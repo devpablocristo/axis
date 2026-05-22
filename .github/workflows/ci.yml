@@ -1,0 +1,97 @@
+name: Axis CI
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: axis-ci-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  companion:
+    name: companion
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: companion/go.mod
+          cache-dependency-path: companion/go.sum
+      - run: go vet ./...
+        working-directory: companion
+      - run: go test ./...
+        working-directory: companion
+      - run: bash scripts/quality/check-migrations.sh
+        working-directory: companion
+      - run: bash scripts/quality/check-governance-imports.sh
+        working-directory: companion
+      - run: bash scripts/quality/check-side-effects-pipeline.sh
+        working-directory: companion
+
+  nexus:
+    name: nexus governance
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: nexus/governance/go.mod
+          cache-dependency-path: nexus/governance/go.sum
+      - run: go vet ./...
+        working-directory: nexus/governance
+      - run: go test ./...
+        working-directory: nexus/governance
+      - run: bash scripts/quality/check-migrations.sh
+        working-directory: nexus
+      - run: bash scripts/quality/check-no-ai-runtime.sh
+        working-directory: nexus
+
+  bff:
+    name: bff
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: bff/go.mod
+          cache-dependency-path: bff/go.sum
+      - run: go test ./...
+        working-directory: bff
+      - run: go build ./...
+        working-directory: bff
+
+  console:
+    name: console
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: console/.nvmrc
+          cache: npm
+          cache-dependency-path: console/package-lock.json
+      - run: npm ci
+        working-directory: console
+      - run: npm run typecheck
+        working-directory: console
+      - run: npm run build
+        working-directory: console
+
+  hygiene:
+    name: hygiene
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - run: make hygiene
+      - run: docker compose config --services

@@ -1,0 +1,11 @@
+.git
+.gitignore
+.env
+.DS_Store
+**/tmp
+**/node_modules
+**/dist
+**/bin
+**/coverage.out
+doc/
+scripts/

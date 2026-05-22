@@ -1,0 +1,10 @@
+.env
+.codex
+.DS_Store
+**/tmp/
+**/coverage.out
+**/node_modules/
+console/dist/
+review/bin/
+go.work
+go.work.sum

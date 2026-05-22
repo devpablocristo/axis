@@ -1,0 +1,19 @@
+---
+description: Tests Go + Python — fakes inline, table-driven, cobertura
+globs: "**/*_test.go,**/test_*.py"
+alwaysApply: false
+---
+
+# Tests
+
+## Go
+- Table-driven: `[]struct{ name, input, expected }`
+- `t.Parallel()` siempre
+- `httptest.NewRequest` + `httptest.NewRecorder`
+- Fakes inline en `_test.go`, NUNCA archivos separados
+- Cubrir: happy path, not found, validation, conflict, archive/restore
+
+## Python
+- pytest + httpx.AsyncClient
+- Fakes inline, no mocks de DB
+- Misma cobertura

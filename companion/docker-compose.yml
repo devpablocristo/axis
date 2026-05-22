@@ -1,0 +1,66 @@
+services:
+  companion-postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: companion
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "${COMPANION_POSTGRES_PORT:-15435}:5432"
+    volumes:
+      - companion-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d companion"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  companion:
+    build:
+      context: .
+    restart: unless-stopped
+    environment:
+      PORT: "8080"
+      DATABASE_URL: "postgres://postgres:postgres@companion-postgres:5432/companion?sslmode=disable"
+      COMPANION_API_KEYS: "admin=${COMPANION_ADMIN_API_KEY:-companion-admin-dev-key}|service_principal=true|org_id=${COMPANION_DEV_ORG_ID:-local-dev-org}|scopes=companion:tasks:read+companion:tasks:write+companion:connectors:execute+companion:connectors:admin+companion:watchers:read+companion:watchers:write+companion:watchers:execute+companion:governance:read+companion:governance:admin+companion:governance-assist:read+companion:governance-assist:admin,internal=${COMPANION_INTERNAL_API_KEY:-local-internal-token}|service_principal=true|org_id=${COMPANION_DEV_ORG_ID:-local-dev-org}|scopes=companion:tasks:read+companion:tasks:write"
+      COMPANION_AUTH_ISSUER_URL: "${COMPANION_AUTH_ISSUER_URL:-}"
+      COMPANION_AUTH_AUDIENCE: "${COMPANION_AUTH_AUDIENCE:-}"
+      COMPANION_INTERNAL_JWT_SECRET: "${COMPANION_INTERNAL_JWT_SECRET:-axis-dev-internal-jwt-secret-change-me}"
+      COMPANION_INTERNAL_JWT_ISSUER: "${COMPANION_INTERNAL_JWT_ISSUER:-axis-bff}"
+      COMPANION_INTERNAL_JWT_AUDIENCE: "${COMPANION_INTERNAL_JWT_AUDIENCE:-companion}"
+      # Apunta al servicio Nexus Governance (proyecto separado).
+      # En dev: levantá Nexus aparte y usá su URL/key aquí.
+      GOVERNANCE_BASE_URL: "${GOVERNANCE_BASE_URL:-http://host.docker.internal:18084}"
+      GOVERNANCE_API_KEY: "${GOVERNANCE_API_KEY:-governance-admin-dev-key}"
+      COMPANION_GOVERNANCE_SYNC_INTERVAL_SEC: "${COMPANION_GOVERNANCE_SYNC_INTERVAL_SEC:-30}"
+      PYMES_BASE_URL: "${PYMES_BASE_URL:-}"
+      PYMES_API_KEY: "${PYMES_API_KEY:-}"
+      PONTI_BASE_URL: "${PONTI_BASE_URL:-}"
+      PONTI_API_KEY: "${PONTI_API_KEY:-}"
+      COMPANION_WATCHER_INTERVAL_SEC: "${COMPANION_WATCHER_INTERVAL_SEC:-0}"
+      COMPANION_WATCHER_SYNC_INTERVAL_SEC: "${COMPANION_WATCHER_SYNC_INTERVAL_SEC:-0}"
+      COMPANION_LLM_PROVIDER: "${COMPANION_LLM_PROVIDER:-vertex}"
+      COMPANION_LLM_MODEL: "${COMPANION_LLM_MODEL:-gemini-2.5-flash-lite}"
+      COMPANION_LLM_VERTEX_PROJECT: "${COMPANION_LLM_VERTEX_PROJECT:-pymes-dev-352318}"
+      COMPANION_LLM_VERTEX_LOCATION: "${COMPANION_LLM_VERTEX_LOCATION:-us-central1}"
+      # Para COMPANION_LLM_PROVIDER=vertex: reusar ADC del host
+      # (requiere `gcloud auth application-default login` en el host).
+      GOOGLE_APPLICATION_CREDENTIALS: /root/.config/gcloud/application_default_credentials.json
+    volumes:
+      - ${HOME}/.config/gcloud:/root/.config/gcloud:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${COMPANION_PORT:-18085}:8080"
+    depends_on:
+      companion-postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/readyz >/dev/null 2>&1 || exit 1"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  companion-postgres-data:

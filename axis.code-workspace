@@ -1,0 +1,216 @@
+{
+    "folders": [
+        {
+            "path": "."
+        }
+    ],
+    "settings": {
+        // Explorador de archivos
+        "explorer.autoReveal": true,
+        "explorer.compactFolders": false,
+        "explorer.confirmDragAndDrop": false,
+        "explorer.enableDragAndDrop": false,
+        "explorer.confirmDelete": true,
+
+        // Editor
+        "editor.tabSize": 4,
+        "editor.inlineSuggest.enabled": true,
+        "editor.dropIntoEditor.enabled": false,
+        "editor.dragAndDrop": false,
+        "editor.wordWrap": "on",
+        "editor.wordWrapColumn": 80,
+
+        // Archivos
+        "files.autoSave": "afterDelay",
+        "files.associations": {
+            "*.jet": "javascript",
+            "*.env": "env",
+            "*.env.local": "env"
+        },
+
+        // Terminal
+        "terminal.integrated.defaultProfile.linux": "zsh",
+        "terminal.integrated.scrollback": 10000,
+        "terminal.integrated.fontFamily": "monospace",
+        "terminal.integrated.cursorStyle": "block",
+
+        // Workbench
+        "workbench.startupEditor": "none",
+        "workbench.iconTheme": "vscode-icons",
+        "workbench.colorTheme": "Peacock Contrast (rainglow)",
+        "workbench.colorCustomizations": {
+            "statusBar.background": "#00b7ff",    // Color de fondo de la barra inferior
+            "statusBarItem.hoverBackground": "#333333",  // Color al pasar el ratón sobre elementos en la barra
+            "statusBarItem.prominentBackground": "#FF5733",  // Color del texto cuando esté conectado remotamente
+            "statusBarItem.remoteForeground": "#FFFF00",     // Color específico del texto "Open a Remote Window"
+            "statusBarItem.remoteBackground": "#003e49",      // Color de fondo del botón "Open a Remote Window"
+            "statusBar.foreground": "#000000",
+            "statusBar.debuggingBackground": "#ff7b00",
+            "statusBar.debuggingForeground": "#000000"
+        },
+        "workbench.editor.empty.hint": "hidden",
+        "workbench.editor.splitOnDragAndDrop": false,
+
+        // Indent Rainbow
+        // "indentRainbow.indicatorStyle": "light",
+        // "indentRainbow.lightIndicatorStyleLineWidth": 1,
+        // "indentRainbow.colors": [
+        //     "rgba(255,255,64,0.3)",
+        //     "rgba(127,255,127,0.3)",
+        //     "rgba(255,127,255,0.3)",
+        //     "rgba(79,236,236,0.3)"
+        // ],
+
+        // Go settings
+        "go.formatTool": "gofmt",
+        "go.useLanguageServer": true,
+        "go.toolsManagement.autoUpdate": true,
+        "go.lintTool": "golangci-lint",
+        "go.lintOnSave": "file",
+        "go.vetOnSave": "package",
+        "go.testOnSave": true,
+        "go.coverOnSave": false, // cuando esta true, pinta todo de forma incomoda, dejarlo false
+        "gopls": {
+            "buildFlags": ["-tags=wireinject,!wireinject"],
+            "analyses": {
+                "unusedparams": true
+            },
+            "staticcheck": true
+        },
+
+        // Git settings
+        "git.autofetch": true,
+        "git.enableSmartCommit": true,
+        "git.confirmSync": false,
+        "git.openRepositoryInParentFolders": "never",
+
+        // Makefile settings
+        "makefile.configureOnOpen": true,
+
+        // Tabnine settings
+        // "tabnine.experimentalAutoImports": true,
+
+        // Icons
+        "vsicons.dontShowNewVersionMessage": true,
+
+        // Notebook settings
+        "notebook.dragAndDropEnabled": false,
+
+        // Todo-tree highlights
+        "todo-tree.general.tags": [
+            "TODO",
+            "FIXME",
+            "NOTE",
+            "BUG",
+            "HACK",
+            "INFO",
+            "CMND"
+        ],
+        "todo-tree.highlights.defaultHighlight": {
+            "type": "text-and-comment",
+            "foreground": "#000000",
+            "background": "#ffffff",
+            "iconColour": "#ffffff"
+        },
+        "todo-tree.highlights.customHighlight": {
+            "TODO": {
+                "foreground": "#000000",
+                "background": "#22B965",
+                "iconColour": "#22B965",
+                "icon": "check"
+            },
+            "FIXME": {
+                "foreground": "#000000",
+                "background": "#B4292B",
+                "iconColour": "#B4292B",
+                "icon": "bug"
+            },
+            "NOTE": {
+                "foreground": "#000000",
+                "background": "#2B6DD5",
+                "iconColour": "#2B6DD5",
+                "icon": "note"
+            },
+            "BUG": {
+                "foreground": "#FFFFFF",
+                "background": "#FF0000",
+                "iconColour": "#FF0000",
+                "icon": "alert"
+            },
+            "HACK": {
+                "foreground": "#FFFFFF",
+                "background": "#FFA500",
+                "iconColour": "#FFA500",
+                "icon": "flame"
+            },
+            "INFO": {
+                "foreground": "#FFFFFF",
+                "background": "#800080",
+                "iconColour": "#800080",
+                "icon": "info"
+            },
+            "CMND": {
+                "foreground": "#38f000",
+                "background": "#000000",
+                "iconColour": "#38f000",
+                "icon": "terminal"
+            }
+        },
+
+        // SQL Formatter settings
+        "sql-formatter.dialect": "sql", // Cambia esto según tu dialecto de SQL
+        "sql-formatter.uppercase": true, // Formatear en mayúsculas
+        "sql-formatter.linesBetweenQueries": 2, // Líneas entre consultas
+
+        // Prettier settings
+        "prettier.singleQuote": true,
+        "prettier.trailingComma": "all",
+        "prettier.printWidth": 80,
+
+        // ESLint settings
+        "eslint.enable": true,
+        "editor.codeActionsOnSave": {
+            "source.fixAll.eslint": "explicit"
+        },
+        "eslint.validate": [
+            "javascript",
+            "javascriptreact",
+            "typescript",
+            "typescriptreact"
+        ],
+
+        // Docker settings
+        "docker.showExplorer": true,
+        "docker.explorerRefreshInterval": 1000,
+
+        // Python settings
+        "python.pythonPath": "/usr/bin/python3",
+        "python.linting.pylintEnabled": true,
+        "python.linting.enabled": true,
+
+        // Remote Development settings
+        "remote.SSH.showLoginTerminal": true,
+        "remote.SSH.useLocalServer": true,
+
+        // Live Share settings
+        "liveshare.featureSet": "insiders",
+        "liveshare.allowGuestDebugControl": true,
+
+        // Markdown settings
+        "markdown.preview.breaks": true,
+        "markdown.preview.scrollEditorWithPreview": true,
+
+        // Code Runner settings
+        "code-runner.clearPreviousOutput": true,
+        "code-runner.runInTerminal": true,
+
+        // GitLens settings
+        "gitlens.advanced.messages": {},
+
+        // Peacock settings
+        "peacock.affectActivityBar": true,
+        "peacock.affectStatusBar": true,
+        "peacock.affectTitleBar": true,
+        "peacock.color": "#00b7ff",
+    }
+}

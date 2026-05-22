@@ -1,0 +1,97 @@
+---
+description: Python FastAPI — arquitectura clean/layered estandarizada
+globs: "**/*.py"
+alwaysApply: true
+---
+
+# Python FastAPI Architecture
+
+**Para Python siempre FastAPI.** Arquitectura clean/layered.
+
+## Estructura de directorios
+
+```
+app/
+    main.py                  # FastAPI app factory + startup/shutdown
+    config.py                # pydantic-settings BaseSettings
+
+    <modulo>/
+        domain.py            # entidades puras (Pydantic BaseModel, dataclass)
+        service.py           # lógica de negocio (equivale a usecases.go)
+        router.py            # adapter HTTP (APIRouter)
+        schemas.py           # DTOs request/response (Pydantic)
+        repository.py        # Protocol (interface) + implementación
+        dependencies.py      # FastAPI Depends() factories
+
+    shared/
+        errors.py            # HTTPException helpers
+        database.py          # async engine, session factory
+        auth.py              # API key dependency
+
+tests/
+    conftest.py
+    <modulo>/
+        test_router.py
+        test_service.py
+
+alembic/
+    versions/
+```
+
+## Convenciones estrictas
+
+- **Type hints siempre** — `def create(self, item: Entity) -> Entity`
+- **Pydantic para DTOs** — `class CreatePolicyRequest(BaseModel)`
+- **Pydantic Settings para config** — `class Settings(BaseSettings)`, nunca hardcoded
+- **async/await para I/O** — `async def get_by_id(self, id: UUID) -> Entity | None`
+- **Protocol para interfaces** — `class Repository(Protocol):` (equivale a Go interface)
+- **Depends() para DI** — inyección vía FastAPI, no global state
+- **HTTPException para errores** — con `status_code` y `detail` estructurado
+- **Alembic para migraciones** — nunca modificar existente, crear nueva
+- **pytest + httpx.AsyncClient** para tests
+- **Ruff para lint, mypy para tipos**
+- **No `print()`** — usar `logging` con structlog o loguru
+- **Early return** — mismo principio que Go
+- **Enums**: `class Effect(str, Enum): ALLOW = "allow"`
+- **`|` syntax para Optional** — `str | None`, no `Optional[str]`
+- **Dataclasses o Pydantic** para domain, nunca dicts sueltos
+
+## CRUD router canónico
+```python
+router = APIRouter(prefix="/v1/policies", tags=["policies"])
+
+@router.post("/", status_code=201)
+async def create(req: CreatePolicyRequest, svc: PolicyService = Depends(get_service)) -> PolicyResponse: ...
+
+@router.get("/{id}")
+async def get_by_id(id: UUID, svc: PolicyService = Depends(get_service)) -> PolicyResponse: ...
+
+@router.get("/")
+async def list_all(archived: bool = False, svc: PolicyService = Depends(get_service)) -> list[PolicyResponse]: ...
+
+@router.patch("/{id}")
+async def update(id: UUID, req: UpdatePolicyRequest, svc: PolicyService = Depends(get_service)) -> PolicyResponse: ...
+
+@router.delete("/{id}", status_code=204)
+async def delete(id: UUID, svc: PolicyService = Depends(get_service)) -> None: ...
+
+@router.post("/{id}/archive", status_code=204)
+async def archive(id: UUID, svc: PolicyService = Depends(get_service)) -> None: ...
+
+@router.post("/{id}/restore", status_code=204)
+async def restore(id: UUID, svc: PolicyService = Depends(get_service)) -> None: ...
+```
+
+## Tests
+- `@pytest.mark.asyncio` para tests async
+- `httpx.AsyncClient` con `ASGITransport` para tests de endpoints
+- In-memory repositories o SQLite para tests (no mocks de DB)
+- Cubrir: happy path, not found, validation, conflict, archive/restore
+
+## Prohibiciones
+- NUNCA usar `print()` para logging
+- NUNCA usar `dict` como tipo de retorno — siempre Pydantic model
+- NUNCA hardcodear config — siempre `Settings`
+- NUNCA `except: pass` o `except Exception: pass` — al menos loguear
+- NUNCA usar `Optional[X]` — usar `X | None`
+- NUNCA exponer modelos de dominio por HTTP — siempre schemas/DTOs

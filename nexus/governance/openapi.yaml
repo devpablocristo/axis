@@ -1,0 +1,184 @@
+openapi: 3.1.0
+info:
+  title: Nexus Governance API
+  version: 1.0.0
+servers:
+  - url: http://localhost:18084
+paths:
+  /v1/requests:
+    post:
+      summary: Evalua una request gobernada
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmitRequest"
+      responses:
+        "201":
+          description: Decision de governance
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubmitResponse"
+        "400": { description: Validation error }
+        "403": { description: Forbidden }
+    get:
+      summary: Lista requests con filtro tenant-aware
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - in: query
+          name: status
+          schema: { type: string }
+        - in: query
+          name: action_type
+          schema: { type: string }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 50, maximum: 1000 }
+      responses:
+        "200": { description: Request list }
+  /v1/requests/{id}:
+    get:
+      summary: Obtiene una request
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200":
+          description: Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Request"
+        "404": { description: Not found }
+  /v1/requests/{id}/result:
+    post:
+      summary: Reporta resultado de ejecucion
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReportResultRequest"
+      responses:
+        "204": { description: Result accepted }
+        "409": { description: Request is not executable }
+  /v1/requests/{id}/evidence:
+    get:
+      summary: Devuelve evidence pack firmado
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Evidence pack }
+components:
+  securitySchemes:
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    UUIDPath:
+      in: path
+      name: id
+      required: true
+      schema: { type: string, format: uuid }
+  schemas:
+    ToolIntent:
+      type: object
+      required:
+        - schema_version
+        - org_id
+        - actor_id
+        - actor_type
+        - product_surface
+        - run_id
+        - tool_invocation_id
+        - connector_id
+        - capability_id
+        - operation
+        - target_system
+        - target_resource
+        - payload_hash
+        - idempotency_key
+      properties:
+        schema_version: { type: string, const: tool_intent.v1 }
+        org_id: { type: string }
+        actor_id: { type: string }
+        actor_type: { type: string }
+        product_surface: { type: string }
+        task_id: { type: string }
+        run_id: { type: string }
+        tool_invocation_id: { type: string }
+        connector_id: { type: string }
+        capability_id: { type: string }
+        operation: { type: string }
+        target_system: { type: string }
+        target_resource: { type: string }
+        payload_hash: { type: string }
+        idempotency_key: { type: string }
+        risk_hint: { type: string }
+        evidence_context: { type: object, additionalProperties: true }
+    SubmitRequest:
+      type: object
+      required: [requester_type, requester_id, action_type]
+      properties:
+        idempotency_key: { type: string }
+        requester_type: { type: string }
+        requester_id: { type: string }
+        requester_name: { type: string }
+        action_type: { type: string }
+        target_system: { type: string }
+        target_resource: { type: string }
+        action_binding:
+          $ref: "#/components/schemas/ToolIntent"
+        params: { type: object, additionalProperties: true }
+        reason: { type: string }
+        context: { type: string }
+    SubmitResponse:
+      type: object
+      required: [request_id, decision, risk_level, status]
+      properties:
+        request_id: { type: string, format: uuid }
+        decision: { type: string, enum: [allow, deny, require_approval] }
+        risk_level: { type: string }
+        decision_reason: { type: string }
+        status:
+          type: string
+          enum: [allowed, denied, pending_approval, approved, rejected, executed, failed]
+        binding_hash: { type: string }
+        approval:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            expires_at: { type: string, format: date-time }
+    Request:
+      allOf:
+        - $ref: "#/components/schemas/SubmitResponse"
+        - type: object
+          properties:
+            id: { type: string, format: uuid }
+            org_id: { type: string }
+            action_binding:
+              $ref: "#/components/schemas/ToolIntent"
+            params: { type: object, additionalProperties: true }
+            created_at: { type: string, format: date-time }
+            updated_at: { type: string, format: date-time }
+    ReportResultRequest:
+      type: object
+      required: [success]
+      properties:
+        result_id: { type: string }
+        success: { type: boolean }
+        result: { type: object, additionalProperties: true }
+        duration_ms: { type: integer }
+        error_message: { type: string }

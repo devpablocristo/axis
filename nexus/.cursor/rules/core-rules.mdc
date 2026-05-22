@@ -1,0 +1,27 @@
+---
+description: Reglas base — principios, flujo, idioma, prohibiciones
+alwaysApply: true
+---
+
+# Reglas base
+
+## Principios
+- DRY, YAGNI, SOLID, KISS, Fail fast
+- Cambios quirúrgicos — solo lo que se pide
+
+## Idioma
+- Código: inglés. Comentarios: español. Respuestas: español.
+
+## Flujo
+- TLDR primero. Ideal primero. Esperar aprobación. Verificar antes de decir "listo".
+
+## Prohibiciones
+- NUNCA valores hardcodeados
+- NUNCA `panic()`, `_` para errores, `fmt.Printf` para logging
+- NUNCA `err.Error()` en respuestas HTTP al cliente
+- NUNCA `var body struct{...}` inline — siempre DTOs
+- NUNCA repos in-memory como artefacto de producción
+- NUNCA sufijos en archivos si solo hay una implementación
+- NUNCA `web/`, `api/`, `frontend/`, `backend/` como nombres de directorio
+- NUNCA modificar migraciones existentes
+- NUNCA decir "listo" sin build + test exitosos

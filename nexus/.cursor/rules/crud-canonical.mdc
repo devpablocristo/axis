@@ -1,0 +1,27 @@
+---
+description: CRUD canónico 7 operaciones — DELETE hard, Archive soft, DTOs obligatorios
+alwaysApply: true
+---
+
+# CRUD canónico (7 operaciones)
+
+| Operación | Método | Path | Status |
+|-----------|--------|------|--------|
+| Create | POST | `/v1/{entities}` | 201 |
+| Read | GET | `/v1/{entities}/{id}` | 200 |
+| List | GET | `/v1/{entities}` | 200 |
+| Update | PATCH | `/v1/{entities}/{id}` | 200 |
+| Delete | DELETE | `/v1/{entities}/{id}` | 204 |
+| Archive | POST | `/v1/{entities}/{id}/archive` | 204 |
+| Restore | POST | `/v1/{entities}/{id}/restore` | 204 |
+
+## Reglas
+
+- DELETE = hard delete. Archive = soft delete. Restore = limpia archived_at.
+- Archive/Restore idempotentes (204 aunque ya esté en ese estado).
+- List excluye archivados por default; `?archived=true` para incluir.
+- NUNCA `var body struct{...}` inline — siempre DTOs en `handler/dto/dto.go`
+- NUNCA exponer domain structs por HTTP — siempre DTOs
+- NUNCA `err.Error()` en respuestas al cliente — loguear y retornar mensaje genérico
+- Errores HTTP: `{code, message}` (NOT_FOUND, CONFLICT, VALIDATION, INTERNAL)
+- Sentinel errors en `repository.go`: ErrNotFound, ErrAlreadyExists, ErrArchived

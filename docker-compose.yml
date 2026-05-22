@@ -1,0 +1,126 @@
+services:
+  companion-postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: companion
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "${COMPANION_POSTGRES_PORT:-15435}:5432"
+    volumes:
+      - companion-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d companion"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  governance-postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: nexus
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "${GOVERNANCE_POSTGRES_PORT:-15434}:5432"
+    volumes:
+      - governance-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d nexus"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  governance:
+    build:
+      context: ./nexus/governance
+    restart: unless-stopped
+    environment:
+      PORT: "8080"
+      DATABASE_URL: "postgres://postgres:postgres@governance-postgres:5432/nexus?sslmode=disable"
+      GOVERNANCE_API_KEYS: "admin=${GOVERNANCE_ADMIN_API_KEY:-governance-admin-dev-key}|service_principal=true|org_id=${AXIS_DEV_ORG_ID:-local-dev-org}|scopes=nexus:requests:read+nexus:requests:write+nexus:requests:result+nexus:approvals:decide+nexus:policies:admin+nexus:rbac:admin+nexus:evidence:write+nexus:dashboard:read+nexus:learning:propose+nexus:cross_org"
+      GOVERNANCE_INTERNAL_JWT_SECRET: "${AXIS_INTERNAL_JWT_SECRET:-axis-dev-internal-jwt-secret-change-me}"
+      GOVERNANCE_INTERNAL_JWT_ISSUER: "${AXIS_INTERNAL_JWT_ISSUER:-axis-bff}"
+      GOVERNANCE_INTERNAL_JWT_AUDIENCE: "nexus"
+      APPROVAL_DEFAULT_TTL: "${GOVERNANCE_APPROVAL_TTL:-3600}"
+      GOVERNANCE_SIGNING_KEY: "${GOVERNANCE_SIGNING_KEY:-governance-dev-signing-key-change-in-production}"
+      GOVERNANCE_CALLBACK_TOKEN: "${GOVERNANCE_CALLBACK_TOKEN:-local-governance-callback-token}"
+    ports:
+      - "${GOVERNANCE_PORT:-18084}:8080"
+    depends_on:
+      governance-postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/readyz >/dev/null 2>&1 || exit 1"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  companion:
+    build:
+      context: ./companion
+    restart: unless-stopped
+    environment:
+      PORT: "8080"
+      DATABASE_URL: "postgres://postgres:postgres@companion-postgres:5432/companion?sslmode=disable"
+      COMPANION_API_KEYS: "admin=${COMPANION_ADMIN_API_KEY:-companion-admin-dev-key}|service_principal=true|org_id=${AXIS_DEV_ORG_ID:-local-dev-org}|scopes=companion:tasks:read+companion:tasks:write+companion:connectors:execute+companion:connectors:admin+companion:watchers:read+companion:watchers:write+companion:watchers:execute+companion:governance:read+companion:governance:admin+companion:governance-assist:read+companion:governance-assist:admin"
+      COMPANION_INTERNAL_JWT_SECRET: "${AXIS_INTERNAL_JWT_SECRET:-axis-dev-internal-jwt-secret-change-me}"
+      COMPANION_INTERNAL_JWT_ISSUER: "${AXIS_INTERNAL_JWT_ISSUER:-axis-bff}"
+      COMPANION_INTERNAL_JWT_AUDIENCE: "companion"
+      GOVERNANCE_BASE_URL: "http://governance:8080"
+      GOVERNANCE_API_KEY: "${GOVERNANCE_ADMIN_API_KEY:-governance-admin-dev-key}"
+      COMPANION_LLM_PROVIDER: "${COMPANION_LLM_PROVIDER:-fake}"
+      COMPANION_LLM_MODEL: "${COMPANION_LLM_MODEL:-fake}"
+      COMPANION_WATCHER_INTERVAL_SEC: "0"
+      COMPANION_WATCHER_SYNC_INTERVAL_SEC: "0"
+    ports:
+      - "${COMPANION_PORT:-18085}:8080"
+    depends_on:
+      companion-postgres:
+        condition: service_healthy
+      governance:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/readyz >/dev/null 2>&1 || exit 1"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  bff:
+    build:
+      context: ./bff
+    restart: unless-stopped
+    environment:
+      PORT: "8080"
+      AXIS_BFF_AUTH_MODE: "${AXIS_BFF_AUTH_MODE:-dev}"
+      AXIS_DEV_ORG_ID: "${AXIS_DEV_ORG_ID:-local-dev-org}"
+      AXIS_DEV_USER_ID: "${AXIS_DEV_USER_ID:-local-dev-admin}"
+      AXIS_INTERNAL_JWT_SECRET: "${AXIS_INTERNAL_JWT_SECRET:-axis-dev-internal-jwt-secret-change-me}"
+      AXIS_INTERNAL_JWT_ISSUER: "${AXIS_INTERNAL_JWT_ISSUER:-axis-bff}"
+      COMPANION_BASE_URL: "http://companion:8080"
+      NEXUS_BASE_URL: "http://governance:8080"
+    ports:
+      - "${AXIS_BFF_PORT:-18080}:8080"
+    depends_on:
+      companion:
+        condition: service_healthy
+      governance:
+        condition: service_healthy
+
+  console:
+    build:
+      context: ./console
+    restart: unless-stopped
+    environment:
+      AXIS_BFF_BASE_URL: "http://bff:8080"
+    ports:
+      - "${AXIS_CONSOLE_PORT:-13000}:80"
+    depends_on:
+      bff:
+        condition: service_started
+
+volumes:
+  companion-postgres-data:
+  governance-postgres-data:

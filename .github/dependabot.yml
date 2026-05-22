@@ -1,0 +1,47 @@
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /companion
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 1
+  - package-ecosystem: gomod
+    directory: /nexus/governance
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 1
+  - package-ecosystem: gomod
+    directory: /bff
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 1
+  - package-ecosystem: npm
+    directory: /console
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 1
+  - package-ecosystem: docker
+    directory: /companion
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 1
+  - package-ecosystem: docker
+    directory: /nexus/governance
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 1
+  - package-ecosystem: docker
+    directory: /bff
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 1
+  - package-ecosystem: docker
+    directory: /console
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 1
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 2

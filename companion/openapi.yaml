@@ -1,0 +1,581 @@
+openapi: 3.1.0
+info:
+  title: Companion API
+  version: 0.1.0
+  description: API del empleado IA central del ecosistema.
+servers:
+  - url: http://localhost:18085
+security:
+  - apiKeyAuth: []
+  - bearerAuth: []
+paths:
+  /healthz:
+    get:
+      summary: Health check
+      security: []
+      responses:
+        "200": { description: OK }
+  /readyz:
+    get:
+      summary: Readiness check
+      security: []
+      responses:
+        "200": { description: Ready }
+  /v1/chat:
+    post:
+      summary: Conversa con Companion
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ChatRequest" }
+      responses:
+        "200":
+          description: Chat result
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ChatResponse" }
+  /v1/chat/conversations:
+    get:
+      summary: Lista conversaciones del agente (scoped por org+user)
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        "200":
+          description: Conversation list
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConversationListResponse" }
+  /v1/chat/conversations/{id}:
+    get:
+      summary: Detalle de una conversación con mensajes
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Conversation detail
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConversationDetail" }
+        "404": { description: Conversation not found }
+  /v1/notifications:
+    post:
+      summary: Genera insights/notificaciones del tenant
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NotificationsRequest" }
+      responses:
+        "200":
+          description: Notifications result
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NotificationsResponse" }
+  /v1/tasks:
+    get:
+      summary: Lista tasks del tenant
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        "200":
+          description: Task list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Task" }
+    post:
+      summary: Crea una task
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateTaskRequest" }
+      responses:
+        "201":
+          description: Task created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Task" }
+  /v1/tasks/{id}:
+    get:
+      summary: Obtiene detalle de task
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200":
+          description: Task detail
+          content:
+            application/json:
+              schema: { type: object }
+  /v1/tasks/{id}/message:
+    post:
+      summary: Agrega mensaje a task
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "201": { description: Message created }
+  /v1/tasks/{id}/investigate:
+    post:
+      summary: Cambia task a investigación
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Task updated }
+  /v1/tasks/{id}/propose:
+    post:
+      summary: Envía propuesta a Nexus Governance
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Governance submit result }
+  /v1/tasks/{id}/execution-plan:
+    put:
+      summary: Guarda plan de ejecución
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200": { description: Execution plan }
+  /v1/tasks/{id}/execute:
+    post:
+      summary: Ejecuta una task aprobada/gobernada
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Execution result }
+        "412": { description: Governance not approved }
+  /v1/tasks/{id}/retry:
+    post:
+      summary: Reintenta una ejecución retryable
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Execution result }
+  /v1/tasks/{id}/sync:
+    post:
+      summary: Sincroniza estado de governance de una task
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Task updated }
+  /v1/memory:
+    get:
+      summary: Busca memoria por scope
+      parameters:
+        - in: query
+          name: scope_type
+          required: true
+          schema: { type: string, enum: [task, org, user] }
+        - in: query
+          name: scope_id
+          required: true
+          schema: { type: string }
+        - in: query
+          name: kind
+          schema: { type: string }
+      responses:
+        "200": { description: Memory list }
+    put:
+      summary: Crea o actualiza memoria
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpsertMemoryRequest" }
+      responses:
+        "200": { description: Memory entry }
+  /v1/memory/{id}:
+    get:
+      summary: Obtiene memoria por ID
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Memory entry }
+    delete:
+      summary: Borra memoria por ID
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "204": { description: Deleted }
+  /v1/connectors:
+    get:
+      summary: Lista connectors
+      responses:
+        "200": { description: Connector list }
+    post:
+      summary: Crea connector config
+      responses:
+        "201": { description: Connector created }
+  /v1/connectors/refresh:
+    post:
+      summary: Refresca connectors default
+      responses:
+        "200": { description: Refreshed }
+  /v1/connectors/execute:
+    post:
+      summary: Ejecuta una capability
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200": { description: Execution result }
+        "403": { description: Forbidden or governance denied }
+  /v1/connectors/capabilities:
+    get:
+      summary: Lista capabilities disponibles
+      responses:
+        "200": { description: Capability list }
+  /v1/connectors/{id}:
+    get:
+      summary: Obtiene connector
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Connector }
+    delete:
+      summary: Borra connector
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "204": { description: Deleted }
+  /v1/connectors/{id}/executions:
+    get:
+      summary: Lista ejecuciones de connector
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Execution list }
+  /v1/watchers:
+    get:
+      summary: Lista watchers por tenant
+      parameters:
+        - in: query
+          name: org_id
+          schema: { type: string }
+      responses:
+        "200": { description: Watcher list }
+    post:
+      summary: Crea watcher
+      responses:
+        "201": { description: Watcher created }
+  /v1/watchers/{id}:
+    get:
+      summary: Obtiene watcher
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Watcher }
+    patch:
+      summary: Actualiza watcher
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Watcher updated }
+    delete:
+      summary: Borra watcher
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "204": { description: Deleted }
+  /v1/watchers/{id}/run:
+    post:
+      summary: Ejecuta watcher manualmente
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Run result }
+  /v1/watchers/{id}/proposals:
+    get:
+      summary: Lista proposals de watcher
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Proposal list }
+  /v1/run-traces:
+    get:
+      summary: Lista run traces por org o task
+      parameters:
+        - in: query
+          name: task_id
+          schema: { type: string, format: uuid }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 50 }
+      responses:
+        "200": { description: Trace list }
+  /v1/run-traces/{run_id}:
+    get:
+      summary: Obtiene run trace
+      parameters:
+        - in: path
+          name: run_id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: Run trace }
+  /v1/governance-assist/propose:
+    post:
+      summary: Analiza historial Nexus y propone learning/policies
+      responses:
+        "200": { description: Proposal summary }
+  /v1/governance-assist/explain/{request_id}:
+    get:
+      summary: Explica una request de Nexus para humano
+      parameters:
+        - in: path
+          name: request_id
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Explanation }
+components:
+  securitySchemes:
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    UUIDPath:
+      in: path
+      name: id
+      required: true
+      schema:
+        type: string
+        format: uuid
+  schemas:
+    ChatRequest:
+      type: object
+      required: [message]
+      properties:
+        message: { type: string }
+        task_id: { type: string, format: uuid }
+        chat_id: { type: string, format: uuid, description: "Continúa conversación durable existente" }
+        channel: { type: string, description: "Canal del caller. Default: api." }
+        product_surface: { type: string }
+        route_hint: { type: string }
+        confirmed_actions:
+          type: array
+          items: { type: string }
+        handoff: { $ref: "#/components/schemas/ChatHandoff" }
+    ChatResponse:
+      description: |
+        Response canónico del chat de Companion. Incluye chat_id, reply y
+        blocks del contrato compartido, más task y messages como estado
+        operativo estable de la API.
+      type: object
+      required: [reply, task, messages]
+      properties:
+        chat_id: { type: string, format: uuid }
+        reply: { type: string }
+        blocks:
+          type: array
+          items: { $ref: "#/components/schemas/ChatBlock" }
+        tool_calls:
+          type: array
+          items: { $ref: "#/components/schemas/ChatToolCall" }
+        pending_confirmations:
+          type: array
+          items: { $ref: "#/components/schemas/ChatPendingConfirmation" }
+        tokens_used: { type: integer }
+        routed_agent: { type: string }
+        routing_source: { type: string }
+        output_kind: { type: string }
+        task: { $ref: "#/components/schemas/Task" }
+        messages:
+          type: array
+          items: { $ref: "#/components/schemas/TaskMessage" }
+    ChatHandoff:
+      type: object
+      required: [source]
+      properties:
+        source: { type: string }
+        target_agent: { type: string }
+    ChatBlock:
+      description: |
+        Unión etiquetada por `type`. v0.1 solo expone la variante "text".
+        Variantes reservadas (no emitirlas todavía): "actions",
+        "insight_card", "kpi_group", "table".
+      type: object
+      required: [type]
+      properties:
+        type: { type: string, enum: [text, actions, insight_card, kpi_group, table] }
+        text: { type: string, description: "presente cuando type=text" }
+    ChatToolCall:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        args: {}
+        result: {}
+        duration_ms: { type: integer }
+        error: { type: string }
+    ChatPendingConfirmation:
+      type: object
+      required: [id]
+      properties:
+        id: { type: string }
+        description: { type: string }
+        binding_hash: { type: string }
+    TaskMessage:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        author_type: { type: string, enum: [user, assistant, system, tool] }
+        author_id: { type: string }
+        body: { type: string }
+        metadata: { type: object, additionalProperties: true }
+        created_at: { type: string, format: date-time }
+    ConversationSummary:
+      type: object
+      required: [id, created_at, updated_at, message_count]
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        message_count: { type: integer }
+        product_surface: { type: string }
+    ConversationMessage:
+      type: object
+      required: [role, content]
+      properties:
+        role: { type: string, enum: [user, assistant, system, tool] }
+        content: { type: string }
+        timestamp: { type: string, format: date-time }
+        blocks:
+          type: array
+          items: { $ref: "#/components/schemas/ChatBlock" }
+    ConversationDetail:
+      type: object
+      required: [id, created_at, updated_at, messages]
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        messages:
+          type: array
+          items: { $ref: "#/components/schemas/ConversationMessage" }
+    ConversationListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/ConversationSummary" }
+        next_cursor: { type: string }
+    NotificationsRequest:
+      type: object
+      properties:
+        kind: { type: string, default: insight }
+        period: { type: string, enum: [today, week, month] }
+        compare: { type: boolean }
+        top_limit: { type: integer }
+        preferred_language: { type: string }
+    NotificationsResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/NotificationItem" }
+        service_kind: { type: string }
+        output_kind: { type: string }
+    NotificationItem:
+      type: object
+      required: [id, title]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        body: { type: string }
+        severity: { type: string }
+        period: { type: string }
+        scope: { type: string }
+        context: {}
+    CreateTaskRequest:
+      type: object
+      required: [title]
+      properties:
+        title: { type: string }
+        goal: { type: string }
+        priority: { type: string }
+        created_by: { type: string }
+        assigned_to: { type: string }
+        channel: { type: string }
+        summary: { type: string }
+        context_json: { type: object, additionalProperties: true }
+    Task:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        org_id: { type: string }
+        title: { type: string }
+        status: { type: string }
+        governance_status: { type: string }
+        governance_last_checked_at: { type: string, format: date-time }
+    UpsertMemoryRequest:
+      type: object
+      required: [kind, scope_type, scope_id, key]
+      properties:
+        kind: { type: string }
+        memory_type: { type: string, enum: [episodic, semantic, operational, preference, playbook, task_projection] }
+        classification: { type: string, enum: [stable, operational, audit] }
+        scope_type: { type: string, enum: [task, org, user] }
+        scope_id: { type: string }
+        key: { type: string }
+        content_text: { type: string }
+        payload_json: { type: object, additionalProperties: true }
+        provenance: { type: object, additionalProperties: true }
+        confidence: { type: number, format: double }
+        retention_policy: { type: string }
+        version: { type: integer }
+        ttl_days: { type: integer }
+    MemoryEntry:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        org_id: { type: string }
+        user_id: { type: string }
+        product_surface: { type: string }
+        kind: { type: string }
+        memory_type: { type: string }
+        classification: { type: string }
+        scope_type: { type: string, enum: [task, org, user] }
+        scope_id: { type: string }
+        key: { type: string }
+        content_text: { type: string }
+        payload_json: { type: object, additionalProperties: true }
+        provenance: { type: object, additionalProperties: true }
+        confidence: { type: number, format: double }
+        retention_policy: { type: string }
+        version: { type: integer }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
