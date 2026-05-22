@@ -5,9 +5,9 @@ import (
 	"time"
 
 	connectordomain "github.com/devpablocristo/companion/internal/connectors/usecases/domain"
+	"github.com/devpablocristo/companion/internal/nexusclient"
 	domain "github.com/devpablocristo/companion/internal/tasks/usecases/domain"
 	contracts "github.com/devpablocristo/platform/contracts/ai/go"
-	"github.com/devpablocristo/platform/kernels/governance/go/governanceclient"
 	"github.com/google/uuid"
 )
 
@@ -23,23 +23,23 @@ type CreateTaskRequest struct {
 }
 
 type TaskResponse struct {
-	ID                      string          `json:"id"`
-	OrgID                   string          `json:"org_id,omitempty"`
-	Title                   string          `json:"title"`
-	Goal                    string          `json:"goal"`
-	Status                  string          `json:"status"`
-	Priority                string          `json:"priority"`
-	CreatedBy               string          `json:"created_by"`
-	AssignedTo              string          `json:"assigned_to"`
-	Channel                 string          `json:"channel"`
-	Summary                 string          `json:"summary"`
-	ContextJSON             json.RawMessage `json:"context_json"`
-	GovernanceStatus        string          `json:"governance_status,omitempty"`
-	GovernanceLastCheckedAt *string         `json:"governance_last_checked_at,omitempty"`
-	GovernanceSyncError     string          `json:"governance_sync_error,omitempty"`
-	CreatedAt               string          `json:"created_at"`
-	UpdatedAt               string          `json:"updated_at"`
-	ClosedAt                *string         `json:"closed_at,omitempty"`
+	ID                 string          `json:"id"`
+	OrgID              string          `json:"org_id,omitempty"`
+	Title              string          `json:"title"`
+	Goal               string          `json:"goal"`
+	Status             string          `json:"status"`
+	Priority           string          `json:"priority"`
+	CreatedBy          string          `json:"created_by"`
+	AssignedTo         string          `json:"assigned_to"`
+	Channel            string          `json:"channel"`
+	Summary            string          `json:"summary"`
+	ContextJSON        json.RawMessage `json:"context_json"`
+	NexusStatus        string          `json:"nexus_status,omitempty"`
+	NexusLastCheckedAt *string         `json:"nexus_last_checked_at,omitempty"`
+	NexusSyncError     string          `json:"nexus_sync_error,omitempty"`
+	CreatedAt          string          `json:"created_at"`
+	UpdatedAt          string          `json:"updated_at"`
+	ClosedAt           *string         `json:"closed_at,omitempty"`
 }
 
 type MessageResponse struct {
@@ -52,12 +52,12 @@ type MessageResponse struct {
 }
 
 type ActionResponse struct {
-	ID                  string          `json:"id"`
-	ActionType          string          `json:"action_type"`
-	Payload             json.RawMessage `json:"payload,omitempty"`
-	GovernanceRequestID *string         `json:"governance_request_id,omitempty"`
-	ErrorMessage        string          `json:"error_message,omitempty"`
-	CreatedAt           string          `json:"created_at"`
+	ID             string          `json:"id"`
+	ActionType     string          `json:"action_type"`
+	Payload        json.RawMessage `json:"payload,omitempty"`
+	NexusRequestID *string         `json:"nexus_request_id,omitempty"`
+	ErrorMessage   string          `json:"error_message,omitempty"`
+	CreatedAt      string          `json:"created_at"`
 }
 
 type ArtifactResponse struct {
@@ -68,19 +68,19 @@ type ArtifactResponse struct {
 	CreatedAt string          `json:"created_at"`
 }
 
-type LinkedGovernanceRequestResponse struct {
-	ActionID string                           `json:"action_id"`
-	Request  *governanceclient.RequestSummary `json:"request,omitempty"`
+type LinkedNexusRequestResponse struct {
+	ActionID string                      `json:"action_id"`
+	Request  *nexusclient.RequestSummary `json:"request,omitempty"`
 }
 
-type GovernanceSyncStateResponse struct {
-	GovernanceRequestID      string `json:"governance_request_id"`
-	LastGovernanceStatus     string `json:"last_governance_status,omitempty"`
-	LastGovernanceHTTPStatus int    `json:"last_governance_http_status"`
-	LastCheckedAt            string `json:"last_checked_at"`
-	LastError                string `json:"last_error,omitempty"`
-	ConsecutiveFailures      int    `json:"consecutive_failures"`
-	NextCheckAt              string `json:"next_check_at"`
+type NexusSyncStateResponse struct {
+	NexusRequestID      string `json:"nexus_request_id"`
+	LastNexusStatus     string `json:"last_nexus_status,omitempty"`
+	LastNexusHTTPStatus int    `json:"last_nexus_http_status"`
+	LastCheckedAt       string `json:"last_checked_at"`
+	LastError           string `json:"last_error,omitempty"`
+	ConsecutiveFailures int    `json:"consecutive_failures"`
+	NextCheckAt         string `json:"next_check_at"`
 }
 
 type TaskExecutionPlanResponse struct {
@@ -110,14 +110,14 @@ type TaskExecutionStateResponse struct {
 }
 
 type TaskDetailResponse struct {
-	Task                     TaskResponse                      `json:"task"`
-	Messages                 []MessageResponse                 `json:"messages"`
-	Actions                  []ActionResponse                  `json:"actions"`
-	Artifacts                []ArtifactResponse                `json:"artifacts"`
-	LinkedGovernanceRequests []LinkedGovernanceRequestResponse `json:"linked_governance_requests"`
-	GovernanceSync           *GovernanceSyncStateResponse      `json:"governance_sync,omitempty"`
-	ExecutionPlan            *TaskExecutionPlanResponse        `json:"execution_plan,omitempty"`
-	ExecutionState           *TaskExecutionStateResponse       `json:"execution_state,omitempty"`
+	Task                TaskResponse                 `json:"task"`
+	Messages            []MessageResponse            `json:"messages"`
+	Actions             []ActionResponse             `json:"actions"`
+	Artifacts           []ArtifactResponse           `json:"artifacts"`
+	LinkedNexusRequests []LinkedNexusRequestResponse `json:"linked_nexus_requests"`
+	NexusSync           *NexusSyncStateResponse      `json:"nexus_sync,omitempty"`
+	ExecutionPlan       *TaskExecutionPlanResponse   `json:"execution_plan,omitempty"`
+	ExecutionState      *TaskExecutionStateResponse  `json:"execution_state,omitempty"`
 }
 
 type AddMessageRequest struct {
@@ -162,15 +162,15 @@ type ProposeRequest struct {
 }
 
 type ProposeResponse struct {
-	Task             TaskResponse   `json:"task"`
-	Action           ActionResponse `json:"action"`
-	GovernanceSubmit struct {
+	Task        TaskResponse   `json:"task"`
+	Action      ActionResponse `json:"action"`
+	NexusSubmit struct {
 		RequestID      string `json:"request_id"`
 		Decision       string `json:"decision"`
 		Status         string `json:"status"`
 		RiskLevel      string `json:"risk_level"`
 		DecisionReason string `json:"decision_reason"`
-	} `json:"governance_submit"`
+	} `json:"nexus_submit"`
 }
 
 type SetExecutionPlanRequest struct {
@@ -188,53 +188,53 @@ type ExecuteTaskResponse struct {
 }
 
 type ExecutionResultResponse struct {
-	ID                  string          `json:"id"`
-	ConnectorID         string          `json:"connector_id"`
-	OrgID               string          `json:"org_id,omitempty"`
-	ActorID             string          `json:"actor_id,omitempty"`
-	Operation           string          `json:"operation"`
-	Status              string          `json:"status"`
-	ExternalRef         string          `json:"external_ref"`
-	Payload             json.RawMessage `json:"payload,omitempty"`
-	Result              json.RawMessage `json:"result,omitempty"`
-	Evidence            json.RawMessage `json:"evidence,omitempty"`
-	ErrorMessage        string          `json:"error_message,omitempty"`
-	Retryable           bool            `json:"retryable"`
-	DurationMS          int64           `json:"duration_ms"`
-	IdempotencyKey      string          `json:"idempotency_key,omitempty"`
-	GovernanceRequestID *string         `json:"governance_request_id,omitempty"`
-	CreatedAt           string          `json:"created_at"`
+	ID             string          `json:"id"`
+	ConnectorID    string          `json:"connector_id"`
+	OrgID          string          `json:"org_id,omitempty"`
+	ActorID        string          `json:"actor_id,omitempty"`
+	Operation      string          `json:"operation"`
+	Status         string          `json:"status"`
+	ExternalRef    string          `json:"external_ref"`
+	Payload        json.RawMessage `json:"payload,omitempty"`
+	Result         json.RawMessage `json:"result,omitempty"`
+	Evidence       json.RawMessage `json:"evidence,omitempty"`
+	ErrorMessage   string          `json:"error_message,omitempty"`
+	Retryable      bool            `json:"retryable"`
+	DurationMS     int64           `json:"duration_ms"`
+	IdempotencyKey string          `json:"idempotency_key,omitempty"`
+	NexusRequestID *string         `json:"nexus_request_id,omitempty"`
+	CreatedAt      string          `json:"created_at"`
 }
 
 func TaskToResponse(t domain.Task) TaskResponse {
 	var closed *string
-	var governanceLastChecked *string
+	var nexusLastChecked *string
 	if t.ClosedAt != nil {
 		s := t.ClosedAt.UTC().Format(time.RFC3339)
 		closed = &s
 	}
-	if t.GovernanceLastCheckedAt != nil {
-		s := t.GovernanceLastCheckedAt.UTC().Format(time.RFC3339)
-		governanceLastChecked = &s
+	if t.NexusLastCheckedAt != nil {
+		s := t.NexusLastCheckedAt.UTC().Format(time.RFC3339)
+		nexusLastChecked = &s
 	}
 	return TaskResponse{
-		ID:                      t.ID.String(),
-		OrgID:                   t.OrgID,
-		Title:                   t.Title,
-		Goal:                    t.Goal,
-		Status:                  t.Status,
-		Priority:                t.Priority,
-		CreatedBy:               t.CreatedBy,
-		AssignedTo:              t.AssignedTo,
-		Channel:                 t.Channel,
-		Summary:                 t.Summary,
-		ContextJSON:             t.ContextJSON,
-		GovernanceStatus:        t.GovernanceStatus,
-		GovernanceLastCheckedAt: governanceLastChecked,
-		GovernanceSyncError:     t.GovernanceSyncError,
-		CreatedAt:               t.CreatedAt.UTC().Format(time.RFC3339),
-		UpdatedAt:               t.UpdatedAt.UTC().Format(time.RFC3339),
-		ClosedAt:                closed,
+		ID:                 t.ID.String(),
+		OrgID:              t.OrgID,
+		Title:              t.Title,
+		Goal:               t.Goal,
+		Status:             t.Status,
+		Priority:           t.Priority,
+		CreatedBy:          t.CreatedBy,
+		AssignedTo:         t.AssignedTo,
+		Channel:            t.Channel,
+		Summary:            t.Summary,
+		ContextJSON:        t.ContextJSON,
+		NexusStatus:        t.NexusStatus,
+		NexusLastCheckedAt: nexusLastChecked,
+		NexusSyncError:     t.NexusSyncError,
+		CreatedAt:          t.CreatedAt.UTC().Format(time.RFC3339),
+		UpdatedAt:          t.UpdatedAt.UTC().Format(time.RFC3339),
+		ClosedAt:           closed,
 	}
 }
 
@@ -308,17 +308,17 @@ func extractChatID(raw json.RawMessage) uuid.UUID {
 
 func ActionToResponse(a domain.TaskAction) ActionResponse {
 	var rid *string
-	if a.GovernanceRequestID != nil {
-		s := a.GovernanceRequestID.String()
+	if a.NexusRequestID != nil {
+		s := a.NexusRequestID.String()
 		rid = &s
 	}
 	return ActionResponse{
-		ID:                  a.ID.String(),
-		ActionType:          a.ActionType,
-		Payload:             a.Payload,
-		GovernanceRequestID: rid,
-		ErrorMessage:        a.ErrorMessage,
-		CreatedAt:           a.CreatedAt.UTC().Format(time.RFC3339),
+		ID:             a.ID.String(),
+		ActionType:     a.ActionType,
+		Payload:        a.Payload,
+		NexusRequestID: rid,
+		ErrorMessage:   a.ErrorMessage,
+		CreatedAt:      a.CreatedAt.UTC().Format(time.RFC3339),
 	}
 }
 
@@ -332,15 +332,15 @@ func ArtifactToResponse(a domain.TaskArtifact) ArtifactResponse {
 	}
 }
 
-func GovernanceSyncToResponse(s domain.TaskGovernanceSyncState) *GovernanceSyncStateResponse {
-	return &GovernanceSyncStateResponse{
-		GovernanceRequestID:      s.GovernanceRequestID.String(),
-		LastGovernanceStatus:     s.LastGovernanceStatus,
-		LastGovernanceHTTPStatus: s.LastGovernanceHTTPStatus,
-		LastCheckedAt:            s.LastCheckedAt.UTC().Format(time.RFC3339),
-		LastError:                s.LastError,
-		ConsecutiveFailures:      s.ConsecutiveFailures,
-		NextCheckAt:              s.NextCheckAt.UTC().Format(time.RFC3339),
+func NexusSyncToResponse(s domain.TaskNexusSyncState) *NexusSyncStateResponse {
+	return &NexusSyncStateResponse{
+		NexusRequestID:      s.NexusRequestID.String(),
+		LastNexusStatus:     s.LastNexusStatus,
+		LastNexusHTTPStatus: s.LastNexusHTTPStatus,
+		LastCheckedAt:       s.LastCheckedAt.UTC().Format(time.RFC3339),
+		LastError:           s.LastError,
+		ConsecutiveFailures: s.ConsecutiveFailures,
+		NextCheckAt:         s.NextCheckAt.UTC().Format(time.RFC3339),
 	}
 }
 
@@ -377,27 +377,27 @@ func ExecutionStateToResponse(state domain.TaskExecutionState) *TaskExecutionSta
 }
 
 func ExecutionResultToResponse(result connectordomain.ExecutionResult) ExecutionResultResponse {
-	var governanceRequestID *string
-	if result.GovernanceRequestID != nil {
-		s := result.GovernanceRequestID.String()
-		governanceRequestID = &s
+	var nexusRequestID *string
+	if result.NexusRequestID != nil {
+		s := result.NexusRequestID.String()
+		nexusRequestID = &s
 	}
 	return ExecutionResultResponse{
-		ID:                  result.ID.String(),
-		ConnectorID:         result.ConnectorID.String(),
-		OrgID:               result.OrgID,
-		ActorID:             result.ActorID,
-		Operation:           result.Operation,
-		Status:              result.Status,
-		ExternalRef:         result.ExternalRef,
-		Payload:             result.Payload,
-		Result:              result.ResultJSON,
-		Evidence:            result.EvidenceJSON,
-		ErrorMessage:        result.ErrorMessage,
-		Retryable:           result.Retryable,
-		DurationMS:          result.DurationMS,
-		IdempotencyKey:      result.IdempotencyKey,
-		GovernanceRequestID: governanceRequestID,
-		CreatedAt:           result.CreatedAt.UTC().Format(time.RFC3339),
+		ID:             result.ID.String(),
+		ConnectorID:    result.ConnectorID.String(),
+		OrgID:          result.OrgID,
+		ActorID:        result.ActorID,
+		Operation:      result.Operation,
+		Status:         result.Status,
+		ExternalRef:    result.ExternalRef,
+		Payload:        result.Payload,
+		Result:         result.ResultJSON,
+		Evidence:       result.EvidenceJSON,
+		ErrorMessage:   result.ErrorMessage,
+		Retryable:      result.Retryable,
+		DurationMS:     result.DurationMS,
+		IdempotencyKey: result.IdempotencyKey,
+		NexusRequestID: nexusRequestID,
+		CreatedAt:      result.CreatedAt.UTC().Format(time.RFC3339),
 	}
 }

@@ -41,7 +41,7 @@ CREATE TABLE companion_task_actions (
     task_id           UUID NOT NULL REFERENCES companion_tasks (id) ON DELETE CASCADE,
     action_type       TEXT NOT NULL,
     payload           JSONB NOT NULL DEFAULT '{}',
-    review_request_id UUID,
+    nexus_request_id UUID,
     error_message     TEXT,
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 );

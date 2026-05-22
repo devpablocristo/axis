@@ -9,7 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/devpablocristo/platform/kernels/governance/go/governanceclient"
+	"github.com/devpablocristo/companion/internal/nexusclient"
 
 	connectorsdomain "github.com/devpablocristo/companion/internal/connectors/usecases/domain"
 )
@@ -28,10 +28,10 @@ type ConnectorExecutor interface {
 	ListConnectors(ctx context.Context) ([]connectorsdomain.Connector, error)
 }
 
-// GovernanceSubmitter envía un request a Nexus. Mismo contrato que
-// `tasks.GovernanceGateway.SubmitRequest`.
-type GovernanceSubmitter interface {
-	SubmitRequest(ctx context.Context, idempotencyKey string, body governanceclient.SubmitRequestBody) (governanceclient.SubmitResponse, error)
+// NexusSubmitter envía un request a Nexus. Mismo contrato que
+// `tasks.NexusGateway.SubmitRequest`.
+type NexusSubmitter interface {
+	SubmitRequest(ctx context.Context, idempotencyKey string, body nexusclient.SubmitRequestBody) (nexusclient.SubmitResponse, error)
 }
 
 // CapabilityBridgeDeps agrupa lo que la bridge necesita para exponer
@@ -41,14 +41,14 @@ type GovernanceSubmitter interface {
 type CapabilityBridgeDeps struct {
 	Connectors []ConnectorTypeView
 	Executor   ConnectorExecutor
-	Submitter  GovernanceSubmitter
+	Submitter  NexusSubmitter
 }
 
 // RegisterConnectorCapabilities itera cada connector type registrado y expone
 // SUS capabilities como runtime tools para el LLM.
 //
-//   - Reads (NeedsGovernance == false): se ejecutan directo contra ConnectorExecutor.
-//   - Writes governed: se proponen primero a Nexus; si Nexus las marca como
+//   - Reads (NeedsNexusApproval == false): se ejecutan directo contra ConnectorExecutor.
+//   - Writes controlled: se proponen primero a Nexus; si Nexus las marca como
 //     allowed/approved se ejecutan inmediatamente; si quedan pending o son
 //     denied se devuelve el estado al LLM para que informe al usuario.
 //
@@ -95,8 +95,8 @@ func describeCapability(kind string, c connectorsdomain.Capability) string {
 	switch {
 	case c.ReadOnly:
 		return fmt.Sprintf("Read-only operation %q on the %q connector.", c.Operation, kind)
-	case c.RequiresGovernance:
-		return fmt.Sprintf("Write operation %q on the %q connector (requires governance approval before execution).", c.Operation, kind)
+	case c.RequiresNexusApproval:
+		return fmt.Sprintf("Write operation %q on the %q connector (requires nexus approval before execution).", c.Operation, kind)
 	default:
 		return fmt.Sprintf("Operation %q on the %q connector.", c.Operation, kind)
 	}
@@ -185,7 +185,7 @@ func capabilityToolHandler(kind string, capability connectorsdomain.Capability, 
 			IdempotencyKey: fmt.Sprintf("chat-%s-%s", capability.Operation, uuid.NewString()),
 		}
 
-		if !capability.NeedsGovernance() {
+		if !capability.NeedsNexusApproval() {
 			res, err := deps.Executor.Execute(ctx, spec)
 			if err != nil {
 				slog.Error("capability execute failed", "operation", capability.Operation, "kind", kind, "error", err)
@@ -197,11 +197,11 @@ func capabilityToolHandler(kind string, capability connectorsdomain.Capability, 
 			return string(res.ResultJSON), nil
 		}
 
-		// Governed write: propose primero, luego ejecutar si Nexus aprueba.
+		// Controlled write: propose primero, luego ejecutar si Nexus aprueba.
 		if deps.Submitter == nil {
-			return `{"error":"governance not configured"}`, nil
+			return `{"error":"nexus not configured"}`, nil
 		}
-		submitBody := governanceclient.SubmitRequestBody{
+		submitBody := nexusclient.SubmitRequestBody{
 			RequesterType:  "companion",
 			RequesterID:    "companion-chat",
 			RequesterName:  "Companion Chat",
@@ -216,31 +216,31 @@ func capabilityToolHandler(kind string, capability connectorsdomain.Capability, 
 		}
 		submitOut, err := deps.Submitter.SubmitRequest(ctx, spec.IdempotencyKey, submitBody)
 		if err != nil {
-			slog.Error("governance submit failed", "operation", capability.Operation, "error", err)
-			return `{"error":"governance submit failed"}`, nil
+			slog.Error("nexus submit failed", "operation", capability.Operation, "error", err)
+			return `{"error":"nexus submit failed"}`, nil
 		}
 		status := strings.ToLower(strings.TrimSpace(submitOut.Status))
 		switch status {
 		case "allowed", "approved", "executed":
 			reqID, perr := uuid.Parse(submitOut.RequestID)
 			if perr != nil {
-				return `{"error":"invalid request_id from governance"}`, nil
+				return `{"error":"invalid request_id from nexus"}`, nil
 			}
-			spec.GovernanceRequestID = &reqID
+			spec.NexusRequestID = &reqID
 			res, err := deps.Executor.Execute(ctx, spec)
 			if err != nil {
-				slog.Error("governed capability execute failed", "operation", capability.Operation, "error", err)
+				slog.Error("controlled capability execute failed", "operation", capability.Operation, "error", err)
 				return jsonOrError(map[string]any{
-					"status":            "execution_failed",
-					"request_id":        submitOut.RequestID,
-					"governance_status": status,
+					"status":       "execution_failed",
+					"request_id":   submitOut.RequestID,
+					"nexus_status": status,
 				}), nil
 			}
 			return jsonOrError(map[string]any{
-				"status":            "executed",
-				"request_id":        submitOut.RequestID,
-				"governance_status": status,
-				"result":            json.RawMessage(res.ResultJSON),
+				"status":       "executed",
+				"request_id":   submitOut.RequestID,
+				"nexus_status": status,
+				"result":       json.RawMessage(res.ResultJSON),
 			}), nil
 		case "pending_approval", "pending":
 			return jsonOrError(map[string]any{

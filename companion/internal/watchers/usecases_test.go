@@ -7,7 +7,7 @@ import (
 	"time"
 
 	connectordomain "github.com/devpablocristo/companion/internal/connectors/usecases/domain"
-	"github.com/devpablocristo/platform/kernels/governance/go/governanceclient"
+	"github.com/devpablocristo/companion/internal/nexusclient"
 	"github.com/google/uuid"
 
 	domain "github.com/devpablocristo/companion/internal/watchers/usecases/domain"
@@ -155,26 +155,26 @@ func (f *fakePymes) SendWhatsAppText(_ context.Context, _, _, _ string) error {
 	return f.sendErr
 }
 
-// --- governance fake ---
+// --- nexus fake ---
 
-type fakeGovernance struct {
+type fakeNexus struct {
 	decision    string
 	reportCalls int
 }
 
-func (f *fakeGovernance) SubmitRequest(_ context.Context, _ string, _ governanceclient.SubmitRequestBody) (governanceclient.SubmitResponse, error) {
-	return governanceclient.SubmitResponse{
+func (f *fakeNexus) SubmitRequest(_ context.Context, _ string, _ nexusclient.SubmitRequestBody) (nexusclient.SubmitResponse, error) {
+	return nexusclient.SubmitResponse{
 		RequestID: uuid.New().String(),
 		Decision:  f.decision,
 		Status:    f.decision,
 	}, nil
 }
 
-func (f *fakeGovernance) GetRequest(_ context.Context, _ string) (governanceclient.RequestSummary, int, error) {
-	return governanceclient.RequestSummary{Status: f.decision, Decision: f.decision}, 200, nil
+func (f *fakeNexus) GetRequest(_ context.Context, _ string) (nexusclient.RequestSummary, int, error) {
+	return nexusclient.RequestSummary{Status: f.decision, Decision: f.decision}, 200, nil
 }
 
-func (f *fakeGovernance) ReportResult(_ context.Context, _ string, _ bool, _ map[string]any, _ int64, _ string) (int, error) {
+func (f *fakeNexus) ReportResult(_ context.Context, _ string, _ bool, _ map[string]any, _ int64, _ string) (int, error) {
 	f.reportCalls++
 	return 200, nil
 }
@@ -228,18 +228,18 @@ func (f *fakeConnectorExecutor) Execute(_ context.Context, spec connectordomain.
 	}
 	f.execCalls++
 	return connectordomain.ExecutionResult{
-		ID:                  uuid.New(),
-		ConnectorID:         spec.ConnectorID,
-		OrgID:               spec.OrgID,
-		ActorID:             spec.ActorID,
-		Operation:           spec.Operation,
-		Status:              connectordomain.ExecSuccess,
-		ExternalRef:         "pymes-send",
-		Payload:             spec.Payload,
-		ResultJSON:          json.RawMessage(`{"sent":true}`),
-		IdempotencyKey:      spec.IdempotencyKey,
-		GovernanceRequestID: spec.GovernanceRequestID,
-		CreatedAt:           time.Now().UTC(),
+		ID:             uuid.New(),
+		ConnectorID:    spec.ConnectorID,
+		OrgID:          spec.OrgID,
+		ActorID:        spec.ActorID,
+		Operation:      spec.Operation,
+		Status:         connectordomain.ExecSuccess,
+		ExternalRef:    "pymes-send",
+		Payload:        spec.Payload,
+		ResultJSON:     json.RawMessage(`{"sent":true}`),
+		IdempotencyKey: spec.IdempotencyKey,
+		NexusRequestID: spec.NexusRequestID,
+		CreatedAt:      time.Now().UTC(),
 	}, nil
 }
 
@@ -248,7 +248,7 @@ func (f *fakeConnectorExecutor) Execute(_ context.Context, spec connectordomain.
 func TestUsecases_Create(t *testing.T) {
 	t.Parallel()
 	repo := newFakeRepo()
-	uc := NewUsecases(repo, &fakeGovernance{decision: "allowed"})
+	uc := NewUsecases(repo, &fakeNexus{decision: "allowed"})
 
 	w, err := uc.Create(context.Background(), CreateWatcherInput{
 		OrgID:       "org-1",
@@ -271,7 +271,7 @@ func TestUsecases_Create(t *testing.T) {
 func TestUsecases_UpdatePartialFields(t *testing.T) {
 	t.Parallel()
 	repo := newFakeRepo()
-	uc := NewUsecases(repo, &fakeGovernance{decision: "allowed"})
+	uc := NewUsecases(repo, &fakeNexus{decision: "allowed"})
 
 	w, _ := uc.Create(context.Background(), CreateWatcherInput{
 		OrgID: "org-1", Name: "Original", WatcherType: domain.WatcherLowStock,
@@ -298,7 +298,7 @@ func TestUsecases_UpdatePartialFields(t *testing.T) {
 func TestUsecases_RunWatcher_DisabledReturnsError(t *testing.T) {
 	t.Parallel()
 	repo := newFakeRepo()
-	uc := NewUsecases(repo, &fakeGovernance{decision: "allowed"})
+	uc := NewUsecases(repo, &fakeNexus{decision: "allowed"})
 
 	w, _ := uc.Create(context.Background(), CreateWatcherInput{
 		OrgID: "org-1", Name: "Disabled", WatcherType: domain.WatcherLowStock,
@@ -313,9 +313,9 @@ func TestUsecases_RunWatcher_DisabledReturnsError(t *testing.T) {
 
 func TestUsecases_RunWatcher_StaleWorkOrders_AutoExecutes(t *testing.T) {
 	t.Parallel()
-	governance := &fakeGovernance{decision: "allowed"}
+	nexus := &fakeNexus{decision: "allowed"}
 	repo := newFakeRepo()
-	uc := NewUsecases(repo, governance)
+	uc := NewUsecases(repo, nexus)
 	executor := &fakeConnectorExecutor{readResults: map[string]json.RawMessage{
 		"pymes.get_work_orders": json.RawMessage(`[
 			{"id":"wo-1","type":"work_order","name":"Orden atrasada","party_id":"party-1"},
@@ -348,8 +348,8 @@ func TestUsecases_RunWatcher_StaleWorkOrders_AutoExecutes(t *testing.T) {
 	if executor.readCalls != 1 {
 		t.Fatalf("expected 1 read capability execution, got %d", executor.readCalls)
 	}
-	if governance.reportCalls != 2 {
-		t.Fatalf("expected 2 governance result reports, got %d", governance.reportCalls)
+	if nexus.reportCalls != 2 {
+		t.Fatalf("expected 2 nexus result reports, got %d", nexus.reportCalls)
 	}
 	if len(repo.proposals) != 2 {
 		t.Fatalf("expected 2 persisted proposals, got %d", len(repo.proposals))
@@ -358,9 +358,9 @@ func TestUsecases_RunWatcher_StaleWorkOrders_AutoExecutes(t *testing.T) {
 
 func TestUsecases_RunWatcher_DeniedSkipsExecution(t *testing.T) {
 	t.Parallel()
-	governance := &fakeGovernance{decision: "denied"}
+	nexus := &fakeNexus{decision: "denied"}
 	repo := newFakeRepo()
-	uc := NewUsecases(repo, governance)
+	uc := NewUsecases(repo, nexus)
 	executor := &fakeConnectorExecutor{readResults: map[string]json.RawMessage{
 		"pymes.get_work_orders": json.RawMessage(`[{"id":"wo-1","type":"work_order","name":"Denied order","party_id":"party-1"}]`),
 	}}
@@ -381,15 +381,15 @@ func TestUsecases_RunWatcher_DeniedSkipsExecution(t *testing.T) {
 	if executor.execCalls != 0 {
 		t.Fatalf("expected 0 connector executions when denied, got %d", executor.execCalls)
 	}
-	if governance.reportCalls != 0 {
-		t.Fatalf("expected 0 governance reports when denied, got %d", governance.reportCalls)
+	if nexus.reportCalls != 0 {
+		t.Fatalf("expected 0 nexus reports when denied, got %d", nexus.reportCalls)
 	}
 }
 
 func TestUsecases_Delete(t *testing.T) {
 	t.Parallel()
 	repo := newFakeRepo()
-	uc := NewUsecases(repo, &fakeGovernance{})
+	uc := NewUsecases(repo, &fakeNexus{})
 
 	w, _ := uc.Create(context.Background(), CreateWatcherInput{
 		OrgID: "org-1", Name: "To Delete", WatcherType: domain.WatcherLowStock,

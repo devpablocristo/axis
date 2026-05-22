@@ -22,7 +22,7 @@ export type Approval = {
   required_approvals?: number
 }
 
-export type GovernanceRequest = {
+export type NexusRequest = {
   id: string
   org_id?: string
   action_type: string

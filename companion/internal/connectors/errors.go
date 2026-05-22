@@ -9,7 +9,7 @@ import (
 var (
 	ErrNotFound         = domainerr.NotFound("not found")
 	ErrDisabled         = errors.New("connector is disabled")
-	ErrUngated          = errors.New("execution requires governance approval")
+	ErrUngated          = errors.New("execution requires nexus approval")
 	ErrOperationUnknown = errors.New("unknown operation for connector")
 	ErrInvalidPayload   = errors.New("invalid connector payload")
 	ErrForbidden        = domainerr.Forbidden("connector access forbidden")
@@ -21,7 +21,7 @@ func IsNotFound(err error) bool {
 	return domainerr.IsNotFound(err)
 }
 
-// IsUngated verifica si la ejecución no tiene aprobación de Governance.
+// IsUngated verifica si la ejecución no tiene aprobación de Nexus.
 func IsUngated(err error) bool {
 	return errors.Is(err, ErrUngated)
 }

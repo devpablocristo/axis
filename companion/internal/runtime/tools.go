@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/devpablocristo/platform/kernels/governance/go/governanceclient"
+	"github.com/devpablocristo/companion/internal/nexusclient"
 
 	"github.com/devpablocristo/companion/internal/memory"
 	memdomain "github.com/devpablocristo/companion/internal/memory/usecases/domain"
@@ -31,12 +31,12 @@ type toolPolicy struct {
 }
 
 const (
-	scopeCompanionGovernanceAdmin = "companion:governance:admin"
-	scopeCompanionWatchersRead    = "companion:watchers:read"
+	scopeCompanionNexusAdmin   = "companion:nexus:admin"
+	scopeCompanionWatchersRead = "companion:watchers:read"
 )
 
 // NewToolKit crea el kit de tools con las dependencias inyectadas.
-func NewToolKit(rc *governanceclient.Client, memUC *memory.Usecases, watcherUC *watchers.Usecases) *ToolKit {
+func NewToolKit(rc *nexusclient.Client, memUC *memory.Usecases, watcherUC *watchers.Usecases) *ToolKit {
 	tk := &ToolKit{
 		Handlers: make(map[string]ToolHandler),
 		policies: make(map[string]toolPolicy),
@@ -58,7 +58,7 @@ func NewToolKit(rc *governanceclient.Client, memUC *memory.Usecases, watcherUC *
 		}
 
 		// Aprobaciones pendientes
-		if rc != nil && hasAnyScope(id.AuthScopes, scopeCompanionGovernanceAdmin) {
+		if rc != nil && hasAnyScope(id.AuthScopes, scopeCompanionNexusAdmin) {
 			st, raw, err := rc.ListPendingApprovals(ctx)
 			if err == nil && st == 200 {
 				parts = append(parts, summarizeApprovals(raw))
@@ -98,16 +98,16 @@ func NewToolKit(rc *governanceclient.Client, memUC *memory.Usecases, watcherUC *
 			"type":       "object",
 			"properties": map[string]any{},
 		},
-	}, toolPolicy{RequiresTenant: true, RequiredAnyScope: []string{scopeCompanionGovernanceAdmin}}, func(ctx context.Context, _ json.RawMessage) (string, error) {
+	}, toolPolicy{RequiresTenant: true, RequiredAnyScope: []string{scopeCompanionNexusAdmin}}, func(ctx context.Context, _ json.RawMessage) (string, error) {
 		if rc == nil {
-			return `{"approvals": [], "message": "governance no configurado"}`, nil
+			return `{"approvals": [], "message": "nexus no configurado"}`, nil
 		}
 		st, raw, err := rc.ListPendingApprovals(ctx)
 		if err != nil {
 			return "", fmt.Errorf("list approvals: %w", err)
 		}
 		if st != 200 {
-			return fmt.Sprintf(`{"error": "governance respondió con status %d"}`, st), nil
+			return fmt.Sprintf(`{"error": "nexus respondió con status %d"}`, st), nil
 		}
 		return string(raw), nil
 	})
@@ -115,12 +115,12 @@ func NewToolKit(rc *governanceclient.Client, memUC *memory.Usecases, watcherUC *
 	// --- list_policies ---
 	tk.add(ToolSchema{
 		Name:        "list_policies",
-		Description: "Lista las reglas de gobernanza activas.",
+		Description: "Lista las reglas de decisiones sensibles activas.",
 		Parameters: map[string]any{
 			"type":       "object",
 			"properties": map[string]any{},
 		},
-	}, toolPolicy{RequiresTenant: true, RequiredAnyScope: []string{scopeCompanionGovernanceAdmin}}, func(ctx context.Context, _ json.RawMessage) (string, error) {
+	}, toolPolicy{RequiresTenant: true, RequiredAnyScope: []string{scopeCompanionNexusAdmin}}, func(ctx context.Context, _ json.RawMessage) (string, error) {
 		if rc == nil {
 			return `{"policies": []}`, nil
 		}

@@ -23,23 +23,23 @@ const (
 
 // Task entidad de dominio.
 type Task struct {
-	ID                  uuid.UUID
-	OrgID               string
-	Title               string
-	Goal                string
-	Status              string
-	Priority            string
-	CreatedBy           string
-	AssignedTo          string
-	Channel             string
-	Summary             string
-	ContextJSON         json.RawMessage
-	GovernanceStatus        string
-	GovernanceLastCheckedAt *time.Time
-	GovernanceSyncError     string
-	CreatedAt           time.Time
-	UpdatedAt           time.Time
-	ClosedAt            *time.Time
+	ID                 uuid.UUID
+	OrgID              string
+	Title              string
+	Goal               string
+	Status             string
+	Priority           string
+	CreatedBy          string
+	AssignedTo         string
+	Channel            string
+	Summary            string
+	ContextJSON        json.RawMessage
+	NexusStatus        string
+	NexusLastCheckedAt *time.Time
+	NexusSyncError     string
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	ClosedAt           *time.Time
 }
 
 // TaskMessage mensaje en el hilo de una tarea.
@@ -53,15 +53,15 @@ type TaskMessage struct {
 	CreatedAt  time.Time
 }
 
-// TaskAction acción sobre una tarea (p. ej. propose → Governance).
+// TaskAction acción sobre una tarea (p. ej. propose → Nexus).
 type TaskAction struct {
-	ID              uuid.UUID
-	TaskID          uuid.UUID
-	ActionType      string
-	Payload         json.RawMessage
-	GovernanceRequestID *uuid.UUID
-	ErrorMessage    string
-	CreatedAt       time.Time
+	ID             uuid.UUID
+	TaskID         uuid.UUID
+	ActionType     string
+	Payload        json.RawMessage
+	NexusRequestID *uuid.UUID
+	ErrorMessage   string
+	CreatedAt      time.Time
 }
 
 // TaskArtifact adjunto mínimo.
@@ -74,18 +74,18 @@ type TaskArtifact struct {
 	CreatedAt time.Time
 }
 
-// TaskGovernanceSyncState snapshot persistido del último estado conocido en Governance.
-type TaskGovernanceSyncState struct {
-	TaskID               uuid.UUID
-	GovernanceRequestID      uuid.UUID
-	LastGovernanceStatus     string
-	LastGovernanceHTTPStatus int
-	LastCheckedAt        time.Time
-	LastError            string
-	ConsecutiveFailures  int
-	NextCheckAt          time.Time
-	CreatedAt            time.Time
-	UpdatedAt            time.Time
+// TaskNexusSyncState snapshot persistido del último estado conocido en Nexus.
+type TaskNexusSyncState struct {
+	TaskID              uuid.UUID
+	NexusRequestID      uuid.UUID
+	LastNexusStatus     string
+	LastNexusHTTPStatus int
+	LastCheckedAt       time.Time
+	LastError           string
+	ConsecutiveFailures int
+	NextCheckAt         time.Time
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
 }
 
 // TaskExecutionPlan snapshot persistido del plan de ejecución manual de una tarea.

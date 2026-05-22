@@ -19,7 +19,7 @@ CREATE INDEX idx_memory_scope_kind ON companion_memory_entries (scope_type, scop
 CREATE INDEX idx_memory_expires ON companion_memory_entries (expires_at) WHERE expires_at IS NOT NULL;
 CREATE UNIQUE INDEX idx_memory_scope_key ON companion_memory_entries (scope_type, scope_id, kind, key);
 
--- Módulo connectors: ejecución gobernada en sistemas externos
+-- Módulo connectors: ejecución controlada en sistemas externos
 CREATE TABLE companion_connectors (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name        VARCHAR(255) NOT NULL,
@@ -44,10 +44,10 @@ CREATE TABLE companion_connector_executions (
     retryable         BOOLEAN NOT NULL DEFAULT false,
     duration_ms       BIGINT NOT NULL DEFAULT 0,
     task_id           UUID,
-    review_request_id UUID,
+    nexus_request_id UUID,
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX idx_executions_connector ON companion_connector_executions (connector_id, created_at DESC);
 CREATE INDEX idx_executions_task ON companion_connector_executions (task_id) WHERE task_id IS NOT NULL;
-CREATE INDEX idx_executions_review ON companion_connector_executions (review_request_id) WHERE review_request_id IS NOT NULL;
+CREATE INDEX idx_executions_nexus ON companion_connector_executions (nexus_request_id) WHERE nexus_request_id IS NOT NULL;

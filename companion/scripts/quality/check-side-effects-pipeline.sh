@@ -12,7 +12,7 @@ matches="$(
 )"
 
 if [ -n "$matches" ]; then
-  echo "ERROR: product side effects must go through ConnectorExecution + Nexus governance:" >&2
+  echo "ERROR: product side effects must go through ConnectorExecution + Nexus:" >&2
   echo "$matches" >&2
   exit 1
 fi

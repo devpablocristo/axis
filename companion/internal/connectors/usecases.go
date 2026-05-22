@@ -27,56 +27,56 @@ type Repository interface {
 	SaveExecution(ctx context.Context, r domain.ExecutionResult) error
 	AcquireExecutionLock(ctx context.Context, lockKey string) (bool, error)
 	ReleaseExecutionLock(ctx context.Context, lockKey string) error
-	GetExecutionByIdempotency(ctx context.Context, taskID uuid.UUID, operation string, governanceRequestID *uuid.UUID, idempotencyKey string) (domain.ExecutionResult, error)
+	GetExecutionByIdempotency(ctx context.Context, taskID uuid.UUID, operation string, nexusRequestID *uuid.UUID, idempotencyKey string) (domain.ExecutionResult, error)
 	ListExecutions(ctx context.Context, connectorID uuid.UUID, limit int) ([]domain.ExecutionResult, error)
 }
 
-// GovernanceExecutionIntent es la acción exacta que Nexus debe haber aprobado.
-type GovernanceExecutionIntent struct {
-	GovernanceRequestID uuid.UUID
-	OrgID               string
-	ActorID             string
-	ActorType           string
-	ProductSurface      string
-	TaskID              *uuid.UUID
-	RunID               string
-	ToolInvocationID    string
-	ConnectorID         uuid.UUID
-	CapabilityID        string
-	Operation           string
-	TargetSystem        string
-	TargetResource      string
-	PayloadHash         string
-	IdempotencyKey      string
-	RiskHint            string
-	ActionBinding       map[string]any
-	BindingHash         string
+// NexusExecutionIntent es la acción exacta que Nexus debe haber aprobado.
+type NexusExecutionIntent struct {
+	NexusRequestID   uuid.UUID
+	OrgID            string
+	ActorID          string
+	ActorType        string
+	ProductSurface   string
+	TaskID           *uuid.UUID
+	RunID            string
+	ToolInvocationID string
+	ConnectorID      uuid.UUID
+	CapabilityID     string
+	Operation        string
+	TargetSystem     string
+	TargetResource   string
+	PayloadHash      string
+	IdempotencyKey   string
+	RiskHint         string
+	ActionBinding    map[string]any
+	BindingHash      string
 }
 
 const toolIntentSchemaVersion = "tool_intent.v1"
 
-// GovernanceRequestMeta es el subconjunto de Nexus usado para validar grants.
-type GovernanceRequestMeta struct {
+// NexusRequestMeta es el subconjunto de Nexus usado para validar grants.
+type NexusRequestMeta struct {
 	Status        string
 	OrgID         string
 	BindingHash   string
 	ActionBinding map[string]any
 }
 
-// GovernanceChecker verifica que una ejecución tiene aprobación de Nexus y pertenece al tenant esperado.
-type GovernanceChecker interface {
-	AuthorizeExecution(ctx context.Context, intent GovernanceExecutionIntent) (bool, error)
+// NexusChecker verifica que una ejecución tiene aprobación de Nexus y pertenece al tenant esperado.
+type NexusChecker interface {
+	AuthorizeExecution(ctx context.Context, intent NexusExecutionIntent) (bool, error)
 }
 
 // Usecases lógica de negocio de conectores.
 type Usecases struct {
 	repo     Repository
 	registry *registry.Registry
-	checker  GovernanceChecker
+	checker  NexusChecker
 }
 
 // NewUsecases crea una nueva instancia de Usecases.
-func NewUsecases(repo Repository, reg *registry.Registry, checker GovernanceChecker) *Usecases {
+func NewUsecases(repo Repository, reg *registry.Registry, checker NexusChecker) *Usecases {
 	return &Usecases{
 		repo:     repo,
 		registry: reg,
@@ -161,7 +161,7 @@ func (uc *Usecases) Execute(ctx context.Context, spec domain.ExecutionSpec) (dom
 	}
 
 	if spec.IdempotencyKey != "" && spec.TaskID != nil {
-		existing, err := uc.repo.GetExecutionByIdempotency(ctx, *spec.TaskID, spec.Operation, spec.GovernanceRequestID, spec.IdempotencyKey)
+		existing, err := uc.repo.GetExecutionByIdempotency(ctx, *spec.TaskID, spec.Operation, spec.NexusRequestID, spec.IdempotencyKey)
 		if err == nil && existing.ID != uuid.Nil {
 			return existing, nil
 		}
@@ -174,43 +174,43 @@ func (uc *Usecases) Execute(ctx context.Context, spec domain.ExecutionSpec) (dom
 	//
 	// IMPORTANTE — esto es un READ-THROUGH PASS, no una decisión local.
 	// Companion NO evalúa policies, NO computa risk, NO decide approve/deny.
-	// El checker (governance gateway adapter) consulta a Nexus por HTTP el
+	// El checker (nexus gateway adapter) consulta a Nexus por HTTP el
 	// status del request y se limita a comparar el resultado contra el set
 	// "allowed/approved/executed" para autorizar la ejecución del connector.
 	// Source of truth = Nexus. Si Nexus cambia la semántica de status, el
 	// contract test (companion/internal/tasks/task_fsm_test.go) lo detecta.
-	if capability.NeedsGovernance() && uc.checker == nil {
+	if capability.NeedsNexusApproval() && uc.checker == nil {
 		return domain.ExecutionResult{}, ErrUngated
 	}
-	if capability.NeedsGovernance() && spec.GovernanceRequestID != nil {
-		approved, err := uc.checker.AuthorizeExecution(ctx, GovernanceExecutionIntent{
-			GovernanceRequestID: *spec.GovernanceRequestID,
-			OrgID:               spec.OrgID,
-			ActorID:             spec.ActorID,
-			ActorType:           "agent",
-			ProductSurface:      productSurfaceFor(capability, spec),
-			TaskID:              spec.TaskID,
-			RunID:               runIDFor(spec),
-			ToolInvocationID:    toolInvocationIDFor(capability, spec),
-			ConnectorID:         spec.ConnectorID,
-			CapabilityID:        capability.ID,
-			Operation:           spec.Operation,
-			TargetSystem:        config.Kind,
-			TargetResource:      config.ID.String(),
-			PayloadHash:         payloadHash,
-			IdempotencyKey:      spec.IdempotencyKey,
-			RiskHint:            capability.RiskClass,
-			ActionBinding:       actionBinding,
-			BindingHash:         bindingHash,
+	if capability.NeedsNexusApproval() && spec.NexusRequestID != nil {
+		approved, err := uc.checker.AuthorizeExecution(ctx, NexusExecutionIntent{
+			NexusRequestID:   *spec.NexusRequestID,
+			OrgID:            spec.OrgID,
+			ActorID:          spec.ActorID,
+			ActorType:        "agent",
+			ProductSurface:   productSurfaceFor(capability, spec),
+			TaskID:           spec.TaskID,
+			RunID:            runIDFor(spec),
+			ToolInvocationID: toolInvocationIDFor(capability, spec),
+			ConnectorID:      spec.ConnectorID,
+			CapabilityID:     capability.ID,
+			Operation:        spec.Operation,
+			TargetSystem:     config.Kind,
+			TargetResource:   config.ID.String(),
+			PayloadHash:      payloadHash,
+			IdempotencyKey:   spec.IdempotencyKey,
+			RiskHint:         capability.RiskClass,
+			ActionBinding:    actionBinding,
+			BindingHash:      bindingHash,
 		})
 		if err != nil {
-			slog.Error("check governance approval", "error", err, "governance_request_id", spec.GovernanceRequestID)
-			return domain.ExecutionResult{}, fmt.Errorf("check governance approval: %w", err)
+			slog.Error("check nexus approval", "error", err, "nexus_request_id", spec.NexusRequestID)
+			return domain.ExecutionResult{}, fmt.Errorf("check nexus approval: %w", err)
 		}
 		if !approved {
 			return domain.ExecutionResult{}, ErrUngated
 		}
-	} else if capability.NeedsGovernance() && spec.GovernanceRequestID == nil {
+	} else if capability.NeedsNexusApproval() && spec.NexusRequestID == nil {
 		return domain.ExecutionResult{}, ErrUngated
 	}
 
@@ -238,7 +238,7 @@ func (uc *Usecases) Execute(ctx context.Context, spec domain.ExecutionSpec) (dom
 			}
 		}()
 
-		existing, err := uc.repo.GetExecutionByIdempotency(ctx, *spec.TaskID, spec.Operation, spec.GovernanceRequestID, spec.IdempotencyKey)
+		existing, err := uc.repo.GetExecutionByIdempotency(ctx, *spec.TaskID, spec.Operation, spec.NexusRequestID, spec.IdempotencyKey)
 		if err == nil && existing.ID != uuid.Nil {
 			return existing, nil
 		}
@@ -266,7 +266,7 @@ func (uc *Usecases) Execute(ctx context.Context, spec domain.ExecutionSpec) (dom
 	// Persistir resultado
 	if saveErr := uc.repo.SaveExecution(ctx, result); saveErr != nil {
 		if IsConflict(saveErr) && spec.IdempotencyKey != "" && spec.TaskID != nil {
-			existing, err := uc.repo.GetExecutionByIdempotency(ctx, *spec.TaskID, spec.Operation, spec.GovernanceRequestID, spec.IdempotencyKey)
+			existing, err := uc.repo.GetExecutionByIdempotency(ctx, *spec.TaskID, spec.Operation, spec.NexusRequestID, spec.IdempotencyKey)
 			if err == nil && existing.ID != uuid.Nil {
 				return existing, nil
 			}
@@ -359,19 +359,19 @@ type ConnectorCapabilities struct {
 	Capabilities []domain.Capability
 }
 
-// GovernanceCheckerAdapter adapta el governanceclient para verificar aprobaciones.
-type GovernanceCheckerAdapter struct {
-	getRequest func(ctx context.Context, id uuid.UUID) (GovernanceRequestMeta, int, error)
+// NexusCheckerAdapter adapta el nexusclient para verificar aprobaciones.
+type NexusCheckerAdapter struct {
+	getRequest func(ctx context.Context, id uuid.UUID) (NexusRequestMeta, int, error)
 }
 
-// NewGovernanceCheckerAdapter crea un adaptador para verificar aprobaciones.
-func NewGovernanceCheckerAdapter(getRequest func(ctx context.Context, id uuid.UUID) (GovernanceRequestMeta, int, error)) *GovernanceCheckerAdapter {
-	return &GovernanceCheckerAdapter{getRequest: getRequest}
+// NewNexusCheckerAdapter crea un adaptador para verificar aprobaciones.
+func NewNexusCheckerAdapter(getRequest func(ctx context.Context, id uuid.UUID) (NexusRequestMeta, int, error)) *NexusCheckerAdapter {
+	return &NexusCheckerAdapter{getRequest: getRequest}
 }
 
 // AuthorizeExecution verifica si un request de Nexus fue aprobado y pertenece a la misma org.
-func (a *GovernanceCheckerAdapter) AuthorizeExecution(ctx context.Context, intent GovernanceExecutionIntent) (bool, error) {
-	meta, _, err := a.getRequest(ctx, intent.GovernanceRequestID)
+func (a *NexusCheckerAdapter) AuthorizeExecution(ctx context.Context, intent NexusExecutionIntent) (bool, error) {
+	meta, _, err := a.getRequest(ctx, intent.NexusRequestID)
 	if err != nil {
 		return false, err
 	}
@@ -594,11 +594,11 @@ func executionLockKey(spec domain.ExecutionSpec) string {
 	if spec.TaskID == nil || strings.TrimSpace(spec.IdempotencyKey) == "" {
 		return ""
 	}
-	governanceID := "none"
-	if spec.GovernanceRequestID != nil {
-		governanceID = spec.GovernanceRequestID.String()
+	nexusID := "none"
+	if spec.NexusRequestID != nil {
+		nexusID = spec.NexusRequestID.String()
 	}
-	return fmt.Sprintf("connector-execution:%s:%s:%s:%s", spec.TaskID.String(), spec.Operation, governanceID, strings.TrimSpace(spec.IdempotencyKey))
+	return fmt.Sprintf("connector-execution:%s:%s:%s:%s", spec.TaskID.String(), spec.Operation, nexusID, strings.TrimSpace(spec.IdempotencyKey))
 }
 
 func buildExecutionEvidence(config domain.Connector, capability domain.Capability, spec domain.ExecutionSpec, result domain.ExecutionResult) json.RawMessage {
@@ -629,8 +629,8 @@ func buildExecutionEvidence(config domain.Connector, capability domain.Capabilit
 	if spec.TaskID != nil {
 		evidence["task_id"] = spec.TaskID.String()
 	}
-	if spec.GovernanceRequestID != nil {
-		evidence["governance_request_id"] = spec.GovernanceRequestID.String()
+	if spec.NexusRequestID != nil {
+		evidence["nexus_request_id"] = spec.NexusRequestID.String()
 	}
 	raw, err := json.Marshal(evidence)
 	if err != nil {

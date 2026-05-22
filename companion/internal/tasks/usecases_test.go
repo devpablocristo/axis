@@ -13,8 +13,8 @@ import (
 	"github.com/google/uuid"
 
 	connectordomain "github.com/devpablocristo/companion/internal/connectors/usecases/domain"
+	"github.com/devpablocristo/companion/internal/nexusclient"
 	domain "github.com/devpablocristo/companion/internal/tasks/usecases/domain"
-	"github.com/devpablocristo/platform/kernels/governance/go/governanceclient"
 )
 
 type fakeRepo struct {
@@ -22,7 +22,7 @@ type fakeRepo struct {
 	lastPropose    map[uuid.UUID]uuid.UUID
 	actions        []domain.TaskAction
 	artifacts      []domain.TaskArtifact
-	governanceSync map[uuid.UUID]domain.TaskGovernanceSyncState
+	nexusSync      map[uuid.UUID]domain.TaskNexusSyncState
 	executionPlan  map[uuid.UUID]domain.TaskExecutionPlan
 	executionState map[uuid.UUID]domain.TaskExecutionState
 }
@@ -48,10 +48,10 @@ func (f *fakeRepo) GetTaskByID(ctx context.Context, id uuid.UUID) (domain.Task, 
 	if !ok {
 		return domain.Task{}, ErrNotFound
 	}
-	if state, ok := f.governanceSync[id]; ok {
-		t.GovernanceStatus = state.LastGovernanceStatus
-		t.GovernanceLastCheckedAt = &state.LastCheckedAt
-		t.GovernanceSyncError = state.LastError
+	if state, ok := f.nexusSync[id]; ok {
+		t.NexusStatus = state.LastNexusStatus
+		t.NexusLastCheckedAt = &state.LastCheckedAt
+		t.NexusSyncError = state.LastError
 	}
 	return t, nil
 }
@@ -62,10 +62,10 @@ func (f *fakeRepo) ListTasks(ctx context.Context, orgID string, limit int) ([]do
 		if orgID != "" && t.OrgID != "" && t.OrgID != orgID {
 			continue
 		}
-		if state, ok := f.governanceSync[t.ID]; ok {
-			t.GovernanceStatus = state.LastGovernanceStatus
-			t.GovernanceLastCheckedAt = &state.LastCheckedAt
-			t.GovernanceSyncError = state.LastError
+		if state, ok := f.nexusSync[t.ID]; ok {
+			t.NexusStatus = state.LastNexusStatus
+			t.NexusLastCheckedAt = &state.LastCheckedAt
+			t.NexusSyncError = state.LastError
 		}
 		out = append(out, t)
 	}
@@ -93,13 +93,13 @@ func (f *fakeRepo) ListTasksByStatus(ctx context.Context, status string, limit i
 	return out, nil
 }
 
-func (f *fakeRepo) ListTasksPendingGovernanceSync(ctx context.Context, now time.Time, limit int) ([]domain.Task, error) {
+func (f *fakeRepo) ListTasksPendingNexusSync(ctx context.Context, now time.Time, limit int) ([]domain.Task, error) {
 	var out []domain.Task
 	for _, t := range f.tasks {
 		if t.Status != domain.TaskStatusWaitingForApproval {
 			continue
 		}
-		state, ok := f.governanceSync[t.ID]
+		state, ok := f.nexusSync[t.ID]
 		if ok && state.NextCheckAt.After(now) {
 			continue
 		}
@@ -108,7 +108,7 @@ func (f *fakeRepo) ListTasksPendingGovernanceSync(ctx context.Context, now time.
 	return out, nil
 }
 
-func (f *fakeRepo) LatestProposeGovernanceRequestID(ctx context.Context, taskID uuid.UUID) (uuid.UUID, error) {
+func (f *fakeRepo) LatestProposeNexusRequestID(ctx context.Context, taskID uuid.UUID) (uuid.UUID, error) {
 	if f.lastPropose == nil {
 		return uuid.Nil, ErrNotFound
 	}
@@ -119,22 +119,22 @@ func (f *fakeRepo) LatestProposeGovernanceRequestID(ctx context.Context, taskID 
 	return rid, nil
 }
 
-func (f *fakeRepo) GetGovernanceSyncState(ctx context.Context, taskID uuid.UUID) (domain.TaskGovernanceSyncState, error) {
-	if f.governanceSync == nil {
-		return domain.TaskGovernanceSyncState{}, ErrNotFound
+func (f *fakeRepo) GetNexusSyncState(ctx context.Context, taskID uuid.UUID) (domain.TaskNexusSyncState, error) {
+	if f.nexusSync == nil {
+		return domain.TaskNexusSyncState{}, ErrNotFound
 	}
-	state, ok := f.governanceSync[taskID]
+	state, ok := f.nexusSync[taskID]
 	if !ok {
-		return domain.TaskGovernanceSyncState{}, ErrNotFound
+		return domain.TaskNexusSyncState{}, ErrNotFound
 	}
 	return state, nil
 }
 
-func (f *fakeRepo) UpsertGovernanceSyncState(ctx context.Context, s domain.TaskGovernanceSyncState) (domain.TaskGovernanceSyncState, error) {
-	if f.governanceSync == nil {
-		f.governanceSync = make(map[uuid.UUID]domain.TaskGovernanceSyncState)
+func (f *fakeRepo) UpsertNexusSyncState(ctx context.Context, s domain.TaskNexusSyncState) (domain.TaskNexusSyncState, error) {
+	if f.nexusSync == nil {
+		f.nexusSync = make(map[uuid.UUID]domain.TaskNexusSyncState)
 	}
-	if existing, ok := f.governanceSync[s.TaskID]; ok {
+	if existing, ok := f.nexusSync[s.TaskID]; ok {
 		if s.CreatedAt.IsZero() {
 			s.CreatedAt = existing.CreatedAt
 		}
@@ -145,7 +145,7 @@ func (f *fakeRepo) UpsertGovernanceSyncState(ctx context.Context, s domain.TaskG
 	if s.UpdatedAt.IsZero() {
 		s.UpdatedAt = time.Now().UTC()
 	}
-	f.governanceSync[s.TaskID] = s
+	f.nexusSync[s.TaskID] = s
 	return s, nil
 }
 
@@ -233,18 +233,18 @@ func (f *fakeRepo) InsertAction(ctx context.Context, a domain.TaskAction) (domai
 	return a, nil
 }
 
-func (f *fakeRepo) UpdateActionGovernanceResult(ctx context.Context, actionID uuid.UUID, governanceRequestID *uuid.UUID, errMsg string) error {
+func (f *fakeRepo) UpdateActionNexusResult(ctx context.Context, actionID uuid.UUID, nexusRequestID *uuid.UUID, errMsg string) error {
 	for i := range f.actions {
 		if f.actions[i].ID != actionID {
 			continue
 		}
-		f.actions[i].GovernanceRequestID = governanceRequestID
+		f.actions[i].NexusRequestID = nexusRequestID
 		f.actions[i].ErrorMessage = errMsg
-		if governanceRequestID != nil && f.actions[i].ActionType == TaskActionPropose {
+		if nexusRequestID != nil && f.actions[i].ActionType == TaskActionPropose {
 			if f.lastPropose == nil {
 				f.lastPropose = make(map[uuid.UUID]uuid.UUID)
 			}
-			f.lastPropose[f.actions[i].TaskID] = *governanceRequestID
+			f.lastPropose[f.actions[i].TaskID] = *nexusRequestID
 		}
 		return nil
 	}
@@ -292,9 +292,9 @@ func (f *fakeRepo) countActions(actionType string) int {
 	return count
 }
 
-type stubGovernance struct {
-	submitFn func(ctx context.Context, idempotencyKey string, body governanceclient.SubmitRequestBody) (governanceclient.SubmitResponse, error)
-	getFn    func(ctx context.Context, id string) (governanceclient.RequestSummary, int, error)
+type stubNexus struct {
+	submitFn func(ctx context.Context, idempotencyKey string, body nexusclient.SubmitRequestBody) (nexusclient.SubmitResponse, error)
+	getFn    func(ctx context.Context, id string) (nexusclient.RequestSummary, int, error)
 	reportFn func(ctx context.Context, id string, success bool, result map[string]any, durationMS int64, errorMessage string) (int, error)
 }
 
@@ -367,34 +367,34 @@ func (s *stubExecutor) Execute(ctx context.Context, spec connectordomain.Executi
 		return s.executeFn(ctx, spec)
 	}
 	return connectordomain.ExecutionResult{
-		ID:                  uuid.New(),
-		ConnectorID:         spec.ConnectorID,
-		Operation:           spec.Operation,
-		Status:              connectordomain.ExecSuccess,
-		ExternalRef:         "exec-ref",
-		Payload:             spec.Payload,
-		ResultJSON:          json.RawMessage(`{"ok":true}`),
-		TaskID:              spec.TaskID,
-		GovernanceRequestID: spec.GovernanceRequestID,
-		CreatedAt:           time.Now().UTC(),
+		ID:             uuid.New(),
+		ConnectorID:    spec.ConnectorID,
+		Operation:      spec.Operation,
+		Status:         connectordomain.ExecSuccess,
+		ExternalRef:    "exec-ref",
+		Payload:        spec.Payload,
+		ResultJSON:     json.RawMessage(`{"ok":true}`),
+		TaskID:         spec.TaskID,
+		NexusRequestID: spec.NexusRequestID,
+		CreatedAt:      time.Now().UTC(),
 	}, nil
 }
 
-func (s *stubGovernance) SubmitRequest(ctx context.Context, idempotencyKey string, body governanceclient.SubmitRequestBody) (governanceclient.SubmitResponse, error) {
+func (s *stubNexus) SubmitRequest(ctx context.Context, idempotencyKey string, body nexusclient.SubmitRequestBody) (nexusclient.SubmitResponse, error) {
 	if s.submitFn != nil {
 		return s.submitFn(ctx, idempotencyKey, body)
 	}
-	return governanceclient.SubmitResponse{}, nil
+	return nexusclient.SubmitResponse{}, nil
 }
 
-func (s *stubGovernance) GetRequest(ctx context.Context, id string) (governanceclient.RequestSummary, int, error) {
+func (s *stubNexus) GetRequest(ctx context.Context, id string) (nexusclient.RequestSummary, int, error) {
 	if s.getFn != nil {
 		return s.getFn(ctx, id)
 	}
-	return governanceclient.RequestSummary{}, http.StatusNotFound, nil
+	return nexusclient.RequestSummary{}, http.StatusNotFound, nil
 }
 
-func (s *stubGovernance) ReportResult(ctx context.Context, id string, success bool, result map[string]any, durationMS int64, errorMessage string) (int, error) {
+func (s *stubNexus) ReportResult(ctx context.Context, id string, success bool, result map[string]any, durationMS int64, errorMessage string) (int, error) {
 	if s.reportFn != nil {
 		return s.reportFn(ctx, id, success, result, durationMS, errorMessage)
 	}
@@ -403,7 +403,7 @@ func (s *stubGovernance) ReportResult(ctx context.Context, id string, success bo
 
 func createWaitingTask(t *testing.T, repo *fakeRepo) domain.Task {
 	t.Helper()
-	uc := NewUsecases(repo, &stubGovernance{})
+	uc := NewUsecases(repo, &stubNexus{})
 	created, err := uc.Create(context.Background(), CreateTaskInput{Title: "sync-test"})
 	if err != nil {
 		t.Fatal(err)
@@ -419,7 +419,7 @@ func createWaitingTask(t *testing.T, repo *fakeRepo) domain.Task {
 
 func TestUsecases_Create_requiresTitle(t *testing.T) {
 	t.Parallel()
-	uc := NewUsecases(&fakeRepo{}, &stubGovernance{})
+	uc := NewUsecases(&fakeRepo{}, &stubNexus{})
 	_, err := uc.Create(context.Background(), CreateTaskInput{})
 	if err == nil {
 		t.Fatal("expected error")
@@ -429,7 +429,7 @@ func TestUsecases_Create_requiresTitle(t *testing.T) {
 func TestUsecases_Create_ok(t *testing.T) {
 	t.Parallel()
 	r := &fakeRepo{}
-	uc := NewUsecases(r, &stubGovernance{})
+	uc := NewUsecases(r, &stubNexus{})
 	mem := &stubTaskMemory{}
 	uc.SetTaskMemory(mem)
 	out, err := uc.Create(context.Background(), CreateTaskInput{Title: "x"})
@@ -446,7 +446,7 @@ func TestUsecases_Create_ok(t *testing.T) {
 
 func TestUsecases_ChatDefaultsChannelToAPI(t *testing.T) {
 	t.Parallel()
-	uc := NewUsecases(&fakeRepo{}, &stubGovernance{})
+	uc := NewUsecases(&fakeRepo{}, &stubNexus{})
 
 	result, err := uc.Chat(context.Background(), ChatInput{
 		UserID:  "user-1",
@@ -465,7 +465,7 @@ func TestUsecases_SetExecutionPlan_persistsAndAudits(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	repo := &fakeRepo{}
-	uc := NewUsecases(repo, &stubGovernance{})
+	uc := NewUsecases(repo, &stubNexus{})
 	connectorID := uuid.New()
 	uc.SetExecutor(&stubExecutor{
 		getConnectorFn: func(ctx context.Context, id uuid.UUID) (connectordomain.Connector, error) {
@@ -495,16 +495,16 @@ func TestUsecases_SetExecutionPlan_persistsAndAudits(t *testing.T) {
 	}
 }
 
-func TestUsecases_Propose_persistsInitialGovernanceSyncState(t *testing.T) {
+func TestUsecases_Propose_persistsInitialNexusSyncState(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	repo := &fakeRepo{}
-	governanceRequestID := uuid.New()
+	nexusRequestID := uuid.New()
 	mem := &stubTaskMemory{}
-	uc := NewUsecases(repo, &stubGovernance{
-		submitFn: func(ctx context.Context, idempotencyKey string, body governanceclient.SubmitRequestBody) (governanceclient.SubmitResponse, error) {
-			return governanceclient.SubmitResponse{
-				RequestID: governanceRequestID.String(),
+	uc := NewUsecases(repo, &stubNexus{
+		submitFn: func(ctx context.Context, idempotencyKey string, body nexusclient.SubmitRequestBody) (nexusclient.SubmitResponse, error) {
+			return nexusclient.SubmitResponse{
+				RequestID: nexusRequestID.String(),
 				Status:    "pending_approval",
 				Decision:  "require_approval",
 				RiskLevel: "high",
@@ -538,22 +538,22 @@ func TestUsecases_Propose_persistsInitialGovernanceSyncState(t *testing.T) {
 	if submit.Status != "pending_approval" {
 		t.Fatalf("unexpected submit status %q", submit.Status)
 	}
-	if action.GovernanceRequestID == nil || *action.GovernanceRequestID != governanceRequestID {
-		t.Fatalf("unexpected action governance request id %+v", action.GovernanceRequestID)
+	if action.NexusRequestID == nil || *action.NexusRequestID != nexusRequestID {
+		t.Fatalf("unexpected action nexus request id %+v", action.NexusRequestID)
 	}
 
-	state, err := repo.GetGovernanceSyncState(ctx, task.ID)
+	state, err := repo.GetNexusSyncState(ctx, task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state.GovernanceRequestID != governanceRequestID {
-		t.Fatalf("unexpected state governance_request_id %s", state.GovernanceRequestID)
+	if state.NexusRequestID != nexusRequestID {
+		t.Fatalf("unexpected state nexus_request_id %s", state.NexusRequestID)
 	}
-	if state.LastGovernanceStatus != "pending_approval" {
-		t.Fatalf("unexpected state status %q", state.LastGovernanceStatus)
+	if state.LastNexusStatus != "pending_approval" {
+		t.Fatalf("unexpected state status %q", state.LastNexusStatus)
 	}
-	if state.LastGovernanceHTTPStatus != http.StatusCreated {
-		t.Fatalf("unexpected state http status %d", state.LastGovernanceHTTPStatus)
+	if state.LastNexusHTTPStatus != http.StatusCreated {
+		t.Fatalf("unexpected state http status %d", state.LastNexusHTTPStatus)
 	}
 	if state.LastError != "" || state.ConsecutiveFailures != 0 {
 		t.Fatalf("unexpected state error/failures %+v", state)
@@ -562,53 +562,53 @@ func TestUsecases_Propose_persistsInitialGovernanceSyncState(t *testing.T) {
 		t.Fatalf("expected create+plan+propose memory projection, got %d writes", len(mem.writes))
 	}
 	lastSummary := mem.writes[len(mem.writes)-2]
-	if lastSummary.Kind != taskMemoryKindSummary || !strings.Contains(lastSummary.ContentText, "waiting for Governance") {
+	if lastSummary.Kind != taskMemoryKindSummary || !strings.Contains(lastSummary.ContentText, "waiting for Nexus") {
 		t.Fatalf("unexpected summary write %+v", lastSummary)
 	}
 }
 
-func TestUsecases_SyncTaskGovernance_pendingIsIdempotent(t *testing.T) {
+func TestUsecases_SyncTaskNexus_pendingIsIdempotent(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	repo := &fakeRepo{governanceSync: make(map[uuid.UUID]domain.TaskGovernanceSyncState)}
+	repo := &fakeRepo{nexusSync: make(map[uuid.UUID]domain.TaskNexusSyncState)}
 	task := createWaitingTask(t, repo)
 	rid := uuid.New()
 	lastChecked := time.Now().UTC().Add(-time.Minute)
-	repo.governanceSync[task.ID] = domain.TaskGovernanceSyncState{
-		TaskID:                   task.ID,
-		GovernanceRequestID:      rid,
-		LastGovernanceStatus:     "pending_approval",
-		LastGovernanceHTTPStatus: http.StatusOK,
-		LastCheckedAt:            lastChecked,
-		LastError:                "",
-		ConsecutiveFailures:      0,
-		NextCheckAt:              time.Now().UTC().Add(-time.Second),
-		CreatedAt:                lastChecked,
-		UpdatedAt:                lastChecked,
+	repo.nexusSync[task.ID] = domain.TaskNexusSyncState{
+		TaskID:              task.ID,
+		NexusRequestID:      rid,
+		LastNexusStatus:     "pending_approval",
+		LastNexusHTTPStatus: http.StatusOK,
+		LastCheckedAt:       lastChecked,
+		LastError:           "",
+		ConsecutiveFailures: 0,
+		NextCheckAt:         time.Now().UTC().Add(-time.Second),
+		CreatedAt:           lastChecked,
+		UpdatedAt:           lastChecked,
 	}
-	uc := NewUsecases(repo, &stubGovernance{
-		getFn: func(ctx context.Context, id string) (governanceclient.RequestSummary, int, error) {
-			return governanceclient.RequestSummary{ID: rid.String(), Status: "pending_approval"}, http.StatusOK, nil
+	uc := NewUsecases(repo, &stubNexus{
+		getFn: func(ctx context.Context, id string) (nexusclient.RequestSummary, int, error) {
+			return nexusclient.RequestSummary{ID: rid.String(), Status: "pending_approval"}, http.StatusOK, nil
 		},
 	})
-	uc.SetGovernanceSyncInterval(5 * time.Second)
+	uc.SetNexusSyncInterval(5 * time.Second)
 
-	out, err := uc.SyncTaskGovernance(ctx, task.ID)
+	out, err := uc.SyncTaskNexus(ctx, task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if out.Status != domain.TaskStatusWaitingForApproval {
 		t.Fatalf("expected waiting_for_approval, got %q", out.Status)
 	}
-	if repo.countActions(TaskActionSyncGovernance) != 0 {
-		t.Fatalf("expected no sync_governance action, got %d", repo.countActions(TaskActionSyncGovernance))
+	if repo.countActions(TaskActionSyncNexus) != 0 {
+		t.Fatalf("expected no sync_nexus action, got %d", repo.countActions(TaskActionSyncNexus))
 	}
 
-	state, err := repo.GetGovernanceSyncState(ctx, task.ID)
+	state, err := repo.GetNexusSyncState(ctx, task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state.LastGovernanceStatus != "pending_approval" || state.LastError != "" || state.ConsecutiveFailures != 0 {
+	if state.LastNexusStatus != "pending_approval" || state.LastError != "" || state.ConsecutiveFailures != 0 {
 		t.Fatalf("unexpected state %+v", state)
 	}
 	if !state.LastCheckedAt.After(lastChecked) {
@@ -616,32 +616,32 @@ func TestUsecases_SyncTaskGovernance_pendingIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestUsecases_SyncTaskGovernance_approvedToDone(t *testing.T) {
+func TestUsecases_SyncTaskNexus_approvedToDone(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	repo := &fakeRepo{governanceSync: make(map[uuid.UUID]domain.TaskGovernanceSyncState)}
+	repo := &fakeRepo{nexusSync: make(map[uuid.UUID]domain.TaskNexusSyncState)}
 	task := createWaitingTask(t, repo)
 	rid := uuid.New()
-	repo.governanceSync[task.ID] = domain.TaskGovernanceSyncState{
-		TaskID:                   task.ID,
-		GovernanceRequestID:      rid,
-		LastGovernanceStatus:     "pending_approval",
-		LastGovernanceHTTPStatus: http.StatusCreated,
-		LastCheckedAt:            time.Now().UTC().Add(-time.Minute),
-		NextCheckAt:              time.Now().UTC().Add(-time.Second),
-		CreatedAt:                time.Now().UTC().Add(-time.Minute),
-		UpdatedAt:                time.Now().UTC().Add(-time.Minute),
+	repo.nexusSync[task.ID] = domain.TaskNexusSyncState{
+		TaskID:              task.ID,
+		NexusRequestID:      rid,
+		LastNexusStatus:     "pending_approval",
+		LastNexusHTTPStatus: http.StatusCreated,
+		LastCheckedAt:       time.Now().UTC().Add(-time.Minute),
+		NextCheckAt:         time.Now().UTC().Add(-time.Second),
+		CreatedAt:           time.Now().UTC().Add(-time.Minute),
+		UpdatedAt:           time.Now().UTC().Add(-time.Minute),
 	}
-	uc := NewUsecases(repo, &stubGovernance{
-		getFn: func(ctx context.Context, id string) (governanceclient.RequestSummary, int, error) {
+	uc := NewUsecases(repo, &stubNexus{
+		getFn: func(ctx context.Context, id string) (nexusclient.RequestSummary, int, error) {
 			if id != rid.String() {
-				return governanceclient.RequestSummary{}, http.StatusNotFound, nil
+				return nexusclient.RequestSummary{}, http.StatusNotFound, nil
 			}
-			return governanceclient.RequestSummary{ID: rid.String(), Status: "approved"}, http.StatusOK, nil
+			return nexusclient.RequestSummary{ID: rid.String(), Status: "approved"}, http.StatusOK, nil
 		},
 	})
 
-	out, err := uc.SyncTaskGovernance(ctx, task.ID)
+	out, err := uc.SyncTaskNexus(ctx, task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -651,36 +651,36 @@ func TestUsecases_SyncTaskGovernance_approvedToDone(t *testing.T) {
 	if out.ClosedAt == nil {
 		t.Fatal("expected ClosedAt on terminal state")
 	}
-	if repo.countActions(TaskActionSyncGovernance) != 1 {
-		t.Fatalf("expected one sync_governance action, got %d", repo.countActions(TaskActionSyncGovernance))
+	if repo.countActions(TaskActionSyncNexus) != 1 {
+		t.Fatalf("expected one sync_nexus action, got %d", repo.countActions(TaskActionSyncNexus))
 	}
-	state, err := repo.GetGovernanceSyncState(ctx, task.ID)
+	state, err := repo.GetNexusSyncState(ctx, task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state.LastGovernanceStatus != "approved" || state.LastError != "" || state.ConsecutiveFailures != 0 {
+	if state.LastNexusStatus != "approved" || state.LastError != "" || state.ConsecutiveFailures != 0 {
 		t.Fatalf("unexpected state %+v", state)
 	}
 }
 
-func TestUsecases_SyncTaskGovernance_approvedWithExecutionPlanToWaitingForInput(t *testing.T) {
+func TestUsecases_SyncTaskNexus_approvedWithExecutionPlanToWaitingForInput(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	repo := &fakeRepo{
-		governanceSync: make(map[uuid.UUID]domain.TaskGovernanceSyncState),
-		executionPlan:  make(map[uuid.UUID]domain.TaskExecutionPlan),
+		nexusSync:     make(map[uuid.UUID]domain.TaskNexusSyncState),
+		executionPlan: make(map[uuid.UUID]domain.TaskExecutionPlan),
 	}
 	task := createWaitingTask(t, repo)
 	rid := uuid.New()
-	repo.governanceSync[task.ID] = domain.TaskGovernanceSyncState{
-		TaskID:                   task.ID,
-		GovernanceRequestID:      rid,
-		LastGovernanceStatus:     "pending_approval",
-		LastGovernanceHTTPStatus: http.StatusCreated,
-		LastCheckedAt:            time.Now().UTC().Add(-time.Minute),
-		NextCheckAt:              time.Now().UTC().Add(-time.Second),
-		CreatedAt:                time.Now().UTC().Add(-time.Minute),
-		UpdatedAt:                time.Now().UTC().Add(-time.Minute),
+	repo.nexusSync[task.ID] = domain.TaskNexusSyncState{
+		TaskID:              task.ID,
+		NexusRequestID:      rid,
+		LastNexusStatus:     "pending_approval",
+		LastNexusHTTPStatus: http.StatusCreated,
+		LastCheckedAt:       time.Now().UTC().Add(-time.Minute),
+		NextCheckAt:         time.Now().UTC().Add(-time.Second),
+		CreatedAt:           time.Now().UTC().Add(-time.Minute),
+		UpdatedAt:           time.Now().UTC().Add(-time.Minute),
 	}
 	repo.executionPlan[task.ID] = domain.TaskExecutionPlan{
 		TaskID:      task.ID,
@@ -690,13 +690,13 @@ func TestUsecases_SyncTaskGovernance_approvedWithExecutionPlanToWaitingForInput(
 		CreatedAt:   time.Now().UTC().Add(-time.Minute),
 		UpdatedAt:   time.Now().UTC().Add(-time.Minute),
 	}
-	uc := NewUsecases(repo, &stubGovernance{
-		getFn: func(ctx context.Context, id string) (governanceclient.RequestSummary, int, error) {
-			return governanceclient.RequestSummary{ID: rid.String(), Status: "approved"}, http.StatusOK, nil
+	uc := NewUsecases(repo, &stubNexus{
+		getFn: func(ctx context.Context, id string) (nexusclient.RequestSummary, int, error) {
+			return nexusclient.RequestSummary{ID: rid.String(), Status: "approved"}, http.StatusOK, nil
 		},
 	})
 
-	out, err := uc.SyncTaskGovernance(ctx, task.ID)
+	out, err := uc.SyncTaskNexus(ctx, task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -705,20 +705,20 @@ func TestUsecases_SyncTaskGovernance_approvedWithExecutionPlanToWaitingForInput(
 	}
 }
 
-func TestUsecases_SyncTaskGovernance_rejectedToFailed(t *testing.T) {
+func TestUsecases_SyncTaskNexus_rejectedToFailed(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	repo := &fakeRepo{lastPropose: make(map[uuid.UUID]uuid.UUID)}
 	task := createWaitingTask(t, repo)
 	rid := uuid.New()
 	repo.lastPropose[task.ID] = rid
-	uc := NewUsecases(repo, &stubGovernance{
-		getFn: func(ctx context.Context, id string) (governanceclient.RequestSummary, int, error) {
-			return governanceclient.RequestSummary{ID: rid.String(), Status: "rejected"}, http.StatusOK, nil
+	uc := NewUsecases(repo, &stubNexus{
+		getFn: func(ctx context.Context, id string) (nexusclient.RequestSummary, int, error) {
+			return nexusclient.RequestSummary{ID: rid.String(), Status: "rejected"}, http.StatusOK, nil
 		},
 	})
 
-	out, err := uc.SyncTaskGovernance(ctx, task.ID)
+	out, err := uc.SyncTaskNexus(ctx, task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -728,53 +728,53 @@ func TestUsecases_SyncTaskGovernance_rejectedToFailed(t *testing.T) {
 	if out.ClosedAt == nil {
 		t.Fatal("expected ClosedAt on failed task")
 	}
-	state, err := repo.GetGovernanceSyncState(ctx, task.ID)
+	state, err := repo.GetNexusSyncState(ctx, task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state.LastGovernanceStatus != "rejected" {
-		t.Fatalf("unexpected state status %q", state.LastGovernanceStatus)
+	if state.LastNexusStatus != "rejected" {
+		t.Fatalf("unexpected state status %q", state.LastNexusStatus)
 	}
 }
 
-func TestUsecases_SyncTaskGovernance_errorBackoffThenReset(t *testing.T) {
+func TestUsecases_SyncTaskNexus_errorBackoffThenReset(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	repo := &fakeRepo{governanceSync: make(map[uuid.UUID]domain.TaskGovernanceSyncState)}
+	repo := &fakeRepo{nexusSync: make(map[uuid.UUID]domain.TaskNexusSyncState)}
 	task := createWaitingTask(t, repo)
 	rid := uuid.New()
 	originalNextCheck := time.Now().UTC().Add(-time.Second)
-	repo.governanceSync[task.ID] = domain.TaskGovernanceSyncState{
-		TaskID:                   task.ID,
-		GovernanceRequestID:      rid,
-		LastGovernanceStatus:     "pending_approval",
-		LastGovernanceHTTPStatus: http.StatusOK,
-		LastCheckedAt:            time.Now().UTC().Add(-time.Minute),
-		LastError:                "",
-		ConsecutiveFailures:      0,
-		NextCheckAt:              originalNextCheck,
-		CreatedAt:                time.Now().UTC().Add(-time.Minute),
-		UpdatedAt:                time.Now().UTC().Add(-time.Minute),
+	repo.nexusSync[task.ID] = domain.TaskNexusSyncState{
+		TaskID:              task.ID,
+		NexusRequestID:      rid,
+		LastNexusStatus:     "pending_approval",
+		LastNexusHTTPStatus: http.StatusOK,
+		LastCheckedAt:       time.Now().UTC().Add(-time.Minute),
+		LastError:           "",
+		ConsecutiveFailures: 0,
+		NextCheckAt:         originalNextCheck,
+		CreatedAt:           time.Now().UTC().Add(-time.Minute),
+		UpdatedAt:           time.Now().UTC().Add(-time.Minute),
 	}
-	rev := &stubGovernance{
-		getFn: func(ctx context.Context, id string) (governanceclient.RequestSummary, int, error) {
-			return governanceclient.RequestSummary{}, http.StatusBadGateway, errors.New("governance unavailable")
+	rev := &stubNexus{
+		getFn: func(ctx context.Context, id string) (nexusclient.RequestSummary, int, error) {
+			return nexusclient.RequestSummary{}, http.StatusBadGateway, errors.New("nexus unavailable")
 		},
 	}
 	uc := NewUsecases(repo, rev)
-	uc.SetGovernanceSyncInterval(2 * time.Second)
+	uc.SetNexusSyncInterval(2 * time.Second)
 
-	if _, err := uc.SyncTaskGovernance(ctx, task.ID); err == nil {
+	if _, err := uc.SyncTaskNexus(ctx, task.ID); err == nil {
 		t.Fatal("expected sync error")
 	}
-	state, err := repo.GetGovernanceSyncState(ctx, task.ID)
+	state, err := repo.GetNexusSyncState(ctx, task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if state.ConsecutiveFailures != 1 {
 		t.Fatalf("expected 1 failure, got %d", state.ConsecutiveFailures)
 	}
-	if !strings.Contains(state.LastError, "governance unavailable") {
+	if !strings.Contains(state.LastError, "nexus unavailable") {
 		t.Fatalf("unexpected error %q", state.LastError)
 	}
 	firstBackoff := state.NextCheckAt
@@ -782,20 +782,20 @@ func TestUsecases_SyncTaskGovernance_errorBackoffThenReset(t *testing.T) {
 		t.Fatalf("expected next_check_at to advance, got %s", firstBackoff)
 	}
 
-	rev.getFn = func(ctx context.Context, id string) (governanceclient.RequestSummary, int, error) {
-		return governanceclient.RequestSummary{ID: rid.String(), Status: "pending_approval"}, http.StatusOK, nil
+	rev.getFn = func(ctx context.Context, id string) (nexusclient.RequestSummary, int, error) {
+		return nexusclient.RequestSummary{ID: rid.String(), Status: "pending_approval"}, http.StatusOK, nil
 	}
 	state.NextCheckAt = time.Now().UTC().Add(-time.Second)
-	repo.governanceSync[task.ID] = state
+	repo.nexusSync[task.ID] = state
 
-	out, err := uc.SyncTaskGovernance(ctx, task.ID)
+	out, err := uc.SyncTaskNexus(ctx, task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if out.Status != domain.TaskStatusWaitingForApproval {
 		t.Fatalf("expected waiting_for_approval, got %q", out.Status)
 	}
-	state, err = repo.GetGovernanceSyncState(ctx, task.ID)
+	state, err = repo.GetNexusSyncState(ctx, task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -807,13 +807,13 @@ func TestUsecases_SyncTaskGovernance_errorBackoffThenReset(t *testing.T) {
 	}
 }
 
-func TestUsecases_SyncPendingGovernanceTasks_syncsOnlyEligibleTasks(t *testing.T) {
+func TestUsecases_SyncPendingNexusTasks_syncsOnlyEligibleTasks(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	repo := &fakeRepo{governanceSync: make(map[uuid.UUID]domain.TaskGovernanceSyncState)}
+	repo := &fakeRepo{nexusSync: make(map[uuid.UUID]domain.TaskNexusSyncState)}
 	eligible := createWaitingTask(t, repo)
 	notDue := createWaitingTask(t, repo)
-	doneTask, err := NewUsecases(repo, &stubGovernance{}).Create(ctx, CreateTaskInput{Title: "done"})
+	doneTask, err := NewUsecases(repo, &stubNexus{}).Create(ctx, CreateTaskInput{Title: "done"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -826,41 +826,41 @@ func TestUsecases_SyncPendingGovernanceTasks_syncsOnlyEligibleTasks(t *testing.T
 	eligibleRID := uuid.New()
 	notDueRID := uuid.New()
 	now := time.Now().UTC()
-	repo.governanceSync[eligible.ID] = domain.TaskGovernanceSyncState{
-		TaskID:                   eligible.ID,
-		GovernanceRequestID:      eligibleRID,
-		LastGovernanceStatus:     "pending_approval",
-		LastGovernanceHTTPStatus: http.StatusOK,
-		LastCheckedAt:            now.Add(-time.Minute),
-		NextCheckAt:              now.Add(-time.Second),
-		CreatedAt:                now.Add(-time.Minute),
-		UpdatedAt:                now.Add(-time.Minute),
+	repo.nexusSync[eligible.ID] = domain.TaskNexusSyncState{
+		TaskID:              eligible.ID,
+		NexusRequestID:      eligibleRID,
+		LastNexusStatus:     "pending_approval",
+		LastNexusHTTPStatus: http.StatusOK,
+		LastCheckedAt:       now.Add(-time.Minute),
+		NextCheckAt:         now.Add(-time.Second),
+		CreatedAt:           now.Add(-time.Minute),
+		UpdatedAt:           now.Add(-time.Minute),
 	}
-	repo.governanceSync[notDue.ID] = domain.TaskGovernanceSyncState{
-		TaskID:                   notDue.ID,
-		GovernanceRequestID:      notDueRID,
-		LastGovernanceStatus:     "pending_approval",
-		LastGovernanceHTTPStatus: http.StatusOK,
-		LastCheckedAt:            now.Add(-time.Minute),
-		NextCheckAt:              now.Add(time.Minute),
-		CreatedAt:                now.Add(-time.Minute),
-		UpdatedAt:                now.Add(-time.Minute),
+	repo.nexusSync[notDue.ID] = domain.TaskNexusSyncState{
+		TaskID:              notDue.ID,
+		NexusRequestID:      notDueRID,
+		LastNexusStatus:     "pending_approval",
+		LastNexusHTTPStatus: http.StatusOK,
+		LastCheckedAt:       now.Add(-time.Minute),
+		NextCheckAt:         now.Add(time.Minute),
+		CreatedAt:           now.Add(-time.Minute),
+		UpdatedAt:           now.Add(-time.Minute),
 	}
 
-	uc := NewUsecases(repo, &stubGovernance{
-		getFn: func(ctx context.Context, id string) (governanceclient.RequestSummary, int, error) {
+	uc := NewUsecases(repo, &stubNexus{
+		getFn: func(ctx context.Context, id string) (nexusclient.RequestSummary, int, error) {
 			switch id {
 			case eligibleRID.String():
-				return governanceclient.RequestSummary{ID: eligibleRID.String(), Status: "approved"}, http.StatusOK, nil
+				return nexusclient.RequestSummary{ID: eligibleRID.String(), Status: "approved"}, http.StatusOK, nil
 			case notDueRID.String():
-				return governanceclient.RequestSummary{ID: notDueRID.String(), Status: "rejected"}, http.StatusOK, nil
+				return nexusclient.RequestSummary{ID: notDueRID.String(), Status: "rejected"}, http.StatusOK, nil
 			default:
-				return governanceclient.RequestSummary{}, http.StatusNotFound, nil
+				return nexusclient.RequestSummary{}, http.StatusNotFound, nil
 			}
 		},
 	})
 
-	uc.SyncPendingGovernanceTasks(ctx, 10)
+	uc.SyncPendingNexusTasks(ctx, 10)
 
 	eligibleOut, err := repo.GetTaskByID(ctx, eligible.ID)
 	if err != nil {
@@ -891,29 +891,29 @@ func TestUsecases_ExecuteTask_success(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	repo := &fakeRepo{
-		governanceSync: make(map[uuid.UUID]domain.TaskGovernanceSyncState),
+		nexusSync:      make(map[uuid.UUID]domain.TaskNexusSyncState),
 		executionPlan:  make(map[uuid.UUID]domain.TaskExecutionPlan),
 		executionState: make(map[uuid.UUID]domain.TaskExecutionState),
 	}
-	task, err := NewUsecases(repo, &stubGovernance{}).Create(ctx, CreateTaskInput{Title: "execute"})
+	task, err := NewUsecases(repo, &stubNexus{}).Create(ctx, CreateTaskInput{Title: "execute"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	task.Status = domain.TaskStatusWaitingForInput
-	task.GovernanceStatus = "approved"
+	task.NexusStatus = "approved"
 	task, err = repo.UpdateTask(ctx, task)
 	if err != nil {
 		t.Fatal(err)
 	}
-	governanceRequestID := uuid.New()
-	repo.governanceSync[task.ID] = domain.TaskGovernanceSyncState{
-		TaskID:               task.ID,
-		GovernanceRequestID:  governanceRequestID,
-		LastGovernanceStatus: "approved",
-		LastCheckedAt:        time.Now().UTC(),
-		NextCheckAt:          time.Now().UTC().Add(time.Minute),
-		CreatedAt:            time.Now().UTC(),
-		UpdatedAt:            time.Now().UTC(),
+	nexusRequestID := uuid.New()
+	repo.nexusSync[task.ID] = domain.TaskNexusSyncState{
+		TaskID:          task.ID,
+		NexusRequestID:  nexusRequestID,
+		LastNexusStatus: "approved",
+		LastCheckedAt:   time.Now().UTC(),
+		NextCheckAt:     time.Now().UTC().Add(time.Minute),
+		CreatedAt:       time.Now().UTC(),
+		UpdatedAt:       time.Now().UTC(),
 	}
 	plan := domain.TaskExecutionPlan{
 		TaskID:         task.ID,
@@ -927,23 +927,23 @@ func TestUsecases_ExecuteTask_success(t *testing.T) {
 	repo.executionPlan[task.ID] = plan
 
 	var gotSpec connectordomain.ExecutionSpec
-	uc := NewUsecases(repo, &stubGovernance{})
+	uc := NewUsecases(repo, &stubNexus{})
 	mem := &stubTaskMemory{}
 	uc.SetTaskMemory(mem)
 	uc.SetExecutor(&stubExecutor{
 		executeFn: func(ctx context.Context, spec connectordomain.ExecutionSpec) (connectordomain.ExecutionResult, error) {
 			gotSpec = spec
 			return connectordomain.ExecutionResult{
-				ID:                  uuid.New(),
-				ConnectorID:         spec.ConnectorID,
-				Operation:           spec.Operation,
-				Status:              connectordomain.ExecSuccess,
-				ExternalRef:         "connector-ref",
-				Payload:             spec.Payload,
-				ResultJSON:          json.RawMessage(`{"sent":true}`),
-				TaskID:              spec.TaskID,
-				GovernanceRequestID: spec.GovernanceRequestID,
-				CreatedAt:           time.Now().UTC(),
+				ID:             uuid.New(),
+				ConnectorID:    spec.ConnectorID,
+				Operation:      spec.Operation,
+				Status:         connectordomain.ExecSuccess,
+				ExternalRef:    "connector-ref",
+				Payload:        spec.Payload,
+				ResultJSON:     json.RawMessage(`{"sent":true}`),
+				TaskID:         spec.TaskID,
+				NexusRequestID: spec.NexusRequestID,
+				CreatedAt:      time.Now().UTC(),
 			}, nil
 		},
 	})
@@ -970,8 +970,8 @@ func TestUsecases_ExecuteTask_success(t *testing.T) {
 	if gotSpec.IdempotencyKey != "exec-1" {
 		t.Fatalf("expected stored idempotency key, got %q", gotSpec.IdempotencyKey)
 	}
-	if gotSpec.GovernanceRequestID == nil || *gotSpec.GovernanceRequestID != governanceRequestID {
-		t.Fatalf("unexpected governance request id %+v", gotSpec.GovernanceRequestID)
+	if gotSpec.NexusRequestID == nil || *gotSpec.NexusRequestID != nexusRequestID {
+		t.Fatalf("unexpected nexus request id %+v", gotSpec.NexusRequestID)
 	}
 	if out.ExecutionState.Retryable {
 		t.Fatal("expected non-retryable execution state after verified success")
@@ -992,16 +992,16 @@ func TestUsecases_ExecuteTask_failureMarksTaskFailed(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	repo := &fakeRepo{
-		governanceSync: make(map[uuid.UUID]domain.TaskGovernanceSyncState),
+		nexusSync:      make(map[uuid.UUID]domain.TaskNexusSyncState),
 		executionPlan:  make(map[uuid.UUID]domain.TaskExecutionPlan),
 		executionState: make(map[uuid.UUID]domain.TaskExecutionState),
 	}
-	task, err := NewUsecases(repo, &stubGovernance{}).Create(ctx, CreateTaskInput{Title: "execute failure"})
+	task, err := NewUsecases(repo, &stubNexus{}).Create(ctx, CreateTaskInput{Title: "execute failure"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	task.Status = domain.TaskStatusWaitingForInput
-	task.GovernanceStatus = "approved"
+	task.NexusStatus = "approved"
 	task, err = repo.UpdateTask(ctx, task)
 	if err != nil {
 		t.Fatal(err)
@@ -1015,7 +1015,7 @@ func TestUsecases_ExecuteTask_failureMarksTaskFailed(t *testing.T) {
 		UpdatedAt:   time.Now().UTC(),
 	}
 
-	uc := NewUsecases(repo, &stubGovernance{})
+	uc := NewUsecases(repo, &stubNexus{})
 	uc.SetExecutor(&stubExecutor{
 		executeFn: func(ctx context.Context, spec connectordomain.ExecutionSpec) (connectordomain.ExecutionResult, error) {
 			return connectordomain.ExecutionResult{}, errors.New("connector unavailable")
@@ -1050,29 +1050,29 @@ func TestUsecases_ExecuteTask_verificationFailureMarksTaskFailed(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	repo := &fakeRepo{
-		governanceSync: make(map[uuid.UUID]domain.TaskGovernanceSyncState),
+		nexusSync:      make(map[uuid.UUID]domain.TaskNexusSyncState),
 		executionPlan:  make(map[uuid.UUID]domain.TaskExecutionPlan),
 		executionState: make(map[uuid.UUID]domain.TaskExecutionState),
 	}
-	task, err := NewUsecases(repo, &stubGovernance{}).Create(ctx, CreateTaskInput{Title: "verification failure"})
+	task, err := NewUsecases(repo, &stubNexus{}).Create(ctx, CreateTaskInput{Title: "verification failure"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	task.Status = domain.TaskStatusWaitingForInput
-	task.GovernanceStatus = "approved"
+	task.NexusStatus = "approved"
 	task, err = repo.UpdateTask(ctx, task)
 	if err != nil {
 		t.Fatal(err)
 	}
-	governanceRequestID := uuid.New()
-	repo.governanceSync[task.ID] = domain.TaskGovernanceSyncState{
-		TaskID:               task.ID,
-		GovernanceRequestID:  governanceRequestID,
-		LastGovernanceStatus: "approved",
-		LastCheckedAt:        time.Now().UTC(),
-		NextCheckAt:          time.Now().UTC().Add(time.Minute),
-		CreatedAt:            time.Now().UTC(),
-		UpdatedAt:            time.Now().UTC(),
+	nexusRequestID := uuid.New()
+	repo.nexusSync[task.ID] = domain.TaskNexusSyncState{
+		TaskID:          task.ID,
+		NexusRequestID:  nexusRequestID,
+		LastNexusStatus: "approved",
+		LastCheckedAt:   time.Now().UTC(),
+		NextCheckAt:     time.Now().UTC().Add(time.Minute),
+		CreatedAt:       time.Now().UTC(),
+		UpdatedAt:       time.Now().UTC(),
 	}
 	repo.executionPlan[task.ID] = domain.TaskExecutionPlan{
 		TaskID:      task.ID,
@@ -1083,19 +1083,19 @@ func TestUsecases_ExecuteTask_verificationFailureMarksTaskFailed(t *testing.T) {
 		UpdatedAt:   time.Now().UTC(),
 	}
 
-	uc := NewUsecases(repo, &stubGovernance{})
+	uc := NewUsecases(repo, &stubNexus{})
 	uc.SetExecutor(&stubExecutor{
 		executeFn: func(ctx context.Context, spec connectordomain.ExecutionSpec) (connectordomain.ExecutionResult, error) {
 			return connectordomain.ExecutionResult{
-				ID:                  uuid.New(),
-				ConnectorID:         spec.ConnectorID,
-				Operation:           spec.Operation,
-				Status:              connectordomain.ExecSuccess,
-				Payload:             spec.Payload,
-				ResultJSON:          json.RawMessage(`{}`),
-				TaskID:              spec.TaskID,
-				GovernanceRequestID: spec.GovernanceRequestID,
-				CreatedAt:           time.Now().UTC(),
+				ID:             uuid.New(),
+				ConnectorID:    spec.ConnectorID,
+				Operation:      spec.Operation,
+				Status:         connectordomain.ExecSuccess,
+				Payload:        spec.Payload,
+				ResultJSON:     json.RawMessage(`{}`),
+				TaskID:         spec.TaskID,
+				NexusRequestID: spec.NexusRequestID,
+				CreatedAt:      time.Now().UTC(),
 			}, nil
 		},
 	})
@@ -1119,32 +1119,32 @@ func TestUsecases_RetryTask_reexecutesRetryableFailure(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	repo := &fakeRepo{
-		governanceSync: make(map[uuid.UUID]domain.TaskGovernanceSyncState),
+		nexusSync:      make(map[uuid.UUID]domain.TaskNexusSyncState),
 		executionPlan:  make(map[uuid.UUID]domain.TaskExecutionPlan),
 		executionState: make(map[uuid.UUID]domain.TaskExecutionState),
 	}
-	task, err := NewUsecases(repo, &stubGovernance{}).Create(ctx, CreateTaskInput{Title: "retry execution"})
+	task, err := NewUsecases(repo, &stubNexus{}).Create(ctx, CreateTaskInput{Title: "retry execution"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
 	task.Status = domain.TaskStatusFailed
-	task.GovernanceStatus = "approved"
+	task.NexusStatus = "approved"
 	task.ClosedAt = &now
 	task, err = repo.UpdateTask(ctx, task)
 	if err != nil {
 		t.Fatal(err)
 	}
-	governanceRequestID := uuid.New()
-	repo.governanceSync[task.ID] = domain.TaskGovernanceSyncState{
-		TaskID:                   task.ID,
-		GovernanceRequestID:      governanceRequestID,
-		LastGovernanceStatus:     "approved",
-		LastGovernanceHTTPStatus: http.StatusOK,
-		LastCheckedAt:            now,
-		NextCheckAt:              now.Add(time.Minute),
-		CreatedAt:                now,
-		UpdatedAt:                now,
+	nexusRequestID := uuid.New()
+	repo.nexusSync[task.ID] = domain.TaskNexusSyncState{
+		TaskID:              task.ID,
+		NexusRequestID:      nexusRequestID,
+		LastNexusStatus:     "approved",
+		LastNexusHTTPStatus: http.StatusOK,
+		LastCheckedAt:       now,
+		NextCheckAt:         now.Add(time.Minute),
+		CreatedAt:           now,
+		UpdatedAt:           now,
 	}
 	repo.executionPlan[task.ID] = domain.TaskExecutionPlan{
 		TaskID:         task.ID,
@@ -1173,24 +1173,24 @@ func TestUsecases_RetryTask_reexecutesRetryableFailure(t *testing.T) {
 		UpdatedAt: now,
 	}
 
-	uc := NewUsecases(repo, &stubGovernance{
-		getFn: func(ctx context.Context, id string) (governanceclient.RequestSummary, int, error) {
-			return governanceclient.RequestSummary{ID: governanceRequestID.String(), Status: "approved"}, http.StatusOK, nil
+	uc := NewUsecases(repo, &stubNexus{
+		getFn: func(ctx context.Context, id string) (nexusclient.RequestSummary, int, error) {
+			return nexusclient.RequestSummary{ID: nexusRequestID.String(), Status: "approved"}, http.StatusOK, nil
 		},
 	})
 	uc.SetExecutor(&stubExecutor{
 		executeFn: func(ctx context.Context, spec connectordomain.ExecutionSpec) (connectordomain.ExecutionResult, error) {
 			return connectordomain.ExecutionResult{
-				ID:                  uuid.New(),
-				ConnectorID:         spec.ConnectorID,
-				Operation:           spec.Operation,
-				Status:              connectordomain.ExecSuccess,
-				ExternalRef:         "retry-ref",
-				Payload:             spec.Payload,
-				ResultJSON:          json.RawMessage(`{"ok":true}`),
-				TaskID:              spec.TaskID,
-				GovernanceRequestID: spec.GovernanceRequestID,
-				CreatedAt:           time.Now().UTC(),
+				ID:             uuid.New(),
+				ConnectorID:    spec.ConnectorID,
+				Operation:      spec.Operation,
+				Status:         connectordomain.ExecSuccess,
+				ExternalRef:    "retry-ref",
+				Payload:        spec.Payload,
+				ResultJSON:     json.RawMessage(`{"ok":true}`),
+				TaskID:         spec.TaskID,
+				NexusRequestID: spec.NexusRequestID,
+				CreatedAt:      time.Now().UTC(),
 			}, nil
 		},
 	})
@@ -1220,7 +1220,7 @@ func TestNotifyAlert_PreservesOrgID(t *testing.T) {
 	t.Parallel()
 
 	repo := &fakeRepo{}
-	uc := NewUsecases(repo, &stubGovernance{})
+	uc := NewUsecases(repo, &stubNexus{})
 
 	if err := uc.NotifyAlert(context.Background(), "org-alerts", "stock bajo"); err != nil {
 		t.Fatal(err)

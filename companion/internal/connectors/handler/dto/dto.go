@@ -39,12 +39,12 @@ type ConnectorListResponse struct {
 
 // ExecuteRequest petición para ejecutar una operación.
 type ExecuteRequest struct {
-	ConnectorID     string          `json:"connector_id"`
-	Operation       string          `json:"operation"`
-	Payload         json.RawMessage `json:"payload"`
-	IdempotencyKey  string          `json:"idempotency_key,omitempty"`
-	TaskID          string          `json:"task_id,omitempty"`
-	GovernanceRequestID string          `json:"governance_request_id,omitempty"`
+	ConnectorID    string          `json:"connector_id"`
+	Operation      string          `json:"operation"`
+	Payload        json.RawMessage `json:"payload"`
+	IdempotencyKey string          `json:"idempotency_key,omitempty"`
+	TaskID         string          `json:"task_id,omitempty"`
+	NexusRequestID string          `json:"nexus_request_id,omitempty"`
 }
 
 // ExecutionResponse resultado de una ejecución.

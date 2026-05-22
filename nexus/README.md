@@ -1,25 +1,28 @@
 # Nexus
 
-Nexus es el servicio headless de governance de Axis. Decide
-`allow`/`deny`/`require_approval`, administra approvals, policies, action types,
-delegations, RBAC, audit y evidence packs. No incluye runtime LLM, memoria IA ni
-UI propia.
+Servicio headless de Axis para decisiones sensibles. Decide `allow`/`deny`/
+`require_approval`, administra approvals, policies, action types, delegations,
+RBAC, audit y evidence packs. No incluye runtime LLM, memoria IA ni UI propia.
 
 ## Estructura
 
 ```text
 nexus/
-├── governance/          # servicio Go
-├── scripts/             # quality, smoke, e2e
-├── docker-compose.yml   # governance + postgres
-├── docker-compose.dev.yml
-├── Makefile
-└── .env.example
+├── cmd/api/
+├── internal/
+├── migrations/
+├── wire/
+├── scripts/
+├── docs/
+├── go.mod
+├── go.sum
+└── openapi.yaml
 ```
+
+Docker, compose y Make targets viven en la raíz de Axis.
 
 ## Contrato
 
-- HTTP API en `governance/`.
 - Auth inbound: `X-API-Key` o Bearer JWT/OIDC interno.
 - Datos tenant-owned requieren `org_id` no vacío.
 - Config compartida explícita: `policies`, `action_types` y `delegations`
@@ -27,25 +30,22 @@ nexus/
   `nexus:cross_org`.
 - La UI administrativa vive en `../console` y accede por `../bff`.
 
-## Arranque local
+## Desarrollo
+
+Desde la raíz de Axis:
 
 ```bash
-test -f .env || cp .env.example .env
-make up
+make test-nexus
+make qa-nexus
+make dev-nexus
+make smoke-nexus
+make e2e-nexus
+docker compose up -d --build nexus-postgres nexus
 ```
 
 URL por defecto: `http://localhost:18084`.
 
-## Tests
+## Documentación
 
-```bash
-make test
-make qa
-make smoke
-make e2e
-```
-
-## Deploy
-
-Nexus se deploya como componente independiente de Axis. Usar tags `nexus-v*`
-para releases del servicio.
+- `docs/development.md`
+- `openapi.yaml`

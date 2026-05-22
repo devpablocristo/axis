@@ -1,5 +1,5 @@
 -- Reversa de 0003_memory_connectors.up.sql
-DROP INDEX IF EXISTS idx_executions_review;
+DROP INDEX IF EXISTS idx_executions_nexus;
 DROP INDEX IF EXISTS idx_executions_task;
 DROP INDEX IF EXISTS idx_executions_connector;
 DROP TABLE IF EXISTS companion_connector_executions;

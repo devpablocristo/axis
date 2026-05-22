@@ -1,6 +1,6 @@
 # Axis
 
-Monorepo de control operativo para IA, governance y consola admin/ops.
+Monorepo de control operativo para IA, decisiones sensibles y consola admin/ops.
 
 Axis agrupa deployables independientes. Vivir en el mismo repo no implica mismo
 runtime, misma base de datos ni mismo ciclo de deploy.
@@ -10,11 +10,10 @@ runtime, misma base de datos ni mismo ciclo de deploy.
 ```text
 axis/
 ├── companion/   # servicio headless de IA/runtime/tools/memory
-├── nexus/       # servicio headless de governance/policies/approvals/audit
+├── nexus/       # servicio headless de policies/approvals/audit
 ├── bff/         # backend-for-frontend de la consola operativa
 ├── console/     # UI admin/ops de Axis
-├── packages/    # contratos, auth, UI compartida
-└── infra/       # IaC, deploys y ambientes
+└── packages/    # contratos, auth, UI compartida
 ```
 
 ## Deployables
@@ -22,7 +21,7 @@ axis/
 | Carpeta | Deployable | Rol |
 |---|---|---|
 | `companion/` | `axis-companion` | API headless IA |
-| `nexus/` | `axis-nexus` | API headless governance |
+| `nexus/` | `axis-nexus` | API headless de decisiones sensibles |
 | `bff/` | `axis-bff` | HTTP BFF para `console/` |
 | `console/` | `axis-console` | UI admin/ops |
 
@@ -53,6 +52,13 @@ test -f .env || cp .env.example .env
 docker compose up -d --build
 ```
 
+Para desarrollo con hot reload de APIs:
+
+```bash
+docker compose up -d companion-postgres nexus-postgres
+make dev-apis
+```
+
 Puertos por defecto:
 
 | Servicio | URL |
@@ -60,4 +66,4 @@ Puertos por defecto:
 | Axis Console | `http://localhost:13000` |
 | Axis BFF | `http://localhost:18080` |
 | Companion API | `http://localhost:18085` |
-| Nexus Governance API | `http://localhost:18084` |
+| Nexus API | `http://localhost:18084` |

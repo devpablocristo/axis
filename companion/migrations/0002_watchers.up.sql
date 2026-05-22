@@ -27,8 +27,8 @@ CREATE TABLE companion_proposals (
     target_resource     VARCHAR(255),
     params              JSONB        NOT NULL DEFAULT '{}',
     reason              TEXT         NOT NULL,
-    review_request_id   UUID,
-    review_decision     VARCHAR(32),
+    nexus_request_id   UUID,
+    nexus_decision     VARCHAR(32),
     execution_status    VARCHAR(32)  NOT NULL DEFAULT 'pending' CHECK (execution_status IN (
         'pending', 'executed', 'failed', 'skipped'
     )),
@@ -39,4 +39,4 @@ CREATE TABLE companion_proposals (
 
 CREATE INDEX idx_proposals_watcher ON companion_proposals (watcher_id, created_at DESC);
 CREATE INDEX idx_proposals_org_status ON companion_proposals (org_id, execution_status);
-CREATE INDEX idx_proposals_review ON companion_proposals (review_request_id) WHERE review_request_id IS NOT NULL;
+CREATE INDEX idx_proposals_nexus ON companion_proposals (nexus_request_id) WHERE nexus_request_id IS NOT NULL;

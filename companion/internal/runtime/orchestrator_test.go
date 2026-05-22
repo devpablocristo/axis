@@ -123,7 +123,7 @@ func TestRouteAgent_filtersToolsByTenantAndScopes(t *testing.T) {
 		},
 		policies: map[string]toolPolicy{
 			"get_overview":    {RequiresTenant: true},
-			"check_approvals": {RequiresTenant: true, RequiredAnyScope: []string{scopeCompanionGovernanceAdmin}},
+			"check_approvals": {RequiresTenant: true, RequiredAnyScope: []string{scopeCompanionNexusAdmin}},
 			"list_watchers":   {RequiresTenant: true, RequiredAnyScope: []string{scopeCompanionWatchersRead}},
 			"remember":        {RequiresUser: true},
 		},
@@ -135,7 +135,7 @@ func TestRouteAgent_filtersToolsByTenantAndScopes(t *testing.T) {
 		t.Fatalf("expected only user-scoped memory tool without tenant, got %+v", route.AllowedTools)
 	}
 
-	withScopes := BuildIdentityChain("user-1", "org-1", "companion", scopeCompanionGovernanceAdmin, scopeCompanionWatchersRead)
+	withScopes := BuildIdentityChain("user-1", "org-1", "companion", scopeCompanionNexusAdmin, scopeCompanionWatchersRead)
 	route = RouteAgent("estado", "companion", toolkit, withScopes, AutonomyA2)
 	if got, want := len(route.AllowedTools), 2; got != want {
 		t.Fatalf("expected %d tools with tenant and scopes, got %d: %+v", want, got, route.AllowedTools)
@@ -145,7 +145,7 @@ func TestRouteAgent_filtersToolsByTenantAndScopes(t *testing.T) {
 func TestValidateToolPolicy_rejectsToolOutsideRoute(t *testing.T) {
 	t.Parallel()
 
-	toolkit := &ToolKit{policies: map[string]toolPolicy{"list_policies": {RequiredAnyScope: []string{scopeCompanionGovernanceAdmin}}}}
+	toolkit := &ToolKit{policies: map[string]toolPolicy{"list_policies": {RequiredAnyScope: []string{scopeCompanionNexusAdmin}}}}
 	identity := BuildIdentityChain("user-1", "org-1", "companion")
 	event := ValidateToolPolicy("list_policies", json.RawMessage(`{}`), identity, AgentRoute{AllowedTools: []string{"recall"}}, toolkit)
 	if event == nil || event.Type != "tool_policy" {

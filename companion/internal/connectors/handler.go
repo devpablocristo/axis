@@ -215,17 +215,17 @@ func (h *Handler) execute(w http.ResponseWriter, r *http.Request) {
 			spec.TaskID = &tid
 		}
 	}
-	if body.GovernanceRequestID != "" {
-		rid, err := uuid.Parse(body.GovernanceRequestID)
+	if body.NexusRequestID != "" {
+		rid, err := uuid.Parse(body.NexusRequestID)
 		if err == nil {
-			spec.GovernanceRequestID = &rid
+			spec.NexusRequestID = &rid
 		}
 	}
 
 	result, err := h.uc.Execute(r.Context(), spec)
 	if err != nil {
 		if IsUngated(err) {
-			httpjson.WriteFlatError(w, http.StatusForbidden, "UNGATED", "execution requires governance approval")
+			httpjson.WriteFlatError(w, http.StatusForbidden, "UNGATED", "execution requires nexus approval")
 			return
 		}
 		if IsNotFound(err) {

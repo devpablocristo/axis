@@ -10,8 +10,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	sharedpostgres "github.com/devpablocristo/platform/databases/postgres/go"
 	domain "github.com/devpablocristo/companion/internal/watchers/usecases/domain"
+	sharedpostgres "github.com/devpablocristo/platform/databases/postgres/go"
 )
 
 // Repository port de persistencia para watchers y proposals.
@@ -150,9 +150,9 @@ func (r *PostgresRepository) CreateProposal(ctx context.Context, p domain.Propos
 	}
 
 	_, err := r.db.Pool().Exec(ctx, `
-		INSERT INTO companion_proposals (id, watcher_id, org_id, action_type, target_resource, params, reason, governance_request_id, governance_decision, execution_status, created_at)
+		INSERT INTO companion_proposals (id, watcher_id, org_id, action_type, target_resource, params, reason, nexus_request_id, nexus_decision, execution_status, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-		p.ID, p.WatcherID, p.OrgID, p.ActionType, p.TargetResource, p.Params, p.Reason, p.GovernanceRequestID, p.GovernanceDecision, p.ExecutionStatus, p.CreatedAt,
+		p.ID, p.WatcherID, p.OrgID, p.ActionType, p.TargetResource, p.Params, p.Reason, p.NexusRequestID, p.NexusDecision, p.ExecutionStatus, p.CreatedAt,
 	)
 	if err != nil {
 		return domain.Proposal{}, fmt.Errorf("create proposal: %w", err)
@@ -163,9 +163,9 @@ func (r *PostgresRepository) CreateProposal(ctx context.Context, p domain.Propos
 func (r *PostgresRepository) UpdateProposal(ctx context.Context, p domain.Proposal) error {
 	_, err := r.db.Pool().Exec(ctx, `
 		UPDATE companion_proposals
-		SET governance_request_id = $2, governance_decision = $3, execution_status = $4, execution_result = $5, resolved_at = $6
+		SET nexus_request_id = $2, nexus_decision = $3, execution_status = $4, execution_result = $5, resolved_at = $6
 		WHERE id = $1`,
-		p.ID, p.GovernanceRequestID, p.GovernanceDecision, p.ExecutionStatus, p.ExecutionResult, p.ResolvedAt,
+		p.ID, p.NexusRequestID, p.NexusDecision, p.ExecutionStatus, p.ExecutionResult, p.ResolvedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("update proposal: %w", err)
@@ -178,7 +178,7 @@ func (r *PostgresRepository) ListProposalsByWatcher(ctx context.Context, watcher
 		limit = 50
 	}
 	rows, err := r.db.Pool().Query(ctx, `
-		SELECT id, watcher_id, org_id, action_type, target_resource, params, reason, governance_request_id, governance_decision, execution_status, execution_result, created_at, resolved_at
+		SELECT id, watcher_id, org_id, action_type, target_resource, params, reason, nexus_request_id, nexus_decision, execution_status, execution_result, created_at, resolved_at
 		FROM companion_proposals WHERE watcher_id = $1 ORDER BY created_at DESC LIMIT $2`, watcherID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list proposals: %w", err)
@@ -198,7 +198,7 @@ func (r *PostgresRepository) ListProposalsByWatcher(ctx context.Context, watcher
 
 func (r *PostgresRepository) PendingProposals(ctx context.Context, orgID string) ([]domain.Proposal, error) {
 	rows, err := r.db.Pool().Query(ctx, `
-		SELECT id, watcher_id, org_id, action_type, target_resource, params, reason, governance_request_id, governance_decision, execution_status, execution_result, created_at, resolved_at
+		SELECT id, watcher_id, org_id, action_type, target_resource, params, reason, nexus_request_id, nexus_decision, execution_status, execution_result, created_at, resolved_at
 		FROM companion_proposals WHERE org_id = $1 AND execution_status = 'pending' ORDER BY created_at`, orgID)
 	if err != nil {
 		return nil, fmt.Errorf("pending proposals: %w", err)
@@ -245,7 +245,7 @@ func scanWatcherRows(rows pgx.Rows) (domain.Watcher, error) {
 
 func scanProposalRows(rows pgx.Rows) (domain.Proposal, error) {
 	var p domain.Proposal
-	err := rows.Scan(&p.ID, &p.WatcherID, &p.OrgID, &p.ActionType, &p.TargetResource, &p.Params, &p.Reason, &p.GovernanceRequestID, &p.GovernanceDecision, &p.ExecutionStatus, &p.ExecutionResult, &p.CreatedAt, &p.ResolvedAt)
+	err := rows.Scan(&p.ID, &p.WatcherID, &p.OrgID, &p.ActionType, &p.TargetResource, &p.Params, &p.Reason, &p.NexusRequestID, &p.NexusDecision, &p.ExecutionStatus, &p.ExecutionResult, &p.CreatedAt, &p.ResolvedAt)
 	if err != nil {
 		return domain.Proposal{}, fmt.Errorf("scan proposal row: %w", err)
 	}

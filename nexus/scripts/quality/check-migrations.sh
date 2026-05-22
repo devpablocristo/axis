@@ -20,6 +20,6 @@ check_dir() {
   fi
 }
 
-check_dir "$ROOT/governance/migrations"
+check_dir "$ROOT/migrations"
 
 echo "Migration version checks passed."

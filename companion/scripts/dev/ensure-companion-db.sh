@@ -3,11 +3,12 @@
 # se creó antes de montar postgres-init).
 set -euo pipefail
 
-V3_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-cd "$V3_ROOT"
+COMPANION_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+AXIS_ROOT="$(cd "$COMPANION_ROOT/.." && pwd)"
+cd "$AXIS_ROOT"
 
 if ! docker compose exec -T companion-postgres pg_isready -U postgres >/dev/null 2>&1; then
-  echo "ERROR: Postgres no responde. Ejecutá: docker compose up -d companion-postgres" >&2
+  echo "ERROR: Postgres no responde. Ejecutá desde axis/: docker compose up -d companion-postgres" >&2
   exit 1
 fi
 

@@ -22,34 +22,34 @@ type Connector struct {
 
 // Capability capacidad que ofrece un conector.
 type Capability struct {
-	ID                 string                `json:"id,omitempty"`
-	Version            string                `json:"version,omitempty"`
-	Status             string                `json:"status,omitempty"`
-	OwnerDomain        string                `json:"owner_domain,omitempty"`
-	PublishedFrom      string                `json:"published_from,omitempty"`
-	Product            string                `json:"product,omitempty"`
-	Operation          string                `json:"operation"` // send_whatsapp, create_purchase, etc.
-	Mode               string                `json:"mode"`      // read o write
-	SideEffectClass    string                `json:"side_effect_class,omitempty"`
-	SideEffect         bool                  `json:"side_effect"`
-	ReadOnly           bool                  `json:"read_only"`
-	RiskClass          string                `json:"risk_class,omitempty"`
-	TenantScope        TenantScope           `json:"tenant_scope,omitempty"`
-	AuthMode           AuthMode              `json:"auth_mode,omitempty"`
-	RequiredRoles      []string              `json:"required_roles,omitempty"`
-	RequiredScopes     []string              `json:"required_scopes,omitempty"`
-	RequiredModules    []string              `json:"required_modules,omitempty"`
-	RequiresGovernance bool                  `json:"requires_governance"`
-	ApprovalPolicy     ApprovalPolicy        `json:"approval_policy,omitempty"`
-	InputSchema        map[string]any        `json:"input_schema,omitempty"`
-	OutputSchema       map[string]any        `json:"output_schema,omitempty"`
-	EvidenceFields     []string              `json:"evidence_fields,omitempty"` // alias de compatibilidad
-	EvidenceRequired   []string              `json:"evidence_required,omitempty"`
-	DataClassification DataClassification    `json:"data_classification,omitempty"`
-	Idempotency        IdempotencyContract   `json:"idempotency,omitempty"`
-	Observability      ObservabilityContract `json:"observability,omitempty"`
-	ErrorContract      ErrorContract         `json:"error_contract,omitempty"`
-	Rollback           RollbackContract      `json:"rollback,omitempty"`
+	ID                    string                `json:"id,omitempty"`
+	Version               string                `json:"version,omitempty"`
+	Status                string                `json:"status,omitempty"`
+	OwnerDomain           string                `json:"owner_domain,omitempty"`
+	PublishedFrom         string                `json:"published_from,omitempty"`
+	Product               string                `json:"product,omitempty"`
+	Operation             string                `json:"operation"` // send_whatsapp, create_purchase, etc.
+	Mode                  string                `json:"mode"`      // read o write
+	SideEffectClass       string                `json:"side_effect_class,omitempty"`
+	SideEffect            bool                  `json:"side_effect"`
+	ReadOnly              bool                  `json:"read_only"`
+	RiskClass             string                `json:"risk_class,omitempty"`
+	TenantScope           TenantScope           `json:"tenant_scope,omitempty"`
+	AuthMode              AuthMode              `json:"auth_mode,omitempty"`
+	RequiredRoles         []string              `json:"required_roles,omitempty"`
+	RequiredScopes        []string              `json:"required_scopes,omitempty"`
+	RequiredModules       []string              `json:"required_modules,omitempty"`
+	RequiresNexusApproval bool                  `json:"requires_nexus_approval"`
+	ApprovalPolicy        ApprovalPolicy        `json:"approval_policy,omitempty"`
+	InputSchema           map[string]any        `json:"input_schema,omitempty"`
+	OutputSchema          map[string]any        `json:"output_schema,omitempty"`
+	EvidenceFields        []string              `json:"evidence_fields,omitempty"` // alias de compatibilidad
+	EvidenceRequired      []string              `json:"evidence_required,omitempty"`
+	DataClassification    DataClassification    `json:"data_classification,omitempty"`
+	Idempotency           IdempotencyContract   `json:"idempotency,omitempty"`
+	Observability         ObservabilityContract `json:"observability,omitempty"`
+	ErrorContract         ErrorContract         `json:"error_contract,omitempty"`
+	Rollback              RollbackContract      `json:"rollback,omitempty"`
 }
 
 type TenantScope struct {
@@ -92,13 +92,13 @@ type RollbackContract struct {
 }
 
 type CapabilityDecision struct {
-	CapabilityID        string   `json:"capability_id"`
-	Operation           string   `json:"operation"`
-	SideEffectClass     string   `json:"side_effect_class"`
-	RiskClass           string   `json:"risk_class"`
-	RequiresGovernance  bool     `json:"requires_governance"`
-	RequiredScopes      []string `json:"required_scopes,omitempty"`
-	IdempotencyRequired bool     `json:"idempotency_required"`
+	CapabilityID          string   `json:"capability_id"`
+	Operation             string   `json:"operation"`
+	SideEffectClass       string   `json:"side_effect_class"`
+	RiskClass             string   `json:"risk_class"`
+	RequiresNexusApproval bool     `json:"requires_nexus_approval"`
+	RequiredScopes        []string `json:"required_scopes,omitempty"`
+	IdempotencyRequired   bool     `json:"idempotency_required"`
 }
 
 type CapabilityFilter struct {
@@ -113,39 +113,39 @@ type CapabilityFilter struct {
 
 // ExecutionSpec especificación de una ejecución en un conector.
 type ExecutionSpec struct {
-	ConnectorID         uuid.UUID
-	OrgID               string
-	ActorID             string
-	ProductSurface      string
-	AuthScopes          []string
-	RunID               string
-	ToolInvocationID    string
-	Operation           string
-	Payload             json.RawMessage
-	IdempotencyKey      string
-	TaskID              *uuid.UUID
-	GovernanceRequestID *uuid.UUID
+	ConnectorID      uuid.UUID
+	OrgID            string
+	ActorID          string
+	ProductSurface   string
+	AuthScopes       []string
+	RunID            string
+	ToolInvocationID string
+	Operation        string
+	Payload          json.RawMessage
+	IdempotencyKey   string
+	TaskID           *uuid.UUID
+	NexusRequestID   *uuid.UUID
 }
 
 // ExecutionResult resultado de una ejecución.
 type ExecutionResult struct {
-	ID                  uuid.UUID
-	ConnectorID         uuid.UUID
-	OrgID               string
-	ActorID             string
-	Operation           string
-	Status              string // success, failure, partial
-	ExternalRef         string // referencia en el sistema externo
-	Payload             json.RawMessage
-	ResultJSON          json.RawMessage
-	EvidenceJSON        json.RawMessage
-	ErrorMessage        string
-	Retryable           bool
-	DurationMS          int64
-	IdempotencyKey      string
-	TaskID              *uuid.UUID
-	GovernanceRequestID *uuid.UUID
-	CreatedAt           time.Time
+	ID             uuid.UUID
+	ConnectorID    uuid.UUID
+	OrgID          string
+	ActorID        string
+	Operation      string
+	Status         string // success, failure, partial
+	ExternalRef    string // referencia en el sistema externo
+	Payload        json.RawMessage
+	ResultJSON     json.RawMessage
+	EvidenceJSON   json.RawMessage
+	ErrorMessage   string
+	Retryable      bool
+	DurationMS     int64
+	IdempotencyKey string
+	TaskID         *uuid.UUID
+	NexusRequestID *uuid.UUID
+	CreatedAt      time.Time
 }
 
 // ExecutionStatus valores de estado de ejecución.
@@ -186,9 +186,9 @@ func (c Capability) HasSideEffect() bool {
 	return c.SideEffect || mode == CapabilityModeWrite || sideEffectClass == SideEffectClassWrite || sideEffectClass == SideEffectClassNotify || sideEffectClass == SideEffectClassExecute || !c.ReadOnly && mode != CapabilityModeRead
 }
 
-// NeedsGovernance indica si Nexus debe aprobar/permitir antes de ejecutar.
-func (c Capability) NeedsGovernance() bool {
-	return c.RequiresGovernance || c.ApprovalPolicy.Required || c.HasSideEffect()
+// NeedsNexusApproval indica si Nexus debe aprobar/permitir antes de ejecutar.
+func (c Capability) NeedsNexusApproval() bool {
+	return c.RequiresNexusApproval || c.ApprovalPolicy.Required || c.HasSideEffect()
 }
 
 // Normalized completa defaults del contrato v1 sin perder compatibilidad con
@@ -254,7 +254,7 @@ func (c Capability) Normalized(connectorID, kind string) Capability {
 	if len(c.EvidenceFields) == 0 && len(c.EvidenceRequired) > 0 {
 		c.EvidenceFields = append([]string(nil), c.EvidenceRequired...)
 	}
-	if c.NeedsGovernance() {
+	if c.NeedsNexusApproval() {
 		c.ApprovalPolicy.Required = true
 	}
 	if c.HasSideEffect() {
@@ -277,13 +277,13 @@ func (c Capability) Normalized(connectorID, kind string) Capability {
 
 func (c Capability) RuntimeDecision() CapabilityDecision {
 	return CapabilityDecision{
-		CapabilityID:        c.ID,
-		Operation:           c.Operation,
-		SideEffectClass:     c.SideEffectClass,
-		RiskClass:           c.RiskClass,
-		RequiresGovernance:  c.NeedsGovernance(),
-		RequiredScopes:      append([]string(nil), c.RequiredScopes...),
-		IdempotencyRequired: c.Idempotency.Required,
+		CapabilityID:          c.ID,
+		Operation:             c.Operation,
+		SideEffectClass:       c.SideEffectClass,
+		RiskClass:             c.RiskClass,
+		RequiresNexusApproval: c.NeedsNexusApproval(),
+		RequiredScopes:        append([]string(nil), c.RequiredScopes...),
+		IdempotencyRequired:   c.Idempotency.Required,
 	}
 }
 

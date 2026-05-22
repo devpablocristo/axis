@@ -6,7 +6,7 @@ updates:
       interval: weekly
     open-pull-requests-limit: 1
   - package-ecosystem: gomod
-    directory: /nexus/governance
+    directory: /nexus
     schedule:
       interval: weekly
     open-pull-requests-limit: 1
@@ -21,22 +21,7 @@ updates:
       interval: weekly
     open-pull-requests-limit: 1
   - package-ecosystem: docker
-    directory: /companion
-    schedule:
-      interval: monthly
-    open-pull-requests-limit: 1
-  - package-ecosystem: docker
-    directory: /nexus/governance
-    schedule:
-      interval: monthly
-    open-pull-requests-limit: 1
-  - package-ecosystem: docker
-    directory: /bff
-    schedule:
-      interval: monthly
-    open-pull-requests-limit: 1
-  - package-ecosystem: docker
-    directory: /console
+    directory: /
     schedule:
       interval: monthly
     open-pull-requests-limit: 1

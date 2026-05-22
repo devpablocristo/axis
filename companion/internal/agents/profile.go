@@ -35,11 +35,11 @@ func DefaultRegistry() Registry {
 			Version:        "v1",
 		},
 		{
-			ID:             "companion.governance",
+			ID:             "companion.nexus",
 			ProductSurface: "companion",
 			MaxAutonomy:    "A2",
 			AllowedTools:   []string{"get_overview", "check_approvals", "list_policies"},
-			RequiredScopes: []string{"companion:governance:admin"},
+			RequiredScopes: []string{"companion:nexus:admin"},
 			MemoryPolicy:   MemoryPolicy{AllowedTypes: []string{"task_projection"}, MaxItems: 5},
 			Enabled:        true,
 			Version:        "v1",
@@ -83,8 +83,8 @@ func DefaultRegistry() Registry {
 func (r Registry) Resolve(productSurface, intent, requestedAutonomy string, scopes []string, availableTools []string) Profile {
 	selected := r.profiles[0]
 	switch {
-	case strings.HasPrefix(intent, "governance."):
-		selected = r.find("companion.governance", selected)
+	case strings.HasPrefix(intent, "nexus."):
+		selected = r.find("companion.nexus", selected)
 	case strings.HasPrefix(intent, "operations."):
 		selected = r.find("companion.operations", selected)
 	case intent == "memory":
@@ -92,9 +92,9 @@ func (r Registry) Resolve(productSurface, intent, requestedAutonomy string, scop
 	}
 	// Si hay un perfil específico para el producto, prevalece sobre el default
 	// (ej: "pymes.default" para superficie Pymes). El intent-based override de
-	// arriba sigue ganando porque governance/operations/memory son transversales.
+	// arriba sigue ganando porque nexus/operations/memory son transversales.
 	ps := strings.TrimSpace(productSurface)
-	if ps != "" && ps != "companion" && !strings.HasPrefix(intent, "governance.") && !strings.HasPrefix(intent, "operations.") && intent != "memory" {
+	if ps != "" && ps != "companion" && !strings.HasPrefix(intent, "nexus.") && !strings.HasPrefix(intent, "operations.") && intent != "memory" {
 		selected = r.find(ps+".default", selected)
 	}
 	if ps != "" {

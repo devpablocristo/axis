@@ -20,10 +20,10 @@ import (
 // Config configura timeout y retry del cliente. Los defaults se aplican si
 // se pasan ceros o se usa NewClient simple.
 type Config struct {
-	Timeout       time.Duration // por request HTTP. Default 15s.
-	MaxRetries    int           // GETs idempotentes. Default 2 (3 intentos totales).
-	BackoffBase   time.Duration // base del backoff exponencial. Default 200ms.
-	BackoffMax    time.Duration // techo del backoff por intento. Default 2s.
+	Timeout     time.Duration // por request HTTP. Default 15s.
+	MaxRetries  int           // GETs idempotentes. Default 2 (3 intentos totales).
+	BackoffBase time.Duration // base del backoff exponencial. Default 200ms.
+	BackoffMax  time.Duration // techo del backoff por intento. Default 2s.
 }
 
 func (c Config) withDefaults() Config {

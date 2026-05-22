@@ -30,25 +30,25 @@ jobs:
         working-directory: companion
       - run: bash scripts/quality/check-migrations.sh
         working-directory: companion
-      - run: bash scripts/quality/check-governance-imports.sh
+      - run: bash scripts/quality/check-nexus-imports.sh
         working-directory: companion
       - run: bash scripts/quality/check-side-effects-pipeline.sh
         working-directory: companion
 
   nexus:
-    name: nexus governance
+    name: nexus
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
         with:
-          go-version-file: nexus/governance/go.mod
-          cache-dependency-path: nexus/governance/go.sum
+          go-version-file: nexus/go.mod
+          cache-dependency-path: nexus/go.sum
       - run: go vet ./...
-        working-directory: nexus/governance
+        working-directory: nexus
       - run: go test ./...
-        working-directory: nexus/governance
+        working-directory: nexus
       - run: bash scripts/quality/check-migrations.sh
         working-directory: nexus
       - run: bash scripts/quality/check-no-ai-runtime.sh

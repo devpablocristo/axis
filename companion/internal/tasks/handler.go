@@ -12,9 +12,9 @@ import (
 	"github.com/devpablocristo/platform/http/go/httpjson"
 	"github.com/google/uuid"
 
+	"github.com/devpablocristo/companion/internal/nexusclient"
 	tasksdto "github.com/devpablocristo/companion/internal/tasks/handler/dto"
 	domain "github.com/devpablocristo/companion/internal/tasks/usecases/domain"
-	"github.com/devpablocristo/platform/kernels/governance/go/governanceclient"
 )
 
 const (
@@ -29,11 +29,11 @@ type taskUsecase interface {
 	GetDetail(ctx context.Context, id uuid.UUID) (TaskDetail, error)
 	AddMessage(ctx context.Context, taskID uuid.UUID, in AddMessageInput) (domain.TaskMessage, error)
 	Investigate(ctx context.Context, taskID uuid.UUID, in InvestigateInput) (domain.Task, error)
-	Propose(ctx context.Context, taskID uuid.UUID, in ProposeInput) (domain.Task, domain.TaskAction, governanceclient.SubmitResponse, error)
+	Propose(ctx context.Context, taskID uuid.UUID, in ProposeInput) (domain.Task, domain.TaskAction, nexusclient.SubmitResponse, error)
 	SetExecutionPlan(ctx context.Context, taskID uuid.UUID, in SetExecutionPlanInput) (domain.TaskExecutionPlan, error)
 	ExecuteTask(ctx context.Context, taskID uuid.UUID) (ExecuteTaskOutput, error)
 	RetryTask(ctx context.Context, taskID uuid.UUID) (ExecuteTaskOutput, error)
-	SyncTaskGovernance(ctx context.Context, taskID uuid.UUID) (domain.Task, error)
+	SyncTaskNexus(ctx context.Context, taskID uuid.UUID) (domain.Task, error)
 	Chat(ctx context.Context, in ChatInput) (ChatResult, error)
 }
 
@@ -55,7 +55,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /v1/tasks/{id}/execution-plan", h.setExecutionPlan)
 	mux.HandleFunc("POST /v1/tasks/{id}/execute", h.execute)
 	mux.HandleFunc("POST /v1/tasks/{id}/retry", h.retry)
-	mux.HandleFunc("POST /v1/tasks/{id}/sync", h.syncGovernance)
+	mux.HandleFunc("POST /v1/tasks/{id}/sync", h.syncNexus)
 	mux.HandleFunc("POST /v1/chat", h.chat)
 	mux.HandleFunc("POST /v1/internal/customer-messaging/inbound", h.customerMessagingInbound)
 }
@@ -142,11 +142,11 @@ func (h *Handler) getByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp := tasksdto.TaskDetailResponse{
-		Task:                     tasksdto.TaskToResponse(detail.Task),
-		Messages:                 make([]tasksdto.MessageResponse, 0, len(detail.Messages)),
-		Actions:                  make([]tasksdto.ActionResponse, 0, len(detail.Actions)),
-		Artifacts:                make([]tasksdto.ArtifactResponse, 0, len(detail.Artifacts)),
-		LinkedGovernanceRequests: make([]tasksdto.LinkedGovernanceRequestResponse, 0, len(detail.LinkedGovernanceRequests)),
+		Task:                tasksdto.TaskToResponse(detail.Task),
+		Messages:            make([]tasksdto.MessageResponse, 0, len(detail.Messages)),
+		Actions:             make([]tasksdto.ActionResponse, 0, len(detail.Actions)),
+		Artifacts:           make([]tasksdto.ArtifactResponse, 0, len(detail.Artifacts)),
+		LinkedNexusRequests: make([]tasksdto.LinkedNexusRequestResponse, 0, len(detail.LinkedNexusRequests)),
 	}
 	for _, m := range detail.Messages {
 		resp.Messages = append(resp.Messages, tasksdto.MessageToResponse(m))
@@ -157,14 +157,14 @@ func (h *Handler) getByID(w http.ResponseWriter, r *http.Request) {
 	for _, ar := range detail.Artifacts {
 		resp.Artifacts = append(resp.Artifacts, tasksdto.ArtifactToResponse(ar))
 	}
-	for _, lr := range detail.LinkedGovernanceRequests {
-		resp.LinkedGovernanceRequests = append(resp.LinkedGovernanceRequests, tasksdto.LinkedGovernanceRequestResponse{
+	for _, lr := range detail.LinkedNexusRequests {
+		resp.LinkedNexusRequests = append(resp.LinkedNexusRequests, tasksdto.LinkedNexusRequestResponse{
 			ActionID: lr.ActionID.String(),
 			Request:  lr.Request,
 		})
 	}
-	if detail.GovernanceSync != nil {
-		resp.GovernanceSync = tasksdto.GovernanceSyncToResponse(*detail.GovernanceSync)
+	if detail.NexusSync != nil {
+		resp.NexusSync = tasksdto.NexusSyncToResponse(*detail.NexusSync)
 	}
 	if detail.ExecutionPlan != nil {
 		resp.ExecutionPlan = tasksdto.ExecutionPlanToResponse(*detail.ExecutionPlan)
@@ -276,10 +276,10 @@ func (h *Handler) propose(w http.ResponseWriter, r *http.Request) {
 			httpjson.WriteFlatError(w, http.StatusConflict, "CONFLICT", "invalid task state")
 			return
 		}
-		if errors.Is(err, ErrGovernanceSubmit) && t.ID != uuid.Nil {
+		if errors.Is(err, ErrNexusSubmit) && t.ID != uuid.Nil {
 			httpjson.WriteJSON(w, http.StatusBadGateway, map[string]any{
-				"code":    "GOVERNANCE_SUBMIT_FAILED",
-				"message": "governance request failed",
+				"code":    "NEXUS_SUBMIT_FAILED",
+				"message": "nexus request failed",
 				"task":    tasksdto.TaskToResponse(t),
 				"action":  tasksdto.ActionToResponse(action),
 			})
@@ -291,15 +291,15 @@ func (h *Handler) propose(w http.ResponseWriter, r *http.Request) {
 	var pr tasksdto.ProposeResponse
 	pr.Task = tasksdto.TaskToResponse(t)
 	pr.Action = tasksdto.ActionToResponse(action)
-	pr.GovernanceSubmit.RequestID = sub.RequestID
-	pr.GovernanceSubmit.Decision = sub.Decision
-	pr.GovernanceSubmit.Status = sub.Status
-	pr.GovernanceSubmit.RiskLevel = sub.RiskLevel
-	pr.GovernanceSubmit.DecisionReason = sub.DecisionReason
+	pr.NexusSubmit.RequestID = sub.RequestID
+	pr.NexusSubmit.Decision = sub.Decision
+	pr.NexusSubmit.Status = sub.Status
+	pr.NexusSubmit.RiskLevel = sub.RiskLevel
+	pr.NexusSubmit.DecisionReason = sub.DecisionReason
 	httpjson.WriteJSON(w, http.StatusOK, pr)
 }
 
-func (h *Handler) syncGovernance(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) syncNexus(w http.ResponseWriter, r *http.Request) {
 	if !requireScope(w, r, scopeCompanionTasksWrite) {
 		return
 	}
@@ -311,7 +311,7 @@ func (h *Handler) syncGovernance(w http.ResponseWriter, r *http.Request) {
 	if !h.authorizeTaskOrg(w, r, id) {
 		return
 	}
-	t, err := h.uc.SyncTaskGovernance(r.Context(), id)
+	t, err := h.uc.SyncTaskNexus(r.Context(), id)
 	if err != nil {
 		if IsNotFound(err) {
 			httpjson.WriteFlatError(w, http.StatusNotFound, "NOT_FOUND", "task not found")
@@ -387,7 +387,7 @@ func (h *Handler) execute(w http.ResponseWriter, r *http.Request) {
 			httpjson.WriteFlatError(w, http.StatusNotFound, "NOT_FOUND", "task not found")
 			return
 		}
-		if writeGovernanceBlocked(w, err) {
+		if writeNexusBlocked(w, err) {
 			return
 		}
 		if IsInvalidTaskState(err) {
@@ -426,7 +426,7 @@ func (h *Handler) retry(w http.ResponseWriter, r *http.Request) {
 			httpjson.WriteFlatError(w, http.StatusNotFound, "NOT_FOUND", "task not found")
 			return
 		}
-		if writeGovernanceBlocked(w, err) {
+		if writeNexusBlocked(w, err) {
 			return
 		}
 		if IsInvalidTaskState(err) {
@@ -605,21 +605,21 @@ func (h *Handler) authorizeTaskOrg(w http.ResponseWriter, r *http.Request, id uu
 	return true
 }
 
-// writeGovernanceBlocked detecta el typed error ErrGovernanceNotApproved y escribe
-// HTTP 412 (precondition_failed) con governance_request_id y governance_status en el
+// writeNexusBlocked detecta el typed error ErrNexusNotApproved y escribe
+// HTTP 412 (precondition_failed) con nexus_request_id y nexus_status en el
 // body para que el caller pueda actuar (esperar, refrescar, escalar).
 // Devuelve true si manejó el error.
-func writeGovernanceBlocked(w http.ResponseWriter, err error) bool {
-	blocked, ok := AsGovernanceBlocked(err)
+func writeNexusBlocked(w http.ResponseWriter, err error) bool {
+	blocked, ok := AsNexusBlocked(err)
 	if !ok {
 		return false
 	}
 	httpjson.WriteJSON(w, http.StatusPreconditionFailed, map[string]any{
-		"code":                  "GOVERNANCE_NOT_APPROVED",
-		"message":               "execution requires the linked governance to be approved",
-		"governance_request_id": blocked.GovernanceRequestID,
-		"governance_status":     blocked.GovernanceStatus,
-		"reason":                blocked.Reason,
+		"code":             "NEXUS_NOT_APPROVED",
+		"message":          "execution requires the linked nexus to be approved",
+		"nexus_request_id": blocked.NexusRequestID,
+		"nexus_status":     blocked.NexusStatus,
+		"reason":           blocked.Reason,
 	})
 	return true
 }

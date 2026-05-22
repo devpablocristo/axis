@@ -1,7 +1,7 @@
 import { Activity, Bot, CheckCircle2, DatabaseZap, FileClock, GitPullRequestArrow, KeyRound, Layers3, ListChecks, RefreshCw, ShieldCheck, Sparkles, UsersRound } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ActionType, Approval, AxisSession, CompanionTask, Delegation, GovernanceRequest, Policy, RunTrace, ServiceHealth, axisFetch, getHealth, getSession } from './api'
+import { ActionType, Approval, AxisSession, CompanionTask, Delegation, NexusRequest, Policy, RunTrace, ServiceHealth, axisFetch, getHealth, getSession } from './api'
 
 type LoadState<T> = {
   data: T
@@ -16,7 +16,7 @@ export function App() {
   const [session, setSession] = useState<LoadState<AxisSession | null>>(empty(null))
   const [health, setHealth] = useState<LoadState<ServiceHealth | null>>(empty(null))
   const [approvals, setApprovals] = useState<LoadState<Approval[]>>(empty([]))
-  const [requests, setRequests] = useState<LoadState<GovernanceRequest[]>>(empty([]))
+  const [requests, setRequests] = useState<LoadState<NexusRequest[]>>(empty([]))
   const [policies, setPolicies] = useState<LoadState<Policy[]>>(empty([]))
   const [actionTypes, setActionTypes] = useState<LoadState<ActionType[]>>(empty([]))
   const [delegations, setDelegations] = useState<LoadState<Delegation[]>>(empty([]))
@@ -29,7 +29,7 @@ export function App() {
       load(setSession, () => getSession(orgId), null),
       load(setHealth, () => getHealth(), null),
       load(setApprovals, async () => (await axisFetch<{ data: Approval[] }>('/api/nexus/v1/approvals/pending', orgId)).data ?? [], []),
-      load(setRequests, async () => (await axisFetch<{ data: GovernanceRequest[] }>('/api/nexus/v1/requests?limit=12', orgId)).data ?? [], []),
+      load(setRequests, async () => (await axisFetch<{ data: NexusRequest[] }>('/api/nexus/v1/requests?limit=12', orgId)).data ?? [], []),
       load(setPolicies, async () => (await axisFetch<{ data: Policy[] }>('/api/nexus/v1/policies', orgId)).data ?? [], []),
       load(setActionTypes, async () => (await axisFetch<{ data: ActionType[] }>('/api/nexus/v1/action-types', orgId)).data ?? [], []),
       load(setDelegations, async () => (await axisFetch<{ data: Delegation[] }>('/api/nexus/v1/delegations', orgId)).data ?? [], []),

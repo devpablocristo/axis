@@ -1,9 +1,0 @@
-services:
-  governance:
-    build:
-      context: ./governance
-      dockerfile: Dockerfile.dev
-    working_dir: /workspace/nexus/governance
-    volumes:
-      - ./governance:/workspace/nexus/governance
-    command: ["air", "-c", ".air.toml"]

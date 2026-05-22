@@ -1,4 +1,4 @@
--- Planes de ejecución manual para tareas aprobadas en Review.
+-- Planes de ejecución manual para tareas aprobadas en Nexus.
 
 CREATE TABLE companion_task_execution_plans (
     task_id           UUID PRIMARY KEY REFERENCES companion_tasks (id) ON DELETE CASCADE,

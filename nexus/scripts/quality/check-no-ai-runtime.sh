@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="${1:-governance}"
+ROOT="${1:-.}"
 
 patterns=(
   "platform/kernels/ai"

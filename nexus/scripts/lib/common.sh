@@ -4,7 +4,7 @@
 set -euo pipefail
 
 API_BASE="${API_BASE:-http://localhost:18084}"
-API_KEY="${API_KEY:-governance-admin-dev-key}"
+API_KEY="${API_KEY:-nexus-admin-dev-key}"
 
 # Esperar a que un endpoint HTTP responda 200
 wait_for_http() {

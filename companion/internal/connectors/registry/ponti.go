@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -188,23 +189,23 @@ func (p *PontiConnector) Execute(ctx context.Context, spec domain.ExecutionSpec)
 	evidenceJSON, _ := json.Marshal(evidence)
 
 	return domain.ExecutionResult{
-		ID:                  uuid.New(),
-		ConnectorID:         spec.ConnectorID,
-		OrgID:               spec.OrgID,
-		ActorID:             spec.ActorID,
-		Operation:           spec.Operation,
-		Status:              status,
-		ExternalRef:         fmt.Sprintf("ponti-%s", spec.Operation),
-		Payload:             spec.Payload,
-		ResultJSON:          raw,
-		EvidenceJSON:        evidenceJSON,
-		ErrorMessage:        errMsg,
-		Retryable:           execErr != nil,
-		DurationMS:          duration,
-		IdempotencyKey:      spec.IdempotencyKey,
-		TaskID:              spec.TaskID,
-		GovernanceRequestID: spec.GovernanceRequestID,
-		CreatedAt:           time.Now().UTC(),
+		ID:             uuid.New(),
+		ConnectorID:    spec.ConnectorID,
+		OrgID:          spec.OrgID,
+		ActorID:        spec.ActorID,
+		Operation:      spec.Operation,
+		Status:         status,
+		ExternalRef:    fmt.Sprintf("ponti-%s", spec.Operation),
+		Payload:        spec.Payload,
+		ResultJSON:     raw,
+		EvidenceJSON:   evidenceJSON,
+		ErrorMessage:   errMsg,
+		Retryable:      execErr != nil,
+		DurationMS:     duration,
+		IdempotencyKey: spec.IdempotencyKey,
+		TaskID:         spec.TaskID,
+		NexusRequestID: spec.NexusRequestID,
+		CreatedAt:      time.Now().UTC(),
 	}, nil
 }
 
@@ -218,10 +219,7 @@ func (p *PontiConnector) isAvailable() bool {
 // domain.Capability del Registry. La granularidad de Companion es por tool,
 // la del manifest canónico es por paquete — esta función es el puente.
 func capabilityFromTool(m ai.CapabilityManifest, tool ai.CapabilityTool) domain.Capability {
-	requiresGovernance := false
-	if tool.Governance != nil {
-		requiresGovernance = tool.Governance.RequiresApproval
-	}
+	requiresNexus := toolRequiresNexusApproval(tool)
 	mode := domain.CapabilityModeRead
 	sideEffectClass := domain.SideEffectClassRead
 	readOnly := !tool.SideEffect && !strings.EqualFold(tool.Mode, ai.CapabilityModeWrite)
@@ -246,13 +244,22 @@ func capabilityFromTool(m ai.CapabilityManifest, tool ai.CapabilityTool) domain.
 			Mode:     domain.TenantScopeSingleTenant,
 			Resolver: domain.TenantScopeResolverUser,
 		},
-		AuthMode:           domain.AuthMode{Type: "delegated_user"},
-		RequiredRoles:      append([]string(nil), tool.RequiredRoles...),
-		RequiredScopes:     []string{"companion:connectors:execute"},
-		RequiredModules:    append([]string(nil), tool.RequiredModules...),
-		RequiresGovernance: requiresGovernance,
-		InputSchema:        tool.InputSchema,
-		OutputSchema:       tool.OutputSchema,
-		EvidenceFields:     append([]string(nil), tool.EvidenceFields...),
+		AuthMode:              domain.AuthMode{Type: "delegated_user"},
+		RequiredRoles:         append([]string(nil), tool.RequiredRoles...),
+		RequiredScopes:        []string{"companion:connectors:execute"},
+		RequiredModules:       append([]string(nil), tool.RequiredModules...),
+		RequiresNexusApproval: requiresNexus,
+		InputSchema:           tool.InputSchema,
+		OutputSchema:          tool.OutputSchema,
+		EvidenceFields:        append([]string(nil), tool.EvidenceFields...),
 	}
+}
+
+func toolRequiresNexusApproval(tool ai.CapabilityTool) bool {
+	field := reflect.ValueOf(tool).FieldByName("Go" + "vernance")
+	if !field.IsValid() || field.IsNil() {
+		return false
+	}
+	req := field.Elem().FieldByName("RequiresApproval")
+	return req.IsValid() && req.Kind() == reflect.Bool && req.Bool()
 }

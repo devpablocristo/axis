@@ -12,11 +12,11 @@ type Connector interface {
 	ID() string
 	// Kind tipo de conector (pymes, whatsapp, mock, etc.).
 	Kind() string
-	// Capabilities lista operaciones y su contrato v1 (mode, risk, governance, schema, evidence).
+	// Capabilities lista operaciones y su contrato v1 (mode, risk, nexus, schema, evidence).
 	Capabilities() []domain.Capability
 	// Validate verifica que la spec es válida para este conector.
 	Validate(spec domain.ExecutionSpec) error
-	// Execute ejecuta la operación. Solo debe llamarse tras aprobación de Governance.
+	// Execute ejecuta la operación. Solo debe llamarse tras aprobación de Nexus.
 	Execute(ctx context.Context, spec domain.ExecutionSpec) (domain.ExecutionResult, error)
 }
 

@@ -462,8 +462,8 @@ func TestPontiConnector_Discovery_PopulatesCapabilities(t *testing.T) {
 		if !c.ReadOnly {
 			t.Errorf("capability %q must be read_only=true", c.ID)
 		}
-		if c.RequiresGovernance {
-			t.Errorf("capability %q must NOT require governance (read-only)", c.ID)
+		if c.RequiresNexusApproval {
+			t.Errorf("capability %q must NOT require nexus (read-only)", c.ID)
 		}
 		if c.RiskClass != domain.RiskClassLow {
 			t.Errorf("capability %q must risk_class=low, got %s", c.ID, c.RiskClass)

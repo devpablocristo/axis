@@ -6,12 +6,12 @@ Aprobado. Ninguna etapa de implementación posterior debe avanzar si contradice 
 
 ## Contexto
 
-Companion forma parte de un ecosistema donde existen productos con verdad transaccional propia, librerías reutilizables y un servicio de governance externo. Desde la experiencia de producto, Companion debe comportarse como un empleado IA transversal: entiende contexto, coordina tareas, propone acciones, pide aprobaciones cuando corresponde y ejecuta capacidades autorizadas. La intención no es convertir Companion en un monolito de negocio ni mover lógica de productos a este repo. La decisión arquitectónica buscada es que esa experiencia de empleado IA se sostenga sobre una capa de coordinación y runtime de IA, consumiendo capacidades publicadas por otros componentes bajo contratos explícitos.
+Companion forma parte de un ecosistema donde existen productos con verdad transaccional propia, librerías reutilizables y un servicio de nexus externo. Desde la experiencia de producto, Companion debe comportarse como un empleado IA transversal: entiende contexto, coordina tareas, propone acciones, pide aprobaciones cuando corresponde y ejecuta capacidades autorizadas. La intención no es convertir Companion en un monolito de negocio ni mover lógica de productos a este repo. La decisión arquitectónica buscada es que esa experiencia de empleado IA se sostenga sobre una capa de coordinación y runtime de IA, consumiendo capacidades publicadas por otros componentes bajo contratos explícitos.
 
 El diseño debe preservar estas invariantes:
 
 - Companion coordina tareas, memoria, agentes, tools y experiencia de usuario.
-- Nexus Governance gobierna approvals, políticas, evidencia y auditoría para acciones sensibles.
+- Nexus gobierna approvals, políticas, evidencia y auditoría para acciones sensibles.
 - Los productos conservan sus APIs, reglas transaccionales y ownership de datos.
 - Core contiene runtime reusable solo cuando la abstracción ya es suficientemente genérica.
 - Modules contiene UI reusable solo cuando el componente es realmente compartible y publicado.
@@ -21,15 +21,15 @@ El diseño debe preservar estas invariantes:
 
 Adoptamos Companion como empleado IA transversal del ecosistema, implementado arquitectónicamente como AI Operating Layer. Companion será el coordinador multi-tenant de capacidades de IA y no el dueño de la lógica transaccional de cada producto.
 
-Las integraciones entre Companion y productos deben modelarse como capabilities versionadas. Cada capability define qué acción o lectura ofrece un producto o módulo, bajo qué permisos, con qué contrato de entrada/salida, qué riesgo operativo tiene y si requiere governance.
+Las integraciones entre Companion y productos deben modelarse como capabilities versionadas. Cada capability define qué acción o lectura ofrece un producto o módulo, bajo qué permisos, con qué contrato de entrada/salida, qué riesgo operativo tiene y si requiere nexus.
 
 ## Definición operativa de empleado IA
 
-Companion no debe tratarse como un chatbot con tools. Companion debe tratarse como un principal de software no humano, gobernado y auditable, con identidad propia, owner explícito, misión delimitada, memoria acotada con provenance, capacidad de planificar trabajo multi-step, uso de capabilities versionadas, autorización viva por acción y obligación de producir evidencia antes de efectos sensibles.
+Companion no debe tratarse como un chatbot con tools. Companion debe tratarse como un principal de software no humano, controlado y auditable, con identidad propia, owner explícito, misión delimitada, memoria acotada con provenance, capacidad de planificar trabajo multi-step, uso de capabilities versionadas, autorización viva por acción y obligación de producir evidencia antes de efectos sensibles.
 
 Definición formal:
 
-> Companion es un principal de software transversal, gobernado y auditable, que coordina trabajo multi-step para un ecosistema de productos usando capabilities publicadas y versionadas, con memoria acotada y autoridad graduada por policy, sin reemplazar la verdad transaccional, el ownership de negocio ni la responsabilidad humana en acciones sensibles.
+> Companion es un principal de software transversal, controlado y auditable, que coordina trabajo multi-step para un ecosistema de productos usando capabilities publicadas y versionadas, con memoria acotada y autoridad graduada por policy, sin reemplazar la verdad transaccional, el ownership de negocio ni la responsabilidad humana en acciones sensibles.
 
 Companion se diferencia de otros artefactos así:
 
@@ -61,13 +61,13 @@ Límites estructurales:
 | No autoasignarse permisos, scopes, roles o approvals | Evita confused deputy, privilege creep y ruptura de accountability |
 | No tratar su memoria como truth transaccional | La verdad de negocio vive en los productos |
 | No mezclar tenants, dominios u owners | El leakage multi-tenant es un fallo crítico |
-| No ejecutar writes sensibles sin decisión externa de policy | La autorización vive en Nexus Governance |
+| No ejecutar writes sensibles sin decisión externa de policy | La autorización vive en Nexus |
 | No alterar ni ocultar su propio audit | Sin rastro confiable no hay operabilidad ni defensa |
 | No consumir repos locales ni contratos no publicados | Reduce ambigüedad de supply chain y preserva ownership |
 | No promoverse a más autonomía por sí mismo | La autonomía es una decisión de producto y riesgo |
 | No almacenar secretos, tokens o reasoning libre como memoria útil | Reduce riesgo de disclosure, replay y fuga lateral |
 
-Companion nunca debe poder mover dinero, cambiar permisos o membresías, borrar o exportar datos sensibles, enviar comunicaciones externas con impacto contractual, modificar policies, registrar nuevas capabilities productivas, cambiar sus prompts/modelos productivos ni escribir sobre la verdad transaccional fuera de capabilities aprobadas sin control humano o governance explícito.
+Companion nunca debe poder mover dinero, cambiar permisos o membresías, borrar o exportar datos sensibles, enviar comunicaciones externas con impacto contractual, modificar policies, registrar nuevas capabilities productivas, cambiar sus prompts/modelos productivos ni escribir sobre la verdad transaccional fuera de capabilities aprobadas sin control humano o nexus explícito.
 
 ## Arquitectura objetivo de runtime
 
@@ -76,14 +76,14 @@ Companion no debe ser un agente monolítico. Debe componerse como un runtime con
 | Parte | Responsabilidad | Frontera |
 |---|---|---|
 | API/Gateway | Exponer HTTP, autenticar, resolver principal, org y scopes | No decide reglas de negocio de productos |
-| Task Orchestrator | Mantener lifecycle de tareas, estados, acciones, sync con governance y ejecución | No ejecuta writes sin approval cuando aplica |
+| Task Orchestrator | Mantener lifecycle de tareas, estados, acciones, sync con nexus y ejecución | No ejecuta writes sin approval cuando aplica |
 | Agent Router | Elegir agente/capability según intención, tenant, producto, permisos y contexto | No inventa permisos ni saltea manifests |
 | Capability Registry | Registrar capabilities disponibles, versiones, riesgos, schemas, roles y módulos requeridos | No contiene lógica transaccional |
 | Tool Runtime | Ejecutar tools/capabilities con timeouts, idempotencia, límites y trazas | No concede autorización final para writes sensibles |
 | Memory Store | Guardar memoria scoped por tenant, usuario, producto y dominio | No mezcla contexto entre tenants ni productos |
-| Governance Adapter | Crear requests en Nexus, sincronizar approvals, reportar resultados y evidencia | No reemplaza policies ni audit de Nexus |
+| Nexus Adapter | Crear requests en Nexus, sincronizar approvals, reportar resultados y evidencia | No reemplaza policies ni audit de Nexus |
 | Scheduler/Workers | Ejecutar syncs, watchers y reconciliaciones periódicas | No debe crear efectos secundarios sin contrato explícito |
-| Observability/Audit Trail | Registrar decisiones, tool calls, costos, latencia, errores y vínculos con governance requests | No sustituye el audit canónico de Nexus |
+| Observability/Audit Trail | Registrar decisiones, tool calls, costos, latencia, errores y vínculos con nexus requests | No sustituye el audit canónico de Nexus |
 
 Flujo conceptual:
 
@@ -95,8 +95,8 @@ flowchart LR
   AgentRouter --> CapabilityRegistry["Capability Registry"]
   CapabilityRegistry --> ToolRuntime["Tool Runtime"]
   ToolRuntime -->|"read capability"| ProductAPI["Product API"]
-  ToolRuntime -->|"sensitive write proposal"| NexusGovernance["Nexus Governance"]
-  NexusGovernance -->|"approved or denied"| TaskOrchestrator
+  ToolRuntime -->|"sensitive write proposal"| NexusNexus["Nexus"]
+  NexusNexus -->|"approved or denied"| TaskOrchestrator
   TaskOrchestrator -->|"authorized execution"| ProductAPI
   TaskOrchestrator --> MemoryStore["Memory Store"]
   TaskOrchestrator --> AuditTrail["Observability and Audit Trail"]
@@ -108,7 +108,7 @@ Esta separación es conceptual antes que física. No implica crear microservicio
 
 Companion debe mantenerse en Go para el núcleo del runtime.
 
-Go es la opción preferida para Companion porque el trabajo principal del servicio es orquestación de backend: HTTP, Postgres, concurrencia, workers, timeouts, retries, idempotencia, auth, governance y llamadas a APIs externas. El repositorio ya está implementado en Go y sus dependencias Core publicadas también exponen módulos Go relevantes. Reescribir el núcleo en Python o Rust no tiene beneficio demostrado para la Etapa 0 y aumentaría el riesgo.
+Go es la opción preferida para Companion porque el trabajo principal del servicio es orquestación de backend: HTTP, Postgres, concurrencia, workers, timeouts, retries, idempotencia, auth, nexus y llamadas a APIs externas. El repositorio ya está implementado en Go y sus dependencias Core publicadas también exponen módulos Go relevantes. Reescribir el núcleo en Python o Rust no tiene beneficio demostrado para la Etapa 0 y aumentaría el riesgo.
 
 Python puede usarse de forma acotada cuando sea la mejor herramienta para:
 
@@ -134,11 +134,11 @@ Temporal u otro motor de workflows durables debe evaluarse cuando Companion nece
 
 | Área | Es dueño de | No debe ser dueño de | Ejemplos |
 |---|---|---|---|
-| Companion | Orquestación IA, task lifecycle, memoria operativa, agent routing, tool runtime, UX central, contexto tenant/user/product, trazas de decisiones | Reglas transaccionales de productos, autorización final de writes sensibles, schemas internos privados de productos | Crear task, proponer a governance, enrutar a capability, sincronizar estado de approval |
-| Core | Tipos y runtime reutilizables, contratos base, clientes compartidos, schemas comunes, primitives de memoria/evals/observabilidad cuando sean genéricas | Lógica específica de Companion, reglas de negocio de Pymes/Ponti, UI | Capability manifest types, governance client, tool schema types, eval harness |
+| Companion | Orquestación IA, task lifecycle, memoria operativa, agent routing, tool runtime, UX central, contexto tenant/user/product, trazas de decisiones | Reglas transaccionales de productos, autorización final de writes sensibles, schemas internos privados de productos | Crear task, proponer a nexus, enrutar a capability, sincronizar estado de approval |
+| Core | Tipos y runtime reutilizables, contratos base, clientes compartidos, schemas comunes, primitives de memoria/evals/observabilidad cuando sean genéricas | Lógica específica de Companion, reglas de negocio de Pymes/Ponti, UI | Capability manifest types, nexus client, tool schema types, eval harness |
 | Modules | Componentes UI reutilizables y publicados, bloques visuales compartidos, patrones de interacción comunes | Estado transaccional de producto, reglas de permisos, workflows específicos no reutilizables | ApprovalCard, InsightCard, TaskCard, ChatPanel si son compartidos por más de un producto |
-| Products | Verdad transaccional, reglas de dominio, APIs de dominio, validaciones propias, persistencia de negocio, compensaciones | Orquestación global de IA, policies cross-product, audit governance global | Pymes ventas/stock/caja; Ponti agro/insights; futuros productos |
-| Nexus Governance | Policies, approvals, delegations, evidence, audit/replay, decisión autorizativa para writes sensibles | Ejecución del write de negocio, UI principal de Companion, memoria conversacional | Crear governance request, aprobar/rechazar, registrar evidencia, auditar decisión |
+| Products | Verdad transaccional, reglas de dominio, APIs de dominio, validaciones propias, persistencia de negocio, compensaciones | Orquestación global de IA, policies cross-product, audit nexus global | Pymes ventas/stock/caja; Ponti agro/insights; futuros productos |
+| Nexus | Policies, approvals, delegations, evidence, audit/replay, decisión autorizativa para writes sensibles | Ejecución del write de negocio, UI principal de Companion, memoria conversacional | Crear nexus request, aprobar/rechazar, registrar evidencia, auditar decisión |
 
 ## Definición formal de capability
 
@@ -154,7 +154,7 @@ Debe responder, como mínimo:
 - Qué input schema acepta.
 - Qué output schema devuelve.
 - Qué riesgo tiene.
-- Si requiere approval de Nexus Governance.
+- Si requiere approval de Nexus.
 - Qué evidence fields deben conservarse.
 - Qué idempotency key o regla de deduplicación aplica cuando hay efectos secundarios.
 - Qué owner de dominio responde por la operación.
@@ -246,7 +246,7 @@ La memoria se divide en tres clases. No toda persistencia es memoria para razona
 |---|---|---|---|---|---|
 | Memoria estable | Identidad, misión, preferencias aprobadas, relaciones duraderas útiles, hechos curados y verificables | tenant / user / product / domain | Larga, con revisión | Mutable mediante corrección | Nunca reemplaza truth del producto |
 | Memoria operativa | Contexto de sesión, plan activo, evidencia seleccionada, approvals pendientes, resultados transitorios | task / session / workflow | Corta | Mutable y efímera | Debe poder expirar sin romper integridad |
-| Historial / audit | Requests, decisiones, tool calls, approvals, resultados, errores, evidence refs, modelo/versión, policy decisions | tenant / workflow / action | Según compliance | Append-only con redacciones gobernadas | No es memoria para pensar; es rastro para operar y auditar |
+| Historial / audit | Requests, decisiones, tool calls, approvals, resultados, errores, evidence refs, modelo/versión, policy decisions | tenant / workflow / action | Según compliance | Append-only con redacciones controladas | No es memoria para pensar; es rastro para operar y auditar |
 
 Cada ítem persistido de memoria estable debe incluir, como mínimo:
 
@@ -308,7 +308,7 @@ El ciclo operativo recomendado para Companion:
 7. Proponer acciones sensibles con objetivo, preview, impacto, riesgos y evidence refs.
 8. Pedir approval durable cuando la policy lo requiera.
 9. Ejecutar con idempotencia, timeout, typed errors y audit.
-10. Reportar resultado y aprender de forma gobernada mediante evals, feedback y memoria curada.
+10. Reportar resultado y aprender de forma controlada mediante evals, feedback y memoria curada.
 
 ## Criterios para decidir dónde vive una lógica
 
@@ -340,7 +340,7 @@ La lógica vive en un producto cuando:
 - Requiere invariantes de dominio que Companion no debe conocer.
 - Necesita compensación o rollback específico del producto.
 
-La lógica vive en Nexus Governance cuando:
+La lógica vive en Nexus cuando:
 
 - Define autorización, approval, delegación, policy o auditoría.
 - Registra evidencia o permite replay de una decisión.
@@ -355,7 +355,7 @@ Riesgo: mezclar memoria, capabilities, approvals o datos entre tenants.
 
 Mitigación requerida:
 
-- Todo task, memory entry, capability invocation y governance request debe transportar tenant context.
+- Todo task, memory entry, capability invocation y nexus request debe transportar tenant context.
 - Las capabilities deben declarar `tenant_scope`.
 - Las pruebas de etapas posteriores deben incluir cross-tenant leakage.
 
@@ -365,7 +365,7 @@ Riesgo: que el runtime ejecute writes o decisiones sensibles con demasiada auton
 
 Mitigación requerida:
 
-- Todo write sensible debe pasar por Nexus Governance.
+- Todo write sensible debe pasar por Nexus.
 - El LLM no es autoridad final.
 - Las tools deben declarar modo, riesgo e idempotencia.
 - Companion debe separar propuesta, approval y ejecución.
@@ -407,7 +407,7 @@ Riesgo: no poder explicar por qué una acción fue propuesta, aprobada o ejecuta
 Mitigación requerida:
 
 - Cada capability sensible debe declarar evidence fields.
-- Companion debe registrar trace de decisión y vínculo con governance request.
+- Companion debe registrar trace de decisión y vínculo con nexus request.
 - Nexus conserva evidence, audit y replay de decisiones.
 
 ### Prompt injection e input no confiable
@@ -439,7 +439,7 @@ Mitigación requerida:
 
 - Cada memoria estable debe tener provenance, `last_verified_at`, confidence y retention policy.
 - La verdad transaccional siempre se consulta al producto dueño cuando importe para una acción.
-- La memoria debe admitir corrección, superseding y olvido gobernado.
+- La memoria debe admitir corrección, superseding y olvido controlado.
 
 ### Wrong tool use
 
@@ -459,7 +459,7 @@ Riesgo: ejecutar cambios de negocio sin permiso vivo, sin approval o sin idempot
 Mitigación requerida:
 
 - Todo write debe tener capability publicada, tenant scope, permiso vivo e idempotency contract.
-- Todo write sensible debe pasar por Nexus Governance.
+- Todo write sensible debe pasar por Nexus.
 - El resultado debe reportarse con evidence y audit event.
 
 ### Over-centralization
@@ -477,7 +477,7 @@ Mitigación requerida:
 - No avanzar a contratos de capabilities sin aprobar este ADR.
 - No mover lógica a Core o Modules si no existe justificación de reutilización y paquete publicado.
 - No integrar productos por llamadas ad hoc si la operación debería ser una capability.
-- No ejecutar writes sensibles desde Companion sin Nexus Governance.
+- No ejecutar writes sensibles desde Companion sin Nexus.
 - No apagar lógica existente de productos hasta demostrar paridad funcional, permisos, auditoría y tenant isolation.
 
 ## Consecuencias
@@ -486,7 +486,7 @@ Positivas:
 
 - Companion puede crecer como capa IA sin absorber todo el negocio.
 - Los productos conservan ownership claro.
-- Governance queda fuera del LLM y fuera del runtime de Companion.
+- Nexus queda fuera del LLM y fuera del runtime de Companion.
 - Core/Modules crecen por reutilización real, no por centralización prematura.
 
 Costos:
@@ -517,8 +517,8 @@ Etapa 0 se considera completa cuando:
 Este ADR toma como señales de diseño documentación y material técnico sobre:
 
 - Model Context Protocol y diseño de tools/capabilities.
-- OpenAI Agents SDK: sessions, tracing, guardrails, tools y human governance approval.
-- Microsoft guidance sobre governance, seguridad, observabilidad e identidad de agentes.
+- OpenAI Agents SDK: sessions, tracing, guardrails, tools y human nexus approval.
+- Microsoft guidance sobre nexus, seguridad, observabilidad e identidad de agentes.
 - Temporal para workflows durables y human-in-the-loop.
 - WorkOS y prácticas de identidad/autorización fina para agentes.
 - AWS/Amazon sobre evals de agentes y evaluación de trayectorias.

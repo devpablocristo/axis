@@ -1,9 +1,0 @@
-.git
-.github
-.env
-*.local
-tmp/
-node_modules/
-dist/
-coverage.out
-console/

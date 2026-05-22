@@ -17,7 +17,7 @@ CREATE INDEX IF NOT EXISTS idx_executions_org_created
     ON companion_connector_executions (org_id, created_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_executions_idempotency_lookup
-    ON companion_connector_executions (task_id, operation, review_request_id, idempotency_key)
+    ON companion_connector_executions (task_id, operation, nexus_request_id, idempotency_key)
     WHERE task_id IS NOT NULL
-      AND review_request_id IS NOT NULL
+      AND nexus_request_id IS NOT NULL
       AND idempotency_key <> '';

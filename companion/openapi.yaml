@@ -140,11 +140,11 @@ paths:
         "200": { description: Task updated }
   /v1/tasks/{id}/propose:
     post:
-      summary: Envía propuesta a Nexus Governance
+      summary: Envía propuesta a Nexus
       parameters:
         - $ref: "#/components/parameters/UUIDPath"
       responses:
-        "200": { description: Governance submit result }
+        "200": { description: Nexus submit result }
   /v1/tasks/{id}/execution-plan:
     put:
       summary: Guarda plan de ejecución
@@ -159,12 +159,12 @@ paths:
         "200": { description: Execution plan }
   /v1/tasks/{id}/execute:
     post:
-      summary: Ejecuta una task aprobada/gobernada
+      summary: Ejecuta una task aprobada/controlada
       parameters:
         - $ref: "#/components/parameters/UUIDPath"
       responses:
         "200": { description: Execution result }
-        "412": { description: Governance not approved }
+        "412": { description: Nexus not approved }
   /v1/tasks/{id}/retry:
     post:
       summary: Reintenta una ejecución retryable
@@ -174,7 +174,7 @@ paths:
         "200": { description: Execution result }
   /v1/tasks/{id}/sync:
     post:
-      summary: Sincroniza estado de governance de una task
+      summary: Sincroniza estado de Nexus de una task
       parameters:
         - $ref: "#/components/parameters/UUIDPath"
       responses:
@@ -242,7 +242,7 @@ paths:
             schema: { type: object }
       responses:
         "200": { description: Execution result }
-        "403": { description: Forbidden or governance denied }
+        "403": { description: Forbidden or nexus denied }
   /v1/connectors/capabilities:
     get:
       summary: Lista capabilities disponibles
@@ -336,12 +336,12 @@ paths:
           schema: { type: string, format: uuid }
       responses:
         "200": { description: Run trace }
-  /v1/governance-assist/propose:
+  /v1/nexus-assist/propose:
     post:
       summary: Analiza historial Nexus y propone learning/policies
       responses:
         "200": { description: Proposal summary }
-  /v1/governance-assist/explain/{request_id}:
+  /v1/nexus-assist/explain/{request_id}:
     get:
       summary: Explica una request de Nexus para humano
       parameters:
@@ -538,8 +538,8 @@ components:
         org_id: { type: string }
         title: { type: string }
         status: { type: string }
-        governance_status: { type: string }
-        governance_last_checked_at: { type: string, format: date-time }
+        nexus_status: { type: string }
+        nexus_last_checked_at: { type: string, format: date-time }
     UpsertMemoryRequest:
       type: object
       required: [kind, scope_type, scope_id, key]

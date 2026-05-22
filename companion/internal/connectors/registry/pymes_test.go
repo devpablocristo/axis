@@ -310,21 +310,21 @@ func TestPymesCapabilitiesIncludesAllSprint1(t *testing.T) {
 	}
 }
 
-func TestPymesWriteCapabilitiesRequireGovernance(t *testing.T) {
+func TestPymesWriteCapabilitiesRequireNexus(t *testing.T) {
 	conn := NewPymesConnector(nil)
 	writes := map[string]bool{
-		"pymes.scheduling.book":              true,
-		"pymes.quotes.create":                true,
-		"pymes.sales.create":                 true,
-		"pymes.payments.link":                true,
-		"pymes.procurement_requests.create":  true,
+		"pymes.scheduling.book":             true,
+		"pymes.quotes.create":               true,
+		"pymes.sales.create":                true,
+		"pymes.payments.link":               true,
+		"pymes.procurement_requests.create": true,
 	}
 	for _, c := range conn.Capabilities() {
 		if !writes[c.Operation] {
 			continue
 		}
-		if !c.RequiresGovernance {
-			t.Errorf("%s should require governance", c.Operation)
+		if !c.RequiresNexusApproval {
+			t.Errorf("%s should require nexus", c.Operation)
 		}
 		if c.Mode != domain.CapabilityModeWrite {
 			t.Errorf("%s should be Write mode", c.Operation)

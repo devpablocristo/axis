@@ -13,8 +13,8 @@ import (
 
 	"github.com/devpablocristo/companion/internal/connectors"
 	"github.com/devpablocristo/companion/internal/connectors/registry"
-	governanceassist "github.com/devpablocristo/companion/internal/governance_assist"
 	"github.com/devpablocristo/companion/internal/memory"
+	nexusassist "github.com/devpablocristo/companion/internal/nexus_assist"
 	"github.com/devpablocristo/companion/internal/runtime"
 	"github.com/devpablocristo/companion/internal/tasks"
 	"github.com/devpablocristo/companion/internal/watchers"
@@ -71,8 +71,8 @@ func (a taskMemoryAdapter) UpsertTaskMemory(ctx context.Context, taskID uuid.UUI
 	return err
 }
 
-func governanceSyncInterval() time.Duration {
-	return envconfig.Duration("COMPANION_GOVERNANCE_SYNC_INTERVAL_SEC", 30*time.Second)
+func nexusSyncInterval() time.Duration {
+	return envconfig.Duration("COMPANION_NEXUS_SYNC_INTERVAL_SEC", 30*time.Second)
 }
 
 func watcherInterval() time.Duration {
@@ -106,8 +106,8 @@ type Config struct {
 	InternalJWTSecret   string
 	InternalJWTIssuer   string
 	InternalJWTAudience string
-	GovernanceBaseURL   string
-	GovernanceAPIKey    string
+	NexusBaseURL        string
+	NexusAPIKey         string
 	PymesBaseURL        string
 	PymesAPIKey         string
 	PontiBaseURL        string
@@ -123,18 +123,18 @@ type Config struct {
 func NewServer(cfg Config) (http.Handler, func(), error) {
 	ctx := context.Background()
 
-	db, err := sharedpostgres.OpenWithConfig(ctx, cfg.DatabaseURL, sharedpostgres.DefaultConfig("nexus-companion"))
+	db, err := sharedpostgres.OpenWithConfig(ctx, cfg.DatabaseURL, sharedpostgres.DefaultConfig("companion"))
 	if err != nil {
 		return nil, nil, fmt.Errorf("open database: %w", err)
 	}
 
-	if err := sharedpostgres.MigrateUp(ctx, db, "nexus-companion", cfg.MigrationFiles, "."); err != nil {
+	if err := sharedpostgres.MigrateUp(ctx, db, "companion", cfg.MigrationFiles, "."); err != nil {
 		db.Close()
 		return nil, nil, fmt.Errorf("run migrations: %w", err)
 	}
 
-	governanceGateway := newGovernanceGateway(cfg.GovernanceBaseURL, cfg.GovernanceAPIKey)
-	rc := governanceGateway.client
+	nexusGateway := newNexusGateway(cfg.NexusBaseURL, cfg.NexusAPIKey)
+	rc := nexusGateway.client
 	pymesClient := pymesclient.NewClient(cfg.PymesBaseURL, cfg.PymesAPIKey)
 
 	// Connectors module
@@ -148,21 +148,21 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 		connReg.Register(registry.NewPontiConnector(pontiClient))
 	}
 	connRepo := connectors.NewPostgresRepository(db)
-	governanceChecker := connectors.NewGovernanceCheckerAdapter(func(c context.Context, id uuid.UUID) (connectors.GovernanceRequestMeta, int, error) {
-		return governanceGateway.GetRequestMeta(c, id.String())
+	nexusChecker := connectors.NewNexusCheckerAdapter(func(c context.Context, id uuid.UUID) (connectors.NexusRequestMeta, int, error) {
+		return nexusGateway.GetRequestMeta(c, id.String())
 	})
-	connUC := connectors.NewUsecases(connRepo, connReg, governanceChecker)
+	connUC := connectors.NewUsecases(connRepo, connReg, nexusChecker)
 	connHandler := connectors.NewHandler(connUC)
 
 	repo := tasks.NewPostgresRepository(db)
-	uc := tasks.NewUsecases(repo, governanceGateway)
-	uc.SetGovernanceSyncInterval(governanceSyncInterval())
+	uc := tasks.NewUsecases(repo, nexusGateway)
+	uc.SetNexusSyncInterval(nexusSyncInterval())
 	uc.SetExecutor(connUC)
 	h := tasks.NewHandler(uc)
 
 	// Watchers module
 	watcherRepo := watchers.NewPostgresRepository(db)
-	watcherUC := watchers.NewUsecases(watcherRepo, governanceGateway)
+	watcherUC := watchers.NewUsecases(watcherRepo, nexusGateway)
 	watcherUC.SetConnectorExecutor(connUC)
 	watcherHandler := watchers.NewHandler(watcherUC)
 
@@ -193,7 +193,7 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 
 	// Bridge LLM ↔ connectors: expone cada capability declarada por los
 	// connector types registrados como runtime tool (LLM-callable). Reads van
-	// directo al executor; writes governed pasan por Nexus antes de ejecutar.
+	// directo al executor; writes controlled pasan por Nexus antes de ejecutar.
 	connectorViews := make([]runtime.ConnectorTypeView, 0)
 	for _, c := range connReg.List() {
 		connectorViews = append(connectorViews, c)
@@ -201,10 +201,10 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	runtime.RegisterConnectorCapabilities(toolkit, runtime.CapabilityBridgeDeps{
 		Connectors: connectorViews,
 		Executor:   connUC,
-		Submitter:  governanceGateway,
+		Submitter:  nexusGateway,
 	})
 	contextPorts := runtime.ContextPorts{
-		GovernanceClient: rc,
+		NexusClient: rc,
 		MemoryFind: func(c context.Context, orgID, userID, productSurface string, st memdomain.ScopeType, sid string, k memdomain.MemoryKind, limit int) ([]memdomain.MemoryEntry, error) {
 			return memUC.Find(c, memory.FindQuery{OrgID: orgID, UserID: userID, ProductSurface: productSurface, ScopeType: st, ScopeID: sid, Kind: k, Limit: limit})
 		},
@@ -226,11 +226,11 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	watcherUC.SetNotifier(uc)
 	slog.Info("companion runtime initialized", "llm_provider", cfg.LLMProvider)
 
-	// Governance-assist: lee Nexus + arma proposals/summaries con Gemini.
+	// Nexus-assist: lee Nexus + arma proposals/summaries con Gemini.
 	// Le pasamos el mismo provider del runtime para no duplicar config.
-	governanceAssistProposer := governanceassist.NewProposer(rc, llmProvider)
-	governanceAssistContextualizer := governanceassist.NewContextualizer(rc, llmProvider)
-	governanceAssistHandler := governanceassist.NewHandler(governanceAssistProposer, governanceAssistContextualizer)
+	nexusAssistProposer := nexusassist.NewProposer(rc, llmProvider)
+	nexusAssistContextualizer := nexusassist.NewContextualizer(rc, llmProvider)
+	nexusAssistHandler := nexusassist.NewHandler(nexusAssistProposer, nexusAssistContextualizer)
 
 	mux := http.NewServeMux()
 	health.RegisterEndpoints(mux, func(c context.Context) error {
@@ -242,7 +242,7 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	chatHandler.Register(mux)
 	connHandler.Register(mux)
 	traceHandler.Register(mux)
-	governanceAssistHandler.Register(mux)
+	nexusAssistHandler.Register(mux)
 
 	// Seed conectores por defecto
 	if err := connUC.SeedDefaultConnectors(ctx); err != nil {
@@ -262,9 +262,9 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	cleanup := func() {
 		db.Close()
 	}
-	if d := governanceSyncInterval(); d > 0 {
+	if d := nexusSyncInterval(); d > 0 {
 		syncCtx, syncCancel := context.WithCancel(context.Background())
-		go uc.RunGovernanceSyncLoop(syncCtx, d, 50)
+		go uc.RunNexusSyncLoop(syncCtx, d, 50)
 		prev := cleanup
 		cleanup = func() {
 			syncCancel()

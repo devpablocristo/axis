@@ -166,13 +166,13 @@ func classifyIntent(message string) string {
 	text := strings.ToLower(message)
 	switch {
 	case strings.Contains(text, "aprobar"), strings.Contains(text, "rechazar"), strings.Contains(text, "approval"):
-		return "governance.governance"
+		return "nexus.nexus"
 	case strings.Contains(text, "record"), strings.Contains(text, "memor"):
 		return "memory"
 	case strings.Contains(text, "alerta"), strings.Contains(text, "watcher"):
 		return "operations.watchers"
 	case strings.Contains(text, "política"), strings.Contains(text, "policy"):
-		return "governance.policy"
+		return "nexus.policy"
 	default:
 		return "general.assist"
 	}

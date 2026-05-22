@@ -1,21 +1,28 @@
 #!/usr/bin/env bash
-# Funciones compartidas para scripts smoke de Companion + Nexus Governance
+# Funciones compartidas para scripts smoke de Companion + Nexus
 
 set -euo pipefail
 
-# Cargar .env del repo para alinear smoke con `docker compose` (mismas claves que el contenedor).
+# Cargar .env de Axis para alinear smoke con `docker compose` root.
 _companion_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-if [ -f "$_companion_root/.env" ]; then
+_axis_root="$(cd "$_companion_root/.." && pwd)"
+if [ -f "$_axis_root/.env" ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . "$_axis_root/.env"
+  set +a
+elif [ -f "$_companion_root/.env" ]; then
   set -a
   # shellcheck disable=SC1091
   . "$_companion_root/.env"
   set +a
 fi
 unset _companion_root
+unset _axis_root
 
 API_BASE="${API_BASE:-http://localhost:18084}"
-# Llamadas desde el host al API de Governance; debe ser la misma clave que GOVERNANCE_API_KEY.
-API_KEY="${GOVERNANCE_API_KEY:-${API_KEY:-governance-admin-dev-key}}"
+# Llamadas desde el host al API de Nexus; debe ser la misma clave que NEXUS_API_KEY.
+API_KEY="${NEXUS_API_KEY:-${API_KEY:-nexus-admin-dev-key}}"
 
 # Companion (puerto host por defecto alineado con docker-compose)
 COMPANION_BASE="${COMPANION_BASE:-http://localhost:18085}"
@@ -45,7 +52,7 @@ api_get() {
   code=$(echo "$out" | tail -n1)
   out=$(echo "$out" | sed '$d')
   if ! [[ "$code" =~ ^[0-9]{3}$ ]] || [ "$code" -ge 400 ]; then
-    echo "governance GET $1 failed: HTTP ${code:-?} $out" >&2
+    echo "nexus GET $1 failed: HTTP ${code:-?} $out" >&2
     return 22
   fi
   printf '%s' "$out"
@@ -59,7 +66,7 @@ api_post() {
   code=$(echo "$out" | tail -n1)
   out=$(echo "$out" | sed '$d')
   if ! [[ "$code" =~ ^[0-9]{3}$ ]] || [ "$code" -ge 400 ]; then
-    echo "governance POST $1 failed: HTTP ${code:-?} $out" >&2
+    echo "nexus POST $1 failed: HTTP ${code:-?} $out" >&2
     return 22
   fi
   printf '%s' "$out"

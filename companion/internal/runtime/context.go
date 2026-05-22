@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/devpablocristo/platform/kernels/governance/go/governanceclient"
+	"github.com/devpablocristo/companion/internal/nexusclient"
 
 	memdomain "github.com/devpablocristo/companion/internal/memory/usecases/domain"
 	taskdomain "github.com/devpablocristo/companion/internal/tasks/usecases/domain"
@@ -50,8 +50,8 @@ func IdentityFromContext(ctx context.Context) Identity {
 
 // ContextPorts interfaces que el context assembler necesita.
 type ContextPorts struct {
-	GovernanceClient *governanceclient.Client
-	MemoryFind       func(ctx context.Context, orgID, userID, productSurface string, scopeType memdomain.ScopeType, scopeID string, kind memdomain.MemoryKind, limit int) ([]memdomain.MemoryEntry, error)
+	NexusClient *nexusclient.Client
+	MemoryFind  func(ctx context.Context, orgID, userID, productSurface string, scopeType memdomain.ScopeType, scopeID string, kind memdomain.MemoryKind, limit int) ([]memdomain.MemoryEntry, error)
 }
 
 // AssembledContext contexto ensamblado para el LLM.
@@ -102,8 +102,8 @@ func AssembleContext(ctx context.Context, ports ContextPorts, userID, orgID, pro
 	}
 
 	// 2. Aprobaciones pendientes
-	if ports.GovernanceClient != nil && strings.TrimSpace(orgID) != "" && hasAnyScope(authScopes, scopeCompanionGovernanceAdmin) {
-		st, raw, err := ports.GovernanceClient.ListPendingApprovals(ctx)
+	if ports.NexusClient != nil && strings.TrimSpace(orgID) != "" && hasAnyScope(authScopes, scopeCompanionNexusAdmin) {
+		st, raw, err := ports.NexusClient.ListPendingApprovals(ctx)
 		if err == nil && st == 200 && len(raw) > 0 {
 			var approvals struct {
 				Data []struct {

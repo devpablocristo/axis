@@ -16,11 +16,11 @@ import (
 	"github.com/google/uuid"
 
 	connectordomain "github.com/devpablocristo/companion/internal/connectors/usecases/domain"
+	"github.com/devpablocristo/companion/internal/nexusclient"
 	domain "github.com/devpablocristo/companion/internal/tasks/usecases/domain"
-	"github.com/devpablocristo/platform/kernels/governance/go/governanceclient"
 )
 
-// Identidad del servicio Companion ante Governance (documentado en README).
+// Identidad del servicio Companion ante Nexus (documentado en README).
 const (
 	CompanionRequesterType     = "service"
 	CompanionRequesterID       = "nexus_companion"
@@ -28,7 +28,7 @@ const (
 	ActionTypePropose          = "companion.propose"
 	TaskActionInvestigate      = "investigate"
 	TaskActionPropose          = "propose"
-	TaskActionSyncGovernance   = "sync_governance"
+	TaskActionSyncNexus        = "sync_nexus"
 	TaskActionSetExecutionPlan = "set_execution_plan"
 	TaskActionExecuteConnector = "execute_connector"
 	TaskActionRetryExecution   = "retry_execution"
@@ -42,8 +42,8 @@ const (
 	taskMemoryKindFacts   = "task_facts"
 	taskMemoryKindSummary = "task_summary"
 
-	defaultGovernanceSyncInterval = 30 * time.Second
-	maxGovernanceSyncBackoff      = 10 * time.Minute
+	defaultNexusSyncInterval = 30 * time.Second
+	maxNexusSyncBackoff      = 10 * time.Minute
 )
 
 // marshalOrEmpty serializa v a JSON. Si falla (typically map con channels o
@@ -58,9 +58,9 @@ func marshalOrEmpty(label string, v any) json.RawMessage {
 	return b
 }
 
-type governanceGateway interface {
-	SubmitRequest(ctx context.Context, idempotencyKey string, body governanceclient.SubmitRequestBody) (governanceclient.SubmitResponse, error)
-	GetRequest(ctx context.Context, id string) (governanceclient.RequestSummary, int, error)
+type nexusGateway interface {
+	SubmitRequest(ctx context.Context, idempotencyKey string, body nexusclient.SubmitRequestBody) (nexusclient.SubmitResponse, error)
+	GetRequest(ctx context.Context, id string) (nexusclient.RequestSummary, int, error)
 	ReportResult(ctx context.Context, id string, success bool, result map[string]any, durationMS int64, errorMessage string) (int, error)
 }
 
@@ -103,22 +103,22 @@ type OrchestratorResult struct {
 	Reply string
 }
 
-// Usecases lógica de tareas e integración con Nexus governance.
+// Usecases lógica de tareas e integración con Nexus.
 type Usecases struct {
-	repo                   Repository
-	governance             governanceGateway
-	orchestrator           ChatOrchestrator // opcional en tests; productivo usa Gemini
-	executor               taskExecutor
-	taskMemory             taskMemoryWriter
-	agentMemory            agentMemoryWriter
-	governanceSyncInterval time.Duration
+	repo              Repository
+	nexus             nexusGateway
+	orchestrator      ChatOrchestrator // opcional en tests; productivo usa Gemini
+	executor          taskExecutor
+	taskMemory        taskMemoryWriter
+	agentMemory       agentMemoryWriter
+	nexusSyncInterval time.Duration
 }
 
-func NewUsecases(repo Repository, governance governanceGateway) *Usecases {
+func NewUsecases(repo Repository, nexus nexusGateway) *Usecases {
 	return &Usecases{
-		repo:                   repo,
-		governance:             governance,
-		governanceSyncInterval: defaultGovernanceSyncInterval,
+		repo:              repo,
+		nexus:             nexus,
+		nexusSyncInterval: defaultNexusSyncInterval,
 	}
 }
 
@@ -142,12 +142,12 @@ func (u *Usecases) SetAgentMemory(writer agentMemoryWriter) {
 	u.agentMemory = writer
 }
 
-func (u *Usecases) SetGovernanceSyncInterval(interval time.Duration) {
+func (u *Usecases) SetNexusSyncInterval(interval time.Duration) {
 	if interval <= 0 {
-		u.governanceSyncInterval = defaultGovernanceSyncInterval
+		u.nexusSyncInterval = defaultNexusSyncInterval
 		return
 	}
-	u.governanceSyncInterval = interval
+	u.nexusSyncInterval = interval
 }
 
 type CreateTaskInput struct {
@@ -201,20 +201,20 @@ func (u *Usecases) Get(ctx context.Context, id uuid.UUID) (domain.Task, error) {
 	return u.repo.GetTaskByID(ctx, id)
 }
 
-type LinkedGovernanceRequest struct {
-	ActionID uuid.UUID                        `json:"action_id"`
-	Request  *governanceclient.RequestSummary `json:"request,omitempty"`
+type LinkedNexusRequest struct {
+	ActionID uuid.UUID                   `json:"action_id"`
+	Request  *nexusclient.RequestSummary `json:"request,omitempty"`
 }
 
 type TaskDetail struct {
-	Task                     domain.Task                     `json:"task"`
-	Messages                 []domain.TaskMessage            `json:"messages"`
-	Actions                  []domain.TaskAction             `json:"actions"`
-	Artifacts                []domain.TaskArtifact           `json:"artifacts"`
-	LinkedGovernanceRequests []LinkedGovernanceRequest       `json:"linked_governance_requests"`
-	GovernanceSync           *domain.TaskGovernanceSyncState `json:"governance_sync,omitempty"`
-	ExecutionPlan            *domain.TaskExecutionPlan       `json:"execution_plan,omitempty"`
-	ExecutionState           *domain.TaskExecutionState      `json:"execution_state,omitempty"`
+	Task                domain.Task                `json:"task"`
+	Messages            []domain.TaskMessage       `json:"messages"`
+	Actions             []domain.TaskAction        `json:"actions"`
+	Artifacts           []domain.TaskArtifact      `json:"artifacts"`
+	LinkedNexusRequests []LinkedNexusRequest       `json:"linked_nexus_requests"`
+	NexusSync           *domain.TaskNexusSyncState `json:"nexus_sync,omitempty"`
+	ExecutionPlan       *domain.TaskExecutionPlan  `json:"execution_plan,omitempty"`
+	ExecutionState      *domain.TaskExecutionState `json:"execution_state,omitempty"`
 }
 
 func (u *Usecases) GetDetail(ctx context.Context, id uuid.UUID) (TaskDetail, error) {
@@ -236,9 +236,9 @@ func (u *Usecases) GetDetail(ctx context.Context, id uuid.UUID) (TaskDetail, err
 	if err != nil {
 		return out, err
 	}
-	state, stateErr := u.repo.GetGovernanceSyncState(ctx, id)
+	state, stateErr := u.repo.GetNexusSyncState(ctx, id)
 	if stateErr == nil {
-		out.GovernanceSync = &state
+		out.NexusSync = &state
 	} else if !domainerr.IsNotFound(stateErr) {
 		return out, stateErr
 	}
@@ -256,27 +256,27 @@ func (u *Usecases) GetDetail(ctx context.Context, id uuid.UUID) (TaskDetail, err
 	}
 	seen := make(map[uuid.UUID]struct{})
 	for _, a := range out.Actions {
-		if a.GovernanceRequestID == nil {
+		if a.NexusRequestID == nil {
 			continue
 		}
-		rid := *a.GovernanceRequestID
+		rid := *a.NexusRequestID
 		if _, ok := seen[rid]; ok {
 			continue
 		}
 		seen[rid] = struct{}{}
-		sum, st, gErr := u.governance.GetRequest(ctx, rid.String())
-		lr := LinkedGovernanceRequest{ActionID: a.ID}
+		sum, st, gErr := u.nexus.GetRequest(ctx, rid.String())
+		lr := LinkedNexusRequest{ActionID: a.ID}
 		if gErr != nil {
-			slog.Error("governance get request failed", "error", gErr, "request_id", rid)
-			out.LinkedGovernanceRequests = append(out.LinkedGovernanceRequests, lr)
+			slog.Error("nexus get request failed", "error", gErr, "request_id", rid)
+			out.LinkedNexusRequests = append(out.LinkedNexusRequests, lr)
 			continue
 		}
 		if st == 404 {
-			out.LinkedGovernanceRequests = append(out.LinkedGovernanceRequests, lr)
+			out.LinkedNexusRequests = append(out.LinkedNexusRequests, lr)
 			continue
 		}
 		lr.Request = &sum
-		out.LinkedGovernanceRequests = append(out.LinkedGovernanceRequests, lr)
+		out.LinkedNexusRequests = append(out.LinkedNexusRequests, lr)
 	}
 	return out, nil
 }
@@ -529,44 +529,44 @@ func (u *Usecases) applyTaskEvent(ctx context.Context, t domain.Task, event stri
 	return u.repo.UpdateTask(ctx, t)
 }
 
-func (u *Usecases) governanceSyncIntervalOrDefault() time.Duration {
-	if u.governanceSyncInterval <= 0 {
-		return defaultGovernanceSyncInterval
+func (u *Usecases) nexusSyncIntervalOrDefault() time.Duration {
+	if u.nexusSyncInterval <= 0 {
+		return defaultNexusSyncInterval
 	}
-	return u.governanceSyncInterval
+	return u.nexusSyncInterval
 }
 
-func nextGovernanceSyncAt(now time.Time, interval time.Duration, consecutiveFailures int) time.Time {
+func nextNexusSyncAt(now time.Time, interval time.Duration, consecutiveFailures int) time.Time {
 	if interval <= 0 {
-		interval = defaultGovernanceSyncInterval
+		interval = defaultNexusSyncInterval
 	}
 	if consecutiveFailures <= 0 {
 		return now.Add(interval)
 	}
 	delay := interval
 	for i := 1; i < consecutiveFailures; i++ {
-		if delay >= maxGovernanceSyncBackoff/2 {
-			delay = maxGovernanceSyncBackoff
+		if delay >= maxNexusSyncBackoff/2 {
+			delay = maxNexusSyncBackoff
 			break
 		}
 		delay *= 2
 	}
-	if delay > maxGovernanceSyncBackoff {
-		delay = maxGovernanceSyncBackoff
+	if delay > maxNexusSyncBackoff {
+		delay = maxNexusSyncBackoff
 	}
 	return now.Add(delay)
 }
 
-func governanceSnapshotChanged(prev *domain.TaskGovernanceSyncState, next domain.TaskGovernanceSyncState) bool {
+func nexusSnapshotChanged(prev *domain.TaskNexusSyncState, next domain.TaskNexusSyncState) bool {
 	if prev == nil {
-		return next.GovernanceRequestID != uuid.Nil ||
-			next.LastGovernanceStatus != "" ||
-			next.LastGovernanceHTTPStatus != 0 ||
+		return next.NexusRequestID != uuid.Nil ||
+			next.LastNexusStatus != "" ||
+			next.LastNexusHTTPStatus != 0 ||
 			next.LastError != ""
 	}
-	return prev.GovernanceRequestID != next.GovernanceRequestID ||
-		prev.LastGovernanceStatus != next.LastGovernanceStatus ||
-		prev.LastGovernanceHTTPStatus != next.LastGovernanceHTTPStatus ||
+	return prev.NexusRequestID != next.NexusRequestID ||
+		prev.LastNexusStatus != next.LastNexusStatus ||
+		prev.LastNexusHTTPStatus != next.LastNexusHTTPStatus ||
 		prev.LastError != next.LastError
 }
 
@@ -580,8 +580,8 @@ func executionPlanChanged(prev *domain.TaskExecutionPlan, next domain.TaskExecut
 		prev.IdempotencyKey != next.IdempotencyKey
 }
 
-func isApprovedGovernanceStatus(status string) bool {
-	switch normalizeGovernanceStatus(status) {
+func isApprovedNexusStatus(status string) bool {
+	switch normalizeNexusStatus(status) {
 	case "allowed", "approved", "executed":
 		return true
 	default:
@@ -613,7 +613,7 @@ func (u *Usecases) getExecutionState(ctx context.Context, taskID uuid.UUID) (*do
 
 type taskMemorySnapshot struct {
 	Task           domain.Task
-	GovernanceSync *domain.TaskGovernanceSyncState
+	NexusSync      *domain.TaskNexusSyncState
 	ExecutionPlan  *domain.TaskExecutionPlan
 	ExecutionState *domain.TaskExecutionState
 }
@@ -625,12 +625,12 @@ func (u *Usecases) loadTaskMemorySnapshot(ctx context.Context, taskID uuid.UUID)
 	}
 	snapshot := taskMemorySnapshot{Task: task}
 
-	governanceSync, err := u.repo.GetGovernanceSyncState(ctx, taskID)
+	nexusSync, err := u.repo.GetNexusSyncState(ctx, taskID)
 	if err == nil {
-		snapshot.GovernanceSync = &governanceSync
-		snapshot.Task.GovernanceStatus = governanceSync.LastGovernanceStatus
-		snapshot.Task.GovernanceLastCheckedAt = &governanceSync.LastCheckedAt
-		snapshot.Task.GovernanceSyncError = governanceSync.LastError
+		snapshot.NexusSync = &nexusSync
+		snapshot.Task.NexusStatus = nexusSync.LastNexusStatus
+		snapshot.Task.NexusLastCheckedAt = &nexusSync.LastCheckedAt
+		snapshot.Task.NexusSyncError = nexusSync.LastError
 	} else if !domainerr.IsNotFound(err) {
 		return taskMemorySnapshot{}, err
 	}
@@ -656,11 +656,11 @@ func nextTaskStep(snapshot taskMemorySnapshot) string {
 	switch snapshot.Task.Status {
 	case domain.TaskStatusNew, domain.TaskStatusInvestigating:
 		if snapshot.ExecutionPlan == nil {
-			return "define execution plan and propose to governance"
+			return "define execution plan and propose to nexus"
 		}
-		return "propose to governance"
+		return "propose to nexus"
 	case domain.TaskStatusWaitingForApproval:
-		return "wait for governance resolution or sync from governance"
+		return "wait for nexus resolution or sync from nexus"
 	case domain.TaskStatusWaitingForInput:
 		if snapshot.ExecutionPlan != nil {
 			return "execute the approved task manually"
@@ -669,11 +669,11 @@ func nextTaskStep(snapshot taskMemorySnapshot) string {
 	case domain.TaskStatusExecuting, domain.TaskStatusVerifying:
 		return "observe execution and verification"
 	case domain.TaskStatusFailed:
-		if snapshot.ExecutionState != nil && snapshot.ExecutionState.Retryable && isApprovedGovernanceStatus(snapshot.Task.GovernanceStatus) {
+		if snapshot.ExecutionState != nil && snapshot.ExecutionState.Retryable && isApprovedNexusStatus(snapshot.Task.NexusStatus) {
 			return "inspect failure and retry execution"
 		}
-		if snapshot.Task.GovernanceStatus == "rejected" || snapshot.Task.GovernanceStatus == "denied" {
-			return "inspect governance decision and adjust the task"
+		if snapshot.Task.NexusStatus == "rejected" || snapshot.Task.NexusStatus == "denied" {
+			return "inspect nexus decision and adjust the task"
 		}
 		return "inspect failure details"
 	case domain.TaskStatusDone:
@@ -696,10 +696,10 @@ func buildTaskSummary(snapshot taskMemorySnapshot) string {
 	case domain.TaskStatusInvestigating:
 		return fmt.Sprintf("%s is under investigation. Next step: %s.", prefix, nextTaskStep(snapshot))
 	case domain.TaskStatusWaitingForApproval:
-		if snapshot.GovernanceSync != nil && snapshot.GovernanceSync.GovernanceRequestID != uuid.Nil {
-			return fmt.Sprintf("%s is waiting for Governance. Request %s is currently %s.", prefix, snapshot.GovernanceSync.GovernanceRequestID.String(), formatStatusForMemory(snapshot.GovernanceSync.LastGovernanceStatus))
+		if snapshot.NexusSync != nil && snapshot.NexusSync.NexusRequestID != uuid.Nil {
+			return fmt.Sprintf("%s is waiting for Nexus. Request %s is currently %s.", prefix, snapshot.NexusSync.NexusRequestID.String(), formatStatusForMemory(snapshot.NexusSync.LastNexusStatus))
 		}
-		return fmt.Sprintf("%s is waiting for Governance approval.", prefix)
+		return fmt.Sprintf("%s is waiting for Nexus approval.", prefix)
 	case domain.TaskStatusWaitingForInput:
 		if snapshot.ExecutionPlan != nil {
 			return fmt.Sprintf("%s is approved and ready for manual execution via %s.", prefix, snapshot.ExecutionPlan.Operation)
@@ -713,8 +713,8 @@ func buildTaskSummary(snapshot taskMemorySnapshot) string {
 		if snapshot.ExecutionState != nil && snapshot.ExecutionState.VerificationResult.Status == domain.VerificationStatusVerified {
 			return fmt.Sprintf("%s completed successfully and the latest execution was verified.", prefix)
 		}
-		if isApprovedGovernanceStatus(snapshot.Task.GovernanceStatus) {
-			return fmt.Sprintf("%s completed successfully after Governance resolved %s.", prefix, formatStatusForMemory(snapshot.Task.GovernanceStatus))
+		if isApprovedNexusStatus(snapshot.Task.NexusStatus) {
+			return fmt.Sprintf("%s completed successfully after Nexus resolved %s.", prefix, formatStatusForMemory(snapshot.Task.NexusStatus))
 		}
 		return fmt.Sprintf("%s completed successfully.", prefix)
 	case domain.TaskStatusFailed:
@@ -724,8 +724,8 @@ func buildTaskSummary(snapshot taskMemorySnapshot) string {
 			}
 			return fmt.Sprintf("%s failed during execution. Last error: %s.", prefix, snapshot.ExecutionState.LastError)
 		}
-		if snapshot.Task.GovernanceStatus != "" {
-			return fmt.Sprintf("%s failed because Governance resolved %s.", prefix, formatStatusForMemory(snapshot.Task.GovernanceStatus))
+		if snapshot.Task.NexusStatus != "" {
+			return fmt.Sprintf("%s failed because Nexus resolved %s.", prefix, formatStatusForMemory(snapshot.Task.NexusStatus))
 		}
 		return fmt.Sprintf("%s failed and needs operator attention.", prefix)
 	default:
@@ -765,24 +765,24 @@ func buildTaskFactsPayload(snapshot taskMemorySnapshot, reason string) json.RawM
 	if snapshot.Task.ClosedAt != nil {
 		payload["closed_at"] = snapshot.Task.ClosedAt.UTC().Format(time.RFC3339)
 	}
-	if snapshot.Task.GovernanceStatus != "" {
-		payload["governance_status"] = snapshot.Task.GovernanceStatus
+	if snapshot.Task.NexusStatus != "" {
+		payload["nexus_status"] = snapshot.Task.NexusStatus
 	}
-	if snapshot.Task.GovernanceLastCheckedAt != nil {
-		payload["governance_last_checked_at"] = snapshot.Task.GovernanceLastCheckedAt.UTC().Format(time.RFC3339)
+	if snapshot.Task.NexusLastCheckedAt != nil {
+		payload["nexus_last_checked_at"] = snapshot.Task.NexusLastCheckedAt.UTC().Format(time.RFC3339)
 	}
-	if snapshot.Task.GovernanceSyncError != "" {
-		payload["governance_sync_error"] = snapshot.Task.GovernanceSyncError
+	if snapshot.Task.NexusSyncError != "" {
+		payload["nexus_sync_error"] = snapshot.Task.NexusSyncError
 	}
-	if snapshot.GovernanceSync != nil {
-		payload["governance"] = map[string]any{
-			"governance_request_id": snapshot.GovernanceSync.GovernanceRequestID.String(),
-			"status":                snapshot.GovernanceSync.LastGovernanceStatus,
-			"http_status":           snapshot.GovernanceSync.LastGovernanceHTTPStatus,
-			"last_checked_at":       snapshot.GovernanceSync.LastCheckedAt.UTC().Format(time.RFC3339),
-			"next_check_at":         snapshot.GovernanceSync.NextCheckAt.UTC().Format(time.RFC3339),
-			"consecutive_failures":  snapshot.GovernanceSync.ConsecutiveFailures,
-			"last_error":            snapshot.GovernanceSync.LastError,
+	if snapshot.NexusSync != nil {
+		payload["nexus"] = map[string]any{
+			"nexus_request_id":     snapshot.NexusSync.NexusRequestID.String(),
+			"status":               snapshot.NexusSync.LastNexusStatus,
+			"http_status":          snapshot.NexusSync.LastNexusHTTPStatus,
+			"last_checked_at":      snapshot.NexusSync.LastCheckedAt.UTC().Format(time.RFC3339),
+			"next_check_at":        snapshot.NexusSync.NextCheckAt.UTC().Format(time.RFC3339),
+			"consecutive_failures": snapshot.NexusSync.ConsecutiveFailures,
+			"last_error":           snapshot.NexusSync.LastError,
 		}
 	}
 	if snapshot.ExecutionPlan != nil {
@@ -822,7 +822,7 @@ func (u *Usecases) syncTaskMemory(ctx context.Context, taskID uuid.UUID, reason 
 	summaryPayload := marshalOrEmpty("task_summary", map[string]any{
 		"projection_reason": reason,
 		"status":            snapshot.Task.Status,
-		"governance_status": snapshot.Task.GovernanceStatus,
+		"nexus_status":      snapshot.Task.NexusStatus,
 		"next_step":         nextTaskStep(snapshot),
 	})
 	if err := u.taskMemory.UpsertTaskMemory(ctx, taskID, taskMemoryKindSummary, taskMemoryCurrentKey, buildTaskSummary(snapshot), summaryPayload); err != nil {
@@ -833,12 +833,12 @@ func (u *Usecases) syncTaskMemory(ctx context.Context, taskID uuid.UUID, reason 
 	}
 }
 
-func buildGovernanceSyncActionPayload(origin string, prev *domain.TaskGovernanceSyncState, next domain.TaskGovernanceSyncState, beforeStatus, afterStatus, event string) json.RawMessage {
+func buildNexusSyncActionPayload(origin string, prev *domain.TaskNexusSyncState, next domain.TaskNexusSyncState, beforeStatus, afterStatus, event string) json.RawMessage {
 	type syncSnapshot struct {
-		GovernanceRequestID string `json:"governance_request_id,omitempty"`
-		Status              string `json:"status,omitempty"`
-		HTTPStatus          int    `json:"http_status,omitempty"`
-		Error               string `json:"error,omitempty"`
+		NexusRequestID string `json:"nexus_request_id,omitempty"`
+		Status         string `json:"status,omitempty"`
+		HTTPStatus     int    `json:"http_status,omitempty"`
+		Error          string `json:"error,omitempty"`
 	}
 	payload := map[string]any{
 		"origin":             origin,
@@ -849,55 +849,55 @@ func buildGovernanceSyncActionPayload(origin string, prev *domain.TaskGovernance
 		payload["transition_event"] = event
 	}
 	current := syncSnapshot{
-		Status:     next.LastGovernanceStatus,
-		HTTPStatus: next.LastGovernanceHTTPStatus,
+		Status:     next.LastNexusStatus,
+		HTTPStatus: next.LastNexusHTTPStatus,
 		Error:      next.LastError,
 	}
-	if next.GovernanceRequestID != uuid.Nil {
-		current.GovernanceRequestID = next.GovernanceRequestID.String()
+	if next.NexusRequestID != uuid.Nil {
+		current.NexusRequestID = next.NexusRequestID.String()
 	}
 	payload["current"] = current
 	if prev != nil {
 		previous := syncSnapshot{
-			Status:     prev.LastGovernanceStatus,
-			HTTPStatus: prev.LastGovernanceHTTPStatus,
+			Status:     prev.LastNexusStatus,
+			HTTPStatus: prev.LastNexusHTTPStatus,
 			Error:      prev.LastError,
 		}
-		if prev.GovernanceRequestID != uuid.Nil {
-			previous.GovernanceRequestID = prev.GovernanceRequestID.String()
+		if prev.NexusRequestID != uuid.Nil {
+			previous.NexusRequestID = prev.NexusRequestID.String()
 		}
 		payload["previous"] = previous
 	}
-	return marshalOrEmpty("governance_sync_payload", payload)
+	return marshalOrEmpty("nexus_sync_payload", payload)
 }
 
-func (u *Usecases) latestGovernanceRequestIDForTask(ctx context.Context, taskID uuid.UUID, state *domain.TaskGovernanceSyncState) (uuid.UUID, error) {
-	if state != nil && state.GovernanceRequestID != uuid.Nil {
-		return state.GovernanceRequestID, nil
+func (u *Usecases) latestNexusRequestIDForTask(ctx context.Context, taskID uuid.UUID, state *domain.TaskNexusSyncState) (uuid.UUID, error) {
+	if state != nil && state.NexusRequestID != uuid.Nil {
+		return state.NexusRequestID, nil
 	}
-	return u.repo.LatestProposeGovernanceRequestID(ctx, taskID)
+	return u.repo.LatestProposeNexusRequestID(ctx, taskID)
 }
 
-func (u *Usecases) persistGovernanceSyncAction(ctx context.Context, taskID uuid.UUID, governanceRequestID uuid.UUID, origin string, prev *domain.TaskGovernanceSyncState, next domain.TaskGovernanceSyncState, beforeStatus, afterStatus, event string) {
-	payload := buildGovernanceSyncActionPayload(origin, prev, next, beforeStatus, afterStatus, event)
-	governanceRequestIDCopy := governanceRequestID
+func (u *Usecases) persistNexusSyncAction(ctx context.Context, taskID uuid.UUID, nexusRequestID uuid.UUID, origin string, prev *domain.TaskNexusSyncState, next domain.TaskNexusSyncState, beforeStatus, afterStatus, event string) {
+	payload := buildNexusSyncActionPayload(origin, prev, next, beforeStatus, afterStatus, event)
+	nexusRequestIDCopy := nexusRequestID
 	if _, err := u.repo.InsertAction(ctx, domain.TaskAction{
-		TaskID:              taskID,
-		ActionType:          TaskActionSyncGovernance,
-		Payload:             payload,
-		GovernanceRequestID: &governanceRequestIDCopy,
+		TaskID:         taskID,
+		ActionType:     TaskActionSyncNexus,
+		Payload:        payload,
+		NexusRequestID: &nexusRequestIDCopy,
 	}); err != nil {
-		slog.Warn("companion sync_governance action failed", "task_id", taskID.String(), "governance_request_id", governanceRequestID.String(), "error", err)
+		slog.Warn("companion sync_nexus action failed", "task_id", taskID.String(), "nexus_request_id", nexusRequestID.String(), "error", err)
 	}
 }
 
-func (u *Usecases) syncTaskWithGovernance(ctx context.Context, t domain.Task, origin string) (domain.Task, *domain.TaskGovernanceSyncState, error) {
+func (u *Usecases) syncTaskWithNexus(ctx context.Context, t domain.Task, origin string) (domain.Task, *domain.TaskNexusSyncState, error) {
 	if t.Status != domain.TaskStatusWaitingForApproval {
 		return t, nil, nil
 	}
 
-	var prevState *domain.TaskGovernanceSyncState
-	currentState, err := u.repo.GetGovernanceSyncState(ctx, t.ID)
+	var prevState *domain.TaskNexusSyncState
+	currentState, err := u.repo.GetNexusSyncState(ctx, t.ID)
 	if err == nil {
 		stateCopy := currentState
 		prevState = &stateCopy
@@ -905,7 +905,7 @@ func (u *Usecases) syncTaskWithGovernance(ctx context.Context, t domain.Task, or
 		return domain.Task{}, nil, err
 	}
 
-	rid, err := u.latestGovernanceRequestIDForTask(ctx, t.ID, prevState)
+	rid, err := u.latestNexusRequestIDForTask(ctx, t.ID, prevState)
 	if err != nil {
 		if domainerr.IsNotFound(err) {
 			return t, prevState, nil
@@ -914,72 +914,72 @@ func (u *Usecases) syncTaskWithGovernance(ctx context.Context, t domain.Task, or
 	}
 
 	now := time.Now().UTC()
-	nextState := domain.TaskGovernanceSyncState{
-		TaskID:              t.ID,
-		GovernanceRequestID: rid,
-		LastCheckedAt:       now,
-		NextCheckAt:         nextGovernanceSyncAt(now, u.governanceSyncIntervalOrDefault(), 0),
+	nextState := domain.TaskNexusSyncState{
+		TaskID:         t.ID,
+		NexusRequestID: rid,
+		LastCheckedAt:  now,
+		NextCheckAt:    nextNexusSyncAt(now, u.nexusSyncIntervalOrDefault(), 0),
 	}
 	if prevState != nil {
 		nextState.CreatedAt = prevState.CreatedAt
-		nextState.LastGovernanceStatus = prevState.LastGovernanceStatus
-		nextState.LastGovernanceHTTPStatus = prevState.LastGovernanceHTTPStatus
+		nextState.LastNexusStatus = prevState.LastNexusStatus
+		nextState.LastNexusHTTPStatus = prevState.LastNexusHTTPStatus
 		nextState.LastError = prevState.LastError
 		nextState.ConsecutiveFailures = prevState.ConsecutiveFailures
 	}
 
-	sum, st, gErr := u.governance.GetRequest(ctx, rid.String())
+	sum, st, gErr := u.nexus.GetRequest(ctx, rid.String())
 	beforeStatus := t.Status
 	appliedEvent := ""
 
 	if gErr != nil {
-		nextState.LastGovernanceHTTPStatus = st
+		nextState.LastNexusHTTPStatus = st
 		nextState.LastError = gErr.Error()
 		nextState.ConsecutiveFailures++
-		nextState.NextCheckAt = nextGovernanceSyncAt(now, u.governanceSyncIntervalOrDefault(), nextState.ConsecutiveFailures)
-		stateOut, upErr := u.repo.UpsertGovernanceSyncState(ctx, nextState)
+		nextState.NextCheckAt = nextNexusSyncAt(now, u.nexusSyncIntervalOrDefault(), nextState.ConsecutiveFailures)
+		stateOut, upErr := u.repo.UpsertNexusSyncState(ctx, nextState)
 		if upErr != nil {
 			return domain.Task{}, prevState, upErr
 		}
-		if governanceSnapshotChanged(prevState, stateOut) {
-			u.persistGovernanceSyncAction(ctx, t.ID, rid, origin, prevState, stateOut, beforeStatus, t.Status, appliedEvent)
-			u.syncTaskMemory(ctx, t.ID, "governance_sync_error")
+		if nexusSnapshotChanged(prevState, stateOut) {
+			u.persistNexusSyncAction(ctx, t.ID, rid, origin, prevState, stateOut, beforeStatus, t.Status, appliedEvent)
+			u.syncTaskMemory(ctx, t.ID, "nexus_sync_error")
 		}
-		return domain.Task{}, &stateOut, fmt.Errorf("governance get request: %w", gErr)
+		return domain.Task{}, &stateOut, fmt.Errorf("nexus get request: %w", gErr)
 	}
 
-	nextState.LastGovernanceHTTPStatus = st
+	nextState.LastNexusHTTPStatus = st
 
 	if st == http.StatusNotFound {
-		nextState.LastError = "governance request not found"
+		nextState.LastError = "nexus request not found"
 		nextState.ConsecutiveFailures++
-		nextState.NextCheckAt = nextGovernanceSyncAt(now, u.governanceSyncIntervalOrDefault(), nextState.ConsecutiveFailures)
-		stateOut, upErr := u.repo.UpsertGovernanceSyncState(ctx, nextState)
+		nextState.NextCheckAt = nextNexusSyncAt(now, u.nexusSyncIntervalOrDefault(), nextState.ConsecutiveFailures)
+		stateOut, upErr := u.repo.UpsertNexusSyncState(ctx, nextState)
 		if upErr != nil {
 			return domain.Task{}, prevState, upErr
 		}
-		if governanceSnapshotChanged(prevState, stateOut) {
-			u.persistGovernanceSyncAction(ctx, t.ID, rid, origin, prevState, stateOut, beforeStatus, t.Status, appliedEvent)
-			u.syncTaskMemory(ctx, t.ID, "governance_sync_not_found")
+		if nexusSnapshotChanged(prevState, stateOut) {
+			u.persistNexusSyncAction(ctx, t.ID, rid, origin, prevState, stateOut, beforeStatus, t.Status, appliedEvent)
+			u.syncTaskMemory(ctx, t.ID, "nexus_sync_not_found")
 		}
-		t.GovernanceStatus = stateOut.LastGovernanceStatus
-		t.GovernanceLastCheckedAt = &stateOut.LastCheckedAt
-		t.GovernanceSyncError = stateOut.LastError
+		t.NexusStatus = stateOut.LastNexusStatus
+		t.NexusLastCheckedAt = &stateOut.LastCheckedAt
+		t.NexusSyncError = stateOut.LastError
 		return t, &stateOut, nil
 	}
-	if normalizedStatus := normalizeGovernanceStatus(sum.Status); normalizedStatus != "" {
-		nextState.LastGovernanceStatus = normalizedStatus
+	if normalizedStatus := normalizeNexusStatus(sum.Status); normalizedStatus != "" {
+		nextState.LastNexusStatus = normalizedStatus
 	}
 
 	nextState.LastError = ""
 	nextState.ConsecutiveFailures = 0
-	nextState.NextCheckAt = nextGovernanceSyncAt(now, u.governanceSyncIntervalOrDefault(), 0)
+	nextState.NextCheckAt = nextNexusSyncAt(now, u.nexusSyncIntervalOrDefault(), 0)
 
 	plan, planErr := u.getExecutionPlan(ctx, t.ID)
 	if planErr != nil {
 		return domain.Task{}, prevState, planErr
 	}
-	ev, apply := eventFromGovernanceRequestStatusWithExecutionPlan(sum.Status, plan != nil)
+	ev, apply := eventFromNexusRequestStatusWithExecutionPlan(sum.Status, plan != nil)
 	if apply {
 		appliedEvent = ev
 		t, err = u.applyTaskEvent(ctx, t, ev)
@@ -988,22 +988,22 @@ func (u *Usecases) syncTaskWithGovernance(ctx context.Context, t domain.Task, or
 		}
 	}
 
-	stateOut, upErr := u.repo.UpsertGovernanceSyncState(ctx, nextState)
+	stateOut, upErr := u.repo.UpsertNexusSyncState(ctx, nextState)
 	if upErr != nil {
 		return domain.Task{}, prevState, upErr
 	}
-	if governanceSnapshotChanged(prevState, stateOut) || beforeStatus != t.Status {
-		u.persistGovernanceSyncAction(ctx, t.ID, rid, origin, prevState, stateOut, beforeStatus, t.Status, appliedEvent)
-		u.syncTaskMemory(ctx, t.ID, "governance_sync")
+	if nexusSnapshotChanged(prevState, stateOut) || beforeStatus != t.Status {
+		u.persistNexusSyncAction(ctx, t.ID, rid, origin, prevState, stateOut, beforeStatus, t.Status, appliedEvent)
+		u.syncTaskMemory(ctx, t.ID, "nexus_sync")
 	}
-	t.GovernanceStatus = stateOut.LastGovernanceStatus
-	t.GovernanceLastCheckedAt = &stateOut.LastCheckedAt
-	t.GovernanceSyncError = stateOut.LastError
+	t.NexusStatus = stateOut.LastNexusStatus
+	t.NexusLastCheckedAt = &stateOut.LastCheckedAt
+	t.NexusSyncError = stateOut.LastError
 
-	slog.Info("companion task synced from governance",
+	slog.Info("companion task synced from nexus",
 		"task_id", t.ID.String(),
-		"governance_request_id", rid.String(),
-		"governance_status", stateOut.LastGovernanceStatus,
+		"nexus_request_id", rid.String(),
+		"nexus_status", stateOut.LastNexusStatus,
 		"task_status", t.Status,
 		"origin", origin,
 	)
@@ -1041,9 +1041,9 @@ type ProposeInput struct {
 	SessionID      string
 }
 
-func (u *Usecases) Propose(ctx context.Context, taskID uuid.UUID, in ProposeInput) (domain.Task, domain.TaskAction, governanceclient.SubmitResponse, error) {
+func (u *Usecases) Propose(ctx context.Context, taskID uuid.UUID, in ProposeInput) (domain.Task, domain.TaskAction, nexusclient.SubmitResponse, error) {
 	var zeroA domain.TaskAction
-	var zeroSub governanceclient.SubmitResponse
+	var zeroSub nexusclient.SubmitResponse
 	t, err := u.repo.GetTaskByID(ctx, taskID)
 	if err != nil {
 		return domain.Task{}, zeroA, zeroSub, err
@@ -1131,7 +1131,7 @@ func (u *Usecases) Propose(ctx context.Context, taskID uuid.UUID, in ProposeInpu
 	}
 
 	idem := fmt.Sprintf("companion-propose-%s", action.ID.String())
-	submitBody := governanceclient.SubmitRequestBody{
+	submitBody := nexusclient.SubmitRequestBody{
 		RequesterType:  CompanionRequesterType,
 		RequesterID:    CompanionRequesterID,
 		RequesterName:  CompanionRequesterName,
@@ -1143,39 +1143,39 @@ func (u *Usecases) Propose(ctx context.Context, taskID uuid.UUID, in ProposeInpu
 		Context:        string(ctxStr),
 	}
 
-	submitOut, subErr := u.governance.SubmitRequest(ctx, idem, submitBody)
+	submitOut, subErr := u.nexus.SubmitRequest(ctx, idem, submitBody)
 	if subErr != nil {
-		slog.Warn("companion propose governance submit failed",
+		slog.Warn("companion propose nexus submit failed",
 			"task_id", taskID.String(),
 			"action_id", action.ID.String(),
 			"error", subErr,
 		)
-		_ = u.repo.UpdateActionGovernanceResult(ctx, action.ID, nil, subErr.Error())
+		_ = u.repo.UpdateActionNexusResult(ctx, action.ID, nil, subErr.Error())
 		t2, ge := u.repo.GetTaskByID(ctx, taskID)
 		if ge != nil {
 			return domain.Task{}, action, zeroSub, ge
 		}
-		return t2, action, zeroSub, fmt.Errorf("%w: %v", ErrGovernanceSubmit, subErr)
+		return t2, action, zeroSub, fmt.Errorf("%w: %v", ErrNexusSubmit, subErr)
 	}
 	reqUUID, perr := uuid.Parse(submitOut.RequestID)
 	if perr != nil {
-		_ = u.repo.UpdateActionGovernanceResult(ctx, action.ID, nil, "invalid request_id from governance")
+		_ = u.repo.UpdateActionNexusResult(ctx, action.ID, nil, "invalid request_id from nexus")
 		return domain.Task{}, action, zeroSub, fmt.Errorf("parse request_id: %w", perr)
 	}
-	if err := u.repo.UpdateActionGovernanceResult(ctx, action.ID, &reqUUID, ""); err != nil {
+	if err := u.repo.UpdateActionNexusResult(ctx, action.ID, &reqUUID, ""); err != nil {
 		return domain.Task{}, action, zeroSub, err
 	}
 
 	now := time.Now().UTC()
-	state, err := u.repo.UpsertGovernanceSyncState(ctx, domain.TaskGovernanceSyncState{
-		TaskID:                   taskID,
-		GovernanceRequestID:      reqUUID,
-		LastGovernanceStatus:     normalizeGovernanceStatus(submitOut.Status),
-		LastGovernanceHTTPStatus: http.StatusCreated,
-		LastCheckedAt:            now,
-		LastError:                "",
-		ConsecutiveFailures:      0,
-		NextCheckAt:              nextGovernanceSyncAt(now, u.governanceSyncIntervalOrDefault(), 0),
+	state, err := u.repo.UpsertNexusSyncState(ctx, domain.TaskNexusSyncState{
+		TaskID:              taskID,
+		NexusRequestID:      reqUUID,
+		LastNexusStatus:     normalizeNexusStatus(submitOut.Status),
+		LastNexusHTTPStatus: http.StatusCreated,
+		LastCheckedAt:       now,
+		LastError:           "",
+		ConsecutiveFailures: 0,
+		NextCheckAt:         nextNexusSyncAt(now, u.nexusSyncIntervalOrDefault(), 0),
 	})
 	if err != nil {
 		return domain.Task{}, action, zeroSub, err
@@ -1183,10 +1183,10 @@ func (u *Usecases) Propose(ctx context.Context, taskID uuid.UUID, in ProposeInpu
 
 	ev, evErr := eventFromSubmitResponseWithExecutionPlan(submitOut, true)
 	if evErr != nil {
-		slog.Error("companion propose unexpected governance status",
+		slog.Error("companion propose unexpected nexus status",
 			"task_id", taskID.String(),
 			"action_id", action.ID.String(),
-			"governance_status", submitOut.Status,
+			"nexus_status", submitOut.Status,
 			"error", evErr,
 		)
 		return domain.Task{}, action, submitOut, evErr
@@ -1195,16 +1195,16 @@ func (u *Usecases) Propose(ctx context.Context, taskID uuid.UUID, in ProposeInpu
 	if err != nil {
 		return domain.Task{}, action, submitOut, err
 	}
-	t.GovernanceStatus = state.LastGovernanceStatus
-	t.GovernanceLastCheckedAt = &state.LastCheckedAt
-	t.GovernanceSyncError = state.LastError
-	action.GovernanceRequestID = &reqUUID
-	slog.Info("companion propose submitted to governance",
+	t.NexusStatus = state.LastNexusStatus
+	t.NexusLastCheckedAt = &state.LastCheckedAt
+	t.NexusSyncError = state.LastError
+	action.NexusRequestID = &reqUUID
+	slog.Info("companion propose submitted to nexus",
 		"task_id", taskID.String(),
 		"action_id", action.ID.String(),
-		"governance_request_id", reqUUID.String(),
-		"governance_decision", submitOut.Decision,
-		"governance_status", submitOut.Status,
+		"nexus_request_id", reqUUID.String(),
+		"nexus_decision", submitOut.Decision,
+		"nexus_status", submitOut.Status,
 		"task_status", t.Status,
 	)
 	u.syncTaskMemory(ctx, taskID, "propose")
@@ -1308,9 +1308,9 @@ func buildConnectorExecutionPayload(result connectordomain.ExecutionResult) json
 		"retryable":       result.Retryable,
 		"duration_ms":     result.DurationMS,
 		"idempotency_key": result.IdempotencyKey,
-		"governance_request_id": func() string {
-			if result.GovernanceRequestID != nil {
-				return result.GovernanceRequestID.String()
+		"nexus_request_id": func() string {
+			if result.NexusRequestID != nil {
+				return result.NexusRequestID.String()
 			}
 			return ""
 		}(),
@@ -1424,7 +1424,7 @@ func buildExecutionState(prev *domain.TaskExecutionState, taskID uuid.UUID, resu
 	}
 }
 
-func defaultExecutionIdempotencyKey(taskID uuid.UUID, governanceRequestID *uuid.UUID) string {
+func defaultExecutionIdempotencyKey(taskID uuid.UUID, nexusRequestID *uuid.UUID) string {
 	return fmt.Sprintf("task-execute-%s", taskID.String())
 }
 
@@ -1445,9 +1445,9 @@ func executionActorID(t domain.Task) string {
 	return CompanionRequesterID
 }
 
-func (u *Usecases) refreshGovernanceSnapshot(ctx context.Context, taskID uuid.UUID, origin string) (*domain.TaskGovernanceSyncState, error) {
-	var prevState *domain.TaskGovernanceSyncState
-	currentState, err := u.repo.GetGovernanceSyncState(ctx, taskID)
+func (u *Usecases) refreshNexusSnapshot(ctx context.Context, taskID uuid.UUID, origin string) (*domain.TaskNexusSyncState, error) {
+	var prevState *domain.TaskNexusSyncState
+	currentState, err := u.repo.GetNexusSyncState(ctx, taskID)
 	if err == nil {
 		stateCopy := currentState
 		prevState = &stateCopy
@@ -1455,51 +1455,51 @@ func (u *Usecases) refreshGovernanceSnapshot(ctx context.Context, taskID uuid.UU
 		return nil, err
 	}
 
-	governanceRequestID, err := u.latestGovernanceRequestIDForTask(ctx, taskID, prevState)
+	nexusRequestID, err := u.latestNexusRequestIDForTask(ctx, taskID, prevState)
 	if err != nil {
 		return nil, err
 	}
 
 	now := time.Now().UTC()
-	nextState := domain.TaskGovernanceSyncState{
-		TaskID:              taskID,
-		GovernanceRequestID: governanceRequestID,
-		LastCheckedAt:       now,
-		NextCheckAt:         nextGovernanceSyncAt(now, u.governanceSyncIntervalOrDefault(), 0),
+	nextState := domain.TaskNexusSyncState{
+		TaskID:         taskID,
+		NexusRequestID: nexusRequestID,
+		LastCheckedAt:  now,
+		NextCheckAt:    nextNexusSyncAt(now, u.nexusSyncIntervalOrDefault(), 0),
 	}
 	if prevState != nil {
 		nextState.CreatedAt = prevState.CreatedAt
-		nextState.LastGovernanceStatus = prevState.LastGovernanceStatus
-		nextState.LastGovernanceHTTPStatus = prevState.LastGovernanceHTTPStatus
+		nextState.LastNexusStatus = prevState.LastNexusStatus
+		nextState.LastNexusHTTPStatus = prevState.LastNexusHTTPStatus
 		nextState.LastError = prevState.LastError
 		nextState.ConsecutiveFailures = prevState.ConsecutiveFailures
 	}
 
-	sum, statusCode, getErr := u.governance.GetRequest(ctx, governanceRequestID.String())
+	sum, statusCode, getErr := u.nexus.GetRequest(ctx, nexusRequestID.String())
 	if getErr != nil {
-		nextState.LastGovernanceHTTPStatus = statusCode
+		nextState.LastNexusHTTPStatus = statusCode
 		nextState.LastError = getErr.Error()
 		nextState.ConsecutiveFailures++
-		nextState.NextCheckAt = nextGovernanceSyncAt(now, u.governanceSyncIntervalOrDefault(), nextState.ConsecutiveFailures)
-		stateOut, upsertErr := u.repo.UpsertGovernanceSyncState(ctx, nextState)
+		nextState.NextCheckAt = nextNexusSyncAt(now, u.nexusSyncIntervalOrDefault(), nextState.ConsecutiveFailures)
+		stateOut, upsertErr := u.repo.UpsertNexusSyncState(ctx, nextState)
 		if upsertErr != nil {
 			return nil, upsertErr
 		}
-		return &stateOut, fmt.Errorf("governance get request: %w", getErr)
+		return &stateOut, fmt.Errorf("nexus get request: %w", getErr)
 	}
 
-	nextState.LastGovernanceHTTPStatus = statusCode
-	nextState.LastGovernanceStatus = normalizeGovernanceStatus(sum.Status)
+	nextState.LastNexusHTTPStatus = statusCode
+	nextState.LastNexusStatus = normalizeNexusStatus(sum.Status)
 	nextState.LastError = ""
 	nextState.ConsecutiveFailures = 0
-	nextState.NextCheckAt = nextGovernanceSyncAt(now, u.governanceSyncIntervalOrDefault(), 0)
+	nextState.NextCheckAt = nextNexusSyncAt(now, u.nexusSyncIntervalOrDefault(), 0)
 
-	stateOut, upsertErr := u.repo.UpsertGovernanceSyncState(ctx, nextState)
+	stateOut, upsertErr := u.repo.UpsertNexusSyncState(ctx, nextState)
 	if upsertErr != nil {
 		return nil, upsertErr
 	}
-	if governanceSnapshotChanged(prevState, stateOut) {
-		u.persistGovernanceSyncAction(ctx, taskID, governanceRequestID, origin, prevState, stateOut, "", "", "")
+	if nexusSnapshotChanged(prevState, stateOut) {
+		u.persistNexusSyncAction(ctx, taskID, nexusRequestID, origin, prevState, stateOut, "", "", "")
 	}
 	return &stateOut, nil
 }
@@ -1512,55 +1512,55 @@ func (u *Usecases) runTaskExecution(ctx context.Context, t domain.Task, plan dom
 		return out, err
 	}
 
-	var governanceRequestID *uuid.UUID
-	if syncState, syncErr := u.repo.GetGovernanceSyncState(ctx, t.ID); syncErr == nil && syncState.GovernanceRequestID != uuid.Nil {
-		governanceRequestID = &syncState.GovernanceRequestID
+	var nexusRequestID *uuid.UUID
+	if syncState, syncErr := u.repo.GetNexusSyncState(ctx, t.ID); syncErr == nil && syncState.NexusRequestID != uuid.Nil {
+		nexusRequestID = &syncState.NexusRequestID
 	}
 	idempotencyKey := plan.IdempotencyKey
 	if idempotencyKey == "" {
-		idempotencyKey = defaultExecutionIdempotencyKey(t.ID, governanceRequestID)
+		idempotencyKey = defaultExecutionIdempotencyKey(t.ID, nexusRequestID)
 	}
 
 	result, execErr := u.executor.Execute(ctx, connectordomain.ExecutionSpec{
-		ConnectorID:         plan.ConnectorID,
-		OrgID:               t.OrgID,
-		ActorID:             executionActorID(t),
-		ProductSurface:      "companion",
-		Operation:           plan.Operation,
-		Payload:             plan.Payload,
-		IdempotencyKey:      idempotencyKey,
-		TaskID:              &t.ID,
-		GovernanceRequestID: governanceRequestID,
+		ConnectorID:    plan.ConnectorID,
+		OrgID:          t.OrgID,
+		ActorID:        executionActorID(t),
+		ProductSurface: "companion",
+		Operation:      plan.Operation,
+		Payload:        plan.Payload,
+		IdempotencyKey: idempotencyKey,
+		TaskID:         &t.ID,
+		NexusRequestID: nexusRequestID,
 	})
 	if execErr != nil {
 		result = connectordomain.ExecutionResult{
-			ID:                  uuid.New(),
-			ConnectorID:         plan.ConnectorID,
-			OrgID:               t.OrgID,
-			ActorID:             executionActorID(t),
-			Operation:           plan.Operation,
-			Status:              connectordomain.ExecFailure,
-			Payload:             plan.Payload,
-			ResultJSON:          json.RawMessage(`{}`),
-			ErrorMessage:        execErr.Error(),
-			Retryable:           true,
-			IdempotencyKey:      idempotencyKey,
-			TaskID:              &t.ID,
-			GovernanceRequestID: governanceRequestID,
-			CreatedAt:           time.Now().UTC(),
+			ID:             uuid.New(),
+			ConnectorID:    plan.ConnectorID,
+			OrgID:          t.OrgID,
+			ActorID:        executionActorID(t),
+			Operation:      plan.Operation,
+			Status:         connectordomain.ExecFailure,
+			Payload:        plan.Payload,
+			ResultJSON:     json.RawMessage(`{}`),
+			ErrorMessage:   execErr.Error(),
+			Retryable:      true,
+			IdempotencyKey: idempotencyKey,
+			TaskID:         &t.ID,
+			NexusRequestID: nexusRequestID,
+			CreatedAt:      time.Now().UTC(),
 		}
 	}
 	if result.CreatedAt.IsZero() {
 		result.CreatedAt = time.Now().UTC()
 	}
-	u.reportExecutionToGovernance(ctx, governanceRequestID, result)
+	u.reportExecutionToNexus(ctx, nexusRequestID, result)
 
 	if _, insertErr := u.repo.InsertAction(ctx, domain.TaskAction{
-		TaskID:              t.ID,
-		ActionType:          TaskActionExecuteConnector,
-		Payload:             buildConnectorExecutionPayload(result),
-		GovernanceRequestID: governanceRequestID,
-		ErrorMessage:        result.ErrorMessage,
+		TaskID:         t.ID,
+		ActionType:     TaskActionExecuteConnector,
+		Payload:        buildConnectorExecutionPayload(result),
+		NexusRequestID: nexusRequestID,
+		ErrorMessage:   result.ErrorMessage,
 	}); insertErr != nil {
 		slog.Warn("companion execute connector action failed", "task_id", t.ID.String(), "error", insertErr)
 	}
@@ -1580,10 +1580,10 @@ func (u *Usecases) runTaskExecution(ctx context.Context, t domain.Task, plan dom
 
 	verification := verifyExecutionResult(result)
 	if _, verifyErr := u.repo.InsertAction(ctx, domain.TaskAction{
-		TaskID:              t.ID,
-		ActionType:          TaskActionVerifyExecution,
-		Payload:             buildVerificationPayload(result, verification),
-		GovernanceRequestID: governanceRequestID,
+		TaskID:         t.ID,
+		ActionType:     TaskActionVerifyExecution,
+		Payload:        buildVerificationPayload(result, verification),
+		NexusRequestID: nexusRequestID,
 		ErrorMessage: func() string {
 			if verification.Status == domain.VerificationStatusFailed {
 				return verification.Summary
@@ -1633,7 +1633,7 @@ func (u *Usecases) runTaskExecution(ctx context.Context, t domain.Task, plan dom
 		}
 	}
 
-	t.GovernanceStatus = normalizeGovernanceStatus(t.GovernanceStatus)
+	t.NexusStatus = normalizeNexusStatus(t.NexusStatus)
 	out.Task = t
 	out.Plan = plan
 	out.Execution = result
@@ -1642,8 +1642,8 @@ func (u *Usecases) runTaskExecution(ctx context.Context, t domain.Task, plan dom
 	return out, nil
 }
 
-func (u *Usecases) reportExecutionToGovernance(ctx context.Context, governanceRequestID *uuid.UUID, result connectordomain.ExecutionResult) {
-	if u.governance == nil || governanceRequestID == nil || *governanceRequestID == uuid.Nil {
+func (u *Usecases) reportExecutionToNexus(ctx context.Context, nexusRequestID *uuid.UUID, result connectordomain.ExecutionResult) {
+	if u.nexus == nil || nexusRequestID == nil || *nexusRequestID == uuid.Nil {
 		return
 	}
 	success := result.Status == connectordomain.ExecSuccess
@@ -1665,10 +1665,10 @@ func (u *Usecases) reportExecutionToGovernance(ctx context.Context, governanceRe
 	if len(result.EvidenceJSON) > 0 {
 		resultPayload["evidence"] = json.RawMessage(result.EvidenceJSON)
 	}
-	status, err := u.governance.ReportResult(ctx, governanceRequestID.String(), success, resultPayload, result.DurationMS, result.ErrorMessage)
+	status, err := u.nexus.ReportResult(ctx, nexusRequestID.String(), success, resultPayload, result.DurationMS, result.ErrorMessage)
 	if err != nil || status >= http.StatusBadRequest {
-		slog.Warn("report execution to governance failed",
-			"governance_request_id", governanceRequestID.String(),
+		slog.Warn("report execution to nexus failed",
+			"nexus_request_id", nexusRequestID.String(),
 			"status", status,
 			"error", err)
 	}
@@ -1692,14 +1692,14 @@ func (u *Usecases) ExecuteTask(ctx context.Context, taskID uuid.UUID) (ExecuteTa
 		return out, err
 	}
 
-	var governanceRequestID string
+	var nexusRequestID string
 	if t.Status == domain.TaskStatusWaitingForApproval {
-		syncedTask, state, syncErr := u.syncTaskWithGovernance(ctx, t, "execute")
+		syncedTask, state, syncErr := u.syncTaskWithNexus(ctx, t, "execute")
 		if state != nil {
-			syncedTask.GovernanceStatus = state.LastGovernanceStatus
-			syncedTask.GovernanceLastCheckedAt = &state.LastCheckedAt
-			syncedTask.GovernanceSyncError = state.LastError
-			governanceRequestID = state.GovernanceRequestID.String()
+			syncedTask.NexusStatus = state.LastNexusStatus
+			syncedTask.NexusLastCheckedAt = &state.LastCheckedAt
+			syncedTask.NexusSyncError = state.LastError
+			nexusRequestID = state.NexusRequestID.String()
 		}
 		if syncErr != nil {
 			return out, syncErr
@@ -1707,8 +1707,8 @@ func (u *Usecases) ExecuteTask(ctx context.Context, taskID uuid.UUID) (ExecuteTa
 		t = syncedTask
 	}
 
-	if !isApprovedGovernanceStatus(t.GovernanceStatus) {
-		return out, u.governanceBlockedError(governanceRequestID, t.GovernanceStatus, "execute")
+	if !isApprovedNexusStatus(t.NexusStatus) {
+		return out, u.nexusBlockedError(nexusRequestID, t.NexusStatus, "execute")
 	}
 	if t.Status != domain.TaskStatusWaitingForInput {
 		return out, ErrInvalidTaskState
@@ -1749,15 +1749,15 @@ func (u *Usecases) RetryTask(ctx context.Context, taskID uuid.UUID) (ExecuteTask
 		return out, ErrInvalidTaskState
 	}
 
-	snapshot, snapshotErr := u.refreshGovernanceSnapshot(ctx, taskID, "retry")
+	snapshot, snapshotErr := u.refreshNexusSnapshot(ctx, taskID, "retry")
 	if snapshotErr != nil {
 		return out, snapshotErr
 	}
-	t.GovernanceStatus = snapshot.LastGovernanceStatus
-	t.GovernanceLastCheckedAt = &snapshot.LastCheckedAt
-	t.GovernanceSyncError = snapshot.LastError
-	if !isApprovedGovernanceStatus(snapshot.LastGovernanceStatus) {
-		return out, u.governanceBlockedError(snapshot.GovernanceRequestID.String(), snapshot.LastGovernanceStatus, "retry")
+	t.NexusStatus = snapshot.LastNexusStatus
+	t.NexusLastCheckedAt = &snapshot.LastCheckedAt
+	t.NexusSyncError = snapshot.LastError
+	if !isApprovedNexusStatus(snapshot.LastNexusStatus) {
+		return out, u.nexusBlockedError(snapshot.NexusRequestID.String(), snapshot.LastNexusStatus, "retry")
 	}
 
 	payload := marshalOrEmpty("retry_execution_action", map[string]any{
@@ -1765,12 +1765,12 @@ func (u *Usecases) RetryTask(ctx context.Context, taskID uuid.UUID) (ExecuteTask
 		"last_execution_status": state.LastExecutionStatus,
 		"last_error":            state.LastError,
 	})
-	governanceRequestID := snapshot.GovernanceRequestID
+	nexusRequestID := snapshot.NexusRequestID
 	if _, insertErr := u.repo.InsertAction(ctx, domain.TaskAction{
-		TaskID:              taskID,
-		ActionType:          TaskActionRetryExecution,
-		Payload:             payload,
-		GovernanceRequestID: &governanceRequestID,
+		TaskID:         taskID,
+		ActionType:     TaskActionRetryExecution,
+		Payload:        payload,
+		NexusRequestID: &nexusRequestID,
 	}); insertErr != nil {
 		slog.Warn("companion retry execution action failed", "task_id", taskID.String(), "error", insertErr)
 	}
@@ -1778,17 +1778,17 @@ func (u *Usecases) RetryTask(ctx context.Context, taskID uuid.UUID) (ExecuteTask
 	return u.runTaskExecution(ctx, t, plan, &state, evRetryExecution)
 }
 
-// SyncTaskGovernance consulta Governance y aplica transición si el request ya resolvió (tareas en espera).
-func (u *Usecases) SyncTaskGovernance(ctx context.Context, taskID uuid.UUID) (domain.Task, error) {
+// SyncTaskNexus consulta Nexus y aplica transición si el request ya resolvió (tareas en espera).
+func (u *Usecases) SyncTaskNexus(ctx context.Context, taskID uuid.UUID) (domain.Task, error) {
 	t, err := u.repo.GetTaskByID(ctx, taskID)
 	if err != nil {
 		return domain.Task{}, err
 	}
-	t, state, err := u.syncTaskWithGovernance(ctx, t, "manual")
+	t, state, err := u.syncTaskWithNexus(ctx, t, "manual")
 	if state != nil {
-		t.GovernanceStatus = state.LastGovernanceStatus
-		t.GovernanceLastCheckedAt = &state.LastCheckedAt
-		t.GovernanceSyncError = state.LastError
+		t.NexusStatus = state.LastNexusStatus
+		t.NexusLastCheckedAt = &state.LastCheckedAt
+		t.NexusSyncError = state.LastError
 	}
 	if err != nil {
 		return domain.Task{}, err
@@ -1796,31 +1796,31 @@ func (u *Usecases) SyncTaskGovernance(ctx context.Context, taskID uuid.UUID) (do
 	return t, nil
 }
 
-// SyncPendingGovernanceTasks sincroniza un lote de tareas en waiting_for_approval.
-func (u *Usecases) SyncPendingGovernanceTasks(ctx context.Context, limit int) {
+// SyncPendingNexusTasks sincroniza un lote de tareas en waiting_for_approval.
+func (u *Usecases) SyncPendingNexusTasks(ctx context.Context, limit int) {
 	if limit <= 0 {
 		limit = 50
 	}
-	list, err := u.repo.ListTasksPendingGovernanceSync(ctx, time.Now().UTC(), limit)
+	list, err := u.repo.ListTasksPendingNexusSync(ctx, time.Now().UTC(), limit)
 	if err != nil {
 		slog.Error("companion sync list waiting tasks", "error", err)
 		return
 	}
 	for _, item := range list {
-		if _, _, sErr := u.syncTaskWithGovernance(ctx, item, "loop"); sErr != nil {
+		if _, _, sErr := u.syncTaskWithNexus(ctx, item, "loop"); sErr != nil {
 			slog.Warn("companion sync task failed", "task_id", item.ID.String(), "error", sErr)
 		}
 	}
 }
 
-// RunGovernanceSyncLoop ejecuta SyncPendingGovernanceTasks periódicamente hasta que ctx termina.
-func (u *Usecases) RunGovernanceSyncLoop(ctx context.Context, interval time.Duration, batch int) {
+// RunNexusSyncLoop ejecuta SyncPendingNexusTasks periódicamente hasta que ctx termina.
+func (u *Usecases) RunNexusSyncLoop(ctx context.Context, interval time.Duration, batch int) {
 	if batch <= 0 {
 		return
 	}
-	worker.RunPeriodic(ctx, interval, "governance-sync", func(c context.Context) {
+	worker.RunPeriodic(ctx, interval, "nexus-sync", func(c context.Context) {
 		runCtx, cancel := context.WithTimeout(c, 2*time.Minute)
-		u.SyncPendingGovernanceTasks(runCtx, batch)
+		u.SyncPendingNexusTasks(runCtx, batch)
 		cancel()
 	})
 }
@@ -1835,13 +1835,13 @@ func IsInvalidTaskState(err error) bool {
 	return errors.Is(err, ErrInvalidTaskState)
 }
 
-// governanceBlockedError devuelve un error estructurado cuando una operación de
-// task se bloquea porque la governance en Nexus no está aprobada.
-func (u *Usecases) governanceBlockedError(governanceRequestID, governanceStatus, reason string) error {
-	return &GovernanceBlockedError{
-		GovernanceRequestID: governanceRequestID,
-		GovernanceStatus:    governanceStatus,
-		Reason:              reason,
+// nexusBlockedError devuelve un error estructurado cuando una operación de
+// task se bloquea porque la nexus en Nexus no está aprobada.
+func (u *Usecases) nexusBlockedError(nexusRequestID, nexusStatus, reason string) error {
+	return &NexusBlockedError{
+		NexusRequestID: nexusRequestID,
+		NexusStatus:    nexusStatus,
+		Reason:         reason,
 	}
 }
 

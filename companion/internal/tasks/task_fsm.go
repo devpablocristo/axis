@@ -7,25 +7,25 @@ import (
 
 	"github.com/devpablocristo/platform/concurrency/go/fsm"
 
+	"github.com/devpablocristo/companion/internal/nexusclient"
 	domain "github.com/devpablocristo/companion/internal/tasks/usecases/domain"
-	"github.com/devpablocristo/platform/kernels/governance/go/governanceclient"
 )
 
 // Eventos de transición de tarea (valores opacos para la FSM).
 const (
-	evInvestigate                       = "investigate"
-	evGovernancePendingApproval         = "governance_pending_approval"
-	evGovernanceResolvedAllow           = "governance_resolved_allow"
-	evGovernanceResolvedAllowAwaitInput = "governance_resolved_allow_await_input"
-	evGovernanceResolvedDeny            = "governance_resolved_deny"
-	evStartExecution                    = "start_execution"
-	evRetryExecution                    = "retry_execution"
-	evExecutionSucceeded                = "execution_succeeded"
-	evExecutionVerified                 = "execution_verified"
-	evExecutionFailed                   = "execution_failed"
+	evInvestigate                  = "investigate"
+	evNexusPendingApproval         = "nexus_pending_approval"
+	evNexusResolvedAllow           = "nexus_resolved_allow"
+	evNexusResolvedAllowAwaitInput = "nexus_resolved_allow_await_input"
+	evNexusResolvedDeny            = "nexus_resolved_deny"
+	evStartExecution               = "start_execution"
+	evRetryExecution               = "retry_execution"
+	evExecutionSucceeded           = "execution_succeeded"
+	evExecutionVerified            = "execution_verified"
+	evExecutionFailed              = "execution_failed"
 )
 
-func normalizeGovernanceStatus(status string) string {
+func normalizeNexusStatus(status string) string {
 	return strings.ToLower(strings.TrimSpace(status))
 }
 
@@ -36,19 +36,19 @@ func buildCompanionTaskFSM() *fsm.Machine[string, string] {
 		{From: domain.TaskStatusNew, Event: evInvestigate, To: domain.TaskStatusInvestigating},
 		{From: domain.TaskStatusInvestigating, Event: evInvestigate, To: domain.TaskStatusInvestigating},
 
-		{From: domain.TaskStatusNew, Event: evGovernancePendingApproval, To: domain.TaskStatusWaitingForApproval},
-		{From: domain.TaskStatusInvestigating, Event: evGovernancePendingApproval, To: domain.TaskStatusWaitingForApproval},
+		{From: domain.TaskStatusNew, Event: evNexusPendingApproval, To: domain.TaskStatusWaitingForApproval},
+		{From: domain.TaskStatusInvestigating, Event: evNexusPendingApproval, To: domain.TaskStatusWaitingForApproval},
 
-		{From: domain.TaskStatusNew, Event: evGovernanceResolvedAllow, To: domain.TaskStatusDone},
-		{From: domain.TaskStatusInvestigating, Event: evGovernanceResolvedAllow, To: domain.TaskStatusDone},
-		{From: domain.TaskStatusWaitingForApproval, Event: evGovernanceResolvedAllow, To: domain.TaskStatusDone},
-		{From: domain.TaskStatusNew, Event: evGovernanceResolvedAllowAwaitInput, To: domain.TaskStatusWaitingForInput},
-		{From: domain.TaskStatusInvestigating, Event: evGovernanceResolvedAllowAwaitInput, To: domain.TaskStatusWaitingForInput},
-		{From: domain.TaskStatusWaitingForApproval, Event: evGovernanceResolvedAllowAwaitInput, To: domain.TaskStatusWaitingForInput},
+		{From: domain.TaskStatusNew, Event: evNexusResolvedAllow, To: domain.TaskStatusDone},
+		{From: domain.TaskStatusInvestigating, Event: evNexusResolvedAllow, To: domain.TaskStatusDone},
+		{From: domain.TaskStatusWaitingForApproval, Event: evNexusResolvedAllow, To: domain.TaskStatusDone},
+		{From: domain.TaskStatusNew, Event: evNexusResolvedAllowAwaitInput, To: domain.TaskStatusWaitingForInput},
+		{From: domain.TaskStatusInvestigating, Event: evNexusResolvedAllowAwaitInput, To: domain.TaskStatusWaitingForInput},
+		{From: domain.TaskStatusWaitingForApproval, Event: evNexusResolvedAllowAwaitInput, To: domain.TaskStatusWaitingForInput},
 
-		{From: domain.TaskStatusNew, Event: evGovernanceResolvedDeny, To: domain.TaskStatusFailed},
-		{From: domain.TaskStatusInvestigating, Event: evGovernanceResolvedDeny, To: domain.TaskStatusFailed},
-		{From: domain.TaskStatusWaitingForApproval, Event: evGovernanceResolvedDeny, To: domain.TaskStatusFailed},
+		{From: domain.TaskStatusNew, Event: evNexusResolvedDeny, To: domain.TaskStatusFailed},
+		{From: domain.TaskStatusInvestigating, Event: evNexusResolvedDeny, To: domain.TaskStatusFailed},
+		{From: domain.TaskStatusWaitingForApproval, Event: evNexusResolvedDeny, To: domain.TaskStatusFailed},
 
 		{From: domain.TaskStatusWaitingForInput, Event: evStartExecution, To: domain.TaskStatusExecuting},
 		{From: domain.TaskStatusFailed, Event: evRetryExecution, To: domain.TaskStatusExecuting},
@@ -59,44 +59,44 @@ func buildCompanionTaskFSM() *fsm.Machine[string, string] {
 	})
 }
 
-func eventFromSubmitResponse(sub governanceclient.SubmitResponse) (string, error) {
+func eventFromSubmitResponse(sub nexusclient.SubmitResponse) (string, error) {
 	return eventFromSubmitResponseWithExecutionPlan(sub, false)
 }
 
-func eventFromSubmitResponseWithExecutionPlan(sub governanceclient.SubmitResponse, hasExecutionPlan bool) (string, error) {
-	s := normalizeGovernanceStatus(sub.Status)
+func eventFromSubmitResponseWithExecutionPlan(sub nexusclient.SubmitResponse, hasExecutionPlan bool) (string, error) {
+	s := normalizeNexusStatus(sub.Status)
 	switch s {
 	case "allowed", "approved", "executed":
 		if hasExecutionPlan {
-			return evGovernanceResolvedAllowAwaitInput, nil
+			return evNexusResolvedAllowAwaitInput, nil
 		}
-		return evGovernanceResolvedAllow, nil
+		return evNexusResolvedAllow, nil
 	case "denied", "rejected":
-		return evGovernanceResolvedDeny, nil
+		return evNexusResolvedDeny, nil
 	case "pending_approval":
-		return evGovernancePendingApproval, nil
+		return evNexusPendingApproval, nil
 	default:
-		return "", fmt.Errorf("unexpected governance status after submit: %q", sub.Status)
+		return "", fmt.Errorf("unexpected nexus status after submit: %q", sub.Status)
 	}
 }
 
-// eventFromGovernanceRequestStatus mapea estado HTTP de Governance a evento FSM; apply=false = sin cambio.
-func eventFromGovernanceRequestStatus(status string) (event string, apply bool) {
-	return eventFromGovernanceRequestStatusWithExecutionPlan(status, false)
+// eventFromNexusRequestStatus mapea estado HTTP de Nexus a evento FSM; apply=false = sin cambio.
+func eventFromNexusRequestStatus(status string) (event string, apply bool) {
+	return eventFromNexusRequestStatusWithExecutionPlan(status, false)
 }
 
-func eventFromGovernanceRequestStatusWithExecutionPlan(status string, hasExecutionPlan bool) (event string, apply bool) {
-	s := normalizeGovernanceStatus(status)
+func eventFromNexusRequestStatusWithExecutionPlan(status string, hasExecutionPlan bool) (event string, apply bool) {
+	s := normalizeNexusStatus(status)
 	switch s {
 	case "pending_approval", "pending", "evaluated":
 		return "", false
 	case "allowed", "approved", "executed":
 		if hasExecutionPlan {
-			return evGovernanceResolvedAllowAwaitInput, true
+			return evNexusResolvedAllowAwaitInput, true
 		}
-		return evGovernanceResolvedAllow, true
+		return evNexusResolvedAllow, true
 	case "denied", "rejected", "expired", "failed", "cancelled":
-		return evGovernanceResolvedDeny, true
+		return evNexusResolvedDeny, true
 	default:
 		return "", false
 	}

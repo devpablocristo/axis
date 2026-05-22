@@ -11,8 +11,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
-	sharedpostgres "github.com/devpablocristo/platform/databases/postgres/go"
 	domain "github.com/devpablocristo/companion/internal/connectors/usecases/domain"
+	sharedpostgres "github.com/devpablocristo/platform/databases/postgres/go"
 )
 
 // PostgresRepository implementación PostgreSQL del repositorio de conectores.
@@ -133,11 +133,11 @@ func (r *PostgresRepository) SaveExecution(ctx context.Context, e domain.Executi
 	_, err := r.db.Pool().Exec(ctx, `
 		INSERT INTO companion_connector_executions
 			(id, connector_id, org_id, actor_id, operation, status, external_ref, payload, result_json,
-			 evidence_json, error_message, retryable, duration_ms, idempotency_key, task_id, governance_request_id, created_at)
+			 evidence_json, error_message, retryable, duration_ms, idempotency_key, task_id, nexus_request_id, created_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
 	`, e.ID, e.ConnectorID, e.OrgID, e.ActorID, e.Operation, e.Status, e.ExternalRef,
 		e.Payload, e.ResultJSON, e.EvidenceJSON, nullIfEmpty(e.ErrorMessage),
-		e.Retryable, e.DurationMS, e.IdempotencyKey, e.TaskID, e.GovernanceRequestID, e.CreatedAt)
+		e.Retryable, e.DurationMS, e.IdempotencyKey, e.TaskID, e.NexusRequestID, e.CreatedAt)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return ErrConflict
@@ -174,25 +174,25 @@ func (r *PostgresRepository) ReleaseExecutionLock(ctx context.Context, lockKey s
 }
 
 // GetExecutionByIdempotency devuelve una ejecución ya registrada para una key de idempotencia.
-func (r *PostgresRepository) GetExecutionByIdempotency(ctx context.Context, taskID uuid.UUID, operation string, governanceRequestID *uuid.UUID, idempotencyKey string) (domain.ExecutionResult, error) {
+func (r *PostgresRepository) GetExecutionByIdempotency(ctx context.Context, taskID uuid.UUID, operation string, nexusRequestID *uuid.UUID, idempotencyKey string) (domain.ExecutionResult, error) {
 	if taskID == uuid.Nil || idempotencyKey == "" {
 		return domain.ExecutionResult{}, ErrNotFound
 	}
-	var governanceID any
-	if governanceRequestID != nil {
-		governanceID = *governanceRequestID
+	var nexusID any
+	if nexusRequestID != nil {
+		nexusID = *nexusRequestID
 	}
 	row := r.db.Pool().QueryRow(ctx, `
 		SELECT id, connector_id, org_id, actor_id, operation, status, external_ref, payload, result_json,
-		       evidence_json, error_message, retryable, duration_ms, idempotency_key, task_id, governance_request_id, created_at
+		       evidence_json, error_message, retryable, duration_ms, idempotency_key, task_id, nexus_request_id, created_at
 		FROM companion_connector_executions
 		WHERE task_id = $1
 		  AND operation = $2
 		  AND idempotency_key = $3
-		  AND (($4::uuid IS NULL AND governance_request_id IS NULL) OR governance_request_id = $4::uuid)
+		  AND (($4::uuid IS NULL AND nexus_request_id IS NULL) OR nexus_request_id = $4::uuid)
 		ORDER BY created_at DESC
 		LIMIT 1
-	`, taskID, operation, idempotencyKey, governanceID)
+	`, taskID, operation, idempotencyKey, nexusID)
 	execution, err := scanExecution(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -210,7 +210,7 @@ func (r *PostgresRepository) ListExecutions(ctx context.Context, connectorID uui
 	}
 	rows, err := r.db.Pool().Query(ctx, `
 		SELECT id, connector_id, org_id, actor_id, operation, status, external_ref, payload, result_json,
-		       evidence_json, error_message, retryable, duration_ms, idempotency_key, task_id, governance_request_id, created_at
+		       evidence_json, error_message, retryable, duration_ms, idempotency_key, task_id, nexus_request_id, created_at
 		FROM companion_connector_executions
 		WHERE connector_id = $1
 		ORDER BY created_at DESC LIMIT $2
@@ -263,7 +263,7 @@ func scanExecution(row rowScanner) (domain.ExecutionResult, error) {
 	err := row.Scan(
 		&e.ID, &e.ConnectorID, &e.OrgID, &e.ActorID, &e.Operation, &e.Status, &e.ExternalRef,
 		&payloadRaw, &resultRaw, &evidenceRaw, &errMsg, &e.Retryable, &e.DurationMS,
-		&e.IdempotencyKey, &e.TaskID, &e.GovernanceRequestID, &e.CreatedAt,
+		&e.IdempotencyKey, &e.TaskID, &e.NexusRequestID, &e.CreatedAt,
 	)
 	if err != nil {
 		return domain.ExecutionResult{}, err

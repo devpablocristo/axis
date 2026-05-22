@@ -28,14 +28,14 @@ func main() {
 		logger.Error("DATABASE_URL is required")
 		os.Exit(1)
 	}
-	governanceBase := os.Getenv("GOVERNANCE_BASE_URL")
-	if governanceBase == "" {
-		logger.Error("GOVERNANCE_BASE_URL is required")
+	nexusBase := os.Getenv("NEXUS_BASE_URL")
+	if nexusBase == "" {
+		logger.Error("NEXUS_BASE_URL is required")
 		os.Exit(1)
 	}
-	governanceKey := os.Getenv("GOVERNANCE_API_KEY")
-	if governanceKey == "" {
-		logger.Error("GOVERNANCE_API_KEY is required")
+	nexusKey := os.Getenv("NEXUS_API_KEY")
+	if nexusKey == "" {
+		logger.Error("NEXUS_API_KEY is required")
 		os.Exit(1)
 	}
 	apiKeys := os.Getenv("COMPANION_API_KEYS")
@@ -52,8 +52,8 @@ func main() {
 		InternalJWTSecret:   os.Getenv("COMPANION_INTERNAL_JWT_SECRET"),
 		InternalJWTIssuer:   os.Getenv("COMPANION_INTERNAL_JWT_ISSUER"),
 		InternalJWTAudience: os.Getenv("COMPANION_INTERNAL_JWT_AUDIENCE"),
-		GovernanceBaseURL:   governanceBase,
-		GovernanceAPIKey:    governanceKey,
+		NexusBaseURL:        nexusBase,
+		NexusAPIKey:         nexusKey,
 		PymesBaseURL:        os.Getenv("PYMES_BASE_URL"),
 		PymesAPIKey:         os.Getenv("PYMES_API_KEY"),
 		PontiBaseURL:        os.Getenv("PONTI_BASE_URL"),

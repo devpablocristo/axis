@@ -12,18 +12,18 @@ import (
 	"github.com/devpablocristo/platform/concurrency/go/worker"
 	"github.com/google/uuid"
 
+	"github.com/devpablocristo/companion/internal/nexusclient"
 	domain "github.com/devpablocristo/companion/internal/watchers/usecases/domain"
-	"github.com/devpablocristo/platform/kernels/governance/go/governanceclient"
 )
 
-// GovernanceGateway port para enviar solicitudes a Nexus Governance.
-type GovernanceGateway interface {
-	SubmitRequest(ctx context.Context, idempotencyKey string, body governanceclient.SubmitRequestBody) (governanceclient.SubmitResponse, error)
-	GetRequest(ctx context.Context, id string) (governanceclient.RequestSummary, int, error)
+// NexusGateway port para enviar solicitudes a Nexus.
+type NexusGateway interface {
+	SubmitRequest(ctx context.Context, idempotencyKey string, body nexusclient.SubmitRequestBody) (nexusclient.SubmitResponse, error)
+	GetRequest(ctx context.Context, id string) (nexusclient.RequestSummary, int, error)
 	ReportResult(ctx context.Context, id string, success bool, result map[string]any, durationMS int64, errorMessage string) (int, error)
 }
 
-// ConnectorExecutor ejecuta side effects usando el pipeline gobernado de connectors.
+// ConnectorExecutor ejecuta side effects usando el pipeline controlado de connectors.
 type ConnectorExecutor interface {
 	ListConnectors(ctx context.Context) ([]connectordomain.Connector, error)
 	BuildActionBinding(ctx context.Context, spec connectordomain.ExecutionSpec) (map[string]any, string, error)
@@ -55,15 +55,15 @@ type ChatNotifier interface {
 
 // Usecases contiene la lógica de negocio del módulo watchers.
 type Usecases struct {
-	repo       Repository
-	governance GovernanceGateway
-	executor   ConnectorExecutor
-	notifier   ChatNotifier // nil = sin notificaciones al chat
+	repo     Repository
+	nexus    NexusGateway
+	executor ConnectorExecutor
+	notifier ChatNotifier // nil = sin notificaciones al chat
 }
 
 // NewUsecases crea los usecases del módulo watchers.
-func NewUsecases(repo Repository, governance GovernanceGateway) *Usecases {
-	return &Usecases{repo: repo, governance: governance}
+func NewUsecases(repo Repository, nexus NexusGateway) *Usecases {
+	return &Usecases{repo: repo, nexus: nexus}
 }
 
 // SetNotifier inyecta el notificador de chat. Opcional.
@@ -130,7 +130,7 @@ func (uc *Usecases) ListProposals(ctx context.Context, watcherID uuid.UUID, limi
 
 // --- Ejecución ---
 
-// actionTypeForWatcher mapea tipo de watcher a action_type de Governance.
+// actionTypeForWatcher mapea tipo de watcher a action_type de Nexus.
 func actionTypeForWatcher(wt domain.WatcherType) string {
 	switch wt {
 	case domain.WatcherStaleWorkOrders:
@@ -148,7 +148,7 @@ func actionTypeForWatcher(wt domain.WatcherType) string {
 	}
 }
 
-// RunWatcher ejecuta un watcher: consulta Pymes, crea propuestas, evalúa con Governance, ejecuta si permite.
+// RunWatcher ejecuta un watcher: consulta Pymes, crea propuestas, evalúa con Nexus, ejecuta si permite.
 func (uc *Usecases) RunWatcher(ctx context.Context, watcherID uuid.UUID) (*domain.WatcherResult, error) {
 	w, err := uc.repo.GetWatcher(ctx, watcherID)
 	if err != nil {
@@ -386,9 +386,9 @@ func (uc *Usecases) processItem(ctx context.Context, w domain.Watcher, item doma
 		return proposal, fmt.Errorf("build connector intent: %w", err)
 	}
 
-	// Consultar Governance
+	// Consultar Nexus
 	idempotencyKey := fmt.Sprintf("companion-watcher-%s-%s", w.ID, proposal.ID)
-	governanceParams := map[string]any{
+	nexusParams := map[string]any{
 		"org_id":               w.OrgID,
 		"proposal_id":          proposal.ID.String(),
 		"watcher_id":           w.ID.String(),
@@ -397,40 +397,40 @@ func (uc *Usecases) processItem(ctx context.Context, w domain.Watcher, item doma
 		"action_binding":       binding,
 		"binding_hash":         bindingHash,
 	}
-	governanceResp, err := uc.governance.SubmitRequest(ctx, idempotencyKey, governanceclient.SubmitRequestBody{
+	nexusResp, err := uc.nexus.SubmitRequest(ctx, idempotencyKey, nexusclient.SubmitRequestBody{
 		RequesterType:  "service",
 		RequesterID:    "nexus_companion",
 		RequesterName:  "Nexus Companion Watcher",
 		ActionType:     "companion.propose",
 		TargetSystem:   fmt.Sprint(binding["target_system"]),
 		TargetResource: fmt.Sprint(binding["target_resource"]),
-		Params:         governanceParams,
+		Params:         nexusParams,
 		Reason:         proposal.Reason,
 	})
 	if err != nil {
-		slog.Error("watcher governance submit failed", "proposal_id", proposal.ID, "error", err)
+		slog.Error("watcher nexus submit failed", "proposal_id", proposal.ID, "error", err)
 		// Persistir el fallo en el proposal creado: si no, queda como pending
-		// con governance_request_id NULL — invisible para SyncPendingProposals y
+		// con nexus_request_id NULL — invisible para SyncPendingProposals y
 		// difícil de reconciliar a mano. Marcamos failed con reason para que
 		// un dashboard/listado muestre el orphan.
 		now := time.Now().UTC()
 		proposal.ExecutionStatus = domain.ProposalFailed
 		proposal.ResolvedAt = &now
-		proposal.ExecutionResult = marshalSyncErrorResult("submit_governance_failed", err)
+		proposal.ExecutionResult = marshalSyncErrorResult("submit_nexus_failed", err)
 		if upErr := uc.repo.UpdateProposal(ctx, proposal); upErr != nil {
 			slog.Error("watcher mark submit-failed proposal failed", "proposal_id", proposal.ID, "error", upErr)
 		}
-		return proposal, fmt.Errorf("submit governance request: %w", err)
+		return proposal, fmt.Errorf("submit nexus request: %w", err)
 	}
 
-	governanceID, _ := uuid.Parse(governanceResp.RequestID)
-	if governanceID != uuid.Nil {
-		proposal.GovernanceRequestID = &governanceID
-		execSpec.GovernanceRequestID = &governanceID
+	nexusID, _ := uuid.Parse(nexusResp.RequestID)
+	if nexusID != uuid.Nil {
+		proposal.NexusRequestID = &nexusID
+		execSpec.NexusRequestID = &nexusID
 	}
 
-	decision := governanceResp.Decision
-	proposal.GovernanceDecision = &decision
+	decision := nexusResp.Decision
+	proposal.NexusDecision = &decision
 
 	switch {
 	case decision == "allowed" || decision == "allow" || decision == "approved":
@@ -446,11 +446,11 @@ func (uc *Usecases) processItem(ctx context.Context, w domain.Watcher, item doma
 				errJSON = []byte(`{"error":"marshal_failed"}`)
 			}
 			proposal.ExecutionResult = errJSON
-			uc.reportExecutionToGovernance(ctx, proposal.GovernanceRequestID, execResult, false, execErr.Error())
+			uc.reportExecutionToNexus(ctx, proposal.NexusRequestID, execResult, false, execErr.Error())
 		} else {
 			proposal.ExecutionStatus = domain.ProposalExecuted
 			proposal.ExecutionResult = watcherExecutionResultJSON(execResult, "inline")
-			uc.reportExecutionToGovernance(ctx, proposal.GovernanceRequestID, execResult, true, "")
+			uc.reportExecutionToNexus(ctx, proposal.NexusRequestID, execResult, true, "")
 		}
 
 	case decision == "denied" || decision == "deny" || decision == "rejected":
@@ -477,7 +477,7 @@ func (uc *Usecases) executeAction(ctx context.Context, spec connectordomain.Exec
 	return uc.executor.Execute(ctx, spec)
 }
 
-func (uc *Usecases) buildWatcherExecutionSpec(ctx context.Context, w domain.Watcher, item domain.PymesItem, proposalID uuid.UUID, governanceID *uuid.UUID) (connectordomain.ExecutionSpec, map[string]any, string, error) {
+func (uc *Usecases) buildWatcherExecutionSpec(ctx context.Context, w domain.Watcher, item domain.PymesItem, proposalID uuid.UUID, nexusID *uuid.UUID) (connectordomain.ExecutionSpec, map[string]any, string, error) {
 	if item.PartyID == "" && item.Phone == "" {
 		return connectordomain.ExecutionSpec{}, nil, "", fmt.Errorf("no contact info for item %s", item.ID)
 	}
@@ -497,15 +497,15 @@ func (uc *Usecases) buildWatcherExecutionSpec(ctx context.Context, w domain.Watc
 		return connectordomain.ExecutionSpec{}, nil, "", fmt.Errorf("marshal watcher connector payload: %w", err)
 	}
 	spec := connectordomain.ExecutionSpec{
-		ConnectorID:         connectorID,
-		OrgID:               w.OrgID,
-		ActorID:             "nexus_companion",
-		ProductSurface:      "pymes",
-		AuthScopes:          []string{"companion:connectors:execute"},
-		Operation:           "pymes.send_whatsapp_text",
-		Payload:             payload,
-		IdempotencyKey:      fmt.Sprintf("watcher-execute-%s", proposalID.String()),
-		GovernanceRequestID: governanceID,
+		ConnectorID:    connectorID,
+		OrgID:          w.OrgID,
+		ActorID:        "nexus_companion",
+		ProductSurface: "pymes",
+		AuthScopes:     []string{"companion:connectors:execute"},
+		Operation:      "pymes.send_whatsapp_text",
+		Payload:        payload,
+		IdempotencyKey: fmt.Sprintf("watcher-execute-%s", proposalID.String()),
+		NexusRequestID: nexusID,
 	}
 	binding, bindingHash, err := uc.executor.BuildActionBinding(ctx, spec)
 	if err != nil {
@@ -558,8 +558,8 @@ func watcherExecutionResultJSON(result connectordomain.ExecutionResult, via stri
 	return raw
 }
 
-func (uc *Usecases) reportExecutionToGovernance(ctx context.Context, governanceID *uuid.UUID, result connectordomain.ExecutionResult, success bool, errorMessage string) {
-	if uc.governance == nil || governanceID == nil || *governanceID == uuid.Nil {
+func (uc *Usecases) reportExecutionToNexus(ctx context.Context, nexusID *uuid.UUID, result connectordomain.ExecutionResult, success bool, errorMessage string) {
+	if uc.nexus == nil || nexusID == nil || *nexusID == uuid.Nil {
 		return
 	}
 	payload := map[string]any{
@@ -570,10 +570,10 @@ func (uc *Usecases) reportExecutionToGovernance(ctx context.Context, governanceI
 		"org_id":                 result.OrgID,
 		"actor_id":               result.ActorID,
 	}
-	status, err := uc.governance.ReportResult(ctx, governanceID.String(), success, payload, result.DurationMS, errorMessage)
+	status, err := uc.nexus.ReportResult(ctx, nexusID.String(), success, payload, result.DurationMS, errorMessage)
 	if err != nil || status >= 400 {
-		slog.Warn("watcher report execution to governance failed",
-			"governance_request_id", governanceID.String(),
+		slog.Warn("watcher report execution to nexus failed",
+			"nexus_request_id", nexusID.String(),
 			"status", status,
 			"error", err)
 	}
@@ -641,10 +641,10 @@ func (uc *Usecases) SyncPendingProposals(ctx context.Context, orgID string, limi
 		if i >= limit {
 			break
 		}
-		if p.GovernanceRequestID == nil {
+		if p.NexusRequestID == nil {
 			continue
 		}
-		summary, statusCode, err := uc.governance.GetRequest(ctx, p.GovernanceRequestID.String())
+		summary, statusCode, err := uc.nexus.GetRequest(ctx, p.NexusRequestID.String())
 		if err != nil || statusCode == 404 {
 			continue
 		}
@@ -654,7 +654,7 @@ func (uc *Usecases) SyncPendingProposals(ctx context.Context, orgID string, limi
 		}
 
 		decision := summary.Decision
-		p.GovernanceDecision = &decision
+		p.NexusDecision = &decision
 		now := time.Now().UTC()
 		p.ResolvedAt = &now
 
@@ -689,7 +689,7 @@ func (uc *Usecases) SyncPendingProposals(ctx context.Context, orgID string, limi
 			continue
 		}
 
-		execSpec, _, _, specErr := uc.buildWatcherExecutionSpec(ctx, w, item, p.ID, p.GovernanceRequestID)
+		execSpec, _, _, specErr := uc.buildWatcherExecutionSpec(ctx, w, item, p.ID, p.NexusRequestID)
 		if specErr != nil {
 			slog.Error("sync build connector intent failed", "proposal_id", p.ID, "error", specErr)
 			p.ExecutionStatus = domain.ProposalFailed
@@ -698,11 +698,11 @@ func (uc *Usecases) SyncPendingProposals(ctx context.Context, orgID string, limi
 			slog.Error("sync execute approved proposal failed", "proposal_id", p.ID, "error", execErr)
 			p.ExecutionStatus = domain.ProposalFailed
 			p.ExecutionResult = marshalSyncErrorResult("execution_failed", execErr)
-			uc.reportExecutionToGovernance(ctx, p.GovernanceRequestID, execResult, false, execErr.Error())
+			uc.reportExecutionToNexus(ctx, p.NexusRequestID, execResult, false, execErr.Error())
 		} else {
 			p.ExecutionStatus = domain.ProposalExecuted
 			p.ExecutionResult = watcherExecutionResultJSON(execResult, "sync_loop")
-			uc.reportExecutionToGovernance(ctx, p.GovernanceRequestID, execResult, true, "")
+			uc.reportExecutionToNexus(ctx, p.NexusRequestID, execResult, true, "")
 		}
 		if err := uc.repo.UpdateProposal(ctx, p); err != nil {
 			slog.Error("sync update proposal failed", "proposal_id", p.ID, "error", err)

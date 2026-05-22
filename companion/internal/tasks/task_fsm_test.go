@@ -3,8 +3,8 @@ package tasks
 import (
 	"testing"
 
+	"github.com/devpablocristo/companion/internal/nexusclient"
 	domain "github.com/devpablocristo/companion/internal/tasks/usecases/domain"
-	"github.com/devpablocristo/platform/kernels/governance/go/governanceclient"
 )
 
 func TestEventFromSubmitResponse(t *testing.T) {
@@ -13,59 +13,59 @@ func TestEventFromSubmitResponse(t *testing.T) {
 		status string
 		want   string
 	}{
-		{"allowed", evGovernanceResolvedAllow},
-		{" executed ", evGovernanceResolvedAllow},
-		{"ALLOWED", evGovernanceResolvedAllow},
-		{"denied", evGovernanceResolvedDeny},
-		{"pending_approval", evGovernancePendingApproval},
+		{"allowed", evNexusResolvedAllow},
+		{" executed ", evNexusResolvedAllow},
+		{"ALLOWED", evNexusResolvedAllow},
+		{"denied", evNexusResolvedDeny},
+		{"pending_approval", evNexusPendingApproval},
 	}
 	for _, tc := range cases {
-		ev, err := eventFromSubmitResponse(governanceclient.SubmitResponse{Status: tc.status})
+		ev, err := eventFromSubmitResponse(nexusclient.SubmitResponse{Status: tc.status})
 		if err != nil || ev != tc.want {
 			t.Fatalf("status %q: got %q %v want %q", tc.status, ev, err, tc.want)
 		}
 	}
-	_, err := eventFromSubmitResponse(governanceclient.SubmitResponse{Status: "weird"})
+	_, err := eventFromSubmitResponse(nexusclient.SubmitResponse{Status: "weird"})
 	if err == nil {
 		t.Fatal("expected error for unknown status")
 	}
 }
 
-func TestEventFromGovernanceRequestStatus(t *testing.T) {
+func TestEventFromNexusRequestStatus(t *testing.T) {
 	t.Parallel()
-	ev, ok := eventFromGovernanceRequestStatus("pending_approval")
+	ev, ok := eventFromNexusRequestStatus("pending_approval")
 	if ok || ev != "" {
 		t.Fatalf("pending: got %q %v", ev, ok)
 	}
-	ev, ok = eventFromGovernanceRequestStatus("evaluated")
+	ev, ok = eventFromNexusRequestStatus("evaluated")
 	if ok || ev != "" {
 		t.Fatalf("evaluated: got %q %v", ev, ok)
 	}
-	ev, ok = eventFromGovernanceRequestStatus("approved")
-	if !ok || ev != evGovernanceResolvedAllow {
+	ev, ok = eventFromNexusRequestStatus("approved")
+	if !ok || ev != evNexusResolvedAllow {
 		t.Fatalf("approved: got %q %v", ev, ok)
 	}
-	ev, ok = eventFromGovernanceRequestStatus("rejected")
-	if !ok || ev != evGovernanceResolvedDeny {
+	ev, ok = eventFromNexusRequestStatus("rejected")
+	if !ok || ev != evNexusResolvedDeny {
 		t.Fatalf("rejected: got %q %v", ev, ok)
 	}
-	ev, ok = eventFromGovernanceRequestStatus("expired")
-	if !ok || ev != evGovernanceResolvedDeny {
+	ev, ok = eventFromNexusRequestStatus("expired")
+	if !ok || ev != evNexusResolvedDeny {
 		t.Fatalf("expired: got %q %v", ev, ok)
 	}
 }
 
-func TestEventFromGovernanceRequestStatusWithExecutionPlan(t *testing.T) {
+func TestEventFromNexusRequestStatusWithExecutionPlan(t *testing.T) {
 	t.Parallel()
-	ev, ok := eventFromGovernanceRequestStatusWithExecutionPlan("approved", true)
-	if !ok || ev != evGovernanceResolvedAllowAwaitInput {
+	ev, ok := eventFromNexusRequestStatusWithExecutionPlan("approved", true)
+	if !ok || ev != evNexusResolvedAllowAwaitInput {
 		t.Fatalf("approved with execution plan: got %q %v", ev, ok)
 	}
 }
 
 // TestFSMContract_HandlesAllNexusStatuses garantiza que el FSM de
 // Companion mapea TODOS los statuses canónicos publicados por Nexus en
-// governanceclient.KnownStatuses. Si Nexus agrega un status nuevo, la
+// nexusclient.KnownStatuses. Si Nexus agrega un status nuevo, la
 // slice crece y el test falla hasta que un dev:
 //  1. Agrega el case correspondiente en task_fsm.go.
 //  2. Agrega la fila en este test (expected map).
@@ -78,33 +78,33 @@ func TestFSMContract_HandlesAllNexusStatuses(t *testing.T) {
 		apply bool
 	}
 	expected := map[string]expectation{
-		governanceclient.StatusPending:         {"", false},
-		governanceclient.StatusEvaluated:       {"", false},
-		governanceclient.StatusPendingApproval: {"", false},
-		governanceclient.StatusAllowed:         {evGovernanceResolvedAllow, true},
-		governanceclient.StatusApproved:        {evGovernanceResolvedAllow, true},
-		governanceclient.StatusExecuted:        {evGovernanceResolvedAllow, true},
-		governanceclient.StatusDenied:          {evGovernanceResolvedDeny, true},
-		governanceclient.StatusRejected:        {evGovernanceResolvedDeny, true},
-		governanceclient.StatusExpired:         {evGovernanceResolvedDeny, true},
-		governanceclient.StatusFailed:          {evGovernanceResolvedDeny, true},
-		governanceclient.StatusCancelled:       {evGovernanceResolvedDeny, true},
+		nexusclient.StatusPending:         {"", false},
+		nexusclient.StatusEvaluated:       {"", false},
+		nexusclient.StatusPendingApproval: {"", false},
+		nexusclient.StatusAllowed:         {evNexusResolvedAllow, true},
+		nexusclient.StatusApproved:        {evNexusResolvedAllow, true},
+		nexusclient.StatusExecuted:        {evNexusResolvedAllow, true},
+		nexusclient.StatusDenied:          {evNexusResolvedDeny, true},
+		nexusclient.StatusRejected:        {evNexusResolvedDeny, true},
+		nexusclient.StatusExpired:         {evNexusResolvedDeny, true},
+		nexusclient.StatusFailed:          {evNexusResolvedDeny, true},
+		nexusclient.StatusCancelled:       {evNexusResolvedDeny, true},
 	}
 
-	if len(expected) != len(governanceclient.KnownStatuses) {
-		t.Fatalf("contract drift: governanceclient.KnownStatuses has %d entries but this test expects %d. "+
+	if len(expected) != len(nexusclient.KnownStatuses) {
+		t.Fatalf("contract drift: nexusclient.KnownStatuses has %d entries but this test expects %d. "+
 			"Nexus may have added/removed a status — update both task_fsm.go and the expected map below.",
-			len(governanceclient.KnownStatuses), len(expected))
+			len(nexusclient.KnownStatuses), len(expected))
 	}
 
-	for _, status := range governanceclient.KnownStatuses {
+	for _, status := range nexusclient.KnownStatuses {
 		exp, found := expected[status]
 		if !found {
-			t.Errorf("contract: governanceclient.KnownStatuses includes %q but the FSM contract test has no row for it. "+
+			t.Errorf("contract: nexusclient.KnownStatuses includes %q but the FSM contract test has no row for it. "+
 				"Update task_fsm.go to handle it, then add the expected mapping in this test.", status)
 			continue
 		}
-		ev, apply := eventFromGovernanceRequestStatus(status)
+		ev, apply := eventFromNexusRequestStatus(status)
 		if ev != exp.event || apply != exp.apply {
 			t.Errorf("status %q: got (event=%q, apply=%v) want (event=%q, apply=%v)",
 				status, ev, apply, exp.event, exp.apply)
@@ -119,22 +119,22 @@ func TestFSMContract_HandlesAllNexusStatuses(t *testing.T) {
 func TestFSMContract_SubmitResponseCoversImmediate(t *testing.T) {
 	t.Parallel()
 	immediate := []string{
-		governanceclient.StatusAllowed,
-		governanceclient.StatusApproved,
-		governanceclient.StatusExecuted,
-		governanceclient.StatusDenied,
-		governanceclient.StatusRejected,
-		governanceclient.StatusPendingApproval,
+		nexusclient.StatusAllowed,
+		nexusclient.StatusApproved,
+		nexusclient.StatusExecuted,
+		nexusclient.StatusDenied,
+		nexusclient.StatusRejected,
+		nexusclient.StatusPendingApproval,
 	}
 	for _, s := range immediate {
-		ev, err := eventFromSubmitResponse(governanceclient.SubmitResponse{Status: s})
+		ev, err := eventFromSubmitResponse(nexusclient.SubmitResponse{Status: s})
 		if err != nil || ev == "" {
 			t.Errorf("submit-response status %q: got (event=%q, err=%v) — expected a defined event", s, ev, err)
 		}
 	}
 }
 
-func TestCompanionTaskFSM_investigateAndGovernance(t *testing.T) {
+func TestCompanionTaskFSM_investigateAndNexus(t *testing.T) {
 	t.Parallel()
 	m := companionTaskMachine()
 	to, err := m.Transition(domain.TaskStatusNew, evInvestigate)
@@ -145,15 +145,15 @@ func TestCompanionTaskFSM_investigateAndGovernance(t *testing.T) {
 	if err != nil || to != domain.TaskStatusInvestigating {
 		t.Fatalf("investigate idempotent: %q %v", to, err)
 	}
-	to, err = m.Transition(domain.TaskStatusInvestigating, evGovernancePendingApproval)
+	to, err = m.Transition(domain.TaskStatusInvestigating, evNexusPendingApproval)
 	if err != nil || to != domain.TaskStatusWaitingForApproval {
 		t.Fatalf("pending: %q %v", to, err)
 	}
-	to, err = m.Transition(domain.TaskStatusInvestigating, evGovernanceResolvedAllow)
+	to, err = m.Transition(domain.TaskStatusInvestigating, evNexusResolvedAllow)
 	if err != nil || to != domain.TaskStatusDone {
 		t.Fatalf("allow from investigating: %q %v", to, err)
 	}
-	to, err = m.Transition(domain.TaskStatusWaitingForApproval, evGovernanceResolvedAllowAwaitInput)
+	to, err = m.Transition(domain.TaskStatusWaitingForApproval, evNexusResolvedAllowAwaitInput)
 	if err != nil || to != domain.TaskStatusWaitingForInput {
 		t.Fatalf("allow awaiting input: %q %v", to, err)
 	}

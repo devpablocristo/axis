@@ -1,0 +1,14 @@
+FROM node:22.12-alpine AS build
+
+WORKDIR /src/console
+
+COPY console/package*.json ./
+RUN npm ci
+
+COPY console/ ./
+RUN npm run build
+
+FROM nginx:1.27-alpine
+COPY console.nginx.conf.template /etc/nginx/templates/default.conf.template
+COPY --from=build /src/console/dist /usr/share/nginx/html
+EXPOSE 80

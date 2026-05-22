@@ -55,8 +55,8 @@ type ProposalResponse struct {
 	TargetResource  string          `json:"target_resource"`
 	Params          json.RawMessage `json:"params"`
 	Reason          string          `json:"reason"`
-	GovernanceRequestID *string         `json:"governance_request_id,omitempty"`
-	GovernanceDecision  *string         `json:"governance_decision,omitempty"`
+	NexusRequestID  *string         `json:"nexus_request_id,omitempty"`
+	NexusDecision   *string         `json:"nexus_decision,omitempty"`
 	ExecutionStatus string          `json:"execution_status"`
 	ExecutionResult json.RawMessage `json:"execution_result,omitempty"`
 	CreatedAt       string          `json:"created_at"`
@@ -109,12 +109,12 @@ func ProposalToResponse(p domain.Proposal) ProposalResponse {
 		ExecutionResult: p.ExecutionResult,
 		CreatedAt:       p.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
-	if p.GovernanceRequestID != nil {
-		s := p.GovernanceRequestID.String()
-		resp.GovernanceRequestID = &s
+	if p.NexusRequestID != nil {
+		s := p.NexusRequestID.String()
+		resp.NexusRequestID = &s
 	}
-	if p.GovernanceDecision != nil {
-		resp.GovernanceDecision = p.GovernanceDecision
+	if p.NexusDecision != nil {
+		resp.NexusDecision = p.NexusDecision
 	}
 	if p.ResolvedAt != nil {
 		s := p.ResolvedAt.Format("2006-01-02T15:04:05Z07:00")
