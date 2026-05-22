@@ -35,17 +35,33 @@ type ProviderConfig struct {
 	VertexLocation string
 }
 
-// NewProvider crea el provider Gemini. Companion solo soporta Gemini via
-// Vertex AI; cualquier otro provider falla en boot para evitar drift local/GCP.
+// NewProvider crea el provider LLM. En runtime real Companion usa Gemini via
+// Vertex AI; fake/noop queda solo para desarrollo local sin credenciales GCP.
 func NewProvider(cfg ProviderConfig) (LLMProvider, error) {
 	provider := strings.ToLower(strings.TrimSpace(cfg.Provider))
 	if provider == "" {
 		provider = DefaultGeminiProvider
 	}
+	if provider == "fake" || provider == "noop" || provider == "echo" {
+		return fakeProvider{}, nil
+	}
 	if provider != "vertex" && provider != "vertex_ai" {
-		return nil, fmt.Errorf("unsupported COMPANION_LLM_PROVIDER=%q: companion only supports Gemini via Vertex AI", cfg.Provider)
+		return nil, fmt.Errorf("unsupported COMPANION_LLM_PROVIDER=%q: companion supports vertex or fake", cfg.Provider)
 	}
 	return newVertexProvider(cfg)
+}
+
+type fakeProvider struct{}
+
+func (fakeProvider) Chat(_ context.Context, req ChatRequest) (ChatResponse, error) {
+	content := "Companion local runtime is ready."
+	for i := len(req.Messages) - 1; i >= 0; i-- {
+		if req.Messages[i].Role == "user" && strings.TrimSpace(req.Messages[i].Content) != "" {
+			content = "Companion local runtime received: " + strings.TrimSpace(req.Messages[i].Content)
+			break
+		}
+	}
+	return ChatResponse{Text: content}, nil
 }
 
 func newVertexProvider(cfg ProviderConfig) (LLMProvider, error) {
