@@ -27,7 +27,7 @@ func principalOrgID(r *http.Request) string { return identityhttp.PrincipalOrgID
 
 func canAccessTaskOrg(r *http.Request, task domain.Task) bool {
 	taskOrg := strings.TrimSpace(task.OrgID)
-	if identityhttp.HasNoAuthContext(r) {
+	if identityhttp.HasNoAuthContext(r) || identityhttp.HasScope(r, "companion:cross_org") {
 		return true
 	}
 	orgID := principalOrgID(r)

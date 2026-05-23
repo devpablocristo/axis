@@ -13,6 +13,7 @@ import (
 
 	"github.com/devpablocristo/platform/concurrency/go/worker"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
+	"github.com/devpablocristo/platform/security/go/tenant"
 	"github.com/google/uuid"
 
 	connectordomain "github.com/devpablocristo/companion/internal/connectors/usecases/domain"
@@ -193,8 +194,17 @@ func (u *Usecases) Create(ctx context.Context, in CreateTaskInput) (domain.Task,
 	return out, nil
 }
 
-func (u *Usecases) List(ctx context.Context, orgID string, limit int) ([]domain.Task, error) {
+// List devuelve tareas para un tenant. `orgID` obligatorio; vacío retorna
+// `domainerr.TenantMissing` (el repo enforce esta semántica también).
+func (u *Usecases) List(ctx context.Context, orgID tenant.ID, limit int) ([]domain.Task, error) {
 	return u.repo.ListTasks(ctx, orgID, limit)
+}
+
+// ListAll devuelve tareas SIN filtro de tenant. SOLO callable después de
+// validar `companion:cross_org` (o dev mode sin auth). El usecase no valida
+// scopes; eso vive en el handler.
+func (u *Usecases) ListAll(ctx context.Context, limit int) ([]domain.Task, error) {
+	return u.repo.ListAllTasks(ctx, limit)
 }
 
 func (u *Usecases) Get(ctx context.Context, id uuid.UUID) (domain.Task, error) {

@@ -9,13 +9,17 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/devpablocristo/platform/authn/go/identityhttp"
 	"github.com/devpablocristo/platform/http/go/httpjson"
+	"github.com/devpablocristo/platform/security/go/tenant"
 	"github.com/google/uuid"
 
 	"github.com/devpablocristo/companion/internal/nexusclient"
 	tasksdto "github.com/devpablocristo/companion/internal/tasks/handler/dto"
 	domain "github.com/devpablocristo/companion/internal/tasks/usecases/domain"
 )
+
+const scopeCompanionCrossOrg = "companion:cross_org"
 
 const (
 	defaultListLimit = 50
@@ -24,7 +28,8 @@ const (
 
 type taskUsecase interface {
 	Create(ctx context.Context, in CreateTaskInput) (domain.Task, error)
-	List(ctx context.Context, orgID string, limit int) ([]domain.Task, error)
+	List(ctx context.Context, orgID tenant.ID, limit int) ([]domain.Task, error)
+	ListAll(ctx context.Context, limit int) ([]domain.Task, error)
 	Get(ctx context.Context, id uuid.UUID) (domain.Task, error)
 	GetDetail(ctx context.Context, id uuid.UUID) (TaskDetail, error)
 	AddMessage(ctx context.Context, taskID uuid.UUID, in AddMessageInput) (domain.TaskMessage, error)
@@ -101,7 +106,29 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 			limit = n
 		}
 	}
-	list, err := h.uc.List(r.Context(), principalOrgID(r), limit)
+	// Routing por scope/auth:
+	//   - sin auth context (dev/healthz)     → ListAll (paridad legacy)
+	//   - con scope companion:cross_org      → ListAll (admin explícito)
+	//   - con principal y org_id no-vacío    → List(orgID) strict
+	//   - con principal y org_id vacío       → 403 (tenant context required)
+	//
+	// Cierra el leak histórico donde principalOrgID(r) == "" + auth presente
+	// devolvía TODOS los tenants.
+	var (
+		list []domain.Task
+		err  error
+	)
+	switch {
+	case identityhttp.HasNoAuthContext(r), identityhttp.HasScope(r, scopeCompanionCrossOrg):
+		list, err = h.uc.ListAll(r.Context(), limit)
+	default:
+		orgID := tenant.FromString(principalOrgID(r))
+		if orgID.IsZero() {
+			httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "tenant context required")
+			return
+		}
+		list, err = h.uc.List(r.Context(), orgID, limit)
+	}
 	if err != nil {
 		httpjson.WriteFlatInternalError(w, err, "list tasks failed")
 		return

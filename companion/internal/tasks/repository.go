@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/devpablocristo/platform/errors/go/domainerr"
+	"github.com/devpablocristo/platform/security/go/tenant"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
@@ -21,10 +22,15 @@ var ErrNotFound = domainerr.NotFound("not found")
 type Repository interface {
 	CreateTask(ctx context.Context, t domain.Task) (domain.Task, error)
 	GetTaskByID(ctx context.Context, id uuid.UUID) (domain.Task, error)
-	// ListTasks devuelve tareas. Si orgID es no-vacío, filtra a nivel SQL
-	// por (org_id = orgID OR org_id IS NULL OR org_id = '') para preservar
-	// aislamiento multi-tenant. Si orgID es vacío, devuelve todas las tareas.
-	ListTasks(ctx context.Context, orgID string, limit int) ([]domain.Task, error)
+	// ListTasks devuelve tareas filtradas por tenant. `orgID` es obligatorio:
+	// si está vacío, retorna `domainerr.TenantMissing()` sin tocar la DB.
+	// Cerrá el leak histórico donde `orgID == ""` devolvía todas las filas
+	// de TODOS los tenants.
+	ListTasks(ctx context.Context, orgID tenant.ID, limit int) ([]domain.Task, error)
+	// ListAllTasks devuelve tareas SIN filtrar por tenant. SOLO para flows
+	// admin/audit con scope `companion:cross_org` o requests sin auth context
+	// (dev/healthcheck). El handler debe validar el caller antes de invocar.
+	ListAllTasks(ctx context.Context, limit int) ([]domain.Task, error)
 	UpdateTask(ctx context.Context, t domain.Task) (domain.Task, error)
 	ListTasksByStatus(ctx context.Context, status string, limit int) ([]domain.Task, error)
 	ListTasksPendingNexusSync(ctx context.Context, now time.Time, limit int) ([]domain.Task, error)
@@ -102,25 +108,43 @@ func (r *PostgresRepository) GetTaskByID(ctx context.Context, id uuid.UUID) (dom
 	return t, nil
 }
 
-func (r *PostgresRepository) ListTasks(ctx context.Context, orgID string, limit int) ([]domain.Task, error) {
+func (r *PostgresRepository) ListTasks(ctx context.Context, orgID tenant.ID, limit int) ([]domain.Task, error) {
+	if orgID.IsZero() {
+		return nil, domainerr.TenantMissing()
+	}
 	if limit <= 0 {
 		limit = 50
 	}
-	var (
-		rows pgx.Rows
-		err  error
-	)
-	if orgID != "" {
-		rows, err = r.db.Pool().Query(ctx,
-			selectTask+` WHERE t.org_id = $1
-				ORDER BY t.updated_at DESC LIMIT $2`,
-			orgID, limit)
-	} else {
-		rows, err = r.db.Pool().Query(ctx,
-			selectTask+` ORDER BY t.updated_at DESC LIMIT $1`, limit)
-	}
+	rows, err := r.db.Pool().Query(ctx,
+		selectTask+` WHERE t.org_id = $1
+			ORDER BY t.updated_at DESC LIMIT $2`,
+		orgID.String(), limit)
 	if err != nil {
 		return nil, fmt.Errorf("list tasks: %w", err)
+	}
+	defer rows.Close()
+	var out []domain.Task
+	for rows.Next() {
+		t, err := scanTask(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// ListAllTasks ejecuta el SELECT sin filtro de tenant. Caller responsibility:
+// confirmar via scope/auth context que la llamada está autorizada para acceder
+// cross-org. Ver handler.list para el routing.
+func (r *PostgresRepository) ListAllTasks(ctx context.Context, limit int) ([]domain.Task, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := r.db.Pool().Query(ctx,
+		selectTask+` ORDER BY t.updated_at DESC LIMIT $1`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list all tasks: %w", err)
 	}
 	defer rows.Close()
 	var out []domain.Task

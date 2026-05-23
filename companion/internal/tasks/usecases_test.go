@@ -15,6 +15,8 @@ import (
 	connectordomain "github.com/devpablocristo/companion/internal/connectors/usecases/domain"
 	"github.com/devpablocristo/companion/internal/nexusclient"
 	domain "github.com/devpablocristo/companion/internal/tasks/usecases/domain"
+	"github.com/devpablocristo/platform/errors/go/domainerr"
+	"github.com/devpablocristo/platform/security/go/tenant"
 )
 
 type fakeRepo struct {
@@ -56,12 +58,29 @@ func (f *fakeRepo) GetTaskByID(ctx context.Context, id uuid.UUID) (domain.Task, 
 	return t, nil
 }
 
-func (f *fakeRepo) ListTasks(ctx context.Context, orgID string, limit int) ([]domain.Task, error) {
+func (f *fakeRepo) ListTasks(ctx context.Context, orgID tenant.ID, limit int) ([]domain.Task, error) {
+	if orgID.IsZero() {
+		return nil, domainerr.TenantMissing()
+	}
+	scope := orgID.String()
 	var out []domain.Task
 	for _, t := range f.tasks {
-		if orgID != "" && t.OrgID != "" && t.OrgID != orgID {
+		if t.OrgID != "" && t.OrgID != scope {
 			continue
 		}
+		if state, ok := f.nexusSync[t.ID]; ok {
+			t.NexusStatus = state.LastNexusStatus
+			t.NexusLastCheckedAt = &state.LastCheckedAt
+			t.NexusSyncError = state.LastError
+		}
+		out = append(out, t)
+	}
+	return out, nil
+}
+
+func (f *fakeRepo) ListAllTasks(ctx context.Context, limit int) ([]domain.Task, error) {
+	var out []domain.Task
+	for _, t := range f.tasks {
 		if state, ok := f.nexusSync[t.ID]; ok {
 			t.NexusStatus = state.LastNexusStatus
 			t.NexusLastCheckedAt = &state.LastCheckedAt
@@ -1213,6 +1232,74 @@ func TestUsecases_RetryTask_reexecutesRetryableFailure(t *testing.T) {
 	}
 	if repo.countActions(TaskActionRetryExecution) != 1 {
 		t.Fatalf("expected one retry action, got %d", repo.countActions(TaskActionRetryExecution))
+	}
+}
+
+// TestList_RejectsEmptyOrgID asegura que la firma strict de Usecases.List
+// cierre el leak histórico: orgID vacío debe fallar con TenantMissing y
+// nunca devolver tasks (Fase 5 del plan multitenancy).
+func TestList_RejectsEmptyOrgID(t *testing.T) {
+	t.Parallel()
+	repo := &fakeRepo{tasks: map[uuid.UUID]domain.Task{
+		uuid.New(): {ID: uuid.New(), Title: "leak-bait", OrgID: "tenant-A"},
+		uuid.New(): {ID: uuid.New(), Title: "leak-bait-2", OrgID: "tenant-B"},
+	}}
+	uc := NewUsecases(repo, &stubNexus{})
+
+	got, err := uc.List(context.Background(), tenant.ID(""), 100)
+	if err == nil {
+		t.Fatal("expected error for empty orgID")
+	}
+	if !errors.Is(err, domainerr.TenantMissing()) {
+		t.Errorf("expected TenantMissing, got %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("expected zero rows on error, got %d (LEAK)", len(got))
+	}
+}
+
+// TestList_FiltersByOrgID confirma que orgID válido SÍ aplica el filtro
+// y no incluye tasks de otros tenants.
+func TestList_FiltersByOrgID(t *testing.T) {
+	t.Parallel()
+	repo := &fakeRepo{tasks: map[uuid.UUID]domain.Task{
+		uuid.New(): {ID: uuid.New(), Title: "A1", OrgID: "tenant-A"},
+		uuid.New(): {ID: uuid.New(), Title: "A2", OrgID: "tenant-A"},
+		uuid.New(): {ID: uuid.New(), Title: "B1", OrgID: "tenant-B"},
+	}}
+	uc := NewUsecases(repo, &stubNexus{})
+
+	got, err := uc.List(context.Background(), tenant.FromString("tenant-A"), 100)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 rows for tenant-A, got %d", len(got))
+	}
+	for _, task := range got {
+		if task.OrgID != "tenant-A" {
+			t.Errorf("leaked row: %+v", task)
+		}
+	}
+}
+
+// TestListAll_BypassesTenantScope confirma que ListAll devuelve TODAS las
+// rows — pensado para flows admin con scope companion:cross_org. El handler
+// es quien valida el caller; el usecase confía en lo que recibe.
+func TestListAll_BypassesTenantScope(t *testing.T) {
+	t.Parallel()
+	repo := &fakeRepo{tasks: map[uuid.UUID]domain.Task{
+		uuid.New(): {ID: uuid.New(), Title: "A", OrgID: "tenant-A"},
+		uuid.New(): {ID: uuid.New(), Title: "B", OrgID: "tenant-B"},
+	}}
+	uc := NewUsecases(repo, &stubNexus{})
+
+	got, err := uc.ListAll(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("ListAll: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 rows across orgs, got %d", len(got))
 	}
 }
 
