@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	evidencedomain "github.com/devpablocristo/nexus/internal/evidence/usecases/domain"
+	"github.com/devpablocristo/platform/authn/go/identityhttp"
 	"github.com/devpablocristo/platform/http/go/httpjson"
 )
 
@@ -14,7 +15,7 @@ const (
 )
 
 func requireScope(w http.ResponseWriter, r *http.Request, scopes ...string) bool {
-	if requestHasNoAuthContext(r) || requestHasScope(r, scopes...) {
+	if identityhttp.HasNoAuthContext(r) || identityhttp.HasAnyScope(r, scopes...) {
 		return true
 	}
 	httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "missing required scope")
@@ -22,10 +23,10 @@ func requireScope(w http.ResponseWriter, r *http.Request, scopes ...string) bool
 }
 
 func canAccessEvidenceOrg(r *http.Request, pack evidencedomain.EvidencePack) bool {
-	if requestHasNoAuthContext(r) || requestHasScope(r, scopeNexusCrossOrg) {
+	if identityhttp.HasNoAuthContext(r) || identityhttp.HasScope(r, scopeNexusCrossOrg) {
 		return true
 	}
-	orgID := strings.TrimSpace(r.Header.Get("X-Org-ID"))
+	orgID := identityhttp.PrincipalOrgID(r)
 	// Antes esto sacaba el org del bag user-controlled `Params["org_id"]`,
 	// permitiendo bypass cross-org si el caller original no incluía la
 	// clave. Ahora usamos pack.Request.OrgID que viene de la columna
@@ -35,31 +36,4 @@ func canAccessEvidenceOrg(r *http.Request, pack evidencedomain.EvidencePack) boo
 		return false
 	}
 	return packOrg == orgID
-}
-
-func requestHasNoAuthContext(r *http.Request) bool {
-	return strings.TrimSpace(r.Header.Get("X-Auth-Method")) == "" &&
-		strings.TrimSpace(r.Header.Get("X-Auth-Scopes")) == ""
-}
-
-func requestHasScope(r *http.Request, scopes ...string) bool {
-	have := parseHeaderScopes(r.Header.Get("X-Auth-Scopes"))
-	for _, scope := range scopes {
-		if _, ok := have[scope]; ok {
-			return true
-		}
-	}
-	return false
-}
-
-func parseHeaderScopes(raw string) map[string]struct{} {
-	raw = strings.NewReplacer(",", " ", ";", " ", "+", " ").Replace(raw)
-	fields := strings.Fields(raw)
-	out := make(map[string]struct{}, len(fields))
-	for _, field := range fields {
-		if scope := strings.TrimSpace(field); scope != "" {
-			out[scope] = struct{}{}
-		}
-	}
-	return out
 }

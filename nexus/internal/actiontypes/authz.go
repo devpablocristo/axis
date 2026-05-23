@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/devpablocristo/platform/authn/go/identityhttp"
 	"github.com/devpablocristo/platform/http/go/httpjson"
 )
 
@@ -13,7 +14,7 @@ const (
 )
 
 func requireScope(w http.ResponseWriter, r *http.Request, scopes ...string) bool {
-	if requestHasNoAuthContext(r) || requestHasScope(r, scopes...) {
+	if identityhttp.HasNoAuthContext(r) || identityhttp.HasAnyScope(r, scopes...) {
 		return true
 	}
 	httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "missing required scope")
@@ -21,10 +22,10 @@ func requireScope(w http.ResponseWriter, r *http.Request, scopes ...string) bool
 }
 
 func effectiveActionTypeOrg(r *http.Request, requested *string) (*string, bool) {
-	if requestHasNoAuthContext(r) || requestHasScope(r, scopeNexusCrossOrg) {
+	if identityhttp.HasNoAuthContext(r) || identityhttp.HasScope(r, scopeNexusCrossOrg) {
 		return normalizeOrgPtr(requested), true
 	}
-	orgID := strings.TrimSpace(r.Header.Get("X-Org-ID"))
+	orgID := identityhttp.PrincipalOrgID(r)
 	if orgID == "" {
 		return nil, false
 	}
@@ -35,10 +36,10 @@ func effectiveActionTypeOrg(r *http.Request, requested *string) (*string, bool) 
 }
 
 func canAccessActionTypeOrg(r *http.Request, orgID *string) bool {
-	if requestHasNoAuthContext(r) || requestHasScope(r, scopeNexusCrossOrg) {
+	if identityhttp.HasNoAuthContext(r) || identityhttp.HasScope(r, scopeNexusCrossOrg) {
 		return true
 	}
-	principalOrgID := strings.TrimSpace(r.Header.Get("X-Org-ID"))
+	principalOrgID := identityhttp.PrincipalOrgID(r)
 	if principalOrgID == "" {
 		return orgID == nil || strings.TrimSpace(*orgID) == ""
 	}
@@ -49,18 +50,18 @@ func canAccessActionTypeOrg(r *http.Request, orgID *string) bool {
 }
 
 func canWriteActionTypeOrg(r *http.Request, orgID *string) bool {
-	if requestHasNoAuthContext(r) || requestHasScope(r, scopeNexusCrossOrg) {
+	if identityhttp.HasNoAuthContext(r) || identityhttp.HasScope(r, scopeNexusCrossOrg) {
 		return true
 	}
-	principalOrgID := strings.TrimSpace(r.Header.Get("X-Org-ID"))
+	principalOrgID := identityhttp.PrincipalOrgID(r)
 	return principalOrgID != "" && orgID != nil && strings.TrimSpace(*orgID) == principalOrgID
 }
 
 func listActionTypesOrg(r *http.Request) (*string, bool) {
-	if requestHasNoAuthContext(r) || requestHasScope(r, scopeNexusCrossOrg) {
+	if identityhttp.HasNoAuthContext(r) || identityhttp.HasScope(r, scopeNexusCrossOrg) {
 		return nil, true
 	}
-	orgID := strings.TrimSpace(r.Header.Get("X-Org-ID"))
+	orgID := identityhttp.PrincipalOrgID(r)
 	if orgID == "" {
 		return nil, false
 	}
@@ -78,29 +79,8 @@ func normalizeOrgPtr(value *string) *string {
 	return &trimmed
 }
 
-func requestHasNoAuthContext(r *http.Request) bool {
-	return strings.TrimSpace(r.Header.Get("X-Auth-Method")) == "" &&
-		strings.TrimSpace(r.Header.Get("X-Auth-Scopes")) == ""
-}
+func requestHasNoAuthContext(r *http.Request) bool { return identityhttp.HasNoAuthContext(r) }
 
 func requestHasScope(r *http.Request, scopes ...string) bool {
-	have := parseHeaderScopes(r.Header.Get("X-Auth-Scopes"))
-	for _, scope := range scopes {
-		if _, ok := have[scope]; ok {
-			return true
-		}
-	}
-	return false
-}
-
-func parseHeaderScopes(raw string) map[string]struct{} {
-	raw = strings.NewReplacer(",", " ", ";", " ", "+", " ").Replace(raw)
-	fields := strings.Fields(raw)
-	out := make(map[string]struct{}, len(fields))
-	for _, field := range fields {
-		if scope := strings.TrimSpace(field); scope != "" {
-			out[scope] = struct{}{}
-		}
-	}
-	return out
+	return identityhttp.HasAnyScope(r, scopes...)
 }

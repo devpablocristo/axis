@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	domain "github.com/devpablocristo/companion/internal/connectors/usecases/domain"
+	"github.com/devpablocristo/platform/authn/go/identityhttp"
 	"github.com/devpablocristo/platform/http/go/httpjson"
 )
 
@@ -16,41 +17,39 @@ const (
 )
 
 func requireScope(w http.ResponseWriter, r *http.Request, scopes ...string) bool {
-	if requestHasNoAuthContext(r) || requestHasScope(r, scopes...) {
+	if identityhttp.HasNoAuthContext(r) || identityhttp.HasAnyScope(r, scopes...) {
 		return true
 	}
 	httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "missing required scope")
 	return false
 }
 
-func principalOrgID(r *http.Request) string {
-	return strings.TrimSpace(r.Header.Get("X-Org-ID"))
-}
+func principalOrgID(r *http.Request) string { return identityhttp.PrincipalOrgID(r) }
 
-func principalActorID(r *http.Request) string {
-	return strings.TrimSpace(r.Header.Get("X-User-ID"))
-}
+func principalActorID(r *http.Request) string { return identityhttp.FromRequest(r).Actor }
 
 func canAccessConnectorOrg(r *http.Request, connector domain.Connector) bool {
-	orgID := principalOrgID(r)
-	if requestHasNoAuthContext(r) || strings.TrimSpace(connector.OrgID) == "" {
+	connectorOrg := strings.TrimSpace(connector.OrgID)
+	if identityhttp.HasNoAuthContext(r) || connectorOrg == "" {
 		return true
 	}
+	orgID := principalOrgID(r)
 	if orgID == "" {
 		return false
 	}
-	return strings.TrimSpace(connector.OrgID) == orgID
+	return connectorOrg == orgID
 }
 
 func canAccessExecutionOrg(r *http.Request, execution domain.ExecutionResult) bool {
-	orgID := principalOrgID(r)
-	if requestHasNoAuthContext(r) {
+	executionOrg := strings.TrimSpace(execution.OrgID)
+	if identityhttp.HasNoAuthContext(r) {
 		return true
 	}
-	if orgID == "" || strings.TrimSpace(execution.OrgID) == "" {
+	orgID := principalOrgID(r)
+	if orgID == "" || executionOrg == "" {
 		return false
 	}
-	return strings.TrimSpace(execution.OrgID) == orgID
+	return executionOrg == orgID
 }
 
 func bindPayloadToPrincipalOrg(r *http.Request, raw json.RawMessage) (json.RawMessage, bool) {
@@ -59,7 +58,7 @@ func bindPayloadToPrincipalOrg(r *http.Request, raw json.RawMessage) (json.RawMe
 		if len(raw) == 0 {
 			return json.RawMessage(`{}`), true
 		}
-		if !requestHasNoAuthContext(r) {
+		if !identityhttp.HasNoAuthContext(r) {
 			return nil, false
 		}
 		return raw, true
@@ -87,29 +86,17 @@ func bindPayloadToPrincipalOrg(r *http.Request, raw json.RawMessage) (json.RawMe
 }
 
 func requestHasNoAuthContext(r *http.Request) bool {
-	return strings.TrimSpace(r.Header.Get("X-Auth-Method")) == "" &&
-		strings.TrimSpace(r.Header.Get("X-Auth-Scopes")) == ""
+	return identityhttp.HasNoAuthContext(r)
 }
 
 func requestHasScope(r *http.Request, scopes ...string) bool {
-	have := parseHeaderScopes(r.Header.Get("X-Auth-Scopes"))
-	for _, scope := range scopes {
-		if _, ok := have[scope]; ok {
-			return true
-		}
-	}
-	return false
+	return identityhttp.HasAnyScope(r, scopes...)
 }
 
-func parseHeaderScopes(raw string) map[string]struct{} {
-	values := parseHeaderValues(raw)
-	out := make(map[string]struct{}, len(values))
-	for _, value := range values {
-		out[value] = struct{}{}
-	}
-	return out
-}
-
+// parseHeaderValues normaliza listas separadas por coma/espacio/`+`/`;`.
+// Usado por handler.go para parsear headers tipo `X-Auth-Scopes` o similares
+// donde el formato no es exclusivamente scopes (identityhttp.ParseScopes
+// retorna []string también pero se reserva para scopes específicamente).
 func parseHeaderValues(raw string) []string {
 	raw = strings.NewReplacer(",", " ", ";", " ", "+", " ").Replace(raw)
 	fields := strings.Fields(raw)
