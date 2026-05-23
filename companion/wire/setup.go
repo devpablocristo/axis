@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/devpablocristo/companion/internal/assist"
 	"github.com/devpablocristo/companion/internal/connectors"
 	"github.com/devpablocristo/companion/internal/connectors/registry"
 	"github.com/devpablocristo/companion/internal/memory"
@@ -19,6 +20,7 @@ import (
 	"github.com/devpablocristo/companion/internal/tasks"
 	"github.com/devpablocristo/companion/internal/watchers"
 	"github.com/devpablocristo/companion/internal/watchers/pymesclient"
+	"github.com/devpablocristo/platform/authn/go/internaljwt"
 	"github.com/devpablocristo/platform/config/go/envconfig"
 	sharedpostgres "github.com/devpablocristo/platform/databases/postgres/go"
 	"github.com/devpablocristo/platform/http/go/health"
@@ -232,6 +234,10 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	nexusAssistContextualizer := nexusassist.NewContextualizer(rc, llmProvider)
 	nexusAssistHandler := nexusassist.NewHandler(nexusAssistProposer, nexusAssistContextualizer)
 
+	assistRepo := assist.NewPostgresRepository(db)
+	assistUC := assist.NewUsecases(assistRepo, llmProvider)
+	assistHandler := assist.NewHandler(assistUC)
+
 	mux := http.NewServeMux()
 	health.RegisterEndpoints(mux, func(c context.Context) error {
 		return db.Ping(c)
@@ -243,13 +249,14 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	connHandler.Register(mux)
 	traceHandler.Register(mux)
 	nexusAssistHandler.Register(mux)
+	assistHandler.Register(mux)
 
 	// Seed conectores por defecto
 	if err := connUC.SeedDefaultConnectors(ctx); err != nil {
 		slog.Error("seed default connectors", "error", err)
 	}
 
-	authMW, err := newAuthMiddleware(cfg.APIKeys, cfg.AuthIssuerURL, cfg.AuthAudience, internalJWTConfig{
+	authMW, err := newAuthMiddleware(cfg.APIKeys, cfg.AuthIssuerURL, cfg.AuthAudience, internaljwt.Config{
 		Secret:   cfg.InternalJWTSecret,
 		Issuer:   cfg.InternalJWTIssuer,
 		Audience: cfg.InternalJWTAudience,

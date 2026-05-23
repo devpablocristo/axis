@@ -17,10 +17,12 @@ import (
 	"github.com/devpablocristo/nexus/internal/dashboard"
 	"github.com/devpablocristo/nexus/internal/delegations"
 	"github.com/devpablocristo/nexus/internal/evidence"
+	"github.com/devpablocristo/nexus/internal/findings"
 	"github.com/devpablocristo/nexus/internal/learning"
 	"github.com/devpablocristo/nexus/internal/policies"
 	"github.com/devpablocristo/nexus/internal/rbac"
 	"github.com/devpablocristo/nexus/internal/requests"
+	"github.com/devpablocristo/platform/authn/go/internaljwt"
 	sharedpostgres "github.com/devpablocristo/platform/databases/postgres/go"
 	"github.com/devpablocristo/platform/http/go/health"
 )
@@ -66,6 +68,7 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	learningRepo := learning.NewPostgresRepository(db)
 	configRepo := nexusconfig.NewPostgresRepository(db.Pool())
 	actionTypeRepo := actiontypes.NewPostgresRepository(db)
+	findingRepo := findings.NewPostgresRepository(db)
 
 	// Adapters
 	auditSink := requests.NewAuditSinkAdapter(auditRepo)
@@ -98,6 +101,7 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	delegationUC := delegations.NewUsecases(delegationRepo)
 	rbacRepo := rbac.NewPostgresRepository(db)
 	rbacUC := rbac.NewUsecases(rbacRepo)
+	findingUC := findings.NewUsecases(findingRepo, findings.NewEvaluator())
 
 	attestationStore := requests.NewPostgresAttestationStore(db.Pool())
 
@@ -172,6 +176,7 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	actionTypeHandler := actiontypes.NewHandler(actionTypeUC)
 	delegationHandler := delegations.NewHandler(delegationUC)
 	rbacHandler := rbac.NewHandler(rbacUC)
+	findingHandler := findings.NewHandler(findingUC)
 
 	// Evidence packs.
 	// Sin default fallback: si la clave no está, falla startup. Un default
@@ -206,8 +211,9 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	delegationHandler.Register(mux)
 	rbacHandler.Register(mux)
 	evidenceHandler.Register(mux)
+	findingHandler.Register(mux)
 
-	authMW, err := newAuthMiddleware(cfg.APIKeys, cfg.AuthIssuerURL, cfg.AuthAudience, internalJWTConfig{
+	authMW, err := newAuthMiddleware(cfg.APIKeys, cfg.AuthIssuerURL, cfg.AuthAudience, internaljwt.Config{
 		Secret:   cfg.InternalJWTSecret,
 		Issuer:   cfg.InternalJWTIssuer,
 		Audience: cfg.InternalJWTAudience,

@@ -3,20 +3,25 @@ module github.com/devpablocristo/companion
 go 1.26.1
 
 require (
-	github.com/devpablocristo/platform/authn/go v0.1.0
+	github.com/devpablocristo/platform/authn/go v0.2.0
 	github.com/devpablocristo/platform/concurrency/go v0.1.1
 	github.com/devpablocristo/platform/config/go v0.1.0
 	github.com/devpablocristo/platform/contracts/ai/go v0.1.0
 	github.com/devpablocristo/platform/databases/postgres/go v0.1.0
-	github.com/devpablocristo/platform/errors/go v0.1.0
+	github.com/devpablocristo/platform/errors/go v0.2.0
 	github.com/devpablocristo/platform/http/go v0.1.0
 	github.com/devpablocristo/platform/kernels/ai/go v0.1.0
+	github.com/devpablocristo/platform/lifecycle/go v0.0.0
 	github.com/devpablocristo/platform/observability/go v0.1.0
-	github.com/devpablocristo/platform/security/go v0.1.0
+	github.com/devpablocristo/platform/security/go v0.2.1
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.9.2
 	golang.org/x/oauth2 v0.36.0
 )
+
+replace github.com/devpablocristo/platform/authn/go => ../../platform/authn/go
+
+replace github.com/devpablocristo/platform/lifecycle/go => ../../platform/lifecycle/go
 
 require (
 	cloud.google.com/go/compute/metadata v0.8.0 // indirect

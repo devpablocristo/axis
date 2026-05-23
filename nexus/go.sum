@@ -25,12 +25,16 @@ github.com/devpablocristo/platform/databases/postgres/go v0.1.0 h1:m8+iISxkiZO0H
 github.com/devpablocristo/platform/databases/postgres/go v0.1.0/go.mod h1:jgCqHHL8B9khk8K5GYA8LIDhnq6kQqAJEDwTk9pXQN4=
 github.com/devpablocristo/platform/errors/go v0.1.0 h1:lI+4cSrI1FNAfzgNBXEwSZemrsT7EJyaDJ3FkLt7Vfo=
 github.com/devpablocristo/platform/errors/go v0.1.0/go.mod h1:1cHoflrIdeQrLDtVPgsl5GqjYH7AZKASNYCMSAcdjOA=
+github.com/devpablocristo/platform/errors/go v0.2.0 h1:I7WZlgEd7ic6c2IETYgzA3ULykDd8Qnx+w6NYPXlRKM=
+github.com/devpablocristo/platform/errors/go v0.2.0/go.mod h1:1cHoflrIdeQrLDtVPgsl5GqjYH7AZKASNYCMSAcdjOA=
 github.com/devpablocristo/platform/http/go v0.1.0 h1:YQGApnAJx2+62HrLZ5G5Uf0Kq5phhV4JF6Be0IRZ//o=
 github.com/devpablocristo/platform/http/go v0.1.0/go.mod h1:qinUKdGJ51xbKMLYWF96bSGu8JSRAbWPsAqTusrg5tk=
 github.com/devpablocristo/platform/observability/go v0.1.0 h1:pnZw6RPw0nVcc+iqQN1rCFyEFn+W1IQhkdpqx7SNeb8=
 github.com/devpablocristo/platform/observability/go v0.1.0/go.mod h1:yqODkauQbmLctT5s9EVnEKL8CGaSu4M5G3aV02Kl6ng=
 github.com/devpablocristo/platform/security/go v0.1.0 h1:XVpaxj8y0uiNRPGi60KZx7YqVCLkC5erJXSl03kUm9M=
 github.com/devpablocristo/platform/security/go v0.1.0/go.mod h1:Urgj+tAuwcOtJMTAlLA7BDbUgKvz2yfNPcXpK3G2OnQ=
+github.com/devpablocristo/platform/security/go v0.2.1 h1:rKmr160pPdOXFLC8efMUbTbeTYV4O/mOq5EW54bvu/8=
+github.com/devpablocristo/platform/security/go v0.2.1/go.mod h1:P0FEZO5qZDDOxLk6+d90AFlQeiK3qiQ3CnTKqscCmeg=
 github.com/devpablocristo/platform/webhook/go v0.1.0 h1:2y4it0ErOUuCfMs1xjFIQfZM9/BuPSX09IpOiev0MUM=
 github.com/devpablocristo/platform/webhook/go v0.1.0/go.mod h1:7DT8WaPLZPadAOsqBppHFbm3v39vSuVeYNXV1+HdJOE=
 github.com/dhui/dktest v0.4.6 h1:+DPKyScKSEp3VLtbMDHcUq6V5Lm5zfZZVb0Sk7Ahom4=

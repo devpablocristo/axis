@@ -3,17 +3,22 @@ module github.com/devpablocristo/nexus
 go 1.26.1
 
 require (
-	github.com/devpablocristo/platform/authn/go v0.1.0
+	github.com/devpablocristo/platform/authn/go v0.2.0
 	github.com/devpablocristo/platform/databases/postgres/go v0.1.0
-	github.com/devpablocristo/platform/errors/go v0.1.0
+	github.com/devpablocristo/platform/errors/go v0.2.0
 	github.com/devpablocristo/platform/http/go v0.1.0
+	github.com/devpablocristo/platform/lifecycle/go v0.0.0
 	github.com/devpablocristo/platform/observability/go v0.1.0
-	github.com/devpablocristo/platform/security/go v0.1.0
+	github.com/devpablocristo/platform/security/go v0.2.1
 	github.com/devpablocristo/platform/webhook/go v0.1.0
 	github.com/google/cel-go v0.28.0
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.9.2
 )
+
+replace github.com/devpablocristo/platform/authn/go => ../../platform/authn/go
+
+replace github.com/devpablocristo/platform/lifecycle/go => ../../platform/lifecycle/go
 
 require (
 	cel.dev/expr v0.25.1 // indirect
