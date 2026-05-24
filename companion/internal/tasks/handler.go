@@ -35,6 +35,9 @@ type taskUsecase interface {
 	AddMessage(ctx context.Context, taskID uuid.UUID, in AddMessageInput) (domain.TaskMessage, error)
 	Investigate(ctx context.Context, taskID uuid.UUID, in InvestigateInput) (domain.Task, error)
 	Propose(ctx context.Context, taskID uuid.UUID, in ProposeInput) (domain.Task, domain.TaskAction, nexusclient.SubmitResponse, error)
+	SetTaskPlan(ctx context.Context, taskID uuid.UUID, in SetTaskPlanInput) (domain.TaskPlan, error)
+	UpdateTaskPlanStep(ctx context.Context, taskID, stepID uuid.UUID, in UpdateTaskPlanStepInput) (domain.TaskPlan, error)
+	RecordTaskPlanCheckpoint(ctx context.Context, taskID uuid.UUID, in RecordTaskPlanCheckpointInput) (domain.TaskPlan, error)
 	SetExecutionPlan(ctx context.Context, taskID uuid.UUID, in SetExecutionPlanInput) (domain.TaskExecutionPlan, error)
 	ExecuteTask(ctx context.Context, taskID uuid.UUID) (ExecuteTaskOutput, error)
 	RetryTask(ctx context.Context, taskID uuid.UUID) (ExecuteTaskOutput, error)
@@ -57,6 +60,9 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/tasks/{id}/message", h.addMessage)
 	mux.HandleFunc("POST /v1/tasks/{id}/investigate", h.investigate)
 	mux.HandleFunc("POST /v1/tasks/{id}/propose", h.propose)
+	mux.HandleFunc("PUT /v1/tasks/{id}/plan", h.setTaskPlan)
+	mux.HandleFunc("PATCH /v1/tasks/{id}/plan/steps/{step_id}", h.updatePlanStep)
+	mux.HandleFunc("POST /v1/tasks/{id}/plan/checkpoint", h.recordPlanCheckpoint)
 	mux.HandleFunc("PUT /v1/tasks/{id}/execution-plan", h.setExecutionPlan)
 	mux.HandleFunc("POST /v1/tasks/{id}/execute", h.execute)
 	mux.HandleFunc("POST /v1/tasks/{id}/retry", h.retry)
@@ -205,6 +211,9 @@ func (h *Handler) getByID(w http.ResponseWriter, r *http.Request) {
 	}
 	if detail.ExecutionPlan != nil {
 		resp.ExecutionPlan = tasksdto.ExecutionPlanToResponse(*detail.ExecutionPlan)
+	}
+	if detail.DurablePlan != nil {
+		resp.DurablePlan = tasksdto.TaskPlanToResponse(*detail.DurablePlan)
 	}
 	if detail.ExecutionState != nil {
 		resp.ExecutionState = tasksdto.ExecutionStateToResponse(*detail.ExecutionState)
@@ -358,6 +367,151 @@ func (h *Handler) syncNexus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpjson.WriteJSON(w, http.StatusOK, tasksdto.TaskToResponse(t))
+}
+
+func (h *Handler) setTaskPlan(w http.ResponseWriter, r *http.Request) {
+	if !requireScope(w, r, scopeCompanionTasksWrite) {
+		return
+	}
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid id")
+		return
+	}
+	if !h.authorizeTaskOrg(w, r, id) {
+		return
+	}
+	var body tasksdto.SetTaskPlanRequest
+	if err := httpjson.DecodeJSON(r, &body); err != nil {
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid json")
+		return
+	}
+	steps := make([]SetTaskPlanStepInput, 0, len(body.Steps))
+	for _, step := range body.Steps {
+		var stepID uuid.UUID
+		if strings.TrimSpace(step.ID) != "" {
+			parsed, err := uuid.Parse(step.ID)
+			if err != nil {
+				httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid step id")
+				return
+			}
+			stepID = parsed
+		}
+		steps = append(steps, SetTaskPlanStepInput{
+			ID:              stepID,
+			StepKey:         step.StepKey,
+			Title:           step.Title,
+			Status:          step.Status,
+			DependsOnJSON:   step.DependsOn,
+			ToolName:        step.ToolName,
+			Capability:      step.Capability,
+			ExpectedOutcome: step.ExpectedOutcome,
+			Postcondition:   step.Postcondition,
+			EvidenceJSON:    step.Evidence,
+			Observation:     step.Observation,
+			Blocker:         step.Blocker,
+			ErrorMessage:    step.ErrorMessage,
+			AttemptCount:    step.AttemptCount,
+			SortOrder:       step.SortOrder,
+		})
+	}
+	plan, err := h.uc.SetTaskPlan(r.Context(), id, SetTaskPlanInput{
+		Objective:       body.Objective,
+		Status:          body.Status,
+		Strategy:        body.Strategy,
+		AssumptionsJSON: body.Assumptions,
+		ConstraintsJSON: body.Constraints,
+		CheckpointJSON:  body.Checkpoint,
+		NextAction:      body.NextAction,
+		Blocker:         body.Blocker,
+		CreatedBy:       principalUserID(r),
+		Steps:           steps,
+	})
+	if err != nil {
+		if IsNotFound(err) {
+			httpjson.WriteFlatError(w, http.StatusNotFound, "NOT_FOUND", "task not found")
+			return
+		}
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", err.Error())
+		return
+	}
+	httpjson.WriteJSON(w, http.StatusOK, tasksdto.TaskPlanToResponse(plan))
+}
+
+func (h *Handler) updatePlanStep(w http.ResponseWriter, r *http.Request) {
+	if !requireScope(w, r, scopeCompanionTasksWrite) {
+		return
+	}
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid id")
+		return
+	}
+	stepID, err := uuid.Parse(r.PathValue("step_id"))
+	if err != nil {
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid step_id")
+		return
+	}
+	if !h.authorizeTaskOrg(w, r, id) {
+		return
+	}
+	var body tasksdto.UpdateTaskPlanStepRequest
+	if err := httpjson.DecodeJSON(r, &body); err != nil {
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid json")
+		return
+	}
+	plan, err := h.uc.UpdateTaskPlanStep(r.Context(), id, stepID, UpdateTaskPlanStepInput{
+		Status:         body.Status,
+		EvidenceJSON:   body.Evidence,
+		Observation:    body.Observation,
+		Blocker:        body.Blocker,
+		ErrorMessage:   body.ErrorMessage,
+		CheckpointJSON: body.Checkpoint,
+		NextAction:     body.NextAction,
+	})
+	if err != nil {
+		if IsNotFound(err) {
+			httpjson.WriteFlatError(w, http.StatusNotFound, "NOT_FOUND", "task plan or step not found")
+			return
+		}
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", err.Error())
+		return
+	}
+	httpjson.WriteJSON(w, http.StatusOK, tasksdto.TaskPlanToResponse(plan))
+}
+
+func (h *Handler) recordPlanCheckpoint(w http.ResponseWriter, r *http.Request) {
+	if !requireScope(w, r, scopeCompanionTasksWrite) {
+		return
+	}
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid id")
+		return
+	}
+	if !h.authorizeTaskOrg(w, r, id) {
+		return
+	}
+	var body tasksdto.RecordTaskPlanCheckpointRequest
+	if err := httpjson.DecodeJSON(r, &body); err != nil {
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid json")
+		return
+	}
+	plan, err := h.uc.RecordTaskPlanCheckpoint(r.Context(), id, RecordTaskPlanCheckpointInput{
+		Status:         body.Status,
+		CheckpointJSON: body.Checkpoint,
+		NextAction:     body.NextAction,
+		Blocker:        body.Blocker,
+	})
+	if err != nil {
+		if IsNotFound(err) {
+			httpjson.WriteFlatError(w, http.StatusNotFound, "NOT_FOUND", "task plan not found")
+			return
+		}
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", err.Error())
+		return
+	}
+	httpjson.WriteJSON(w, http.StatusOK, tasksdto.TaskPlanToResponse(plan))
 }
 
 func (h *Handler) setExecutionPlan(w http.ResponseWriter, r *http.Request) {

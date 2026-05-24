@@ -33,6 +33,7 @@ type IdentityChain struct {
 	HumanUserID         string   `json:"human_user_id,omitempty"`
 	ActorType           string   `json:"actor_type,omitempty"`
 	ProductSurface      string   `json:"product_surface,omitempty"`
+	TaskID              string   `json:"task_id,omitempty"`
 	AuthScopes          []string `json:"auth_scopes,omitempty"`
 	CompanionPrincipal  string   `json:"companion_principal"`
 	OnBehalfOf          string   `json:"on_behalf_of,omitempty"`
@@ -280,8 +281,10 @@ func runtimeSummary(identity IdentityChain, route AgentRoute) string {
 - Usuario iniciador: %s.
 - On behalf of: %s.
 - Superficie: %s.
+- Task actual: %s.
 - Intención clasificada: %s.
 - Autonomía máxima efectiva: %s.
+- Si hay task actual y el trabajo requiere varios pasos, mantené actualizado el plan durable con las tools de planner.
 - Regla dura: podés decidir, recomendar y proponer; no ejecutes writes sensibles ni approvals como acción autónoma.
 - Toda tool debe respetar customer org, permisos, trazas y guardrails.`,
 		identity.CompanionPrincipal,
@@ -289,6 +292,7 @@ func runtimeSummary(identity IdentityChain, route AgentRoute) string {
 		emptyAsUnknown(identity.InitiatingUser),
 		emptyAsUnknown(identity.OnBehalfOf),
 		route.Product,
+		emptyAsUnknown(identity.TaskID),
 		route.Intent,
 		route.Autonomy,
 	)

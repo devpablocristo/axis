@@ -152,6 +152,58 @@ paths:
         - $ref: "#/components/parameters/UUIDPath"
       responses:
         "200": { description: Nexus submit result }
+  /v1/tasks/{id}/plan:
+    put:
+      summary: Crea o reemplaza el plan durable cognitivo de una task
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SetTaskPlanRequest" }
+      responses:
+        "200":
+          description: Durable task plan
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TaskPlan" }
+  /v1/tasks/{id}/plan/steps/{step_id}:
+    patch:
+      summary: Actualiza estado/evidencia de un paso del plan durable
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+        - in: path
+          name: step_id
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateTaskPlanStepRequest" }
+      responses:
+        "200":
+          description: Durable task plan
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TaskPlan" }
+  /v1/tasks/{id}/plan/checkpoint:
+    post:
+      summary: Registra checkpoint/next action del plan durable
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RecordTaskPlanCheckpointRequest" }
+      responses:
+        "200":
+          description: Durable task plan
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TaskPlan" }
   /v1/tasks/{id}/execution-plan:
     put:
       summary: Guarda plan de ejecución
@@ -609,6 +661,96 @@ components:
         status: { type: string }
         nexus_status: { type: string }
         nexus_last_checked_at: { type: string, format: date-time }
+    SetTaskPlanRequest:
+      type: object
+      required: [steps]
+      properties:
+        objective: { type: string }
+        status: { type: string, enum: [draft, active, blocked, completed, failed, escalated] }
+        strategy: { type: string }
+        assumptions: {}
+        constraints: {}
+        checkpoint: {}
+        next_action: { type: string }
+        blocker: { type: string }
+        steps:
+          type: array
+          items: { $ref: "#/components/schemas/SetTaskPlanStepRequest" }
+    SetTaskPlanStepRequest:
+      type: object
+      required: [title]
+      properties:
+        id: { type: string, format: uuid }
+        step_key: { type: string }
+        title: { type: string }
+        status: { type: string, enum: [pending, ready, running, blocked, done, failed, skipped] }
+        depends_on: {}
+        tool_name: { type: string }
+        capability: { type: string }
+        expected_outcome: { type: string }
+        postcondition: { type: string }
+        evidence: {}
+        observation: { type: string }
+        blocker: { type: string }
+        error_message: { type: string }
+        attempt_count: { type: integer }
+        sort_order: { type: integer }
+    UpdateTaskPlanStepRequest:
+      type: object
+      properties:
+        status: { type: string, enum: [pending, ready, running, blocked, done, failed, skipped] }
+        evidence: {}
+        observation: { type: string }
+        blocker: { type: string }
+        error_message: { type: string }
+        checkpoint: {}
+        next_action: { type: string }
+    RecordTaskPlanCheckpointRequest:
+      type: object
+      properties:
+        status: { type: string, enum: [draft, active, blocked, completed, failed, escalated] }
+        checkpoint: {}
+        next_action: { type: string }
+        blocker: { type: string }
+    TaskPlan:
+      type: object
+      properties:
+        objective: { type: string }
+        status: { type: string }
+        strategy: { type: string }
+        assumptions: {}
+        constraints: {}
+        checkpoint: {}
+        next_action: { type: string }
+        blocker: { type: string }
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        completed_at: { type: string, format: date-time }
+        steps:
+          type: array
+          items: { $ref: "#/components/schemas/TaskPlanStep" }
+    TaskPlanStep:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        step_key: { type: string }
+        title: { type: string }
+        status: { type: string }
+        depends_on: {}
+        tool_name: { type: string }
+        capability: { type: string }
+        expected_outcome: { type: string }
+        postcondition: { type: string }
+        evidence: {}
+        observation: { type: string }
+        blocker: { type: string }
+        error_message: { type: string }
+        attempt_count: { type: integer }
+        sort_order: { type: integer }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        completed_at: { type: string, format: date-time }
     UpsertMemoryRequest:
       type: object
       required: [kind, scope_type, scope_id, key]

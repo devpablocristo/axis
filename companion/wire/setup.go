@@ -26,11 +26,16 @@ import (
 	"github.com/devpablocristo/platform/http/go/health"
 
 	memdomain "github.com/devpablocristo/companion/internal/memory/usecases/domain"
+	taskdomain "github.com/devpablocristo/companion/internal/tasks/usecases/domain"
 )
 
 type taskMemoryAdapter struct {
 	uc   *memory.Usecases
 	repo tasks.Repository
+}
+
+type taskPlannerAdapter struct {
+	uc *tasks.Usecases
 }
 
 // taskOrgGetter resuelve el org_id de una task para que el handler de
@@ -45,6 +50,66 @@ func (g taskOrgGetter) GetTaskOrg(ctx context.Context, taskID uuid.UUID) (string
 		return "", err
 	}
 	return t.OrgID, nil
+}
+
+func (a taskPlannerAdapter) GetTaskPlan(ctx context.Context, taskID uuid.UUID) (taskdomain.TaskPlan, error) {
+	return a.uc.GetTaskPlan(ctx, taskID)
+}
+
+func (a taskPlannerAdapter) SetTaskPlan(ctx context.Context, taskID uuid.UUID, in runtime.PlannerSetTaskPlanInput) (taskdomain.TaskPlan, error) {
+	steps := make([]tasks.SetTaskPlanStepInput, 0, len(in.Steps))
+	for _, step := range in.Steps {
+		steps = append(steps, tasks.SetTaskPlanStepInput{
+			ID:              step.ID,
+			StepKey:         step.StepKey,
+			Title:           step.Title,
+			Status:          step.Status,
+			DependsOnJSON:   step.DependsOnJSON,
+			ToolName:        step.ToolName,
+			Capability:      step.Capability,
+			ExpectedOutcome: step.ExpectedOutcome,
+			Postcondition:   step.Postcondition,
+			EvidenceJSON:    step.EvidenceJSON,
+			Observation:     step.Observation,
+			Blocker:         step.Blocker,
+			ErrorMessage:    step.ErrorMessage,
+			AttemptCount:    step.AttemptCount,
+			SortOrder:       step.SortOrder,
+		})
+	}
+	return a.uc.SetTaskPlan(ctx, taskID, tasks.SetTaskPlanInput{
+		Objective:       in.Objective,
+		Status:          in.Status,
+		Strategy:        in.Strategy,
+		AssumptionsJSON: in.AssumptionsJSON,
+		ConstraintsJSON: in.ConstraintsJSON,
+		CheckpointJSON:  in.CheckpointJSON,
+		NextAction:      in.NextAction,
+		Blocker:         in.Blocker,
+		CreatedBy:       in.CreatedBy,
+		Steps:           steps,
+	})
+}
+
+func (a taskPlannerAdapter) UpdateTaskPlanStep(ctx context.Context, taskID, stepID uuid.UUID, in runtime.PlannerUpdateTaskPlanStepInput) (taskdomain.TaskPlan, error) {
+	return a.uc.UpdateTaskPlanStep(ctx, taskID, stepID, tasks.UpdateTaskPlanStepInput{
+		Status:         in.Status,
+		EvidenceJSON:   in.EvidenceJSON,
+		Observation:    in.Observation,
+		Blocker:        in.Blocker,
+		ErrorMessage:   in.ErrorMessage,
+		CheckpointJSON: in.CheckpointJSON,
+		NextAction:     in.NextAction,
+	})
+}
+
+func (a taskPlannerAdapter) RecordTaskPlanCheckpoint(ctx context.Context, taskID uuid.UUID, in runtime.PlannerRecordTaskPlanCheckpointInput) (taskdomain.TaskPlan, error) {
+	return a.uc.RecordTaskPlanCheckpoint(ctx, taskID, tasks.RecordTaskPlanCheckpointInput{
+		Status:         in.Status,
+		CheckpointJSON: in.CheckpointJSON,
+		NextAction:     in.NextAction,
+		Blocker:        in.Blocker,
+	})
 }
 
 func (a taskMemoryAdapter) UpsertTaskMemory(ctx context.Context, taskID uuid.UUID, kind, key string, contentText string, payload json.RawMessage) error {
@@ -205,10 +270,14 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 		Executor:   connUC,
 		Submitter:  nexusGateway,
 	})
+	runtime.RegisterTaskPlannerTools(toolkit, taskPlannerAdapter{uc: uc})
 	contextPorts := runtime.ContextPorts{
 		NexusClient: rc,
 		MemoryFind: func(c context.Context, orgID, userID, productSurface string, st memdomain.ScopeType, sid string, k memdomain.MemoryKind, limit int) ([]memdomain.MemoryEntry, error) {
 			return memUC.Find(c, memory.FindQuery{OrgID: orgID, UserID: userID, ProductSurface: productSurface, ScopeType: st, ScopeID: sid, Kind: k, Limit: limit})
+		},
+		TaskPlanGet: func(c context.Context, taskID uuid.UUID) (taskdomain.TaskPlan, error) {
+			return repo.GetTaskPlan(c, taskID)
 		},
 	}
 	orchestrator := runtime.NewOrchestrator(llmProvider, toolkit, contextPorts)

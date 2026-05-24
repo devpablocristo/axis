@@ -64,6 +64,7 @@ func RegisterConnectorCapabilities(tk *ToolKit, deps CapabilityBridgeDeps) {
 		kind := conn.Kind()
 		for _, capability := range conn.Capabilities() {
 			capability := capability // capture per iteration
+			capability = capability.Normalized("", kind)
 			name := operationToToolName(capability.Operation)
 			if name == "" {
 				continue
@@ -78,7 +79,23 @@ func RegisterConnectorCapabilities(tk *ToolKit, deps CapabilityBridgeDeps) {
 				RequiredAnyScope: capability.RequiredScopes,
 			}
 			tk.add(schema, policy, capabilityToolHandler(kind, capability, deps))
+			tk.setMetadata(name, toolMetadataFromCapability(kind, capability))
 		}
+	}
+}
+
+func toolMetadataFromCapability(kind string, capability connectorsdomain.Capability) ToolMetadata {
+	return ToolMetadata{
+		Operation:             capability.Operation,
+		CapabilityID:          capability.ID,
+		Product:               capability.Product,
+		ConnectorKind:         kind,
+		SideEffectClass:       capability.SideEffectClass,
+		RiskClass:             capability.RiskClass,
+		RequiresNexusApproval: capability.NeedsNexusApproval(),
+		EvidenceRequired:      append([]string(nil), capability.EvidenceRequired...),
+		RollbackSupported:     capability.Rollback.Supported,
+		RollbackCapabilityID:  capability.Rollback.CapabilityID,
 	}
 }
 
@@ -186,7 +203,13 @@ func capabilityToolHandler(kind string, capability connectorsdomain.Capability, 
 			AuthScopes:         append([]string(nil), id.AuthScopes...),
 			Operation:          capability.Operation,
 			Payload:            payload,
-			IdempotencyKey:     fmt.Sprintf("chat-%s-%s", capability.Operation, uuid.NewString()),
+			IdempotencyKey:     firstNonEmpty(id.IdempotencyKey, fmt.Sprintf("chat-%s-%s", capability.Operation, uuid.NewString())),
+		}
+		if taskID, err := uuid.Parse(strings.TrimSpace(id.TaskID)); err == nil && taskID != uuid.Nil {
+			spec.TaskID = &taskID
+		}
+		if invocationID := strings.TrimSpace(id.PlanStepID); invocationID != "" {
+			spec.ToolInvocationID = invocationID
 		}
 
 		if !capability.NeedsNexusApproval() {
@@ -194,6 +217,9 @@ func capabilityToolHandler(kind string, capability connectorsdomain.Capability, 
 			if err != nil {
 				slog.Error("capability execute failed", "operation", capability.Operation, "kind", kind, "error", err)
 				return `{"error":"execution failed"}`, nil
+			}
+			if isPlanStepInvocation(id) {
+				return connectorPlanStepResult(res), nil
 			}
 			if len(res.ResultJSON) == 0 {
 				return `{"result": null}`, nil
@@ -244,6 +270,9 @@ func capabilityToolHandler(kind string, capability connectorsdomain.Capability, 
 					"nexus_status": status,
 				}), nil
 			}
+			if isPlanStepInvocation(id) {
+				return connectorPlanStepResult(res, "request_id", submitOut.RequestID, "nexus_status", status), nil
+			}
 			return jsonOrError(map[string]any{
 				"status":       "executed",
 				"request_id":   submitOut.RequestID,
@@ -268,6 +297,54 @@ func capabilityToolHandler(kind string, capability connectorsdomain.Capability, 
 			}), nil
 		}
 	}
+}
+
+func isPlanStepInvocation(id Identity) bool {
+	return strings.TrimSpace(id.PlanStepID) != ""
+}
+
+func connectorPlanStepResult(res connectorsdomain.ExecutionResult, extra ...any) string {
+	status := res.Status
+	if status == "" {
+		status = connectorsdomain.ExecSuccess
+	}
+	payload := map[string]any{
+		"status":          status,
+		"connector_id":    res.ConnectorID.String(),
+		"operation":       res.Operation,
+		"external_ref":    res.ExternalRef,
+		"result":          json.RawMessage(jsonOrDefaultRaw(res.ResultJSON)),
+		"evidence":        json.RawMessage(jsonOrDefaultRaw(res.EvidenceJSON)),
+		"duration_ms":     res.DurationMS,
+		"idempotency_key": res.IdempotencyKey,
+	}
+	if res.ID != uuid.Nil {
+		payload["execution_id"] = res.ID.String()
+	}
+	if res.TaskID != nil {
+		payload["task_id"] = res.TaskID.String()
+	}
+	if res.NexusRequestID != nil {
+		payload["nexus_request_id"] = res.NexusRequestID.String()
+	}
+	if res.ErrorMessage != "" {
+		payload["error"] = res.ErrorMessage
+	}
+	for i := 0; i+1 < len(extra); i += 2 {
+		key, ok := extra[i].(string)
+		if !ok || strings.TrimSpace(key) == "" {
+			continue
+		}
+		payload[key] = extra[i+1]
+	}
+	return jsonOrError(payload)
+}
+
+func jsonOrDefaultRaw(raw json.RawMessage) string {
+	if strings.TrimSpace(string(raw)) == "" {
+		return `{}`
+	}
+	return string(raw)
 }
 
 func resolveConnectorID(ctx context.Context, exec ConnectorExecutor, orgID, kind string) (uuid.UUID, error) {

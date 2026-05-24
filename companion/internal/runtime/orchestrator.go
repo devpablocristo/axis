@@ -83,6 +83,9 @@ func (o *Orchestrator) Run(ctx context.Context, in RunInput) (RunResult, error) 
 	in.AuthScopes = append([]string(nil), requestIdentity.Scopes...)
 	in.ProductSurface = productSurface
 	identity := BuildIdentityChainFromContext(requestIdentity)
+	if in.TaskID != nil && *in.TaskID != uuid.Nil {
+		identity.TaskID = in.TaskID.String()
+	}
 	route := RouteAgent(in.Message, productSurface, o.toolkit, identity, o.defaultAutonomy)
 	modelName := firstNonEmpty(o.model, DefaultGeminiModel)
 	policy := defaultRuntimePolicy(in.OrgID)
@@ -138,7 +141,7 @@ func (o *Orchestrator) Run(ctx context.Context, in RunInput) (RunResult, error) 
 	}
 
 	// 1. Ensamblar contexto
-	assembled := AssembleContext(ctx, o.ports, in.UserID, in.OrgID, productSurface, in.AuthScopes, in.Messages)
+	assembled := AssembleContext(ctx, o.ports, in.UserID, in.OrgID, productSurface, in.AuthScopes, in.TaskID, in.Messages)
 
 	// 2. Construir mensajes para el LLM
 	systemPrompt := SystemPrompt()
@@ -215,7 +218,12 @@ func (o *Orchestrator) Run(ctx context.Context, in RunInput) (RunResult, error) 
 			}
 
 			// Inyectar identidad en context para que tools usen IDs reales.
-			toolCtx, cancel := context.WithTimeout(WithIdentityContext(ctx, requestIdentity), 15*time.Second)
+			toolCtx := WithIdentityContext(ctx, requestIdentity)
+			if in.TaskID != nil {
+				toolCtx = WithTaskID(toolCtx, *in.TaskID)
+			}
+			toolCtx = WithAllowedTools(toolCtx, route.AllowedTools)
+			toolCtx, cancel := context.WithTimeout(toolCtx, 15*time.Second)
 			result := o.toolkit.ExecuteTool(toolCtx, tc.Name, tc.Args)
 			cancel()
 			trace.Usage.AddToolCall(result)

@@ -8,6 +8,7 @@ import (
 
 	"github.com/devpablocristo/companion/internal/identityctx"
 	"github.com/devpablocristo/companion/internal/nexusclient"
+	"github.com/google/uuid"
 
 	memdomain "github.com/devpablocristo/companion/internal/memory/usecases/domain"
 	taskdomain "github.com/devpablocristo/companion/internal/tasks/usecases/domain"
@@ -25,6 +26,10 @@ type Identity struct {
 	CompanionPrincipal string
 	OnBehalfOf         string
 	ProductSurface     string
+	TaskID             string
+	PlanStepID         string
+	IdempotencyKey     string
+	AllowedTools       []string
 	AuthScopes         []string
 	ServicePrincipal   bool
 }
@@ -62,6 +67,30 @@ func WithIdentityContext(ctx context.Context, id identityctx.IdentityContext) co
 	})
 }
 
+func WithTaskID(ctx context.Context, taskID uuid.UUID) context.Context {
+	if taskID == uuid.Nil {
+		return ctx
+	}
+	id := IdentityFromContext(ctx)
+	id.TaskID = taskID.String()
+	return context.WithValue(ctx, identityKey{}, id)
+}
+
+func WithAllowedTools(ctx context.Context, allowedTools []string) context.Context {
+	id := IdentityFromContext(ctx)
+	id.AllowedTools = append([]string(nil), allowedTools...)
+	return context.WithValue(ctx, identityKey{}, id)
+}
+
+func WithPlanStepExecution(ctx context.Context, stepID uuid.UUID, idempotencyKey string) context.Context {
+	id := IdentityFromContext(ctx)
+	if stepID != uuid.Nil {
+		id.PlanStepID = stepID.String()
+	}
+	id.IdempotencyKey = strings.TrimSpace(idempotencyKey)
+	return context.WithValue(ctx, identityKey{}, id)
+}
+
 // IdentityFromContext extrae la identidad del context.
 func IdentityFromContext(ctx context.Context) Identity {
 	id, _ := ctx.Value(identityKey{}).(Identity)
@@ -72,6 +101,7 @@ func IdentityFromContext(ctx context.Context) Identity {
 type ContextPorts struct {
 	NexusClient *nexusclient.Client
 	MemoryFind  func(ctx context.Context, orgID, userID, productSurface string, scopeType memdomain.ScopeType, scopeID string, kind memdomain.MemoryKind, limit int) ([]memdomain.MemoryEntry, error)
+	TaskPlanGet func(ctx context.Context, taskID uuid.UUID) (taskdomain.TaskPlan, error)
 }
 
 // AssembledContext contexto ensamblado para el LLM.
@@ -81,7 +111,7 @@ type AssembledContext struct {
 }
 
 // AssembleContext arma el contexto relevante para una conversación.
-func AssembleContext(ctx context.Context, ports ContextPorts, userID, orgID, productSurface string, authScopes []string, messages []taskdomain.TaskMessage) AssembledContext {
+func AssembleContext(ctx context.Context, ports ContextPorts, userID, orgID, productSurface string, authScopes []string, taskID *uuid.UUID, messages []taskdomain.TaskMessage) AssembledContext {
 	var parts []string
 	if strings.TrimSpace(productSurface) == "" {
 		productSurface = DefaultProductSurface
@@ -121,7 +151,17 @@ func AssembleContext(ctx context.Context, ports ContextPorts, userID, orgID, pro
 		}
 	}
 
-	// 2. Aprobaciones pendientes
+	// 2. Plan durable de la task actual
+	if ports.TaskPlanGet != nil && taskID != nil && *taskID != uuid.Nil {
+		plan, err := ports.TaskPlanGet(ctx, *taskID)
+		if err == nil && strings.TrimSpace(plan.Objective) != "" {
+			if summary := summarizeTaskPlan(plan); summary != "" {
+				parts = append(parts, summary)
+			}
+		}
+	}
+
+	// 3. Aprobaciones pendientes
 	if ports.NexusClient != nil && strings.TrimSpace(orgID) != "" && hasAnyScope(authScopes, scopeCompanionNexusAdmin) {
 		st, raw, err := ports.NexusClient.ListPendingApprovals(ctx)
 		if err == nil && st == 200 && len(raw) > 0 {
@@ -147,7 +187,7 @@ func AssembleContext(ctx context.Context, ports ContextPorts, userID, orgID, pro
 		}
 	}
 
-	// 3. Historial de mensajes → formato LLM
+	// 4. Historial de mensajes → formato LLM
 	var history []LLMMessage
 	limit := 20
 	start := 0
@@ -171,6 +211,41 @@ func AssembleContext(ctx context.Context, ports ContextPorts, userID, orgID, pro
 		Summary: summary,
 		History: history,
 	}
+}
+
+func summarizeTaskPlan(plan taskdomain.TaskPlan) string {
+	var lines []string
+	lines = append(lines, "Plan durable de la task:")
+	lines = append(lines, "- Objetivo: "+plan.Objective)
+	if plan.Status != "" {
+		lines = append(lines, "- Estado del plan: "+plan.Status)
+	}
+	if plan.Strategy != "" {
+		lines = append(lines, "- Estrategia: "+plan.Strategy)
+	}
+	if plan.NextAction != "" {
+		lines = append(lines, "- Próxima acción: "+plan.NextAction)
+	}
+	if plan.Blocker != "" {
+		lines = append(lines, "- Bloqueo: "+plan.Blocker)
+	}
+	if len(plan.Steps) > 0 {
+		lines = append(lines, "- Pasos:")
+		for _, step := range plan.Steps {
+			line := fmt.Sprintf("  - [%s] %s", step.Status, step.Title)
+			if step.ExpectedOutcome != "" {
+				line += " → " + step.ExpectedOutcome
+			}
+			if step.Postcondition != "" {
+				line += " (verificar: " + step.Postcondition + ")"
+			}
+			if step.Blocker != "" {
+				line += " (bloqueado: " + step.Blocker + ")"
+			}
+			lines = append(lines, line)
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func hasAnyScope(scopes []string, required ...string) bool {

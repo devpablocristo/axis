@@ -29,10 +29,13 @@ func DefaultRegistry() Registry {
 			ID:             "companion.default",
 			ProductSurface: "companion",
 			MaxAutonomy:    "A2",
-			AllowedTools:   []string{"get_overview", "remember", "recall"},
-			MemoryPolicy:   MemoryPolicy{AllowedTypes: []string{"preference", "playbook", "task_projection"}, MaxItems: 10},
-			Enabled:        true,
-			Version:        "v1",
+			AllowedTools: []string{
+				"get_overview", "remember", "recall",
+				"set_task_plan", "update_task_plan_step", "record_task_plan_checkpoint", "execute_task_plan_step", "prepare_task_plan_compensation",
+			},
+			MemoryPolicy: MemoryPolicy{AllowedTypes: []string{"preference", "playbook", "task_projection"}, MaxItems: 10},
+			Enabled:      true,
+			Version:      "v1",
 		},
 		{
 			ID:             "companion.nexus",
@@ -102,10 +105,14 @@ func genericProductProfile(productSurface string) Profile {
 		ID:             "product." + productSurface + ".generic",
 		ProductSurface: productSurface,
 		MaxAutonomy:    "A2",
-		AllowedTools:   []string{"remember", "recall", productToolPrefix(productSurface) + "*"},
-		MemoryPolicy:   MemoryPolicy{AllowedTypes: []string{"preference", "playbook", "task_projection", "operational"}, MaxItems: 10},
-		Enabled:        true,
-		Version:        "v1",
+		AllowedTools: []string{
+			"remember", "recall",
+			"set_task_plan", "update_task_plan_step", "record_task_plan_checkpoint", "execute_task_plan_step", "prepare_task_plan_compensation",
+			productToolPrefix(productSurface) + "*",
+		},
+		MemoryPolicy: MemoryPolicy{AllowedTypes: []string{"preference", "playbook", "task_projection", "operational"}, MaxItems: 10},
+		Enabled:      true,
+		Version:      "v1",
 	}
 }
 

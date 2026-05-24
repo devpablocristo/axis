@@ -109,6 +109,43 @@ type TaskExecutionStateResponse struct {
 	VerificationResult  TaskVerificationResultResponse `json:"verification_result"`
 }
 
+type TaskPlanResponse struct {
+	Objective   string                 `json:"objective"`
+	Status      string                 `json:"status"`
+	Strategy    string                 `json:"strategy,omitempty"`
+	Assumptions json.RawMessage        `json:"assumptions,omitempty"`
+	Constraints json.RawMessage        `json:"constraints,omitempty"`
+	Checkpoint  json.RawMessage        `json:"checkpoint,omitempty"`
+	NextAction  string                 `json:"next_action,omitempty"`
+	Blocker     string                 `json:"blocker,omitempty"`
+	CreatedBy   string                 `json:"created_by,omitempty"`
+	CreatedAt   string                 `json:"created_at"`
+	UpdatedAt   string                 `json:"updated_at"`
+	CompletedAt string                 `json:"completed_at,omitempty"`
+	Steps       []TaskPlanStepResponse `json:"steps"`
+}
+
+type TaskPlanStepResponse struct {
+	ID              string          `json:"id"`
+	StepKey         string          `json:"step_key"`
+	Title           string          `json:"title"`
+	Status          string          `json:"status"`
+	DependsOn       json.RawMessage `json:"depends_on,omitempty"`
+	ToolName        string          `json:"tool_name,omitempty"`
+	Capability      string          `json:"capability,omitempty"`
+	ExpectedOutcome string          `json:"expected_outcome,omitempty"`
+	Postcondition   string          `json:"postcondition,omitempty"`
+	Evidence        json.RawMessage `json:"evidence,omitempty"`
+	Observation     string          `json:"observation,omitempty"`
+	Blocker         string          `json:"blocker,omitempty"`
+	ErrorMessage    string          `json:"error_message,omitempty"`
+	AttemptCount    int             `json:"attempt_count"`
+	SortOrder       int             `json:"sort_order"`
+	CreatedAt       string          `json:"created_at"`
+	UpdatedAt       string          `json:"updated_at"`
+	CompletedAt     string          `json:"completed_at,omitempty"`
+}
+
 type TaskDetailResponse struct {
 	Task                TaskResponse                 `json:"task"`
 	Messages            []MessageResponse            `json:"messages"`
@@ -117,6 +154,7 @@ type TaskDetailResponse struct {
 	LinkedNexusRequests []LinkedNexusRequestResponse `json:"linked_nexus_requests"`
 	NexusSync           *NexusSyncStateResponse      `json:"nexus_sync,omitempty"`
 	ExecutionPlan       *TaskExecutionPlanResponse   `json:"execution_plan,omitempty"`
+	DurablePlan         *TaskPlanResponse            `json:"durable_plan,omitempty"`
 	ExecutionState      *TaskExecutionStateResponse  `json:"execution_state,omitempty"`
 }
 
@@ -178,6 +216,53 @@ type SetExecutionPlanRequest struct {
 	Operation      string          `json:"operation"`
 	Payload        json.RawMessage `json:"payload,omitempty"`
 	IdempotencyKey string          `json:"idempotency_key,omitempty"`
+}
+
+type SetTaskPlanRequest struct {
+	Objective   string                   `json:"objective,omitempty"`
+	Status      string                   `json:"status,omitempty"`
+	Strategy    string                   `json:"strategy,omitempty"`
+	Assumptions json.RawMessage          `json:"assumptions,omitempty"`
+	Constraints json.RawMessage          `json:"constraints,omitempty"`
+	Checkpoint  json.RawMessage          `json:"checkpoint,omitempty"`
+	NextAction  string                   `json:"next_action,omitempty"`
+	Blocker     string                   `json:"blocker,omitempty"`
+	Steps       []SetTaskPlanStepRequest `json:"steps"`
+}
+
+type SetTaskPlanStepRequest struct {
+	ID              string          `json:"id,omitempty"`
+	StepKey         string          `json:"step_key,omitempty"`
+	Title           string          `json:"title"`
+	Status          string          `json:"status,omitempty"`
+	DependsOn       json.RawMessage `json:"depends_on,omitempty"`
+	ToolName        string          `json:"tool_name,omitempty"`
+	Capability      string          `json:"capability,omitempty"`
+	ExpectedOutcome string          `json:"expected_outcome,omitempty"`
+	Postcondition   string          `json:"postcondition,omitempty"`
+	Evidence        json.RawMessage `json:"evidence,omitempty"`
+	Observation     string          `json:"observation,omitempty"`
+	Blocker         string          `json:"blocker,omitempty"`
+	ErrorMessage    string          `json:"error_message,omitempty"`
+	AttemptCount    int             `json:"attempt_count,omitempty"`
+	SortOrder       int             `json:"sort_order,omitempty"`
+}
+
+type UpdateTaskPlanStepRequest struct {
+	Status       string          `json:"status,omitempty"`
+	Evidence     json.RawMessage `json:"evidence,omitempty"`
+	Observation  string          `json:"observation,omitempty"`
+	Blocker      string          `json:"blocker,omitempty"`
+	ErrorMessage string          `json:"error_message,omitempty"`
+	Checkpoint   json.RawMessage `json:"checkpoint,omitempty"`
+	NextAction   string          `json:"next_action,omitempty"`
+}
+
+type RecordTaskPlanCheckpointRequest struct {
+	Status     string          `json:"status,omitempty"`
+	Checkpoint json.RawMessage `json:"checkpoint,omitempty"`
+	NextAction string          `json:"next_action,omitempty"`
+	Blocker    string          `json:"blocker,omitempty"`
 }
 
 type ExecuteTaskResponse struct {
@@ -352,6 +437,59 @@ func ExecutionPlanToResponse(plan domain.TaskExecutionPlan) *TaskExecutionPlanRe
 		IdempotencyKey: plan.IdempotencyKey,
 		CreatedAt:      plan.CreatedAt.UTC().Format(time.RFC3339),
 		UpdatedAt:      plan.UpdatedAt.UTC().Format(time.RFC3339),
+	}
+}
+
+func TaskPlanToResponse(plan domain.TaskPlan) *TaskPlanResponse {
+	steps := make([]TaskPlanStepResponse, 0, len(plan.Steps))
+	for _, step := range plan.Steps {
+		steps = append(steps, TaskPlanStepToResponse(step))
+	}
+	completedAt := ""
+	if plan.CompletedAt != nil {
+		completedAt = plan.CompletedAt.UTC().Format(time.RFC3339)
+	}
+	return &TaskPlanResponse{
+		Objective:   plan.Objective,
+		Status:      plan.Status,
+		Strategy:    plan.Strategy,
+		Assumptions: plan.AssumptionsJSON,
+		Constraints: plan.ConstraintsJSON,
+		Checkpoint:  plan.CheckpointJSON,
+		NextAction:  plan.NextAction,
+		Blocker:     plan.Blocker,
+		CreatedBy:   plan.CreatedBy,
+		CreatedAt:   plan.CreatedAt.UTC().Format(time.RFC3339),
+		UpdatedAt:   plan.UpdatedAt.UTC().Format(time.RFC3339),
+		CompletedAt: completedAt,
+		Steps:       steps,
+	}
+}
+
+func TaskPlanStepToResponse(step domain.TaskPlanStep) TaskPlanStepResponse {
+	completedAt := ""
+	if step.CompletedAt != nil {
+		completedAt = step.CompletedAt.UTC().Format(time.RFC3339)
+	}
+	return TaskPlanStepResponse{
+		ID:              step.ID.String(),
+		StepKey:         step.StepKey,
+		Title:           step.Title,
+		Status:          step.Status,
+		DependsOn:       step.DependsOnJSON,
+		ToolName:        step.ToolName,
+		Capability:      step.Capability,
+		ExpectedOutcome: step.ExpectedOutcome,
+		Postcondition:   step.Postcondition,
+		Evidence:        step.EvidenceJSON,
+		Observation:     step.Observation,
+		Blocker:         step.Blocker,
+		ErrorMessage:    step.ErrorMessage,
+		AttemptCount:    step.AttemptCount,
+		SortOrder:       step.SortOrder,
+		CreatedAt:       step.CreatedAt.UTC().Format(time.RFC3339),
+		UpdatedAt:       step.UpdatedAt.UTC().Format(time.RFC3339),
+		CompletedAt:     completedAt,
 	}
 }
 

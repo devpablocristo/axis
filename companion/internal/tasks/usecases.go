@@ -35,6 +35,9 @@ const (
 	TaskActionExecuteConnector = "execute_connector"
 	TaskActionRetryExecution   = "retry_execution"
 	TaskActionVerifyExecution  = "verify_execution"
+	TaskActionSetDurablePlan   = "set_durable_plan"
+	TaskActionUpdatePlanStep   = "update_plan_step"
+	TaskActionPlanCheckpoint   = "plan_checkpoint"
 
 	TaskArtifactConnectorExecution    = "connector_execution"
 	TaskArtifactExecutionError        = "connector_execution_error"
@@ -226,6 +229,7 @@ type TaskDetail struct {
 	LinkedNexusRequests []LinkedNexusRequest       `json:"linked_nexus_requests"`
 	NexusSync           *domain.TaskNexusSyncState `json:"nexus_sync,omitempty"`
 	ExecutionPlan       *domain.TaskExecutionPlan  `json:"execution_plan,omitempty"`
+	DurablePlan         *domain.TaskPlan           `json:"durable_plan,omitempty"`
 	ExecutionState      *domain.TaskExecutionState `json:"execution_state,omitempty"`
 }
 
@@ -259,6 +263,12 @@ func (u *Usecases) GetDetail(ctx context.Context, id uuid.UUID) (TaskDetail, err
 		out.ExecutionPlan = &plan
 	} else if !domainerr.IsNotFound(planErr) {
 		return out, planErr
+	}
+	durablePlan, durablePlanErr := u.repo.GetTaskPlan(ctx, id)
+	if durablePlanErr == nil {
+		out.DurablePlan = &durablePlan
+	} else if !domainerr.IsNotFound(durablePlanErr) {
+		return out, durablePlanErr
 	}
 	executionState, executionStateErr := u.repo.GetExecutionState(ctx, id)
 	if executionStateErr == nil {
@@ -651,6 +661,7 @@ type taskMemorySnapshot struct {
 	Task           domain.Task
 	NexusSync      *domain.TaskNexusSyncState
 	ExecutionPlan  *domain.TaskExecutionPlan
+	DurablePlan    *domain.TaskPlan
 	ExecutionState *domain.TaskExecutionState
 }
 
@@ -678,6 +689,13 @@ func (u *Usecases) loadTaskMemorySnapshot(ctx context.Context, taskID uuid.UUID)
 		return taskMemorySnapshot{}, err
 	}
 
+	durablePlan, err := u.repo.GetTaskPlan(ctx, taskID)
+	if err == nil {
+		snapshot.DurablePlan = &durablePlan
+	} else if !domainerr.IsNotFound(err) {
+		return taskMemorySnapshot{}, err
+	}
+
 	executionState, err := u.repo.GetExecutionState(ctx, taskID)
 	if err == nil {
 		snapshot.ExecutionState = &executionState
@@ -689,6 +707,9 @@ func (u *Usecases) loadTaskMemorySnapshot(ctx context.Context, taskID uuid.UUID)
 }
 
 func nextTaskStep(snapshot taskMemorySnapshot) string {
+	if snapshot.DurablePlan != nil && strings.TrimSpace(snapshot.DurablePlan.NextAction) != "" {
+		return snapshot.DurablePlan.NextAction
+	}
 	switch snapshot.Task.Status {
 	case domain.TaskStatusNew, domain.TaskStatusInvestigating:
 		if snapshot.ExecutionPlan == nil {
@@ -725,6 +746,9 @@ func buildTaskSummary(snapshot taskMemorySnapshot) string {
 		title = snapshot.Task.ID.String()
 	}
 	prefix := fmt.Sprintf("Task %q", title)
+	if snapshot.DurablePlan != nil && strings.TrimSpace(snapshot.DurablePlan.NextAction) != "" {
+		return fmt.Sprintf("%s has an active durable plan (%s). Next action: %s.", prefix, formatStatusForMemory(snapshot.DurablePlan.Status), snapshot.DurablePlan.NextAction)
+	}
 
 	switch snapshot.Task.Status {
 	case domain.TaskStatusNew:
@@ -828,6 +852,35 @@ func buildTaskFactsPayload(snapshot taskMemorySnapshot, reason string) json.RawM
 			"payload":         json.RawMessage(snapshot.ExecutionPlan.Payload),
 			"idempotency_key": snapshot.ExecutionPlan.IdempotencyKey,
 			"updated_at":      snapshot.ExecutionPlan.UpdatedAt.UTC().Format(time.RFC3339),
+		}
+	}
+	if snapshot.DurablePlan != nil {
+		steps := make([]map[string]any, 0, len(snapshot.DurablePlan.Steps))
+		for _, step := range snapshot.DurablePlan.Steps {
+			steps = append(steps, map[string]any{
+				"id":               step.ID.String(),
+				"step_key":         step.StepKey,
+				"title":            step.Title,
+				"status":           step.Status,
+				"expected_outcome": step.ExpectedOutcome,
+				"postcondition":    step.Postcondition,
+				"observation":      step.Observation,
+				"blocker":          step.Blocker,
+				"error_message":    step.ErrorMessage,
+				"attempt_count":    step.AttemptCount,
+				"sort_order":       step.SortOrder,
+				"completed_at":     formatOptionalTime(step.CompletedAt),
+			})
+		}
+		payload["durable_plan"] = map[string]any{
+			"objective":   snapshot.DurablePlan.Objective,
+			"status":      snapshot.DurablePlan.Status,
+			"strategy":    snapshot.DurablePlan.Strategy,
+			"next_action": snapshot.DurablePlan.NextAction,
+			"blocker":     snapshot.DurablePlan.Blocker,
+			"checkpoint":  json.RawMessage(snapshot.DurablePlan.CheckpointJSON),
+			"steps":       steps,
+			"updated_at":  snapshot.DurablePlan.UpdatedAt.UTC().Format(time.RFC3339),
 		}
 	}
 	if snapshot.ExecutionState != nil {
@@ -1256,6 +1309,444 @@ type SetExecutionPlanInput struct {
 	Operation      string
 	Payload        json.RawMessage
 	IdempotencyKey string
+}
+
+type SetTaskPlanInput struct {
+	Objective       string
+	Status          string
+	Strategy        string
+	AssumptionsJSON json.RawMessage
+	ConstraintsJSON json.RawMessage
+	CheckpointJSON  json.RawMessage
+	NextAction      string
+	Blocker         string
+	CreatedBy       string
+	Steps           []SetTaskPlanStepInput
+}
+
+type SetTaskPlanStepInput struct {
+	ID              uuid.UUID
+	StepKey         string
+	Title           string
+	Status          string
+	DependsOnJSON   json.RawMessage
+	ToolName        string
+	Capability      string
+	ExpectedOutcome string
+	Postcondition   string
+	EvidenceJSON    json.RawMessage
+	Observation     string
+	Blocker         string
+	ErrorMessage    string
+	AttemptCount    int
+	SortOrder       int
+}
+
+type UpdateTaskPlanStepInput struct {
+	Status         string
+	EvidenceJSON   json.RawMessage
+	Observation    string
+	Blocker        string
+	ErrorMessage   string
+	CheckpointJSON json.RawMessage
+	NextAction     string
+}
+
+type RecordTaskPlanCheckpointInput struct {
+	Status         string
+	CheckpointJSON json.RawMessage
+	NextAction     string
+	Blocker        string
+}
+
+func (u *Usecases) SetTaskPlan(ctx context.Context, taskID uuid.UUID, in SetTaskPlanInput) (domain.TaskPlan, error) {
+	t, err := u.repo.GetTaskByID(ctx, taskID)
+	if err != nil {
+		return domain.TaskPlan{}, err
+	}
+	objective := strings.TrimSpace(in.Objective)
+	if objective == "" {
+		objective = strings.TrimSpace(t.Goal)
+	}
+	if objective == "" {
+		objective = strings.TrimSpace(t.Title)
+	}
+	if objective == "" {
+		return domain.TaskPlan{}, fmt.Errorf("objective is required")
+	}
+	if len(in.Steps) == 0 {
+		return domain.TaskPlan{}, fmt.Errorf("at least one plan step is required")
+	}
+	status := strings.TrimSpace(in.Status)
+	if status == "" {
+		status = domain.TaskPlanStatusActive
+	}
+	if !validTaskPlanStatus(status) {
+		return domain.TaskPlan{}, fmt.Errorf("invalid plan status")
+	}
+	plan := domain.TaskPlan{
+		TaskID:          taskID,
+		OrgID:           t.OrgID,
+		Objective:       objective,
+		Status:          status,
+		Strategy:        strings.TrimSpace(in.Strategy),
+		AssumptionsJSON: jsonOrDefault(in.AssumptionsJSON, `[]`),
+		ConstraintsJSON: jsonOrDefault(in.ConstraintsJSON, `[]`),
+		CheckpointJSON:  jsonOrDefault(in.CheckpointJSON, `{}`),
+		NextAction:      strings.TrimSpace(in.NextAction),
+		Blocker:         strings.TrimSpace(in.Blocker),
+		CreatedBy:       strings.TrimSpace(in.CreatedBy),
+		Steps:           make([]domain.TaskPlanStep, 0, len(in.Steps)),
+	}
+	for i, inputStep := range in.Steps {
+		step, err := buildTaskPlanStep(t.OrgID, taskID, i, inputStep)
+		if err != nil {
+			return domain.TaskPlan{}, err
+		}
+		plan.Steps = append(plan.Steps, step)
+	}
+	if plan.NextAction == "" {
+		plan.NextAction = nextActionFromSteps(plan.Steps)
+	}
+	applyPlanCompletion(&plan)
+	saved, err := u.repo.UpsertTaskPlan(ctx, plan)
+	if err != nil {
+		return domain.TaskPlan{}, err
+	}
+	if _, insertErr := u.repo.InsertAction(ctx, domain.TaskAction{
+		TaskID:     taskID,
+		ActionType: TaskActionSetDurablePlan,
+		Payload:    taskPlanActionPayload(saved),
+	}); insertErr != nil {
+		slog.Warn("companion set durable plan action failed", "task_id", taskID.String(), "error", insertErr)
+	}
+	u.syncTaskMemory(ctx, taskID, "set_durable_plan")
+	return saved, nil
+}
+
+func (u *Usecases) UpdateTaskPlanStep(ctx context.Context, taskID, stepID uuid.UUID, in UpdateTaskPlanStepInput) (domain.TaskPlan, error) {
+	plan, err := u.repo.GetTaskPlan(ctx, taskID)
+	if err != nil {
+		return domain.TaskPlan{}, err
+	}
+	if _, err := u.repo.GetTaskByID(ctx, taskID); err != nil {
+		return domain.TaskPlan{}, err
+	}
+	var step *domain.TaskPlanStep
+	for i := range plan.Steps {
+		if plan.Steps[i].ID == stepID {
+			step = &plan.Steps[i]
+			break
+		}
+	}
+	if step == nil {
+		return domain.TaskPlan{}, ErrNotFound
+	}
+	if status := strings.TrimSpace(in.Status); status != "" {
+		if !validTaskPlanStepStatus(status) {
+			return domain.TaskPlan{}, fmt.Errorf("invalid plan step status")
+		}
+		step.Status = status
+	}
+	if len(in.EvidenceJSON) > 0 {
+		step.EvidenceJSON = jsonOrDefault(in.EvidenceJSON, `{}`)
+	}
+	if strings.TrimSpace(in.Observation) != "" {
+		step.Observation = strings.TrimSpace(in.Observation)
+	}
+	if strings.TrimSpace(in.Blocker) != "" {
+		step.Blocker = strings.TrimSpace(in.Blocker)
+	}
+	if strings.TrimSpace(in.ErrorMessage) != "" {
+		step.ErrorMessage = strings.TrimSpace(in.ErrorMessage)
+	}
+	if step.Status == domain.TaskPlanStepStatusRunning {
+		step.AttemptCount++
+	}
+	if isTerminalTaskPlanStepStatus(step.Status) {
+		now := time.Now().UTC()
+		step.CompletedAt = &now
+	}
+	if _, err := u.repo.UpdateTaskPlanStep(ctx, *step); err != nil {
+		return domain.TaskPlan{}, err
+	}
+	updated, err := u.repo.GetTaskPlan(ctx, taskID)
+	if err != nil {
+		return domain.TaskPlan{}, err
+	}
+	if len(in.CheckpointJSON) > 0 {
+		updated.CheckpointJSON = jsonOrDefault(in.CheckpointJSON, `{}`)
+	}
+	if strings.TrimSpace(in.NextAction) != "" {
+		updated.NextAction = strings.TrimSpace(in.NextAction)
+	} else {
+		updated.NextAction = nextActionFromSteps(updated.Steps)
+	}
+	updated.Blocker = firstPlanBlocker(updated.Steps)
+	updated.Status = statusFromPlanSteps(updated.Steps, updated.Status)
+	applyPlanCompletion(&updated)
+	updated, err = u.repo.UpdateTaskPlan(ctx, updated)
+	if err != nil {
+		return domain.TaskPlan{}, err
+	}
+	if _, insertErr := u.repo.InsertAction(ctx, domain.TaskAction{
+		TaskID:     taskID,
+		ActionType: TaskActionUpdatePlanStep,
+		Payload: marshalOrEmpty("task_plan_step_action", map[string]any{
+			"step_id":       stepID.String(),
+			"status":        step.Status,
+			"observation":   step.Observation,
+			"blocker":       step.Blocker,
+			"error_message": step.ErrorMessage,
+		}),
+	}); insertErr != nil {
+		slog.Warn("companion update plan step action failed", "task_id", taskID.String(), "step_id", stepID.String(), "error", insertErr)
+	}
+	u.syncTaskMemory(ctx, taskID, "update_plan_step")
+	return updated, nil
+}
+
+func (u *Usecases) RecordTaskPlanCheckpoint(ctx context.Context, taskID uuid.UUID, in RecordTaskPlanCheckpointInput) (domain.TaskPlan, error) {
+	plan, err := u.repo.GetTaskPlan(ctx, taskID)
+	if err != nil {
+		return domain.TaskPlan{}, err
+	}
+	if _, err := u.repo.GetTaskByID(ctx, taskID); err != nil {
+		return domain.TaskPlan{}, err
+	}
+	if len(in.CheckpointJSON) > 0 {
+		plan.CheckpointJSON = jsonOrDefault(in.CheckpointJSON, `{}`)
+	}
+	if status := strings.TrimSpace(in.Status); status != "" {
+		if !validTaskPlanStatus(status) {
+			return domain.TaskPlan{}, fmt.Errorf("invalid plan status")
+		}
+		plan.Status = status
+	}
+	if strings.TrimSpace(in.NextAction) != "" {
+		plan.NextAction = strings.TrimSpace(in.NextAction)
+	}
+	if strings.TrimSpace(in.Blocker) != "" {
+		plan.Blocker = strings.TrimSpace(in.Blocker)
+	}
+	applyPlanCompletion(&plan)
+	updated, err := u.repo.UpdateTaskPlan(ctx, plan)
+	if err != nil {
+		return domain.TaskPlan{}, err
+	}
+	if _, insertErr := u.repo.InsertAction(ctx, domain.TaskAction{
+		TaskID:     taskID,
+		ActionType: TaskActionPlanCheckpoint,
+		Payload: marshalOrEmpty("task_plan_checkpoint_action", map[string]any{
+			"status":      updated.Status,
+			"next_action": updated.NextAction,
+			"blocker":     updated.Blocker,
+			"checkpoint":  json.RawMessage(updated.CheckpointJSON),
+		}),
+	}); insertErr != nil {
+		slog.Warn("companion plan checkpoint action failed", "task_id", taskID.String(), "error", insertErr)
+	}
+	u.syncTaskMemory(ctx, taskID, "plan_checkpoint")
+	return updated, nil
+}
+
+func (u *Usecases) GetTaskPlan(ctx context.Context, taskID uuid.UUID) (domain.TaskPlan, error) {
+	return u.repo.GetTaskPlan(ctx, taskID)
+}
+
+func buildTaskPlanStep(orgID string, taskID uuid.UUID, index int, in SetTaskPlanStepInput) (domain.TaskPlanStep, error) {
+	title := strings.TrimSpace(in.Title)
+	if title == "" {
+		return domain.TaskPlanStep{}, fmt.Errorf("plan step title is required")
+	}
+	status := strings.TrimSpace(in.Status)
+	if status == "" {
+		status = domain.TaskPlanStepStatusPending
+	}
+	if !validTaskPlanStepStatus(status) {
+		return domain.TaskPlanStep{}, fmt.Errorf("invalid plan step status")
+	}
+	stepKey := strings.TrimSpace(in.StepKey)
+	if stepKey == "" {
+		stepKey = fmt.Sprintf("step-%d", index+1)
+	}
+	sortOrder := in.SortOrder
+	if sortOrder == 0 {
+		sortOrder = index + 1
+	}
+	step := domain.TaskPlanStep{
+		ID:              in.ID,
+		TaskID:          taskID,
+		OrgID:           orgID,
+		StepKey:         stepKey,
+		Title:           title,
+		Status:          status,
+		DependsOnJSON:   jsonOrDefault(in.DependsOnJSON, `[]`),
+		ToolName:        strings.TrimSpace(in.ToolName),
+		Capability:      strings.TrimSpace(in.Capability),
+		ExpectedOutcome: strings.TrimSpace(in.ExpectedOutcome),
+		Postcondition:   strings.TrimSpace(in.Postcondition),
+		EvidenceJSON:    jsonOrDefault(in.EvidenceJSON, `{}`),
+		Observation:     strings.TrimSpace(in.Observation),
+		Blocker:         strings.TrimSpace(in.Blocker),
+		ErrorMessage:    strings.TrimSpace(in.ErrorMessage),
+		AttemptCount:    in.AttemptCount,
+		SortOrder:       sortOrder,
+	}
+	if isTerminalTaskPlanStepStatus(step.Status) {
+		now := time.Now().UTC()
+		step.CompletedAt = &now
+	}
+	return step, nil
+}
+
+func validTaskPlanStatus(status string) bool {
+	switch strings.TrimSpace(status) {
+	case domain.TaskPlanStatusDraft, domain.TaskPlanStatusActive, domain.TaskPlanStatusBlocked,
+		domain.TaskPlanStatusCompleted, domain.TaskPlanStatusFailed, domain.TaskPlanStatusEscalated:
+		return true
+	default:
+		return false
+	}
+}
+
+func validTaskPlanStepStatus(status string) bool {
+	switch strings.TrimSpace(status) {
+	case domain.TaskPlanStepStatusPending, domain.TaskPlanStepStatusReady, domain.TaskPlanStepStatusRunning,
+		domain.TaskPlanStepStatusBlocked, domain.TaskPlanStepStatusDone,
+		domain.TaskPlanStepStatusFailed, domain.TaskPlanStepStatusSkipped:
+		return true
+	default:
+		return false
+	}
+}
+
+func isTerminalTaskPlanStepStatus(status string) bool {
+	switch strings.TrimSpace(status) {
+	case domain.TaskPlanStepStatusDone, domain.TaskPlanStepStatusFailed, domain.TaskPlanStepStatusSkipped:
+		return true
+	default:
+		return false
+	}
+}
+
+func jsonOrDefault(raw json.RawMessage, fallback string) json.RawMessage {
+	if len(raw) == 0 {
+		return json.RawMessage(fallback)
+	}
+	return raw
+}
+
+func nextActionFromSteps(steps []domain.TaskPlanStep) string {
+	for _, step := range steps {
+		switch step.Status {
+		case domain.TaskPlanStepStatusPending, domain.TaskPlanStepStatusReady, domain.TaskPlanStepStatusRunning:
+			return step.Title
+		case domain.TaskPlanStepStatusBlocked:
+			if step.Blocker != "" {
+				return "resolve blocker: " + step.Blocker
+			}
+			return "resolve blocker for " + step.Title
+		}
+	}
+	return "closed"
+}
+
+func firstPlanBlocker(steps []domain.TaskPlanStep) string {
+	for _, step := range steps {
+		if step.Status == domain.TaskPlanStepStatusBlocked && strings.TrimSpace(step.Blocker) != "" {
+			return strings.TrimSpace(step.Blocker)
+		}
+	}
+	return ""
+}
+
+func statusFromPlanSteps(steps []domain.TaskPlanStep, fallback string) string {
+	if len(steps) == 0 {
+		return fallback
+	}
+	allTerminal := true
+	hasFailed := false
+	hasBlocked := false
+	hasRunning := false
+	for _, step := range steps {
+		switch step.Status {
+		case domain.TaskPlanStepStatusFailed:
+			hasFailed = true
+		case domain.TaskPlanStepStatusBlocked:
+			hasBlocked = true
+			allTerminal = false
+		case domain.TaskPlanStepStatusRunning:
+			hasRunning = true
+			allTerminal = false
+		default:
+			if !isTerminalTaskPlanStepStatus(step.Status) {
+				allTerminal = false
+			}
+		}
+	}
+	switch {
+	case hasFailed:
+		return domain.TaskPlanStatusFailed
+	case hasBlocked:
+		return domain.TaskPlanStatusBlocked
+	case allTerminal:
+		return domain.TaskPlanStatusCompleted
+	case hasRunning:
+		return domain.TaskPlanStatusActive
+	default:
+		return domain.TaskPlanStatusActive
+	}
+}
+
+func applyPlanCompletion(plan *domain.TaskPlan) {
+	if plan == nil {
+		return
+	}
+	switch plan.Status {
+	case domain.TaskPlanStatusCompleted, domain.TaskPlanStatusFailed, domain.TaskPlanStatusEscalated:
+		if plan.CompletedAt == nil {
+			now := time.Now().UTC()
+			plan.CompletedAt = &now
+		}
+	default:
+		plan.CompletedAt = nil
+	}
+}
+
+func taskPlanActionPayload(plan domain.TaskPlan) json.RawMessage {
+	steps := make([]map[string]any, 0, len(plan.Steps))
+	for _, step := range plan.Steps {
+		steps = append(steps, map[string]any{
+			"id":               step.ID.String(),
+			"step_key":         step.StepKey,
+			"title":            step.Title,
+			"status":           step.Status,
+			"tool_name":        step.ToolName,
+			"capability":       step.Capability,
+			"expected_outcome": step.ExpectedOutcome,
+			"postcondition":    step.Postcondition,
+			"sort_order":       step.SortOrder,
+			"depends_on":       json.RawMessage(step.DependsOnJSON),
+			"attempt_count":    step.AttemptCount,
+			"completed_at":     formatOptionalTime(step.CompletedAt),
+		})
+	}
+	return marshalOrEmpty("task_plan_action", map[string]any{
+		"objective":   plan.Objective,
+		"status":      plan.Status,
+		"strategy":    plan.Strategy,
+		"next_action": plan.NextAction,
+		"blocker":     plan.Blocker,
+		"steps":       steps,
+	})
+}
+
+func formatOptionalTime(t *time.Time) string {
+	if t == nil {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339)
 }
 
 func (u *Usecases) SetExecutionPlan(ctx context.Context, taskID uuid.UUID, in SetExecutionPlanInput) (domain.TaskExecutionPlan, error) {

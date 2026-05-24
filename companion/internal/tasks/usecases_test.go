@@ -26,6 +26,7 @@ type fakeRepo struct {
 	artifacts      []domain.TaskArtifact
 	nexusSync      map[uuid.UUID]domain.TaskNexusSyncState
 	executionPlan  map[uuid.UUID]domain.TaskExecutionPlan
+	taskPlan       map[uuid.UUID]domain.TaskPlan
 	executionState map[uuid.UUID]domain.TaskExecutionState
 }
 
@@ -197,6 +198,86 @@ func (f *fakeRepo) UpsertExecutionPlan(ctx context.Context, plan domain.TaskExec
 	}
 	f.executionPlan[plan.TaskID] = plan
 	return plan, nil
+}
+
+func (f *fakeRepo) GetTaskPlan(ctx context.Context, taskID uuid.UUID) (domain.TaskPlan, error) {
+	if f.taskPlan == nil {
+		return domain.TaskPlan{}, ErrNotFound
+	}
+	plan, ok := f.taskPlan[taskID]
+	if !ok {
+		return domain.TaskPlan{}, ErrNotFound
+	}
+	return plan, nil
+}
+
+func (f *fakeRepo) UpsertTaskPlan(ctx context.Context, plan domain.TaskPlan) (domain.TaskPlan, error) {
+	if f.taskPlan == nil {
+		f.taskPlan = make(map[uuid.UUID]domain.TaskPlan)
+	}
+	if existing, ok := f.taskPlan[plan.TaskID]; ok && plan.CreatedAt.IsZero() {
+		plan.CreatedAt = existing.CreatedAt
+	}
+	now := time.Now().UTC()
+	if plan.CreatedAt.IsZero() {
+		plan.CreatedAt = now
+	}
+	if plan.UpdatedAt.IsZero() {
+		plan.UpdatedAt = now
+	}
+	for i := range plan.Steps {
+		if plan.Steps[i].ID == uuid.Nil {
+			plan.Steps[i].ID = uuid.New()
+		}
+		if plan.Steps[i].CreatedAt.IsZero() {
+			plan.Steps[i].CreatedAt = now
+		}
+		if plan.Steps[i].UpdatedAt.IsZero() {
+			plan.Steps[i].UpdatedAt = now
+		}
+	}
+	f.taskPlan[plan.TaskID] = plan
+	return plan, nil
+}
+
+func (f *fakeRepo) UpdateTaskPlan(ctx context.Context, plan domain.TaskPlan) (domain.TaskPlan, error) {
+	if f.taskPlan == nil {
+		return domain.TaskPlan{}, ErrNotFound
+	}
+	existing, ok := f.taskPlan[plan.TaskID]
+	if !ok {
+		return domain.TaskPlan{}, ErrNotFound
+	}
+	plan.Steps = existing.Steps
+	if plan.CreatedAt.IsZero() {
+		plan.CreatedAt = existing.CreatedAt
+	}
+	if plan.UpdatedAt.IsZero() {
+		plan.UpdatedAt = time.Now().UTC()
+	}
+	f.taskPlan[plan.TaskID] = plan
+	return plan, nil
+}
+
+func (f *fakeRepo) UpdateTaskPlanStep(ctx context.Context, step domain.TaskPlanStep) (domain.TaskPlanStep, error) {
+	if f.taskPlan == nil {
+		return domain.TaskPlanStep{}, ErrNotFound
+	}
+	plan, ok := f.taskPlan[step.TaskID]
+	if !ok {
+		return domain.TaskPlanStep{}, ErrNotFound
+	}
+	for i := range plan.Steps {
+		if plan.Steps[i].ID == step.ID {
+			if step.UpdatedAt.IsZero() {
+				step.UpdatedAt = time.Now().UTC()
+			}
+			plan.Steps[i] = step
+			f.taskPlan[step.TaskID] = plan
+			return step, nil
+		}
+	}
+	return domain.TaskPlanStep{}, ErrNotFound
 }
 
 func (f *fakeRepo) GetExecutionState(ctx context.Context, taskID uuid.UUID) (domain.TaskExecutionState, error) {
@@ -511,6 +592,114 @@ func TestUsecases_SetExecutionPlan_persistsAndAudits(t *testing.T) {
 	}
 	if repo.countActions(TaskActionSetExecutionPlan) != 1 {
 		t.Fatalf("expected one set_execution_plan action, got %d", repo.countActions(TaskActionSetExecutionPlan))
+	}
+}
+
+func TestUsecases_SetTaskPlan_persistsStepsAndAudits(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	repo := &fakeRepo{}
+	uc := NewUsecases(repo, &stubNexus{})
+	mem := &stubTaskMemory{}
+	uc.SetTaskMemory(mem)
+
+	task, err := uc.Create(ctx, CreateTaskInput{OrgID: "org-a", CreatedBy: "user-a", Title: "durable work", Goal: "finish safely"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := uc.SetTaskPlan(ctx, task.ID, SetTaskPlanInput{
+		Objective:  "finish safely",
+		Strategy:   "plan then verify",
+		NextAction: "inspect context",
+		Steps: []SetTaskPlanStepInput{
+			{StepKey: "inspect", Title: "Inspect context", Status: domain.TaskPlanStepStatusReady, ExpectedOutcome: "facts collected"},
+			{StepKey: "verify", Title: "Verify result", Postcondition: "evidence exists"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Status != domain.TaskPlanStatusActive || len(plan.Steps) != 2 {
+		t.Fatalf("unexpected durable plan %+v", plan)
+	}
+	if plan.Steps[0].OrgID != "org-a" || plan.Steps[0].StepKey != "inspect" {
+		t.Fatalf("unexpected step %+v", plan.Steps[0])
+	}
+	if repo.countActions(TaskActionSetDurablePlan) != 1 {
+		t.Fatalf("expected one set durable plan action, got %d", repo.countActions(TaskActionSetDurablePlan))
+	}
+	if len(mem.writes) < 4 {
+		t.Fatalf("expected task memory projection for durable plan, got %d writes", len(mem.writes))
+	}
+}
+
+func TestUsecases_UpdateTaskPlanStepCompletesPlan(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	repo := &fakeRepo{}
+	uc := NewUsecases(repo, &stubNexus{})
+	task, err := uc.Create(ctx, CreateTaskInput{OrgID: "org-a", Title: "complete plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := uc.SetTaskPlan(ctx, task.ID, SetTaskPlanInput{
+		Objective: "complete plan",
+		Steps: []SetTaskPlanStepInput{
+			{StepKey: "only", Title: "Only step", Status: domain.TaskPlanStepStatusReady},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	updated, err := uc.UpdateTaskPlanStep(ctx, task.ID, plan.Steps[0].ID, UpdateTaskPlanStepInput{
+		Status:       domain.TaskPlanStepStatusDone,
+		Observation:  "done",
+		EvidenceJSON: json.RawMessage(`{"checked":true}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Status != domain.TaskPlanStatusCompleted || updated.CompletedAt == nil {
+		t.Fatalf("expected completed durable plan, got %+v", updated)
+	}
+	if updated.Steps[0].CompletedAt == nil || updated.Steps[0].Observation != "done" {
+		t.Fatalf("expected completed step, got %+v", updated.Steps[0])
+	}
+	if repo.countActions(TaskActionUpdatePlanStep) != 1 {
+		t.Fatalf("expected one update plan step action, got %d", repo.countActions(TaskActionUpdatePlanStep))
+	}
+}
+
+func TestUsecases_RecordTaskPlanCheckpoint(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	repo := &fakeRepo{}
+	uc := NewUsecases(repo, &stubNexus{})
+	task, err := uc.Create(ctx, CreateTaskInput{OrgID: "org-a", Title: "checkpoint"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = uc.SetTaskPlan(ctx, task.ID, SetTaskPlanInput{
+		Objective: "checkpoint",
+		Steps:     []SetTaskPlanStepInput{{Title: "Step"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, err := uc.RecordTaskPlanCheckpoint(ctx, task.ID, RecordTaskPlanCheckpointInput{
+		CheckpointJSON: json.RawMessage(`{"phase":"observed"}`),
+		NextAction:     "continue",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.NextAction != "continue" || !strings.Contains(string(updated.CheckpointJSON), "observed") {
+		t.Fatalf("unexpected checkpoint %+v", updated)
+	}
+	if repo.countActions(TaskActionPlanCheckpoint) != 1 {
+		t.Fatalf("expected one plan checkpoint action, got %d", repo.countActions(TaskActionPlanCheckpoint))
 	}
 }
 

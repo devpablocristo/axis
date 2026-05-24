@@ -100,6 +100,66 @@ type TaskExecutionPlan struct {
 }
 
 const (
+	TaskPlanStatusDraft     = "draft"
+	TaskPlanStatusActive    = "active"
+	TaskPlanStatusBlocked   = "blocked"
+	TaskPlanStatusCompleted = "completed"
+	TaskPlanStatusFailed    = "failed"
+	TaskPlanStatusEscalated = "escalated"
+
+	TaskPlanStepStatusPending = "pending"
+	TaskPlanStepStatusReady   = "ready"
+	TaskPlanStepStatusRunning = "running"
+	TaskPlanStepStatusBlocked = "blocked"
+	TaskPlanStepStatusDone    = "done"
+	TaskPlanStepStatusFailed  = "failed"
+	TaskPlanStepStatusSkipped = "skipped"
+)
+
+// TaskPlan es el plan cognitivo durable de una task. No reemplaza a
+// TaskExecutionPlan: este modela objetivo, pasos, checkpoints y bloqueos.
+type TaskPlan struct {
+	TaskID          uuid.UUID
+	OrgID           string
+	Objective       string
+	Status          string
+	Strategy        string
+	AssumptionsJSON json.RawMessage
+	ConstraintsJSON json.RawMessage
+	CheckpointJSON  json.RawMessage
+	NextAction      string
+	Blocker         string
+	CreatedBy       string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	CompletedAt     *time.Time
+	Steps           []TaskPlanStep
+}
+
+type TaskPlanStep struct {
+	ID              uuid.UUID
+	TaskID          uuid.UUID
+	OrgID           string
+	StepKey         string
+	Title           string
+	Status          string
+	DependsOnJSON   json.RawMessage
+	ToolName        string
+	Capability      string
+	ExpectedOutcome string
+	Postcondition   string
+	EvidenceJSON    json.RawMessage
+	Observation     string
+	Blocker         string
+	ErrorMessage    string
+	AttemptCount    int
+	SortOrder       int
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	CompletedAt     *time.Time
+}
+
+const (
 	VerificationStatusVerified = "verified"
 	VerificationStatusFailed   = "failed"
 )

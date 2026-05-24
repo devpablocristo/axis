@@ -39,6 +39,10 @@ type Repository interface {
 	UpsertNexusSyncState(ctx context.Context, s domain.TaskNexusSyncState) (domain.TaskNexusSyncState, error)
 	GetExecutionPlan(ctx context.Context, taskID uuid.UUID) (domain.TaskExecutionPlan, error)
 	UpsertExecutionPlan(ctx context.Context, plan domain.TaskExecutionPlan) (domain.TaskExecutionPlan, error)
+	GetTaskPlan(ctx context.Context, taskID uuid.UUID) (domain.TaskPlan, error)
+	UpsertTaskPlan(ctx context.Context, plan domain.TaskPlan) (domain.TaskPlan, error)
+	UpdateTaskPlan(ctx context.Context, plan domain.TaskPlan) (domain.TaskPlan, error)
+	UpdateTaskPlanStep(ctx context.Context, step domain.TaskPlanStep) (domain.TaskPlanStep, error)
 	GetExecutionState(ctx context.Context, taskID uuid.UUID) (domain.TaskExecutionState, error)
 	UpsertExecutionState(ctx context.Context, state domain.TaskExecutionState) (domain.TaskExecutionState, error)
 
@@ -326,6 +330,184 @@ func (r *PostgresRepository) UpsertExecutionPlan(ctx context.Context, plan domai
 	return plan, nil
 }
 
+func (r *PostgresRepository) GetTaskPlan(ctx context.Context, taskID uuid.UUID) (domain.TaskPlan, error) {
+	row := r.db.Pool().QueryRow(ctx, `
+		SELECT task_id, org_id, objective, status, strategy, assumptions_json, constraints_json,
+		       checkpoint_json, next_action, blocker, created_by, created_at, updated_at, completed_at
+		FROM companion_task_plans
+		WHERE task_id = $1
+	`, taskID)
+	plan, err := scanTaskPlan(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.TaskPlan{}, ErrNotFound
+		}
+		return domain.TaskPlan{}, fmt.Errorf("get task plan: %w", err)
+	}
+	steps, err := r.listTaskPlanSteps(ctx, taskID)
+	if err != nil {
+		return domain.TaskPlan{}, err
+	}
+	plan.Steps = steps
+	return plan, nil
+}
+
+func (r *PostgresRepository) UpsertTaskPlan(ctx context.Context, plan domain.TaskPlan) (domain.TaskPlan, error) {
+	now := time.Now().UTC()
+	normalizeTaskPlanJSON(&plan)
+	if plan.CreatedAt.IsZero() {
+		plan.CreatedAt = now
+	}
+	plan.UpdatedAt = now
+	tx, err := r.db.Pool().Begin(ctx)
+	if err != nil {
+		return domain.TaskPlan{}, fmt.Errorf("begin upsert task plan: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	_, err = tx.Exec(ctx, `
+		INSERT INTO companion_task_plans (
+			task_id, org_id, objective, status, strategy, assumptions_json, constraints_json,
+			checkpoint_json, next_action, blocker, created_by, created_at, updated_at, completed_at
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+		ON CONFLICT (task_id) DO UPDATE SET
+			org_id = EXCLUDED.org_id,
+			objective = EXCLUDED.objective,
+			status = EXCLUDED.status,
+			strategy = EXCLUDED.strategy,
+			assumptions_json = EXCLUDED.assumptions_json,
+			constraints_json = EXCLUDED.constraints_json,
+			checkpoint_json = EXCLUDED.checkpoint_json,
+			next_action = EXCLUDED.next_action,
+			blocker = EXCLUDED.blocker,
+			created_by = EXCLUDED.created_by,
+			updated_at = EXCLUDED.updated_at,
+			completed_at = EXCLUDED.completed_at
+	`, plan.TaskID, plan.OrgID, plan.Objective, plan.Status, plan.Strategy,
+		plan.AssumptionsJSON, plan.ConstraintsJSON, plan.CheckpointJSON,
+		plan.NextAction, plan.Blocker, plan.CreatedBy, plan.CreatedAt, plan.UpdatedAt, plan.CompletedAt)
+	if err != nil {
+		return domain.TaskPlan{}, fmt.Errorf("upsert task plan: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM companion_task_plan_steps WHERE task_id = $1`, plan.TaskID); err != nil {
+		return domain.TaskPlan{}, fmt.Errorf("replace task plan steps: %w", err)
+	}
+	for i := range plan.Steps {
+		step := plan.Steps[i]
+		normalizeTaskPlanStepJSON(&step)
+		if step.ID == uuid.Nil {
+			step.ID = uuid.New()
+		}
+		if step.CreatedAt.IsZero() {
+			step.CreatedAt = now
+		}
+		step.UpdatedAt = now
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO companion_task_plan_steps (
+				id, task_id, org_id, step_key, title, status, depends_on_json,
+				tool_name, capability, expected_outcome, postcondition,
+				evidence_json, observation, blocker, error_message,
+				attempt_count, sort_order, created_at, updated_at, completed_at
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+		`, step.ID, plan.TaskID, plan.OrgID, step.StepKey, step.Title, step.Status,
+			step.DependsOnJSON, step.ToolName, step.Capability, step.ExpectedOutcome,
+			step.Postcondition, step.EvidenceJSON, step.Observation, step.Blocker,
+			step.ErrorMessage, step.AttemptCount, step.SortOrder, step.CreatedAt, step.UpdatedAt, step.CompletedAt); err != nil {
+			return domain.TaskPlan{}, fmt.Errorf("insert task plan step: %w", err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return domain.TaskPlan{}, fmt.Errorf("commit upsert task plan: %w", err)
+	}
+	return r.GetTaskPlan(ctx, plan.TaskID)
+}
+
+func (r *PostgresRepository) UpdateTaskPlan(ctx context.Context, plan domain.TaskPlan) (domain.TaskPlan, error) {
+	normalizeTaskPlanJSON(&plan)
+	plan.UpdatedAt = time.Now().UTC()
+	tag, err := r.db.Pool().Exec(ctx, `
+		UPDATE companion_task_plans SET
+			objective = $2,
+			status = $3,
+			strategy = $4,
+			assumptions_json = $5,
+			constraints_json = $6,
+			checkpoint_json = $7,
+			next_action = $8,
+			blocker = $9,
+			updated_at = $10,
+			completed_at = $11
+		WHERE task_id = $1
+	`, plan.TaskID, plan.Objective, plan.Status, plan.Strategy,
+		plan.AssumptionsJSON, plan.ConstraintsJSON, plan.CheckpointJSON,
+		plan.NextAction, plan.Blocker, plan.UpdatedAt, plan.CompletedAt)
+	if err != nil {
+		return domain.TaskPlan{}, fmt.Errorf("update task plan: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.TaskPlan{}, ErrNotFound
+	}
+	return r.GetTaskPlan(ctx, plan.TaskID)
+}
+
+func (r *PostgresRepository) UpdateTaskPlanStep(ctx context.Context, step domain.TaskPlanStep) (domain.TaskPlanStep, error) {
+	normalizeTaskPlanStepJSON(&step)
+	step.UpdatedAt = time.Now().UTC()
+	tag, err := r.db.Pool().Exec(ctx, `
+		UPDATE companion_task_plan_steps SET
+			status = $3,
+			depends_on_json = $4,
+			tool_name = $5,
+			capability = $6,
+			expected_outcome = $7,
+			postcondition = $8,
+			evidence_json = $9,
+			observation = $10,
+			blocker = $11,
+			error_message = $12,
+			attempt_count = $13,
+			sort_order = $14,
+			updated_at = $15,
+			completed_at = $16
+		WHERE task_id = $1 AND id = $2
+	`, step.TaskID, step.ID, step.Status, step.DependsOnJSON, step.ToolName,
+		step.Capability, step.ExpectedOutcome, step.Postcondition, step.EvidenceJSON,
+		step.Observation, step.Blocker, step.ErrorMessage, step.AttemptCount,
+		step.SortOrder, step.UpdatedAt, step.CompletedAt)
+	if err != nil {
+		return domain.TaskPlanStep{}, fmt.Errorf("update task plan step: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.TaskPlanStep{}, ErrNotFound
+	}
+	return step, nil
+}
+
+func (r *PostgresRepository) listTaskPlanSteps(ctx context.Context, taskID uuid.UUID) ([]domain.TaskPlanStep, error) {
+	rows, err := r.db.Pool().Query(ctx, `
+		SELECT id, task_id, org_id, step_key, title, status, depends_on_json,
+		       tool_name, capability, expected_outcome, postcondition,
+		       evidence_json, observation, blocker, error_message,
+		       attempt_count, sort_order, created_at, updated_at, completed_at
+		FROM companion_task_plan_steps
+		WHERE task_id = $1
+		ORDER BY sort_order ASC, created_at ASC
+	`, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("list task plan steps: %w", err)
+	}
+	defer rows.Close()
+	var out []domain.TaskPlanStep
+	for rows.Next() {
+		step, err := scanTaskPlanStep(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, step)
+	}
+	return out, rows.Err()
+}
+
 func (r *PostgresRepository) GetExecutionState(ctx context.Context, taskID uuid.UUID) (domain.TaskExecutionState, error) {
 	row := r.db.Pool().QueryRow(ctx, `
 		SELECT task_id, last_execution_id, last_execution_status, retryable, retry_count,
@@ -611,6 +793,94 @@ func scanExecutionPlan(row rowScanner) (domain.TaskExecutionPlan, error) {
 		plan.Payload = json.RawMessage(payloadRaw)
 	}
 	return plan, nil
+}
+
+func scanTaskPlan(row rowScanner) (domain.TaskPlan, error) {
+	var plan domain.TaskPlan
+	var assumptionsRaw, constraintsRaw, checkpointRaw []byte
+	var completedAt *time.Time
+	err := row.Scan(
+		&plan.TaskID,
+		&plan.OrgID,
+		&plan.Objective,
+		&plan.Status,
+		&plan.Strategy,
+		&assumptionsRaw,
+		&constraintsRaw,
+		&checkpointRaw,
+		&plan.NextAction,
+		&plan.Blocker,
+		&plan.CreatedBy,
+		&plan.CreatedAt,
+		&plan.UpdatedAt,
+		&completedAt,
+	)
+	if err != nil {
+		return domain.TaskPlan{}, err
+	}
+	plan.AssumptionsJSON = json.RawMessage(assumptionsRaw)
+	plan.ConstraintsJSON = json.RawMessage(constraintsRaw)
+	plan.CheckpointJSON = json.RawMessage(checkpointRaw)
+	plan.CompletedAt = completedAt
+	normalizeTaskPlanJSON(&plan)
+	return plan, nil
+}
+
+func scanTaskPlanStep(row rowScanner) (domain.TaskPlanStep, error) {
+	var step domain.TaskPlanStep
+	var dependsRaw, evidenceRaw []byte
+	var completedAt *time.Time
+	err := row.Scan(
+		&step.ID,
+		&step.TaskID,
+		&step.OrgID,
+		&step.StepKey,
+		&step.Title,
+		&step.Status,
+		&dependsRaw,
+		&step.ToolName,
+		&step.Capability,
+		&step.ExpectedOutcome,
+		&step.Postcondition,
+		&evidenceRaw,
+		&step.Observation,
+		&step.Blocker,
+		&step.ErrorMessage,
+		&step.AttemptCount,
+		&step.SortOrder,
+		&step.CreatedAt,
+		&step.UpdatedAt,
+		&completedAt,
+	)
+	if err != nil {
+		return domain.TaskPlanStep{}, err
+	}
+	step.DependsOnJSON = json.RawMessage(dependsRaw)
+	step.EvidenceJSON = json.RawMessage(evidenceRaw)
+	step.CompletedAt = completedAt
+	normalizeTaskPlanStepJSON(&step)
+	return step, nil
+}
+
+func normalizeTaskPlanJSON(plan *domain.TaskPlan) {
+	if len(plan.AssumptionsJSON) == 0 {
+		plan.AssumptionsJSON = json.RawMessage(`[]`)
+	}
+	if len(plan.ConstraintsJSON) == 0 {
+		plan.ConstraintsJSON = json.RawMessage(`[]`)
+	}
+	if len(plan.CheckpointJSON) == 0 {
+		plan.CheckpointJSON = json.RawMessage(`{}`)
+	}
+}
+
+func normalizeTaskPlanStepJSON(step *domain.TaskPlanStep) {
+	if len(step.DependsOnJSON) == 0 {
+		step.DependsOnJSON = json.RawMessage(`[]`)
+	}
+	if len(step.EvidenceJSON) == 0 {
+		step.EvidenceJSON = json.RawMessage(`{}`)
+	}
 }
 
 func scanExecutionState(row rowScanner) (domain.TaskExecutionState, error) {

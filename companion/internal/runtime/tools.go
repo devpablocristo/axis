@@ -22,12 +22,28 @@ type ToolKit struct {
 	Schemas  []ToolSchema
 	Handlers map[string]ToolHandler
 	policies map[string]toolPolicy
+	metadata map[string]ToolMetadata
 }
 
 type toolPolicy struct {
 	RequiresTenant   bool
 	RequiresUser     bool
+	RequiresTask     bool
 	RequiredAnyScope []string
+}
+
+type ToolMetadata struct {
+	Name                  string   `json:"name,omitempty"`
+	Operation             string   `json:"operation,omitempty"`
+	CapabilityID          string   `json:"capability_id,omitempty"`
+	Product               string   `json:"product,omitempty"`
+	ConnectorKind         string   `json:"connector_kind,omitempty"`
+	SideEffectClass       string   `json:"side_effect_class,omitempty"`
+	RiskClass             string   `json:"risk_class,omitempty"`
+	RequiresNexusApproval bool     `json:"requires_nexus_approval,omitempty"`
+	EvidenceRequired      []string `json:"evidence_required,omitempty"`
+	RollbackSupported     bool     `json:"rollback_supported,omitempty"`
+	RollbackCapabilityID  string   `json:"rollback_capability_id,omitempty"`
 }
 
 const (
@@ -40,6 +56,7 @@ func NewToolKit(rc *nexusclient.Client, memUC *memory.Usecases, watcherUC *watch
 	tk := &ToolKit{
 		Handlers: make(map[string]ToolHandler),
 		policies: make(map[string]toolPolicy),
+		metadata: make(map[string]ToolMetadata),
 	}
 
 	// --- get_overview: resumen de estado ---
@@ -281,9 +298,56 @@ func NewToolKit(rc *nexusclient.Client, memUC *memory.Usecases, watcherUC *watch
 }
 
 func (tk *ToolKit) add(schema ToolSchema, policy toolPolicy, handler ToolHandler) {
+	if tk.Handlers == nil {
+		tk.Handlers = make(map[string]ToolHandler)
+	}
+	if tk.policies == nil {
+		tk.policies = make(map[string]toolPolicy)
+	}
 	tk.Schemas = append(tk.Schemas, schema)
 	tk.Handlers[schema.Name] = handler
 	tk.policies[schema.Name] = policy
+}
+
+func (tk *ToolKit) setMetadata(name string, metadata ToolMetadata) {
+	if tk == nil {
+		return
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return
+	}
+	if tk.metadata == nil {
+		tk.metadata = make(map[string]ToolMetadata)
+	}
+	metadata.Name = name
+	metadata.EvidenceRequired = cleanStringList(metadata.EvidenceRequired)
+	tk.metadata[name] = metadata
+}
+
+func (tk *ToolKit) ToolMetadata(name string) (ToolMetadata, bool) {
+	if tk == nil || tk.metadata == nil {
+		return ToolMetadata{}, false
+	}
+	metadata, ok := tk.metadata[strings.TrimSpace(name)]
+	return metadata, ok
+}
+
+func cleanStringList(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }
 
 func (tk *ToolKit) SchemasFor(identity IdentityChain, intent string) []ToolSchema {
@@ -311,6 +375,9 @@ func (tk *ToolKit) CanUseTool(name string, identity IdentityChain) bool {
 		return false
 	}
 	if policy.RequiresUser && strings.TrimSpace(identity.InitiatingUser) == "" {
+		return false
+	}
+	if policy.RequiresTask && strings.TrimSpace(identity.TaskID) == "" {
 		return false
 	}
 	if len(policy.RequiredAnyScope) > 0 && !hasAnyScope(identity.AuthScopes, policy.RequiredAnyScope...) {
