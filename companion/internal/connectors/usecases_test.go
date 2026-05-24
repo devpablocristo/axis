@@ -357,6 +357,95 @@ func TestUsecases_CapabilitiesExposeConnectorContractV1(t *testing.T) {
 	if len(writeCap.InputSchema) == 0 || len(writeCap.EvidenceFields) == 0 {
 		t.Fatalf("expected schema and evidence fields: %+v", writeCap)
 	}
+	if writeCap.DisplayName == "" || writeCap.Description == "" || writeCap.Connector != "mock" || writeCap.ActionType == "" {
+		t.Fatalf("expected explicit manifest fields: %+v", writeCap)
+	}
+	if writeCap.NexusActionType != "agent.capability.invoke" || writeCap.IdempotencyMode != "required" || !writeCap.EnabledByDefault {
+		t.Fatalf("expected approval/idempotency defaults from manifest registry: %+v", writeCap)
+	}
+	if writeCap.Timeout == "" || writeCap.Retries.MaxAttempts < 1 || len(writeCap.ObservabilityTags) == 0 {
+		t.Fatalf("expected operational manifest fields: %+v", writeCap)
+	}
+}
+
+func TestUsecases_CapabilityManifestsExposeVersionedContracts(t *testing.T) {
+	t.Parallel()
+
+	reg := registry.NewRegistry()
+	reg.Register(registry.NewMockConnector())
+	uc := NewUsecases(&fakeConnectorRepo{}, reg, &stubChecker{})
+
+	manifests, err := uc.CapabilityManifests(domain.CapabilityFilter{
+		Scopes:             []string{"companion:connectors:execute"},
+		IncludeWrites:      true,
+		EnforcePermissions: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(manifests) != 2 {
+		t.Fatalf("expected mock manifests, got %+v", manifests)
+	}
+	var writeManifestFound bool
+	for _, manifest := range manifests {
+		if manifest.CapabilityID != "mock.write" {
+			continue
+		}
+		writeManifestFound = true
+		if manifest.SchemaVersion != "capability_manifest.v1" || manifest.NexusActionType != "agent.capability.invoke" {
+			t.Fatalf("unexpected write manifest identity: %+v", manifest)
+		}
+		if manifest.InputSchema["type"] != "object" || manifest.EvidenceSchema["type"] != "object" {
+			t.Fatalf("expected strict object schemas: %+v", manifest)
+		}
+	}
+	if !writeManifestFound {
+		t.Fatalf("mock.write manifest not found: %+v", manifests)
+	}
+}
+
+func TestUsecases_BuildActionBindingIncludesCapabilityManifestFields(t *testing.T) {
+	t.Parallel()
+
+	repo := &fakeConnectorRepo{connectors: make(map[uuid.UUID]domain.Connector)}
+	connectorID := uuid.New()
+	repo.connectors[connectorID] = domain.Connector{
+		ID:      connectorID,
+		OrgID:   "org-a",
+		Name:    "Mock Connector",
+		Kind:    "mock",
+		Enabled: true,
+	}
+	reg := registry.NewRegistry()
+	reg.Register(registry.NewMockConnector())
+	uc := NewUsecases(repo, reg, &stubChecker{})
+	taskID := uuid.New()
+
+	binding, hash, err := uc.BuildActionBinding(context.Background(), domain.ExecutionSpec{
+		ConnectorID:    connectorID,
+		OrgID:          "org-a",
+		ActorID:        "actor-1",
+		AuthScopes:     []string{"companion:connectors:execute"},
+		Operation:      "mock.write",
+		Payload:        json.RawMessage(`{"message":"hello"}`),
+		IdempotencyKey: "idem-binding",
+		TaskID:         &taskID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hash == "" {
+		t.Fatal("expected binding hash")
+	}
+	if binding["capability_id"] != "mock.write" || binding["capability_version"] != "1.0.0" {
+		t.Fatalf("expected capability identity in binding, got %+v", binding)
+	}
+	if binding["nexus_action_type"] != "agent.capability.invoke" || binding["side_effect_type"] != domain.SideEffectClassWrite {
+		t.Fatalf("expected approval manifest fields in binding, got %+v", binding)
+	}
+	if binding["cost_class"] == "" || binding["rate_limit_class"] == "" {
+		t.Fatalf("expected operational classes in binding, got %+v", binding)
+	}
 }
 
 func TestUsecases_CapabilitiesFiltersWritesByDefault(t *testing.T) {

@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -22,6 +23,7 @@ type Orchestrator struct {
 	ports           ContextPorts
 	traces          TraceRepository // opcional; nil = no persiste (uso en tests)
 	controls        RuntimeControls
+	observer        ObservabilityRecorder
 	defaultAutonomy AutonomyLevel // "" → A2 (default conservador)
 	model           string
 }
@@ -43,6 +45,10 @@ func (o *Orchestrator) SetTraceRepository(repo TraceRepository) {
 // SetRuntimeControls inyecta políticas y contabilidad de runtime por tenant.
 func (o *Orchestrator) SetRuntimeControls(repo RuntimeControls) {
 	o.controls = repo
+}
+
+func (o *Orchestrator) SetObservabilityRecorder(repo ObservabilityRecorder) {
+	o.observer = repo
 }
 
 // SetDefaultAutonomy fija el nivel de autonomía por defecto del runtime.
@@ -116,8 +122,27 @@ func (o *Orchestrator) Run(ctx context.Context, in RunInput) (RunResult, error) 
 		Model:          modelName,
 		StartedAt:      time.Now().UTC(),
 	}
+	o.recordObservabilityEvent(ctx, trace, in, "run", "started", map[string]any{
+		"model":                  modelName,
+		"prompt_version":         SystemPromptVersion,
+		"agent_profile":          route.Profile,
+		"allowed_tools":          route.AllowedTools,
+		"runtime_policy_version": policy.SettingsVersion,
+		"control_plane": map[string]any{
+			"max_risk_class":        policy.ControlPlane.MaxRiskClass,
+			"trace_level":           policy.ControlPlane.Observability.TraceLevel,
+			"redaction_mode":        policy.ControlPlane.Observability.RedactionMode,
+			"replay_enabled":        policy.ControlPlane.Observability.ReplayEnabled,
+			"capture_prompts":       policy.ControlPlane.Observability.CapturePrompts,
+			"capture_tool_payloads": policy.ControlPlane.Observability.CaptureToolPayloads,
+		},
+	})
 	if decision.Event != nil {
 		trace.GuardrailEvents = append(trace.GuardrailEvents, *decision.Event)
+		o.recordObservabilityEvent(ctx, trace, in, "guardrail", "runtime_policy", map[string]any{
+			"target": decision.Event.Target,
+			"reason": decision.Event.Reason,
+		})
 		if decision.Reply != "" {
 			trace.CompletedAt = time.Now().UTC()
 			slog.Warn("runtime_tenant_policy_rejected", "run_id", trace.RunID, "type", decision.Event.Type, "reason", decision.Event.Reason)
@@ -131,6 +156,10 @@ func (o *Orchestrator) Run(ctx context.Context, in RunInput) (RunResult, error) 
 	}
 	if event := CheckPromptInjection(in.Message); event != nil {
 		trace.GuardrailEvents = append(trace.GuardrailEvents, *event)
+		o.recordObservabilityEvent(ctx, trace, in, "guardrail", "prompt_injection", map[string]any{
+			"target": event.Target,
+			"reason": event.Reason,
+		})
 		trace.CompletedAt = time.Now().UTC()
 		slog.Warn("runtime_guardrail_rejected", "run_id", trace.RunID, "type", event.Type, "reason", event.Reason)
 		o.finishTrace(ctx, trace, in, "")
@@ -158,6 +187,13 @@ func (o *Orchestrator) Run(ctx context.Context, in RunInput) (RunResult, error) 
 	for round := 0; round < maxToolRounds; round++ {
 		recordChatInputUsage(&trace.Usage, systemPrompt, llmMessages)
 		trace.Usage.AddLLMCall()
+		o.recordObservabilityEvent(ctx, trace, in, "llm", "request", map[string]any{
+			"round":        round,
+			"model":        modelName,
+			"tools_count":  len(allowedSchemas),
+			"max_tokens":   1024,
+			"input_tokens": trace.Usage.EstimatedInputTokens,
+		})
 		resp, err := o.provider.Chat(ctx, ChatRequest{
 			SystemPrompt: systemPrompt,
 			Messages:     llmMessages,
@@ -202,6 +238,11 @@ func (o *Orchestrator) Run(ctx context.Context, in RunInput) (RunResult, error) 
 			if event := ValidateToolPolicy(tc.Name, tc.Args, trace.IdentityChain, route, o.toolkit); event != nil {
 				slog.Warn("tool_call_guardrail_rejected", "tool", tc.Name, "type", event.Type, "reason", event.Reason)
 				trace.GuardrailEvents = append(trace.GuardrailEvents, *event)
+				o.recordObservabilityEvent(ctx, trace, in, "tool", "rejected", map[string]any{
+					"tool":   tc.Name,
+					"reason": event.Reason,
+					"args":   json.RawMessage(tc.Args),
+				})
 				trace.ToolCalls = append(trace.ToolCalls, ToolTrace{
 					Name:           tc.Name,
 					ToolCallID:     tc.ID,
@@ -226,13 +267,28 @@ func (o *Orchestrator) Run(ctx context.Context, in RunInput) (RunResult, error) 
 			toolCtx, cancel := context.WithTimeout(toolCtx, 15*time.Second)
 			result := o.toolkit.ExecuteTool(toolCtx, tc.Name, tc.Args)
 			cancel()
+			durationMS := time.Since(toolStart).Milliseconds()
 			trace.Usage.AddToolCall(result)
 			trace.ToolCalls = append(trace.ToolCalls, ToolTrace{
 				Name:           tc.Name,
 				ToolCallID:     tc.ID,
 				Allowed:        true,
 				DecisionReason: "allowed_by_runtime_policy",
-				DurationMS:     time.Since(toolStart).Milliseconds(),
+				DurationMS:     durationMS,
+			})
+			metadata, _ := o.toolkit.ToolMetadata(tc.Name)
+			o.recordObservabilityEvent(ctx, trace, in, "tool", "executed", map[string]any{
+				"tool":               tc.Name,
+				"tool_call_id":       tc.ID,
+				"duration_ms":        durationMS,
+				"capability_id":      metadata.CapabilityID,
+				"capability_version": metadata.CapabilityVersion,
+				"connector_kind":     metadata.ConnectorKind,
+				"risk_class":         metadata.RiskClass,
+				"side_effect":        metadata.SideEffectClass,
+				"requires_nexus":     metadata.RequiresNexusApproval,
+				"args":               json.RawMessage(tc.Args),
+				"result":             result,
 			})
 
 			llmMessages = append(llmMessages, LLMMessage{
@@ -281,6 +337,12 @@ func (o *Orchestrator) persistTrace(ctx context.Context, trace RunTrace, in RunI
 }
 
 func (o *Orchestrator) finishTrace(ctx context.Context, trace RunTrace, in RunInput, errMsg string) {
+	o.recordObservabilityEvent(ctx, trace, in, "run", "completed", map[string]any{
+		"error":            errMsg,
+		"usage":            trace.Usage,
+		"tool_calls":       len(trace.ToolCalls),
+		"guardrail_events": len(trace.GuardrailEvents),
+	})
 	o.persistTrace(ctx, trace, in, errMsg)
 	if o.controls == nil || in.OrgID == "" {
 		return
@@ -289,6 +351,17 @@ func (o *Orchestrator) finishTrace(ctx context.Context, trace RunTrace, in RunIn
 	defer cancel()
 	if err := o.controls.AddRuntimeUsage(recordCtx, in.OrgID, runtimeUsagePeriod(trace.StartedAt), trace.Usage); err != nil {
 		slog.Error("runtime_usage_record_failed", "run_id", trace.RunID, "customer_org_id", in.OrgID, "error", err)
+	}
+}
+
+func (o *Orchestrator) recordObservabilityEvent(ctx context.Context, trace RunTrace, in RunInput, eventType, eventName string, payload map[string]any) {
+	if o.observer == nil {
+		return
+	}
+	recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	defer cancel()
+	if err := o.observer.RecordObservabilityEvent(recordCtx, newObservabilityEvent(trace, in, eventType, eventName, payload)); err != nil {
+		slog.Error("observability_event_record_failed", "run_id", trace.RunID, "event", eventName, "error", err)
 	}
 }
 

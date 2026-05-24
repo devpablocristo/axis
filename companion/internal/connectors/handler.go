@@ -10,6 +10,7 @@ import (
 	"github.com/devpablocristo/platform/http/go/httpjson"
 	"github.com/google/uuid"
 
+	"github.com/devpablocristo/companion/internal/capabilities"
 	"github.com/devpablocristo/companion/internal/connectors/handler/dto"
 	"github.com/devpablocristo/companion/internal/connectors/registry"
 	domain "github.com/devpablocristo/companion/internal/connectors/usecases/domain"
@@ -27,6 +28,7 @@ type connectorUsecase interface {
 	Execute(ctx context.Context, spec domain.ExecutionSpec) (domain.ExecutionResult, error)
 	ListExecutions(ctx context.Context, connectorID uuid.UUID, limit int) ([]domain.ExecutionResult, error)
 	Capabilities(filter domain.CapabilityFilter) []ConnectorCapabilities
+	CapabilityManifests(filter domain.CapabilityFilter) ([]capabilities.Manifest, error)
 	RefreshConnectors(ctx context.Context) []registry.RefreshResult
 }
 
@@ -50,6 +52,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/connectors/execute", h.execute)
 	mux.HandleFunc("GET /v1/connectors/{id}/executions", h.listExecutions)
 	mux.HandleFunc("GET /v1/connectors/capabilities", h.capabilities)
+	mux.HandleFunc("GET /v1/connectors/capability-manifests", h.capabilityManifests)
 }
 
 func (h *Handler) refresh(w http.ResponseWriter, r *http.Request) {
@@ -286,16 +289,7 @@ func (h *Handler) listExecutions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) capabilities(w http.ResponseWriter, r *http.Request) {
-	id := identityctx.FromRequest(r)
-	filter := domain.CapabilityFilter{
-		TenantID:           id.CustomerOrgID,
-		Roles:              parseHeaderValues(r.Header.Get("X-Auth-Roles")),
-		Scopes:             append([]string(nil), id.Scopes...),
-		Modules:            parseHeaderValues(r.Header.Get("X-Enabled-Modules")),
-		MaxRiskClass:       strings.TrimSpace(r.URL.Query().Get("max_risk_class")),
-		IncludeWrites:      strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("include_writes")), "true"),
-		EnforcePermissions: !identityctx.HasNoAuthContext(r),
-	}
+	filter := capabilityFilterFromRequest(r)
 	caps := h.uc.Capabilities(filter)
 	out := make([]dto.CapabilityResponse, 0, len(caps))
 	for _, c := range caps {
@@ -311,4 +305,26 @@ func (h *Handler) capabilities(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	httpjson.WriteJSON(w, http.StatusOK, dto.CapabilitiesListResponse{Connectors: out})
+}
+
+func (h *Handler) capabilityManifests(w http.ResponseWriter, r *http.Request) {
+	manifests, err := h.uc.CapabilityManifests(capabilityFilterFromRequest(r))
+	if err != nil {
+		httpjson.WriteFlatInternalError(w, err, "list capability manifests failed")
+		return
+	}
+	httpjson.WriteJSON(w, http.StatusOK, dto.CapabilityManifestListResponse{Capabilities: manifests})
+}
+
+func capabilityFilterFromRequest(r *http.Request) domain.CapabilityFilter {
+	id := identityctx.FromRequest(r)
+	return domain.CapabilityFilter{
+		TenantID:           id.CustomerOrgID,
+		Roles:              parseHeaderValues(r.Header.Get("X-Auth-Roles")),
+		Scopes:             append([]string(nil), id.Scopes...),
+		Modules:            parseHeaderValues(r.Header.Get("X-Enabled-Modules")),
+		MaxRiskClass:       strings.TrimSpace(r.URL.Query().Get("max_risk_class")),
+		IncludeWrites:      strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("include_writes")), "true"),
+		EnforcePermissions: !identityctx.HasNoAuthContext(r),
+	}
 }

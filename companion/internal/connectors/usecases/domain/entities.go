@@ -25,11 +25,18 @@ type Capability struct {
 	ID                    string                `json:"id,omitempty"`
 	Version               string                `json:"version,omitempty"`
 	Status                string                `json:"status,omitempty"`
+	DisplayName           string                `json:"display_name,omitempty"`
+	Description           string                `json:"description,omitempty"`
+	Owner                 string                `json:"owner,omitempty"`
 	OwnerDomain           string                `json:"owner_domain,omitempty"`
 	PublishedFrom         string                `json:"published_from,omitempty"`
 	Product               string                `json:"product,omitempty"`
+	ProductSurface        string                `json:"product_surface,omitempty"`
+	Connector             string                `json:"connector,omitempty"`
 	Operation             string                `json:"operation"` // send_whatsapp, create_purchase, etc.
-	Mode                  string                `json:"mode"`      // read o write
+	ActionType            string                `json:"action_type,omitempty"`
+	Mode                  string                `json:"mode"` // read o write
+	SideEffectType        string                `json:"side_effect_type,omitempty"`
 	SideEffectClass       string                `json:"side_effect_class,omitempty"`
 	SideEffect            bool                  `json:"side_effect"`
 	ReadOnly              bool                  `json:"read_only"`
@@ -43,13 +50,26 @@ type Capability struct {
 	ApprovalPolicy        ApprovalPolicy        `json:"approval_policy,omitempty"`
 	InputSchema           map[string]any        `json:"input_schema,omitempty"`
 	OutputSchema          map[string]any        `json:"output_schema,omitempty"`
+	EvidenceSchema        map[string]any        `json:"evidence_schema,omitempty"`
 	EvidenceFields        []string              `json:"evidence_fields,omitempty"` // alias de compatibilidad
 	EvidenceRequired      []string              `json:"evidence_required,omitempty"`
 	DataClassification    DataClassification    `json:"data_classification,omitempty"`
 	Idempotency           IdempotencyContract   `json:"idempotency,omitempty"`
+	IdempotencyMode       string                `json:"idempotency_mode,omitempty"`
 	Observability         ObservabilityContract `json:"observability,omitempty"`
+	ObservabilityTags     []string              `json:"observability_tags,omitempty"`
 	ErrorContract         ErrorContract         `json:"error_contract,omitempty"`
 	Rollback              RollbackContract      `json:"rollback,omitempty"`
+	CompensationStrategy  string                `json:"compensation_strategy,omitempty"`
+	NexusActionType       string                `json:"nexus_action_type,omitempty"`
+	TenantConfigurable    bool                  `json:"tenant_configurable"`
+	EnabledByDefault      bool                  `json:"enabled_by_default"`
+	RateLimitClass        string                `json:"rate_limit_class,omitempty"`
+	CostClass             string                `json:"cost_class,omitempty"`
+	Timeout               string                `json:"timeout,omitempty"`
+	Retries               RetryPolicy           `json:"retries,omitempty"`
+	Postconditions        []string              `json:"postconditions,omitempty"`
+	Preconditions         []string              `json:"preconditions,omitempty"`
 }
 
 type TenantScope struct {
@@ -89,6 +109,11 @@ type ErrorContract struct {
 type RollbackContract struct {
 	Supported    bool   `json:"supported"`
 	CapabilityID string `json:"capability_id,omitempty"`
+}
+
+type RetryPolicy struct {
+	MaxAttempts int    `json:"max_attempts"`
+	Backoff     string `json:"backoff,omitempty"`
 }
 
 type CapabilityDecision struct {
@@ -214,11 +239,20 @@ func (c Capability) Normalized(connectorID, kind string) Capability {
 	if c.OwnerDomain == "" {
 		c.OwnerDomain = kind
 	}
+	if c.Owner == "" {
+		c.Owner = c.OwnerDomain
+	}
 	if c.PublishedFrom == "" {
 		c.PublishedFrom = CapabilityPublishedFromProduct
 	}
 	if c.Product == "" {
 		c.Product = kind
+	}
+	if c.ProductSurface == "" {
+		c.ProductSurface = c.Product
+	}
+	if c.Connector == "" {
+		c.Connector = kind
 	}
 	if c.Mode == "" {
 		if c.ReadOnly && !c.SideEffect {
@@ -227,6 +261,9 @@ func (c Capability) Normalized(connectorID, kind string) Capability {
 			c.Mode = CapabilityModeWrite
 		}
 	}
+	if c.ActionType == "" {
+		c.ActionType = c.Mode
+	}
 	if c.SideEffectClass == "" {
 		if strings.EqualFold(c.Mode, CapabilityModeRead) {
 			c.SideEffectClass = SideEffectClassRead
@@ -234,8 +271,17 @@ func (c Capability) Normalized(connectorID, kind string) Capability {
 			c.SideEffectClass = SideEffectClassWrite
 		}
 	}
+	if c.SideEffectType == "" {
+		c.SideEffectType = c.SideEffectClass
+	}
 	if c.RiskClass == "" {
 		c.RiskClass = RiskClassLow
+	}
+	if c.DisplayName == "" {
+		c.DisplayName = strings.ReplaceAll(c.ID, ".", " ")
+	}
+	if c.Description == "" {
+		c.Description = "Capability " + c.ID + " on " + kind + " connector."
 	}
 	if c.TenantScope.Mode == "" {
 		c.TenantScope.Mode = TenantScopeSingleTenant
@@ -252,6 +298,9 @@ func (c Capability) Normalized(connectorID, kind string) Capability {
 	if c.OutputSchema == nil {
 		c.OutputSchema = map[string]any{"type": "object"}
 	}
+	if c.EvidenceSchema == nil {
+		c.EvidenceSchema = map[string]any{"type": "object"}
+	}
 	if len(c.EvidenceRequired) == 0 && len(c.EvidenceFields) > 0 {
 		c.EvidenceRequired = append([]string(nil), c.EvidenceFields...)
 	}
@@ -260,6 +309,9 @@ func (c Capability) Normalized(connectorID, kind string) Capability {
 	}
 	if c.NeedsNexusApproval() {
 		c.ApprovalPolicy.Required = true
+		if c.NexusActionType == "" {
+			c.NexusActionType = "agent.capability.invoke"
+		}
 	}
 	if c.HasSideEffect() {
 		if len(c.Idempotency.KeyFields) == 0 {
@@ -267,13 +319,41 @@ func (c Capability) Normalized(connectorID, kind string) Capability {
 		}
 		c.Idempotency.Required = true
 	}
+	if c.IdempotencyMode == "" {
+		if c.Idempotency.Required {
+			c.IdempotencyMode = "required"
+		} else {
+			c.IdempotencyMode = "none"
+		}
+	}
 	if len(c.Observability.Metrics) == 0 {
 		c.Observability.Metrics = []string{"latency_ms", "success_rate", "error_rate"}
 	}
 	c.Observability.EmitTrace = true
 	c.Observability.EmitAuditEvent = true
+	if len(c.ObservabilityTags) == 0 {
+		c.ObservabilityTags = []string{"connector:" + kind, "risk:" + c.RiskClass, "mode:" + c.Mode}
+	}
 	if len(c.ErrorContract.TypedErrors) == 0 {
 		c.ErrorContract.TypedErrors = []string{"unauthorized", "out_of_scope", "precondition_failed", "conflict"}
+	}
+	if c.RateLimitClass == "" {
+		c.RateLimitClass = "standard"
+	}
+	if c.CostClass == "" {
+		c.CostClass = "low"
+	}
+	if c.Timeout == "" {
+		c.Timeout = "30s"
+	}
+	if c.Retries.MaxAttempts == 0 {
+		c.Retries = RetryPolicy{MaxAttempts: 1, Backoff: "none"}
+	}
+	if len(c.Preconditions) == 0 {
+		c.Preconditions = []string{"customer_org_context"}
+	}
+	if len(c.Postconditions) == 0 && len(c.EvidenceRequired) > 0 {
+		c.Postconditions = append([]string(nil), c.EvidenceRequired...)
 	}
 	_ = connectorID
 	return c

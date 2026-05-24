@@ -7,6 +7,7 @@ import (
 	"time"
 
 	connectordomain "github.com/devpablocristo/companion/internal/connectors/usecases/domain"
+	"github.com/devpablocristo/companion/internal/jobs"
 	"github.com/devpablocristo/companion/internal/nexusclient"
 	"github.com/google/uuid"
 
@@ -504,5 +505,85 @@ func TestUsecases_Delete(t *testing.T) {
 	_, err := uc.Get(context.Background(), w.ID)
 	if err == nil {
 		t.Fatal("expected not found after delete")
+	}
+}
+
+func TestUsecases_EnqueueWatcherRunsUsesDurableJobQueue(t *testing.T) {
+	t.Parallel()
+
+	repo := newFakeRepo()
+	queue := jobs.NewMemoryRepository()
+	uc := NewUsecases(repo, &fakeNexus{})
+	uc.SetJobQueue(queue)
+	enabled, _ := uc.Create(context.Background(), CreateWatcherInput{
+		OrgID: "org-1", Name: "Enabled", WatcherType: domain.WatcherLowStock,
+		Config: json.RawMessage(`{"threshold_units":1}`), Enabled: true,
+	})
+	_, _ = uc.Create(context.Background(), CreateWatcherInput{
+		OrgID: "org-1", Name: "Disabled", WatcherType: domain.WatcherLowStock,
+		Config: json.RawMessage(`{"threshold_units":1}`), Enabled: false,
+	})
+
+	count, err := uc.EnqueueWatcherRuns(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("expected one watcher job enqueued, got %d", count)
+	}
+	claimed, err := queue.Claim(context.Background(), jobs.ClaimOptions{WorkerID: "w1", Kinds: []string{JobKindWatcherRun}, BatchSize: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(claimed) != 1 || claimed[0].Kind != JobKindWatcherRun {
+		t.Fatalf("expected watcher.run job, got %+v", claimed)
+	}
+	var payload watcherRunJobPayload
+	if err := json.Unmarshal(claimed[0].Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.WatcherID != enabled.ID.String() {
+		t.Fatalf("expected watcher_id %s, got %s", enabled.ID, payload.WatcherID)
+	}
+}
+
+func TestUsecases_JobHandlerRunsWatcherAndCompletes(t *testing.T) {
+	t.Parallel()
+
+	repo := newFakeRepo()
+	queue := jobs.NewMemoryRepository()
+	uc := NewUsecases(repo, &fakeNexus{decision: "allowed"})
+	uc.SetConnectorExecutor(&fakeConnectorExecutor{readResults: map[string]json.RawMessage{
+		"pymes.get_low_stock": json.RawMessage(`[]`),
+	}})
+	w, _ := uc.Create(context.Background(), CreateWatcherInput{
+		OrgID: "org-1", Name: "Low stock", WatcherType: domain.WatcherLowStock,
+		Config: json.RawMessage(`{"threshold_units":1}`), Enabled: true,
+	})
+	payload, err := json.Marshal(watcherRunJobPayload{WatcherID: w.ID.String()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, _, err := queue.Enqueue(context.Background(), jobs.EnqueueInput{
+		OrgID:     w.OrgID,
+		Kind:      JobKindWatcherRun,
+		ShardKey:  w.OrgID,
+		DedupeKey: "watcher.run:" + w.ID.String(),
+		Payload:   payload,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	worker := jobs.NewWorker(queue, jobs.WorkerConfig{WorkerID: "w1", Concurrency: 1})
+	uc.RegisterJobHandlers(worker)
+	if claimed, err := worker.RunOnce(context.Background()); err != nil || claimed != 1 {
+		t.Fatalf("worker claimed=%d err=%v", claimed, err)
+	}
+	stored, err := queue.Get(context.Background(), job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != jobs.StatusSucceeded {
+		t.Fatalf("expected job succeeded, got %+v", stored)
 	}
 }

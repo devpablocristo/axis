@@ -3,12 +3,14 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
 
 	"github.com/google/uuid"
 
+	"github.com/devpablocristo/companion/internal/capabilities"
 	"github.com/devpablocristo/companion/internal/nexusclient"
 
 	connectorsdomain "github.com/devpablocristo/companion/internal/connectors/usecases/domain"
@@ -17,6 +19,7 @@ import (
 // ConnectorTypeView expone un connector type registrado (Kind + capability
 // templates declaradas en código). Es solo lectura.
 type ConnectorTypeView interface {
+	ID() string
 	Kind() string
 	Capabilities() []connectorsdomain.Capability
 }
@@ -35,6 +38,10 @@ type NexusSubmitter interface {
 	SubmitRequest(ctx context.Context, idempotencyKey string, body nexusclient.SubmitRequestBody) (nexusclient.SubmitResponse, error)
 }
 
+type RuntimePolicyReader interface {
+	GetRuntimePolicy(ctx context.Context, orgID string) (TenantRuntimePolicy, error)
+}
+
 // CapabilityBridgeDeps agrupa lo que la bridge necesita para exponer
 // connector capabilities como runtime tools. Connectors es la lista de
 // connector types disponibles al boot (típicamente armada desde
@@ -43,6 +50,7 @@ type CapabilityBridgeDeps struct {
 	Connectors []ConnectorTypeView
 	Executor   ConnectorExecutor
 	Submitter  NexusSubmitter
+	Controls   RuntimePolicyReader
 }
 
 // RegisterConnectorCapabilities itera cada connector type registrado y expone
@@ -65,7 +73,12 @@ func RegisterConnectorCapabilities(tk *ToolKit, deps CapabilityBridgeDeps) {
 		kind := conn.Kind()
 		for _, capability := range conn.Capabilities() {
 			capability := capability // capture per iteration
-			capability = capability.Normalized("", kind)
+			manifest, err := capabilities.FromConnectorCapability(conn.ID(), kind, capability)
+			if err != nil {
+				slog.Error("skip invalid capability manifest", "connector", conn.ID(), "operation", capability.Operation, "error", err)
+				continue
+			}
+			capability = manifest.ToConnectorCapability().Normalized(conn.ID(), kind)
 			name := operationToToolName(capability.Operation)
 			if name == "" {
 				continue
@@ -89,14 +102,24 @@ func toolMetadataFromCapability(kind string, capability connectorsdomain.Capabil
 	return ToolMetadata{
 		Operation:             capability.Operation,
 		CapabilityID:          capability.ID,
+		CapabilityVersion:     capability.Version,
 		Product:               capability.Product,
 		ConnectorKind:         kind,
+		ActionType:            capability.ActionType,
 		SideEffectClass:       capability.SideEffectClass,
 		RiskClass:             capability.RiskClass,
+		NexusActionType:       capability.NexusActionType,
 		RequiresNexusApproval: capability.NeedsNexusApproval(),
 		EvidenceRequired:      append([]string(nil), capability.EvidenceRequired...),
 		RollbackSupported:     capability.Rollback.Supported,
 		RollbackCapabilityID:  capability.Rollback.CapabilityID,
+		CompensationStrategy:  capability.CompensationStrategy,
+		CostClass:             capability.CostClass,
+		RateLimitClass:        capability.RateLimitClass,
+		Timeout:               capability.Timeout,
+		Preconditions:         append([]string(nil), capability.Preconditions...),
+		Postconditions:        append([]string(nil), capability.Postconditions...),
+		ObservabilityTags:     append([]string(nil), capability.ObservabilityTags...),
 	}
 }
 
@@ -177,6 +200,15 @@ func capabilityToolHandler(kind string, capability connectorsdomain.Capability, 
 		if strings.TrimSpace(id.OrgID) == "" {
 			return `{"error":"customer org context required"}`, nil
 		}
+		toolName := operationToToolName(capability.Operation)
+		if event := validateCapabilityControlPlane(ctx, deps.Controls, id.OrgID, toolName, kind, capability); event != nil {
+			slog.Warn("capability_blocked_by_control_plane", "operation", capability.Operation, "kind", kind, "reason", event.Reason)
+			return jsonOrError(map[string]any{
+				"error":  "capability blocked by customer org control plane",
+				"target": event.Target,
+				"reason": event.Reason,
+			}), nil
+		}
 
 		connID, err := resolveConnectorID(ctx, deps.Executor, id.OrgID, kind)
 		if err != nil {
@@ -241,7 +273,7 @@ func capabilityToolHandler(kind string, capability connectorsdomain.Capability, 
 			RequesterType:  "agent",
 			RequesterID:    firstNonEmpty(id.CompanionPrincipal, CompanionPrincipal),
 			RequesterName:  "Companion Employee AI",
-			ActionType:     nexusclient.ActionTypeAgentCapabilityInvoke,
+			ActionType:     firstNonEmpty(capability.NexusActionType, nexusclient.ActionTypeAgentCapabilityInvoke),
 			TargetSystem:   kind,
 			TargetResource: connID.String(),
 			ActionBinding:  binding,
@@ -307,6 +339,99 @@ func capabilityToolHandler(kind string, capability connectorsdomain.Capability, 
 			}), nil
 		}
 	}
+}
+
+func validateCapabilityControlPlane(ctx context.Context, reader RuntimePolicyReader, orgID, toolName, connectorKind string, capability connectorsdomain.Capability) *GuardrailEvent {
+	if reader == nil {
+		return nil
+	}
+	policy, err := reader.GetRuntimePolicy(ctx, orgID)
+	if err != nil {
+		if errors.Is(err, ErrRuntimePolicyNotFound) {
+			return &GuardrailEvent{Type: "org_control_plane", Target: "policy", Reason: "customer org runtime policy is required before executing capabilities"}
+		}
+		return &GuardrailEvent{Type: "org_control_plane", Target: "policy", Reason: "customer org runtime policy lookup failed"}
+	}
+	policy = normalizeRuntimePolicy(policy)
+	if !policy.Enabled || policy.KillSwitch {
+		return &GuardrailEvent{Type: "org_control_plane", Target: "runtime", Reason: "runtime is disabled for this customer org"}
+	}
+	settings := policy.ControlPlane
+	if settings.ConnectorKillSwitches[connectorKind] {
+		return &GuardrailEvent{Type: "org_control_plane", Target: "connector:" + connectorKind, Reason: "connector kill switch is active"}
+	}
+	if stringListAllows(settings.DeniedConnectors, connectorKind) {
+		return &GuardrailEvent{Type: "org_control_plane", Target: "connector:" + connectorKind, Reason: "connector is denied for this customer org"}
+	}
+	if len(settings.AllowedConnectors) > 0 && !stringListAllows(settings.AllowedConnectors, connectorKind) {
+		return &GuardrailEvent{Type: "org_control_plane", Target: "connector:" + connectorKind, Reason: "connector is not allowed for this customer org"}
+	}
+	if settings.ToolKillSwitches[toolName] {
+		return &GuardrailEvent{Type: "org_control_plane", Target: "tool:" + toolName, Reason: "tool kill switch is active"}
+	}
+	if stringListAllows(settings.DeniedTools, toolName) {
+		return &GuardrailEvent{Type: "org_control_plane", Target: "tool:" + toolName, Reason: "tool is denied for this customer org"}
+	}
+	if len(settings.AllowedTools) > 0 && !stringListAllows(settings.AllowedTools, toolName) {
+		return &GuardrailEvent{Type: "org_control_plane", Target: "tool:" + toolName, Reason: "tool is not allowed for this customer org"}
+	}
+	if controlPlaneMatchesAny(settings.DeniedCapabilities, capability.ID, capability.Operation, toolName) {
+		return &GuardrailEvent{Type: "org_control_plane", Target: "capability:" + capability.ID, Reason: "capability is denied for this customer org"}
+	}
+	if len(settings.AllowedCapabilities) > 0 && !controlPlaneMatchesAny(settings.AllowedCapabilities, capability.ID, capability.Operation, toolName) {
+		return &GuardrailEvent{Type: "org_control_plane", Target: "capability:" + capability.ID, Reason: "capability is not allowed for this customer org"}
+	}
+	if riskRankControlPlane(capability.RiskClass) > riskRankControlPlane(settings.MaxRiskClass) {
+		return &GuardrailEvent{Type: "org_control_plane", Target: "risk:" + capability.RiskClass, Reason: "capability risk exceeds customer org limit"}
+	}
+	if approvalThresholdRequiresNexus(settings.ApprovalThresholds, capability.RiskClass) && !capability.NeedsNexusApproval() {
+		return &GuardrailEvent{Type: "org_control_plane", Target: "approval_threshold", Reason: "capability risk requires Nexus approval but capability is not configured for controlled execution"}
+	}
+	return nil
+}
+
+func controlPlaneMatchesAny(patterns []string, values ...string) bool {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if stringListAllows(patterns, value) {
+			return true
+		}
+	}
+	return false
+}
+
+func riskRankControlPlane(value string) int {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "none":
+		return 0
+	case "low":
+		return 1
+	case "medium":
+		return 2
+	case "", "high":
+		return 3
+	case "critical":
+		return 4
+	default:
+		return 4
+	}
+}
+
+func approvalThresholdRequiresNexus(thresholds map[string]string, risk string) bool {
+	rank := riskRankControlPlane(risk)
+	for thresholdRisk, mode := range thresholds {
+		mode = strings.ToLower(strings.TrimSpace(mode))
+		if mode != "require_approval" && mode != "nexus_required" {
+			continue
+		}
+		if rank >= riskRankControlPlane(thresholdRisk) {
+			return true
+		}
+	}
+	return false
 }
 
 func isPlanStepInvocation(id Identity) bool {

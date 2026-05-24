@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+
+	connectorsdomain "github.com/devpablocristo/companion/internal/connectors/usecases/domain"
 )
 
 type fakeRuntimeControls struct {
@@ -22,6 +24,10 @@ func (f *fakeRuntimeControls) GetRuntimePolicy(_ context.Context, orgID string) 
 func (f *fakeRuntimeControls) UpsertRuntimePolicy(_ context.Context, policy TenantRuntimePolicy) (TenantRuntimePolicy, error) {
 	f.policy = normalizeRuntimePolicy(policy)
 	return f.policy, nil
+}
+
+func (f *fakeRuntimeControls) ListRuntimePolicyAudit(_ context.Context, _ string, _ int) ([]RuntimePolicyAuditEntry, error) {
+	return nil, nil
 }
 
 func (f *fakeRuntimeControls) GetRuntimeUsage(_ context.Context, orgID, period string) (TenantRuntimeUsage, error) {
@@ -132,5 +138,126 @@ func TestRouteAllowsWildcardProductTools(t *testing.T) {
 	}
 	if routeAllowsTool(route, "pymes_customers_search") {
 		t.Fatal("expected different product prefix to be rejected")
+	}
+}
+
+func TestApplyRuntimePolicy_FiltersToolsWithOrgControlPlane(t *testing.T) {
+	t.Parallel()
+
+	policy := TenantRuntimePolicy{
+		OrgID:       "org-1",
+		Enabled:     true,
+		MaxAutonomy: AutonomyA2,
+		ControlPlane: OrgControlPlaneSettings{
+			AllowedTools:     []string{"remember", "demo_*"},
+			DeniedTools:      []string{"demo_delete"},
+			ToolKillSwitches: map[string]bool{"demo_archive": true},
+		},
+	}
+	route := AgentRoute{
+		AllowedTools: []string{"remember", "check_approvals", "demo_search", "demo_delete", "demo_archive"},
+		Profile: AgentProfile{
+			ID:           "default",
+			AllowedTools: []string{"remember", "check_approvals", "demo_search", "demo_delete", "demo_archive"},
+		},
+	}
+
+	decision := applyRuntimePolicy(policy, TenantRuntimeUsage{}, route, "gemini-1")
+	if decision.Reply != "" {
+		t.Fatalf("expected policy to filter tools without rejecting route: %s", decision.Reply)
+	}
+	got := decision.Route.AllowedTools
+	want := []string{"remember", "demo_search"}
+	if len(got) != len(want) {
+		t.Fatalf("expected filtered tools %v, got %v", want, got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("expected filtered tools %v, got %v", want, got)
+		}
+	}
+}
+
+func TestApplyRuntimePolicy_RejectsDisabledProfile(t *testing.T) {
+	t.Parallel()
+
+	policy := TenantRuntimePolicy{
+		OrgID:       "org-1",
+		Enabled:     true,
+		MaxAutonomy: AutonomyA2,
+		ControlPlane: OrgControlPlaneSettings{
+			AllowedProfiles: []string{"finance"},
+		},
+	}
+	decision := applyRuntimePolicy(policy, TenantRuntimeUsage{}, AgentRoute{
+		Profile: AgentProfile{ID: "support"},
+	}, "gemini-1")
+	if decision.Event == nil || decision.Event.Type != "org_control_plane" {
+		t.Fatalf("expected org control plane rejection, got %+v", decision.Event)
+	}
+}
+
+func TestValidateCapabilityControlPlane_FailsClosedWithoutPolicy(t *testing.T) {
+	t.Parallel()
+
+	reader := &missingPolicyReader{}
+	event := validateCapabilityControlPlane(context.Background(), reader, "org-1", "demo_update", "demo", connectorsCapability("demo.update", "medium", true))
+	if event == nil || event.Target != "policy" {
+		t.Fatalf("expected missing policy to fail closed, got %+v", event)
+	}
+}
+
+func TestValidateCapabilityControlPlane_RejectsDeniedAndRiskyCapability(t *testing.T) {
+	t.Parallel()
+
+	reader := &fakePolicyReader{policy: TenantRuntimePolicy{
+		OrgID:       "org-1",
+		Enabled:     true,
+		MaxAutonomy: AutonomyA2,
+		ControlPlane: OrgControlPlaneSettings{
+			AllowedConnectors:  []string{"demo"},
+			DeniedCapabilities: []string{"demo.delete"},
+			MaxRiskClass:       "medium",
+			ApprovalThresholds: map[string]string{"medium": "require_approval"},
+		},
+	}}
+	if event := validateCapabilityControlPlane(context.Background(), reader, "org-1", "demo_delete", "demo", connectorsCapability("demo.delete", "medium", true)); event == nil {
+		t.Fatal("expected denied capability to be rejected")
+	}
+	if event := validateCapabilityControlPlane(context.Background(), reader, "org-1", "demo_admin", "demo", connectorsCapability("demo.admin", "critical", true)); event == nil || event.Target != "risk:critical" {
+		t.Fatalf("expected critical risk to be rejected, got %+v", event)
+	}
+	if event := validateCapabilityControlPlane(context.Background(), reader, "org-1", "demo_read", "demo", connectorsCapability("demo.read", "medium", false)); event == nil || event.Target != "approval_threshold" {
+		t.Fatalf("expected threshold to reject ungated medium capability, got %+v", event)
+	}
+}
+
+type missingPolicyReader struct{}
+
+func (missingPolicyReader) GetRuntimePolicy(context.Context, string) (TenantRuntimePolicy, error) {
+	return TenantRuntimePolicy{}, ErrRuntimePolicyNotFound
+}
+
+type fakePolicyReader struct {
+	policy TenantRuntimePolicy
+}
+
+func (f *fakePolicyReader) GetRuntimePolicy(context.Context, string) (TenantRuntimePolicy, error) {
+	return f.policy, nil
+}
+
+func connectorsCapability(operation, risk string, approval bool) connectorsdomain.Capability {
+	mode := connectorsdomain.CapabilityModeRead
+	if approval {
+		mode = connectorsdomain.CapabilityModeWrite
+	}
+	return connectorsdomain.Capability{
+		ID:                    operation,
+		Version:               "1.0.0",
+		Operation:             operation,
+		Mode:                  mode,
+		ReadOnly:              mode == connectorsdomain.CapabilityModeRead,
+		RiskClass:             risk,
+		RequiresNexusApproval: approval,
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -14,6 +15,7 @@ import (
 	"github.com/devpablocristo/companion/internal/assist"
 	"github.com/devpablocristo/companion/internal/connectors"
 	"github.com/devpablocristo/companion/internal/connectors/registry"
+	"github.com/devpablocristo/companion/internal/jobs"
 	"github.com/devpablocristo/companion/internal/memory"
 	nexusassist "github.com/devpablocristo/companion/internal/nexus_assist"
 	"github.com/devpablocristo/companion/internal/runtime"
@@ -196,6 +198,27 @@ func watcherSyncInterval() time.Duration {
 	return envconfig.Duration("COMPANION_WATCHER_SYNC_INTERVAL_SEC", watcherInterval())
 }
 
+func jobWorkerCount() int {
+	raw := envconfig.Get("COMPANION_JOB_WORKERS", "2")
+	count, err := strconv.Atoi(raw)
+	if err != nil || count < 0 {
+		return 2
+	}
+	return count
+}
+
+func jobPollInterval() time.Duration {
+	return envconfig.Duration("COMPANION_JOB_POLL_INTERVAL_SEC", time.Second)
+}
+
+func jobLeaseDuration() time.Duration {
+	return envconfig.Duration("COMPANION_JOB_LEASE_SEC", 30*time.Second)
+}
+
+func jobTimeout() time.Duration {
+	return envconfig.Duration("COMPANION_JOB_TIMEOUT_SEC", 5*time.Minute)
+}
+
 // defaultAutonomyLevel lee el nivel de autonomía base del runtime desde env
 // (COMPANION_DEFAULT_AUTONOMY_LEVEL). Acepta A0..A5; cualquier otro valor causa
 // fail-fast en boot para evitar arrancar con configuración ambigua. Default A2.
@@ -278,6 +301,8 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	watcherUC := watchers.NewUsecases(watcherRepo, nexusGateway)
 	watcherUC.SetConnectorExecutor(connUC)
 	watcherHandler := watchers.NewHandler(watcherUC)
+	jobRepo := jobs.NewPostgresRepository(db)
+	watcherUC.SetJobQueue(jobRepo)
 
 	// Memory module
 	memRepo := memory.NewPostgresRepository(db)
@@ -303,6 +328,7 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 		return nil, nil, fmt.Errorf("configure Gemini provider: %w", err)
 	}
 	toolkit := runtime.NewToolKit(rc, memUC, watcherUC)
+	runtimeControlsRepo := runtime.NewPostgresRuntimeControlsRepository(db)
 
 	// Bridge LLM ↔ connectors: expone cada capability declarada por los
 	// connector types registrados como runtime tool (LLM-callable). Reads van
@@ -315,6 +341,7 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 		Connectors: connectorViews,
 		Executor:   connUC,
 		Submitter:  nexusGateway,
+		Controls:   runtimeControlsRepo,
 	})
 	runtime.RegisterTaskPlannerTools(toolkit, taskPlannerAdapter{uc: uc})
 	contextPorts := runtime.ContextPorts{
@@ -335,15 +362,26 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	}
 	orchestrator.SetDefaultAutonomy(autonomy)
 	traceRepo := runtime.NewPostgresTraceRepository(db)
+	observabilityRepo := runtime.NewPostgresObservabilityRepository(db, traceRepo)
 	orchestrator.SetTraceRepository(traceRepo)
-	runtimeControlsRepo := runtime.NewPostgresRuntimeControlsRepository(db)
+	orchestrator.SetObservabilityRecorder(observabilityRepo)
 	orchestrator.SetRuntimeControls(runtimeControlsRepo)
 	traceHandler := runtime.NewTraceHandler(traceRepo)
+	observabilityHandler := runtime.NewObservabilityHandler(observabilityRepo)
 	runtimeControlsHandler := runtime.NewRuntimeControlsHandler(runtimeControlsRepo)
+	jobHandler := jobs.NewHandler(jobRepo)
 	adapter := runtime.NewOrchestratorAdapter(orchestrator)
 	uc.SetOrchestrator(adapter)
 	// Watchers empujan alertas al chat del suscriptor
 	watcherUC.SetNotifier(uc)
+	jobWorker := jobs.NewWorker(jobRepo, jobs.WorkerConfig{
+		WorkerID:       "companion-" + uuid.NewString(),
+		Concurrency:    jobWorkerCount(),
+		PollInterval:   jobPollInterval(),
+		LeaseDuration:  jobLeaseDuration(),
+		DefaultTimeout: jobTimeout(),
+	})
+	watcherUC.RegisterJobHandlers(jobWorker)
 	slog.Info("companion runtime initialized", "llm_provider", cfg.LLMProvider)
 
 	// Nexus-assist: lee Nexus + arma proposals/summaries con Gemini.
@@ -366,7 +404,9 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	chatHandler.Register(mux)
 	connHandler.Register(mux)
 	traceHandler.Register(mux)
+	observabilityHandler.Register(mux)
 	runtimeControlsHandler.Register(mux)
+	jobHandler.Register(mux)
 	nexusAssistHandler.Register(mux)
 	assistHandler.Register(mux)
 
@@ -412,6 +452,15 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 		prev := cleanup
 		cleanup = func() {
 			watcherSyncCancel()
+			prev()
+		}
+	}
+	if jobWorkerCount() > 0 {
+		jobsCtx, jobsCancel := context.WithCancel(context.Background())
+		go jobWorker.Run(jobsCtx)
+		prev := cleanup
+		cleanup = func() {
+			jobsCancel()
 			prev()
 		}
 	}

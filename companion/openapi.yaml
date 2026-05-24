@@ -307,6 +307,28 @@ paths:
       summary: Lista capabilities disponibles
       responses:
         "200": { description: Capability list }
+  /v1/connectors/capability-manifests:
+    get:
+      summary: Lista manifests versionados de capabilities
+      parameters:
+        - in: query
+          name: include_writes
+          schema: { type: boolean, default: false }
+        - in: query
+          name: max_risk_class
+          schema: { type: string, enum: [low, medium, high, critical] }
+      responses:
+        "200":
+          description: Capability manifest list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [capabilities]
+                properties:
+                  capabilities:
+                    type: array
+                    items: { $ref: "#/components/schemas/CapabilityManifest" }
   /v1/connectors/{id}:
     get:
       summary: Obtiene connector
@@ -414,6 +436,41 @@ paths:
           schema: { type: string, format: uuid }
       responses:
         "200": { description: Run trace }
+  /v1/run-traces/{run_id}/replay:
+    get:
+      summary: Obtiene replay operativo de un run
+      parameters:
+        - in: path
+          name: run_id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Run replay
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RunReplay" }
+  /v1/observability/events:
+    get:
+      summary: Lista eventos de observabilidad redacted
+      parameters:
+        - in: query
+          name: run_id
+          schema: { type: string, format: uuid }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 100, minimum: 1, maximum: 500 }
+      responses:
+        "200":
+          description: Observability events
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  events:
+                    type: array
+                    items: { $ref: "#/components/schemas/ObservabilityEvent" }
   /v1/runtime/policy:
     get:
       summary: Obtiene la política runtime de la customer org autenticada
@@ -438,6 +495,20 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/RuntimePolicy" }
+  /v1/runtime/policy/audit:
+    get:
+      summary: Lista cambios versionados de la política runtime
+      description: Requiere `companion:runtime:admin` o `companion:cross_org`.
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, default: 50, minimum: 1, maximum: 200 }
+      responses:
+        "200":
+          description: Runtime policy audit entries
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RuntimePolicyAuditResponse" }
   /v1/runtime/usage:
     get:
       summary: Consulta uso mensual de runtime de la customer org autenticada
@@ -455,6 +526,43 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/RuntimeUsage" }
+  /v1/jobs/{id}:
+    get:
+      summary: Obtiene estado y evidence de un job durable
+      description: Requiere `companion:runtime:admin` o `companion:cross_org`.
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200":
+          description: Job durable
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+  /v1/jobs/{id}/cancel:
+    post:
+      summary: Cancela un job durable queued/running
+      description: Requiere `companion:runtime:admin` o `companion:cross_org`.
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string }
+      responses:
+        "200": { description: Cancelled }
+  /v1/jobs/recover-expired:
+    post:
+      summary: Reencola jobs con leases vencidos
+      description: Requiere `companion:runtime:admin` o `companion:cross_org`.
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, default: 100, minimum: 1 }
+      responses:
+        "200": { description: Recovery summary }
   /v1/nexus-assist/propose:
     post:
       summary: Analiza historial Nexus y propone learning/policies
@@ -571,6 +679,79 @@ components:
         body: { type: string }
         metadata: { type: object, additionalProperties: true }
         created_at: { type: string, format: date-time }
+    CapabilityManifest:
+      type: object
+      required:
+        - schema_version
+        - capability_id
+        - version
+        - display_name
+        - description
+        - owner
+        - product_surface
+        - connector
+        - action_type
+        - risk_level
+        - side_effect_type
+        - auth_mode
+        - input_schema
+        - output_schema
+        - evidence_schema
+        - idempotency_mode
+        - approval_required
+        - tenant_configurable
+        - enabled_by_default
+        - rate_limit_class
+        - cost_class
+        - timeout
+        - retries
+      properties:
+        schema_version: { type: string, enum: [capability_manifest.v1] }
+        capability_id: { type: string }
+        version: { type: string }
+        display_name: { type: string }
+        description: { type: string }
+        owner: { type: string }
+        product_surface: { type: string }
+        connector: { type: string }
+        action_type: { type: string, enum: [read, write] }
+        risk_level: { type: string, enum: [low, medium, high, critical] }
+        side_effect_type: { type: string, enum: [read, write, notify, execute] }
+        auth_mode: { type: string }
+        required_scopes:
+          type: array
+          items: { type: string }
+        input_schema: { type: object, additionalProperties: true }
+        output_schema: { type: object, additionalProperties: true }
+        evidence_schema: { type: object, additionalProperties: true }
+        required_evidence:
+          type: array
+          items: { type: string }
+        idempotency_mode: { type: string, enum: [none, optional, required] }
+        rollback_supported: { type: boolean }
+        rollback_capability_id: { type: string }
+        compensation_strategy: { type: string }
+        nexus_action_type: { type: string }
+        approval_required: { type: boolean }
+        tenant_configurable: { type: boolean }
+        enabled_by_default: { type: boolean }
+        rate_limit_class: { type: string }
+        cost_class: { type: string }
+        timeout: { type: string }
+        retries:
+          type: object
+          properties:
+            max_attempts: { type: integer, minimum: 1 }
+            backoff: { type: string }
+        postconditions:
+          type: array
+          items: { type: string }
+        preconditions:
+          type: array
+          items: { type: string }
+        observability_tags:
+          type: array
+          items: { type: string }
     ConversationSummary:
       type: object
       required: [id, created_at, updated_at, message_count]
@@ -870,6 +1051,8 @@ components:
           items: { type: string }
         monthly_token_budget: { type: integer, format: int64 }
         monthly_tool_call_budget: { type: integer, format: int64 }
+        settings_version: { type: integer, format: int64 }
+        control_plane: { $ref: "#/components/schemas/OrgControlPlane" }
         metadata: { type: object, additionalProperties: true }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
@@ -887,7 +1070,107 @@ components:
           items: { type: string }
         monthly_token_budget: { type: integer, format: int64, minimum: 0 }
         monthly_tool_call_budget: { type: integer, format: int64, minimum: 0 }
+        control_plane: { $ref: "#/components/schemas/OrgControlPlane" }
         metadata: { type: object, additionalProperties: true }
+    OrgControlPlane:
+      type: object
+      properties:
+        enabled_agents:
+          type: array
+          items: { type: string }
+        allowed_profiles:
+          type: array
+          items: { type: string }
+        allowed_tools:
+          type: array
+          items: { type: string }
+        denied_tools:
+          type: array
+          items: { type: string }
+        allowed_capabilities:
+          type: array
+          items: { type: string }
+        denied_capabilities:
+          type: array
+          items: { type: string }
+        allowed_connectors:
+          type: array
+          items: { type: string }
+        denied_connectors:
+          type: array
+          items: { type: string }
+        allowed_models:
+          type: array
+          items: { type: string }
+        monthly_cost_budget_cents: { type: integer, format: int64, minimum: 0 }
+        max_risk_class: { type: string, enum: [none, low, medium, high, critical] }
+        approval_thresholds:
+          type: object
+          additionalProperties: { type: string }
+        retention: { $ref: "#/components/schemas/OrgRetentionPolicy" }
+        memory: { $ref: "#/components/schemas/OrgMemoryPolicy" }
+        agent_kill_switches:
+          type: object
+          additionalProperties: { type: boolean }
+        tool_kill_switches:
+          type: object
+          additionalProperties: { type: boolean }
+        connector_kill_switches:
+          type: object
+          additionalProperties: { type: boolean }
+        data_isolation: { $ref: "#/components/schemas/OrgDataIsolationPolicy" }
+        observability: { $ref: "#/components/schemas/OrgObservabilitySettings" }
+        metadata: { type: object, additionalProperties: true }
+    OrgRetentionPolicy:
+      type: object
+      properties:
+        run_trace_days: { type: integer, minimum: 0 }
+        tool_evidence_days: { type: integer, minimum: 0 }
+        memory_days: { type: integer, minimum: 0 }
+    OrgMemoryPolicy:
+      type: object
+      properties:
+        retention_days: { type: integer, minimum: 0 }
+        compaction_after_days: { type: integer, minimum: 0 }
+        require_provenance: { type: boolean }
+        min_confidence: { type: number, minimum: 0, maximum: 1 }
+        allowed_memory_kinds:
+          type: array
+          items: { type: string }
+        blocked_memory_sources:
+          type: array
+          items: { type: string }
+    OrgDataIsolationPolicy:
+      type: object
+      properties:
+        mode: { type: string, enum: [strict_org, dedicated_store, inherited] }
+        require_org_scoped_memory: { type: boolean }
+        require_org_scoped_tools: { type: boolean }
+        forbid_cross_org_retrieval: { type: boolean }
+    OrgObservabilitySettings:
+      type: object
+      properties:
+        trace_level: { type: string, enum: [minimal, standard, debug] }
+        redaction_mode: { type: string, enum: [strict, standard, disabled] }
+        replay_enabled: { type: boolean }
+        capture_prompts: { type: boolean }
+        capture_tool_payloads: { type: boolean }
+    RuntimePolicyAuditResponse:
+      type: object
+      properties:
+        entries:
+          type: array
+          items: { $ref: "#/components/schemas/RuntimePolicyAuditEntry" }
+    RuntimePolicyAuditEntry:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        org_id: { type: string }
+        settings_version: { type: integer, format: int64 }
+        changed_by: { type: string }
+        reason: { type: string }
+        policy: { $ref: "#/components/schemas/RuntimePolicy" }
+        created_at: { type: string, format: date-time }
     RuntimeUsage:
       type: object
       properties:
@@ -903,3 +1186,52 @@ components:
         tool_call_budget_remaining: { type: integer, format: int64 }
         last_run_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    RunReplay:
+      type: object
+      properties:
+        trace: { type: object, additionalProperties: true }
+        events:
+          type: array
+          items: { $ref: "#/components/schemas/ObservabilityEvent" }
+    ObservabilityEvent:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        org_id: { type: string }
+        run_id: { type: string, format: uuid }
+        task_id: { type: string, format: uuid }
+        job_id: { type: string, format: uuid }
+        agent_id: { type: string }
+        capability_id: { type: string }
+        event_type: { type: string }
+        event_name: { type: string }
+        severity: { type: string }
+        trace_id: { type: string }
+        payload: { type: object, additionalProperties: true }
+        redacted: { type: boolean }
+        occurred_at: { type: string, format: date-time }
+    Job:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        org_id: { type: string }
+        kind: { type: string }
+        shard_key: { type: string }
+        dedupe_key: { type: string }
+        payload: { type: object, additionalProperties: true }
+        status: { type: string, enum: [queued, running, succeeded, failed, dead_letter, cancelled] }
+        priority: { type: integer }
+        attempts: { type: integer }
+        max_attempts: { type: integer }
+        run_after: { type: string, format: date-time }
+        lease_owner: { type: string }
+        lease_until: { type: string, format: date-time }
+        locked_at: { type: string, format: date-time }
+        heartbeat_at: { type: string, format: date-time }
+        deadline_at: { type: string, format: date-time }
+        timeout_seconds: { type: integer }
+        last_error: { type: string }
+        evidence: { type: object, additionalProperties: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        completed_at: { type: string, format: date-time }

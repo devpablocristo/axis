@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/devpablocristo/companion/internal/capabilities"
 	domain "github.com/devpablocristo/companion/internal/connectors/usecases/domain"
 )
 
@@ -80,6 +81,10 @@ type CapabilityResponse struct {
 // CapabilitiesListResponse lista de capacidades.
 type CapabilitiesListResponse struct {
 	Connectors []CapabilityResponse `json:"connectors"`
+}
+
+type CapabilityManifestListResponse struct {
+	Capabilities []capabilities.Manifest `json:"capabilities"`
 }
 
 // SaveConnectorRequest petición para guardar un conector.

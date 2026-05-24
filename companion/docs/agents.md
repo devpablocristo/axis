@@ -15,7 +15,8 @@ Cada run produce:
   tools, memory policy y scopes requeridos.
 
 El routing sigue siendo determinístico y simple. El registry actual es seedable
-en código; persistencia dinámica por producto queda fuera de esta iteración.
+en código, pero la configuración runtime por customer org ya puede permitir,
+denegar o apagar perfiles/agents desde `control_plane`.
 
 ## Autonomía
 

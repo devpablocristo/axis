@@ -36,14 +36,24 @@ type ToolMetadata struct {
 	Name                  string   `json:"name,omitempty"`
 	Operation             string   `json:"operation,omitempty"`
 	CapabilityID          string   `json:"capability_id,omitempty"`
+	CapabilityVersion     string   `json:"capability_version,omitempty"`
 	Product               string   `json:"product,omitempty"`
 	ConnectorKind         string   `json:"connector_kind,omitempty"`
+	ActionType            string   `json:"action_type,omitempty"`
 	SideEffectClass       string   `json:"side_effect_class,omitempty"`
 	RiskClass             string   `json:"risk_class,omitempty"`
+	NexusActionType       string   `json:"nexus_action_type,omitempty"`
 	RequiresNexusApproval bool     `json:"requires_nexus_approval,omitempty"`
 	EvidenceRequired      []string `json:"evidence_required,omitempty"`
 	RollbackSupported     bool     `json:"rollback_supported,omitempty"`
 	RollbackCapabilityID  string   `json:"rollback_capability_id,omitempty"`
+	CompensationStrategy  string   `json:"compensation_strategy,omitempty"`
+	CostClass             string   `json:"cost_class,omitempty"`
+	RateLimitClass        string   `json:"rate_limit_class,omitempty"`
+	Timeout               string   `json:"timeout,omitempty"`
+	Preconditions         []string `json:"preconditions,omitempty"`
+	Postconditions        []string `json:"postconditions,omitempty"`
+	ObservabilityTags     []string `json:"observability_tags,omitempty"`
 }
 
 const (
@@ -322,6 +332,9 @@ func (tk *ToolKit) setMetadata(name string, metadata ToolMetadata) {
 	}
 	metadata.Name = name
 	metadata.EvidenceRequired = cleanStringList(metadata.EvidenceRequired)
+	metadata.Preconditions = cleanStringList(metadata.Preconditions)
+	metadata.Postconditions = cleanStringList(metadata.Postconditions)
+	metadata.ObservabilityTags = cleanStringList(metadata.ObservabilityTags)
 	tk.metadata[name] = metadata
 }
 

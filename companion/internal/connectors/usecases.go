@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/devpablocristo/companion/internal/capabilities"
 	"github.com/devpablocristo/companion/internal/connectors/registry"
 	domain "github.com/devpablocristo/companion/internal/connectors/usecases/domain"
 )
@@ -141,7 +142,10 @@ func (uc *Usecases) Execute(ctx context.Context, spec domain.ExecutionSpec) (dom
 			continue
 		}
 		operationKnown = true
-		capability = cap.Normalized(conn.ID(), conn.Kind())
+		capability, err = connectorCapability(conn, cap)
+		if err != nil {
+			return domain.ExecutionResult{}, err
+		}
 		break
 	}
 	if !operationKnown {
@@ -295,7 +299,10 @@ func (uc *Usecases) BuildActionBinding(ctx context.Context, spec domain.Executio
 		if cap.Operation != spec.Operation {
 			continue
 		}
-		capability := cap.Normalized(conn.ID(), conn.Kind())
+		capability, err := connectorCapability(conn, cap)
+		if err != nil {
+			return nil, "", err
+		}
 		if err := validateExecutionContext(spec, capability); err != nil {
 			return nil, "", err
 		}
@@ -334,7 +341,11 @@ func (uc *Usecases) Capabilities(filter domain.CapabilityFilter) []ConnectorCapa
 	for _, c := range uc.registry.List() {
 		caps := make([]domain.Capability, 0, len(c.Capabilities()))
 		for _, cap := range c.Capabilities() {
-			manifest := cap.Normalized(c.ID(), c.Kind())
+			manifest, err := connectorCapability(c, cap)
+			if err != nil {
+				slog.Error("invalid connector capability manifest", "connector", c.ID(), "operation", cap.Operation, "error", err)
+				continue
+			}
 			if !manifest.MatchesFilter(filter) {
 				continue
 			}
@@ -352,11 +363,42 @@ func (uc *Usecases) Capabilities(filter domain.CapabilityFilter) []ConnectorCapa
 	return out
 }
 
+// CapabilityManifests devuelve el catálogo canónico versionado de capabilities
+// compilado desde todos los connector manifests disponibles.
+func (uc *Usecases) CapabilityManifests(filter domain.CapabilityFilter) ([]capabilities.Manifest, error) {
+	manifests := make([]capabilities.Manifest, 0)
+	for _, c := range uc.registry.List() {
+		for _, cap := range c.Capabilities() {
+			manifest, err := capabilities.FromConnectorCapability(c.ID(), c.Kind(), cap)
+			if err != nil {
+				return nil, err
+			}
+			if !manifest.ToConnectorCapability().MatchesFilter(filter) {
+				continue
+			}
+			manifests = append(manifests, manifest)
+		}
+	}
+	reg, err := capabilities.NewRegistry(manifests)
+	if err != nil {
+		return nil, err
+	}
+	return reg.All(), nil
+}
+
 // ConnectorCapabilities agrupa capacidades por conector.
 type ConnectorCapabilities struct {
 	ID           string
 	Kind         string
 	Capabilities []domain.Capability
+}
+
+func connectorCapability(conn registry.Connector, cap domain.Capability) (domain.Capability, error) {
+	manifest, err := capabilities.FromConnectorCapability(conn.ID(), conn.Kind(), cap)
+	if err != nil {
+		return domain.Capability{}, fmt.Errorf("capability manifest %s.%s: %w", conn.ID(), cap.Operation, err)
+	}
+	return manifest.ToConnectorCapability().Normalized(conn.ID(), conn.Kind()), nil
 }
 
 // NexusCheckerAdapter adapta el nexusclient para verificar aprobaciones.
@@ -553,12 +595,19 @@ func buildActionBinding(config domain.Connector, capability domain.Capability, s
 		"tool_invocation_id":  toolInvocationIDFor(capability, spec),
 		"connector_id":        spec.ConnectorID.String(),
 		"capability_id":       capability.ID,
+		"capability_version":  capability.Version,
 		"operation":           spec.Operation,
+		"action_type":         capability.ActionType,
 		"target_system":       config.Kind,
 		"target_resource":     config.ID.String(),
 		"payload_hash":        payloadHash,
 		"idempotency_key":     strings.TrimSpace(spec.IdempotencyKey),
 		"risk_hint":           capability.RiskClass,
+		"side_effect_type":    capability.SideEffectType,
+		"nexus_action_type":   capability.NexusActionType,
+		"cost_class":          capability.CostClass,
+		"rate_limit_class":    capability.RateLimitClass,
+		"observability_tags":  append([]string(nil), capability.ObservabilityTags...),
 	}
 	if spec.TaskID != nil {
 		binding["task_id"] = spec.TaskID.String()

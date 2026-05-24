@@ -12,6 +12,7 @@ import (
 
 	connectordomain "github.com/devpablocristo/companion/internal/connectors/usecases/domain"
 	"github.com/devpablocristo/companion/internal/identityctx"
+	"github.com/devpablocristo/companion/internal/jobs"
 	"github.com/devpablocristo/platform/concurrency/go/worker"
 	"github.com/google/uuid"
 
@@ -62,6 +63,7 @@ type Usecases struct {
 	nexus    NexusGateway
 	executor ConnectorExecutor
 	notifier ChatNotifier // nil = sin notificaciones al chat
+	jobQueue jobs.Repository
 }
 
 // NewUsecases crea los usecases del módulo watchers.
@@ -77,6 +79,10 @@ func (uc *Usecases) SetNotifier(n ChatNotifier) {
 // SetConnectorExecutor enruta acciones con side effect por connectors.
 func (uc *Usecases) SetConnectorExecutor(executor ConnectorExecutor) {
 	uc.executor = executor
+}
+
+func (uc *Usecases) SetJobQueue(queue jobs.Repository) {
+	uc.jobQueue = queue
 }
 
 // --- CRUD ---
@@ -827,6 +833,15 @@ func (uc *Usecases) RunAllEnabled(ctx context.Context, orgID string) error {
 // RunWatcherLoop ejecuta watchers periódicamente en background para todas las orgs.
 func (uc *Usecases) RunWatcherLoop(ctx context.Context, interval time.Duration, batchSize int) {
 	worker.RunPeriodic(ctx, interval, "watcher-loop", func(tickCtx context.Context) {
+		if uc.jobQueue != nil {
+			count, err := uc.EnqueueWatcherRuns(tickCtx, batchSize)
+			if err != nil {
+				slog.Error("watcher loop: enqueue watcher jobs failed", "error", err)
+				return
+			}
+			slog.Info("watcher loop: watcher jobs enqueued", "count", count)
+			return
+		}
 		orgIDs, err := uc.repo.ListEnabledOrgIDs(tickCtx)
 		if err != nil {
 			slog.Error("watcher loop: list org ids failed", "error", err)
@@ -844,6 +859,15 @@ func (uc *Usecases) RunWatcherLoop(ctx context.Context, interval time.Duration, 
 // esperando decisión final en Nexus.
 func (uc *Usecases) RunPendingProposalSyncLoop(ctx context.Context, interval time.Duration, batchSize int) {
 	worker.RunPeriodic(ctx, interval, "watcher-proposal-sync-loop", func(tickCtx context.Context) {
+		if uc.jobQueue != nil {
+			count, err := uc.EnqueuePendingProposalSyncs(tickCtx, batchSize)
+			if err != nil {
+				slog.Error("watcher proposal sync: enqueue sync jobs failed", "error", err)
+				return
+			}
+			slog.Info("watcher proposal sync: jobs enqueued", "count", count)
+			return
+		}
 		orgIDs, err := uc.repo.ListEnabledOrgIDs(tickCtx)
 		if err != nil {
 			slog.Error("watcher proposal sync: list org ids failed", "error", err)
@@ -853,6 +877,154 @@ func (uc *Usecases) RunPendingProposalSyncLoop(ctx context.Context, interval tim
 			uc.SyncPendingProposals(tickCtx, orgID, batchSize)
 		}
 	})
+}
+
+const (
+	JobKindWatcherRun          = "watcher.run"
+	JobKindWatcherProposalSync = "watcher.proposals.sync"
+)
+
+type watcherRunJobPayload struct {
+	WatcherID string `json:"watcher_id"`
+}
+
+type watcherProposalSyncJobPayload struct {
+	OrgID string `json:"org_id"`
+	Limit int    `json:"limit"`
+}
+
+func (uc *Usecases) EnqueueWatcherRuns(ctx context.Context, batchSize int) (int, error) {
+	if uc.jobQueue == nil {
+		return 0, fmt.Errorf("job queue not configured")
+	}
+	if batchSize <= 0 {
+		batchSize = 1000
+	}
+	orgIDs, err := uc.repo.ListEnabledOrgIDs(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("list enabled org ids: %w", err)
+	}
+	count := 0
+	for _, orgID := range orgIDs {
+		if count >= batchSize {
+			break
+		}
+		watchers, err := uc.repo.ListWatchers(ctx, orgID)
+		if err != nil {
+			return count, fmt.Errorf("list watchers for org %s: %w", orgID, err)
+		}
+		for _, w := range watchers {
+			if count >= batchSize {
+				break
+			}
+			if !w.Enabled {
+				continue
+			}
+			payload, err := json.Marshal(watcherRunJobPayload{WatcherID: w.ID.String()})
+			if err != nil {
+				return count, fmt.Errorf("marshal watcher job payload: %w", err)
+			}
+			_, _, err = uc.jobQueue.Enqueue(ctx, jobs.EnqueueInput{
+				OrgID:       w.OrgID,
+				Kind:        JobKindWatcherRun,
+				ShardKey:    w.OrgID + ":" + w.ID.String(),
+				DedupeKey:   JobKindWatcherRun + ":" + w.ID.String(),
+				Payload:     payload,
+				MaxAttempts: 3,
+				Timeout:     5 * time.Minute,
+			})
+			if err != nil {
+				return count, fmt.Errorf("enqueue watcher job: %w", err)
+			}
+			count++
+		}
+	}
+	return count, nil
+}
+
+func (uc *Usecases) EnqueuePendingProposalSyncs(ctx context.Context, batchSize int) (int, error) {
+	if uc.jobQueue == nil {
+		return 0, fmt.Errorf("job queue not configured")
+	}
+	if batchSize <= 0 {
+		batchSize = 100
+	}
+	orgIDs, err := uc.repo.ListEnabledOrgIDs(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("list enabled org ids: %w", err)
+	}
+	count := 0
+	for _, orgID := range orgIDs {
+		payload, err := json.Marshal(watcherProposalSyncJobPayload{OrgID: orgID, Limit: batchSize})
+		if err != nil {
+			return count, fmt.Errorf("marshal watcher proposal sync payload: %w", err)
+		}
+		_, _, err = uc.jobQueue.Enqueue(ctx, jobs.EnqueueInput{
+			OrgID:       orgID,
+			Kind:        JobKindWatcherProposalSync,
+			ShardKey:    orgID,
+			DedupeKey:   JobKindWatcherProposalSync + ":" + orgID,
+			Payload:     payload,
+			MaxAttempts: 3,
+			Timeout:     2 * time.Minute,
+		})
+		if err != nil {
+			return count, fmt.Errorf("enqueue watcher proposal sync job: %w", err)
+		}
+		count++
+	}
+	return count, nil
+}
+
+func (uc *Usecases) RegisterJobHandlers(worker *jobs.Worker) {
+	if worker == nil {
+		return
+	}
+	worker.Register(JobKindWatcherRun, uc.handleWatcherRunJob)
+	worker.Register(JobKindWatcherProposalSync, uc.handleWatcherProposalSyncJob)
+}
+
+func (uc *Usecases) handleWatcherRunJob(ctx context.Context, job jobs.Job) (json.RawMessage, error) {
+	var payload watcherRunJobPayload
+	if err := json.Unmarshal(job.Payload, &payload); err != nil {
+		return json.RawMessage(`{"reason":"invalid_payload"}`), jobs.Permanent(fmt.Errorf("parse watcher run job payload: %w", err))
+	}
+	watcherID, err := uuid.Parse(strings.TrimSpace(payload.WatcherID))
+	if err != nil || watcherID == uuid.Nil {
+		return json.RawMessage(`{"reason":"invalid_watcher_id"}`), jobs.Permanent(fmt.Errorf("invalid watcher_id %q", payload.WatcherID))
+	}
+	result, err := uc.RunWatcher(ctx, watcherID)
+	if err != nil {
+		if err == ErrWatcherDisabled {
+			return json.RawMessage(`{"reason":"watcher_disabled"}`), jobs.Permanent(err)
+		}
+		return json.RawMessage(`{"reason":"run_watcher_failed"}`), err
+	}
+	raw, err := json.Marshal(result)
+	if err != nil {
+		return json.RawMessage(`{"reason":"marshal_result_failed"}`), err
+	}
+	return raw, nil
+}
+
+func (uc *Usecases) handleWatcherProposalSyncJob(ctx context.Context, job jobs.Job) (json.RawMessage, error) {
+	var payload watcherProposalSyncJobPayload
+	if err := json.Unmarshal(job.Payload, &payload); err != nil {
+		return json.RawMessage(`{"reason":"invalid_payload"}`), jobs.Permanent(fmt.Errorf("parse watcher sync job payload: %w", err))
+	}
+	orgID := strings.TrimSpace(payload.OrgID)
+	if orgID == "" {
+		orgID = job.OrgID
+	}
+	if orgID == "" {
+		return json.RawMessage(`{"reason":"missing_org_id"}`), jobs.Permanent(fmt.Errorf("org_id is required"))
+	}
+	limit := payload.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	uc.SyncPendingProposals(ctx, orgID, limit)
+	return json.RawMessage(`{"status":"synced"}`), nil
 }
 
 // SyncPendingProposals reconcilia propuestas que quedaron en require_approval:

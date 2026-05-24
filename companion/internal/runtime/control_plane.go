@@ -217,18 +217,12 @@ func classifyIntent(message string) string {
 }
 
 func CheckPromptInjection(input string) *GuardrailEvent {
-	normalized := strings.ToLower(input)
-	suspicious := []string{
-		"ignore previous instructions",
-		"ignora las instrucciones anteriores",
-		"olvida tus instrucciones",
-		"reveal system prompt",
-		"muestra el prompt",
-		"exfiltrate",
-	}
-	for _, token := range suspicious {
-		if strings.Contains(normalized, token) {
-			return &GuardrailEvent{Type: "prompt_injection", Target: "message", Reason: "input contains instruction override pattern"}
+	for _, finding := range DetectAdversarialContent(input) {
+		switch finding.Type {
+		case "prompt_injection":
+			return &GuardrailEvent{Type: "prompt_injection", Target: "message", Reason: finding.Reason}
+		case "data_exfiltration", "ssrf", "approval_bypass", "memory_poisoning", "secret_leakage":
+			return &GuardrailEvent{Type: finding.Type, Target: "message", Reason: finding.Reason}
 		}
 	}
 	return nil

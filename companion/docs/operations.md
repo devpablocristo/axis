@@ -37,9 +37,36 @@ bash scripts/quality/check-migrations.sh
 
 - `COMPANION_NEXUS_SYNC_INTERVAL_SEC`: sync de tasks con Nexus.
 - `COMPANION_STRICT_NEXUS`: activa fail-closed estricto para grants Nexus.
-- `COMPANION_WATCHER_INTERVAL_SEC`: ejecución periódica de watchers.
-- `COMPANION_WATCHER_SYNC_INTERVAL_SEC`: reconciliación de watcher proposals.
+- `COMPANION_WATCHER_INTERVAL_SEC`: encola ejecución periódica de watchers.
+- `COMPANION_WATCHER_SYNC_INTERVAL_SEC`: encola reconciliación de watcher proposals.
+- `COMPANION_JOB_WORKERS`: cantidad de workers durables. Default: `2`; `0`
+  desactiva workers.
+- `COMPANION_JOB_POLL_INTERVAL_SEC`: intervalo de polling de la queue durable.
+- `COMPANION_JOB_LEASE_SEC`: duración del lease por claim.
+- `COMPANION_JOB_TIMEOUT_SEC`: timeout default por job.
 - Memory purge corre cada hora.
+
+## Jobs
+
+- `GET /v1/jobs/{id}` devuelve estado, attempts, lease, evidence y errores.
+- `POST /v1/jobs/{id}/cancel` cancela un job queued/running.
+- `POST /v1/jobs/recover-expired` reencola leases vencidos.
+
+Los endpoints requieren `companion:runtime:admin` o `companion:cross_org`.
+Watchers usan jobs cuando la queue está configurada; si no, conservan el camino
+inline para compatibilidad de desarrollo.
+
+## Observability
+
+- `GET /v1/run-traces/{run_id}/replay` devuelve el trace y eventos redacted de
+  esa ejecución.
+- `GET /v1/observability/events?run_id=...` lista eventos por run.
+- `GET /v1/observability/events?limit=100` lista eventos recientes de la
+  customer org autenticada.
+
+Los eventos guardan `org_id`, `run_id`, `task_id`, `job_id`, `agent_id`,
+`capability_id`, tipo/nombre de evento, payload redacted, severity y timestamp.
+No se persisten secretos conocidos en payloads.
 
 ## Smoke
 

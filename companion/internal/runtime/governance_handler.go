@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,6 +25,7 @@ func NewRuntimeControlsHandler(repo RuntimeControls) *RuntimeControlsHandler {
 func (h *RuntimeControlsHandler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/runtime/policy", h.getPolicy)
 	mux.HandleFunc("PUT /v1/runtime/policy", h.putPolicy)
+	mux.HandleFunc("GET /v1/runtime/policy/audit", h.getPolicyAudit)
 	mux.HandleFunc("GET /v1/runtime/usage", h.getUsage)
 }
 
@@ -71,12 +73,38 @@ func (h *RuntimeControlsHandler) putPolicy(w http.ResponseWriter, r *http.Reques
 		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "monthly budgets must be greater than or equal to zero")
 		return
 	}
+	if err := validateOrgControlPlaneSettings(policy.ControlPlane); err != nil {
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", err.Error())
+		return
+	}
 	saved, err := h.repo.UpsertRuntimePolicy(r.Context(), policy)
 	if err != nil {
 		httpjson.WriteFlatInternalError(w, err, "save runtime policy failed")
 		return
 	}
 	httpjson.WriteJSON(w, http.StatusOK, saved)
+}
+
+func (h *RuntimeControlsHandler) getPolicyAudit(w http.ResponseWriter, r *http.Request) {
+	orgID, ok := h.requireRuntimeAdminOrg(w, r)
+	if !ok {
+		return
+	}
+	limit := 50
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed <= 0 {
+			httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "limit must be a positive integer")
+			return
+		}
+		limit = parsed
+	}
+	entries, err := h.repo.ListRuntimePolicyAudit(r.Context(), orgID, limit)
+	if err != nil {
+		httpjson.WriteFlatInternalError(w, err, "list runtime policy audit failed")
+		return
+	}
+	httpjson.WriteJSON(w, http.StatusOK, map[string]any{"entries": entries})
 }
 
 func (h *RuntimeControlsHandler) getUsage(w http.ResponseWriter, r *http.Request) {
@@ -125,14 +153,15 @@ func (h *RuntimeControlsHandler) requireRuntimeAdminOrg(w http.ResponseWriter, r
 }
 
 type runtimePolicyRequest struct {
-	Enabled                *bool          `json:"enabled"`
-	KillSwitch             *bool          `json:"kill_switch"`
-	MaxAutonomy            string         `json:"max_autonomy"`
-	AllowedProductSurfaces []string       `json:"allowed_product_surfaces"`
-	AllowedModels          []string       `json:"allowed_models"`
-	MonthlyTokenBudget     *int64         `json:"monthly_token_budget"`
-	MonthlyToolCallBudget  *int64         `json:"monthly_tool_call_budget"`
-	Metadata               map[string]any `json:"metadata"`
+	Enabled                *bool                    `json:"enabled"`
+	KillSwitch             *bool                    `json:"kill_switch"`
+	MaxAutonomy            string                   `json:"max_autonomy"`
+	AllowedProductSurfaces []string                 `json:"allowed_product_surfaces"`
+	AllowedModels          []string                 `json:"allowed_models"`
+	MonthlyTokenBudget     *int64                   `json:"monthly_token_budget"`
+	MonthlyToolCallBudget  *int64                   `json:"monthly_tool_call_budget"`
+	ControlPlane           *OrgControlPlaneSettings `json:"control_plane"`
+	Metadata               map[string]any           `json:"metadata"`
 }
 
 func applyRuntimePolicyRequest(policy *TenantRuntimePolicy, req runtimePolicyRequest) {
@@ -157,6 +186,9 @@ func applyRuntimePolicyRequest(policy *TenantRuntimePolicy, req runtimePolicyReq
 	if req.MonthlyToolCallBudget != nil {
 		policy.MonthlyToolCallBudget = *req.MonthlyToolCallBudget
 	}
+	if req.ControlPlane != nil {
+		policy.ControlPlane = normalizeOrgControlPlaneSettings(*req.ControlPlane)
+	}
 	if req.Metadata != nil {
 		policy.Metadata = req.Metadata
 	}
@@ -165,6 +197,71 @@ func applyRuntimePolicyRequest(policy *TenantRuntimePolicy, req runtimePolicyReq
 func validAutonomy(level AutonomyLevel) bool {
 	switch level {
 	case AutonomyA0, AutonomyA1, AutonomyA2, AutonomyA3, AutonomyA4, AutonomyA5:
+		return true
+	default:
+		return false
+	}
+}
+
+func validateOrgControlPlaneSettings(settings OrgControlPlaneSettings) error {
+	settings = normalizeOrgControlPlaneSettings(settings)
+	if settings.MonthlyCostBudgetCents < 0 {
+		return errors.New("monthly_cost_budget_cents must be greater than or equal to zero")
+	}
+	if settings.Retention.RunTraceDays < 0 || settings.Retention.ToolEvidenceDays < 0 || settings.Retention.MemoryDays < 0 {
+		return errors.New("retention days must be greater than or equal to zero")
+	}
+	if settings.Memory.RetentionDays < 0 || settings.Memory.CompactionAfterDays < 0 {
+		return errors.New("memory policy days must be greater than or equal to zero")
+	}
+	if settings.Memory.MinConfidence < 0 || settings.Memory.MinConfidence > 1 {
+		return errors.New("memory min_confidence must be between 0 and 1")
+	}
+	if !validRiskClass(settings.MaxRiskClass) {
+		return errors.New("max_risk_class must be none, low, medium, high, or critical")
+	}
+	if !validDataIsolationMode(settings.DataIsolation.Mode) {
+		return errors.New("data_isolation.mode must be strict_org, dedicated_store, or inherited")
+	}
+	if !validTraceLevel(settings.Observability.TraceLevel) {
+		return errors.New("observability.trace_level must be minimal, standard, or debug")
+	}
+	if !validRedactionMode(settings.Observability.RedactionMode) {
+		return errors.New("observability.redaction_mode must be strict, standard, or disabled")
+	}
+	return nil
+}
+
+func validRiskClass(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "none", "low", "medium", "high", "critical":
+		return true
+	default:
+		return false
+	}
+}
+
+func validDataIsolationMode(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "strict_org", "dedicated_store", "inherited":
+		return true
+	default:
+		return false
+	}
+}
+
+func validTraceLevel(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "minimal", "standard", "debug":
+		return true
+	default:
+		return false
+	}
+}
+
+func validRedactionMode(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "strict", "standard", "disabled":
 		return true
 	default:
 		return false
