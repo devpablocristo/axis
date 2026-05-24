@@ -12,7 +12,9 @@ var (
 	// ErrQuotaExceeded indica que el scope (org/user/task) alcanzó el tope
 	// de entradas vivas. Se devuelve solo en path de inserción (los updates
 	// no consumen quota).
-	ErrQuotaExceeded = domainerr.Conflict("memory quota exceeded for scope")
+	ErrQuotaExceeded   = domainerr.Conflict("memory quota exceeded for scope")
+	ErrMemoryConflict  = domainerr.Conflict("memory conflict requires review or supersession")
+	ErrMemoryPoisoning = domainerr.Validation("memory input rejected by poisoning detector")
 )
 
 // IsNotFound verifica si el error es de entrada no encontrada.
@@ -28,4 +30,12 @@ func IsVersionConflict(err error) bool {
 // IsQuotaExceeded verifica si el error es de quota excedida.
 func IsQuotaExceeded(err error) bool {
 	return errors.Is(err, ErrQuotaExceeded)
+}
+
+func IsMemoryConflict(err error) bool {
+	return errors.Is(err, ErrMemoryConflict)
+}
+
+func IsMemoryPoisoning(err error) bool {
+	return errors.Is(err, ErrMemoryPoisoning)
 }

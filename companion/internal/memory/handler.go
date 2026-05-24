@@ -23,6 +23,7 @@ type memoryUsecase interface {
 	Upsert(ctx context.Context, in UpsertInput) (domain.MemoryEntry, error)
 	Get(ctx context.Context, id uuid.UUID) (domain.MemoryEntry, error)
 	Find(ctx context.Context, q FindQuery) ([]domain.MemoryEntry, error)
+	Search(ctx context.Context, q SearchQuery) ([]SearchResult, error)
 	Delete(ctx context.Context, id uuid.UUID) error
 }
 
@@ -51,6 +52,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /v1/memory", h.upsert)
 	mux.HandleFunc("GET /v1/memory/{id}", h.get)
 	mux.HandleFunc("GET /v1/memory", h.find)
+	mux.HandleFunc("GET /v1/memory/search", h.search)
 	mux.HandleFunc("DELETE /v1/memory/{id}", h.delete)
 }
 
@@ -88,6 +90,8 @@ func (h *Handler) upsert(w http.ResponseWriter, r *http.Request) {
 		ProvenanceJSON:  body.ProvenanceJSON,
 		Confidence:      body.Confidence,
 		RetentionPolicy: body.RetentionPolicy,
+		Source:          body.Source,
+		Supersede:       body.Supersede,
 		Version:         body.Version,
 		TTLDays:         body.TTLDays,
 	})
@@ -98,6 +102,14 @@ func (h *Handler) upsert(w http.ResponseWriter, r *http.Request) {
 		}
 		if IsQuotaExceeded(err) {
 			httpjson.WriteFlatError(w, http.StatusTooManyRequests, "QUOTA_EXCEEDED", "memory quota exceeded for scope")
+			return
+		}
+		if IsMemoryConflict(err) {
+			httpjson.WriteFlatError(w, http.StatusConflict, "MEMORY_CONFLICT", "memory conflict requires review or supersession")
+			return
+		}
+		if IsMemoryPoisoning(err) {
+			httpjson.WriteFlatError(w, http.StatusBadRequest, "MEMORY_POISONING", "memory input rejected by poisoning detector")
 			return
 		}
 		httpjson.WriteFlatInternalError(w, err, "upsert memory failed")
@@ -167,6 +179,46 @@ func (h *Handler) find(w http.ResponseWriter, r *http.Request) {
 		out = append(out, dto.EntryToResponse(e))
 	}
 	httpjson.WriteJSON(w, http.StatusOK, dto.MemoryListResponse{Entries: out})
+}
+
+func (h *Handler) search(w http.ResponseWriter, r *http.Request) {
+	if !requireScope(w, r, scopeCompanionMemoryRead) {
+		return
+	}
+	q := r.URL.Query()
+	scopeType := q.Get("scope_type")
+	scopeID := q.Get("scope_id")
+	query := strings.TrimSpace(q.Get("q"))
+	if scopeType == "" || scopeID == "" || query == "" {
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "q, scope_type and scope_id are required")
+		return
+	}
+	if !h.authorizeMemoryScope(r, domain.ScopeType(scopeType), scopeID) {
+		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "memory scope is not allowed for this principal")
+		return
+	}
+	results, err := h.uc.Search(r.Context(), SearchQuery{
+		FindQuery: FindQuery{
+			OrgID:          principalOrgID(r),
+			UserID:         principalUserID(r),
+			ProductSurface: productSurface(r),
+			ScopeType:      domain.ScopeType(scopeType),
+			ScopeID:        scopeID,
+			Kind:           domain.MemoryKind(q.Get("kind")),
+			MemoryType:     domain.MemoryType(q.Get("memory_type")),
+			Limit:          defaultListLimit,
+		},
+		Query: query,
+	})
+	if err != nil {
+		httpjson.WriteFlatInternalError(w, err, "search memory failed")
+		return
+	}
+	out := make([]dto.MemorySearchResult, 0, len(results))
+	for _, result := range results {
+		out = append(out, dto.SearchResultToResponse(result.Entry, result.Score, result.Reasons))
+	}
+	httpjson.WriteJSON(w, http.StatusOK, dto.MemorySearchResponse{Results: out})
 }
 
 func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {

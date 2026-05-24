@@ -46,6 +46,27 @@ nexus-assist. El API key admin de dev incluye todos los scopes necesarios.
 El runtime rechaza patrones básicos de prompt injection en mensajes y args de
 tools. Esto es una guardrail mínima, no una política de seguridad completa.
 
+## Adversarial evals
+
+La suite `scripts/evals/security-adversarial.json` cubre regresiones de:
+
+- prompt injection directa e indirecta;
+- exfiltración de datos;
+- SSRF contra metadata/local file targets;
+- bypass de approval/Nexus;
+- poisoning de memoria;
+- leakage de secretos.
+
+Runner:
+
+```bash
+bash scripts/evals/run-security-evals.sh
+```
+
+`make check-companion` ejecuta esta suite. Los umbrales actuales fallan cerrado:
+un finding esperado no detectado o un guardrail esperado no disparado deja el
+check rojo.
+
 ## Secret handling
 
 Evidence de connector executions sanitiza claves sensibles conocidas. No se

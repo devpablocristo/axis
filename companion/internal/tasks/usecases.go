@@ -104,6 +104,7 @@ type OrchestratorInput struct {
 	Messages       []domain.TaskMessage
 	TaskID         *uuid.UUID // opcional: vincula el trace a una task
 	ProductSurface string     // opcional: "companion" (default) | "ponti" | "pymes" — afecta routing
+	AgentID        string     // opcional: empleado IA persistente que toma ownership de la ejecución
 }
 
 // OrchestratorResult resultado del runtime.
@@ -339,6 +340,7 @@ type ChatInput struct {
 	Message        string
 	Channel        string // "api", "watcher", "whatsapp", product-specific channels, etc.
 	ProductSurface string // opcional: "companion" | "ponti" | "pymes". Afecta routing del agent.
+	AgentID        string // opcional: empleado IA persistente para esta task/conversación.
 	Identity       identityctx.IdentityContext
 }
 
@@ -352,6 +354,7 @@ type ChatResult struct {
 // el agent_conversations.id asociado a la task. Permite reusar la misma
 // conversation_id en mensajes sucesivos del mismo task.
 const agentConversationContextKey = "agent_conversation_id"
+const agentContextKey = "agent_id"
 
 // Chat combina crear/reusar tarea + agregar mensaje del usuario.
 // Es el endpoint principal para la interfaz conversacional del suscriptor.
@@ -364,6 +367,7 @@ func (u *Usecases) Chat(ctx context.Context, in ChatInput) (ChatResult, error) {
 	in.OrgID = in.Identity.CustomerOrgID
 	in.AuthScopes = append([]string(nil), in.Identity.Scopes...)
 	in.ProductSurface = in.Identity.ProductSurface
+	in.AgentID = strings.TrimSpace(in.AgentID)
 
 	var t domain.Task
 	var err error
@@ -375,6 +379,9 @@ func (u *Usecases) Chat(ctx context.Context, in ChatInput) (ChatResult, error) {
 		if err != nil {
 			return ChatResult{}, err
 		}
+		if in.AgentID == "" {
+			in.AgentID = extractTaskAgentID(t.ContextJSON)
+		}
 	} else {
 		// Crear tarea nueva con el primer mensaje como título
 		title := in.Message
@@ -385,13 +392,20 @@ func (u *Usecases) Chat(ctx context.Context, in ChatInput) (ChatResult, error) {
 		if channel == "" {
 			channel = "api"
 		}
+		contextJSON := json.RawMessage(`{}`)
+		if in.AgentID != "" {
+			if updated, ok := mergeTaskAgentID(contextJSON, in.AgentID); ok {
+				contextJSON = updated
+			}
+		}
 		t, err = u.repo.CreateTask(ctx, domain.Task{
-			Title:     title,
-			OrgID:     in.OrgID,
-			Status:    domain.TaskStatusNew,
-			Priority:  "normal",
-			CreatedBy: in.UserID,
-			Channel:   channel,
+			Title:       title,
+			OrgID:       in.OrgID,
+			Status:      domain.TaskStatusNew,
+			Priority:    "normal",
+			CreatedBy:   in.UserID,
+			Channel:     channel,
+			ContextJSON: contextJSON,
 		})
 		if err != nil {
 			return ChatResult{}, fmt.Errorf("create chat task: %w", err)
@@ -405,6 +419,7 @@ func (u *Usecases) Chat(ctx context.Context, in ChatInput) (ChatResult, error) {
 	// para reusar en mensajes sucesivos. Si task existente: reusamos el id ya
 	// guardado.
 	convID := u.ensureAgentConversation(ctx, &t, in, newTask)
+	u.ensureTaskAgent(ctx, &t, in.AgentID)
 
 	// Agregar mensaje del usuario
 	_, err = u.repo.InsertMessage(ctx, domain.TaskMessage{
@@ -438,6 +453,7 @@ func (u *Usecases) Chat(ctx context.Context, in ChatInput) (ChatResult, error) {
 				Messages:       existingMsgs,
 				TaskID:         &taskID,
 				ProductSurface: in.ProductSurface,
+				AgentID:        in.AgentID,
 			})
 			if runErr != nil {
 				slog.Error("orchestrator failed", "error", runErr)
@@ -498,6 +514,19 @@ func (u *Usecases) ensureAgentConversation(ctx context.Context, t *domain.Task, 
 	return convID
 }
 
+func (u *Usecases) ensureTaskAgent(ctx context.Context, t *domain.Task, agentID string) {
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" || extractTaskAgentID(t.ContextJSON) == agentID {
+		return
+	}
+	if updated, ok := mergeTaskAgentID(t.ContextJSON, agentID); ok {
+		t.ContextJSON = updated
+		if _, err := u.repo.UpdateTask(ctx, *t); err != nil {
+			slog.Error("update task context with agent_id", "error", err, "task_id", t.ID)
+		}
+	}
+}
+
 func (u *Usecases) persistAgentMessage(ctx context.Context, convID uuid.UUID, orgID, role, content string) {
 	if u.agentMemory == nil || convID == uuid.Nil || content == "" {
 		return
@@ -541,6 +570,37 @@ func extractAgentConversationID(raw json.RawMessage) uuid.UUID {
 		return uuid.Nil
 	}
 	return parsed
+}
+
+func extractTaskAgentID(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var holder map[string]any
+	if err := json.Unmarshal(raw, &holder); err != nil {
+		return ""
+	}
+	value, _ := holder[agentContextKey].(string)
+	return strings.TrimSpace(value)
+}
+
+func mergeTaskAgentID(raw json.RawMessage, agentID string) (json.RawMessage, bool) {
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" {
+		return raw, false
+	}
+	holder := map[string]any{}
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &holder); err != nil {
+			holder = map[string]any{}
+		}
+	}
+	holder[agentContextKey] = agentID
+	out, err := json.Marshal(holder)
+	if err != nil {
+		return nil, false
+	}
+	return out, true
 }
 
 func mergeAgentConversationID(raw json.RawMessage, convID uuid.UUID) (json.RawMessage, bool) {

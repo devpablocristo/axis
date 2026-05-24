@@ -1,0 +1,194 @@
+package agentfleet
+
+import (
+	"encoding/json"
+	"errors"
+	"net/http"
+	"strconv"
+	"strings"
+
+	"github.com/devpablocristo/companion/internal/identityctx"
+	"github.com/devpablocristo/platform/http/go/httpjson"
+	"github.com/google/uuid"
+)
+
+const (
+	scopeAgentAdmin = "companion:runtime:admin"
+	scopeCrossOrg   = "companion:cross_org"
+)
+
+type Handler struct {
+	uc *Usecases
+}
+
+func NewHandler(uc *Usecases) *Handler {
+	return &Handler{uc: uc}
+}
+
+func (h *Handler) Register(mux *http.ServeMux) {
+	mux.HandleFunc("GET /v1/agents", h.listAgents)
+	mux.HandleFunc("GET /v1/agents/{agent_id}", h.getAgent)
+	mux.HandleFunc("PUT /v1/agents/{agent_id}", h.putAgent)
+	mux.HandleFunc("POST /v1/agents/{agent_id}/disable", h.disableAgent)
+	mux.HandleFunc("GET /v1/agents/handoffs", h.listHandoffs)
+	mux.HandleFunc("POST /v1/agents/handoffs", h.createHandoff)
+	mux.HandleFunc("PATCH /v1/agents/handoffs/{id}", h.updateHandoff)
+}
+
+func (h *Handler) listAgents(w http.ResponseWriter, r *http.Request) {
+	orgID, surface, _, ok := agentRequestContext(w, r)
+	if !ok {
+		return
+	}
+	agents, err := h.uc.ListAgents(r.Context(), orgID, surface)
+	if err != nil {
+		httpjson.WriteFlatInternalError(w, err, "list agents failed")
+		return
+	}
+	httpjson.WriteJSON(w, http.StatusOK, map[string]any{"data": agents})
+}
+
+func (h *Handler) getAgent(w http.ResponseWriter, r *http.Request) {
+	orgID, surface, _, ok := agentRequestContext(w, r)
+	if !ok {
+		return
+	}
+	agent, err := h.uc.GetAgent(r.Context(), orgID, surface, strings.TrimSpace(r.PathValue("agent_id")))
+	if err != nil {
+		writeAgentError(w, err)
+		return
+	}
+	httpjson.WriteJSON(w, http.StatusOK, agent)
+}
+
+func (h *Handler) putAgent(w http.ResponseWriter, r *http.Request) {
+	orgID, surface, actorID, ok := agentRequestContext(w, r)
+	if !ok {
+		return
+	}
+	var agent Agent
+	if err := json.NewDecoder(r.Body).Decode(&agent); err != nil {
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid json body")
+		return
+	}
+	agent.OrgID = orgID
+	agent.ProductSurface = surface
+	agent.AgentID = strings.TrimSpace(r.PathValue("agent_id"))
+	agent.CreatedBy = actorID
+	saved, err := h.uc.SaveAgent(r.Context(), agent)
+	if err != nil {
+		writeAgentError(w, err)
+		return
+	}
+	httpjson.WriteJSON(w, http.StatusOK, saved)
+}
+
+func (h *Handler) disableAgent(w http.ResponseWriter, r *http.Request) {
+	orgID, surface, actorID, ok := agentRequestContext(w, r)
+	if !ok {
+		return
+	}
+	agent, err := h.uc.DisableAgent(r.Context(), orgID, surface, strings.TrimSpace(r.PathValue("agent_id")), actorID)
+	if err != nil {
+		writeAgentError(w, err)
+		return
+	}
+	httpjson.WriteJSON(w, http.StatusOK, agent)
+}
+
+func (h *Handler) listHandoffs(w http.ResponseWriter, r *http.Request) {
+	orgID, surface, _, ok := agentRequestContext(w, r)
+	if !ok {
+		return
+	}
+	limit := 50
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed <= 0 {
+			httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid limit")
+			return
+		}
+		limit = parsed
+	}
+	handoffs, err := h.uc.ListHandoffs(r.Context(), orgID, surface, limit)
+	if err != nil {
+		httpjson.WriteFlatInternalError(w, err, "list handoffs failed")
+		return
+	}
+	httpjson.WriteJSON(w, http.StatusOK, map[string]any{"data": handoffs})
+}
+
+func (h *Handler) createHandoff(w http.ResponseWriter, r *http.Request) {
+	orgID, surface, actorID, ok := agentRequestContext(w, r)
+	if !ok {
+		return
+	}
+	var handoff Handoff
+	if err := json.NewDecoder(r.Body).Decode(&handoff); err != nil {
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid json body")
+		return
+	}
+	handoff.OrgID = orgID
+	handoff.ProductSurface = surface
+	handoff.CreatedBy = actorID
+	saved, err := h.uc.CreateHandoff(r.Context(), handoff)
+	if err != nil {
+		writeAgentError(w, err)
+		return
+	}
+	httpjson.WriteJSON(w, http.StatusCreated, saved)
+}
+
+func (h *Handler) updateHandoff(w http.ResponseWriter, r *http.Request) {
+	orgID, surface, actorID, ok := agentRequestContext(w, r)
+	if !ok {
+		return
+	}
+	var body struct {
+		Status string `json:"status"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid json body")
+		return
+	}
+	handoffID := strings.TrimSpace(r.PathValue("id"))
+	if _, err := uuid.Parse(handoffID); err != nil {
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid handoff id")
+		return
+	}
+	handoff, err := h.uc.UpdateHandoffStatus(r.Context(), orgID, surface, handoffID, strings.TrimSpace(body.Status), actorID)
+	if err != nil {
+		writeAgentError(w, err)
+		return
+	}
+	httpjson.WriteJSON(w, http.StatusOK, handoff)
+}
+
+func agentRequestContext(w http.ResponseWriter, r *http.Request) (string, string, string, bool) {
+	if identityctx.HasNoAuthContext(r) {
+		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "agent fleet endpoints require authenticated admin context")
+		return "", "", "", false
+	}
+	if !identityctx.HasAnyScope(r, scopeAgentAdmin, scopeCrossOrg) {
+		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "missing agent fleet admin scope")
+		return "", "", "", false
+	}
+	id := identityctx.FromRequest(r)
+	orgID := strings.TrimSpace(id.CustomerOrgID)
+	if orgID == "" {
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "customer org context is required")
+		return "", "", "", false
+	}
+	return orgID, id.ProductSurface, id.EffectiveActorID(), true
+}
+
+func writeAgentError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, ErrNotFound):
+		httpjson.WriteFlatError(w, http.StatusNotFound, "NOT_FOUND", "agent not found")
+	case errors.Is(err, ErrValidation):
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", err.Error())
+	default:
+		httpjson.WriteFlatInternalError(w, err, "agent fleet operation failed")
+	}
+}

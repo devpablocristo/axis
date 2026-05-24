@@ -68,6 +68,17 @@ Los eventos guardan `org_id`, `run_id`, `task_id`, `job_id`, `agent_id`,
 `capability_id`, tipo/nombre de evento, payload redacted, severity y timestamp.
 No se persisten secretos conocidos en payloads.
 
+## Agent Fleet
+
+- `GET /v1/agents`: lista empleados IA de la customer org.
+- `PUT /v1/agents/{agent_id}`: crea o actualiza límites de un empleado IA.
+- `POST /v1/agents/{agent_id}/disable`: kill switch por agente.
+- `POST /v1/agents/handoffs`: registra handoff entre agentes.
+
+Los endpoints requieren `companion:runtime:admin` o `companion:cross_org`. El
+chat puede enviar `agent_id`; si el agente no está activo, Companion falla
+cerrado antes de invocar el LLM.
+
 ## Smoke
 
 ```bash

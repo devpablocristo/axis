@@ -12,7 +12,9 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/devpablocristo/companion/internal/agentfleet"
 	"github.com/devpablocristo/companion/internal/assist"
+	"github.com/devpablocristo/companion/internal/business"
 	"github.com/devpablocristo/companion/internal/connectors"
 	"github.com/devpablocristo/companion/internal/connectors/registry"
 	"github.com/devpablocristo/companion/internal/jobs"
@@ -44,6 +46,32 @@ type taskPlannerAdapter struct {
 // memoria pueda autorizar memorias scope=task contra el principal.
 type taskOrgGetter struct {
 	repo tasks.Repository
+}
+
+type agentRuntimeResolver struct {
+	uc *agentfleet.Usecases
+}
+
+func (r agentRuntimeResolver) ResolveRuntimeAgent(ctx context.Context, orgID, productSurface, agentID string) (runtime.RuntimeAgentConfig, error) {
+	agent, err := r.uc.GetAgent(ctx, orgID, productSurface, agentID)
+	if err != nil {
+		return runtime.RuntimeAgentConfig{}, err
+	}
+	return runtime.RuntimeAgentConfig{
+		AgentID:             agent.AgentID,
+		ProfileID:           agent.ProfileID,
+		Role:                agent.Role,
+		Status:              agent.Status,
+		MaxAutonomy:         runtime.AutonomyLevel(agent.MaxAutonomy),
+		AllowedTools:        append([]string(nil), agent.AllowedTools...),
+		AllowedCapabilities: append([]string(nil), agent.AllowedCapabilities...),
+		AllowedConnectors:   append([]string(nil), agent.AllowedConnectors...),
+		MemoryScopeID:       agent.MemoryScopeID,
+		SharedMemoryPolicy:  agent.SharedMemoryPolicy,
+		Limits:              agent.Limits,
+		SLA:                 agent.SLA,
+		Version:             agent.Version,
+	}, nil
 }
 
 func (g taskOrgGetter) GetTaskOrg(ctx context.Context, taskID uuid.UUID) (string, error) {
@@ -308,6 +336,12 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	memRepo := memory.NewPostgresRepository(db)
 	memUC := memory.NewUsecases(memRepo)
 	memHandler := memory.NewHandler(memUC, taskOrgGetter{repo: repo})
+	businessRepo := business.NewPostgresRepository(db)
+	businessUC := business.NewUsecases(businessRepo)
+	businessHandler := business.NewHandler(businessUC)
+	agentRepo := agentfleet.NewPostgresRepository(db)
+	agentUC := agentfleet.NewUsecases(agentRepo)
+	agentHandler := agentfleet.NewHandler(agentUC)
 	uc.SetTaskMemory(taskMemoryAdapter{uc: memUC, repo: repo})
 
 	// Agent memory (conversation history durable per user). El repo de memory
@@ -352,6 +386,13 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 		TaskPlanGet: func(c context.Context, taskID uuid.UUID) (taskdomain.TaskPlan, error) {
 			return repo.GetTaskPlan(c, taskID)
 		},
+		BusinessModelSummary: func(c context.Context, orgID, productSurface string) (string, error) {
+			model, err := businessUC.Get(c, orgID, productSurface)
+			if err != nil {
+				return "", err
+			}
+			return model.Summary(), nil
+		},
 	}
 	orchestrator := runtime.NewOrchestrator(llmProvider, toolkit, contextPorts)
 	orchestrator.SetModel(cfg.LLMModel)
@@ -366,6 +407,7 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	orchestrator.SetTraceRepository(traceRepo)
 	orchestrator.SetObservabilityRecorder(observabilityRepo)
 	orchestrator.SetRuntimeControls(runtimeControlsRepo)
+	orchestrator.SetAgentResolver(agentRuntimeResolver{uc: agentUC})
 	traceHandler := runtime.NewTraceHandler(traceRepo)
 	observabilityHandler := runtime.NewObservabilityHandler(observabilityRepo)
 	runtimeControlsHandler := runtime.NewRuntimeControlsHandler(runtimeControlsRepo)
@@ -401,6 +443,8 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	h.Register(mux)
 	watcherHandler.Register(mux)
 	memHandler.Register(mux)
+	businessHandler.Register(mux)
+	agentHandler.Register(mux)
 	chatHandler.Register(mux)
 	connHandler.Register(mux)
 	traceHandler.Register(mux)

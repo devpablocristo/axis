@@ -49,7 +49,7 @@ func newObservabilityEvent(trace RunTrace, in RunInput, eventType, eventName str
 		OrgID:      strings.TrimSpace(in.OrgID),
 		RunID:      runPtr,
 		TaskID:     in.TaskID,
-		AgentID:    trace.Intent,
+		AgentID:    trace.IdentityChain.AgentID,
 		EventType:  eventType,
 		EventName:  eventName,
 		Severity:   "info",

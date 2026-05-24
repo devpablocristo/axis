@@ -170,6 +170,7 @@ type ChatRequest struct {
 	Message        string `json:"message"`
 	Channel        string `json:"channel,omitempty"`         // default: "api"
 	ProductSurface string `json:"product_surface,omitempty"` // "companion" | "ponti" | "pymes"
+	AgentID        string `json:"agent_id,omitempty"`        // empleado IA persistente a usar
 }
 
 // ChatResponse respuesta del chat con tarea y mensajes.

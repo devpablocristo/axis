@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -24,6 +25,7 @@ type Orchestrator struct {
 	traces          TraceRepository // opcional; nil = no persiste (uso en tests)
 	controls        RuntimeControls
 	observer        ObservabilityRecorder
+	agents          AgentResolver
 	defaultAutonomy AutonomyLevel // "" → A2 (default conservador)
 	model           string
 }
@@ -51,6 +53,10 @@ func (o *Orchestrator) SetObservabilityRecorder(repo ObservabilityRecorder) {
 	o.observer = repo
 }
 
+func (o *Orchestrator) SetAgentResolver(resolver AgentResolver) {
+	o.agents = resolver
+}
+
 // SetDefaultAutonomy fija el nivel de autonomía por defecto del runtime.
 // "" se trata como A2. Niveles fuera de A0..A5 se ignoran (queda A2).
 func (o *Orchestrator) SetDefaultAutonomy(level AutonomyLevel) {
@@ -69,6 +75,7 @@ type RunInput struct {
 	AuthScopes     []string
 	Identity       identityctx.IdentityContext
 	ProductSurface string
+	AgentID        string
 	Message        string
 	Messages       []taskdomain.TaskMessage // hilo completo hasta ahora
 	TaskID         *uuid.UUID               // opcional: vincula el trace a una task
@@ -93,6 +100,32 @@ func (o *Orchestrator) Run(ctx context.Context, in RunInput) (RunResult, error) 
 		identity.TaskID = in.TaskID.String()
 	}
 	route := RouteAgent(in.Message, productSurface, o.toolkit, identity, o.defaultAutonomy)
+	if agentID := strings.TrimSpace(in.AgentID); agentID != "" {
+		identity.AgentID = agentID
+		if o.agents == nil {
+			route.Profile.AgentID = agentID
+			trace := o.rejectedAgentTrace(ctx, in, identity, route, "agent resolver is not configured")
+			return RunResult{Reply: "No puedo operar con ese empleado IA porque la flota no está configurada para este runtime.", Trace: trace}, nil
+		}
+		agent, err := o.agents.ResolveRuntimeAgent(ctx, in.OrgID, productSurface, agentID)
+		if err != nil {
+			route.Profile.AgentID = agentID
+			trace := o.rejectedAgentTrace(ctx, in, identity, route, "agent not available: "+err.Error())
+			return RunResult{Reply: "No puedo operar con ese empleado IA para esta organización.", Trace: trace}, nil
+		}
+		var event *GuardrailEvent
+		route, event = applyRuntimeAgent(route, agent)
+		if agent.MaxAutonomy != "" {
+			route.Autonomy = lowerAutonomy(route.Autonomy, agent.MaxAutonomy)
+			route.Profile.MaxAutonomy = route.Autonomy
+		}
+		identity.AgentID = agent.AgentID
+		if event != nil {
+			trace := o.rejectedAgentTrace(ctx, in, identity, route, event.Reason)
+			trace.GuardrailEvents = []GuardrailEvent{*event}
+			return RunResult{Reply: "No puedo operar con ese empleado IA bajo la configuración actual.", Trace: trace}, nil
+		}
+	}
 	modelName := firstNonEmpty(o.model, DefaultGeminiModel)
 	policy := defaultRuntimePolicy(in.OrgID)
 	currentUsage := TenantRuntimeUsage{OrgID: in.OrgID, Period: runtimeUsagePeriod(time.Now())}
@@ -126,6 +159,7 @@ func (o *Orchestrator) Run(ctx context.Context, in RunInput) (RunResult, error) 
 		"model":                  modelName,
 		"prompt_version":         SystemPromptVersion,
 		"agent_profile":          route.Profile,
+		"agent_id":               identity.AgentID,
 		"allowed_tools":          route.AllowedTools,
 		"runtime_policy_version": policy.SettingsVersion,
 		"control_plane": map[string]any{
@@ -304,6 +338,30 @@ func (o *Orchestrator) Run(ctx context.Context, in RunInput) (RunResult, error) 
 	trace.CompletedAt = time.Now().UTC()
 	o.finishTrace(ctx, trace, in, "max_tool_rounds_exhausted")
 	return RunResult{Trace: trace}, fmt.Errorf("gemini tool loop exhausted after %d rounds", maxToolRounds)
+}
+
+func (o *Orchestrator) rejectedAgentTrace(ctx context.Context, in RunInput, identity IdentityChain, route AgentRoute, reason string) RunTrace {
+	now := time.Now().UTC()
+	trace := RunTrace{
+		RunID:          uuid.NewString(),
+		IdentityChain:  identity,
+		Intent:         route.Intent,
+		ProductSurface: route.Product,
+		AutonomyLevel:  route.Autonomy,
+		PromptVersion:  SystemPromptVersion,
+		Model:          firstNonEmpty(o.model, DefaultGeminiModel),
+		StartedAt:      now,
+		CompletedAt:    now,
+	}
+	if reason != "" {
+		trace.GuardrailEvents = append(trace.GuardrailEvents, GuardrailEvent{Type: "agent_fleet", Target: "agent:" + identity.AgentID, Reason: reason})
+	}
+	o.recordObservabilityEvent(ctx, trace, in, "guardrail", "agent_fleet", map[string]any{
+		"agent_id": identity.AgentID,
+		"reason":   reason,
+	})
+	o.finishTrace(ctx, trace, in, reason)
+	return trace
 }
 
 func runIdentity(in RunInput) identityctx.IdentityContext {

@@ -12,7 +12,9 @@ Nexus decide decisiones sensibles; los productos exponen capacidades de dominio.
 | `cmd/api` | Bootstrap HTTP, config, migraciones, middleware y shutdown |
 | `wire` | Composición de dependencias, auth, clients y loops |
 | `internal/tasks` | Lifecycle de tasks, chat, propuestas a Nexus y ejecución |
+| `internal/agentfleet` | Empleados IA persistentes, límites, ownership y handoffs |
 | `internal/agents` | Perfiles seedables, autonomy y allowlists de tools |
+| `internal/business` | Modelo empresarial persistente versionado por customer org |
 | `internal/capabilities` | Manifests versionados, validación estricta y registry canónico |
 | `internal/jobs` | Queue durable, workers, leases, retries y DLQ |
 | `internal/runtime` | LLM orchestration, prompt, tool calling, control plane, observability y traces |
@@ -46,6 +48,12 @@ Nexus decide decisiones sensibles; los productos exponen capacidades de dominio.
 - Observability: cada run registra eventos redacted de start, LLM request,
   guardrails, tool calls y completion; `run replay` cruza trace persistido y
   ledger de eventos.
+- Business model: configuración versionada por org/product surface con áreas,
+  roles, workflows, reglas, vocabulario y SLAs; el runtime la usa como contexto
+  de negocio sin hardcodear verticales.
+- Agent fleet: `/v1/chat` puede seleccionar `agent_id`; el runtime resuelve
+  límites persistentes, recorta autonomía/tools/capabilities y registra
+  ownership en traces y observability.
 
 ## Persistencia
 
@@ -53,8 +61,10 @@ Postgres guarda tasks, messages, actions, artifacts, nexus sync state,
 execution plans/state, watchers/proposals, memory entries, connectors/executions
 y run traces. `companion_jobs` y `companion_job_events` guardan ejecución
 durable de trabajos operativos. `companion_observability_events` guarda el
-ledger redacted para replay. `companion_run_traces` incluye `prompt_version` y
-`model` para auditar runtime IA.
+ledger redacted para replay. `companion_business_models` guarda el modelo
+empresarial activo y sus versiones. `companion_agents` y
+`companion_agent_handoffs` guardan flota, ownership y coordinación.
+`companion_run_traces` incluye `prompt_version` y `model` para auditar runtime IA.
 
 ## Runtime IA
 
@@ -70,6 +80,10 @@ capabilities, connectors, models, autonomy, budgets, retention, memoria,
 observabilidad, kill switches y riesgo máximo. Las actions críticas siguen
 dependiendo de Nexus; Companion solo reduce o bloquea superficie de ejecución
 cuando la organización no autoriza una capability.
+
+Si el caller informa `agent_id`, el resolver de flota falla cerrado cuando el
+agente no existe, está deshabilitado o no pertenece a la customer org. La flota
+solo restringe ejecución; Nexus conserva las decisiones sensibles.
 
 ## UI operativa
 

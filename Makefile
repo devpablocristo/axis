@@ -19,6 +19,7 @@ check-companion:
 	cd companion && bash scripts/quality/check-migrations.sh
 	cd companion && bash scripts/quality/check-nexus-imports.sh
 	cd companion && bash scripts/quality/check-side-effects-pipeline.sh
+	cd companion && bash scripts/evals/run-security-evals.sh
 
 test-companion:
 	cd companion && go test ./... -count=1

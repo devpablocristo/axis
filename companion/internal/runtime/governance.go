@@ -260,13 +260,19 @@ func applyRuntimePolicy(policy TenantRuntimePolicy, usage TenantRuntimeUsage, ro
 func applyControlPlaneToRoute(settings OrgControlPlaneSettings, route *AgentRoute) *GuardrailEvent {
 	settings = normalizeOrgControlPlaneSettings(settings)
 	profileID := strings.TrimSpace(route.Profile.ID)
+	agentID := strings.TrimSpace(route.Profile.AgentID)
+	if agentID == "" {
+		agentID = profileID
+	}
+	if agentID != "" {
+		if settings.AgentKillSwitches[agentID] {
+			return &GuardrailEvent{Type: "org_control_plane", Target: "agent:" + agentID, Reason: "agent kill switch is active"}
+		}
+		if len(settings.EnabledAgents) > 0 && !stringListAllows(settings.EnabledAgents, agentID) {
+			return &GuardrailEvent{Type: "org_control_plane", Target: "agent:" + agentID, Reason: "agent is not enabled for this customer org"}
+		}
+	}
 	if profileID != "" {
-		if settings.AgentKillSwitches[profileID] {
-			return &GuardrailEvent{Type: "org_control_plane", Target: "agent:" + profileID, Reason: "agent kill switch is active"}
-		}
-		if len(settings.EnabledAgents) > 0 && !stringListAllows(settings.EnabledAgents, profileID) {
-			return &GuardrailEvent{Type: "org_control_plane", Target: "agent:" + profileID, Reason: "agent is not enabled for this customer org"}
-		}
 		if len(settings.AllowedProfiles) > 0 && !stringListAllows(settings.AllowedProfiles, profileID) {
 			return &GuardrailEvent{Type: "org_control_plane", Target: "profile:" + profileID, Reason: "profile is not allowed for this customer org"}
 		}

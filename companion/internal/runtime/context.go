@@ -99,9 +99,10 @@ func IdentityFromContext(ctx context.Context) Identity {
 
 // ContextPorts interfaces que el context assembler necesita.
 type ContextPorts struct {
-	NexusClient *nexusclient.Client
-	MemoryFind  func(ctx context.Context, orgID, userID, productSurface string, scopeType memdomain.ScopeType, scopeID string, kind memdomain.MemoryKind, limit int) ([]memdomain.MemoryEntry, error)
-	TaskPlanGet func(ctx context.Context, taskID uuid.UUID) (taskdomain.TaskPlan, error)
+	NexusClient          *nexusclient.Client
+	MemoryFind           func(ctx context.Context, orgID, userID, productSurface string, scopeType memdomain.ScopeType, scopeID string, kind memdomain.MemoryKind, limit int) ([]memdomain.MemoryEntry, error)
+	TaskPlanGet          func(ctx context.Context, taskID uuid.UUID) (taskdomain.TaskPlan, error)
+	BusinessModelSummary func(ctx context.Context, orgID, productSurface string) (string, error)
 }
 
 // AssembledContext contexto ensamblado para el LLM.
@@ -115,6 +116,11 @@ func AssembleContext(ctx context.Context, ports ContextPorts, userID, orgID, pro
 	var parts []string
 	if strings.TrimSpace(productSurface) == "" {
 		productSurface = DefaultProductSurface
+	}
+	if ports.BusinessModelSummary != nil && strings.TrimSpace(orgID) != "" {
+		if summary, err := ports.BusinessModelSummary(ctx, orgID, productSurface); err == nil && strings.TrimSpace(summary) != "" {
+			parts = append(parts, summary)
+		}
 	}
 
 	// 1. Memoria del usuario (preferencias)

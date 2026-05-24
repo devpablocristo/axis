@@ -4,7 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"log/slog"
+	"math"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/devpablocristo/platform/concurrency/go/worker"
@@ -54,6 +58,23 @@ type UpsertInput struct {
 	RetentionPolicy string
 	Version         int // 0 = insert, >0 = update con versión optimista
 	TTLDays         int // 0 = usar default por kind
+	Source          string
+	Supersede       bool
+	LastVerifiedAt  *time.Time
+	AllowPoisoned   bool
+}
+
+type SearchQuery struct {
+	FindQuery
+	Query            string
+	MinConfidence    float64
+	IncludeUntrusted bool
+}
+
+type SearchResult struct {
+	Entry   domain.MemoryEntry `json:"entry"`
+	Score   float64            `json:"score"`
+	Reasons []string           `json:"reasons,omitempty"`
 }
 
 // defaultPerScopeQuota es el tope de entradas vivas por (scope_type, scope_id).
@@ -126,34 +147,67 @@ func (uc *Usecases) Upsert(ctx context.Context, in UpsertInput) (domain.MemoryEn
 	if in.RetentionPolicy == "" {
 		in.RetentionPolicy = "default"
 	}
+	poisoningFlags := detectMemoryPoisoning(in.ContentText, in.PayloadJSON)
+	if len(poisoningFlags) > 0 && !in.AllowPoisoned {
+		return domain.MemoryEntry{}, fmt.Errorf("%w: %s", ErrMemoryPoisoning, strings.Join(poisoningFlags, ","))
+	}
+	now := time.Now().UTC()
+	if in.LastVerifiedAt == nil {
+		in.LastVerifiedAt = &now
+	}
+	embeddingNamespace := in.OrgID + ":" + in.ProductSurface
+	embedding := buildMemoryEmbedding(in.ContentText)
+	embeddingJSON, err := json.Marshal(embedding)
+	if err != nil {
+		return domain.MemoryEntry{}, fmt.Errorf("marshal memory embedding: %w", err)
+	}
 
 	entry := domain.MemoryEntry{
-		OrgID:           in.OrgID,
-		UserID:          in.UserID,
-		ProductSurface:  in.ProductSurface,
-		Kind:            in.Kind,
-		MemoryType:      in.MemoryType,
-		Classification:  in.Classification,
-		ScopeType:       in.ScopeType,
-		ScopeID:         in.ScopeID,
-		Key:             in.Key,
-		PayloadJSON:     in.PayloadJSON,
-		ContentText:     in.ContentText,
-		ProvenanceJSON:  in.ProvenanceJSON,
-		Confidence:      in.Confidence,
-		RetentionPolicy: in.RetentionPolicy,
-		Version:         in.Version,
-		ExpiresAt:       expiresAt,
+		OrgID:              in.OrgID,
+		UserID:             in.UserID,
+		ProductSurface:     in.ProductSurface,
+		Kind:               in.Kind,
+		MemoryType:         in.MemoryType,
+		Classification:     in.Classification,
+		ScopeType:          in.ScopeType,
+		ScopeID:            in.ScopeID,
+		Key:                in.Key,
+		PayloadJSON:        in.PayloadJSON,
+		ContentText:        in.ContentText,
+		ProvenanceJSON:     in.ProvenanceJSON,
+		Confidence:         in.Confidence,
+		TrustScore:         memoryTrustScore(in.Confidence, poisoningFlags),
+		RetentionPolicy:    in.RetentionPolicy,
+		Status:             "active",
+		Source:             strings.TrimSpace(in.Source),
+		EmbeddingNamespace: embeddingNamespace,
+		EmbeddingModel:     "hash-v1",
+		EmbeddingJSON:      embeddingJSON,
+		LastVerifiedAt:     in.LastVerifiedAt,
+		ConfidenceDecayAt:  confidenceDecayAt(in.Kind, now),
+		PoisoningFlags:     poisoningFlags,
+		Version:            in.Version,
+		ExpiresAt:          expiresAt,
 	}
 
 	current, err := uc.repo.GetByScopeKey(ctx, in.OrgID, in.ProductSurface, in.ScopeType, in.ScopeID, in.Kind, in.Key)
 	switch {
 	case err == nil:
+		if shouldRequireConflictReview(current, entry) && !in.Supersede {
+			entry.Status = "conflict"
+			conflictID := uuid.New()
+			entry.ConflictGroupID = &conflictID
+			return domain.MemoryEntry{}, fmt.Errorf("%w: key %s", ErrMemoryConflict, in.Key)
+		}
 		if in.Version > 0 && current.Version != in.Version {
 			return domain.MemoryEntry{}, ErrVersionConflict
 		}
 		entry.ID = current.ID
 		entry.CreatedAt = current.CreatedAt
+		if in.Supersede {
+			supersedes := current.ID
+			entry.SupersedesID = &supersedes
+		}
 		if in.Version > 0 {
 			entry.Version = in.Version
 		} else {
@@ -183,6 +237,185 @@ func (uc *Usecases) Upsert(ctx context.Context, in UpsertInput) (domain.MemoryEn
 		return domain.MemoryEntry{}, fmt.Errorf("upsert memory: %w", err)
 	}
 	return result, nil
+}
+
+func (uc *Usecases) Search(ctx context.Context, q SearchQuery) ([]SearchResult, error) {
+	if strings.TrimSpace(q.Query) == "" {
+		return nil, fmt.Errorf("query is required")
+	}
+	if q.Limit <= 0 {
+		q.Limit = 20
+	}
+	find := q.FindQuery
+	find.Limit = maxInt(q.Limit*5, q.Limit)
+	entries, err := uc.Find(ctx, find)
+	if err != nil {
+		return nil, err
+	}
+	queryEmbedding := buildMemoryEmbedding(q.Query)
+	results := make([]SearchResult, 0, len(entries))
+	for _, entry := range entries {
+		if entry.Status != "" && entry.Status != "active" && entry.Status != "conflict" {
+			continue
+		}
+		if len(entry.PoisoningFlags) > 0 && !q.IncludeUntrusted {
+			continue
+		}
+		confidence := decayedConfidence(entry, time.Now().UTC())
+		if q.MinConfidence > 0 && confidence < q.MinConfidence {
+			continue
+		}
+		score, reasons := scoreMemory(entry, q.Query, queryEmbedding, confidence)
+		results = append(results, SearchResult{Entry: entry, Score: score, Reasons: reasons})
+	}
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Score > results[j].Score
+	})
+	if len(results) > q.Limit {
+		results = results[:q.Limit]
+	}
+	return results, nil
+}
+
+func shouldRequireConflictReview(current, next domain.MemoryEntry) bool {
+	if current.Kind != domain.MemorySemanticFact && current.Kind != domain.MemoryTenantKnowledge && current.Kind != domain.MemoryBusinessContext {
+		return false
+	}
+	if strings.TrimSpace(current.ContentText) == "" || strings.TrimSpace(next.ContentText) == "" {
+		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(current.ContentText), strings.TrimSpace(next.ContentText)) {
+		return false
+	}
+	return current.Confidence >= 0.7 && next.Confidence >= 0.7
+}
+
+func detectMemoryPoisoning(content string, payload json.RawMessage) []string {
+	text := strings.ToLower(content + " " + string(payload))
+	var flags []string
+	for label, patterns := range map[string][]string{
+		"instruction_override": {"ignore previous instructions", "system override", "developer message"},
+		"permanent_rule":       {"remember this as a permanent rule", "memoriza esta regla permanente", "store this instruction forever"},
+		"approval_bypass":      {"skip nexus", "bypass approval", "sin aprobación"},
+		"secret_material":      {"authorization: bearer", "client_secret=", "private_key"},
+	} {
+		for _, pattern := range patterns {
+			if strings.Contains(text, pattern) {
+				flags = append(flags, label)
+				break
+			}
+		}
+	}
+	sort.Strings(flags)
+	return flags
+}
+
+func memoryTrustScore(confidence float64, flags []string) float64 {
+	if confidence <= 0 {
+		confidence = 1
+	}
+	score := confidence
+	if len(flags) > 0 {
+		score *= 0.2
+	}
+	if score < 0 {
+		return 0
+	}
+	if score > 1 {
+		return 1
+	}
+	return score
+}
+
+func confidenceDecayAt(kind domain.MemoryKind, now time.Time) *time.Time {
+	days := domain.DefaultRetentionDays(kind)
+	if days <= 0 {
+		return nil
+	}
+	t := now.AddDate(0, 0, days/2)
+	return &t
+}
+
+func decayedConfidence(entry domain.MemoryEntry, now time.Time) float64 {
+	confidence := entry.Confidence
+	if confidence <= 0 {
+		confidence = 1
+	}
+	if entry.ConfidenceDecayAt != nil && now.After(*entry.ConfidenceDecayAt) {
+		confidence *= 0.85
+	}
+	if entry.TrustScore > 0 && entry.TrustScore < confidence {
+		confidence = entry.TrustScore
+	}
+	return confidence
+}
+
+func buildMemoryEmbedding(text string) []float64 {
+	const dims = 64
+	vec := make([]float64, dims)
+	for _, token := range strings.Fields(strings.ToLower(text)) {
+		token = strings.Trim(token, ".,;:!?()[]{}\"'")
+		if token == "" {
+			continue
+		}
+		h := fnv.New32a()
+		if _, err := h.Write([]byte(token)); err != nil {
+			continue
+		}
+		vec[int(h.Sum32())%dims]++
+	}
+	var norm float64
+	for _, value := range vec {
+		norm += value * value
+	}
+	if norm == 0 {
+		return vec
+	}
+	norm = math.Sqrt(norm)
+	for i := range vec {
+		vec[i] = vec[i] / norm
+	}
+	return vec
+}
+
+func scoreMemory(entry domain.MemoryEntry, query string, queryEmbedding []float64, confidence float64) (float64, []string) {
+	var embedding []float64
+	if len(entry.EmbeddingJSON) > 0 {
+		_ = json.Unmarshal(entry.EmbeddingJSON, &embedding)
+	}
+	similarity := cosine(queryEmbedding, embedding)
+	reasons := []string{"embedding"}
+	if strings.Contains(strings.ToLower(entry.ContentText), strings.ToLower(query)) {
+		similarity += 0.25
+		reasons = append(reasons, "text_match")
+	}
+	return similarity*0.7 + confidence*0.3, reasons
+}
+
+func cosine(a, b []float64) float64 {
+	if len(a) == 0 || len(b) == 0 {
+		return 0
+	}
+	n := minInt(len(a), len(b))
+	var dot float64
+	for i := 0; i < n; i++ {
+		dot += a[i] * b[i]
+	}
+	return dot
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // Get obtiene una entrada de memoria por ID.

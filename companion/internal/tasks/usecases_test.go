@@ -564,6 +564,28 @@ func TestUsecases_ChatDefaultsChannelToAPI(t *testing.T) {
 	}
 }
 
+func TestUsecases_ChatPersistsAgentIDInTaskContext(t *testing.T) {
+	t.Parallel()
+	uc := NewUsecases(&fakeRepo{}, &stubNexus{})
+
+	result, err := uc.Chat(context.Background(), ChatInput{
+		UserID:  "user-1",
+		OrgID:   "org-1",
+		Message: "Hola",
+		AgentID: "support-agent",
+	})
+	if err != nil {
+		t.Fatalf("chat failed: %v", err)
+	}
+	var contextJSON map[string]string
+	if err := json.Unmarshal(result.Task.ContextJSON, &contextJSON); err != nil {
+		t.Fatal(err)
+	}
+	if contextJSON[agentContextKey] != "support-agent" {
+		t.Fatalf("expected task context agent_id, got %s", contextJSON[agentContextKey])
+	}
+}
+
 func TestUsecases_SetExecutionPlan_persistsAndAudits(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

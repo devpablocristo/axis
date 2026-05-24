@@ -34,6 +34,7 @@ type IdentityChain struct {
 	ActorType           string   `json:"actor_type,omitempty"`
 	ProductSurface      string   `json:"product_surface,omitempty"`
 	TaskID              string   `json:"task_id,omitempty"`
+	AgentID             string   `json:"agent_id,omitempty"`
 	AuthScopes          []string `json:"auth_scopes,omitempty"`
 	CompanionPrincipal  string   `json:"companion_principal"`
 	OnBehalfOf          string   `json:"on_behalf_of,omitempty"`
@@ -96,11 +97,14 @@ type AgentRoute struct {
 // introducir persistencia ni un registry pesado todavía.
 type AgentProfile struct {
 	ID                  string        `json:"id"`
+	AgentID             string        `json:"agent_id,omitempty"`
+	Role                string        `json:"role,omitempty"`
 	ProductSurface      string        `json:"product_surface"`
 	MaxAutonomy         AutonomyLevel `json:"max_autonomy"`
 	AllowedTools        []string      `json:"allowed_tools"`
 	AllowedCapabilities []string      `json:"allowed_capabilities,omitempty"`
 	MemoryPolicy        any           `json:"memory_policy,omitempty"`
+	MemoryScopeID       string        `json:"memory_scope_id,omitempty"`
 	RequiredScopes      []string      `json:"required_scopes,omitempty"`
 	Enabled             bool          `json:"enabled"`
 	Version             string        `json:"version"`

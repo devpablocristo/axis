@@ -14,6 +14,22 @@ type fakeRuntimeControls struct {
 	recorded []RunUsage
 }
 
+type fakeAgentResolver struct {
+	resolve func(context.Context, string, string, string) (RuntimeAgentConfig, error)
+	agent   RuntimeAgentConfig
+	err     error
+}
+
+func (f fakeAgentResolver) ResolveRuntimeAgent(ctx context.Context, orgID, productSurface, agentID string) (RuntimeAgentConfig, error) {
+	if f.resolve != nil {
+		return f.resolve(ctx, orgID, productSurface, agentID)
+	}
+	if f.err != nil {
+		return RuntimeAgentConfig{}, f.err
+	}
+	return f.agent, nil
+}
+
 func (f *fakeRuntimeControls) GetRuntimePolicy(_ context.Context, orgID string) (TenantRuntimePolicy, error) {
 	if f.policy.OrgID == "" {
 		return defaultRuntimePolicy(orgID), nil
@@ -175,6 +191,121 @@ func TestApplyRuntimePolicy_FiltersToolsWithOrgControlPlane(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("expected filtered tools %v, got %v", want, got)
 		}
+	}
+}
+
+func TestOrchestrator_AgentFleetRestrictsToolsAndRecordsIdentity(t *testing.T) {
+	t.Parallel()
+
+	provider := &fakeLLMProvider{responses: []ChatResponse{{Text: "ok"}}}
+	toolkit := &ToolKit{
+		Schemas: []ToolSchema{{Name: "remember"}, {Name: "check_approvals"}},
+		Handlers: map[string]ToolHandler{
+			"remember":        func(_ context.Context, _ json.RawMessage) (string, error) { return `{}`, nil },
+			"check_approvals": func(_ context.Context, _ json.RawMessage) (string, error) { return `{}`, nil },
+		},
+		policies: map[string]toolPolicy{
+			"remember":        {RequiresTenant: true, RequiresUser: true},
+			"check_approvals": {RequiresTenant: true},
+		},
+	}
+	orch := NewOrchestrator(provider, toolkit, ContextPorts{})
+	called := false
+	orch.SetAgentResolver(fakeAgentResolver{resolve: func(context.Context, string, string, string) (RuntimeAgentConfig, error) {
+		called = true
+		return RuntimeAgentConfig{
+			AgentID:      "support-agent",
+			ProfileID:    "support-profile",
+			Role:         "support",
+			Status:       "active",
+			MaxAutonomy:  AutonomyA1,
+			AllowedTools: []string{"remember"},
+			Version:      3,
+		}, nil
+	}})
+	orch.SetDefaultAutonomy(AutonomyA3)
+
+	result, err := orch.Run(context.Background(), RunInput{
+		UserID: "user-1", OrgID: "org-1", AgentID: "support-agent", Message: "hola",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Trace.IdentityChain.AgentID != "support-agent" {
+		t.Fatalf("expected agent identity, got %+v", result.Trace.IdentityChain)
+	}
+	if !called {
+		t.Fatal("expected agent resolver to be called")
+	}
+	if result.Trace.AutonomyLevel != AutonomyA1 {
+		t.Fatalf("expected agent autonomy cap, got %s reply=%q guardrails=%+v provider_calls=%d", result.Trace.AutonomyLevel, result.Reply, result.Trace.GuardrailEvents, provider.callCount)
+	}
+	if len(provider.lastTools()) != 1 || provider.lastTools()[0].Name != "remember" {
+		t.Fatalf("expected agent-restricted tools, got %+v", provider.lastTools())
+	}
+}
+
+func TestApplyRuntimeAgentCapsAutonomy(t *testing.T) {
+	t.Parallel()
+
+	route, event := applyRuntimeAgent(AgentRoute{
+		Autonomy:     AutonomyA2,
+		AllowedTools: []string{"remember", "check_approvals"},
+		Profile: AgentProfile{
+			ID:           "base",
+			MaxAutonomy:  AutonomyA2,
+			AllowedTools: []string{"remember", "check_approvals"},
+		},
+	}, RuntimeAgentConfig{
+		AgentID:      "support-agent",
+		Status:       "active",
+		MaxAutonomy:  AutonomyA1,
+		AllowedTools: []string{"remember"},
+	})
+	if event != nil {
+		t.Fatalf("unexpected event %+v", event)
+	}
+	if route.Autonomy != AutonomyA1 {
+		t.Fatalf("expected A1, got %s", route.Autonomy)
+	}
+	if len(route.AllowedTools) != 1 || route.AllowedTools[0] != "remember" {
+		t.Fatalf("expected tool restriction, got %+v", route.AllowedTools)
+	}
+}
+
+func TestApplyRuntimePolicyPreservesLowerAgentAutonomy(t *testing.T) {
+	t.Parallel()
+
+	decision := applyRuntimePolicy(defaultRuntimePolicy("org-1"), TenantRuntimeUsage{}, AgentRoute{
+		Autonomy: AutonomyA1,
+		Profile:  AgentProfile{ID: "support", AgentID: "agent-1", MaxAutonomy: AutonomyA1},
+	}, "gemini-test")
+	if decision.Route.Autonomy != AutonomyA1 {
+		t.Fatalf("expected A1, got %s event=%+v", decision.Route.Autonomy, decision.Event)
+	}
+}
+
+func TestOrchestrator_AgentFleetRejectsDisabledAgentBeforeProvider(t *testing.T) {
+	t.Parallel()
+
+	provider := &fakeLLMProvider{responses: []ChatResponse{{Text: "should not run"}}}
+	orch := NewOrchestrator(provider, &ToolKit{Handlers: map[string]ToolHandler{}}, ContextPorts{})
+	orch.SetAgentResolver(fakeAgentResolver{agent: RuntimeAgentConfig{
+		AgentID: "disabled-agent",
+		Status:  "disabled",
+	}})
+
+	result, err := orch.Run(context.Background(), RunInput{
+		UserID: "user-1", OrgID: "org-1", AgentID: "disabled-agent", Message: "hola",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provider.callCount != 0 {
+		t.Fatalf("expected provider not called, got %d", provider.callCount)
+	}
+	if len(result.Trace.GuardrailEvents) != 1 || result.Trace.GuardrailEvents[0].Type != "agent_fleet" {
+		t.Fatalf("expected agent fleet guardrail, got %+v", result.Trace.GuardrailEvents)
 	}
 }
 

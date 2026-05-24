@@ -20,6 +20,11 @@ La memoria actual vive en `companion_memory_entries`.
 - `scope_id`: ID del scope.
 - `content_text` y `payload_json`.
 - `provenance_json`, `confidence` y `retention_policy`.
+- `trust_score`, `status`, `source`, `poisoning_flags`,
+  `supersedes_id/superseded_by_id`, `conflict_group_id`,
+  `last_verified_at`, `confidence_decay_at`.
+- `embedding_namespace`, `embedding_model` y `embedding_json` para búsqueda
+  rankeada aislada por customer org/product surface.
 - `version` para optimistic locking.
 - `expires_at` para olvido por TTL.
 
@@ -40,8 +45,23 @@ La memoria actual vive en `companion_memory_entries`.
 La separación final vive en `memory_type`. `classification` queda para
 estabilidad/sensibilidad operativa; no debe usarse como tipo de memoria.
 
-## Evolución
+## Memory v2
 
-El siguiente cambio estructural debe convertir `retention_policy` en reglas
-ejecutables de recuperación/olvido y validar constraints ya cargadas como
-`NOT VALID`.
+La escritura de memoria ahora:
+
+- exige provenance por default desde el control plane;
+- calcula un embedding determinístico `hash-v1` namespaced por
+  `org_id:product_surface`;
+- asigna `trust_score` desde confidence y señales adversariales;
+- rechaza memory poisoning salvo override explícito de infraestructura;
+- detecta conflictos en semantic/tenant/business memory de alta confianza;
+- permite supersession explícita;
+- registra audit append-only en `companion_memory_audit`.
+
+La búsqueda `GET /v1/memory/search` combina similitud vectorial local,
+coincidencia textual, confidence decay y trust score. No recupera memorias
+rechazadas/superseded ni memorias con poisoning flags salvo que el caller use
+infraestructura interna que lo permita.
+
+`companion_memory_summaries` queda como tabla versionada para compactación y
+summaries curados por scope.

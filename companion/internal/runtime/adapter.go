@@ -29,6 +29,7 @@ func (a *OrchestratorAdapter) Run(ctx context.Context, in tasks.OrchestratorInpu
 		Messages:       convertMessages(in.Messages),
 		TaskID:         in.TaskID,
 		ProductSurface: in.ProductSurface,
+		AgentID:        in.AgentID,
 	})
 	if err != nil {
 		return tasks.OrchestratorResult{}, err

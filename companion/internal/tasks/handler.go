@@ -679,6 +679,7 @@ func (h *Handler) chat(w http.ResponseWriter, r *http.Request) {
 		Message:        body.Message,
 		Channel:        body.Channel,
 		ProductSurface: identity.ProductSurface,
+		AgentID:        body.AgentID,
 		Identity:       identity,
 	})
 	if err != nil {
