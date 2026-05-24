@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/devpablocristo/platform/http/go/httpjson"
+	"github.com/devpablocristo/platform/authn/go/identityhttp"
 
 	requestdto "github.com/devpablocristo/nexus/internal/requests/handler/dto"
 	requestdomain "github.com/devpablocristo/nexus/internal/requests/usecases/domain"
@@ -259,7 +260,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 //   - sin auth context (dev/local) → allowAll=true para no romper smoke.
 //   - sino → fail closed.
 func requestOrgScope(r *http.Request) (*string, bool, bool) {
-	if requestHasScope(r, scopeNexusCrossOrg) {
+	if identityhttp.HasAnyScope(r, scopeNexusCrossOrg) {
 		if orgID := strings.TrimSpace(r.Header.Get("X-Org-ID")); orgID != "" {
 			return &orgID, false, true
 		}
@@ -269,7 +270,7 @@ func requestOrgScope(r *http.Request) (*string, bool, bool) {
 	if orgID != "" {
 		return &orgID, false, true
 	}
-	if requestHasNoAuthContext(r) {
+	if identityhttp.HasNoAuthContext(r) {
 		return nil, true, true
 	}
 	return nil, false, false
@@ -624,10 +625,10 @@ func toRequestResponse(req requestdomain.Request) requestdto.RequestResponse {
 func bindParamsToPrincipalOrg(r *http.Request, params map[string]any) (map[string]any, bool) {
 	orgID := strings.TrimSpace(r.Header.Get("X-Org-ID"))
 	if orgID == "" {
-		if requestHasNoAuthContext(r) {
+		if identityhttp.HasNoAuthContext(r) {
 			return params, true
 		}
-		if requestHasScope(r, scopeNexusCrossOrg) {
+		if identityhttp.HasAnyScope(r, scopeNexusCrossOrg) {
 			if raw, exists := params["org_id"]; exists && strings.TrimSpace(rawToString(raw)) != "" {
 				return params, true
 			}
@@ -649,7 +650,7 @@ func bindParamsToPrincipalOrg(r *http.Request, params map[string]any) (map[strin
 }
 
 func canAccessRequestOrg(r *http.Request, req requestdomain.Request) bool {
-	if requestHasScope(r, scopeNexusCrossOrg) {
+	if identityhttp.HasAnyScope(r, scopeNexusCrossOrg) {
 		return true
 	}
 	orgID := strings.TrimSpace(r.Header.Get("X-Org-ID"))
@@ -659,7 +660,7 @@ func canAccessRequestOrg(r *http.Request, req requestdomain.Request) bool {
 		}
 		return strings.TrimSpace(*req.OrgID) == orgID
 	}
-	if requestHasNoAuthContext(r) {
+	if identityhttp.HasNoAuthContext(r) {
 		return true
 	}
 	return false

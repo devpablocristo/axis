@@ -49,8 +49,3 @@ func canWritePolicyOrg(r *http.Request, policy policydomain.Policy) bool {
 	return orgID != "" && policy.OrgID != nil && strings.TrimSpace(*policy.OrgID) == orgID
 }
 
-func requestHasNoAuthContext(r *http.Request) bool { return identityhttp.HasNoAuthContext(r) }
-
-func requestHasScope(r *http.Request, scopes ...string) bool {
-	return identityhttp.HasAnyScope(r, scopes...)
-}

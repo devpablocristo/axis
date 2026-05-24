@@ -9,6 +9,7 @@ import (
 	domain "github.com/devpablocristo/nexus/internal/delegations/usecases/domain"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
 	"github.com/devpablocristo/platform/http/go/httpjson"
+	"github.com/devpablocristo/platform/authn/go/identityhttp"
 	"github.com/google/uuid"
 )
 
@@ -62,7 +63,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	}
 	if orgID := principalOrgID(r); orgID != nil {
 		d.OrgID = orgID
-	} else if !requestHasNoAuthContext(r) && !requestHasScope(r, scopeNexusCrossOrg) {
+	} else if !identityhttp.HasNoAuthContext(r) && !identityhttp.HasAnyScope(r, scopeNexusCrossOrg) {
 		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "org_id is required")
 		return
 	}

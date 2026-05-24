@@ -28,8 +28,3 @@ func principalOrgID(r *http.Request) *string {
 	return &orgID
 }
 
-func requestHasNoAuthContext(r *http.Request) bool { return identityhttp.HasNoAuthContext(r) }
-
-func requestHasScope(r *http.Request, scopes ...string) bool {
-	return identityhttp.HasAnyScope(r, scopes...)
-}

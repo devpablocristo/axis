@@ -12,6 +12,7 @@ import (
 	requesteval "github.com/devpablocristo/nexus/internal/requests"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
 	"github.com/devpablocristo/platform/http/go/httpjson"
+	"github.com/devpablocristo/platform/authn/go/identityhttp"
 	"github.com/google/uuid"
 )
 
@@ -82,7 +83,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	}
 	if orgID := principalOrgID(r); orgID != nil {
 		p.OrgID = orgID
-	} else if !requestHasNoAuthContext(r) && !requestHasScope(r, scopeNexusCrossOrg) {
+	} else if !identityhttp.HasNoAuthContext(r) && !identityhttp.HasAnyScope(r, scopeNexusCrossOrg) {
 		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "org_id is required")
 		return
 	}
@@ -100,7 +101,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	}
 	archived := r.URL.Query().Get("archived") == "true"
 	filters := ListFilters{IncludeArchived: archived}
-	if requestHasScope(r, scopeNexusCrossOrg) {
+	if identityhttp.HasAnyScope(r, scopeNexusCrossOrg) {
 		// Cross-org callers (ej: Pymes service que sirve N tenants) pueden
 		// solicitar policies de un tenant específico via X-Org-ID. Sin el
 		// header, listan todas las policies del cluster.
@@ -109,7 +110,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		}
 	} else if orgID := principalOrgID(r); orgID != nil {
 		filters.OrgID = orgID
-	} else if !requestHasNoAuthContext(r) {
+	} else if !identityhttp.HasNoAuthContext(r) {
 		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "org_id is required")
 		return
 	}

@@ -49,8 +49,3 @@ func canWriteDelegationOrg(r *http.Request, d domain.Delegation) bool {
 	return orgID != "" && d.OrgID != nil && strings.TrimSpace(*d.OrgID) == orgID
 }
 
-func requestHasNoAuthContext(r *http.Request) bool { return identityhttp.HasNoAuthContext(r) }
-
-func requestHasScope(r *http.Request, scopes ...string) bool {
-	return identityhttp.HasAnyScope(r, scopes...)
-}

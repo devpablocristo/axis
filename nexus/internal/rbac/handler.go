@@ -11,6 +11,7 @@ import (
 	domain "github.com/devpablocristo/nexus/internal/rbac/usecases/domain"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
 	"github.com/devpablocristo/platform/http/go/httpjson"
+	"github.com/devpablocristo/platform/authn/go/identityhttp"
 )
 
 type rbacUsecase interface {
@@ -80,7 +81,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		IncludeRevoked: q.Get("include_revoked") == "true",
 	}
 	// Si el principal no tiene cross_org, fuerza el filtro a su propia org.
-	if !requestHasScope(r, scopeNexusCrossOrg) {
+	if !identityhttp.HasAnyScope(r, scopeNexusCrossOrg) {
 		ownOrg := principalOrgID(r)
 		if ownOrg == "" {
 			httpjson.WriteJSON(w, http.StatusOK, map[string]any{"data": []dto.AssignmentResponse{}})

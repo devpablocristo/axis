@@ -9,6 +9,7 @@ import (
 	learningdomain "github.com/devpablocristo/nexus/internal/learning/usecases/domain"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
 	"github.com/devpablocristo/platform/http/go/httpjson"
+	"github.com/devpablocristo/platform/authn/go/identityhttp"
 	"github.com/google/uuid"
 )
 
@@ -256,7 +257,7 @@ func decisionActorID(r *http.Request, explicit string) string {
 }
 
 func proposalOrgScope(r *http.Request) (*string, bool, bool) {
-	if requestHasScope(r, scopeNexusCrossOrg) {
+	if identityhttp.HasAnyScope(r, scopeNexusCrossOrg) {
 		if orgID := strings.TrimSpace(r.Header.Get("X-Org-ID")); orgID != "" {
 			return &orgID, false, true
 		}
@@ -266,7 +267,7 @@ func proposalOrgScope(r *http.Request) (*string, bool, bool) {
 	if orgID != "" {
 		return &orgID, false, true
 	}
-	if requestHasNoAuthContext(r) {
+	if identityhttp.HasNoAuthContext(r) {
 		return nil, true, true
 	}
 	return nil, false, false
@@ -282,26 +283,26 @@ func bindProposalOrgToPrincipal(r *http.Request, requested string) (*string, boo
 		return &principalOrg, true
 	}
 	if requested == "" {
-		if requestHasNoAuthContext(r) {
+		if identityhttp.HasNoAuthContext(r) {
 			return nil, true
 		}
 		return nil, false
 	}
-	if requestHasScope(r, scopeNexusCrossOrg) || requestHasNoAuthContext(r) {
+	if identityhttp.HasAnyScope(r, scopeNexusCrossOrg) || identityhttp.HasNoAuthContext(r) {
 		return &requested, true
 	}
 	return nil, false
 }
 
 func canAccessProposalOrg(r *http.Request, p learningdomain.PolicyProposal) bool {
-	if requestHasScope(r, scopeNexusCrossOrg) {
+	if identityhttp.HasAnyScope(r, scopeNexusCrossOrg) {
 		return true
 	}
 	orgID := strings.TrimSpace(r.Header.Get("X-Org-ID"))
 	if orgID != "" {
 		return p.OrgID != nil && strings.TrimSpace(*p.OrgID) == orgID
 	}
-	if requestHasNoAuthContext(r) {
+	if identityhttp.HasNoAuthContext(r) {
 		return true
 	}
 	return false

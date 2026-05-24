@@ -38,9 +38,3 @@ func canAccessTaskOrg(r *http.Request, task domain.Task) bool {
 }
 
 func principalScopes(r *http.Request) []string { return identityhttp.FromRequest(r).Scopes }
-
-func requestHasNoAuthContext(r *http.Request) bool { return identityhttp.HasNoAuthContext(r) }
-
-func requestHasScope(r *http.Request, scopes ...string) bool {
-	return identityhttp.HasAnyScope(r, scopes...)
-}

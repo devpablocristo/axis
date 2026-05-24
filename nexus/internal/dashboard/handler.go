@@ -7,6 +7,7 @@ import (
 	dashboarddto "github.com/devpablocristo/nexus/internal/dashboard/handler/dto"
 	requestdomain "github.com/devpablocristo/nexus/internal/requests/usecases/domain"
 	"github.com/devpablocristo/platform/http/go/httpjson"
+	"github.com/devpablocristo/platform/authn/go/identityhttp"
 )
 
 const maxListLimit = 1000
@@ -42,9 +43,9 @@ func (h *Handler) summary(w http.ResponseWriter, r *http.Request) {
 	var orgFilter *string
 	allowAll := false
 	switch {
-	case requestHasNoAuthContext(r):
+	case identityhttp.HasNoAuthContext(r):
 		allowAll = true
-	case requestHasScope(r, scopeNexusCrossOrg):
+	case identityhttp.HasAnyScope(r, scopeNexusCrossOrg):
 		// Admin global: si pasa X-Org-ID se filtra ese org; sin header ve todo.
 		orgFilter = principalOrgID(r)
 		allowAll = orgFilter == nil

@@ -85,14 +85,6 @@ func bindPayloadToPrincipalOrg(r *http.Request, raw json.RawMessage) (json.RawMe
 	return json.RawMessage(out), true
 }
 
-func requestHasNoAuthContext(r *http.Request) bool {
-	return identityhttp.HasNoAuthContext(r)
-}
-
-func requestHasScope(r *http.Request, scopes ...string) bool {
-	return identityhttp.HasAnyScope(r, scopes...)
-}
-
 // parseHeaderValues normaliza listas separadas por coma/espacio/`+`/`;`.
 // Usado por handler.go para parsear headers tipo `X-Auth-Scopes` o similares
 // donde el formato no es exclusivamente scopes (identityhttp.ParseScopes

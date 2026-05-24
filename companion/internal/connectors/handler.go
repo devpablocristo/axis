@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/devpablocristo/platform/authn/go/identityhttp"
 	"github.com/devpablocristo/platform/http/go/httpjson"
 	"github.com/google/uuid"
 
@@ -106,7 +107,7 @@ func (h *Handler) save(w http.ResponseWriter, r *http.Request) {
 	if !requireScope(w, r, scopeCompanionConnectorsAdmin) {
 		return
 	}
-	if !requestHasNoAuthContext(r) && principalOrgID(r) == "" {
+	if !identityhttp.HasNoAuthContext(r) && principalOrgID(r) == "" {
 		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "connector save requires org context")
 		return
 	}
@@ -174,7 +175,7 @@ func (h *Handler) execute(w http.ResponseWriter, r *http.Request) {
 	if !requireScope(w, r, scopeCompanionConnectorsExecute) {
 		return
 	}
-	if !requestHasNoAuthContext(r) && (principalOrgID(r) == "" || principalActorID(r) == "") {
+	if !identityhttp.HasNoAuthContext(r) && (principalOrgID(r) == "" || principalActorID(r) == "") {
 		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "connector execution requires org and actor context")
 		return
 	}
@@ -287,7 +288,7 @@ func (h *Handler) capabilities(w http.ResponseWriter, r *http.Request) {
 		Modules:            parseHeaderValues(r.Header.Get("X-Enabled-Modules")),
 		MaxRiskClass:       strings.TrimSpace(r.URL.Query().Get("max_risk_class")),
 		IncludeWrites:      strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("include_writes")), "true"),
-		EnforcePermissions: !requestHasNoAuthContext(r),
+		EnforcePermissions: !identityhttp.HasNoAuthContext(r),
 	}
 	caps := h.uc.Capabilities(filter)
 	out := make([]dto.CapabilityResponse, 0, len(caps))

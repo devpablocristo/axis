@@ -9,7 +9,7 @@ require (
 	github.com/devpablocristo/platform/http/go v0.1.0
 	github.com/devpablocristo/platform/lifecycle/go v0.0.0
 	github.com/devpablocristo/platform/observability/go v0.1.0
-	github.com/devpablocristo/platform/security/go v0.2.1
+	github.com/devpablocristo/platform/security/go v0.2.2
 	github.com/devpablocristo/platform/webhook/go v0.1.0
 	github.com/google/cel-go v0.28.0
 	github.com/google/uuid v1.6.0

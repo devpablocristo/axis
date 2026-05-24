@@ -26,8 +26,3 @@ func canAccessOrg(r *http.Request, orgID string) bool {
 	return identityhttp.CanAccessOrg(r, orgID, scopeNexusCrossOrg)
 }
 
-func requestHasNoAuthContext(r *http.Request) bool { return identityhttp.HasNoAuthContext(r) }
-
-func requestHasScope(r *http.Request, scopes ...string) bool {
-	return identityhttp.HasAnyScope(r, scopes...)
-}

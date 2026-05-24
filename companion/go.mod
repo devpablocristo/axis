@@ -13,7 +13,7 @@ require (
 	github.com/devpablocristo/platform/kernels/ai/go v0.1.0
 	github.com/devpablocristo/platform/lifecycle/go v0.0.0
 	github.com/devpablocristo/platform/observability/go v0.1.0
-	github.com/devpablocristo/platform/security/go v0.2.1
+	github.com/devpablocristo/platform/security/go v0.2.2
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.9.2
 	golang.org/x/oauth2 v0.36.0
