@@ -7,11 +7,12 @@ import (
 	"time"
 
 	"github.com/devpablocristo/companion/internal/agents"
+	"github.com/devpablocristo/companion/internal/identityctx"
 )
 
 const (
-	CompanionPrincipal    = "companion.employee_ai"
-	DefaultProductSurface = "companion"
+	CompanionPrincipal    = identityctx.CompanionPrincipal
+	DefaultProductSurface = identityctx.DefaultSurface
 )
 
 type AutonomyLevel string
@@ -28,9 +29,14 @@ const (
 type IdentityChain struct {
 	InitiatingUser      string   `json:"initiating_user,omitempty"`
 	Tenant              string   `json:"tenant,omitempty"`
+	CustomerOrgID       string   `json:"customer_org_id,omitempty"`
+	HumanUserID         string   `json:"human_user_id,omitempty"`
+	ActorType           string   `json:"actor_type,omitempty"`
 	ProductSurface      string   `json:"product_surface,omitempty"`
 	AuthScopes          []string `json:"auth_scopes,omitempty"`
 	CompanionPrincipal  string   `json:"companion_principal"`
+	OnBehalfOf          string   `json:"on_behalf_of,omitempty"`
+	ServicePrincipal    bool     `json:"service_principal,omitempty"`
 	CapabilityPrincipal string   `json:"capability_principal,omitempty"`
 	ApprovalActor       string   `json:"approval_actor,omitempty"`
 }
@@ -43,10 +49,22 @@ type RunTrace struct {
 	AutonomyLevel   AutonomyLevel    `json:"autonomy_level"`
 	PromptVersion   string           `json:"prompt_version,omitempty"`
 	Model           string           `json:"model,omitempty"`
+	Usage           RunUsage         `json:"usage,omitempty"`
 	GuardrailEvents []GuardrailEvent `json:"guardrail_events,omitempty"`
 	ToolCalls       []ToolTrace      `json:"tool_calls,omitempty"`
 	StartedAt       time.Time        `json:"started_at"`
 	CompletedAt     time.Time        `json:"completed_at,omitempty"`
+}
+
+type RunUsage struct {
+	LLMCalls              int `json:"llm_calls"`
+	InputChars            int `json:"input_chars"`
+	OutputChars           int `json:"output_chars"`
+	EstimatedInputTokens  int `json:"estimated_input_tokens"`
+	EstimatedOutputTokens int `json:"estimated_output_tokens"`
+	EstimatedTotalTokens  int `json:"estimated_total_tokens"`
+	ToolCalls             int `json:"tool_calls"`
+	ToolErrors            int `json:"tool_errors"`
 }
 
 type ToolTrace struct {
@@ -95,9 +113,28 @@ func BuildIdentityChain(userID, orgID, productSurface string, scopes ...string) 
 	return IdentityChain{
 		InitiatingUser:     strings.TrimSpace(userID),
 		Tenant:             strings.TrimSpace(orgID),
+		CustomerOrgID:      strings.TrimSpace(orgID),
+		HumanUserID:        strings.TrimSpace(userID),
 		ProductSurface:     productSurface,
 		AuthScopes:         cleanScopes(scopes),
 		CompanionPrincipal: CompanionPrincipal,
+	}
+}
+
+func BuildIdentityChainFromContext(id identityctx.IdentityContext) IdentityChain {
+	id = id.WithProductSurface(id.ProductSurface)
+	initiatingUser := id.EffectiveActorID()
+	return IdentityChain{
+		InitiatingUser:     initiatingUser,
+		Tenant:             id.CustomerOrgID,
+		CustomerOrgID:      id.CustomerOrgID,
+		HumanUserID:        id.HumanUserID,
+		ActorType:          id.ActorType,
+		ProductSurface:     id.ProductSurface,
+		AuthScopes:         cleanScopes(id.Scopes),
+		CompanionPrincipal: id.CompanionPrincipal,
+		OnBehalfOf:         id.OnBehalfOf,
+		ServicePrincipal:   id.ServicePrincipal,
 	}
 }
 
@@ -205,7 +242,7 @@ func ValidateToolPolicy(toolName string, args json.RawMessage, identity Identity
 		return &GuardrailEvent{Type: "tool_policy", Target: "tool:" + toolName, Reason: "tool is not allowed for the current agent route"}
 	}
 	if toolkit != nil && !toolkit.CanUseTool(toolName, identity) {
-		return &GuardrailEvent{Type: "tool_policy", Target: "tool:" + toolName, Reason: "tool requires tenant, user, or scopes not present in this request"}
+		return &GuardrailEvent{Type: "tool_policy", Target: "tool:" + toolName, Reason: "tool requires customer org, user, or scopes not present in this request"}
 	}
 	return nil
 }
@@ -216,25 +253,41 @@ func routeAllowsTool(route AgentRoute, toolName string) bool {
 		return false
 	}
 	for _, allowed := range route.AllowedTools {
-		if strings.TrimSpace(allowed) == toolName {
+		allowed = strings.TrimSpace(allowed)
+		if allowed == toolName {
+			return true
+		}
+		if strings.HasSuffix(allowed, "*") && strings.HasPrefix(toolName, strings.TrimSuffix(allowed, "*")) {
 			return true
 		}
 	}
 	return false
 }
 
+func filterSchemasForRoute(schemas []ToolSchema, route AgentRoute) []ToolSchema {
+	out := make([]ToolSchema, 0, len(schemas))
+	for _, schema := range schemas {
+		if routeAllowsTool(route, schema.Name) {
+			out = append(out, schema)
+		}
+	}
+	return out
+}
+
 func runtimeSummary(identity IdentityChain, route AgentRoute) string {
 	return fmt.Sprintf(`- Identidad: %s.
-- Tenant: %s.
+- Customer org: %s.
 - Usuario iniciador: %s.
+- On behalf of: %s.
 - Superficie: %s.
 - Intención clasificada: %s.
 - Autonomía máxima efectiva: %s.
 - Regla dura: podés decidir, recomendar y proponer; no ejecutes writes sensibles ni approvals como acción autónoma.
-- Toda tool debe respetar tenant, permisos, trazas y guardrails.`,
+- Toda tool debe respetar customer org, permisos, trazas y guardrails.`,
 		identity.CompanionPrincipal,
-		emptyAsUnknown(identity.Tenant),
+		emptyAsUnknown(identity.CustomerOrgID),
 		emptyAsUnknown(identity.InitiatingUser),
+		emptyAsUnknown(identity.OnBehalfOf),
 		route.Product,
 		route.Intent,
 		route.Autonomy,

@@ -1,0 +1,351 @@
+package assist
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/devpablocristo/companion/internal/runtime"
+	"github.com/devpablocristo/platform/lifecycle/go/lifecycle"
+	"github.com/google/uuid"
+
+	domain "github.com/devpablocristo/companion/internal/assist/usecases/domain"
+)
+
+const resourceAssistPack = "assist_pack"
+
+type UpsertPackInput struct {
+	OrgID          string
+	OwnerSystem    string
+	ProductSurface string
+	AssistType     string
+	Name           string
+	Description    string
+	InputContract  string
+	OutputContract string
+	PromptTemplate string
+	ModelPolicy    map[string]any
+	Enabled        *bool
+}
+
+type UpdatePackInput struct {
+	ID             uuid.UUID
+	OwnerSystem    string
+	ProductSurface string
+	AssistType     string
+	Name           string
+	Description    string
+	InputContract  string
+	OutputContract string
+	PromptTemplate string
+	ModelPolicy    map[string]any
+	Enabled        *bool
+}
+
+type RunAssistInput struct {
+	OrgID          string
+	OwnerSystem    string
+	ProductSurface string
+	AssistType     string
+	SubjectType    string
+	SubjectID      string
+	Input          map[string]any
+}
+
+type ListPacksInput = PackFilter
+type ListRunsInput = RunFilter
+
+type Usecases struct {
+	repo      Repository
+	provider  runtime.LLMProvider
+	lifecycle *lifecycle.Service
+	now       func() time.Time
+}
+
+func NewUsecases(repo Repository, provider runtime.LLMProvider) *Usecases {
+	lifecycleSvc, err := lifecycle.NewServiceWithRepos(
+		map[string]lifecycle.RepositoryPort{resourceAssistPack: repo},
+		noopLifecycleAudit{},
+		lifecycle.NewStaticPolicyRegistry(&lifecycle.ArchivePolicy{
+			ResourceType:    resourceAssistPack,
+			AllowArchive:    true,
+			AllowHardDelete: true,
+		}),
+	)
+	if err != nil {
+		panic(err)
+	}
+	return &Usecases{repo: repo, provider: provider, lifecycle: lifecycleSvc, now: func() time.Time { return time.Now().UTC() }}
+}
+
+func (uc *Usecases) UpsertPack(ctx context.Context, in UpsertPackInput) (domain.AssistPack, error) {
+	pack, err := uc.packFromInput(in)
+	if err != nil {
+		return domain.AssistPack{}, err
+	}
+	return uc.repo.UpsertPack(ctx, pack)
+}
+
+func (uc *Usecases) GetPack(ctx context.Context, id uuid.UUID) (domain.AssistPack, error) {
+	return uc.repo.GetPack(ctx, id)
+}
+
+func (uc *Usecases) ListPacks(ctx context.Context, in ListPacksInput) ([]domain.AssistPack, error) {
+	in.OrgID = strings.TrimSpace(in.OrgID)
+	if in.OrgID == "" {
+		return nil, errors.New("org_id is required")
+	}
+	return uc.repo.ListPacks(ctx, in)
+}
+
+func (uc *Usecases) UpdatePack(ctx context.Context, in UpdatePackInput) (domain.AssistPack, error) {
+	current, err := uc.repo.GetPack(ctx, in.ID)
+	if err != nil {
+		return domain.AssistPack{}, err
+	}
+	current.OwnerSystem = firstNonEmpty(in.OwnerSystem, current.OwnerSystem)
+	current.ProductSurface = firstNonEmpty(in.ProductSurface, current.ProductSurface)
+	current.AssistType = firstNonEmpty(in.AssistType, current.AssistType)
+	current.Name = firstNonEmpty(in.Name, current.Name)
+	current.Description = in.Description
+	current.InputContract = firstNonEmpty(in.InputContract, current.InputContract)
+	current.OutputContract = firstNonEmpty(in.OutputContract, current.OutputContract)
+	current.PromptTemplate = firstNonEmpty(in.PromptTemplate, current.PromptTemplate)
+	if in.ModelPolicy != nil {
+		current.ModelPolicy = in.ModelPolicy
+	}
+	if in.Enabled != nil {
+		current.Enabled = *in.Enabled
+	}
+	if err := validatePack(current); err != nil {
+		return domain.AssistPack{}, err
+	}
+	return uc.repo.UpdatePack(ctx, current)
+}
+
+func (uc *Usecases) ArchivePack(ctx context.Context, orgID, actor string, id uuid.UUID) error {
+	return uc.lifecycle.SoftDelete(ctx, &lifecycle.ArchiveRequest{
+		ResourceType: resourceAssistPack,
+		ResourceID:   id,
+		TenantID:     strings.TrimSpace(orgID),
+		Actor:        strings.TrimSpace(actor),
+	})
+}
+
+func (uc *Usecases) RestorePack(ctx context.Context, orgID, actor string, id uuid.UUID) error {
+	return uc.lifecycle.Restore(ctx, &lifecycle.RestoreRequest{
+		ResourceType: resourceAssistPack,
+		ResourceID:   id,
+		TenantID:     strings.TrimSpace(orgID),
+		Actor:        strings.TrimSpace(actor),
+	})
+}
+
+func (uc *Usecases) HardDeletePack(ctx context.Context, orgID, actor string, id uuid.UUID) error {
+	return uc.lifecycle.HardDelete(ctx, &lifecycle.HardDeleteRequest{
+		ResourceType:   resourceAssistPack,
+		ResourceID:     id,
+		TenantID:       strings.TrimSpace(orgID),
+		Actor:          strings.TrimSpace(actor),
+		MustBeArchived: true,
+	})
+}
+
+func (uc *Usecases) RunAssist(ctx context.Context, in RunAssistInput) (domain.AssistRun, error) {
+	in.OrgID = strings.TrimSpace(in.OrgID)
+	in.OwnerSystem = strings.TrimSpace(in.OwnerSystem)
+	in.ProductSurface = strings.TrimSpace(in.ProductSurface)
+	in.AssistType = strings.TrimSpace(in.AssistType)
+	if in.OrgID == "" || in.OwnerSystem == "" || in.ProductSurface == "" || in.AssistType == "" {
+		return domain.AssistRun{}, errors.New("org_id, owner_system, product_surface and assist_type are required")
+	}
+	if in.Input == nil {
+		in.Input = map[string]any{}
+	}
+	pack, err := uc.repo.GetPackByType(ctx, in.OrgID, in.OwnerSystem, in.ProductSurface, in.AssistType)
+	if err != nil {
+		return domain.AssistRun{}, err
+	}
+	if !pack.Enabled {
+		return domain.AssistRun{}, errors.New("assist pack is disabled")
+	}
+
+	now := uc.now()
+	run := domain.AssistRun{
+		ID:             uuid.New(),
+		OrgID:          in.OrgID,
+		PackID:         pack.ID,
+		OwnerSystem:    pack.OwnerSystem,
+		ProductSurface: pack.ProductSurface,
+		AssistType:     pack.AssistType,
+		SubjectType:    strings.TrimSpace(in.SubjectType),
+		SubjectID:      strings.TrimSpace(in.SubjectID),
+		Input:          in.Input,
+		Status:         "running",
+		CreatedAt:      now,
+	}
+	output, err := uc.runLLM(ctx, pack, in.Input)
+	completedAt := uc.now()
+	run.CompletedAt = &completedAt
+	if err != nil {
+		run.Status = "failed"
+		run.ErrorMessage = err.Error()
+		run.Output = map[string]any{}
+		stored, storeErr := uc.repo.CreateRun(ctx, run)
+		if storeErr != nil {
+			return domain.AssistRun{}, storeErr
+		}
+		return stored, err
+	}
+	run.Status = "completed"
+	run.Output = output
+	return uc.repo.CreateRun(ctx, run)
+}
+
+func (uc *Usecases) GetRun(ctx context.Context, id uuid.UUID) (domain.AssistRun, error) {
+	return uc.repo.GetRun(ctx, id)
+}
+
+func (uc *Usecases) ListRuns(ctx context.Context, in ListRunsInput) ([]domain.AssistRun, error) {
+	in.OrgID = strings.TrimSpace(in.OrgID)
+	if in.OrgID == "" {
+		return nil, errors.New("org_id is required")
+	}
+	return uc.repo.ListRuns(ctx, in)
+}
+
+func (uc *Usecases) packFromInput(in UpsertPackInput) (domain.AssistPack, error) {
+	enabled := true
+	if in.Enabled != nil {
+		enabled = *in.Enabled
+	}
+	pack := domain.AssistPack{
+		ID:             uuid.New(),
+		OrgID:          strings.TrimSpace(in.OrgID),
+		OwnerSystem:    strings.TrimSpace(in.OwnerSystem),
+		ProductSurface: strings.TrimSpace(in.ProductSurface),
+		AssistType:     strings.TrimSpace(in.AssistType),
+		Name:           strings.TrimSpace(in.Name),
+		Description:    strings.TrimSpace(in.Description),
+		InputContract:  strings.TrimSpace(in.InputContract),
+		OutputContract: strings.TrimSpace(in.OutputContract),
+		PromptTemplate: strings.TrimSpace(in.PromptTemplate),
+		ModelPolicy:    in.ModelPolicy,
+		Enabled:        enabled,
+	}
+	if pack.ModelPolicy == nil {
+		pack.ModelPolicy = map[string]any{}
+	}
+	if err := validatePack(pack); err != nil {
+		return domain.AssistPack{}, err
+	}
+	return pack, nil
+}
+
+func (uc *Usecases) runLLM(ctx context.Context, pack domain.AssistPack, input map[string]any) (map[string]any, error) {
+	if uc.provider == nil {
+		return nil, errors.New("llm provider is not configured")
+	}
+	inputJSON, err := json.MarshalIndent(input, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("marshal assist input: %w", err)
+	}
+	prompt := strings.TrimSpace(pack.PromptTemplate)
+	if strings.Contains(prompt, "{{input_json}}") {
+		prompt = strings.ReplaceAll(prompt, "{{input_json}}", string(inputJSON))
+	} else {
+		prompt += "\n\nInput JSON:\n" + string(inputJSON)
+	}
+	maxTokens := 1024
+	if raw, ok := pack.ModelPolicy["max_tokens"].(float64); ok && raw > 0 {
+		maxTokens = int(raw)
+	}
+	resp, err := uc.provider.Chat(ctx, runtime.ChatRequest{
+		SystemPrompt: "You are Companion assist-packs. Explain the provided product-owned facts and findings. Do not create deterministic rules or decide policy outcomes.",
+		Messages: []runtime.LLMMessage{
+			{Role: "user", Content: prompt},
+		},
+		MaxTokens: maxTokens,
+	})
+	if err != nil {
+		return nil, err
+	}
+	text := strings.TrimSpace(resp.Text)
+	if text == "" {
+		text = "No response generated."
+	}
+	if output, ok := parseLLMOutput(text); ok {
+		return output, nil
+	}
+	return map[string]any{
+		"summary":  text,
+		"raw_text": text,
+	}, nil
+}
+
+func validatePack(pack domain.AssistPack) error {
+	if pack.OrgID == "" || pack.OwnerSystem == "" || pack.ProductSurface == "" ||
+		pack.AssistType == "" || pack.Name == "" || pack.InputContract == "" ||
+		pack.OutputContract == "" || pack.PromptTemplate == "" {
+		return errors.New("org_id, owner_system, product_surface, assist_type, name, input_contract, output_contract and prompt_template are required")
+	}
+	return nil
+}
+
+func parseLLMOutput(text string) (map[string]any, bool) {
+	candidates := []string{strings.TrimSpace(text)}
+	if unwrapped := unwrapMarkdownJSON(text); unwrapped != "" && unwrapped != candidates[0] {
+		candidates = append(candidates, unwrapped)
+	}
+	if extracted := extractJSONObject(text); extracted != "" && extracted != candidates[0] {
+		candidates = append(candidates, extracted)
+	}
+	for _, candidate := range candidates {
+		var output map[string]any
+		if err := json.Unmarshal([]byte(candidate), &output); err == nil && len(output) > 0 {
+			return output, true
+		}
+	}
+	return nil, false
+}
+
+func unwrapMarkdownJSON(text string) string {
+	text = strings.TrimSpace(text)
+	if !strings.HasPrefix(text, "```") {
+		return ""
+	}
+	text = strings.TrimPrefix(text, "```")
+	text = strings.TrimSpace(text)
+	if strings.HasPrefix(strings.ToLower(text), "json") {
+		text = strings.TrimSpace(text[len("json"):])
+	}
+	if idx := strings.LastIndex(text, "```"); idx >= 0 {
+		text = text[:idx]
+	}
+	return strings.TrimSpace(text)
+}
+
+func extractJSONObject(text string) string {
+	start := strings.Index(text, "{")
+	end := strings.LastIndex(text, "}")
+	if start < 0 || end <= start {
+		return ""
+	}
+	return strings.TrimSpace(text[start : end+1])
+}
+
+func firstNonEmpty(value, fallback string) string {
+	if trimmed := strings.TrimSpace(value); trimmed != "" {
+		return trimmed
+	}
+	return fallback
+}
+
+type noopLifecycleAudit struct{}
+
+func (noopLifecycleAudit) Append(context.Context, lifecycle.ArchiveAudit) error {
+	return nil
+}

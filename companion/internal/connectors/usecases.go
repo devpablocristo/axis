@@ -393,7 +393,7 @@ func (uc *Usecases) SeedDefaultConnectors(ctx context.Context) error {
 			slog.Error("seed connector marshal capabilities", "kind", conn.Kind(), "error", mErr)
 			capsJSON = []byte(`[]`)
 		}
-		// Final boundary: connector rows are tenant-owned credentials/config.
+		// Final boundary: connector rows are customer-org-owned credentials/config.
 		// Static registry entries publish capability schemas only; they must not
 		// create org_id='' rows that later act as global execution wildcard.
 		slog.InfoContext(ctx, "registered connector capability template", "kind", conn.Kind(), "capabilities", string(capsJSON))
@@ -541,21 +541,24 @@ func actionBindingHash(binding map[string]any) (string, error) {
 
 func buildActionBinding(config domain.Connector, capability domain.Capability, spec domain.ExecutionSpec, payloadHash string) map[string]any {
 	binding := map[string]any{
-		"schema_version":     toolIntentSchemaVersion,
-		"org_id":             strings.TrimSpace(spec.OrgID),
-		"actor_id":           strings.TrimSpace(spec.ActorID),
-		"actor_type":         "agent",
-		"product_surface":    productSurfaceFor(capability, spec),
-		"run_id":             runIDFor(spec),
-		"tool_invocation_id": toolInvocationIDFor(capability, spec),
-		"connector_id":       spec.ConnectorID.String(),
-		"capability_id":      capability.ID,
-		"operation":          spec.Operation,
-		"target_system":      config.Kind,
-		"target_resource":    config.ID.String(),
-		"payload_hash":       payloadHash,
-		"idempotency_key":    strings.TrimSpace(spec.IdempotencyKey),
-		"risk_hint":          capability.RiskClass,
+		"schema_version":      toolIntentSchemaVersion,
+		"org_id":              strings.TrimSpace(spec.OrgID),
+		"actor_id":            strings.TrimSpace(spec.ActorID),
+		"actor_type":          firstNonEmpty(spec.ActorType, "agent"),
+		"companion_principal": firstNonEmpty(spec.CompanionPrincipal, "companion.employee_ai"),
+		"on_behalf_of":        strings.TrimSpace(spec.OnBehalfOf),
+		"service_principal":   spec.ServicePrincipal,
+		"product_surface":     productSurfaceFor(capability, spec),
+		"run_id":              runIDFor(spec),
+		"tool_invocation_id":  toolInvocationIDFor(capability, spec),
+		"connector_id":        spec.ConnectorID.String(),
+		"capability_id":       capability.ID,
+		"operation":           spec.Operation,
+		"target_system":       config.Kind,
+		"target_resource":     config.ID.String(),
+		"payload_hash":        payloadHash,
+		"idempotency_key":     strings.TrimSpace(spec.IdempotencyKey),
+		"risk_hint":           capability.RiskClass,
 	}
 	if spec.TaskID != nil {
 		binding["task_id"] = spec.TaskID.String()
@@ -590,6 +593,15 @@ func productSurfaceFor(capability domain.Capability, spec domain.ExecutionSpec) 
 	return "companion"
 }
 
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
 func executionLockKey(spec domain.ExecutionSpec) string {
 	if spec.TaskID == nil || strings.TrimSpace(spec.IdempotencyKey) == "" {
 		return ""
@@ -603,28 +615,32 @@ func executionLockKey(spec domain.ExecutionSpec) string {
 
 func buildExecutionEvidence(config domain.Connector, capability domain.Capability, spec domain.ExecutionSpec, result domain.ExecutionResult) json.RawMessage {
 	evidence := map[string]any{
-		"actor_id":           strings.TrimSpace(spec.ActorID),
-		"org_id":             strings.TrimSpace(spec.OrgID),
-		"connector_id":       spec.ConnectorID.String(),
-		"connector_kind":     config.Kind,
-		"capability_id":      capability.ID,
-		"capability_version": capability.Version,
-		"operation":          spec.Operation,
-		"mode":               capability.Mode,
-		"side_effect_class":  capability.SideEffectClass,
-		"side_effect":        capability.HasSideEffect(),
-		"risk_class":         capability.RiskClass,
-		"payload":            sanitizeJSONPayload(spec.Payload),
-		"result":             sanitizeJSONPayload(result.ResultJSON),
-		"external_ref":       result.ExternalRef,
-		"status":             result.Status,
-		"error_message":      result.ErrorMessage,
-		"duration_ms":        result.DurationMS,
-		"idempotency_key":    spec.IdempotencyKey,
-		"action_binding":     buildActionBinding(config, capability, spec, mustPayloadHash(spec.Payload)),
-		"created_at":         result.CreatedAt.UTC().Format(time.RFC3339Nano),
-		"verification":       "unsigned",
-		"attestation_ready":  true,
+		"actor_id":            strings.TrimSpace(spec.ActorID),
+		"actor_type":          firstNonEmpty(spec.ActorType, "agent"),
+		"companion_principal": firstNonEmpty(spec.CompanionPrincipal, "companion.employee_ai"),
+		"on_behalf_of":        strings.TrimSpace(spec.OnBehalfOf),
+		"service_principal":   spec.ServicePrincipal,
+		"org_id":              strings.TrimSpace(spec.OrgID),
+		"connector_id":        spec.ConnectorID.String(),
+		"connector_kind":      config.Kind,
+		"capability_id":       capability.ID,
+		"capability_version":  capability.Version,
+		"operation":           spec.Operation,
+		"mode":                capability.Mode,
+		"side_effect_class":   capability.SideEffectClass,
+		"side_effect":         capability.HasSideEffect(),
+		"risk_class":          capability.RiskClass,
+		"payload":             sanitizeJSONPayload(spec.Payload),
+		"result":              sanitizeJSONPayload(result.ResultJSON),
+		"external_ref":        result.ExternalRef,
+		"status":              result.Status,
+		"error_message":       result.ErrorMessage,
+		"duration_ms":         result.DurationMS,
+		"idempotency_key":     spec.IdempotencyKey,
+		"action_binding":      buildActionBinding(config, capability, spec, mustPayloadHash(spec.Payload)),
+		"created_at":          result.CreatedAt.UTC().Format(time.RFC3339Nano),
+		"verification":        "unsigned",
+		"attestation_ready":   true,
 	}
 	if spec.TaskID != nil {
 		evidence["task_id"] = spec.TaskID.String()

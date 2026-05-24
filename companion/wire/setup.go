@@ -221,7 +221,10 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	orchestrator.SetDefaultAutonomy(autonomy)
 	traceRepo := runtime.NewPostgresTraceRepository(db)
 	orchestrator.SetTraceRepository(traceRepo)
+	runtimeGovernanceRepo := runtime.NewPostgresRuntimeGovernanceRepository(db)
+	orchestrator.SetRuntimeGovernance(runtimeGovernanceRepo)
 	traceHandler := runtime.NewTraceHandler(traceRepo)
+	runtimeGovernanceHandler := runtime.NewRuntimeGovernanceHandler(runtimeGovernanceRepo)
 	adapter := runtime.NewOrchestratorAdapter(orchestrator)
 	uc.SetOrchestrator(adapter)
 	// Watchers empujan alertas al chat del suscriptor
@@ -248,6 +251,7 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	chatHandler.Register(mux)
 	connHandler.Register(mux)
 	traceHandler.Register(mux)
+	runtimeGovernanceHandler.Register(mux)
 	nexusAssistHandler.Register(mux)
 	assistHandler.Register(mux)
 

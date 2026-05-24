@@ -2,12 +2,14 @@ FROM golang:1.26-alpine AS builder
 
 RUN apk add --no-cache git
 
-WORKDIR /src/nexus
+WORKDIR /src
 
-COPY nexus/go.mod nexus/go.sum ./
+COPY platform ./platform
+COPY axis/nexus ./axis/nexus
+
+WORKDIR /src/axis/nexus
 RUN go mod download
 
-COPY nexus/ ./
 RUN CGO_ENABLED=0 go build -o /out/nexus ./cmd/api
 
 FROM alpine:3.23

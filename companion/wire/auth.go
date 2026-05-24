@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/devpablocristo/companion/internal/identityctx"
 	authn "github.com/devpablocristo/platform/authn/go"
 	"github.com/devpablocristo/platform/authn/go/identityhttp"
 	"github.com/devpablocristo/platform/authn/go/internaljwt"
@@ -72,6 +73,7 @@ func newAuthMiddleware(apiKeys, issuerURL, audience string, internalJWT internal
 			}
 
 			req := identityhttp.WithPrincipal(r, principal, method)
+			req = identityctx.WithPrincipal(req, principal)
 			next.ServeHTTP(w, req)
 		})
 	}, nil

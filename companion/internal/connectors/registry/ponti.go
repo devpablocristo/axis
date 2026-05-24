@@ -181,10 +181,17 @@ func (p *PontiConnector) Execute(ctx context.Context, spec domain.ExecutionSpec)
 	}
 
 	evidence := map[string]any{
-		"source_ref":  fmt.Sprintf("ponti.%s", spec.Operation),
-		"captured_at": time.Now().UTC().Format(time.RFC3339),
-		"actor":       spec.ActorID,
-		"tenant":      spec.OrgID,
+		"source_ref":           fmt.Sprintf("ponti.%s", spec.Operation),
+		"captured_at":          time.Now().UTC().Format(time.RFC3339),
+		"org_id":               spec.OrgID,
+		"customer_org_id":      spec.OrgID,
+		"actor_id":             spec.ActorID,
+		"actor_type":           spec.ActorType,
+		"companion_principal":  spec.CompanionPrincipal,
+		"on_behalf_of":         spec.OnBehalfOf,
+		"service_principal":    spec.ServicePrincipal,
+		"product_surface":      spec.ProductSurface,
+		"capability_operation": spec.Operation,
 	}
 	evidenceJSON, _ := json.Marshal(evidence)
 

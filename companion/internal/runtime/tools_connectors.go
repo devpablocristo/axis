@@ -157,13 +157,13 @@ func capabilityToolHandler(kind string, capability connectorsdomain.Capability, 
 	return func(ctx context.Context, args json.RawMessage) (string, error) {
 		id := IdentityFromContext(ctx)
 		if strings.TrimSpace(id.OrgID) == "" {
-			return `{"error":"tenant context required"}`, nil
+			return `{"error":"customer org context required"}`, nil
 		}
 
 		connID, err := resolveConnectorID(ctx, deps.Executor, id.OrgID, kind)
 		if err != nil {
 			return jsonOrError(map[string]any{
-				"error":   "connector not configured for this tenant",
+				"error":   "connector not configured for this customer org",
 				"kind":    kind,
 				"details": err.Error(),
 			}), nil
@@ -175,14 +175,18 @@ func capabilityToolHandler(kind string, capability connectorsdomain.Capability, 
 		}
 
 		spec := connectorsdomain.ExecutionSpec{
-			ConnectorID:    connID,
-			OrgID:          id.OrgID,
-			ActorID:        firstNonEmpty(id.UserID, "companion-agent"),
-			ProductSurface: productSurfaceFromIdentity(id),
-			AuthScopes:     append([]string(nil), id.AuthScopes...),
-			Operation:      capability.Operation,
-			Payload:        payload,
-			IdempotencyKey: fmt.Sprintf("chat-%s-%s", capability.Operation, uuid.NewString()),
+			ConnectorID:        connID,
+			OrgID:              id.OrgID,
+			ActorID:            firstNonEmpty(id.UserID, id.OnBehalfOf, id.CompanionPrincipal, CompanionPrincipal),
+			ActorType:          firstNonEmpty(id.ActorType, "agent"),
+			CompanionPrincipal: firstNonEmpty(id.CompanionPrincipal, CompanionPrincipal),
+			OnBehalfOf:         id.OnBehalfOf,
+			ServicePrincipal:   id.ServicePrincipal,
+			ProductSurface:     productSurfaceFromIdentity(id),
+			AuthScopes:         append([]string(nil), id.AuthScopes...),
+			Operation:          capability.Operation,
+			Payload:            payload,
+			IdempotencyKey:     fmt.Sprintf("chat-%s-%s", capability.Operation, uuid.NewString()),
 		}
 
 		if !capability.NeedsNexusApproval() {
@@ -203,14 +207,18 @@ func capabilityToolHandler(kind string, capability connectorsdomain.Capability, 
 		}
 		submitBody := nexusclient.SubmitRequestBody{
 			RequesterType:  "companion",
-			RequesterID:    "companion-chat",
-			RequesterName:  "Companion Chat",
+			RequesterID:    firstNonEmpty(id.CompanionPrincipal, CompanionPrincipal),
+			RequesterName:  "Companion Employee AI",
 			ActionType:     "companion.tool.invoke",
 			TargetSystem:   kind,
 			TargetResource: connID.String(),
 			Params: map[string]any{
-				"operation": capability.Operation,
-				"payload":   json.RawMessage(payload),
+				"operation":           capability.Operation,
+				"payload":             json.RawMessage(payload),
+				"actor_id":            spec.ActorID,
+				"actor_type":          spec.ActorType,
+				"companion_principal": spec.CompanionPrincipal,
+				"on_behalf_of":        spec.OnBehalfOf,
 			},
 			Reason: fmt.Sprintf("LLM-driven invocation of %s", capability.Operation),
 		}

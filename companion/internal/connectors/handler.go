@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/devpablocristo/platform/authn/go/identityhttp"
+	"github.com/devpablocristo/companion/internal/identityctx"
 	"github.com/devpablocristo/platform/http/go/httpjson"
 	"github.com/google/uuid"
 
@@ -107,7 +107,7 @@ func (h *Handler) save(w http.ResponseWriter, r *http.Request) {
 	if !requireScope(w, r, scopeCompanionConnectorsAdmin) {
 		return
 	}
-	if !identityhttp.HasNoAuthContext(r) && principalOrgID(r) == "" {
+	if !identityctx.HasNoAuthContext(r) && principalOrgID(r) == "" {
 		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "connector save requires org context")
 		return
 	}
@@ -175,7 +175,8 @@ func (h *Handler) execute(w http.ResponseWriter, r *http.Request) {
 	if !requireScope(w, r, scopeCompanionConnectorsExecute) {
 		return
 	}
-	if !identityhttp.HasNoAuthContext(r) && (principalOrgID(r) == "" || principalActorID(r) == "") {
+	id := identityctx.FromRequest(r)
+	if !identityctx.HasNoAuthContext(r) && (id.CustomerOrgID == "" || id.EffectiveActorID() == "") {
 		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "connector execution requires org and actor context")
 		return
 	}
@@ -201,14 +202,18 @@ func (h *Handler) execute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	spec := domain.ExecutionSpec{
-		ConnectorID:    connID,
-		OrgID:          principalOrgID(r),
-		ActorID:        principalActorID(r),
-		ProductSurface: strings.TrimSpace(r.Header.Get("X-Product-Surface")),
-		AuthScopes:     parseHeaderValues(r.Header.Get("X-Auth-Scopes")),
-		Operation:      body.Operation,
-		Payload:        payload,
-		IdempotencyKey: body.IdempotencyKey,
+		ConnectorID:        connID,
+		OrgID:              id.CustomerOrgID,
+		ActorID:            id.EffectiveActorID(),
+		ActorType:          id.ActorType,
+		CompanionPrincipal: id.CompanionPrincipal,
+		OnBehalfOf:         id.OnBehalfOf,
+		ServicePrincipal:   id.ServicePrincipal,
+		ProductSurface:     id.ProductSurface,
+		AuthScopes:         append([]string(nil), id.Scopes...),
+		Operation:          body.Operation,
+		Payload:            payload,
+		IdempotencyKey:     body.IdempotencyKey,
 	}
 	if body.TaskID != "" {
 		tid, err := uuid.Parse(body.TaskID)
@@ -281,14 +286,15 @@ func (h *Handler) listExecutions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) capabilities(w http.ResponseWriter, r *http.Request) {
+	id := identityctx.FromRequest(r)
 	filter := domain.CapabilityFilter{
-		TenantID:           principalOrgID(r),
+		TenantID:           id.CustomerOrgID,
 		Roles:              parseHeaderValues(r.Header.Get("X-Auth-Roles")),
-		Scopes:             parseHeaderValues(r.Header.Get("X-Auth-Scopes")),
+		Scopes:             append([]string(nil), id.Scopes...),
 		Modules:            parseHeaderValues(r.Header.Get("X-Enabled-Modules")),
 		MaxRiskClass:       strings.TrimSpace(r.URL.Query().Get("max_risk_class")),
 		IncludeWrites:      strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("include_writes")), "true"),
-		EnforcePermissions: !identityhttp.HasNoAuthContext(r),
+		EnforcePermissions: !identityctx.HasNoAuthContext(r),
 	}
 	caps := h.uc.Capabilities(filter)
 	out := make([]dto.CapabilityResponse, 0, len(caps))

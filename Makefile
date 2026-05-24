@@ -5,7 +5,7 @@ DC := docker compose --project-directory $(CURDIR) -f $(CURDIR)/docker-compose.y
 	qa qa-companion qa-nexus check-companion check-nexus hygiene \
 	smoke smoke-companion smoke-nexus e2e-nexus acceptance-nexus \
 	dev-apis dev-companion dev-nexus \
-	up down build logs compose-services
+	network up down build logs compose-services
 
 test: hygiene test-companion test-nexus test-bff
 
@@ -68,7 +68,7 @@ dev-nexus:
 	@set -a; source .env; set +a; \
 	export PORT="$${NEXUS_PORT:-18084}"; \
 	export DATABASE_URL="$${NEXUS_DATABASE_URL:-postgres://postgres:postgres@localhost:$${NEXUS_POSTGRES_PORT:-15434}/nexus?sslmode=disable}"; \
-	export NEXUS_API_KEYS="admin=$${NEXUS_ADMIN_API_KEY:-nexus-admin-dev-key}|service_principal=true|org_id=$${AXIS_DEV_ORG_ID:-local-dev-org}|scopes=nexus:requests:read+nexus:requests:write+nexus:requests:result+nexus:approvals:decide+nexus:policies:admin+nexus:rbac:admin+nexus:evidence:write+nexus:dashboard:read+nexus:learning:propose+nexus:cross_org"; \
+	export NEXUS_API_KEYS="admin=$${NEXUS_ADMIN_API_KEY:-nexus-admin-dev-key}|service_principal=true|org_id=$${AXIS_DEV_ORG_ID:-local-dev-org}|scopes=nexus:requests:read+nexus:requests:write+nexus:requests:result+nexus:approvals:decide+nexus:policies:admin+nexus:rbac:admin+nexus:evidence:write+nexus:findings:read+nexus:findings:write+nexus:dashboard:read+nexus:learning:propose+nexus:cross_org,argos=$${NEXUS_ARGOS_API_KEY:-argos-nexus-dev-key}|service_principal=true|org_id=$${ARGOS_ORG_ID:-argos-local-org}|scopes=nexus:findings:read+nexus:findings:write"; \
 	export NEXUS_INTERNAL_JWT_SECRET="$${AXIS_INTERNAL_JWT_SECRET:-axis-dev-internal-jwt-secret-change-me}"; \
 	export NEXUS_INTERNAL_JWT_ISSUER="$${AXIS_INTERNAL_JWT_ISSUER:-axis-bff}"; \
 	export NEXUS_INTERNAL_JWT_AUDIENCE="$${NEXUS_INTERNAL_JWT_AUDIENCE:-nexus}"; \
@@ -81,7 +81,7 @@ dev-companion:
 	nexus_port="$${NEXUS_PORT:-18084}"; \
 	export PORT="$${COMPANION_PORT:-18085}"; \
 	export DATABASE_URL="$${COMPANION_DATABASE_URL:-postgres://postgres:postgres@localhost:$${COMPANION_POSTGRES_PORT:-15435}/companion?sslmode=disable}"; \
-	export COMPANION_API_KEYS="admin=$${COMPANION_ADMIN_API_KEY:-companion-admin-dev-key}|service_principal=true|org_id=$${AXIS_DEV_ORG_ID:-local-dev-org}|scopes=companion:tasks:read+companion:tasks:write+companion:connectors:execute+companion:connectors:admin+companion:watchers:read+companion:watchers:write+companion:watchers:execute+companion:nexus:read+companion:nexus:admin+companion:nexus-assist:read+companion:nexus-assist:admin"; \
+	export COMPANION_API_KEYS="admin=$${COMPANION_ADMIN_API_KEY:-companion-admin-dev-key}|service_principal=true|org_id=$${AXIS_DEV_ORG_ID:-local-dev-org}|scopes=companion:tasks:read+companion:tasks:write+companion:connectors:execute+companion:connectors:admin+companion:watchers:read+companion:watchers:write+companion:watchers:execute+companion:nexus:read+companion:nexus:admin+companion:nexus-assist:read+companion:nexus-assist:admin+companion:assist:read+companion:assist:write+companion:cross_org,argos=$${COMPANION_ARGOS_API_KEY:-argos-companion-dev-key}|service_principal=true|org_id=$${ARGOS_ORG_ID:-argos-local-org}|scopes=companion:assist:read+companion:assist:write"; \
 	export COMPANION_INTERNAL_JWT_SECRET="$${AXIS_INTERNAL_JWT_SECRET:-axis-dev-internal-jwt-secret-change-me}"; \
 	export COMPANION_INTERNAL_JWT_ISSUER="$${AXIS_INTERNAL_JWT_ISSUER:-axis-bff}"; \
 	export COMPANION_INTERNAL_JWT_AUDIENCE="$${COMPANION_INTERNAL_JWT_AUDIENCE:-companion}"; \
@@ -95,7 +95,10 @@ dev-apis:
 	@test -f .env || cp .env.example .env
 	+$(MAKE) -j2 dev-nexus dev-companion
 
-up:
+network:
+	@docker network inspect axis-local >/dev/null 2>&1 || docker network create axis-local >/dev/null
+
+up: network
 	@test -f .env || cp .env.example .env
 	$(DC) up -d --build
 

@@ -3,17 +3,21 @@
 ## Auth
 
 Companion requiere API key u OIDC/JWT interno. El middleware valida el
-principal recibido desde servicios/gateways confiables e inyecta:
+principal recibido desde servicios/gateways confiables y construye el
+`IdentityContext` canonico:
 
-- `X-User-ID`
-- `X-Org-ID`
-- `X-Auth-Role`
-- `X-Auth-Scopes`
-- `X-Auth-Method`
-- `X-Service-Principal`
+- `customer_org_id` desde claim `org_id`.
+- `human_user_id` desde `actor_id` cuando el actor es humano.
+- `actor_type`, `product_surface`, `service_principal` y `on_behalf_of`.
+- `companion_principal`, default `companion.employee_ai`.
+- `scopes` desde `scope`, `scp` o metadata autenticada.
 
 API keys soportan metadata inline: `actor`, `org_id`, `scopes` y
 `service_principal`.
+
+Headers `X-Org-ID`, `X-User-ID` y `X-Auth-Scopes` se mantienen como
+compatibilidad temporal para dev/tests cuando no hay principal autenticado; no
+son la fuente canonica en runtime productivo.
 
 Companion no expone una UI propia ni espera sesiones de browser directas. Las
 consolas operativas deben autenticar usuarios fuera de Companion y llamarlo con
@@ -24,14 +28,18 @@ identidad delegada.
 Endpoints sensibles usan scopes: tasks, connectors, watchers y
 nexus-assist. El API key admin de dev incluye todos los scopes necesarios.
 
-## Multi-tenant
+## Customer org isolation
 
-- Tasks listadas por tenant ya no incluyen tasks con `org_id` vacío.
-- Un principal con `X-Org-ID` no puede acceder tasks con `org_id` vacío.
+- `org_id` representa la customer org donde trabaja Companion, no ownership
+  administrativo del runtime global.
+- Tasks listadas por customer org ya no incluyen tasks con `org_id` vacío.
+- Un principal con `org_id` no puede acceder tasks con `org_id` vacío.
 - Watcher alerts preservan `OrgID`.
 - Memory valida scope contra usuario/org/task.
 - Connector executions rechazan connectors globales con `org_id` vacío.
-- Runtime tools requieren tenant/user/scopes antes de exponerse al LLM.
+- Runtime tools requieren customer org/user/scopes antes de exponerse al LLM.
+- Cross-org directo en Companion requiere `companion:cross_org`; el BFF puede
+  seleccionar org con `X-Axis-Org-ID` y enviar un JWT interno ya acotado.
 
 ## Prompt injection
 

@@ -7,10 +7,10 @@ El runtime filtra los schemas antes de enviarlos al modelo.
 
 | Tool | Uso | Requisitos |
 |---|---|---|
-| `get_overview` | Resumen operativo por tenant | tenant requerido |
-| `check_approvals` | Aprobaciones pendientes en Nexus | tenant + `companion:nexus:admin` |
-| `list_policies` | Policies de Nexus | tenant + `companion:nexus:admin` |
-| `list_watchers` | Watchers del tenant | tenant + `companion:watchers:read` |
+| `get_overview` | Resumen operativo por customer org | customer org requerida |
+| `check_approvals` | Aprobaciones pendientes en Nexus | customer org + `companion:nexus:admin` |
+| `list_policies` | Policies de Nexus | customer org + `companion:nexus:admin` |
+| `list_watchers` | Watchers de la customer org | customer org + `companion:watchers:read` |
 | `remember` | Guarda preferencia/hecho | user u org válido |
 | `recall` | Recupera memoria | user u org válido |
 
@@ -29,5 +29,10 @@ Las writes/side effects deben ejecutarse por connectors/capabilities y pasar por
 Nexus antes de ejecutar. El runtime no debe tener tools directas para approve,
 reject o writes sensibles sin gate.
 
-Los connectors son tenant-owned: una fila `org_id=''` no autoriza ejecución.
+Los connectors pertenecen a una customer org: una fila `org_id=''` no autoriza
+ejecución de trabajo.
 Los templates estáticos del registry solo publican schemas.
+
+Las capabilities publicadas por connectors son la fuente de tools específicas
+por producto. Pymes y Ponti son adapters/configuración; el runtime común no debe
+asumir un negocio concreto como default conceptual.

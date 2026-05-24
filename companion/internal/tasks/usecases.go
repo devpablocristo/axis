@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 
 	connectordomain "github.com/devpablocristo/companion/internal/connectors/usecases/domain"
+	"github.com/devpablocristo/companion/internal/identityctx"
 	"github.com/devpablocristo/companion/internal/nexusclient"
 	domain "github.com/devpablocristo/companion/internal/tasks/usecases/domain"
 )
@@ -24,8 +25,8 @@ import (
 // Identidad del servicio Companion ante Nexus (documentado en README).
 const (
 	CompanionRequesterType     = "service"
-	CompanionRequesterID       = "nexus_companion"
-	CompanionRequesterName     = "Nexus Companion"
+	CompanionRequesterID       = identityctx.CompanionPrincipal
+	CompanionRequesterName     = "Companion Employee AI"
 	ActionTypePropose          = "companion.propose"
 	TaskActionInvestigate      = "investigate"
 	TaskActionPropose          = "propose"
@@ -93,6 +94,7 @@ type OrchestratorInput struct {
 	UserID         string
 	OrgID          string
 	AuthScopes     []string
+	Identity       identityctx.IdentityContext
 	Message        string
 	Messages       []domain.TaskMessage
 	TaskID         *uuid.UUID // opcional: vincula el trace a una task
@@ -325,6 +327,7 @@ type ChatInput struct {
 	Message        string
 	Channel        string // "api", "watcher", "whatsapp", product-specific channels, etc.
 	ProductSurface string // opcional: "companion" | "ponti" | "pymes". Afecta routing del agent.
+	Identity       identityctx.IdentityContext
 }
 
 // ChatResult resultado del chat.
@@ -344,6 +347,11 @@ func (u *Usecases) Chat(ctx context.Context, in ChatInput) (ChatResult, error) {
 	if in.Message == "" {
 		return ChatResult{}, fmt.Errorf("message is required")
 	}
+	in.Identity = chatIdentity(in)
+	in.UserID = in.Identity.EffectiveActorID()
+	in.OrgID = in.Identity.CustomerOrgID
+	in.AuthScopes = append([]string(nil), in.Identity.Scopes...)
+	in.ProductSurface = in.Identity.ProductSurface
 
 	var t domain.Task
 	var err error
@@ -413,6 +421,7 @@ func (u *Usecases) Chat(ctx context.Context, in ChatInput) (ChatResult, error) {
 				UserID:         in.UserID,
 				OrgID:          orgID,
 				AuthScopes:     in.AuthScopes,
+				Identity:       in.Identity,
 				Message:        in.Message,
 				Messages:       existingMsgs,
 				TaskID:         &taskID,
@@ -426,7 +435,7 @@ func (u *Usecases) Chat(ctx context.Context, in ChatInput) (ChatResult, error) {
 				_, insertErr := u.repo.InsertMessage(ctx, domain.TaskMessage{
 					TaskID:     t.ID,
 					AuthorType: "system",
-					AuthorID:   "nexus",
+					AuthorID:   in.Identity.CompanionPrincipal,
 					Body:       result.Reply,
 				})
 				if insertErr != nil {
@@ -484,6 +493,23 @@ func (u *Usecases) persistAgentMessage(ctx context.Context, convID uuid.UUID, or
 	if err := u.agentMemory.AppendMessage(ctx, convID, orgID, role, content); err != nil {
 		slog.Error("agent memory append message", "error", err, "conversation_id", convID, "role", role)
 	}
+}
+
+func chatIdentity(in ChatInput) identityctx.IdentityContext {
+	id := in.Identity
+	if id.CustomerOrgID == "" {
+		id.CustomerOrgID = in.OrgID
+	}
+	if id.HumanUserID == "" {
+		id.HumanUserID = in.UserID
+	}
+	if len(id.Scopes) == 0 {
+		id.Scopes = append([]string(nil), in.AuthScopes...)
+	}
+	if id.ProductSurface == "" {
+		id.ProductSurface = in.ProductSurface
+	}
+	return id.WithProductSurface(id.ProductSurface)
 }
 
 func extractAgentConversationID(raw json.RawMessage) uuid.UUID {
@@ -1033,7 +1059,7 @@ func (u *Usecases) Investigate(ctx context.Context, taskID uuid.UUID, in Investi
 		_, err = u.repo.InsertMessage(ctx, domain.TaskMessage{
 			TaskID:     taskID,
 			AuthorType: "system",
-			AuthorID:   "nexus_companion",
+			AuthorID:   CompanionRequesterID,
 			Body:       in.Note,
 		})
 		if err != nil {
@@ -1084,14 +1110,18 @@ func (u *Usecases) Propose(ctx context.Context, taskID uuid.UUID, in ProposeInpu
 		idempotencyKey = defaultExecutionIdempotencyKey(t.ID, nil)
 	}
 	binding, bindingHash, err := u.executor.BuildActionBinding(ctx, connectordomain.ExecutionSpec{
-		ConnectorID:    plan.ConnectorID,
-		OrgID:          t.OrgID,
-		ActorID:        executionActorID(t),
-		ProductSurface: "companion",
-		Operation:      plan.Operation,
-		Payload:        plan.Payload,
-		IdempotencyKey: idempotencyKey,
-		TaskID:         &t.ID,
+		ConnectorID:        plan.ConnectorID,
+		OrgID:              t.OrgID,
+		ActorID:            executionActorID(t),
+		ActorType:          executionActorType(t),
+		CompanionPrincipal: CompanionRequesterID,
+		OnBehalfOf:         executionOnBehalfOf(t),
+		ServicePrincipal:   true,
+		ProductSurface:     "companion",
+		Operation:          plan.Operation,
+		Payload:            plan.Payload,
+		IdempotencyKey:     idempotencyKey,
+		TaskID:             &t.ID,
 	})
 	if err != nil {
 		return domain.Task{}, zeroA, zeroSub, fmt.Errorf("build action binding: %w", err)
@@ -1455,6 +1485,20 @@ func executionActorID(t domain.Task) string {
 	return CompanionRequesterID
 }
 
+func executionActorType(t domain.Task) string {
+	if executionActorID(t) == CompanionRequesterID {
+		return "agent"
+	}
+	return "human"
+}
+
+func executionOnBehalfOf(t domain.Task) string {
+	if actor := strings.TrimSpace(t.CreatedBy); actor != "" && actor != CompanionRequesterID {
+		return actor
+	}
+	return ""
+}
+
 func (u *Usecases) refreshNexusSnapshot(ctx context.Context, taskID uuid.UUID, origin string) (*domain.TaskNexusSyncState, error) {
 	var prevState *domain.TaskNexusSyncState
 	currentState, err := u.repo.GetNexusSyncState(ctx, taskID)
@@ -1532,15 +1576,19 @@ func (u *Usecases) runTaskExecution(ctx context.Context, t domain.Task, plan dom
 	}
 
 	result, execErr := u.executor.Execute(ctx, connectordomain.ExecutionSpec{
-		ConnectorID:    plan.ConnectorID,
-		OrgID:          t.OrgID,
-		ActorID:        executionActorID(t),
-		ProductSurface: "companion",
-		Operation:      plan.Operation,
-		Payload:        plan.Payload,
-		IdempotencyKey: idempotencyKey,
-		TaskID:         &t.ID,
-		NexusRequestID: nexusRequestID,
+		ConnectorID:        plan.ConnectorID,
+		OrgID:              t.OrgID,
+		ActorID:            executionActorID(t),
+		ActorType:          executionActorType(t),
+		CompanionPrincipal: CompanionRequesterID,
+		OnBehalfOf:         executionOnBehalfOf(t),
+		ServicePrincipal:   true,
+		ProductSurface:     "companion",
+		Operation:          plan.Operation,
+		Payload:            plan.Payload,
+		IdempotencyKey:     idempotencyKey,
+		TaskID:             &t.ID,
+		NexusRequestID:     nexusRequestID,
 	})
 	if execErr != nil {
 		result = connectordomain.ExecutionResult{

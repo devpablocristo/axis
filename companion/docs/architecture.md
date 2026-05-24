@@ -45,7 +45,7 @@ auditar runtime IA.
 El runtime usa providers de `platform/kernels/ai/go`. El prompt tiene versión
 `companion.system.v1`. El control plane construye una `IdentityChain`, un
 `AgentRoute` y un `AgentProfile` efectivo con allowlist de tools. El LLM solo
-recibe schemas autorizados para tenant/scopes presentes.
+recibe schemas autorizados para la customer org/scopes presentes.
 
 ## UI operativa
 

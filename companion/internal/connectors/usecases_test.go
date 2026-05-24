@@ -519,14 +519,18 @@ func TestUsecases_Execute_persistsSanitizedEvidence(t *testing.T) {
 	taskID := uuid.New()
 
 	result, err := uc.Execute(context.Background(), domain.ExecutionSpec{
-		ConnectorID:    connectorID,
-		OrgID:          "org-a",
-		ActorID:        "actor-1",
-		Operation:      "mock.write",
-		Payload:        json.RawMessage(`{"message":"hello","api_key":"secret"}`),
-		IdempotencyKey: "idem-1",
-		TaskID:         &taskID,
-		NexusRequestID: &nexusRequestID,
+		ConnectorID:        connectorID,
+		OrgID:              "org-a",
+		ActorID:            "actor-1",
+		ActorType:          "human",
+		CompanionPrincipal: "companion.employee_ai",
+		OnBehalfOf:         "actor-1",
+		ServicePrincipal:   true,
+		Operation:          "mock.write",
+		Payload:            json.RawMessage(`{"message":"hello","api_key":"secret"}`),
+		IdempotencyKey:     "idem-1",
+		TaskID:             &taskID,
+		NexusRequestID:     &nexusRequestID,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -540,6 +544,9 @@ func TestUsecases_Execute_persistsSanitizedEvidence(t *testing.T) {
 	evidence := string(repo.executions[0].EvidenceJSON)
 	if !strings.Contains(evidence, `"org_id":"org-a"`) {
 		t.Fatalf("expected org evidence, got %s", evidence)
+	}
+	if !strings.Contains(evidence, `"companion_principal":"companion.employee_ai"`) || !strings.Contains(evidence, `"on_behalf_of":"actor-1"`) {
+		t.Fatalf("expected companion identity evidence, got %s", evidence)
 	}
 	if strings.Contains(evidence, "secret") || !strings.Contains(evidence, `"api_key":"***"`) {
 		t.Fatalf("expected sanitized evidence, got %s", evidence)

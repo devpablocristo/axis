@@ -7,11 +7,13 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/devpablocristo/companion/internal/identityctx"
 	"github.com/devpablocristo/platform/http/go/httpjson"
 	"github.com/google/uuid"
 )
 
 const defaultTraceListLimit = 50
+const scopeCompanionCrossOrg = "companion:cross_org"
 
 // traceUsecase es la superficie del repo expuesta al handler.
 type traceUsecase interface {
@@ -78,9 +80,9 @@ func (h *TraceHandler) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	orgID := strings.TrimSpace(r.Header.Get("X-Org-ID"))
+	orgID := identityctx.FromRequest(r).CustomerOrgID
 	if orgID == "" {
-		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "X-Org-ID header is required when task_id is not provided")
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "customer org context is required when task_id is not provided")
 		return
 	}
 	limit := defaultTraceListLimit
@@ -97,19 +99,19 @@ func (h *TraceHandler) list(w http.ResponseWriter, r *http.Request) {
 	httpjson.WriteJSON(w, http.StatusOK, map[string]any{"traces": traces})
 }
 
-// canAccessTraceOrg implementa la regla de visibilidad por org. Si el caller
-// no envía X-Org-ID, se permite (compatibilidad con auth modes que aún no
-// resuelven org_id en el header). Si lo envía, debe coincidir.
 func canAccessTraceOrg(r *http.Request, traceOrgID string) bool {
-	orgID := strings.TrimSpace(r.Header.Get("X-Org-ID"))
-	if orgID == "" {
-		return true
+	id := identityctx.FromRequest(r)
+	if identityctx.HasNoAuthContext(r) {
+		if id.CustomerOrgID == "" {
+			return true
+		}
+		return strings.TrimSpace(traceOrgID) == id.CustomerOrgID
 	}
-	return strings.TrimSpace(traceOrgID) == orgID
+	return identityctx.CanAccessOrg(r, traceOrgID, scopeCompanionCrossOrg)
 }
 
 func filterTracesByOrg(r *http.Request, traces []StoredTrace) []StoredTrace {
-	orgID := strings.TrimSpace(r.Header.Get("X-Org-ID"))
+	orgID := identityctx.FromRequest(r).CustomerOrgID
 	if orgID == "" {
 		return traces
 	}

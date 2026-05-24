@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	domain "github.com/devpablocristo/companion/internal/connectors/usecases/domain"
-	"github.com/devpablocristo/platform/authn/go/identityhttp"
+	"github.com/devpablocristo/companion/internal/identityctx"
 	"github.com/devpablocristo/platform/http/go/httpjson"
 )
 
@@ -17,20 +17,20 @@ const (
 )
 
 func requireScope(w http.ResponseWriter, r *http.Request, scopes ...string) bool {
-	if identityhttp.HasNoAuthContext(r) || identityhttp.HasAnyScope(r, scopes...) {
+	if identityctx.HasNoAuthContext(r) || identityctx.HasAnyScope(r, scopes...) {
 		return true
 	}
 	httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "missing required scope")
 	return false
 }
 
-func principalOrgID(r *http.Request) string { return identityhttp.PrincipalOrgID(r) }
+func principalOrgID(r *http.Request) string { return identityctx.PrincipalOrgID(r) }
 
-func principalActorID(r *http.Request) string { return identityhttp.FromRequest(r).Actor }
+func principalActorID(r *http.Request) string { return identityctx.FromRequest(r).EffectiveActorID() }
 
 func canAccessConnectorOrg(r *http.Request, connector domain.Connector) bool {
 	connectorOrg := strings.TrimSpace(connector.OrgID)
-	if identityhttp.HasNoAuthContext(r) || connectorOrg == "" {
+	if identityctx.HasNoAuthContext(r) || connectorOrg == "" {
 		return true
 	}
 	orgID := principalOrgID(r)
@@ -42,7 +42,7 @@ func canAccessConnectorOrg(r *http.Request, connector domain.Connector) bool {
 
 func canAccessExecutionOrg(r *http.Request, execution domain.ExecutionResult) bool {
 	executionOrg := strings.TrimSpace(execution.OrgID)
-	if identityhttp.HasNoAuthContext(r) {
+	if identityctx.HasNoAuthContext(r) {
 		return true
 	}
 	orgID := principalOrgID(r)
@@ -58,7 +58,7 @@ func bindPayloadToPrincipalOrg(r *http.Request, raw json.RawMessage) (json.RawMe
 		if len(raw) == 0 {
 			return json.RawMessage(`{}`), true
 		}
-		if !identityhttp.HasNoAuthContext(r) {
+		if !identityctx.HasNoAuthContext(r) {
 			return nil, false
 		}
 		return raw, true

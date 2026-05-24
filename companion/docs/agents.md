@@ -7,8 +7,8 @@ enforcement en `internal/runtime`.
 
 Cada run produce:
 
-- `IdentityChain`: usuario, tenant, product surface, scopes y principal
-  `companion.employee_ai`.
+- `IdentityChain`: customer org, usuario humano/delegado, product surface,
+  scopes y principal tecnico `companion.employee_ai`.
 - `AgentRoute`: intención clasificada, producto, autonomía efectiva y allowed
   tools.
 - `AgentProfile`: perfil efectivo versionado, autonomía máxima, allowlist de
@@ -27,5 +27,6 @@ mayor autonomía.
 
 Evolución pendiente:
 
-- Persistir perfiles editables por producto/tenant.
+- Persistir perfiles editables por producto/customer org cuando sea necesario,
+  sin entregar administracion del runtime global a clientes.
 - Agregar handoff humano y rollout por versión de perfil.

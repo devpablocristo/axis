@@ -1,11 +1,13 @@
 FROM golang:1.26-alpine AS builder
 
-WORKDIR /src/companion
+WORKDIR /src
 
-COPY companion/go.mod companion/go.sum ./
+COPY platform ./platform
+COPY axis/companion ./axis/companion
+
+WORKDIR /src/axis/companion
 RUN go mod download
 
-COPY companion/ ./
 RUN CGO_ENABLED=0 go build -o /out/companion ./cmd/api
 
 FROM alpine:3.23

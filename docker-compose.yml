@@ -35,13 +35,13 @@ services:
 
   nexus:
     build:
-      context: .
-      dockerfile: Dockerfile.nexus
+      context: ..
+      dockerfile: axis/Dockerfile.nexus
     restart: unless-stopped
     environment:
       PORT: "8080"
       DATABASE_URL: "postgres://postgres:postgres@nexus-postgres:5432/nexus?sslmode=disable"
-      NEXUS_API_KEYS: "admin=${NEXUS_ADMIN_API_KEY:-nexus-admin-dev-key}|service_principal=true|org_id=${AXIS_DEV_ORG_ID:-local-dev-org}|scopes=nexus:requests:read+nexus:requests:write+nexus:requests:result+nexus:approvals:decide+nexus:policies:admin+nexus:rbac:admin+nexus:evidence:write+nexus:dashboard:read+nexus:learning:propose+nexus:cross_org"
+      NEXUS_API_KEYS: "admin=${NEXUS_ADMIN_API_KEY:-nexus-admin-dev-key}|service_principal=true|org_id=${AXIS_DEV_ORG_ID:-local-dev-org}|scopes=nexus:requests:read+nexus:requests:write+nexus:requests:result+nexus:approvals:decide+nexus:policies:admin+nexus:rbac:admin+nexus:evidence:write+nexus:findings:read+nexus:findings:write+nexus:dashboard:read+nexus:learning:propose+nexus:cross_org,argos=${NEXUS_ARGOS_API_KEY:-argos-nexus-dev-key}|service_principal=true|org_id=${ARGOS_ORG_ID:-argos-local-org}|scopes=nexus:findings:read+nexus:findings:write"
       NEXUS_INTERNAL_JWT_SECRET: "${AXIS_INTERNAL_JWT_SECRET:-axis-dev-internal-jwt-secret-change-me}"
       NEXUS_INTERNAL_JWT_ISSUER: "${AXIS_INTERNAL_JWT_ISSUER:-axis-bff}"
       NEXUS_INTERNAL_JWT_AUDIENCE: "${NEXUS_INTERNAL_JWT_AUDIENCE:-nexus}"
@@ -60,6 +60,9 @@ services:
     depends_on:
       nexus-postgres:
         condition: service_healthy
+    networks:
+      default:
+      axis-local:
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/readyz >/dev/null 2>&1 || exit 1"]
       interval: 2s
@@ -68,13 +71,13 @@ services:
 
   companion:
     build:
-      context: .
-      dockerfile: Dockerfile.companion
+      context: ..
+      dockerfile: axis/Dockerfile.companion
     restart: unless-stopped
     environment:
       PORT: "8080"
       DATABASE_URL: "postgres://postgres:postgres@companion-postgres:5432/companion?sslmode=disable"
-      COMPANION_API_KEYS: "admin=${COMPANION_ADMIN_API_KEY:-companion-admin-dev-key}|service_principal=true|org_id=${AXIS_DEV_ORG_ID:-local-dev-org}|scopes=companion:tasks:read+companion:tasks:write+companion:connectors:execute+companion:connectors:admin+companion:watchers:read+companion:watchers:write+companion:watchers:execute+companion:nexus:read+companion:nexus:admin+companion:nexus-assist:read+companion:nexus-assist:admin"
+      COMPANION_API_KEYS: "admin=${COMPANION_ADMIN_API_KEY:-companion-admin-dev-key}|service_principal=true|org_id=${AXIS_DEV_ORG_ID:-local-dev-org}|scopes=companion:tasks:read+companion:tasks:write+companion:connectors:execute+companion:connectors:admin+companion:watchers:read+companion:watchers:write+companion:watchers:execute+companion:nexus:read+companion:nexus:admin+companion:nexus-assist:read+companion:nexus-assist:admin+companion:assist:read+companion:assist:write+companion:cross_org,argos=${COMPANION_ARGOS_API_KEY:-argos-companion-dev-key}|service_principal=true|org_id=${ARGOS_ORG_ID:-argos-local-org}|scopes=companion:assist:read+companion:assist:write"
       COMPANION_INTERNAL_JWT_SECRET: "${AXIS_INTERNAL_JWT_SECRET:-axis-dev-internal-jwt-secret-change-me}"
       COMPANION_INTERNAL_JWT_ISSUER: "${AXIS_INTERNAL_JWT_ISSUER:-axis-bff}"
       COMPANION_INTERNAL_JWT_AUDIENCE: "${COMPANION_INTERNAL_JWT_AUDIENCE:-companion}"
@@ -86,6 +89,11 @@ services:
       COMPANION_LLM_MODEL: "${COMPANION_LLM_MODEL:-fake}"
       COMPANION_LLM_VERTEX_PROJECT: "${COMPANION_LLM_VERTEX_PROJECT:-}"
       COMPANION_LLM_VERTEX_LOCATION: "${COMPANION_LLM_VERTEX_LOCATION:-}"
+      # ADC para Vertex AI / Gemini. Cuando COMPANION_LLM_PROVIDER=vertex_ai,
+      # el binario llama `google.DefaultTokenSource()` que lee este path. El
+      # archivo viene del `gcloud auth application-default login` del host y
+      # se monta read-only abajo en `volumes`.
+      GOOGLE_APPLICATION_CREDENTIALS: "/secrets/gcp-adc.json"
       COMPANION_NEXUS_SYNC_INTERVAL_SEC: "${COMPANION_NEXUS_SYNC_INTERVAL_SEC:-30}"
       COMPANION_STRICT_NEXUS: "${COMPANION_STRICT_NEXUS:-false}"
       COMPANION_DEFAULT_AUTONOMY_LEVEL: "${COMPANION_DEFAULT_AUTONOMY_LEVEL:-A2}"
@@ -95,6 +103,11 @@ services:
       PYMES_API_KEY: "${PYMES_API_KEY:-}"
       PONTI_BASE_URL: "${PONTI_BASE_URL:-}"
       PONTI_API_KEY: "${PONTI_API_KEY:-}"
+    volumes:
+      # ADC (Application Default Credentials) del host. Read-only para que el
+      # container pueda leer pero no modificar las credenciales del dev. El
+      # path en el host viene de `gcloud auth application-default login`.
+      - "${COMPANION_GCP_ADC_HOST_PATH:-~/.config/gcloud/application_default_credentials.json}:/secrets/gcp-adc.json:ro"
     ports:
       - "${COMPANION_PORT:-18085}:8080"
     depends_on:
@@ -102,6 +115,9 @@ services:
         condition: service_healthy
       nexus:
         condition: service_healthy
+    networks:
+      default:
+      axis-local:
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/readyz >/dev/null 2>&1 || exit 1"]
       interval: 2s
@@ -154,3 +170,7 @@ services:
 volumes:
   companion-postgres-data:
   nexus-postgres-data:
+
+networks:
+  axis-local:
+    external: true

@@ -54,7 +54,7 @@ func NewToolKit(rc *nexusclient.Client, memUC *memory.Usecases, watcherUC *watch
 		var parts []string
 		id := IdentityFromContext(ctx)
 		if strings.TrimSpace(id.OrgID) == "" {
-			return `{"error":"tenant context required"}`, nil
+			return `{"error":"customer org context required"}`, nil
 		}
 
 		// Aprobaciones pendientes
@@ -148,7 +148,7 @@ func NewToolKit(rc *nexusclient.Client, memUC *memory.Usecases, watcherUC *watch
 		}
 		id := IdentityFromContext(ctx)
 		if strings.TrimSpace(id.OrgID) == "" {
-			return `{"error":"tenant context required"}`, nil
+			return `{"error":"customer org context required"}`, nil
 		}
 		wList, err := watcherUC.List(ctx, id.OrgID)
 		if err != nil {

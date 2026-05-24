@@ -68,6 +68,39 @@ func TestDevRejectsUnauthorizedOrgSelection(t *testing.T) {
 	}
 }
 
+func TestDevProxyCrossOrgEmitsScopedInternalJWT(t *testing.T) {
+	var gotAuth string
+	downstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer downstream.Close()
+
+	srv, err := newTestServer(downstream.URL, []string{"axis:cross_org", "companion:tasks:read"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/companion/v1/tasks", nil)
+	req.Header.Set("X-Axis-Org-ID", "org-b")
+	rec := httptest.NewRecorder()
+	srv.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	claims := decodeClaims(t, strings.TrimPrefix(gotAuth, "Bearer "))
+	if claims["org_id"] != "org-b" {
+		t.Fatalf("expected org-b scoped token, got %#v", claims["org_id"])
+	}
+	if claims["actor_id"] != "user-a" || claims["on_behalf_of"] != "user-a" {
+		t.Fatalf("expected delegated actor claims, got actor=%#v on_behalf_of=%#v", claims["actor_id"], claims["on_behalf_of"])
+	}
+	if claims["actor_type"] != "human" || claims["service_principal"] != true {
+		t.Fatalf("expected human/service principal claims, got actor_type=%#v service=%#v", claims["actor_type"], claims["service_principal"])
+	}
+}
+
 func TestSessionReturnsSelectedOrgForCrossOrgPrincipal(t *testing.T) {
 	srv, err := newTestServer("http://127.0.0.1:1", []string{"axis:cross_org"})
 	if err != nil {

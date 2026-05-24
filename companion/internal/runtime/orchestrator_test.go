@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/devpablocristo/companion/internal/identityctx"
 	taskdomain "github.com/devpablocristo/companion/internal/tasks/usecases/domain"
 )
 
@@ -12,16 +13,25 @@ import (
 
 type fakeLLMProvider struct {
 	responses []ChatResponse
+	requests  []ChatRequest
 	callCount int
 }
 
-func (f *fakeLLMProvider) Chat(_ context.Context, _ ChatRequest) (ChatResponse, error) {
+func (f *fakeLLMProvider) Chat(_ context.Context, req ChatRequest) (ChatResponse, error) {
+	f.requests = append(f.requests, req)
 	if f.callCount >= len(f.responses) {
 		return ChatResponse{Text: "default response"}, nil
 	}
 	resp := f.responses[f.callCount]
 	f.callCount++
 	return resp, nil
+}
+
+func (f *fakeLLMProvider) lastTools() []ToolSchema {
+	if len(f.requests) == 0 {
+		return nil
+	}
+	return f.requests[len(f.requests)-1].Tools
 }
 
 type failingLLMProvider struct{}
@@ -61,6 +71,37 @@ func TestOrchestrator_Run_directReply(t *testing.T) {
 	}
 	if result.Trace.AutonomyLevel != AutonomyA2 {
 		t.Fatalf("expected default A2 autonomy, got %s", result.Trace.AutonomyLevel)
+	}
+}
+
+func TestOrchestrator_Run_recordsCanonicalIdentity(t *testing.T) {
+	t.Parallel()
+
+	orch := NewOrchestrator(&fakeLLMProvider{responses: []ChatResponse{{Text: "ok"}}}, &ToolKit{Handlers: make(map[string]ToolHandler)}, ContextPorts{})
+
+	result, err := orch.Run(context.Background(), RunInput{
+		Identity: identityctx.IdentityContext{
+			CustomerOrgID:      "org-a",
+			HumanUserID:        "user-a",
+			ActorType:          "human",
+			CompanionPrincipal: identityctx.CompanionPrincipal,
+			OnBehalfOf:         "user-a",
+			ProductSurface:     "pymes",
+			Scopes:             []string{"companion:tasks:write"},
+			AuthMethod:         "internal_jwt",
+			ServicePrincipal:   true,
+		},
+		Message: "hola",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	chain := result.Trace.IdentityChain
+	if chain.CustomerOrgID != "org-a" || chain.HumanUserID != "user-a" || chain.OnBehalfOf != "user-a" {
+		t.Fatalf("identity chain mismatch: %+v", chain)
+	}
+	if chain.ProductSurface != "pymes" || !chain.ServicePrincipal {
+		t.Fatalf("identity metadata mismatch: %+v", chain)
 	}
 }
 

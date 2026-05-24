@@ -180,18 +180,28 @@ func (f *fakeNexus) ReportResult(_ context.Context, _ string, _ bool, _ map[stri
 }
 
 type fakeConnectorExecutor struct {
-	connectorID uuid.UUID
-	execCalls   int
-	readCalls   int
-	lastSpec    connectordomain.ExecutionSpec
-	readResults map[string]json.RawMessage
+	connectorID   uuid.UUID
+	connectorKind string
+	connectorOrg  string
+	execCalls     int
+	readCalls     int
+	lastSpec      connectordomain.ExecutionSpec
+	readResults   map[string]json.RawMessage
 }
 
 func (f *fakeConnectorExecutor) ListConnectors(context.Context) ([]connectordomain.Connector, error) {
 	if f.connectorID == uuid.Nil {
 		f.connectorID = uuid.New()
 	}
-	return []connectordomain.Connector{{ID: f.connectorID, OrgID: "org-1", Kind: "pymes", Enabled: true}}, nil
+	kind := f.connectorKind
+	if kind == "" {
+		kind = "pymes"
+	}
+	orgID := f.connectorOrg
+	if orgID == "" {
+		orgID = "org-1"
+	}
+	return []connectordomain.Connector{{ID: f.connectorID, OrgID: orgID, Kind: kind, Enabled: true}}, nil
 }
 
 func (f *fakeConnectorExecutor) BuildActionBinding(_ context.Context, spec connectordomain.ExecutionSpec) (map[string]any, string, error) {
@@ -203,7 +213,7 @@ func (f *fakeConnectorExecutor) BuildActionBinding(_ context.Context, spec conne
 		"connector_id":    spec.ConnectorID.String(),
 		"capability_id":   spec.Operation,
 		"operation":       spec.Operation,
-		"target_system":   "pymes",
+		"target_system":   spec.ProductSurface,
 		"target_resource": spec.ConnectorID.String(),
 		"payload_hash":    "payload-hash",
 		"idempotency_key": spec.IdempotencyKey,
@@ -353,6 +363,97 @@ func TestUsecases_RunWatcher_StaleWorkOrders_AutoExecutes(t *testing.T) {
 	}
 	if len(repo.proposals) != 2 {
 		t.Fatalf("expected 2 persisted proposals, got %d", len(repo.proposals))
+	}
+}
+
+func TestUsecases_RunWatcher_GenericCapability_AutoExecutesNonPymes(t *testing.T) {
+	t.Parallel()
+	nexus := &fakeNexus{decision: "allowed"}
+	repo := newFakeRepo()
+	uc := NewUsecases(repo, nexus)
+	executor := &fakeConnectorExecutor{
+		connectorKind: "demo",
+		connectorOrg:  "org-1",
+		readResults: map[string]json.RawMessage{
+			"demo.orders.search": json.RawMessage(`{"items":[
+				{"id":"order-1","type":"order","name":"Late order","status":"late","contact_id":"party-1"},
+				{"id":"order-2","type":"order","name":"Ok order","status":"ok","contact_id":"party-2"}
+			]}`),
+		},
+	}
+	uc.SetConnectorExecutor(executor)
+
+	config := json.RawMessage(`{
+		"product_surface":"demo",
+		"connector_kind":"demo",
+		"query_operation":"demo.orders.search",
+		"query_payload":{"status":"late"},
+		"result_items_path":"items",
+		"condition":{"path":"status","operator":"eq","value":"late"},
+		"action_operation":"demo.orders.notify",
+		"action_payload_template":{"org_id":"${org_id}","party_id":"${party_id}","body":"${watcher_message}"},
+		"action_type":"notification.send"
+	}`)
+	w, _ := uc.Create(context.Background(), CreateWatcherInput{
+		OrgID: "org-1", Name: "Demo orders", WatcherType: domain.WatcherCapability,
+		Config: config, Enabled: true,
+	})
+
+	result, err := uc.RunWatcher(context.Background(), w.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Found != 1 || result.Proposed != 1 || result.Executed != 1 {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+	if executor.readCalls != 1 || executor.execCalls != 1 {
+		t.Fatalf("unexpected connector calls: read=%d exec=%d", executor.readCalls, executor.execCalls)
+	}
+	if executor.lastSpec.ProductSurface != "demo" || executor.lastSpec.Operation != "demo.orders.notify" {
+		t.Fatalf("generic watcher used wrong execution spec: %+v", executor.lastSpec)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(executor.lastSpec.Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["org_id"] != "org-1" || payload["party_id"] != "party-1" {
+		t.Fatalf("unexpected action payload: %+v", payload)
+	}
+}
+
+func TestUsecases_RunWatcher_GenericCapability_FailsClosedOnConnectorOrgMismatch(t *testing.T) {
+	t.Parallel()
+	repo := newFakeRepo()
+	uc := NewUsecases(repo, &fakeNexus{decision: "allowed"})
+	executor := &fakeConnectorExecutor{
+		connectorKind: "demo",
+		connectorOrg:  "org-other",
+		readResults: map[string]json.RawMessage{
+			"demo.orders.search": json.RawMessage(`{"items":[{"id":"order-1"}]}`),
+		},
+	}
+	uc.SetConnectorExecutor(executor)
+
+	config := json.RawMessage(`{
+		"product_surface":"demo",
+		"connector_kind":"demo",
+		"query_operation":"demo.orders.search",
+		"result_items_path":"items",
+		"action_operation":"demo.orders.notify",
+		"action_payload_template":{"org_id":"${org_id}"},
+		"action_type":"notification.send"
+	}`)
+	w, _ := uc.Create(context.Background(), CreateWatcherInput{
+		OrgID: "org-1", Name: "Demo orders", WatcherType: domain.WatcherCapability,
+		Config: config, Enabled: true,
+	})
+
+	_, err := uc.RunWatcher(context.Background(), w.ID)
+	if err == nil {
+		t.Fatal("expected connector org mismatch to fail closed")
+	}
+	if executor.readCalls != 0 || executor.execCalls != 0 {
+		t.Fatalf("expected no connector execution, got read=%d exec=%d", executor.readCalls, executor.execCalls)
 	}
 }
 

@@ -184,11 +184,16 @@ func TestPontiConnector_ListInsights_PropagatesTenant(t *testing.T) {
 	conn, connID := newPontiConnector(t, mock)
 
 	res, err := conn.Execute(context.Background(), domain.ExecutionSpec{
-		ConnectorID: connID,
-		OrgID:       "tenant-A",
-		ActorID:     "user-A",
-		Operation:   "ponti.insights.list",
-		Payload:     json.RawMessage(`{"limit":10}`),
+		ConnectorID:        connID,
+		OrgID:              "tenant-A",
+		ActorID:            "user-A",
+		ActorType:          "human",
+		CompanionPrincipal: "companion.employee_ai",
+		OnBehalfOf:         "user-A",
+		ServicePrincipal:   true,
+		ProductSurface:     "ponti",
+		Operation:          "ponti.insights.list",
+		Payload:            json.RawMessage(`{"limit":10}`),
 	})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
@@ -224,6 +229,16 @@ func TestPontiConnector_ListInsights_PropagatesTenant(t *testing.T) {
 	// Evidence pack obligatorio.
 	if len(res.EvidenceJSON) == 0 {
 		t.Fatal("expected evidence_json populated")
+	}
+	var evidence map[string]any
+	if err := json.Unmarshal(res.EvidenceJSON, &evidence); err != nil {
+		t.Fatal(err)
+	}
+	if evidence["actor_id"] != "user-A" || evidence["companion_principal"] != "companion.employee_ai" || evidence["on_behalf_of"] != "user-A" {
+		t.Fatalf("expected canonical identity evidence, got %+v", evidence)
+	}
+	if evidence["customer_org_id"] != "tenant-A" || evidence["product_surface"] != "ponti" {
+		t.Fatalf("expected customer org/product evidence, got %+v", evidence)
 	}
 }
 

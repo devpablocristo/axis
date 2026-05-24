@@ -63,20 +63,6 @@ func DefaultRegistry() Registry {
 			Enabled:        true,
 			Version:        "v1",
 		},
-		// Perfil default para conversaciones en superficie Pymes. El wildcard
-		// "pymes_*" matchea las connector capabilities auto-registradas como
-		// runtime tools (pymes_customers_search, pymes_quotes_create, etc.).
-		// El runtime usa Gemini via Vertex AI; mantenemos pymes_* habilitado
-		// para que el modelo vea las capabilities del producto.
-		{
-			ID:             "pymes.default",
-			ProductSurface: "pymes",
-			MaxAutonomy:    "A2",
-			AllowedTools:   []string{"remember", "recall", "pymes_*"},
-			MemoryPolicy:   MemoryPolicy{AllowedTypes: []string{"preference", "playbook", "task_projection", "operational"}, MaxItems: 10},
-			Enabled:        true,
-			Version:        "v1",
-		},
 	}}
 }
 
@@ -90,12 +76,12 @@ func (r Registry) Resolve(productSurface, intent, requestedAutonomy string, scop
 	case intent == "memory":
 		selected = r.find("companion.memory", selected)
 	}
-	// Si hay un perfil específico para el producto, prevalece sobre el default
-	// (ej: "pymes.default" para superficie Pymes). El intent-based override de
-	// arriba sigue ganando porque nexus/operations/memory son transversales.
+	// Si hay un perfil específico para el producto, prevalece sobre el default.
+	// Si no existe, se genera un perfil agnóstico por product surface que habilita
+	// las capabilities publicadas bajo el prefijo de esa surface.
 	ps := strings.TrimSpace(productSurface)
 	if ps != "" && ps != "companion" && !strings.HasPrefix(intent, "nexus.") && !strings.HasPrefix(intent, "operations.") && intent != "memory" {
-		selected = r.find(ps+".default", selected)
+		selected = r.find(ps+".default", genericProductProfile(ps))
 	}
 	if ps != "" {
 		selected.ProductSurface = ps
@@ -108,6 +94,25 @@ func (r Registry) Resolve(productSurface, intent, requestedAutonomy string, scop
 		selected.AllowedTools = nil
 	}
 	return selected
+}
+
+func genericProductProfile(productSurface string) Profile {
+	productSurface = strings.TrimSpace(productSurface)
+	return Profile{
+		ID:             "product." + productSurface + ".generic",
+		ProductSurface: productSurface,
+		MaxAutonomy:    "A2",
+		AllowedTools:   []string{"remember", "recall", productToolPrefix(productSurface) + "*"},
+		MemoryPolicy:   MemoryPolicy{AllowedTypes: []string{"preference", "playbook", "task_projection", "operational"}, MaxItems: 10},
+		Enabled:        true,
+		Version:        "v1",
+	}
+}
+
+func productToolPrefix(productSurface string) string {
+	productSurface = strings.TrimSpace(productSurface)
+	productSurface = strings.ReplaceAll(productSurface, ".", "_")
+	return productSurface + "_"
 }
 
 func (r Registry) find(id string, defaultProfile Profile) Profile {

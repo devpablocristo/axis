@@ -2,12 +2,14 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/devpablocristo/companion/internal/identityctx"
 	taskdomain "github.com/devpablocristo/companion/internal/tasks/usecases/domain"
 )
 
@@ -19,7 +21,8 @@ type Orchestrator struct {
 	toolkit         *ToolKit
 	ports           ContextPorts
 	traces          TraceRepository // opcional; nil = no persiste (uso en tests)
-	defaultAutonomy AutonomyLevel   // "" → A2 (default conservador)
+	governance      RuntimeGovernance
+	defaultAutonomy AutonomyLevel // "" → A2 (default conservador)
 	model           string
 }
 
@@ -35,6 +38,11 @@ func NewOrchestrator(provider LLMProvider, toolkit *ToolKit, ports ContextPorts)
 // SetTraceRepository inyecta el repositorio de persistencia de traces. Opcional.
 func (o *Orchestrator) SetTraceRepository(repo TraceRepository) {
 	o.traces = repo
+}
+
+// SetRuntimeGovernance inyecta políticas y contabilidad de runtime por tenant.
+func (o *Orchestrator) SetRuntimeGovernance(repo RuntimeGovernance) {
+	o.governance = repo
 }
 
 // SetDefaultAutonomy fija el nivel de autonomía por defecto del runtime.
@@ -53,6 +61,7 @@ type RunInput struct {
 	UserID         string
 	OrgID          string
 	AuthScopes     []string
+	Identity       identityctx.IdentityContext
 	ProductSurface string
 	Message        string
 	Messages       []taskdomain.TaskMessage // hilo completo hasta ahora
@@ -67,16 +76,33 @@ type RunResult struct {
 
 // Run ejecuta el loop principal: context → LLM → tools → LLM → respuesta.
 func (o *Orchestrator) Run(ctx context.Context, in RunInput) (RunResult, error) {
-	productSurface := in.ProductSurface
-	if productSurface == "" {
-		productSurface = DefaultProductSurface
-	}
-	identity := BuildIdentityChain(in.UserID, in.OrgID, productSurface, in.AuthScopes...)
+	requestIdentity := runIdentity(in)
+	productSurface := requestIdentity.ProductSurface
+	in.UserID = requestIdentity.EffectiveActorID()
+	in.OrgID = requestIdentity.CustomerOrgID
+	in.AuthScopes = append([]string(nil), requestIdentity.Scopes...)
+	in.ProductSurface = productSurface
+	identity := BuildIdentityChainFromContext(requestIdentity)
 	route := RouteAgent(in.Message, productSurface, o.toolkit, identity, o.defaultAutonomy)
-	var allowedSchemas []ToolSchema
-	if o.toolkit != nil {
-		allowedSchemas = o.toolkit.SchemasFor(identity, route.Intent)
+	modelName := firstNonEmpty(o.model, DefaultGeminiModel)
+	policy := defaultRuntimePolicy(in.OrgID)
+	currentUsage := TenantRuntimeUsage{OrgID: in.OrgID, Period: runtimeUsagePeriod(time.Now())}
+	if o.governance != nil && in.OrgID != "" {
+		if loaded, err := o.governance.GetRuntimePolicy(ctx, in.OrgID); err == nil {
+			policy = loaded
+		} else if !errors.Is(err, ErrRuntimePolicyNotFound) {
+			slog.Error("runtime_policy_lookup_failed", "customer_org_id", in.OrgID, "error", err)
+			policy.Enabled = false
+			policy.KillSwitch = true
+		}
+		if usage, err := o.governance.GetRuntimeUsage(ctx, in.OrgID, currentUsage.Period); err == nil {
+			currentUsage = usage
+		} else {
+			slog.Error("runtime_usage_lookup_failed", "customer_org_id", in.OrgID, "period", currentUsage.Period, "error", err)
+		}
 	}
+	decision := applyRuntimePolicy(policy, currentUsage, route, modelName)
+	route = decision.Route
 	trace := RunTrace{
 		RunID:          uuid.NewString(),
 		IdentityChain:  identity,
@@ -84,14 +110,27 @@ func (o *Orchestrator) Run(ctx context.Context, in RunInput) (RunResult, error) 
 		ProductSurface: route.Product,
 		AutonomyLevel:  route.Autonomy,
 		PromptVersion:  SystemPromptVersion,
-		Model:          o.model,
+		Model:          modelName,
 		StartedAt:      time.Now().UTC(),
+	}
+	if decision.Event != nil {
+		trace.GuardrailEvents = append(trace.GuardrailEvents, *decision.Event)
+		if decision.Reply != "" {
+			trace.CompletedAt = time.Now().UTC()
+			slog.Warn("runtime_tenant_policy_rejected", "run_id", trace.RunID, "type", decision.Event.Type, "reason", decision.Event.Reason)
+			o.finishTrace(ctx, trace, in, decision.Event.Reason)
+			return RunResult{Reply: decision.Reply, Trace: trace}, nil
+		}
+	}
+	var allowedSchemas []ToolSchema
+	if o.toolkit != nil {
+		allowedSchemas = filterSchemasForRoute(o.toolkit.SchemasFor(identity, route.Intent), route)
 	}
 	if event := CheckPromptInjection(in.Message); event != nil {
 		trace.GuardrailEvents = append(trace.GuardrailEvents, *event)
 		trace.CompletedAt = time.Now().UTC()
 		slog.Warn("runtime_guardrail_rejected", "run_id", trace.RunID, "type", event.Type, "reason", event.Reason)
-		o.persistTrace(ctx, trace, in, "")
+		o.finishTrace(ctx, trace, in, "")
 		return RunResult{
 			Reply: "No puedo continuar con instrucciones que intentan modificar mis reglas internas. Si necesitás hacer una acción concreta, reformulá el pedido con el objetivo de negocio.",
 			Trace: trace,
@@ -114,6 +153,8 @@ func (o *Orchestrator) Run(ctx context.Context, in RunInput) (RunResult, error) 
 
 	// 3. Loop de tool calling (máximo maxToolRounds rondas)
 	for round := 0; round < maxToolRounds; round++ {
+		recordChatInputUsage(&trace.Usage, systemPrompt, llmMessages)
+		trace.Usage.AddLLMCall()
 		resp, err := o.provider.Chat(ctx, ChatRequest{
 			SystemPrompt: systemPrompt,
 			Messages:     llmMessages,
@@ -123,8 +164,13 @@ func (o *Orchestrator) Run(ctx context.Context, in RunInput) (RunResult, error) 
 		if err != nil {
 			slog.Error("llm_chat_failed", "round", round, "error", err)
 			trace.CompletedAt = time.Now().UTC()
-			o.persistTrace(ctx, trace, in, err.Error())
+			o.finishTrace(ctx, trace, in, err.Error())
 			return RunResult{Trace: trace}, fmt.Errorf("gemini chat failed: %w", err)
+		}
+		trace.Usage.AddOutput(resp.Text)
+		for _, tc := range resp.ToolCalls {
+			trace.Usage.AddOutput(tc.Name)
+			trace.Usage.AddOutput(string(tc.Args))
 		}
 
 		// Si no hay tool calls, tenemos la respuesta final
@@ -134,7 +180,7 @@ func (o *Orchestrator) Run(ctx context.Context, in RunInput) (RunResult, error) 
 				reply = "No pude generar una respuesta en este momento."
 			}
 			trace.CompletedAt = time.Now().UTC()
-			o.persistTrace(ctx, trace, in, "")
+			o.finishTrace(ctx, trace, in, "")
 			return RunResult{Reply: reply, Trace: trace}, nil
 		}
 
@@ -168,10 +214,11 @@ func (o *Orchestrator) Run(ctx context.Context, in RunInput) (RunResult, error) 
 				continue
 			}
 
-			// Inyectar identidad en context para que remember/recall usen IDs reales
-			toolCtx, cancel := context.WithTimeout(WithIdentityForProduct(ctx, in.UserID, in.OrgID, productSurface, in.AuthScopes...), 15*time.Second)
+			// Inyectar identidad en context para que tools usen IDs reales.
+			toolCtx, cancel := context.WithTimeout(WithIdentityContext(ctx, requestIdentity), 15*time.Second)
 			result := o.toolkit.ExecuteTool(toolCtx, tc.Name, tc.Args)
 			cancel()
+			trace.Usage.AddToolCall(result)
 			trace.ToolCalls = append(trace.ToolCalls, ToolTrace{
 				Name:           tc.Name,
 				ToolCallID:     tc.ID,
@@ -191,8 +238,25 @@ func (o *Orchestrator) Run(ctx context.Context, in RunInput) (RunResult, error) 
 	// Si llegamos acá, agotamos las rondas
 	slog.Warn("orchestrator_max_rounds_reached", "rounds", maxToolRounds)
 	trace.CompletedAt = time.Now().UTC()
-	o.persistTrace(ctx, trace, in, "max_tool_rounds_exhausted")
+	o.finishTrace(ctx, trace, in, "max_tool_rounds_exhausted")
 	return RunResult{Trace: trace}, fmt.Errorf("gemini tool loop exhausted after %d rounds", maxToolRounds)
+}
+
+func runIdentity(in RunInput) identityctx.IdentityContext {
+	id := in.Identity
+	if id.CustomerOrgID == "" {
+		id.CustomerOrgID = in.OrgID
+	}
+	if id.HumanUserID == "" {
+		id.HumanUserID = in.UserID
+	}
+	if len(id.Scopes) == 0 {
+		id.Scopes = append([]string(nil), in.AuthScopes...)
+	}
+	if surface := in.ProductSurface; surface != "" {
+		id.ProductSurface = surface
+	}
+	return id.WithProductSurface(id.ProductSurface)
 }
 
 // persistTrace guarda el trace si hay repo configurado. Falla en silencio (con log) para
@@ -205,5 +269,31 @@ func (o *Orchestrator) persistTrace(ctx context.Context, trace RunTrace, in RunI
 	defer cancel()
 	if err := o.traces.Save(saveCtx, trace, in.OrgID, in.UserID, in.TaskID, errMsg); err != nil {
 		slog.Error("run_trace_persist_failed", "run_id", trace.RunID, "error", err)
+	}
+}
+
+func (o *Orchestrator) finishTrace(ctx context.Context, trace RunTrace, in RunInput, errMsg string) {
+	o.persistTrace(ctx, trace, in, errMsg)
+	if o.governance == nil || in.OrgID == "" {
+		return
+	}
+	recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+	defer cancel()
+	if err := o.governance.AddRuntimeUsage(recordCtx, in.OrgID, runtimeUsagePeriod(trace.StartedAt), trace.Usage); err != nil {
+		slog.Error("runtime_usage_record_failed", "run_id", trace.RunID, "customer_org_id", in.OrgID, "error", err)
+	}
+}
+
+func recordChatInputUsage(usage *RunUsage, systemPrompt string, messages []LLMMessage) {
+	if usage == nil {
+		return
+	}
+	usage.AddInput(systemPrompt)
+	for _, msg := range messages {
+		usage.AddInput(msg.Content)
+		for _, tc := range msg.ToolCalls {
+			usage.AddInput(tc.Name)
+			usage.AddInput(string(tc.Args))
+		}
 	}
 }

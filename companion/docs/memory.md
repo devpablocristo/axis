@@ -9,8 +9,8 @@ La memoria actual vive en `companion_memory_entries`.
   `operational_state`.
 - `memory_type`: `episodic`, `semantic`, `operational`, `preference`,
   `playbook` o `task_projection`.
-- `org_id`: tenant propietario de la memoria. Es obligatorio en writes/reads
-  operativos.
+- `org_id`: customer org propietaria de la memoria. Es obligatorio en
+  writes/reads operativos.
 - `user_id`: usuario propietario cuando aplica (`scope_type=user` o
   provenance de una task creada por usuario).
 - `product_surface`: superficie/producto que originó y puede recuperar la
@@ -25,12 +25,13 @@ La memoria actual vive en `companion_memory_entries`.
 
 ## Reglas de aislamiento
 
-- Scope `org`: `scope_id` debe coincidir con `X-Org-ID`.
-- Scope `user`: `scope_id` debe ser `X-Org-ID:X-User-ID`.
+- Scope `org`: `scope_id` debe coincidir con el `customer_org_id` resuelto
+  desde el `IdentityContext`.
+- Scope `user`: `scope_id` debe ser `customer_org_id:human_user_id`.
 - Scope `task`: se resuelve el `org_id` de la task y debe coincidir con el
   principal.
-- `product_surface` de la entrada debe coincidir con `X-Product-Surface`
-  (`companion` si el header no viene).
+- `product_surface` de la entrada debe coincidir con el claim/surface resuelto
+  (`companion` si no viene).
 - Runtime `remember`/`recall` no usa `"default"`; sin identidad válida
   responde error y no persiste memoria compartida.
 

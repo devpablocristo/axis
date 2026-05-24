@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strings"
 
+	"github.com/devpablocristo/companion/internal/identityctx"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
 	"github.com/google/uuid"
 
@@ -19,6 +19,7 @@ const (
 	scopeCompanionWatchersRead    = "companion:watchers:read"
 	scopeCompanionWatchersWrite   = "companion:watchers:write"
 	scopeCompanionWatchersExecute = "companion:watchers:execute"
+	scopeCompanionCrossOrg        = "companion:cross_org"
 )
 
 // watcherUsecase port que el handler consume.
@@ -303,59 +304,20 @@ func (h *Handler) listProposals(w http.ResponseWriter, r *http.Request) {
 }
 
 func effectiveWatcherOrgID(r *http.Request, requested string) (string, bool) {
-	effective := strings.TrimSpace(r.Header.Get("X-Org-ID"))
-	requested = strings.TrimSpace(requested)
-	if effective == "" {
-		if !requestHasNoAuthContext(r) {
-			return "", false
-		}
-		return requested, true
-	}
-	if requested == "" || requested == effective {
-		return effective, true
-	}
-	return "", false
+	return identityctx.EffectiveOrgID(r, requested, scopeCompanionCrossOrg)
 }
 
 func canAccessWatcherOrg(r *http.Request, watcher domain.Watcher) bool {
-	effective := strings.TrimSpace(r.Header.Get("X-Org-ID"))
-	if requestHasNoAuthContext(r) {
+	if identityctx.HasNoAuthContext(r) {
 		return true
 	}
-	return effective != "" && strings.TrimSpace(watcher.OrgID) != "" && strings.TrimSpace(watcher.OrgID) == effective
+	return identityctx.CanAccessOrg(r, watcher.OrgID, scopeCompanionCrossOrg)
 }
 
 func requireScope(w http.ResponseWriter, r *http.Request, scopes ...string) bool {
-	if requestHasNoAuthContext(r) || requestHasScope(r, scopes...) {
+	if identityctx.HasNoAuthContext(r) || identityctx.HasAnyScope(r, scopes...) {
 		return true
 	}
 	httpjson.WriteFlatError(w, http.StatusForbidden, "forbidden", "missing required scope")
 	return false
-}
-
-func requestHasNoAuthContext(r *http.Request) bool {
-	return strings.TrimSpace(r.Header.Get("X-Auth-Method")) == "" &&
-		strings.TrimSpace(r.Header.Get("X-Auth-Scopes")) == ""
-}
-
-func requestHasScope(r *http.Request, scopes ...string) bool {
-	have := parseHeaderScopes(r.Header.Get("X-Auth-Scopes"))
-	for _, scope := range scopes {
-		if _, ok := have[scope]; ok {
-			return true
-		}
-	}
-	return false
-}
-
-func parseHeaderScopes(raw string) map[string]struct{} {
-	raw = strings.NewReplacer(",", " ", ";", " ", "+", " ").Replace(raw)
-	fields := strings.Fields(raw)
-	out := make(map[string]struct{}, len(fields))
-	for _, field := range fields {
-		if scope := strings.TrimSpace(field); scope != "" {
-			out[scope] = struct{}{}
-		}
-	}
-	return out
 }

@@ -21,8 +21,8 @@ Companion no puede:
 - Evaluar policies.
 - Aprobar o rechazar requests como motor de nexus.
 - Reimplementar risk engine o audit fuerte.
-- Guardar memoria sin tenant/user/product context cuando aplique.
-- Mezclar datos entre tenants.
+- Guardar memoria sin customer org/user/product context cuando aplique.
+- Mezclar datos entre customer orgs.
 - Poseer una UI de usuario final o una console propia como parte de su runtime.
 
 ## Nexus

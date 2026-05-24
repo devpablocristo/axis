@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/devpablocristo/platform/authn/go/identityhttp"
+	"github.com/devpablocristo/companion/internal/identityctx"
 	"github.com/devpablocristo/platform/http/go/httpjson"
 	"github.com/devpablocristo/platform/security/go/tenant"
 	"github.com/google/uuid"
@@ -78,12 +78,22 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "title is required")
 		return
 	}
+	identity, ok := workIdentity(r)
+	if !ok {
+		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "customer org context required")
+		return
+	}
+	createdBy, ok := resolveCreatedBy(r, body.CreatedBy)
+	if !ok {
+		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "created_by is not allowed for this principal")
+		return
+	}
 	t, err := h.uc.Create(r.Context(), CreateTaskInput{
-		OrgID:       principalOrgID(r),
+		OrgID:       identity.CustomerOrgID,
 		Title:       body.Title,
 		Goal:        body.Goal,
 		Priority:    body.Priority,
-		CreatedBy:   body.CreatedBy,
+		CreatedBy:   createdBy,
 		AssignedTo:  body.AssignedTo,
 		Channel:     body.Channel,
 		Summary:     body.Summary,
@@ -107,10 +117,10 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	// Routing por scope/auth:
-	//   - sin auth context (dev/healthz)     → ListAll (paridad legacy)
+	//   - sin auth context (dev/healthz)     → ListAll (compat dev)
 	//   - con scope companion:cross_org      → ListAll (admin explícito)
 	//   - con principal y org_id no-vacío    → List(orgID) strict
-	//   - con principal y org_id vacío       → 403 (tenant context required)
+	//   - con principal y org_id vacío       → 403 (customer org context required)
 	//
 	// Cierra el leak histórico donde principalOrgID(r) == "" + auth presente
 	// devolvía TODOS los tenants.
@@ -119,12 +129,12 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		err  error
 	)
 	switch {
-	case identityhttp.HasNoAuthContext(r), identityhttp.HasScope(r, scopeCompanionCrossOrg):
+	case identityctx.HasNoAuthContext(r), identityctx.HasScope(r, scopeCompanionCrossOrg):
 		list, err = h.uc.ListAll(r.Context(), limit)
 	default:
 		orgID := tenant.FromString(principalOrgID(r))
 		if orgID.IsZero() {
-			httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "tenant context required")
+			httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "customer org context required")
 			return
 		}
 		list, err = h.uc.List(r.Context(), orgID, limit)
@@ -498,21 +508,24 @@ func (h *Handler) chat(w http.ResponseWriter, r *http.Request) {
 		taskID = &parsed
 	}
 
-	// Extraer identidad: header X-User-ID / X-Org-ID (inyectados por el frontend o gateway)
-	userID := strings.TrimSpace(r.Header.Get("X-User-ID"))
-	if userID == "" {
-		userID = "subscriber"
+	identity, ok := workIdentity(r)
+	if !ok {
+		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "customer org context required")
+		return
 	}
-	orgID := strings.TrimSpace(r.Header.Get("X-Org-ID"))
+	identity = identity.WithProductSurface(body.ProductSurface)
+	userID := identity.EffectiveActorID()
+	orgID := identity.CustomerOrgID
 
 	result, err := h.uc.Chat(r.Context(), ChatInput{
 		TaskID:         taskID,
 		UserID:         userID,
 		OrgID:          orgID,
-		AuthScopes:     principalScopes(r),
+		AuthScopes:     identity.Scopes,
 		Message:        body.Message,
 		Channel:        body.Channel,
-		ProductSurface: body.ProductSurface,
+		ProductSurface: identity.ProductSurface,
+		Identity:       identity,
 	})
 	if err != nil {
 		if IsNotFound(err) {
@@ -555,7 +568,13 @@ func (h *Handler) customerMessagingInbound(w http.ResponseWriter, r *http.Reques
 		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid json")
 		return
 	}
-	if strings.TrimSpace(body.OrgID) == "" {
+	identity, ok := identityctx.WorkIdentityForOrg(r, body.OrgID, scopeCompanionCrossOrg)
+	if !ok {
+		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "customer messaging org is not allowed for this principal")
+		return
+	}
+	orgID := identity.CustomerOrgID
+	if orgID == "" {
 		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "org_id is required")
 		return
 	}
@@ -574,13 +593,15 @@ func (h *Handler) customerMessagingInbound(w http.ResponseWriter, r *http.Reques
 		userID = userID + ":" + profile
 	}
 
+	identity = identity.WithProductSurface("pymes")
 	result, err := h.uc.Chat(r.Context(), ChatInput{
 		UserID:         userID,
-		OrgID:          strings.TrimSpace(body.OrgID),
-		AuthScopes:     principalScopes(r),
+		OrgID:          orgID,
+		AuthScopes:     identity.Scopes,
 		Message:        body.Message,
 		Channel:        "whatsapp",
-		ProductSurface: "pymes",
+		ProductSurface: identity.ProductSurface,
+		Identity:       identity,
 	})
 	if err != nil {
 		httpjson.WriteFlatInternalError(w, err, "customer messaging inbound failed")

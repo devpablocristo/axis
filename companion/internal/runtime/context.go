@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/devpablocristo/companion/internal/identityctx"
 	"github.com/devpablocristo/companion/internal/nexusclient"
 
 	memdomain "github.com/devpablocristo/companion/internal/memory/usecases/domain"
@@ -18,10 +19,14 @@ type identityKey struct{}
 
 // Identity representa el usuario y organización del request actual.
 type Identity struct {
-	UserID         string
-	OrgID          string
-	ProductSurface string
-	AuthScopes     []string
+	UserID             string
+	OrgID              string
+	ActorType          string
+	CompanionPrincipal string
+	OnBehalfOf         string
+	ProductSurface     string
+	AuthScopes         []string
+	ServicePrincipal   bool
 }
 
 // WithIdentity inyecta identidad en el context.
@@ -35,10 +40,25 @@ func WithIdentityForProduct(ctx context.Context, userID, orgID, productSurface s
 		productSurface = DefaultProductSurface
 	}
 	return context.WithValue(ctx, identityKey{}, Identity{
-		UserID:         strings.TrimSpace(userID),
-		OrgID:          strings.TrimSpace(orgID),
-		ProductSurface: productSurface,
-		AuthScopes:     append([]string(nil), scopes...),
+		UserID:             strings.TrimSpace(userID),
+		OrgID:              strings.TrimSpace(orgID),
+		CompanionPrincipal: CompanionPrincipal,
+		ProductSurface:     productSurface,
+		AuthScopes:         append([]string(nil), scopes...),
+	})
+}
+
+func WithIdentityContext(ctx context.Context, id identityctx.IdentityContext) context.Context {
+	id = id.WithProductSurface(id.ProductSurface)
+	return context.WithValue(ctx, identityKey{}, Identity{
+		UserID:             id.EffectiveActorID(),
+		OrgID:              id.CustomerOrgID,
+		ActorType:          id.ActorType,
+		CompanionPrincipal: id.CompanionPrincipal,
+		OnBehalfOf:         id.OnBehalfOf,
+		ProductSurface:     id.ProductSurface,
+		AuthScopes:         append([]string(nil), id.Scopes...),
+		ServicePrincipal:   id.ServicePrincipal,
 	})
 }
 

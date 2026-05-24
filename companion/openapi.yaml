@@ -2,7 +2,14 @@ openapi: 3.1.0
 info:
   title: Companion API
   version: 0.1.0
-  description: API del empleado IA central del ecosistema.
+  description: |
+    API del empleado IA central del ecosistema.
+
+    Companion acepta API key o Bearer JWT interno. Cuando hay principal
+    autenticado, `org_id` se interpreta como customer org/work context: la
+    empresa cliente donde trabaja el empleado IA. Headers como `X-Org-ID` y
+    `X-User-ID` quedan como compatibilidad de dev/test, no como fuente canonica
+    productiva.
 servers:
   - url: http://localhost:18085
 security:
@@ -65,7 +72,7 @@ paths:
         "404": { description: Conversation not found }
   /v1/notifications:
     post:
-      summary: Genera insights/notificaciones del tenant
+      summary: Genera insights/notificaciones de la customer org
       requestBody:
         required: false
         content:
@@ -79,7 +86,7 @@ paths:
               schema: { $ref: "#/components/schemas/NotificationsResponse" }
   /v1/tasks:
     get:
-      summary: Lista tasks del tenant
+      summary: Lista tasks de la customer org autenticada
       parameters:
         - in: query
           name: limit
@@ -270,17 +277,27 @@ paths:
         "200": { description: Execution list }
   /v1/watchers:
     get:
-      summary: Lista watchers por tenant
+      summary: Lista watchers por customer org
       parameters:
         - in: query
           name: org_id
+          description: Customer org/work context. Direct cross-org requiere `companion:cross_org`.
           schema: { type: string }
       responses:
         "200": { description: Watcher list }
     post:
       summary: Crea watcher
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateWatcherRequest" }
       responses:
-        "201": { description: Watcher created }
+        "201":
+          description: Watcher created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Watcher" }
   /v1/watchers/{id}:
     get:
       summary: Obtiene watcher
@@ -292,8 +309,17 @@ paths:
       summary: Actualiza watcher
       parameters:
         - $ref: "#/components/parameters/UUIDPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateWatcherRequest" }
       responses:
-        "200": { description: Watcher updated }
+        "200":
+          description: Watcher updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Watcher" }
     delete:
       summary: Borra watcher
       parameters:
@@ -336,6 +362,47 @@ paths:
           schema: { type: string, format: uuid }
       responses:
         "200": { description: Run trace }
+  /v1/runtime/policy:
+    get:
+      summary: Obtiene la política runtime de la customer org autenticada
+      description: Requiere `companion:runtime:admin` o `companion:cross_org`.
+      responses:
+        "200":
+          description: Runtime policy
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RuntimePolicy" }
+    put:
+      summary: Actualiza la política runtime de la customer org autenticada
+      description: Requiere `companion:runtime:admin` o `companion:cross_org`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RuntimePolicyUpdate" }
+      responses:
+        "200":
+          description: Runtime policy
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RuntimePolicy" }
+  /v1/runtime/usage:
+    get:
+      summary: Consulta uso mensual de runtime de la customer org autenticada
+      description: Requiere `companion:runtime:admin` o `companion:cross_org`.
+      parameters:
+        - in: query
+          name: period
+          schema:
+            type: string
+            pattern: "^[0-9]{4}-[0-9]{2}$"
+          description: Periodo YYYY-MM. Default: mes actual.
+      responses:
+        "200":
+          description: Runtime usage
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RuntimeUsage" }
   /v1/nexus-assist/propose:
     post:
       summary: Analiza historial Nexus y propone learning/policies
@@ -526,7 +593,9 @@ components:
         title: { type: string }
         goal: { type: string }
         priority: { type: string }
-        created_by: { type: string }
+        created_by:
+          type: string
+          description: Si falta, Companion usa el actor efectivo autenticado; si difiere, debe coincidir con `on_behalf_of` o requerir scope operador.
         assigned_to: { type: string }
         channel: { type: string }
         summary: { type: string }
@@ -535,7 +604,7 @@ components:
       type: object
       properties:
         id: { type: string, format: uuid }
-        org_id: { type: string }
+        org_id: { type: string, description: Customer org/work context donde trabaja Companion. }
         title: { type: string }
         status: { type: string }
         nexus_status: { type: string }
@@ -561,7 +630,7 @@ components:
       type: object
       properties:
         id: { type: string, format: uuid }
-        org_id: { type: string }
+        org_id: { type: string, description: Customer org/work context propietario de la memoria. }
         user_id: { type: string }
         product_surface: { type: string }
         kind: { type: string }
@@ -579,3 +648,116 @@ components:
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
         expires_at: { type: string, format: date-time }
+    CreateWatcherRequest:
+      type: object
+      required: [name, watcher_type, config]
+      properties:
+        org_id:
+          type: string
+          description: Customer org/work context. Si falta, se deriva de la identidad autenticada.
+        name: { type: string }
+        watcher_type:
+          type: string
+          enum: [capability, stale_work_orders, unconfirmed_appointments, low_stock, inactive_customers, revenue_drop]
+        config:
+          oneOf:
+            - $ref: "#/components/schemas/CapabilityWatcherConfig"
+            - type: object
+              additionalProperties: true
+          description: Para `watcher_type=capability`, usar `CapabilityWatcherConfig`; los tipos Pymes existentes aceptan su config historica.
+        enabled: { type: boolean }
+    UpdateWatcherRequest:
+      type: object
+      properties:
+        name: { type: string }
+        config:
+          oneOf:
+            - $ref: "#/components/schemas/CapabilityWatcherConfig"
+            - type: object
+              additionalProperties: true
+        enabled: { type: boolean }
+    CapabilityWatcherConfig:
+      type: object
+      required: [product_surface, connector_kind, query_operation, action_operation, action_type]
+      properties:
+        product_surface: { type: string }
+        connector_kind: { type: string }
+        query_operation: { type: string }
+        query_payload: { type: object, additionalProperties: true }
+        result_items_path:
+          type: string
+          description: Path opcional dentro del JSON de resultado donde vive la lista de items.
+        condition:
+          $ref: "#/components/schemas/WatcherCondition"
+        action_operation: { type: string }
+        action_payload_template:
+          type: object
+          additionalProperties: true
+        action_type: { type: string }
+    WatcherCondition:
+      type: object
+      properties:
+        path: { type: string }
+        operator: { type: string, enum: [exists, eq, ne, gt, gte, lt, lte, contains] }
+        value: {}
+    Watcher:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        org_id: { type: string, description: Customer org/work context propietario del watcher. }
+        name: { type: string }
+        watcher_type: { type: string }
+        config: { type: object, additionalProperties: true }
+        enabled: { type: boolean }
+        last_run_at: { type: string, format: date-time }
+        last_result: { type: object, additionalProperties: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    RuntimePolicy:
+      type: object
+      properties:
+        org_id: { type: string }
+        enabled: { type: boolean }
+        kill_switch: { type: boolean }
+        max_autonomy: { type: string, enum: [A0, A1, A2, A3, A4, A5] }
+        allowed_product_surfaces:
+          type: array
+          items: { type: string }
+        allowed_models:
+          type: array
+          items: { type: string }
+        monthly_token_budget: { type: integer, format: int64 }
+        monthly_tool_call_budget: { type: integer, format: int64 }
+        metadata: { type: object, additionalProperties: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    RuntimePolicyUpdate:
+      type: object
+      properties:
+        enabled: { type: boolean }
+        kill_switch: { type: boolean }
+        max_autonomy: { type: string, enum: [A0, A1, A2, A3, A4, A5] }
+        allowed_product_surfaces:
+          type: array
+          items: { type: string }
+        allowed_models:
+          type: array
+          items: { type: string }
+        monthly_token_budget: { type: integer, format: int64, minimum: 0 }
+        monthly_tool_call_budget: { type: integer, format: int64, minimum: 0 }
+        metadata: { type: object, additionalProperties: true }
+    RuntimeUsage:
+      type: object
+      properties:
+        org_id: { type: string }
+        period: { type: string }
+        estimated_tokens: { type: integer, format: int64 }
+        llm_calls: { type: integer, format: int64 }
+        tool_calls: { type: integer, format: int64 }
+        tool_errors: { type: integer, format: int64 }
+        monthly_token_budget: { type: integer, format: int64 }
+        monthly_tool_call_budget: { type: integer, format: int64 }
+        token_budget_remaining: { type: integer, format: int64 }
+        tool_call_budget_remaining: { type: integer, format: int64 }
+        last_run_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }

@@ -113,18 +113,22 @@ type CapabilityFilter struct {
 
 // ExecutionSpec especificación de una ejecución en un conector.
 type ExecutionSpec struct {
-	ConnectorID      uuid.UUID
-	OrgID            string
-	ActorID          string
-	ProductSurface   string
-	AuthScopes       []string
-	RunID            string
-	ToolInvocationID string
-	Operation        string
-	Payload          json.RawMessage
-	IdempotencyKey   string
-	TaskID           *uuid.UUID
-	NexusRequestID   *uuid.UUID
+	ConnectorID        uuid.UUID
+	OrgID              string
+	ActorID            string
+	ActorType          string
+	CompanionPrincipal string
+	OnBehalfOf         string
+	ServicePrincipal   bool
+	ProductSurface     string
+	AuthScopes         []string
+	RunID              string
+	ToolInvocationID   string
+	Operation          string
+	Payload            json.RawMessage
+	IdempotencyKey     string
+	TaskID             *uuid.UUID
+	NexusRequestID     *uuid.UUID
 }
 
 // ExecutionResult resultado de una ejecución.

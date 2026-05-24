@@ -67,3 +67,30 @@ Puertos por defecto:
 | Axis BFF | `http://localhost:18080` |
 | Companion API | `http://localhost:18085` |
 | Nexus API | `http://localhost:18084` |
+
+## Deploy DEV
+
+Los deploys Cloud Run viven en `.github/workflows/` y son independientes por
+deployable: `deploy-nexus-dev`, `deploy-companion-dev`, `deploy-bff-dev` y
+`deploy-console-dev`.
+
+Variables GitHub comunes:
+
+- `GCP_PROJECT_ID_DEV`, `GCP_REGION`, `WIF_PROVIDER_DEV`,
+  `WIF_SERVICE_ACCOUNT_DEV`, `ARTIFACT_REGISTRY`.
+- `CLOUDSQL_INSTANCE_DEV` para Nexus y Companion.
+- Service accounts: `NEXUS_CLOUD_RUN_SERVICE_ACCOUNT_DEV`,
+  `COMPANION_CLOUD_RUN_SERVICE_ACCOUNT_DEV`,
+  `AXIS_BFF_CLOUD_RUN_SERVICE_ACCOUNT_DEV`,
+  `AXIS_CONSOLE_CLOUD_RUN_SERVICE_ACCOUNT_DEV`.
+- URLs entre servicios: `COMPANION_NEXUS_BASE_URL_DEV`,
+  `AXIS_NEXUS_BASE_URL_DEV`, `AXIS_COMPANION_BASE_URL_DEV`,
+  `AXIS_BFF_BASE_URL_DEV`.
+
+Secrets en Secret Manager:
+
+- Nexus: `nexus-db-password`, `nexus-api-keys`, `nexus-signing-key`,
+  `nexus-callback-token`.
+- Companion: `companion-db-password`, `companion-api-keys`,
+  `companion-nexus-api-key`.
+- Shared: `axis-internal-jwt-secret`, usado por BFF, Nexus y Companion.

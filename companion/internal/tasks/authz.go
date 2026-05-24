@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/devpablocristo/companion/internal/identityctx"
 	domain "github.com/devpablocristo/companion/internal/tasks/usecases/domain"
-	"github.com/devpablocristo/platform/authn/go/identityhttp"
 	"github.com/devpablocristo/platform/http/go/httpjson"
 )
 
@@ -16,18 +16,20 @@ const (
 )
 
 func requireScope(w http.ResponseWriter, r *http.Request, scopes ...string) bool {
-	if identityhttp.HasNoAuthContext(r) || identityhttp.HasAnyScope(r, scopes...) {
+	if identityctx.HasNoAuthContext(r) || identityctx.HasAnyScope(r, scopes...) {
 		return true
 	}
 	httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "missing required scope")
 	return false
 }
 
-func principalOrgID(r *http.Request) string { return identityhttp.PrincipalOrgID(r) }
+func principalOrgID(r *http.Request) string { return identityctx.PrincipalOrgID(r) }
+
+func principalUserID(r *http.Request) string { return identityctx.FromRequest(r).EffectiveActorID() }
 
 func canAccessTaskOrg(r *http.Request, task domain.Task) bool {
 	taskOrg := strings.TrimSpace(task.OrgID)
-	if identityhttp.HasNoAuthContext(r) || identityhttp.HasScope(r, "companion:cross_org") {
+	if identityctx.HasNoAuthContext(r) || identityctx.HasScope(r, "companion:cross_org") {
 		return true
 	}
 	orgID := principalOrgID(r)
@@ -37,4 +39,20 @@ func canAccessTaskOrg(r *http.Request, task domain.Task) bool {
 	return taskOrg == orgID
 }
 
-func principalScopes(r *http.Request) []string { return identityhttp.FromRequest(r).Scopes }
+func principalScopes(r *http.Request) []string { return identityctx.FromRequest(r).Scopes }
+
+func workIdentity(r *http.Request) (identityctx.IdentityContext, bool) {
+	return identityctx.WorkIdentity(r)
+}
+
+func resolveCreatedBy(r *http.Request, requested string) (string, bool) {
+	requested = strings.TrimSpace(requested)
+	id := identityctx.FromRequest(r)
+	if requested == "" {
+		return id.EffectiveActorID(), true
+	}
+	if identityctx.HasNoAuthContext(r) || id.CanActAs(requested, scopeCompanionCrossOrg) {
+		return requested, true
+	}
+	return "", false
+}
