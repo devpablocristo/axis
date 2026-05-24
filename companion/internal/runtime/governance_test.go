@@ -6,32 +6,32 @@ import (
 	"testing"
 )
 
-type fakeRuntimeGovernance struct {
+type fakeRuntimeControls struct {
 	policy   TenantRuntimePolicy
 	usage    TenantRuntimeUsage
 	recorded []RunUsage
 }
 
-func (f *fakeRuntimeGovernance) GetRuntimePolicy(_ context.Context, orgID string) (TenantRuntimePolicy, error) {
+func (f *fakeRuntimeControls) GetRuntimePolicy(_ context.Context, orgID string) (TenantRuntimePolicy, error) {
 	if f.policy.OrgID == "" {
 		return defaultRuntimePolicy(orgID), nil
 	}
 	return f.policy, nil
 }
 
-func (f *fakeRuntimeGovernance) UpsertRuntimePolicy(_ context.Context, policy TenantRuntimePolicy) (TenantRuntimePolicy, error) {
+func (f *fakeRuntimeControls) UpsertRuntimePolicy(_ context.Context, policy TenantRuntimePolicy) (TenantRuntimePolicy, error) {
 	f.policy = normalizeRuntimePolicy(policy)
 	return f.policy, nil
 }
 
-func (f *fakeRuntimeGovernance) GetRuntimeUsage(_ context.Context, orgID, period string) (TenantRuntimeUsage, error) {
+func (f *fakeRuntimeControls) GetRuntimeUsage(_ context.Context, orgID, period string) (TenantRuntimeUsage, error) {
 	if f.usage.OrgID == "" {
 		return TenantRuntimeUsage{OrgID: orgID, Period: period}, nil
 	}
 	return f.usage, nil
 }
 
-func (f *fakeRuntimeGovernance) AddRuntimeUsage(_ context.Context, _ string, _ string, usage RunUsage) error {
+func (f *fakeRuntimeControls) AddRuntimeUsage(_ context.Context, _ string, _ string, usage RunUsage) error {
 	f.recorded = append(f.recorded, usage)
 	return nil
 }
@@ -41,7 +41,7 @@ func TestOrchestrator_RuntimeKillSwitchRejectsBeforeProvider(t *testing.T) {
 
 	provider := &fakeLLMProvider{responses: []ChatResponse{{Text: "should not run"}}}
 	orch := NewOrchestrator(provider, &ToolKit{Handlers: make(map[string]ToolHandler)}, ContextPorts{})
-	orch.SetRuntimeGovernance(&fakeRuntimeGovernance{policy: TenantRuntimePolicy{
+	orch.SetRuntimeControls(&fakeRuntimeControls{policy: TenantRuntimePolicy{
 		OrgID:       "org-1",
 		Enabled:     true,
 		KillSwitch:  true,
@@ -66,14 +66,14 @@ func TestOrchestrator_RuntimePolicyCapsAutonomyAndRecordsUsage(t *testing.T) {
 	t.Parallel()
 
 	provider := &fakeLLMProvider{responses: []ChatResponse{{Text: "ok"}}}
-	gov := &fakeRuntimeGovernance{policy: TenantRuntimePolicy{
+	gov := &fakeRuntimeControls{policy: TenantRuntimePolicy{
 		OrgID:       "org-1",
 		Enabled:     true,
 		MaxAutonomy: AutonomyA1,
 	}}
 	orch := NewOrchestrator(provider, &ToolKit{Handlers: make(map[string]ToolHandler)}, ContextPorts{})
 	orch.SetDefaultAutonomy(AutonomyA3)
-	orch.SetRuntimeGovernance(gov)
+	orch.SetRuntimeControls(gov)
 
 	result, err := orch.Run(context.Background(), RunInput{
 		UserID: "user-1", OrgID: "org-1", Message: "hola",

@@ -31,7 +31,7 @@ func DefaultRegistry() Registry {
 			MaxAutonomy:    "A2",
 			AllowedTools: []string{
 				"get_overview", "remember", "recall",
-				"set_task_plan", "update_task_plan_step", "record_task_plan_checkpoint", "execute_task_plan_step", "prepare_task_plan_compensation",
+				"set_task_plan", "update_task_plan_step", "record_task_plan_checkpoint", "execute_task_plan_step", "prepare_task_plan_compensation", "execute_task_plan_compensation",
 			},
 			MemoryPolicy: MemoryPolicy{AllowedTypes: []string{"preference", "playbook", "task_projection"}, MaxItems: 10},
 			Enabled:      true,
@@ -107,7 +107,7 @@ func genericProductProfile(productSurface string) Profile {
 		MaxAutonomy:    "A2",
 		AllowedTools: []string{
 			"remember", "recall",
-			"set_task_plan", "update_task_plan_step", "record_task_plan_checkpoint", "execute_task_plan_step", "prepare_task_plan_compensation",
+			"set_task_plan", "update_task_plan_step", "record_task_plan_checkpoint", "execute_task_plan_step", "prepare_task_plan_compensation", "execute_task_plan_compensation",
 			productToolPrefix(productSurface) + "*",
 		},
 		MemoryPolicy: MemoryPolicy{AllowedTypes: []string{"preference", "playbook", "task_projection", "operational"}, MaxItems: 10},

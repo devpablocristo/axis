@@ -51,6 +51,10 @@ type fakeTaskPlanner struct {
 	plan            taskdomain.TaskPlan
 	stepUpdates     []PlannerUpdateTaskPlanStepInput
 	lastCheckpoint  PlannerRecordTaskPlanCheckpointInput
+	compCalls       int
+	lastComp        PlannerPrepareTaskPlanCompensationInput
+	execCompCalls   int
+	lastExecComp    PlannerExecuteTaskPlanCompensationInput
 }
 
 func (f *fakeTaskPlanner) GetTaskPlan(_ context.Context, taskID uuid.UUID) (taskdomain.TaskPlan, error) {
@@ -139,6 +143,70 @@ func (f *fakeTaskPlanner) RecordTaskPlanCheckpoint(_ context.Context, taskID uui
 		return f.plan, nil
 	}
 	return taskdomain.TaskPlan{TaskID: taskID, Objective: "checkpoint", Status: taskdomain.TaskPlanStatusActive, NextAction: in.NextAction}, nil
+}
+
+func (f *fakeTaskPlanner) PrepareTaskPlanCompensation(_ context.Context, taskID, stepID uuid.UUID, in PlannerPrepareTaskPlanCompensationInput) (PlannerTaskPlanCompensationResult, error) {
+	f.compCalls++
+	f.lastComp = in
+	plan := f.plan
+	if plan.TaskID == uuid.Nil {
+		plan = taskdomain.TaskPlan{TaskID: taskID, OrgID: "org-1", Status: taskdomain.TaskPlanStatusEscalated, NextAction: "await compensation approval decision"}
+	}
+	var step taskdomain.TaskPlanStep
+	for _, candidate := range plan.Steps {
+		if candidate.ID == stepID {
+			step = candidate
+			break
+		}
+	}
+	if step.ID == uuid.Nil {
+		step = taskdomain.TaskPlanStep{ID: stepID, TaskID: taskID, OrgID: "org-1", Status: taskdomain.TaskPlanStepStatusDone}
+	}
+	return PlannerTaskPlanCompensationResult{
+		Plan:             plan,
+		Step:             step,
+		Status:           "compensation_approval_requested",
+		Reason:           in.Reason,
+		Compensation:     map[string]any{"supported": true, "capability_id": "mock.rollback"},
+		NexusRequestID:   uuid.NewString(),
+		NexusStatus:      "pending_approval",
+		NexusDecision:    "require_approval",
+		ApprovalRequired: true,
+	}, nil
+}
+
+func (f *fakeTaskPlanner) ExecuteTaskPlanCompensation(_ context.Context, taskID, stepID uuid.UUID, in PlannerExecuteTaskPlanCompensationInput) (PlannerTaskPlanCompensationExecutionResult, error) {
+	f.execCompCalls++
+	f.lastExecComp = in
+	plan := f.plan
+	if plan.TaskID == uuid.Nil {
+		plan = taskdomain.TaskPlan{TaskID: taskID, OrgID: "org-1", Status: taskdomain.TaskPlanStatusCompleted, NextAction: "compensation executed"}
+	}
+	var step taskdomain.TaskPlanStep
+	for _, candidate := range plan.Steps {
+		if candidate.ID == stepID {
+			step = candidate
+			break
+		}
+	}
+	if step.ID == uuid.Nil {
+		step = taskdomain.TaskPlanStep{ID: stepID, TaskID: taskID, OrgID: "org-1", Status: taskdomain.TaskPlanStepStatusDone}
+	}
+	return PlannerTaskPlanCompensationExecutionResult{
+		Plan:                plan,
+		Step:                step,
+		Status:              "compensation_executed",
+		Reason:              "approved rollback",
+		Compensation:        map[string]any{"supported": true, "capability_id": "mock.rollback"},
+		NexusRequestID:      firstNonEmpty(in.NexusRequestID, uuid.NewString()),
+		NexusStatus:         "approved",
+		ExecutionID:         uuid.NewString(),
+		ExecutionStatus:     "success",
+		VerificationStatus:  "verified",
+		VerificationSummary: "execution succeeded with evidence",
+		ExternalRef:         "mock-ref",
+		ApprovalRequired:    true,
+	}, nil
 }
 
 // --- tests ---
@@ -589,17 +657,72 @@ func TestOrchestrator_PreparesGovernedCompensationFromStepEvidence(t *testing.T)
 	if result.Reply != "compensación preparada" {
 		t.Fatalf("unexpected reply %q", result.Reply)
 	}
-	if planner.checkpointCalls != 1 {
-		t.Fatalf("expected one checkpoint, got %d", planner.checkpointCalls)
+	if planner.compCalls != 1 {
+		t.Fatalf("expected one compensation call, got %d", planner.compCalls)
 	}
-	if planner.lastCheckpoint.Status != taskdomain.TaskPlanStatusEscalated {
-		t.Fatalf("expected escalated plan status, got %+v", planner.lastCheckpoint)
+	if planner.lastComp.Reason != "invoice must be reversed" {
+		t.Fatalf("expected compensation reason to be passed through, got %+v", planner.lastComp)
 	}
-	checkpoint := string(planner.lastCheckpoint.CheckpointJSON)
-	for _, want := range []string{"prepare_task_plan_compensation", "pymes.invoice.cancel", `"governance_required":true`} {
-		if !strings.Contains(checkpoint, want) {
-			t.Fatalf("expected compensation checkpoint to include %q, got %s", want, checkpoint)
-		}
+	if len(result.Trace.ToolCalls) != 1 || result.Trace.ToolCalls[0].Name != "prepare_task_plan_compensation" {
+		t.Fatalf("expected compensation tool trace, got %+v", result.Trace.ToolCalls)
+	}
+}
+
+func TestOrchestrator_ExecutesApprovedGovernedCompensation(t *testing.T) {
+	t.Parallel()
+
+	taskID := uuid.New()
+	stepID := uuid.New()
+	nexusRequestID := uuid.NewString()
+	planner := &fakeTaskPlanner{plan: taskdomain.TaskPlan{
+		TaskID:     taskID,
+		OrgID:      "org-1",
+		Objective:  "Compensate side effect",
+		Status:     taskdomain.TaskPlanStatusEscalated,
+		NextAction: "execute approved compensation",
+		Steps: []taskdomain.TaskPlanStep{{
+			ID:        stepID,
+			TaskID:    taskID,
+			OrgID:     "org-1",
+			StepKey:   "invoice",
+			Title:     "Create invoice",
+			Status:    taskdomain.TaskPlanStepStatusDone,
+			SortOrder: 1,
+		}},
+	}}
+	toolkit := NewToolKit(nil, nil, nil)
+	RegisterTaskPlannerTools(toolkit, planner)
+	provider := &fakeLLMProvider{
+		responses: []ChatResponse{
+			{
+				ToolCalls: []LLMToolCall{{
+					ID:   "tc-exec-comp",
+					Name: "execute_task_plan_compensation",
+					Args: json.RawMessage(fmt.Sprintf(`{"step_id":%q,"nexus_request_id":%q}`, stepID.String(), nexusRequestID)),
+				}},
+			},
+			{Text: "compensación ejecutada"},
+		},
+	}
+	orch := NewOrchestrator(provider, toolkit, ContextPorts{})
+
+	result, err := orch.Run(context.Background(), RunInput{
+		UserID: "user-1", OrgID: "org-1", Message: "ejecutá la compensación aprobada", TaskID: &taskID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Reply != "compensación ejecutada" {
+		t.Fatalf("unexpected reply %q", result.Reply)
+	}
+	if planner.execCompCalls != 1 {
+		t.Fatalf("expected one compensation execution call, got %d", planner.execCompCalls)
+	}
+	if planner.lastExecComp.NexusRequestID != nexusRequestID {
+		t.Fatalf("expected nexus request id to be passed through, got %+v", planner.lastExecComp)
+	}
+	if len(result.Trace.ToolCalls) != 1 || result.Trace.ToolCalls[0].Name != "execute_task_plan_compensation" {
+		t.Fatalf("expected execute compensation tool trace, got %+v", result.Trace.ToolCalls)
 	}
 }
 

@@ -26,6 +26,7 @@ type ConnectorTypeView interface {
 type ConnectorExecutor interface {
 	Execute(ctx context.Context, spec connectorsdomain.ExecutionSpec) (connectorsdomain.ExecutionResult, error)
 	ListConnectors(ctx context.Context) ([]connectorsdomain.Connector, error)
+	BuildActionBinding(ctx context.Context, spec connectorsdomain.ExecutionSpec) (map[string]any, string, error)
 }
 
 // NexusSubmitter envía un request a Nexus. Mismo contrato que
@@ -231,16 +232,25 @@ func capabilityToolHandler(kind string, capability connectorsdomain.Capability, 
 		if deps.Submitter == nil {
 			return `{"error":"nexus not configured"}`, nil
 		}
+		binding, bindingHash, err := deps.Executor.BuildActionBinding(ctx, spec)
+		if err != nil {
+			slog.Error("capability action binding failed", "operation", capability.Operation, "error", err)
+			return `{"error":"action binding failed"}`, nil
+		}
 		submitBody := nexusclient.SubmitRequestBody{
-			RequesterType:  "companion",
+			RequesterType:  "agent",
 			RequesterID:    firstNonEmpty(id.CompanionPrincipal, CompanionPrincipal),
 			RequesterName:  "Companion Employee AI",
-			ActionType:     "companion.tool.invoke",
+			ActionType:     nexusclient.ActionTypeAgentCapabilityInvoke,
 			TargetSystem:   kind,
 			TargetResource: connID.String(),
+			ActionBinding:  binding,
 			Params: map[string]any{
+				"org_id":              spec.OrgID,
 				"operation":           capability.Operation,
 				"payload":             json.RawMessage(payload),
+				"action_binding":      binding,
+				"action_binding_hash": bindingHash,
 				"actor_id":            spec.ActorID,
 				"actor_type":          spec.ActorType,
 				"companion_principal": spec.CompanionPrincipal,

@@ -447,17 +447,20 @@ func (s *stubExecutor) BuildActionBinding(ctx context.Context, spec connectordom
 		return s.bindingFn(ctx, spec)
 	}
 	binding := map[string]any{
-		"org_id":          spec.OrgID,
-		"actor_id":        spec.ActorID,
-		"actor_type":      "agent",
-		"product_surface": "companion",
-		"connector_id":    spec.ConnectorID.String(),
-		"capability_id":   spec.Operation,
-		"operation":       spec.Operation,
-		"target_system":   "mock",
-		"target_resource": spec.ConnectorID.String(),
-		"payload_hash":    "payload-hash",
-		"idempotency_key": spec.IdempotencyKey,
+		"schema_version":     nexusclient.ToolIntentSchemaVersion,
+		"org_id":             spec.OrgID,
+		"actor_id":           spec.ActorID,
+		"actor_type":         "agent",
+		"product_surface":    "companion",
+		"run_id":             "test-run",
+		"tool_invocation_id": "test-tool",
+		"connector_id":       spec.ConnectorID.String(),
+		"capability_id":      spec.Operation,
+		"operation":          spec.Operation,
+		"target_system":      "mock",
+		"target_resource":    spec.ConnectorID.String(),
+		"payload_hash":       "payload-hash",
+		"idempotency_key":    spec.IdempotencyKey,
 	}
 	return binding, "binding-hash", nil
 }
@@ -700,6 +703,324 @@ func TestUsecases_RecordTaskPlanCheckpoint(t *testing.T) {
 	}
 	if repo.countActions(TaskActionPlanCheckpoint) != 1 {
 		t.Fatalf("expected one plan checkpoint action, got %d", repo.countActions(TaskActionPlanCheckpoint))
+	}
+}
+
+func TestUsecases_PrepareTaskPlanCompensationSubmitsGenericNexusRequest(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	repo := &fakeRepo{}
+	nexusRequestID := uuid.New()
+	connectorID := uuid.New()
+	var capturedKey string
+	var capturedBody nexusclient.SubmitRequestBody
+	uc := NewUsecases(repo, &stubNexus{
+		submitFn: func(ctx context.Context, idempotencyKey string, body nexusclient.SubmitRequestBody) (nexusclient.SubmitResponse, error) {
+			capturedKey = idempotencyKey
+			capturedBody = body
+			return nexusclient.SubmitResponse{
+				RequestID:   nexusRequestID.String(),
+				Status:      nexusclient.StatusPendingApproval,
+				Decision:    nexusclient.DecisionRequireApproval,
+				RiskLevel:   "high",
+				BindingHash: "binding-hash",
+			}, nil
+		},
+	})
+	uc.SetExecutor(&stubExecutor{
+		bindingFn: func(ctx context.Context, spec connectordomain.ExecutionSpec) (map[string]any, string, error) {
+			if spec.ConnectorID != connectorID {
+				t.Fatalf("unexpected compensation connector id %s", spec.ConnectorID)
+			}
+			if spec.Operation != "invoice.cancel" {
+				t.Fatalf("unexpected compensation operation %q", spec.Operation)
+			}
+			binding := map[string]any{
+				"schema_version":     nexusclient.ToolIntentSchemaVersion,
+				"org_id":             spec.OrgID,
+				"actor_id":           spec.ActorID,
+				"actor_type":         "agent",
+				"product_surface":    spec.ProductSurface,
+				"run_id":             spec.RunID,
+				"tool_invocation_id": spec.ToolInvocationID,
+				"connector_id":       spec.ConnectorID.String(),
+				"capability_id":      spec.Operation,
+				"operation":          spec.Operation,
+				"target_system":      "billing",
+				"target_resource":    spec.ConnectorID.String(),
+				"payload_hash":       "comp-payload-hash",
+				"idempotency_key":    spec.IdempotencyKey,
+			}
+			return binding, "binding-hash", nil
+		},
+	})
+	task, err := uc.Create(ctx, CreateTaskInput{OrgID: "org-a", CreatedBy: "user-a", Title: "compensate invoice"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalBinding, err := json.Marshal(map[string]any{
+		"schema_version":     nexusclient.ToolIntentSchemaVersion,
+		"org_id":             "org-a",
+		"actor_id":           "user-a",
+		"actor_type":         "human",
+		"product_surface":    "companion",
+		"run_id":             "run-1",
+		"tool_invocation_id": "invoke-1",
+		"connector_id":       connectorID.String(),
+		"capability_id":      "invoice.create",
+		"operation":          "invoice.create",
+		"target_system":      "billing",
+		"target_resource":    connectorID.String(),
+		"payload_hash":       "payload-hash",
+		"idempotency_key":    "original-idem",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalBindingJSON := string(originalBinding)
+	plan, err := uc.SetTaskPlan(ctx, task.ID, SetTaskPlanInput{
+		Objective: "compensate invoice",
+		Steps: []SetTaskPlanStepInput{{
+			StepKey:       "invoice",
+			Title:         "Create invoice",
+			Status:        domain.TaskPlanStepStatusDone,
+			ToolName:      "billing_invoice_create",
+			Capability:    "invoice.create",
+			EvidenceJSON:  json.RawMessage(`{"compensation":{"supported":true,"capability_id":"invoice.cancel","requires_nexus":true},"tool_metadata":{"connector_kind":"billing","rollback_supported":true,"rollback_capability_id":"invoice.cancel"},"tool_result":{"evidence":{"action_binding":` + originalBindingJSON + `}}}`),
+			Postcondition: "invoice exists",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := uc.PrepareTaskPlanCompensation(ctx, task.ID, plan.Steps[0].ID, PrepareTaskPlanCompensationInput{Reason: "customer cancelled"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Status != "compensation_approval_requested" || out.NexusRequestID != nexusRequestID.String() {
+		t.Fatalf("unexpected compensation output: %+v", out)
+	}
+	if capturedBody.ActionType != nexusclient.ActionTypeAgentCapabilityCompensate || capturedBody.RequesterType != "agent" {
+		t.Fatalf("expected generic agent compensation request, got %+v", capturedBody)
+	}
+	if capturedBody.TargetSystem != "billing" || capturedBody.TargetResource != connectorID.String() {
+		t.Fatalf("expected target from original binding, got %+v", capturedBody)
+	}
+	if capturedBody.ActionBinding["org_id"] != "org-a" || capturedBody.ActionBinding["capability_id"] != "invoice.cancel" {
+		t.Fatalf("unexpected compensation action binding: %+v", capturedBody.ActionBinding)
+	}
+	if !strings.HasPrefix(capturedKey, "task-plan-compensation-"+task.ID.String()) {
+		t.Fatalf("expected deterministic compensation idempotency key, got %q", capturedKey)
+	}
+	if repo.countActions(TaskActionPrepareComp) != 1 {
+		t.Fatalf("expected one compensation action, got %d", repo.countActions(TaskActionPrepareComp))
+	}
+}
+
+func TestUsecases_PrepareTaskPlanCompensationRejectsAmbiguousRollbackOperation(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	repo := &fakeRepo{}
+	connectorID := uuid.New()
+	submitted := false
+	uc := NewUsecases(repo, &stubNexus{
+		submitFn: func(ctx context.Context, idempotencyKey string, body nexusclient.SubmitRequestBody) (nexusclient.SubmitResponse, error) {
+			submitted = true
+			return nexusclient.SubmitResponse{}, nil
+		},
+	})
+	uc.SetExecutor(&stubExecutor{})
+	task, err := uc.Create(ctx, CreateTaskInput{OrgID: "org-a", CreatedBy: "user-a", Title: "ambiguous compensation"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalBinding, err := json.Marshal(map[string]any{
+		"schema_version":     nexusclient.ToolIntentSchemaVersion,
+		"org_id":             "org-a",
+		"actor_id":           "user-a",
+		"actor_type":         "human",
+		"product_surface":    "companion",
+		"run_id":             "run-1",
+		"tool_invocation_id": "invoke-1",
+		"connector_id":       connectorID.String(),
+		"capability_id":      "invoice.create",
+		"operation":          "invoice.create",
+		"target_system":      "billing",
+		"target_resource":    connectorID.String(),
+		"payload_hash":       "payload-hash",
+		"idempotency_key":    "original-idem",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := uc.SetTaskPlan(ctx, task.ID, SetTaskPlanInput{
+		Objective: "ambiguous compensation",
+		Steps: []SetTaskPlanStepInput{{
+			StepKey:      "invoice",
+			Title:        "Create invoice",
+			Status:       domain.TaskPlanStepStatusDone,
+			ToolName:     "billing_invoice_create",
+			Capability:   "invoice.create",
+			EvidenceJSON: json.RawMessage(`{"compensation":{"supported":true,"requires_nexus":true},"tool_result":{"evidence":{"action_binding":` + string(originalBinding) + `}}}`),
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := uc.PrepareTaskPlanCompensation(ctx, task.ID, plan.Steps[0].ID, PrepareTaskPlanCompensationInput{Reason: "customer cancelled"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Status != "compensation_contract_invalid" {
+		t.Fatalf("expected invalid compensation contract, got %+v", out)
+	}
+	if submitted {
+		t.Fatal("ambiguous compensation should not be submitted to Nexus")
+	}
+}
+
+func TestUsecases_ExecuteTaskPlanCompensationRequiresApprovedNexusAndReports(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	repo := &fakeRepo{}
+	nexusRequestID := uuid.New()
+	connectorID := uuid.New()
+	var reported bool
+	var executedSpec connectordomain.ExecutionSpec
+	uc := NewUsecases(repo, &stubNexus{
+		submitFn: func(ctx context.Context, idempotencyKey string, body nexusclient.SubmitRequestBody) (nexusclient.SubmitResponse, error) {
+			return nexusclient.SubmitResponse{
+				RequestID:   nexusRequestID.String(),
+				Status:      nexusclient.StatusPendingApproval,
+				Decision:    nexusclient.DecisionRequireApproval,
+				RiskLevel:   "high",
+				BindingHash: "binding-hash",
+			}, nil
+		},
+		getFn: func(ctx context.Context, id string) (nexusclient.RequestSummary, int, error) {
+			if id != nexusRequestID.String() {
+				t.Fatalf("unexpected nexus request lookup %q", id)
+			}
+			return nexusclient.RequestSummary{
+				ID:     nexusRequestID.String(),
+				Status: nexusclient.StatusApproved,
+			}, http.StatusOK, nil
+		},
+		reportFn: func(ctx context.Context, id string, success bool, result map[string]any, durationMS int64, errorMessage string) (int, error) {
+			reported = true
+			if id != nexusRequestID.String() || !success {
+				t.Fatalf("unexpected nexus report id=%q success=%v", id, success)
+			}
+			if result["external_ref"] != "rollback-ref" || result["operation"] != "invoice.cancel" {
+				t.Fatalf("unexpected nexus report payload %+v", result)
+			}
+			return http.StatusOK, nil
+		},
+	})
+	uc.SetExecutor(&stubExecutor{
+		bindingFn: func(ctx context.Context, spec connectordomain.ExecutionSpec) (map[string]any, string, error) {
+			binding := map[string]any{
+				"schema_version":     nexusclient.ToolIntentSchemaVersion,
+				"org_id":             spec.OrgID,
+				"actor_id":           spec.ActorID,
+				"actor_type":         "agent",
+				"product_surface":    spec.ProductSurface,
+				"run_id":             spec.RunID,
+				"tool_invocation_id": spec.ToolInvocationID,
+				"connector_id":       spec.ConnectorID.String(),
+				"capability_id":      spec.Operation,
+				"operation":          spec.Operation,
+				"target_system":      "billing",
+				"target_resource":    spec.ConnectorID.String(),
+				"payload_hash":       "comp-payload-hash",
+				"idempotency_key":    spec.IdempotencyKey,
+			}
+			return binding, "binding-hash", nil
+		},
+		executeFn: func(ctx context.Context, spec connectordomain.ExecutionSpec) (connectordomain.ExecutionResult, error) {
+			executedSpec = spec
+			return connectordomain.ExecutionResult{
+				ID:             uuid.New(),
+				ConnectorID:    spec.ConnectorID,
+				OrgID:          spec.OrgID,
+				ActorID:        spec.ActorID,
+				Operation:      spec.Operation,
+				Status:         connectordomain.ExecSuccess,
+				ExternalRef:    "rollback-ref",
+				Payload:        spec.Payload,
+				ResultJSON:     json.RawMessage(`{"ok":true}`),
+				EvidenceJSON:   json.RawMessage(`{"external_ref":"rollback-ref"}`),
+				IdempotencyKey: spec.IdempotencyKey,
+				TaskID:         spec.TaskID,
+				NexusRequestID: spec.NexusRequestID,
+				DurationMS:     42,
+				CreatedAt:      time.Now().UTC(),
+			}, nil
+		},
+	})
+
+	task, err := uc.Create(ctx, CreateTaskInput{OrgID: "org-a", CreatedBy: "user-a", Title: "execute compensation"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalBinding, err := json.Marshal(map[string]any{
+		"schema_version":     nexusclient.ToolIntentSchemaVersion,
+		"org_id":             "org-a",
+		"actor_id":           "user-a",
+		"actor_type":         "human",
+		"product_surface":    "companion",
+		"run_id":             "run-1",
+		"tool_invocation_id": "invoke-1",
+		"connector_id":       connectorID.String(),
+		"capability_id":      "invoice.create",
+		"operation":          "invoice.create",
+		"target_system":      "billing",
+		"target_resource":    connectorID.String(),
+		"payload_hash":       "payload-hash",
+		"idempotency_key":    "original-idem",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := uc.SetTaskPlan(ctx, task.ID, SetTaskPlanInput{
+		Objective: "execute compensation",
+		Steps: []SetTaskPlanStepInput{{
+			StepKey:       "invoice",
+			Title:         "Create invoice",
+			Status:        domain.TaskPlanStepStatusDone,
+			ToolName:      "billing_invoice_create",
+			Capability:    "invoice.create",
+			EvidenceJSON:  json.RawMessage(`{"compensation":{"supported":true,"capability_id":"invoice.cancel","requires_nexus":true},"tool_result":{"evidence":{"action_binding":` + string(originalBinding) + `}}}`),
+			Postcondition: "invoice exists",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := uc.PrepareTaskPlanCompensation(ctx, task.ID, plan.Steps[0].ID, PrepareTaskPlanCompensationInput{Reason: "customer cancelled"}); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := uc.ExecuteTaskPlanCompensation(ctx, task.ID, plan.Steps[0].ID, ExecuteTaskPlanCompensationInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Status != "compensation_executed" || out.NexusRequestID != nexusRequestID.String() {
+		t.Fatalf("unexpected compensation execution output: %+v", out)
+	}
+	if executedSpec.Operation != "invoice.cancel" || executedSpec.ConnectorID != connectorID {
+		t.Fatalf("unexpected executed compensation spec: %+v", executedSpec)
+	}
+	if executedSpec.NexusRequestID == nil || *executedSpec.NexusRequestID != nexusRequestID {
+		t.Fatalf("expected approved nexus request in execution spec, got %+v", executedSpec.NexusRequestID)
+	}
+	if !reported {
+		t.Fatal("expected compensation execution result to be reported to Nexus")
+	}
+	if repo.countActions(TaskActionExecuteComp) != 1 {
+		t.Fatalf("expected one execute compensation action, got %d", repo.countActions(TaskActionExecuteComp))
 	}
 }
 

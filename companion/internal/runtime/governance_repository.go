@@ -13,15 +13,15 @@ import (
 	sharedpostgres "github.com/devpablocristo/platform/databases/postgres/go"
 )
 
-type PostgresRuntimeGovernanceRepository struct {
+type PostgresRuntimeControlsRepository struct {
 	db *sharedpostgres.DB
 }
 
-func NewPostgresRuntimeGovernanceRepository(db *sharedpostgres.DB) *PostgresRuntimeGovernanceRepository {
-	return &PostgresRuntimeGovernanceRepository{db: db}
+func NewPostgresRuntimeControlsRepository(db *sharedpostgres.DB) *PostgresRuntimeControlsRepository {
+	return &PostgresRuntimeControlsRepository{db: db}
 }
 
-func (r *PostgresRuntimeGovernanceRepository) GetRuntimePolicy(ctx context.Context, orgID string) (TenantRuntimePolicy, error) {
+func (r *PostgresRuntimeControlsRepository) GetRuntimePolicy(ctx context.Context, orgID string) (TenantRuntimePolicy, error) {
 	orgID = strings.TrimSpace(orgID)
 	if orgID == "" {
 		return TenantRuntimePolicy{}, ErrRuntimePolicyNotFound
@@ -44,7 +44,7 @@ func (r *PostgresRuntimeGovernanceRepository) GetRuntimePolicy(ctx context.Conte
 	return policy, nil
 }
 
-func (r *PostgresRuntimeGovernanceRepository) UpsertRuntimePolicy(ctx context.Context, policy TenantRuntimePolicy) (TenantRuntimePolicy, error) {
+func (r *PostgresRuntimeControlsRepository) UpsertRuntimePolicy(ctx context.Context, policy TenantRuntimePolicy) (TenantRuntimePolicy, error) {
 	policy = normalizeRuntimePolicy(policy)
 	if policy.OrgID == "" {
 		return TenantRuntimePolicy{}, fmt.Errorf("org_id is required")
@@ -83,7 +83,7 @@ func (r *PostgresRuntimeGovernanceRepository) UpsertRuntimePolicy(ctx context.Co
 	return result, nil
 }
 
-func (r *PostgresRuntimeGovernanceRepository) GetRuntimeUsage(ctx context.Context, orgID, period string) (TenantRuntimeUsage, error) {
+func (r *PostgresRuntimeControlsRepository) GetRuntimeUsage(ctx context.Context, orgID, period string) (TenantRuntimeUsage, error) {
 	orgID = strings.TrimSpace(orgID)
 	period = strings.TrimSpace(period)
 	if orgID == "" || period == "" {
@@ -104,7 +104,7 @@ func (r *PostgresRuntimeGovernanceRepository) GetRuntimeUsage(ctx context.Contex
 	return usage, nil
 }
 
-func (r *PostgresRuntimeGovernanceRepository) AddRuntimeUsage(ctx context.Context, orgID, period string, usage RunUsage) error {
+func (r *PostgresRuntimeControlsRepository) AddRuntimeUsage(ctx context.Context, orgID, period string, usage RunUsage) error {
 	orgID = strings.TrimSpace(orgID)
 	period = strings.TrimSpace(period)
 	if orgID == "" || period == "" {

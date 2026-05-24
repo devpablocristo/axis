@@ -21,7 +21,7 @@ type Orchestrator struct {
 	toolkit         *ToolKit
 	ports           ContextPorts
 	traces          TraceRepository // opcional; nil = no persiste (uso en tests)
-	governance      RuntimeGovernance
+	controls        RuntimeControls
 	defaultAutonomy AutonomyLevel // "" → A2 (default conservador)
 	model           string
 }
@@ -40,9 +40,9 @@ func (o *Orchestrator) SetTraceRepository(repo TraceRepository) {
 	o.traces = repo
 }
 
-// SetRuntimeGovernance inyecta políticas y contabilidad de runtime por tenant.
-func (o *Orchestrator) SetRuntimeGovernance(repo RuntimeGovernance) {
-	o.governance = repo
+// SetRuntimeControls inyecta políticas y contabilidad de runtime por tenant.
+func (o *Orchestrator) SetRuntimeControls(repo RuntimeControls) {
+	o.controls = repo
 }
 
 // SetDefaultAutonomy fija el nivel de autonomía por defecto del runtime.
@@ -90,15 +90,15 @@ func (o *Orchestrator) Run(ctx context.Context, in RunInput) (RunResult, error) 
 	modelName := firstNonEmpty(o.model, DefaultGeminiModel)
 	policy := defaultRuntimePolicy(in.OrgID)
 	currentUsage := TenantRuntimeUsage{OrgID: in.OrgID, Period: runtimeUsagePeriod(time.Now())}
-	if o.governance != nil && in.OrgID != "" {
-		if loaded, err := o.governance.GetRuntimePolicy(ctx, in.OrgID); err == nil {
+	if o.controls != nil && in.OrgID != "" {
+		if loaded, err := o.controls.GetRuntimePolicy(ctx, in.OrgID); err == nil {
 			policy = loaded
 		} else if !errors.Is(err, ErrRuntimePolicyNotFound) {
 			slog.Error("runtime_policy_lookup_failed", "customer_org_id", in.OrgID, "error", err)
 			policy.Enabled = false
 			policy.KillSwitch = true
 		}
-		if usage, err := o.governance.GetRuntimeUsage(ctx, in.OrgID, currentUsage.Period); err == nil {
+		if usage, err := o.controls.GetRuntimeUsage(ctx, in.OrgID, currentUsage.Period); err == nil {
 			currentUsage = usage
 		} else {
 			slog.Error("runtime_usage_lookup_failed", "customer_org_id", in.OrgID, "period", currentUsage.Period, "error", err)
@@ -282,12 +282,12 @@ func (o *Orchestrator) persistTrace(ctx context.Context, trace RunTrace, in RunI
 
 func (o *Orchestrator) finishTrace(ctx context.Context, trace RunTrace, in RunInput, errMsg string) {
 	o.persistTrace(ctx, trace, in, errMsg)
-	if o.governance == nil || in.OrgID == "" {
+	if o.controls == nil || in.OrgID == "" {
 		return
 	}
 	recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
-	if err := o.governance.AddRuntimeUsage(recordCtx, in.OrgID, runtimeUsagePeriod(trace.StartedAt), trace.Usage); err != nil {
+	if err := o.controls.AddRuntimeUsage(recordCtx, in.OrgID, runtimeUsagePeriod(trace.StartedAt), trace.Usage); err != nil {
 		slog.Error("runtime_usage_record_failed", "run_id", trace.RunID, "customer_org_id", in.OrgID, "error", err)
 	}
 }

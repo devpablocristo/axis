@@ -1,4 +1,4 @@
--- Runtime governance fundacional para Companion como empleado IA enterprise.
+-- Runtime controls fundacional para Companion como empleado IA enterprise.
 --
 -- Esta capa no decide riesgo de acciones sensibles (eso sigue siendo Nexus).
 -- Define controles operacionales por customer org: kill switch, autonomía máxima,

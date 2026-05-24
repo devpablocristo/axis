@@ -6,7 +6,7 @@ Status: accepted
 
 Axis hosts shared services used by multiple products. Argos needs to store and run rules over image-analysis facts, and also request AI assistance for user-facing explanations.
 
-Nexus already has `policies`: deterministic CEL rules for request control. Those policies decide `allow`, `deny`, or `require_approval` for `requests`. That model must remain focused on approvals and execution governance.
+Nexus already has `policies`: deterministic CEL rules for request control. Those policies decide `allow`, `deny`, or `require_approval` for `requests`. That model must remain focused on approvals and execution control.
 
 Argos findings are different: they are observations generated from product facts, such as an analysis result. They do not approve or deny an action.
 
@@ -18,7 +18,7 @@ Products such as Argos own their business knowledge. Axis services store and exe
 
 We add a Nexus `findings` module instead of overloading `requests/policies`.
 
-- `policies` continue to be governance rules for `requests`.
+- `policies` continue to be request control rules for `requests`.
 - `finding_rules` are diagnostic rules over product facts.
 - `fact_evaluations` persist submitted facts idempotently.
 - `findings` persist deterministic results produced by matching rules.

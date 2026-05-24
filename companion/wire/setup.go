@@ -112,6 +112,52 @@ func (a taskPlannerAdapter) RecordTaskPlanCheckpoint(ctx context.Context, taskID
 	})
 }
 
+func (a taskPlannerAdapter) PrepareTaskPlanCompensation(ctx context.Context, taskID, stepID uuid.UUID, in runtime.PlannerPrepareTaskPlanCompensationInput) (runtime.PlannerTaskPlanCompensationResult, error) {
+	out, err := a.uc.PrepareTaskPlanCompensation(ctx, taskID, stepID, tasks.PrepareTaskPlanCompensationInput{
+		Reason: in.Reason,
+	})
+	if err != nil {
+		return runtime.PlannerTaskPlanCompensationResult{}, err
+	}
+	return runtime.PlannerTaskPlanCompensationResult{
+		Plan:                out.Plan,
+		Step:                out.Step,
+		Status:              out.Status,
+		Reason:              out.Reason,
+		Compensation:        out.Compensation,
+		NexusRequestID:      out.NexusRequestID,
+		NexusStatus:         out.NexusStatus,
+		NexusDecision:       out.NexusDecision,
+		NexusBindingHash:    out.NexusBindingHash,
+		ApprovalRequired:    out.ApprovalRequired,
+		ApprovalUnavailable: out.ApprovalUnavailable,
+	}, nil
+}
+
+func (a taskPlannerAdapter) ExecuteTaskPlanCompensation(ctx context.Context, taskID, stepID uuid.UUID, in runtime.PlannerExecuteTaskPlanCompensationInput) (runtime.PlannerTaskPlanCompensationExecutionResult, error) {
+	out, err := a.uc.ExecuteTaskPlanCompensation(ctx, taskID, stepID, tasks.ExecuteTaskPlanCompensationInput{
+		NexusRequestID: in.NexusRequestID,
+	})
+	if err != nil {
+		return runtime.PlannerTaskPlanCompensationExecutionResult{}, err
+	}
+	return runtime.PlannerTaskPlanCompensationExecutionResult{
+		Plan:                out.Plan,
+		Step:                out.Step,
+		Status:              out.Status,
+		Reason:              out.Reason,
+		Compensation:        out.Compensation,
+		NexusRequestID:      out.NexusRequestID,
+		NexusStatus:         out.NexusStatus,
+		ExecutionID:         out.Execution.ID.String(),
+		ExecutionStatus:     out.Execution.Status,
+		VerificationStatus:  out.Verification.Status,
+		VerificationSummary: out.Verification.Summary,
+		ExternalRef:         out.Execution.ExternalRef,
+		ApprovalRequired:    out.ApprovalRequired,
+	}, nil
+}
+
 func (a taskMemoryAdapter) UpsertTaskMemory(ctx context.Context, taskID uuid.UUID, kind, key string, contentText string, payload json.RawMessage) error {
 	if len(payload) == 0 {
 		payload = json.RawMessage(`{}`)
@@ -290,10 +336,10 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	orchestrator.SetDefaultAutonomy(autonomy)
 	traceRepo := runtime.NewPostgresTraceRepository(db)
 	orchestrator.SetTraceRepository(traceRepo)
-	runtimeGovernanceRepo := runtime.NewPostgresRuntimeGovernanceRepository(db)
-	orchestrator.SetRuntimeGovernance(runtimeGovernanceRepo)
+	runtimeControlsRepo := runtime.NewPostgresRuntimeControlsRepository(db)
+	orchestrator.SetRuntimeControls(runtimeControlsRepo)
 	traceHandler := runtime.NewTraceHandler(traceRepo)
-	runtimeGovernanceHandler := runtime.NewRuntimeGovernanceHandler(runtimeGovernanceRepo)
+	runtimeControlsHandler := runtime.NewRuntimeControlsHandler(runtimeControlsRepo)
 	adapter := runtime.NewOrchestratorAdapter(orchestrator)
 	uc.SetOrchestrator(adapter)
 	// Watchers empujan alertas al chat del suscriptor
@@ -320,7 +366,7 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	chatHandler.Register(mux)
 	connHandler.Register(mux)
 	traceHandler.Register(mux)
-	runtimeGovernanceHandler.Register(mux)
+	runtimeControlsHandler.Register(mux)
 	nexusAssistHandler.Register(mux)
 	assistHandler.Register(mux)
 

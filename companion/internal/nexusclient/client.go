@@ -34,6 +34,12 @@ const (
 )
 
 const (
+	ToolIntentSchemaVersion             = "tool_intent.v1"
+	ActionTypeAgentCapabilityInvoke     = "agent.capability.invoke"
+	ActionTypeAgentCapabilityCompensate = "agent.capability.compensate"
+)
+
+const (
 	StatusPending         = "pending"
 	StatusEvaluated       = "evaluated"
 	StatusAllowed         = "allowed"
@@ -68,6 +74,7 @@ type SubmitRequestBody struct {
 	ActionType     string         `json:"action_type"`
 	TargetSystem   string         `json:"target_system,omitempty"`
 	TargetResource string         `json:"target_resource,omitempty"`
+	ActionBinding  map[string]any `json:"action_binding,omitempty"`
 	Params         map[string]any `json:"params,omitempty"`
 	Reason         string         `json:"reason,omitempty"`
 	Context        string         `json:"context,omitempty"`
@@ -79,6 +86,11 @@ type SubmitResponse struct {
 	RiskLevel      string `json:"risk_level"`
 	DecisionReason string `json:"decision_reason"`
 	Status         string `json:"status"`
+	BindingHash    string `json:"binding_hash,omitempty"`
+	Approval       *struct {
+		ID        string `json:"id"`
+		ExpiresAt string `json:"expires_at"`
+	} `json:"approval,omitempty"`
 }
 
 type RequestSummary struct {

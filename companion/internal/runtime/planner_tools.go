@@ -17,6 +17,8 @@ type TaskPlanner interface {
 	SetTaskPlan(ctx context.Context, taskID uuid.UUID, in PlannerSetTaskPlanInput) (taskdomain.TaskPlan, error)
 	UpdateTaskPlanStep(ctx context.Context, taskID, stepID uuid.UUID, in PlannerUpdateTaskPlanStepInput) (taskdomain.TaskPlan, error)
 	RecordTaskPlanCheckpoint(ctx context.Context, taskID uuid.UUID, in PlannerRecordTaskPlanCheckpointInput) (taskdomain.TaskPlan, error)
+	PrepareTaskPlanCompensation(ctx context.Context, taskID, stepID uuid.UUID, in PlannerPrepareTaskPlanCompensationInput) (PlannerTaskPlanCompensationResult, error)
+	ExecuteTaskPlanCompensation(ctx context.Context, taskID, stepID uuid.UUID, in PlannerExecuteTaskPlanCompensationInput) (PlannerTaskPlanCompensationExecutionResult, error)
 }
 
 const (
@@ -25,6 +27,7 @@ const (
 	toolRecordTaskPlanCheckpoint = "record_task_plan_checkpoint"
 	toolExecuteTaskPlanStep      = "execute_task_plan_step"
 	toolPrepareTaskPlanComp      = "prepare_task_plan_compensation"
+	toolExecuteTaskPlanComp      = "execute_task_plan_compensation"
 )
 
 type PlannerSetTaskPlanInput struct {
@@ -73,6 +76,44 @@ type PlannerRecordTaskPlanCheckpointInput struct {
 	CheckpointJSON json.RawMessage `json:"checkpoint"`
 	NextAction     string          `json:"next_action"`
 	Blocker        string          `json:"blocker"`
+}
+
+type PlannerPrepareTaskPlanCompensationInput struct {
+	Reason string
+}
+
+type PlannerTaskPlanCompensationResult struct {
+	Plan                taskdomain.TaskPlan
+	Step                taskdomain.TaskPlanStep
+	Status              string
+	Reason              string
+	Compensation        map[string]any
+	NexusRequestID      string
+	NexusStatus         string
+	NexusDecision       string
+	NexusBindingHash    string
+	ApprovalRequired    bool
+	ApprovalUnavailable bool
+}
+
+type PlannerExecuteTaskPlanCompensationInput struct {
+	NexusRequestID string
+}
+
+type PlannerTaskPlanCompensationExecutionResult struct {
+	Plan                taskdomain.TaskPlan
+	Step                taskdomain.TaskPlanStep
+	Status              string
+	Reason              string
+	Compensation        map[string]any
+	NexusRequestID      string
+	NexusStatus         string
+	ExecutionID         string
+	ExecutionStatus     string
+	VerificationStatus  string
+	VerificationSummary string
+	ExternalRef         string
+	ApprovalRequired    bool
 }
 
 func RegisterTaskPlannerTools(tk *ToolKit, planner TaskPlanner) {
@@ -234,6 +275,20 @@ func RegisterTaskPlannerTools(tk *ToolKit, planner TaskPlanner) {
 	}, toolPolicy{RequiresTenant: true, RequiresUser: true, RequiresTask: true}, func(ctx context.Context, args json.RawMessage) (string, error) {
 		return prepareTaskPlanCompensationTool(ctx, planner, args)
 	})
+
+	tk.add(ToolSchema{
+		Name:        toolExecuteTaskPlanComp,
+		Description: "Ejecuta una compensación/rollback previamente aprobado por Nexus para un paso del plan. Revalida el estado en Nexus antes de tocar el sistema externo.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"step_id":          map[string]any{"type": "string", "description": "ID o step_key del paso a compensar. Si se omite, se usa el último paso con evidencia."},
+				"nexus_request_id": map[string]any{"type": "string", "description": "Request de compensación aprobado en Nexus. Opcional si ya fue preparado por la task."},
+			},
+		},
+	}, toolPolicy{RequiresTenant: true, RequiresUser: true, RequiresTask: true}, func(ctx context.Context, args json.RawMessage) (string, error) {
+		return executeTaskPlanCompensationTool(ctx, planner, args)
+	})
 }
 
 type plannerSetTaskPlanArgs struct {
@@ -290,6 +345,11 @@ type plannerExecuteTaskPlanStepArgs struct {
 type plannerPrepareCompensationArgs struct {
 	StepID string `json:"step_id"`
 	Reason string `json:"reason"`
+}
+
+type plannerExecuteCompensationArgs struct {
+	StepID         string `json:"step_id"`
+	NexusRequestID string `json:"nexus_request_id"`
 }
 
 func (a plannerSetTaskPlanArgs) toInput(createdBy string) PlannerSetTaskPlanInput {
@@ -510,36 +570,39 @@ func prepareTaskPlanCompensationTool(ctx context.Context, planner TaskPlanner, a
 	if pickErr != "" {
 		return taskPlanReplayResult(plan, taskdomain.TaskPlanStep{}, pickErr), nil
 	}
-	compensation, supported := compensationFromStepEvidence(step.EvidenceJSON)
-	status := "compensation_unavailable"
-	planStatus := taskdomain.TaskPlanStatusBlocked
-	blocker := "compensation is not declared for this step"
-	nextAction := "review step manually"
-	if supported {
-		status = "compensation_prepared"
-		planStatus = taskdomain.TaskPlanStatusEscalated
-		blocker = "compensation requires governance approval: " + reason
-		nextAction = "request governance approval for compensation"
-	}
-	checkpoint := taskPlanCheckpointJSON(map[string]any{
-		"source":              "prepare_task_plan_compensation",
-		"status":              status,
-		"step_id":             step.ID.String(),
-		"step_key":            step.StepKey,
-		"reason":              reason,
-		"governance_required": true,
-		"compensation":        compensation,
-	})
-	updated, err := planner.RecordTaskPlanCheckpoint(ctx, taskID, PlannerRecordTaskPlanCheckpointInput{
-		Status:         planStatus,
-		CheckpointJSON: checkpoint,
-		NextAction:     nextAction,
-		Blocker:        blocker,
+	out, err := planner.PrepareTaskPlanCompensation(ctx, taskID, step.ID, PlannerPrepareTaskPlanCompensationInput{
+		Reason: reason,
 	})
 	if err != nil {
-		return "", fmt.Errorf("record compensation checkpoint: %w", err)
+		return "", fmt.Errorf("prepare task plan compensation: %w", err)
 	}
-	return taskPlanCompensationResult(updated, step, status, reason, compensation), nil
+	return taskPlanCompensationResult(out), nil
+}
+
+func executeTaskPlanCompensationTool(ctx context.Context, planner TaskPlanner, args json.RawMessage) (string, error) {
+	taskID, ok := taskIDFromContext(ctx)
+	if !ok {
+		return `{"error":"task context required"}`, nil
+	}
+	var input plannerExecuteCompensationArgs
+	if err := json.Unmarshal(args, &input); err != nil {
+		return "", fmt.Errorf("parse execute compensation args: %w", err)
+	}
+	plan, err := planner.GetTaskPlan(ctx, taskID)
+	if err != nil {
+		return "", fmt.Errorf("get task plan: %w", err)
+	}
+	step, pickErr := pickReplayPlanStep(plan, input.StepID)
+	if pickErr != "" {
+		return taskPlanReplayResult(plan, taskdomain.TaskPlanStep{}, pickErr), nil
+	}
+	out, err := planner.ExecuteTaskPlanCompensation(ctx, taskID, step.ID, PlannerExecuteTaskPlanCompensationInput{
+		NexusRequestID: strings.TrimSpace(input.NexusRequestID),
+	})
+	if err != nil {
+		return "", fmt.Errorf("execute task plan compensation: %w", err)
+	}
+	return taskPlanCompensationExecutionResult(out), nil
 }
 
 type planStepVerification struct {
@@ -685,7 +748,7 @@ func validateNestedPlanTool(ctx context.Context, tk *ToolKit, targetTool string)
 
 func isPlannerControlTool(name string) bool {
 	switch strings.TrimSpace(name) {
-	case toolSetTaskPlan, toolUpdateTaskPlanStep, toolRecordTaskPlanCheckpoint, toolExecuteTaskPlanStep, toolPrepareTaskPlanComp:
+	case toolSetTaskPlan, toolUpdateTaskPlanStep, toolRecordTaskPlanCheckpoint, toolExecuteTaskPlanStep, toolPrepareTaskPlanComp, toolExecuteTaskPlanComp:
 		return true
 	default:
 		return false
@@ -1147,21 +1210,52 @@ func taskPlanReplayResult(plan taskdomain.TaskPlan, step taskdomain.TaskPlanStep
 	return string(raw)
 }
 
-func taskPlanCompensationResult(plan taskdomain.TaskPlan, step taskdomain.TaskPlanStep, status, reason string, compensation map[string]any) string {
+func taskPlanCompensationResult(out PlannerTaskPlanCompensationResult) string {
 	result := map[string]any{
-		"task_id":             plan.TaskID.String(),
-		"plan_status":         plan.Status,
-		"step_id":             step.ID.String(),
-		"step_status":         step.Status,
-		"status":              status,
-		"reason":              reason,
-		"governance_required": true,
-		"compensation":        compensation,
-		"next_action":         plan.NextAction,
+		"task_id":              out.Plan.TaskID.String(),
+		"plan_status":          out.Plan.Status,
+		"step_id":              out.Step.ID.String(),
+		"step_status":          out.Step.Status,
+		"status":               out.Status,
+		"reason":               out.Reason,
+		"approval_required":    out.ApprovalRequired,
+		"approval_unavailable": out.ApprovalUnavailable,
+		"compensation":         out.Compensation,
+		"next_action":          out.Plan.NextAction,
+		"nexus_request_id":     out.NexusRequestID,
+		"nexus_status":         out.NexusStatus,
+		"nexus_decision":       out.NexusDecision,
+		"nexus_binding_hash":   out.NexusBindingHash,
 	}
 	raw, err := json.Marshal(result)
 	if err != nil {
 		return `{"result":"task plan compensation checkpoint recorded"}`
+	}
+	return string(raw)
+}
+
+func taskPlanCompensationExecutionResult(out PlannerTaskPlanCompensationExecutionResult) string {
+	result := map[string]any{
+		"task_id":              out.Plan.TaskID.String(),
+		"plan_status":          out.Plan.Status,
+		"step_id":              out.Step.ID.String(),
+		"step_status":          out.Step.Status,
+		"status":               out.Status,
+		"reason":               out.Reason,
+		"approval_required":    out.ApprovalRequired,
+		"compensation":         out.Compensation,
+		"next_action":          out.Plan.NextAction,
+		"nexus_request_id":     out.NexusRequestID,
+		"nexus_status":         out.NexusStatus,
+		"execution_id":         out.ExecutionID,
+		"execution_status":     out.ExecutionStatus,
+		"verification_status":  out.VerificationStatus,
+		"verification_summary": out.VerificationSummary,
+		"external_ref":         out.ExternalRef,
+	}
+	raw, err := json.Marshal(result)
+	if err != nil {
+		return `{"result":"task plan compensation execution recorded"}`
 	}
 	return string(raw)
 }

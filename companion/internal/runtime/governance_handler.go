@@ -13,21 +13,21 @@ import (
 
 const scopeCompanionRuntimeAdmin = "companion:runtime:admin"
 
-type RuntimeGovernanceHandler struct {
-	repo RuntimeGovernance
+type RuntimeControlsHandler struct {
+	repo RuntimeControls
 }
 
-func NewRuntimeGovernanceHandler(repo RuntimeGovernance) *RuntimeGovernanceHandler {
-	return &RuntimeGovernanceHandler{repo: repo}
+func NewRuntimeControlsHandler(repo RuntimeControls) *RuntimeControlsHandler {
+	return &RuntimeControlsHandler{repo: repo}
 }
 
-func (h *RuntimeGovernanceHandler) Register(mux *http.ServeMux) {
+func (h *RuntimeControlsHandler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/runtime/policy", h.getPolicy)
 	mux.HandleFunc("PUT /v1/runtime/policy", h.putPolicy)
 	mux.HandleFunc("GET /v1/runtime/usage", h.getUsage)
 }
 
-func (h *RuntimeGovernanceHandler) getPolicy(w http.ResponseWriter, r *http.Request) {
+func (h *RuntimeControlsHandler) getPolicy(w http.ResponseWriter, r *http.Request) {
 	orgID, ok := h.requireRuntimeAdminOrg(w, r)
 	if !ok {
 		return
@@ -44,7 +44,7 @@ func (h *RuntimeGovernanceHandler) getPolicy(w http.ResponseWriter, r *http.Requ
 	httpjson.WriteJSON(w, http.StatusOK, policy)
 }
 
-func (h *RuntimeGovernanceHandler) putPolicy(w http.ResponseWriter, r *http.Request) {
+func (h *RuntimeControlsHandler) putPolicy(w http.ResponseWriter, r *http.Request) {
 	orgID, ok := h.requireRuntimeAdminOrg(w, r)
 	if !ok {
 		return
@@ -79,7 +79,7 @@ func (h *RuntimeGovernanceHandler) putPolicy(w http.ResponseWriter, r *http.Requ
 	httpjson.WriteJSON(w, http.StatusOK, saved)
 }
 
-func (h *RuntimeGovernanceHandler) getUsage(w http.ResponseWriter, r *http.Request) {
+func (h *RuntimeControlsHandler) getUsage(w http.ResponseWriter, r *http.Request) {
 	orgID, ok := h.requireRuntimeAdminOrg(w, r)
 	if !ok {
 		return
@@ -107,9 +107,9 @@ func (h *RuntimeGovernanceHandler) getUsage(w http.ResponseWriter, r *http.Reque
 	httpjson.WriteJSON(w, http.StatusOK, usage)
 }
 
-func (h *RuntimeGovernanceHandler) requireRuntimeAdminOrg(w http.ResponseWriter, r *http.Request) (string, bool) {
+func (h *RuntimeControlsHandler) requireRuntimeAdminOrg(w http.ResponseWriter, r *http.Request) (string, bool) {
 	if identityctx.HasNoAuthContext(r) {
-		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "runtime governance endpoints require authenticated admin context")
+		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "runtime controls endpoints require authenticated admin context")
 		return "", false
 	}
 	if !identityctx.HasAnyScope(r, scopeCompanionRuntimeAdmin, scopeCompanionCrossOrg) {

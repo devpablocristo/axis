@@ -10,7 +10,7 @@ import (
 
 var ErrRuntimePolicyNotFound = errors.New("runtime policy not found")
 
-type RuntimeGovernance interface {
+type RuntimeControls interface {
 	GetRuntimePolicy(ctx context.Context, orgID string) (TenantRuntimePolicy, error)
 	UpsertRuntimePolicy(ctx context.Context, policy TenantRuntimePolicy) (TenantRuntimePolicy, error)
 	GetRuntimeUsage(ctx context.Context, orgID, period string) (TenantRuntimeUsage, error)

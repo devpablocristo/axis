@@ -504,6 +504,7 @@ func (uc *Usecases) processItem(ctx context.Context, w domain.Watcher, config do
 		ActionType:     "companion.propose",
 		TargetSystem:   fmt.Sprint(binding["target_system"]),
 		TargetResource: fmt.Sprint(binding["target_resource"]),
+		ActionBinding:  binding,
 		Params:         nexusParams,
 		Reason:         proposal.Reason,
 	})
