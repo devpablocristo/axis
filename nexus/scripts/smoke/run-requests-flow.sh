@@ -7,7 +7,7 @@ source "$SCRIPT_DIR/../lib/common.sh"
 
 echo "=== Smoke: requests flow ==="
 
-wait_for_http "$API_BASE/healthz"
+wait_for_http "$API_BASE/readyz"
 
 # 1. Crear policy
 echo "Creating policy..."

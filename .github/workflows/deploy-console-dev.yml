@@ -2,7 +2,7 @@ name: Deploy Console DEV
 
 on:
   push:
-    branches: [main, develop]
+    branches: [develop]
     paths:
       - "console/**"
       - "console.nginx.conf.template"
@@ -13,7 +13,7 @@ on:
       ref:
         description: "Branch or ref to deploy"
         required: false
-        default: "main"
+        default: "develop"
 
 permissions:
   contents: read
@@ -35,7 +35,7 @@ jobs:
       ARTIFACT_REGISTRY: ${{ vars.ARTIFACT_REGISTRY }}
       CLOUD_RUN_SERVICE_ACCOUNT: ${{ vars.AXIS_CONSOLE_CLOUD_RUN_SERVICE_ACCOUNT_DEV || vars.CLOUD_RUN_SERVICE_ACCOUNT_DEV }}
       IMAGE_NAME: ${{ vars.AXIS_CONSOLE_IMAGE_NAME_DEV || 'axis-console' }}
-      SERVICE_NAME: ${{ vars.AXIS_CONSOLE_CLOUD_RUN_SERVICE_NAME_DEV || 'axis-console-dev' }}
+      SERVICE_NAME: ${{ vars.AXIS_CONSOLE_CLOUD_RUN_SERVICE_NAME_DEV || 'axis-console' }}
 
     steps:
       - name: Checkout
@@ -123,7 +123,7 @@ jobs:
               --region="$GCP_REGION" \
               --format='value(status.latestReadyRevisionName,status.latestCreatedRevisionName)')
             if [[ -n "$latest_created" && "$latest_ready" == "$latest_created" ]]; then
-              curl -fsS "$SERVICE_URL/healthz"
+              curl -fsS "$SERVICE_URL/readyz"
               exit 0
             fi
             echo "attempt $i: latestReady=$latest_ready latestCreated=$latest_created, retrying in 3s..."

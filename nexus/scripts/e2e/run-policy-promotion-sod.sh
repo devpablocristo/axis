@@ -56,7 +56,7 @@ raise SystemExit(1)
 
 echo "=== E2E: policy promotion SoD ==="
 
-wait_for_http "$API_BASE/healthz"
+wait_for_http "$API_BASE/readyz"
 
 RUN_ID="$(date +%s)-$$"
 ACTION_TYPE="alert.escalate"

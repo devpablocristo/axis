@@ -35,8 +35,8 @@ services:
 
   nexus:
     build:
-      context: ..
-      dockerfile: axis/Dockerfile.nexus
+      context: .
+      dockerfile: Dockerfile.nexus
     restart: unless-stopped
     environment:
       PORT: "8080"
@@ -57,6 +57,8 @@ services:
       NEXUS_ATTESTATION_HMAC_SECRET: "${NEXUS_ATTESTATION_HMAC_SECRET:-}"
     ports:
       - "${NEXUS_PORT:-18084}:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       nexus-postgres:
         condition: service_healthy
@@ -71,8 +73,8 @@ services:
 
   companion:
     build:
-      context: ..
-      dockerfile: axis/Dockerfile.companion
+      context: .
+      dockerfile: Dockerfile.companion
     restart: unless-stopped
     environment:
       PORT: "8080"
@@ -115,6 +117,8 @@ services:
       - "${COMPANION_GCP_ADC_HOST_PATH:-~/.config/gcloud/application_default_credentials.json}:/secrets/gcp-adc.json:ro"
     ports:
       - "${COMPANION_PORT:-18085}:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       companion-postgres:
         condition: service_healthy

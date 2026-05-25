@@ -10,7 +10,7 @@ source "$SCRIPT_DIR/../lib/common.sh"
 
 echo "=== Smoke: Companion → Nexus flow ==="
 
-wait_for_http "$API_BASE/healthz"
+wait_for_http "$API_BASE/readyz"
 wait_for_http "$COMPANION_BASE/readyz"
 pass "Nexus and Companion are up"
 

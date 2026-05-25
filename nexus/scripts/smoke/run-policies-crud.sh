@@ -7,7 +7,7 @@ source "$SCRIPT_DIR/../lib/common.sh"
 
 echo "=== Smoke: policies CRUD ==="
 
-wait_for_http "$API_BASE/healthz"
+wait_for_http "$API_BASE/readyz"
 
 # 1. Create
 P=$(api_post "/v1/policies" '{"name":"crud-test","expression":"true","effect":"allow","priority":50,"enabled":true}')

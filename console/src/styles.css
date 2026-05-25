@@ -61,19 +61,27 @@ input {
   gap: 6px;
 }
 
-.nav a {
+.nav button {
   display: flex;
   align-items: center;
   gap: 10px;
   color: #d8dee6;
   min-height: 40px;
   padding: 0 10px;
-  text-decoration: none;
   border-radius: 8px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
 }
 
-.nav a:hover {
+.nav button:hover {
   background: #1c252e;
+}
+
+.nav button.active {
+  background: #24313c;
+  color: #fff;
 }
 
 .nav svg,
@@ -185,6 +193,38 @@ h1 {
   margin: 14px 0;
 }
 
+.page-section {
+  display: grid;
+  gap: 14px;
+}
+
+.screen-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  border-bottom: 1px solid #dfe4ea;
+  padding-bottom: 10px;
+}
+
+.screen-nav button {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #cfd6dd;
+  border-radius: 8px;
+  background: #fff;
+  color: #17202a;
+  padding: 0 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.screen-nav button.active {
+  border-color: #56c2a4;
+  background: #eefaf6;
+  color: #0f604b;
+}
+
 .health,
 .scope-pill {
   display: inline-flex;
@@ -214,6 +254,16 @@ h1 {
 .panel-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   margin-top: 14px;
+}
+
+.screen-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+}
+
+.screen-grid.two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .panel {
@@ -351,12 +401,13 @@ th {
     overflow-x: auto;
   }
 
-  .nav a {
+  .nav button {
     min-width: max-content;
   }
 
   .metrics-grid,
-  .panel-grid {
+  .panel-grid,
+  .screen-grid.two {
     grid-template-columns: 1fr;
   }
 }

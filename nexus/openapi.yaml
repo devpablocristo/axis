@@ -5,6 +5,58 @@ info:
 servers:
   - url: http://localhost:18084
 paths:
+  /v1/metrics/summary:
+    get:
+      summary: Resumen operacional de métricas Nexus
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      responses:
+        "200": { description: Metrics summary }
+  /v1/requests/simulate:
+    post:
+      summary: Simula una request sin persistir aprobación ni audit row
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmitRequest"
+      responses:
+        "200":
+          description: Simulated decision
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimulateResponse"
+  /v1/requests/simulate/replay:
+    post:
+      summary: Re-ejecuta simulaciones sobre requests históricas
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      responses:
+        "200": { description: Replay simulation report }
+  /v1/requests/simulate/batch:
+    post:
+      summary: Simula múltiples requests en batch
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                requests:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/SubmitRequest"
+      responses:
+        "200": { description: Batch simulation report }
+  /v1/requests/simulate/approval:
+    post:
+      summary: Simula una decisión de aprobación/rechazo sobre una request pendiente
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      responses:
+        "200": { description: Approval simulation report }
   /v1/requests:
     post:
       summary: Evalua una request controlada
@@ -68,6 +120,23 @@ paths:
       responses:
         "204": { description: Result accepted }
         "409": { description: Request is not executable }
+  /v1/requests/{id}/attest:
+    post:
+      summary: Registra una attestation firmada sobre una ejecución
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "201": { description: Attestation stored }
+  /v1/requests/{id}/attestation:
+    get:
+      summary: Obtiene la attestation de una request
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Attestation }
+        "404": { description: Not found }
   /v1/requests/{id}/evidence:
     get:
       summary: Devuelve evidence pack firmado
@@ -76,6 +145,14 @@ paths:
         - $ref: "#/components/parameters/UUIDPath"
       responses:
         "200": { description: Evidence pack }
+  /v1/requests/{id}/replay:
+    get:
+      summary: Devuelve el replay auditable de una request
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Audit replay }
   /v1/requests/{id}/replay/verify:
     get:
       summary: Verifica integridad tamper-evident del replay
@@ -89,6 +166,372 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuditIntegrity"
+  /v1/policies:
+    get:
+      summary: Lista policies tenant-aware
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - in: query
+          name: archived
+          schema: { type: boolean }
+      responses:
+        "200": { description: Policy list }
+    post:
+      summary: Crea una policy
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Policy"
+      responses:
+        "201": { description: Policy created }
+  /v1/policies/{id}:
+    get:
+      summary: Obtiene una policy
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Policy }
+        "404": { description: Not found }
+    patch:
+      summary: Actualiza una policy
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Policy"
+      responses:
+        "200": { description: Policy updated }
+    delete:
+      summary: Elimina físicamente una policy archivada
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "204": { description: Policy deleted }
+  /v1/policies/{id}/archive:
+    post:
+      summary: Archiva una policy
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Policy archived }
+  /v1/policies/{id}/restore:
+    post:
+      summary: Restaura una policy archivada
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Policy restored }
+  /v1/approvals/pending:
+    get:
+      summary: Lista approvals pendientes tenant-aware
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      responses:
+        "200": { description: Pending approval list }
+  /v1/approvals/{id}/approve:
+    post:
+      summary: Aprueba una approval pendiente
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Approval accepted }
+  /v1/approvals/{id}/reject:
+    post:
+      summary: Rechaza una approval pendiente
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Approval rejected }
+  /v1/action-types:
+    get:
+      summary: Lista action types registrados
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      responses:
+        "200": { description: Action type list }
+    post:
+      summary: Registra un action type
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ActionType"
+      responses:
+        "201": { description: Action type created }
+  /v1/action-types/{id}:
+    get:
+      summary: Obtiene un action type
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Action type }
+    patch:
+      summary: Actualiza un action type
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Action type updated }
+    delete:
+      summary: Elimina un action type
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "204": { description: Action type deleted }
+  /v1/delegations:
+    get:
+      summary: Lista delegations
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      responses:
+        "200": { description: Delegation list }
+    post:
+      summary: Crea una delegation
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      responses:
+        "201": { description: Delegation created }
+  /v1/delegations/{id}:
+    get:
+      summary: Obtiene una delegation
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Delegation }
+    patch:
+      summary: Actualiza una delegation
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Delegation updated }
+    delete:
+      summary: Elimina una delegation
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "204": { description: Delegation deleted }
+  /v1/rbac/assignments:
+    get:
+      summary: Lista asignaciones RBAC
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      responses:
+        "200": { description: RBAC assignment list }
+    post:
+      summary: Crea una asignación RBAC
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      responses:
+        "201": { description: RBAC assignment created }
+  /v1/rbac/assignments/{id}:
+    get:
+      summary: Obtiene una asignación RBAC
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: RBAC assignment }
+    delete:
+      summary: Elimina una asignación RBAC
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "204": { description: RBAC assignment deleted }
+  /v1/rbac/assignments/{id}/archive:
+    post:
+      summary: Archiva una asignación RBAC
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: RBAC assignment archived }
+  /v1/rbac/assignments/{id}/restore:
+    post:
+      summary: Restaura una asignación RBAC
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: RBAC assignment restored }
+  /v1/rbac/check:
+    get:
+      summary: Evalúa permisos RBAC para un principal
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      responses:
+        "200": { description: RBAC check result }
+  /v1/config:
+    get:
+      summary: Obtiene configuración runtime de Nexus
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      responses:
+        "200": { description: Nexus config }
+    patch:
+      summary: Actualiza configuración runtime de Nexus
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      responses:
+        "200": { description: Nexus config updated }
+  /v1/config/{section}:
+    patch:
+      summary: Actualiza una sección de configuración runtime
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: section
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Nexus config section updated }
+  /v1/config/reset:
+    post:
+      summary: Resetea configuración runtime a defaults seguros
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      responses:
+        "200": { description: Nexus config reset }
+  /v1/learning/proposals:
+    get:
+      summary: Lista propuestas de aprendizaje governance
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      responses:
+        "200": { description: Learning proposal list }
+    post:
+      summary: Crea una propuesta de aprendizaje
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      responses:
+        "201": { description: Learning proposal created }
+  /v1/learning/proposals/{id}:
+    get:
+      summary: Obtiene una propuesta de aprendizaje
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Learning proposal }
+  /v1/learning/proposals/{id}/accept:
+    post:
+      summary: Acepta una propuesta de aprendizaje
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Learning proposal accepted }
+  /v1/learning/proposals/{id}/dismiss:
+    post:
+      summary: Descarta una propuesta de aprendizaje
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Learning proposal dismissed }
+  /v1/learning/analyze:
+    post:
+      summary: Analiza historial governance para sugerir mejoras
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      responses:
+        "200": { description: Learning analysis }
+  /v1/finding-rules:
+    get:
+      summary: Lista reglas de findings
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      responses:
+        "200": { description: Finding rule list }
+    post:
+      summary: Crea o actualiza una regla de findings
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      responses:
+        "201": { description: Finding rule stored }
+  /v1/finding-rules/archived:
+    get:
+      summary: Lista reglas de findings archivadas
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      responses:
+        "200": { description: Archived finding rule list }
+  /v1/finding-rules/{id}:
+    get:
+      summary: Obtiene una regla de findings
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Finding rule }
+    patch:
+      summary: Actualiza una regla de findings
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Finding rule updated }
+  /v1/finding-rules/{id}/archive:
+    post:
+      summary: Archiva una regla de findings
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "204": { description: Finding rule archived }
+  /v1/finding-rules/{id}/restore:
+    post:
+      summary: Restaura una regla de findings
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Finding rule restored }
+  /v1/finding-rules/{id}/hard:
+    delete:
+      summary: Elimina físicamente una regla archivada de findings
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "204": { description: Finding rule hard deleted }
+  /v1/fact-evaluations:
+    post:
+      summary: Evalúa facts contra reglas de findings
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      responses:
+        "201": { description: Fact evaluation submitted }
+  /v1/fact-evaluations/{id}:
+    get:
+      summary: Obtiene una evaluación de facts
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Fact evaluation }
+  /v1/findings:
+    get:
+      summary: Lista findings
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      responses:
+        "200": { description: Finding list }
+  /v1/findings/{id}:
+    get:
+      summary: Obtiene un finding
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Finding }
+    patch:
+      summary: Actualiza estado/resolución de un finding
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Finding updated }
   /v1/governance/contracts:
     get:
       summary: Lista contratos de gobierno versionados
@@ -281,6 +724,30 @@ components:
       required: true
       schema: { type: string, format: uuid }
   schemas:
+    Policy:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        org_id: { type: string }
+        name: { type: string }
+        action_type: { type: string }
+        effect: { type: string, enum: [allow, deny, require_approval] }
+        mode: { type: string, enum: [enforced, shadow] }
+        expression: { type: string }
+        enabled: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ActionType:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        org_id: { type: string }
+        name: { type: string }
+        display_name: { type: string }
+        category: { type: string }
+        risk_class: { type: string }
+        requires_break_glass: { type: boolean }
+        enabled: { type: boolean }
     ToolIntent:
       type: object
       required:
@@ -349,6 +816,19 @@ components:
           properties:
             id: { type: string, format: uuid }
             expires_at: { type: string, format: date-time }
+    SimulateResponse:
+      type: object
+      required: [decision, risk_level, status, would_require_approval]
+      properties:
+        decision: { type: string, enum: [allow, deny, require_approval] }
+        risk_level: { type: string }
+        decision_reason: { type: string }
+        status:
+          type: string
+          enum: [allowed, denied, pending_approval]
+        would_require_approval: { type: boolean }
+        policy_matched: { type: boolean }
+        risk_assessment: { type: object, additionalProperties: true }
     Request:
       allOf:
         - $ref: "#/components/schemas/SubmitResponse"

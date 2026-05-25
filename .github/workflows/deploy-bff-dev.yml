@@ -2,7 +2,7 @@ name: Deploy BFF DEV
 
 on:
   push:
-    branches: [main, develop]
+    branches: [develop]
     paths:
       - "bff/**"
       - "Dockerfile.bff"
@@ -12,7 +12,7 @@ on:
       ref:
         description: "Branch or ref to deploy"
         required: false
-        default: "main"
+        default: "develop"
 
 permissions:
   contents: read
@@ -34,7 +34,7 @@ jobs:
       ARTIFACT_REGISTRY: ${{ vars.ARTIFACT_REGISTRY }}
       CLOUD_RUN_SERVICE_ACCOUNT: ${{ vars.AXIS_BFF_CLOUD_RUN_SERVICE_ACCOUNT_DEV || vars.CLOUD_RUN_SERVICE_ACCOUNT_DEV }}
       IMAGE_NAME: ${{ vars.AXIS_BFF_IMAGE_NAME_DEV || 'axis-bff' }}
-      SERVICE_NAME: ${{ vars.AXIS_BFF_CLOUD_RUN_SERVICE_NAME_DEV || 'axis-bff-dev' }}
+      SERVICE_NAME: ${{ vars.AXIS_BFF_CLOUD_RUN_SERVICE_NAME_DEV || 'axis-bff' }}
       SECRET_INTERNAL_JWT_NAME: ${{ vars.AXIS_INTERNAL_JWT_SECRET_NAME_DEV || 'axis-internal-jwt-secret' }}
 
     steps:
