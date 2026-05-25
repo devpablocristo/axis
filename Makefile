@@ -12,8 +12,7 @@ test: hygiene test-companion test-nexus test-bff
 qa: hygiene qa-companion qa-nexus test-bff test-console
 
 hygiene:
-	@python3 -c 'import pathlib,sys; roots=[pathlib.Path("companion"),pathlib.Path("nexus")]; banned_names={".cursor",".claude",".air.toml",".env.example",".dockerignore",".gitignore","renovate.json","AGENTS.md","CLAUDE.md"}; bad=[]; [bad.append(str(p)) for r in roots for p in r.iterdir() if p.name in banned_names]; [bad.append(str(p)) for r in roots for p in r.glob("*.md") if p.name!="README.md"]; [bad.append(str(p)) for r in roots for p in r.rglob("*") if p.name=="Makefile" or p.name.startswith("Dockerfile") or p.name.startswith("docker-compose")]; print("\n".join(bad)); sys.exit(1 if bad else 0)'
-	@python3 -c 'import subprocess,sys; ac="apps/"+"console"; deny=["infra/"+ "docker","Cl"+"erk","VITE_"+"CLERK","COMPANION_"+"CONSOLE_PORT","NEXUS_"+"CONSOLE_PORT","Companion "+"UI","Nexus "+"console","axis/"+ac,ac,"130"+"01","130"+"02"]; cmd=["rg","-n","--hidden","|".join(deny),".","-g","!.git/**","-g","!**/node_modules/**","-g","!**/dist/**","-g","!Makefile"]; out=subprocess.run(cmd,text=True,capture_output=True); print(out.stdout,end=""); sys.exit(1 if out.stdout else 0)'
+	@python3 scripts/quality/hygiene.py
 
 check-companion:
 	cd companion && bash scripts/quality/check-migrations.sh
