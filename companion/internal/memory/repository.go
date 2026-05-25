@@ -36,6 +36,9 @@ const selectMemory = `
 // Upsert crea o actualiza una entrada de memoria con versión optimista.
 func (r *PostgresRepository) Upsert(ctx context.Context, e domain.MemoryEntry) (domain.MemoryEntry, error) {
 	now := time.Now().UTC()
+	if e.PoisoningFlags == nil {
+		e.PoisoningFlags = []string{}
+	}
 
 	if e.Version == 0 {
 		// Insert nuevo
