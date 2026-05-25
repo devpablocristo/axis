@@ -10,9 +10,9 @@ import (
 	policydto "github.com/devpablocristo/nexus/internal/policies/handler/dto"
 	policydomain "github.com/devpablocristo/nexus/internal/policies/usecases/domain"
 	requesteval "github.com/devpablocristo/nexus/internal/requests"
+	"github.com/devpablocristo/platform/authn/go/identityhttp"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
 	"github.com/devpablocristo/platform/http/go/httpjson"
-	"github.com/devpablocristo/platform/authn/go/identityhttp"
 	"github.com/google/uuid"
 )
 
@@ -27,14 +27,27 @@ type policyUsecase interface {
 	DeleteByID(ctx context.Context, id uuid.UUID) error
 	ArchiveByID(ctx context.Context, id uuid.UUID) error
 	RestoreByID(ctx context.Context, id uuid.UUID) error
+	RequestPromotion(ctx context.Context, legacyPolicyID uuid.UUID, toVersionID uuid.UUID, actorID, reason string, dryRunReport map[string]any) (PolicyPromotion, error)
+	ApprovePromotion(ctx context.Context, promotionID uuid.UUID, actorID string) (PolicyPromotion, error)
+	EnforcePromotion(ctx context.Context, promotionID uuid.UUID, actorID string) (PolicyPromotion, error)
+	RollbackPromotion(ctx context.Context, promotionID uuid.UUID, actorID, reason string) (PolicyPromotion, error)
+	ListPromotions(ctx context.Context, legacyPolicyID uuid.UUID) ([]PolicyPromotion, error)
+	GetPromotion(ctx context.Context, promotionID uuid.UUID) (PolicyPromotion, error)
+	ListChangelog(ctx context.Context, legacyPolicyID uuid.UUID) ([]PolicyChangelogEntry, error)
+}
+
+type policyLifecycleUsecase interface {
+	ListVersions(ctx context.Context, id uuid.UUID) ([]PolicyVersion, error)
 }
 
 type Handler struct {
-	uc policyUsecase
+	uc        policyUsecase
+	lifecycle policyLifecycleUsecase
 }
 
 func NewHandler(uc policyUsecase) *Handler {
-	return &Handler{uc: uc}
+	lifecycle, _ := uc.(policyLifecycleUsecase)
+	return &Handler{uc: uc, lifecycle: lifecycle}
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
@@ -45,6 +58,13 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /v1/policies/{id}", h.deleteByID)
 	mux.HandleFunc("POST /v1/policies/{id}/archive", h.archiveByID)
 	mux.HandleFunc("POST /v1/policies/{id}/restore", h.restoreByID)
+	mux.HandleFunc("GET /v1/policies/{id}/versions", h.listVersions)
+	mux.HandleFunc("GET /v1/policies/{id}/changelog", h.listChangelog)
+	mux.HandleFunc("GET /v1/policies/{id}/promotions", h.listPromotions)
+	mux.HandleFunc("POST /v1/policies/{id}/promotions", h.requestPromotion)
+	mux.HandleFunc("POST /v1/policy-promotions/{id}/approve", h.approvePromotion)
+	mux.HandleFunc("POST /v1/policy-promotions/{id}/enforce", h.enforcePromotion)
+	mux.HandleFunc("POST /v1/policy-promotions/{id}/rollback", h.rollbackPromotion)
 }
 
 func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
@@ -238,6 +258,51 @@ func (h *Handler) deleteByID(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (h *Handler) listVersions(w http.ResponseWriter, r *http.Request) {
+	if !requireScope(w, r, scopeNexusPoliciesAdmin) {
+		return
+	}
+	if h.lifecycle == nil {
+		httpjson.WriteFlatError(w, http.StatusNotImplemented, "NOT_IMPLEMENTED", "policy lifecycle is not available")
+		return
+	}
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid id")
+		return
+	}
+	p, err := h.uc.GetByID(r.Context(), id)
+	if err != nil {
+		writePolicyUsecaseError(w, err)
+		return
+	}
+	if !canAccessPolicyOrg(r, p) {
+		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "policy org is not readable for this principal")
+		return
+	}
+	versions, err := h.lifecycle.ListVersions(r.Context(), id)
+	if err != nil {
+		writePolicyUsecaseError(w, err)
+		return
+	}
+	out := make([]map[string]any, 0, len(versions))
+	for _, version := range versions {
+		out = append(out, map[string]any{
+			"id":           version.ID.String(),
+			"version":      version.Version,
+			"status":       version.Status,
+			"mode":         version.Mode,
+			"enabled":      version.Enabled,
+			"effect":       version.Effect,
+			"priority":     version.Priority,
+			"content_hash": version.ContentHash,
+			"created_by":   version.CreatedBy,
+			"created_at":   version.CreatedAt.Format(time.RFC3339),
+		})
+	}
+	httpjson.WriteJSON(w, http.StatusOK, map[string]any{"data": out})
+}
+
 func (h *Handler) archiveByID(w http.ResponseWriter, r *http.Request) {
 	if !requireScope(w, r, scopeNexusPoliciesAdmin) {
 		return
@@ -277,8 +342,8 @@ func (h *Handler) restoreByID(w http.ResponseWriter, r *http.Request) {
 		writePolicyUsecaseError(w, err)
 		return
 	}
-	if !canAccessPolicyOrg(r, p) {
-		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "policy org is not allowed for this principal")
+	if !canWritePolicyOrg(r, p) {
+		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "policy org is not writable for this principal")
 		return
 	}
 	if err := h.uc.RestoreByID(r.Context(), id); err != nil {
@@ -286,6 +351,177 @@ func (h *Handler) restoreByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+type promotionRequestBody struct {
+	ToVersionID  string         `json:"to_version_id"`
+	Reason       string         `json:"reason,omitempty"`
+	DryRunReport map[string]any `json:"dry_run_report"`
+}
+
+type rollbackPromotionBody struct {
+	Reason string `json:"reason,omitempty"`
+}
+
+func (h *Handler) listPromotions(w http.ResponseWriter, r *http.Request) {
+	if !requireScope(w, r, scopeNexusPoliciesAdmin) {
+		return
+	}
+	policyID, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid id")
+		return
+	}
+	p, err := h.uc.GetByID(r.Context(), policyID)
+	if err != nil {
+		writePolicyUsecaseError(w, err)
+		return
+	}
+	if !canAccessPolicyOrg(r, p) {
+		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "policy org is not readable for this principal")
+		return
+	}
+	list, err := h.uc.ListPromotions(r.Context(), policyID)
+	if err != nil {
+		writePolicyUsecaseError(w, err)
+		return
+	}
+	httpjson.WriteJSON(w, http.StatusOK, map[string]any{"data": list})
+}
+
+func (h *Handler) listChangelog(w http.ResponseWriter, r *http.Request) {
+	if !requireScope(w, r, scopeNexusPoliciesAdmin) {
+		return
+	}
+	policyID, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid id")
+		return
+	}
+	p, err := h.uc.GetByID(r.Context(), policyID)
+	if err != nil {
+		writePolicyUsecaseError(w, err)
+		return
+	}
+	if !canAccessPolicyOrg(r, p) {
+		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "policy org is not readable for this principal")
+		return
+	}
+	entries, err := h.uc.ListChangelog(r.Context(), policyID)
+	if err != nil {
+		writePolicyUsecaseError(w, err)
+		return
+	}
+	out := make([]policydto.PolicyChangelogResponse, 0, len(entries))
+	for _, entry := range entries {
+		out = append(out, toPolicyChangelogResponse(entry))
+	}
+	httpjson.WriteJSON(w, http.StatusOK, map[string]any{"data": out})
+}
+
+func (h *Handler) requestPromotion(w http.ResponseWriter, r *http.Request) {
+	if !requireScope(w, r, scopeNexusPoliciesAdmin) {
+		return
+	}
+	policyID, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid id")
+		return
+	}
+	p, err := h.uc.GetByID(r.Context(), policyID)
+	if err != nil {
+		writePolicyUsecaseError(w, err)
+		return
+	}
+	if !canWritePolicyOrg(r, p) {
+		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "policy org is not writable for this principal")
+		return
+	}
+	var body promotionRequestBody
+	if err := httpjson.DecodeJSON(r, &body); err != nil {
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid json")
+		return
+	}
+	toVersionID, err := uuid.Parse(strings.TrimSpace(body.ToVersionID))
+	if err != nil {
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid to_version_id")
+		return
+	}
+	promotion, err := h.uc.RequestPromotion(r.Context(), policyID, toVersionID, policyActorID(r), body.Reason, body.DryRunReport)
+	if err != nil {
+		writePolicyUsecaseError(w, err)
+		return
+	}
+	httpjson.WriteJSON(w, http.StatusCreated, promotion)
+}
+
+func (h *Handler) approvePromotion(w http.ResponseWriter, r *http.Request) {
+	h.withPromotionWrite(w, r, func(id uuid.UUID) (PolicyPromotion, error) {
+		return h.uc.ApprovePromotion(r.Context(), id, policyActorID(r))
+	})
+}
+
+func (h *Handler) enforcePromotion(w http.ResponseWriter, r *http.Request) {
+	h.withPromotionWrite(w, r, func(id uuid.UUID) (PolicyPromotion, error) {
+		return h.uc.EnforcePromotion(r.Context(), id, policyActorID(r))
+	})
+}
+
+func (h *Handler) rollbackPromotion(w http.ResponseWriter, r *http.Request) {
+	if !requireScope(w, r, scopeNexusPoliciesAdmin) {
+		return
+	}
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid id")
+		return
+	}
+	var body rollbackPromotionBody
+	if err := httpjson.DecodeJSON(r, &body); err != nil {
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid json")
+		return
+	}
+	promotion, err := h.uc.GetPromotion(r.Context(), id)
+	if err != nil {
+		writePolicyUsecaseError(w, err)
+		return
+	}
+	if !canWritePromotionOrg(r, promotion) {
+		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "policy promotion org is not writable for this principal")
+		return
+	}
+	out, err := h.uc.RollbackPromotion(r.Context(), id, policyActorID(r), body.Reason)
+	if err != nil {
+		writePolicyUsecaseError(w, err)
+		return
+	}
+	httpjson.WriteJSON(w, http.StatusOK, out)
+}
+
+func (h *Handler) withPromotionWrite(w http.ResponseWriter, r *http.Request, fn func(uuid.UUID) (PolicyPromotion, error)) {
+	if !requireScope(w, r, scopeNexusPoliciesAdmin) {
+		return
+	}
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid id")
+		return
+	}
+	promotion, err := h.uc.GetPromotion(r.Context(), id)
+	if err != nil {
+		writePolicyUsecaseError(w, err)
+		return
+	}
+	if !canWritePromotionOrg(r, promotion) {
+		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "policy promotion org is not writable for this principal")
+		return
+	}
+	out, err := fn(id)
+	if err != nil {
+		writePolicyUsecaseError(w, err)
+		return
+	}
+	httpjson.WriteJSON(w, http.StatusOK, out)
 }
 
 // --- Helpers ---
@@ -327,9 +563,54 @@ func stringPtrValue(value *string) string {
 	return strings.TrimSpace(*value)
 }
 
+func toPolicyChangelogResponse(entry PolicyChangelogEntry) policydto.PolicyChangelogResponse {
+	var versionID *string
+	if entry.PolicyVersionID != nil {
+		id := entry.PolicyVersionID.String()
+		versionID = &id
+	}
+	data := entry.Data
+	if data == nil {
+		data = map[string]any{}
+	}
+	return policydto.PolicyChangelogResponse{
+		ID:               entry.ID.String(),
+		PolicyArtifactID: entry.PolicyArtifactID.String(),
+		PolicyVersionID:  versionID,
+		ActorID:          entry.ActorID,
+		Action:           entry.Action,
+		Summary:          entry.Summary,
+		Data:             data,
+		CreatedAt:        entry.CreatedAt.Format(time.RFC3339),
+	}
+}
+
+func canWritePromotionOrg(r *http.Request, promotion PolicyPromotion) bool {
+	if identityhttp.HasNoAuthContext(r) || identityhttp.HasScope(r, scopeNexusCrossOrg) {
+		return true
+	}
+	orgID := identityhttp.PrincipalOrgID(r)
+	return orgID != "" && promotion.OrgID != nil && strings.TrimSpace(*promotion.OrgID) == orgID
+}
+
+func policyActorID(r *http.Request) string {
+	if ctx := identityhttp.FromRequest(r); strings.TrimSpace(ctx.Actor) != "" {
+		return strings.TrimSpace(ctx.Actor)
+	}
+	return "system"
+}
+
 func writePolicyUsecaseError(w http.ResponseWriter, err error) {
 	if domainerr.IsNotFound(err) {
 		httpjson.WriteFlatError(w, http.StatusNotFound, "NOT_FOUND", "policy not found")
+		return
+	}
+	if domainerr.IsValidation(err) {
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", err.Error())
+		return
+	}
+	if domainerr.IsConflict(err) {
+		httpjson.WriteFlatError(w, http.StatusConflict, "CONFLICT", err.Error())
 		return
 	}
 	if errors.Is(err, ErrArchived) {

@@ -53,6 +53,11 @@ func main() {
 		PendingCallbackURLs:  splitCSV(os.Getenv("NEXUS_APPROVAL_PENDING_CALLBACK_URLS")),
 		ResolvedCallbackURLs: splitCSV(os.Getenv("NEXUS_APPROVAL_RESOLVED_CALLBACK_URLS")),
 		MigrationFiles:       migrations.Files,
+		TracingExporter:      os.Getenv("NEXUS_TRACING_EXPORTER"),
+		TracingEndpoint:      os.Getenv("NEXUS_OTEL_EXPORTER_OTLP_ENDPOINT"),
+		TracingInsecure:      envBool("NEXUS_OTEL_EXPORTER_OTLP_INSECURE"),
+		TracingSampleRatio:   envFloat("NEXUS_TRACING_SAMPLE_RATIO"),
+		Environment:          firstNonEmptyEnv("NEXUS_ENV", "APP_ENV", "ENVIRONMENT"),
 	}
 	if cfg.APIKeys == "" {
 		logger.Error("NEXUS_API_KEYS is required")
@@ -99,4 +104,34 @@ func splitCSV(raw string) []string {
 		}
 	}
 	return out
+}
+
+func envBool(key string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(key))) {
+	case "1", "true", "yes", "y", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+func envFloat(key string) float64 {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return 0
+	}
+	value, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return 0
+	}
+	return value
+}
+
+func firstNonEmptyEnv(keys ...string) string {
+	for _, key := range keys {
+		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+			return value
+		}
+	}
+	return ""
 }

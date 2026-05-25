@@ -95,6 +95,13 @@ func (u *Usecases) Approve(ctx context.Context, approvalID uuid.UUID, decidedBy,
 	if !a.ExpiresAt.IsZero() && !now.Before(a.ExpiresAt) {
 		return ErrExpired
 	}
+	req, err := u.requestRepo.GetByID(ctx, a.RequestID)
+	if err != nil {
+		return fmt.Errorf("get request for approval: %w", err)
+	}
+	if violatesSeparationOfDuties(req, decidedBy) {
+		return ErrSeparationDuty
+	}
 
 	if a.BreakGlass {
 		// Acá ya tenemos lock: el snapshot a.Decisions refleja el último
@@ -133,10 +140,6 @@ func (u *Usecases) Approve(ctx context.Context, approvalID uuid.UUID, decidedBy,
 	a.DecisionNote = note
 	a.DecidedAt = &now
 
-	req, err := u.requestRepo.GetByID(ctx, a.RequestID)
-	if err != nil {
-		return fmt.Errorf("get request for approval: %w", err)
-	}
 	req.Status = requestdomain.StatusApproved
 	req.DecidedAt = &now
 	req.UpdatedAt = now
@@ -195,6 +198,9 @@ func (u *Usecases) Reject(ctx context.Context, approvalID uuid.UUID, decidedBy, 
 	if err != nil {
 		return fmt.Errorf("get request for rejection: %w", err)
 	}
+	if violatesSeparationOfDuties(req, decidedBy) {
+		return ErrSeparationDuty
+	}
 	req.Status = requestdomain.StatusRejected
 	req.DecidedAt = &now
 	req.UpdatedAt = now
@@ -222,6 +228,13 @@ func (u *Usecases) approveDirect(ctx context.Context, approvalID uuid.UUID, deci
 	now := time.Now().UTC()
 	if !a.ExpiresAt.IsZero() && !now.Before(a.ExpiresAt) {
 		return ErrExpired
+	}
+	req, err := u.requestRepo.GetByID(ctx, a.RequestID)
+	if err != nil {
+		return fmt.Errorf("get request for approval: %w", err)
+	}
+	if violatesSeparationOfDuties(req, decidedBy) {
+		return ErrSeparationDuty
 	}
 	if a.BreakGlass {
 		for _, d := range a.Decisions {
@@ -258,10 +271,6 @@ func (u *Usecases) approveDirect(ctx context.Context, approvalID uuid.UUID, deci
 	a.DecidedAt = &now
 	if _, err := u.repo.Update(ctx, a); err != nil {
 		return fmt.Errorf("update approval: %w", err)
-	}
-	req, err := u.requestRepo.GetByID(ctx, a.RequestID)
-	if err != nil {
-		return fmt.Errorf("get request for approval: %w", err)
 	}
 	req.Status = requestdomain.StatusApproved
 	req.DecidedAt = &now
@@ -307,6 +316,9 @@ func (u *Usecases) rejectDirect(ctx context.Context, approvalID uuid.UUID, decid
 	req, err := u.requestRepo.GetByID(ctx, a.RequestID)
 	if err != nil {
 		return fmt.Errorf("get request for rejection: %w", err)
+	}
+	if violatesSeparationOfDuties(req, decidedBy) {
+		return ErrSeparationDuty
 	}
 	req.Status = requestdomain.StatusRejected
 	req.DecidedAt = &now
@@ -367,4 +379,9 @@ func timePtrRFC3339(value *time.Time) *string {
 	}
 	formatted := value.UTC().Format(time.RFC3339Nano)
 	return &formatted
+}
+
+func violatesSeparationOfDuties(req requestdomain.Request, decidedBy string) bool {
+	requesterID := strings.TrimSpace(req.RequesterID)
+	return requesterID != "" && requesterID == strings.TrimSpace(decidedBy)
 }

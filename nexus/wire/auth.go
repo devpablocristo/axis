@@ -28,6 +28,9 @@ func init() {
 			"nexus:evidence:write",
 			"nexus:findings:read",
 			"nexus:findings:write",
+			"nexus:contracts:admin",
+			"nexus:ops:read",
+			"nexus:ops:admin",
 			"nexus:cross_org",
 		},
 	})

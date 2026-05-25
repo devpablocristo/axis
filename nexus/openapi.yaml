@@ -76,6 +76,194 @@ paths:
         - $ref: "#/components/parameters/UUIDPath"
       responses:
         "200": { description: Evidence pack }
+  /v1/requests/{id}/replay/verify:
+    get:
+      summary: Verifica integridad tamper-evident del replay
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200":
+          description: Audit integrity verification
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditIntegrity"
+  /v1/governance/contracts:
+    get:
+      summary: Lista contratos de gobierno versionados
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      responses:
+        "200": { description: Governance contract list }
+    post:
+      summary: Crea o actualiza un contrato de gobierno
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GovernanceContract"
+      responses:
+        "201": { description: Governance contract stored }
+  /v1/governance/contracts/validate:
+    post:
+      summary: Valida un payload contra un contrato activo
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ContractValidationRequest"
+      responses:
+        "200":
+          description: Validation report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContractValidationResponse"
+  /v1/policies/{id}/versions:
+    get:
+      summary: Lista versiones inmutables lifecycle v2 de una policy
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Policy version list }
+  /v1/policies/{id}/changelog:
+    get:
+      summary: Lista eventos auditables del lifecycle de una policy
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Policy changelog list }
+  /v1/policies/{id}/promotions:
+    get:
+      summary: Lista promociones gobernadas de una policy
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Policy promotion list }
+    post:
+      summary: Solicita una promocion gobernada de policy
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PolicyPromotionRequest"
+      responses:
+        "201": { description: Policy promotion requested }
+  /v1/policy-promotions/{id}/approve:
+    post:
+      summary: Aprueba una promocion de policy con separation of duties
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Policy promotion approved }
+  /v1/policy-promotions/{id}/enforce:
+    post:
+      summary: Aplica una promocion de policy aprobada
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Policy promotion enforced }
+  /v1/policy-promotions/{id}/rollback:
+    post:
+      summary: Revierte una promocion de policy hacia su version anterior
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string }
+      responses:
+        "200": { description: Policy promotion rolled back }
+  /v1/ops/governance/summary:
+    get:
+      summary: Diagnostico operativo de governance
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      responses:
+        "200":
+          description: Governance operational summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GovernanceOpsSummary"
+  /v1/ops/callback-deliveries:
+    get:
+      summary: Lista entregas outbox/DLQ de callbacks
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - in: query
+          name: status
+          schema: { type: string }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 100, maximum: 500 }
+      responses:
+        "200": { description: Callback delivery list }
+  /v1/ops/callback-deliveries/{id}/retry:
+    post:
+      summary: Reencola una callback delivery de forma auditada
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Callback delivery queued }
+  /v1/ops/legal-holds:
+    get:
+      summary: Lista legal holds de governance
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      responses:
+        "200": { description: Legal hold list }
+    post:
+      summary: Crea un legal hold
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LegalHoldRequest"
+      responses:
+        "201": { description: Legal hold created }
+  /v1/ops/exports:
+    get:
+      summary: Lista export jobs de governance
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      responses:
+        "200": { description: Export job list }
+    post:
+      summary: Crea un export manifest verificable
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GovernanceExportRequest"
+      responses:
+        "201": { description: Export job created }
+  /v1/ops/reconciliation/run:
+    post:
+      summary: Ejecuta reconciliacion operacional de Nexus
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      responses:
+        "201": { description: Reconciliation report }
 components:
   securitySchemes:
     apiKeyAuth:
@@ -182,3 +370,84 @@ components:
         result: { type: object, additionalProperties: true }
         duration_ms: { type: integer }
         error_message: { type: string }
+    AuditIntegrity:
+      type: object
+      required: [status, checked_events]
+      properties:
+        status: { type: string, enum: [ok, failed] }
+        checked_events: { type: integer }
+        first_hash: { type: string }
+        last_hash: { type: string }
+        error: { type: string }
+    GovernanceContract:
+      type: object
+      required: [name, version, schema]
+      properties:
+        org_id: { type: string }
+        name: { type: string }
+        version: { type: string }
+        subject_type: { type: string }
+        schema: { type: object, additionalProperties: true }
+        status: { type: string, enum: [draft, active, deprecated, archived] }
+        validation_mode: { type: string, enum: [report_only, enforce] }
+        compatibility: { type: string }
+    ContractValidationRequest:
+      type: object
+      required: [name, payload]
+      properties:
+        org_id: { type: string }
+        name: { type: string }
+        subject_type: { type: string }
+        subject_id: { type: string }
+        payload: { type: object, additionalProperties: true }
+    ContractValidationResponse:
+      type: object
+      required: [contract_name, contract_version, mode, valid, payload_hash]
+      properties:
+        contract_name: { type: string }
+        contract_version: { type: string }
+        mode: { type: string, enum: [report_only, enforce] }
+        valid: { type: boolean }
+        errors:
+          type: array
+          items: { type: string }
+        payload_hash: { type: string }
+    GovernanceOpsSummary:
+      type: object
+      properties:
+        contracts_active: { type: integer }
+        contract_reports_failed: { type: integer }
+        callback_pending: { type: integer }
+        callback_dead: { type: integer }
+        callback_stuck: { type: integer }
+        audit_integrity_failed: { type: integer }
+        rate_limit_rules: { type: integer }
+        rate_limit_blocks_24h: { type: integer }
+        legal_holds_active: { type: integer }
+        exports_failed: { type: integer }
+        reconciliation_critical: { type: integer }
+        reconciliation_last_status: { type: string }
+    PolicyPromotionRequest:
+      type: object
+      required: [to_version_id, dry_run_report]
+      properties:
+        to_version_id: { type: string, format: uuid }
+        reason: { type: string }
+        dry_run_report: { type: object, additionalProperties: true }
+    LegalHoldRequest:
+      type: object
+      required: [subject_type, reason]
+      properties:
+        org_id: { type: string }
+        subject_type: { type: string }
+        subject_id: { type: string }
+        reason: { type: string }
+    GovernanceExportRequest:
+      type: object
+      required: [export_type]
+      properties:
+        org_id: { type: string }
+        export_type: { type: string, enum: [audit, evidence, replay, governance_bundle] }
+        subject_type: { type: string }
+        subject_id: { type: string }
+        manifest: { type: object, additionalProperties: true }

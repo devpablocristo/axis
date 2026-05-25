@@ -45,3 +45,14 @@ type PolicyResponse struct {
 	CreatedAt    string  `json:"created_at"`
 	UpdatedAt    string  `json:"updated_at"`
 }
+
+type PolicyChangelogResponse struct {
+	ID               string         `json:"id"`
+	PolicyArtifactID string         `json:"policy_artifact_id"`
+	PolicyVersionID  *string        `json:"policy_version_id,omitempty"`
+	ActorID          string         `json:"actor_id"`
+	Action           string         `json:"action"`
+	Summary          string         `json:"summary"`
+	Data             map[string]any `json:"data"`
+	CreatedAt        string         `json:"created_at"`
+}

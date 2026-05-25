@@ -2,6 +2,8 @@ package requests
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -125,6 +127,60 @@ func (r *PostgresRepository) CreateWithApproval(ctx context.Context, req request
 	return req, approval, nil
 }
 
+func (r *PostgresRepository) RecordPolicySimulation(ctx context.Context, in ReplaySimulateInput, out ReplaySimulateOutput) (string, string, error) {
+	report := map[string]any{
+		"expression":             in.Expression,
+		"effect":                 in.Effect,
+		"limit":                  in.Limit,
+		"snapshot_quality":       firstNonEmpty(out.SnapshotQuality, "legacy"),
+		"total_evaluated":        out.TotalEvaluated,
+		"would_match":            out.WouldMatch,
+		"would_allow":            out.WouldAllow,
+		"would_deny":             out.WouldDeny,
+		"would_require_approval": out.WouldRequire,
+		"samples":                out.Samples,
+	}
+	raw, err := json.Marshal(report)
+	if err != nil {
+		return "", "", fmt.Errorf("marshal simulation report: %w", err)
+	}
+	sum := sha256.Sum256(raw)
+	reportHash := hex.EncodeToString(sum[:])
+	runID := uuid.New()
+	now := time.Now().UTC()
+	tx, err := r.db.Pool().Begin(ctx)
+	if err != nil {
+		return "", "", fmt.Errorf("begin policy simulation tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO policy_simulation_runs
+			(id, expression, effect, status, total_evaluated, would_match, would_allow,
+			 would_deny, would_require_approval, snapshot_quality, report_hash, requested_by, created_at, completed_at)
+		VALUES ($1,$2,$3,'completed',$4,$5,$6,$7,$8,$9,$10,'system',$11,$11)
+	`, runID, in.Expression, in.Effect, out.TotalEvaluated, out.WouldMatch, out.WouldAllow,
+		out.WouldDeny, out.WouldRequire, firstNonEmpty(out.SnapshotQuality, "legacy"), reportHash, now); err != nil {
+		return "", "", fmt.Errorf("insert policy simulation run: %w", err)
+	}
+	for _, sample := range out.Samples {
+		var requestID *uuid.UUID
+		if parsed, err := uuid.Parse(sample.RequestID); err == nil {
+			requestID = &parsed
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO policy_simulation_samples
+				(simulation_run_id, request_id, action_type, target_system, original_status, would_decide, changed)
+			VALUES ($1,$2,$3,$4,$5,$6,$7)
+		`, runID, requestID, sample.ActionType, sample.TargetSystem, sample.OriginalStatus, sample.WouldDecide, sample.Changed); err != nil {
+			return "", "", fmt.Errorf("insert policy simulation sample: %w", err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return "", "", fmt.Errorf("commit policy simulation tx: %w", err)
+	}
+	return runID.String(), reportHash, nil
+}
+
 type pgExecer interface {
 	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
 }
@@ -193,12 +249,45 @@ func insertApproval(ctx context.Context, execer pgExecer, approval approvaldomai
 	if err != nil {
 		return fmt.Errorf("insert approval: %w", err)
 	}
+	if approval.RequiredApprovals <= 0 {
+		approval.RequiredApprovals = 1
+	}
+	_, err = execer.Exec(ctx, `
+		INSERT INTO approval_plans
+			(approval_id, org_id, request_id, status, required_approvals, separation_of_duties, stages, constraints, created_at, updated_at)
+		VALUES ($1,$2,$3,'active',$4,true,$5,$6,$7,$7)
+		ON CONFLICT (approval_id) DO NOTHING
+	`, approval.ID, approval.OrgID, approval.RequestID, approval.RequiredApprovals,
+		`[{"name":"default","required_approvals":`+fmt.Sprint(approval.RequiredApprovals)+`}]`,
+		`{"separation_of_duties":true}`, approval.CreatedAt)
+	if err != nil {
+		return fmt.Errorf("insert approval plan: %w", err)
+	}
+	if approval.BreakGlass {
+		_, err = execer.Exec(ctx, `
+			INSERT INTO break_glass_reviews (approval_id, org_id, request_id, status, justification)
+			VALUES ($1,$2,$3,'pending',$4)
+			ON CONFLICT DO NOTHING
+		`, approval.ID, approval.OrgID, approval.RequestID, approval.DecisionNote)
+		if err != nil {
+			return fmt.Errorf("insert break-glass review: %w", err)
+		}
+	}
 	return nil
 }
 
 func isUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func (r *PostgresRepository) GetByID(ctx context.Context, id uuid.UUID) (requestdomain.Request, error) {

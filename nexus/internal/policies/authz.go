@@ -48,4 +48,3 @@ func canWritePolicyOrg(r *http.Request, policy policydomain.Policy) bool {
 	orgID := identityhttp.PrincipalOrgID(r)
 	return orgID != "" && policy.OrgID != nil && strings.TrimSpace(*policy.OrgID) == orgID
 }
-

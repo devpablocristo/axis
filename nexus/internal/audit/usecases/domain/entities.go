@@ -7,14 +7,20 @@ import (
 )
 
 type RequestEvent struct {
-	ID        uuid.UUID
-	RequestID uuid.UUID
-	EventType string
-	ActorType string
-	ActorID   string
-	Summary   string
-	Data      map[string]any
-	CreatedAt time.Time
+	ID             uuid.UUID
+	RequestID      uuid.UUID
+	EventType      string
+	ActorType      string
+	ActorID        string
+	Summary        string
+	Data           map[string]any
+	CreatedAt      time.Time
+	ChainScope     string
+	PreviousHash   string
+	PayloadHash    string
+	EventHash      string
+	SignatureKeyID string
+	Signature      string
 }
 
 const (

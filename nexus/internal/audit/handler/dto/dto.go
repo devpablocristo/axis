@@ -10,6 +10,7 @@ type ReplayResponse struct {
 	FinalStatus   string          `json:"final_status"`
 	DurationTotal string          `json:"duration_total,omitempty"`
 	Timeline      []TimelineEntry `json:"timeline"`
+	Integrity     *IntegrityInfo  `json:"integrity,omitempty"`
 }
 
 // RequesterInfo representa el solicitante en la respuesta.
@@ -24,4 +25,12 @@ type TimelineEntry struct {
 	Actor   string `json:"actor"`
 	At      string `json:"at"`
 	Summary string `json:"summary"`
+}
+
+type IntegrityInfo struct {
+	Status        string `json:"status"`
+	CheckedEvents int    `json:"checked_events"`
+	FirstHash     string `json:"first_hash,omitempty"`
+	LastHash      string `json:"last_hash,omitempty"`
+	Error         string `json:"error,omitempty"`
 }

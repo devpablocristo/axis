@@ -351,6 +351,10 @@ func (h *Handler) reportResult(w http.ResponseWriter, r *http.Request) {
 			httpjson.WriteFlatError(w, http.StatusConflict, "CONFLICT", "request is not executable")
 			return
 		}
+		if domainerr.IsForbidden(err) {
+			httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "request org is not allowed for this principal")
+			return
+		}
 		httpjson.WriteFlatInternalError(w, err, "report result failed")
 		return
 	}
