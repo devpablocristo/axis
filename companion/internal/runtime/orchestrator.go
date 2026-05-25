@@ -25,6 +25,7 @@ type Orchestrator struct {
 	traces          TraceRepository // opcional; nil = no persiste (uso en tests)
 	controls        RuntimeControls
 	observer        ObservabilityRecorder
+	costs           CostLedger
 	agents          AgentResolver
 	defaultAutonomy AutonomyLevel // "" → A2 (default conservador)
 	model           string
@@ -51,6 +52,10 @@ func (o *Orchestrator) SetRuntimeControls(repo RuntimeControls) {
 
 func (o *Orchestrator) SetObservabilityRecorder(repo ObservabilityRecorder) {
 	o.observer = repo
+}
+
+func (o *Orchestrator) SetCostLedger(ledger CostLedger) {
+	o.costs = ledger
 }
 
 func (o *Orchestrator) SetAgentResolver(resolver AgentResolver) {
@@ -127,6 +132,8 @@ func (o *Orchestrator) Run(ctx context.Context, in RunInput) (RunResult, error) 
 		}
 	}
 	modelName := firstNonEmpty(o.model, DefaultGeminiModel)
+	ctx, runSpan := startRunSpan(ctx, in.OrgID, productSurface, identity.AgentID, modelName)
+	defer runSpan.End()
 	policy := defaultRuntimePolicy(in.OrgID)
 	currentUsage := TenantRuntimeUsage{OrgID: in.OrgID, Period: runtimeUsagePeriod(time.Now())}
 	if o.controls != nil && in.OrgID != "" {
@@ -141,6 +148,33 @@ func (o *Orchestrator) Run(ctx context.Context, in RunInput) (RunResult, error) 
 			currentUsage = usage
 		} else {
 			slog.Error("runtime_usage_lookup_failed", "customer_org_id", in.OrgID, "period", currentUsage.Period, "error", err)
+		}
+	}
+	if policy.ControlPlane.MonthlyCostBudgetCents > 0 && o.costs != nil && in.OrgID != "" {
+		summary, err := o.costs.GetCostSummary(ctx, in.OrgID, currentUsage.Period, 1)
+		if err != nil {
+			slog.Error("runtime_cost_budget_lookup_failed", "customer_org_id", in.OrgID, "period", currentUsage.Period, "error", err)
+			policy.Enabled = false
+			policy.KillSwitch = true
+		} else if summary.EstimatedCostCents >= policy.ControlPlane.MonthlyCostBudgetCents {
+			trace := RunTrace{
+				RunID:          uuid.NewString(),
+				IdentityChain:  identity,
+				Intent:         route.Intent,
+				ProductSurface: route.Product,
+				AutonomyLevel:  route.Autonomy,
+				PromptVersion:  SystemPromptVersion,
+				Model:          modelName,
+				StartedAt:      time.Now().UTC(),
+				CompletedAt:    time.Now().UTC(),
+				GuardrailEvents: []GuardrailEvent{{
+					Type:   "tenant_runtime_budget",
+					Target: "cost",
+					Reason: "monthly cost budget exhausted",
+				}},
+			}
+			o.finishTrace(ctx, trace, in, "monthly_cost_budget_exhausted")
+			return RunResult{Reply: "La organización alcanzó el presupuesto mensual de costo para Companion.", Trace: trace}, nil
 		}
 	}
 	decision := applyRuntimePolicy(policy, currentUsage, route, modelName)
@@ -402,6 +436,8 @@ func (o *Orchestrator) finishTrace(ctx context.Context, trace RunTrace, in RunIn
 		"guardrail_events": len(trace.GuardrailEvents),
 	})
 	o.persistTrace(ctx, trace, in, errMsg)
+	recordRunMetrics(ctx, trace, in.OrgID)
+	o.recordCostEvents(ctx, trace, in)
 	if o.controls == nil || in.OrgID == "" {
 		return
 	}
@@ -420,6 +456,22 @@ func (o *Orchestrator) recordObservabilityEvent(ctx context.Context, trace RunTr
 	defer cancel()
 	if err := o.observer.RecordObservabilityEvent(recordCtx, newObservabilityEvent(trace, in, eventType, eventName, payload)); err != nil {
 		slog.Error("observability_event_record_failed", "run_id", trace.RunID, "event", eventName, "error", err)
+	}
+}
+
+func (o *Orchestrator) recordCostEvents(ctx context.Context, trace RunTrace, in RunInput) {
+	if o.costs == nil || strings.TrimSpace(in.OrgID) == "" {
+		return
+	}
+	recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+	defer cancel()
+	if err := o.costs.RecordCostEvent(recordCtx, costEventForRun(trace, in)); err != nil {
+		slog.Error("cost_event_record_failed", "run_id", trace.RunID, "event", "run", "error", err)
+	}
+	if len(trace.ToolCalls) > 0 {
+		if err := o.costs.RecordCostEvent(recordCtx, costEventForTools(trace, in)); err != nil {
+			slog.Error("cost_event_record_failed", "run_id", trace.RunID, "event", "tool", "error", err)
+		}
 	}
 }
 

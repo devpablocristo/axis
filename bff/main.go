@@ -284,7 +284,7 @@ func (s *server) selectedOrg(r *http.Request, p authn.Principal) (string, error)
 	if principalOrg != "" && requested == principalOrg {
 		return requested, nil
 	}
-	if hasScope(p.Scopes, "axis:cross_org", "nexus:cross_org") {
+	if hasScope(p.Scopes, "axis:cross_org", "nexus:cross_org", "companion:cross_org") {
 		return requested, nil
 	}
 	return "", errors.New("selected org is not allowed for this principal")
@@ -418,10 +418,22 @@ func requestID(r *http.Request) string {
 func defaultAdminScopes() []string {
 	return []string{
 		"axis:cross_org",
+		"companion:cross_org",
+		"companion:runtime:admin",
 		"companion:tasks:read",
 		"companion:tasks:write",
 		"companion:connectors:execute",
 		"companion:connectors:admin",
+		"companion:memory:read",
+		"companion:memory:write",
+		"companion:memory:admin",
+		"companion:capabilities:read",
+		"companion:capabilities:admin",
+		"companion:agents:read",
+		"companion:agents:admin",
+		"companion:observability:read",
+		"companion:costs:read",
+		"companion:evals:admin",
 		"companion:watchers:read",
 		"companion:watchers:write",
 		"companion:watchers:execute",

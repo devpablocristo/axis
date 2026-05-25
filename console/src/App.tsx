@@ -1,7 +1,7 @@
-import { Activity, Bot, CheckCircle2, DatabaseZap, FileClock, GitPullRequestArrow, KeyRound, Layers3, ListChecks, RefreshCw, ShieldCheck, Sparkles, UsersRound } from 'lucide-react'
+import { Activity, Bot, CheckCircle2, DatabaseZap, FileClock, GitPullRequestArrow, KeyRound, Layers3, ListChecks, Play, Power, RefreshCw, ShieldCheck, Sparkles, UsersRound } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ActionType, Approval, AxisSession, CompanionTask, Delegation, NexusRequest, Policy, RunTrace, ServiceHealth, axisFetch, getHealth, getSession } from './api'
+import { ActionType, Approval, AxisSession, BusinessModel, CapabilityRecord, CompanionAgent, CompanionJob, CompanionTask, CostSummary, Delegation, MemoryConflict, MemoryReview, MemorySummary, NexusRequest, ObservabilityEvent, Policy, RunTrace, RuntimePolicy, SecurityEvalReport, ServiceHealth, axisFetch, getHealth, getSession } from './api'
 
 type LoadState<T> = {
   data: T
@@ -22,6 +22,18 @@ export function App() {
   const [delegations, setDelegations] = useState<LoadState<Delegation[]>>(empty([]))
   const [tasks, setTasks] = useState<LoadState<CompanionTask[]>>(empty([]))
   const [traces, setTraces] = useState<LoadState<RunTrace[]>>(empty([]))
+  const [runtimePolicy, setRuntimePolicy] = useState<LoadState<RuntimePolicy | null>>(empty(null))
+  const [agents, setAgents] = useState<LoadState<CompanionAgent[]>>(empty([]))
+  const [capabilities, setCapabilities] = useState<LoadState<CapabilityRecord[]>>(empty([]))
+  const [memoryConflicts, setMemoryConflicts] = useState<LoadState<MemoryConflict[]>>(empty([]))
+  const [memoryReviews, setMemoryReviews] = useState<LoadState<MemoryReview[]>>(empty([]))
+  const [memorySummaries, setMemorySummaries] = useState<LoadState<MemorySummary[]>>(empty([]))
+  const [jobs, setJobs] = useState<LoadState<CompanionJob[]>>(empty([]))
+  const [events, setEvents] = useState<LoadState<ObservabilityEvent[]>>(empty([]))
+  const [costs, setCosts] = useState<LoadState<CostSummary | null>>(empty(null))
+  const [securityReports, setSecurityReports] = useState<LoadState<SecurityEvalReport[]>>(empty([]))
+  const [businessModel, setBusinessModel] = useState<LoadState<BusinessModel | null>>(empty(null))
+  const [actionMessage, setActionMessage] = useState('')
 
   const refresh = useCallback(async () => {
     localStorage.setItem('axis.org_id', orgId)
@@ -34,9 +46,31 @@ export function App() {
       load(setActionTypes, async () => (await axisFetch<{ data: ActionType[] }>('/api/nexus/v1/action-types', orgId)).data ?? [], []),
       load(setDelegations, async () => (await axisFetch<{ data: Delegation[] }>('/api/nexus/v1/delegations', orgId)).data ?? [], []),
       load(setTasks, async () => (await axisFetch<{ data: CompanionTask[] }>('/api/companion/v1/tasks?limit=12', orgId)).data ?? [], []),
-      load(setTraces, async () => (await axisFetch<{ traces: RunTrace[] }>('/api/companion/v1/run-traces?limit=12', orgId)).traces ?? [], [])
+      load(setTraces, async () => (await axisFetch<{ traces: RunTrace[] }>('/api/companion/v1/run-traces?limit=12', orgId)).traces ?? [], []),
+      load(setRuntimePolicy, () => axisFetch<RuntimePolicy>('/api/companion/v1/runtime/policy', orgId), null),
+      load(setAgents, async () => (await axisFetch<{ data: CompanionAgent[] }>('/api/companion/v1/agents', orgId)).data ?? [], []),
+      load(setCapabilities, async () => (await axisFetch<{ capabilities: CapabilityRecord[] }>('/api/companion/v1/capabilities?limit=12', orgId)).capabilities ?? [], []),
+      load(setMemoryConflicts, async () => (await axisFetch<{ conflicts: MemoryConflict[] }>('/api/companion/v1/memory/conflicts?limit=12', orgId)).conflicts ?? [], []),
+      load(setMemoryReviews, async () => (await axisFetch<{ reviews: MemoryReview[] }>('/api/companion/v1/memory/reviews?limit=12', orgId)).reviews ?? [], []),
+      load(setMemorySummaries, async () => (await axisFetch<{ summaries: MemorySummary[] }>('/api/companion/v1/memory/summaries?limit=12', orgId)).summaries ?? [], []),
+      load(setJobs, async () => (await axisFetch<{ jobs: CompanionJob[] }>('/api/companion/v1/jobs?limit=12', orgId)).jobs ?? [], []),
+      load(setEvents, async () => (await axisFetch<{ events: ObservabilityEvent[] }>('/api/companion/v1/observability/events?limit=12', orgId)).events ?? [], []),
+      load(setCosts, () => axisFetch<CostSummary>('/api/companion/v1/runtime/costs', orgId), null),
+      load(setSecurityReports, async () => (await axisFetch<{ reports: SecurityEvalReport[] }>('/api/companion/v1/security-evals/reports?limit=12', orgId)).reports ?? [], []),
+      load(setBusinessModel, () => axisFetch<BusinessModel>('/api/companion/v1/business-model', orgId), null)
     ])
   }, [orgId])
+
+  const runAction = useCallback(async (label: string, fn: () => Promise<unknown>) => {
+    setActionMessage(`${label}: running`)
+    try {
+      await fn()
+      setActionMessage(`${label}: done`)
+      await refresh()
+    } catch (error) {
+      setActionMessage(`${label}: ${error instanceof Error ? error.message : 'failed'}`)
+    }
+  }, [refresh])
 
   useEffect(() => {
     void refresh()
@@ -64,6 +98,7 @@ export function App() {
           <a href="#overview"><Activity aria-hidden="true" />Overview</a>
           <a href="#nexus"><GitPullRequestArrow aria-hidden="true" />Nexus</a>
           <a href="#companion"><Bot aria-hidden="true" />Companion</a>
+          <a href="#operations"><Activity aria-hidden="true" />Ops</a>
           <a href="#access"><KeyRound aria-hidden="true" />Access</a>
         </nav>
       </aside>
@@ -88,8 +123,8 @@ export function App() {
         <section id="overview" className="metrics-grid">
           <Metric icon={<CheckCircle2 />} label="Approvals" value={approvals.data.length} tone="green" />
           <Metric icon={<FileClock />} label="Requests" value={requests.data.length} tone="blue" />
-          <Metric icon={<Sparkles />} label="Tasks" value={tasks.data.length} tone="violet" />
-          <Metric icon={<DatabaseZap />} label="Traces" value={traces.data.length} tone="amber" />
+          <Metric icon={<Sparkles />} label="Agents" value={agents.data.length} tone="violet" />
+          <Metric icon={<DatabaseZap />} label="Capabilities" value={capabilities.data.length} tone="amber" />
         </section>
 
         <section className="health-row">
@@ -97,6 +132,7 @@ export function App() {
           <HealthPill label="Companion" value={health.data?.companion ?? health.error ?? 'loading'} />
           <HealthPill label="Nexus" value={health.data?.nexus ?? health.error ?? 'loading'} />
           <span className="scope-pill">{session.data?.auth_method ?? 'dev'}</span>
+          {actionMessage && <span className="scope-pill">{actionMessage}</span>}
         </section>
 
         <section id="nexus" className="panel-grid">
@@ -131,8 +167,92 @@ export function App() {
           <Panel title="Tasks" icon={<Bot />} state={tasks}>
             <Table columns={['title', 'status', 'channel']} rows={tasks.data.map((item) => [item.title, item.status, item.channel ?? 'api'])} />
           </Panel>
+          <Panel title="Control Plane" icon={<ShieldCheck />} state={runtimePolicy}>
+            <div className="panel-actions">
+              <button type="button" onClick={() => void runAction('runtime kill switch', () => axisFetch('/api/companion/v1/runtime/policy', orgId, { method: 'PUT', body: JSON.stringify({ kill_switch: !runtimePolicy.data?.kill_switch }) }))}>
+                <Power aria-hidden="true" />Kill switch
+              </button>
+            </div>
+            <Table columns={['setting', 'value']} rows={[
+              ['enabled', runtimePolicy.data?.enabled ? 'yes' : 'no'],
+              ['kill switch', runtimePolicy.data?.kill_switch ? 'on' : 'off'],
+              ['autonomy', runtimePolicy.data?.max_autonomy ?? '-'],
+              ['risk', runtimePolicy.data?.control_plane?.max_risk_class ?? '-'],
+              ['vector store', runtimePolicy.data?.control_plane?.embedding?.vector_store ?? '-']
+            ]} />
+          </Panel>
+          <Panel title="Agents" icon={<UsersRound />} state={agents}>
+            <div className="panel-actions">
+              <button type="button" disabled={!agents.data.some((item) => item.status === 'active')} onClick={() => {
+                const agent = agents.data.find((item) => item.status === 'active')
+                if (agent) void runAction('disable agent', () => axisFetch(`/api/companion/v1/agents/${encodeURIComponent(agent.agent_id)}/disable`, orgId, { method: 'POST', body: '{}' }))
+              }}>
+                <Power aria-hidden="true" />Disable active
+              </button>
+            </div>
+            <Table columns={['agent', 'role', 'status', 'autonomy']} rows={agents.data.map((item) => [item.display_name || item.agent_id, item.role ?? item.profile_id ?? '-', item.status, item.max_autonomy])} />
+          </Panel>
+          <Panel title="Capabilities" icon={<Layers3 />} state={capabilities}>
+            <div className="panel-actions">
+              <button type="button" disabled={!capabilities.data.some((item) => item.status === 'draft')} onClick={() => {
+                const cap = capabilities.data.find((item) => item.status === 'draft')
+                if (cap) void runAction('promote manifest', () => axisFetch(`/api/companion/v1/capabilities/${encodeURIComponent(cap.manifest.capability_id)}/versions/${encodeURIComponent(cap.manifest.version)}/promote`, orgId, { method: 'POST', body: '{}' }))
+              }}>
+                <CheckCircle2 aria-hidden="true" />Promote draft
+              </button>
+            </div>
+            <Table columns={['capability', 'version', 'risk', 'approval']} rows={capabilities.data.map((item) => [item.manifest.display_name || item.manifest.capability_id, item.manifest.version, item.manifest.risk_level, item.manifest.approval_required ? 'yes' : 'no'])} />
+          </Panel>
           <Panel title="Run Traces" icon={<Sparkles />} state={traces}>
             <Table columns={['surface', 'intent', 'status', 'started']} rows={traces.data.map((item) => [item.product_surface ?? '-', item.intent ?? '-', item.status ?? '-', date(item.started_at)])} />
+          </Panel>
+          <Panel title="Business Model" icon={<DatabaseZap />} state={businessModel}>
+            <Table columns={['area', 'count']} rows={[
+              ['areas', countOf(businessModel.data?.areas)],
+              ['roles', countOf(businessModel.data?.roles)],
+              ['workflows', countOf(businessModel.data?.workflows)],
+              ['rules', countOf(businessModel.data?.rules)]
+            ]} />
+          </Panel>
+        </section>
+
+        <section id="operations" className="panel-grid">
+          <Panel title="Memory Review" icon={<DatabaseZap />} state={memoryConflicts}>
+            <div className="panel-actions">
+              <button type="button" disabled={!memoryReviews.data.length} onClick={() => {
+                const review = memoryReviews.data[0]
+                if (review) void runAction('apply memory review', () => axisFetch(`/api/companion/v1/memory/reviews/${encodeURIComponent(review.id)}/apply`, orgId, { method: 'POST', body: '{}' }))
+              }}>
+                <CheckCircle2 aria-hidden="true" />Apply review
+              </button>
+            </div>
+            <Table columns={['key', 'kind', 'confidence', 'updated']} rows={memoryConflicts.data.map((item) => [item.key, item.kind, item.confidence.toFixed(2), date(item.updated_at)])} />
+          </Panel>
+          <Panel title="Memory Summaries" icon={<FileClock />} state={memorySummaries}>
+            <Table columns={['scope', 'type', 'version', 'sources']} rows={memorySummaries.data.map((item) => [`${item.scope_type}:${short(item.scope_id)}`, item.summary_type, item.version, item.source_count])} />
+          </Panel>
+          <Panel title="Jobs" icon={<Activity />} state={jobs}>
+            <Table columns={['kind', 'status', 'attempts', 'created']} rows={jobs.data.map((item) => [item.kind, item.status, `${item.attempts}/${item.max_attempts}`, date(item.created_at)])} />
+          </Panel>
+          <Panel title="Observability" icon={<ListChecks />} state={events}>
+            <Table columns={['type', 'name', 'severity', 'time']} rows={events.data.map((item) => [item.event_type, item.event_name, item.severity, date(item.occurred_at)])} />
+          </Panel>
+          <Panel title="Cost" icon={<DatabaseZap />} state={costs}>
+            <Table columns={['metric', 'value']} rows={[
+              ['period', costs.data?.period ?? '-'],
+              ['tokens', costs.data?.estimated_tokens ?? 0],
+              ['cents', costs.data?.estimated_cost_cents ?? 0],
+              ['llm calls', costs.data?.llm_calls ?? 0],
+              ['tool calls', costs.data?.tool_calls ?? 0]
+            ]} />
+          </Panel>
+          <Panel title="Security Evals" icon={<ShieldCheck />} state={securityReports}>
+            <div className="panel-actions">
+              <button type="button" onClick={() => void runAction('security eval', () => axisFetch('/api/companion/v1/security-evals/runs', orgId, { method: 'POST', body: JSON.stringify({ suite: 'security-adversarial' }) }))}>
+                <Play aria-hidden="true" />Run suite
+              </button>
+            </div>
+            <Table columns={['suite', 'status', 'score', 'created']} rows={securityReports.data.map((item) => [item.suite, item.status, `${Math.round(item.score * 100)}%`, date(item.created_at)])} />
           </Panel>
         </section>
       </main>
@@ -198,6 +318,10 @@ function Table(props: { columns: string[]; rows: Array<Array<string | number>> }
       </table>
     </div>
   )
+}
+
+function countOf(value: unknown[] | undefined) {
+  return Array.isArray(value) ? value.length : 0
 }
 
 function short(value: string) {

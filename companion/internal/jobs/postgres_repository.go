@@ -261,6 +261,40 @@ func (r *PostgresRepository) Get(ctx context.Context, jobID uuid.UUID) (Job, err
 	return job, nil
 }
 
+func (r *PostgresRepository) List(ctx context.Context, orgID, status string, limit int) ([]Job, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	query := `
+		SELECT id, org_id, kind, shard_key, dedupe_key, payload_json, status,
+		       priority, attempts, max_attempts, run_after, lease_owner,
+		       lease_until, locked_at, heartbeat_at, deadline_at, timeout_seconds,
+		       last_error, evidence_json, created_at, updated_at, completed_at
+		FROM companion_jobs
+		WHERE org_id = $1`
+	args := []any{strings.TrimSpace(orgID)}
+	if status = strings.TrimSpace(status); status != "" {
+		args = append(args, status)
+		query += fmt.Sprintf(` AND status = $%d`, len(args))
+	}
+	args = append(args, limit)
+	query += fmt.Sprintf(` ORDER BY created_at DESC LIMIT $%d`, len(args))
+	rows, err := r.db.Pool().Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list jobs: %w", err)
+	}
+	defer rows.Close()
+	out := make([]Job, 0)
+	for rows.Next() {
+		job, err := scanJob(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, job)
+	}
+	return out, rows.Err()
+}
+
 func (r *PostgresRepository) RecoverExpiredLeases(ctx context.Context, limit int) (int64, error) {
 	if limit <= 0 || limit > 1000 {
 		limit = 100

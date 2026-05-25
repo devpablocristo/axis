@@ -43,7 +43,11 @@ func (a *OrchestratorAdapter) Run(ctx context.Context, in tasks.OrchestratorInpu
 		"tool_calls", len(result.Trace.ToolCalls),
 		"guardrail_events", len(result.Trace.GuardrailEvents),
 	)
-	return tasks.OrchestratorResult{Reply: result.Reply}, nil
+	return tasks.OrchestratorResult{
+		Reply:   result.Reply,
+		RunID:   result.Trace.RunID,
+		AgentID: result.Trace.IdentityChain.AgentID,
+	}, nil
 }
 
 func convertMessages(msgs []taskdomain.TaskMessage) []taskdomain.TaskMessage {

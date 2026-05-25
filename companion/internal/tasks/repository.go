@@ -389,6 +389,9 @@ func (r *PostgresRepository) UpsertTaskPlan(ctx context.Context, plan domain.Tas
 	if err != nil {
 		return domain.TaskPlan{}, fmt.Errorf("upsert task plan: %w", err)
 	}
+	if err := r.insertTaskGraphEventTx(ctx, tx, plan.OrgID, plan.TaskID, uuid.Nil, "plan_upserted", plan.Status, "", "", json.RawMessage(plan.CheckpointJSON)); err != nil {
+		return domain.TaskPlan{}, err
+	}
 	if _, err := tx.Exec(ctx, `DELETE FROM companion_task_plan_steps WHERE task_id = $1`, plan.TaskID); err != nil {
 		return domain.TaskPlan{}, fmt.Errorf("replace task plan steps: %w", err)
 	}
@@ -414,6 +417,9 @@ func (r *PostgresRepository) UpsertTaskPlan(ctx context.Context, plan domain.Tas
 			step.Postcondition, step.EvidenceJSON, step.Observation, step.Blocker,
 			step.ErrorMessage, step.AttemptCount, step.SortOrder, step.CreatedAt, step.UpdatedAt, step.CompletedAt); err != nil {
 			return domain.TaskPlan{}, fmt.Errorf("insert task plan step: %w", err)
+		}
+		if err := r.insertTaskGraphEventTx(ctx, tx, plan.OrgID, plan.TaskID, step.ID, "step_planned", step.Status, step.Capability, "", json.RawMessage(step.EvidenceJSON)); err != nil {
+			return domain.TaskPlan{}, err
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -480,7 +486,34 @@ func (r *PostgresRepository) UpdateTaskPlanStep(ctx context.Context, step domain
 	if tag.RowsAffected() == 0 {
 		return domain.TaskPlanStep{}, ErrNotFound
 	}
+	if err := r.insertTaskGraphEvent(ctx, step.OrgID, step.TaskID, step.ID, "step_updated", step.Status, step.Capability, "", json.RawMessage(step.EvidenceJSON)); err != nil {
+		return domain.TaskPlanStep{}, err
+	}
 	return step, nil
+}
+
+func (r *PostgresRepository) insertTaskGraphEvent(ctx context.Context, orgID string, taskID, stepID uuid.UUID, eventType, status, capabilityID, capabilityVersion string, payload json.RawMessage) error {
+	_, err := r.db.Pool().Exec(ctx, `
+		INSERT INTO companion_task_execution_graph_events
+			(org_id, task_id, step_id, event_type, status, capability_id, capability_version, payload_json)
+		VALUES ($1,$2,NULLIF($3, '00000000-0000-0000-0000-000000000000'::uuid),$4,$5,$6,$7,$8)
+	`, orgID, taskID, stepID, eventType, status, capabilityID, capabilityVersion, jsonOrDefault(payload, `{}`))
+	if err != nil {
+		return fmt.Errorf("insert task execution graph event: %w", err)
+	}
+	return nil
+}
+
+func (r *PostgresRepository) insertTaskGraphEventTx(ctx context.Context, tx pgx.Tx, orgID string, taskID, stepID uuid.UUID, eventType, status, capabilityID, capabilityVersion string, payload json.RawMessage) error {
+	_, err := tx.Exec(ctx, `
+		INSERT INTO companion_task_execution_graph_events
+			(org_id, task_id, step_id, event_type, status, capability_id, capability_version, payload_json)
+		VALUES ($1,$2,NULLIF($3, '00000000-0000-0000-0000-000000000000'::uuid),$4,$5,$6,$7,$8)
+	`, orgID, taskID, stepID, eventType, status, capabilityID, capabilityVersion, jsonOrDefault(payload, `{}`))
+	if err != nil {
+		return fmt.Errorf("insert task execution graph event: %w", err)
+	}
+	return nil
 }
 
 func (r *PostgresRepository) listTaskPlanSteps(ctx context.Context, taskID uuid.UUID) ([]domain.TaskPlanStep, error) {
@@ -504,6 +537,44 @@ func (r *PostgresRepository) listTaskPlanSteps(ctx context.Context, taskID uuid.
 			return nil, err
 		}
 		out = append(out, step)
+	}
+	return out, rows.Err()
+}
+
+func (r *PostgresRepository) ListTaskExecutionGraph(ctx context.Context, taskID uuid.UUID, limit int) ([]domain.TaskExecutionGraphEvent, error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 200
+	}
+	rows, err := r.db.Pool().Query(ctx, `
+		SELECT id, org_id, task_id, step_id, event_type, status, agent_id,
+		       capability_id, capability_version, job_id, nexus_decision_id,
+		       payload_json, created_at
+		FROM companion_task_execution_graph_events
+		WHERE task_id = $1
+		ORDER BY created_at ASC
+		LIMIT $2
+	`, taskID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list task execution graph: %w", err)
+	}
+	defer rows.Close()
+	out := make([]domain.TaskExecutionGraphEvent, 0)
+	for rows.Next() {
+		var (
+			event domain.TaskExecutionGraphEvent
+			raw   []byte
+		)
+		if err := rows.Scan(&event.ID, &event.OrgID, &event.TaskID, &event.StepID,
+			&event.EventType, &event.Status, &event.AgentID, &event.CapabilityID,
+			&event.CapabilityVersion, &event.JobID, &event.NexusDecisionID,
+			&raw, &event.CreatedAt); err != nil {
+			return nil, err
+		}
+		event.PayloadJSON = json.RawMessage(raw)
+		if len(event.PayloadJSON) == 0 {
+			event.PayloadJSON = json.RawMessage(`{}`)
+		}
+		out = append(out, event)
 	}
 	return out, rows.Err()
 }

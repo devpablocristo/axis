@@ -54,6 +54,10 @@ type OrgControlPlaneSettings struct {
 	ConnectorKillSwitches  map[string]bool          `json:"connector_kill_switches,omitempty"`
 	DataIsolation          OrgDataIsolationPolicy   `json:"data_isolation,omitempty"`
 	Observability          OrgObservabilitySettings `json:"observability,omitempty"`
+	Embedding              OrgEmbeddingSettings     `json:"embedding,omitempty"`
+	ModelRouting           []OrgModelRoute          `json:"model_routing,omitempty"`
+	EvalThresholds         map[string]float64       `json:"eval_thresholds,omitempty"`
+	DataResidency          string                   `json:"data_residency,omitempty"`
 	Metadata               map[string]any           `json:"metadata,omitempty"`
 }
 
@@ -85,6 +89,26 @@ type OrgObservabilitySettings struct {
 	ReplayEnabled       bool   `json:"replay_enabled"`
 	CapturePrompts      bool   `json:"capture_prompts"`
 	CaptureToolPayloads bool   `json:"capture_tool_payloads"`
+}
+
+type OrgEmbeddingSettings struct {
+	Provider       string `json:"provider,omitempty"`
+	Model          string `json:"model,omitempty"`
+	VectorStore    string `json:"vector_store,omitempty"`
+	Dimensions     int    `json:"dimensions,omitempty"`
+	BatchSize      int    `json:"batch_size,omitempty"`
+	NamespaceMode  string `json:"namespace_mode,omitempty"`
+	TextFallback   bool   `json:"text_fallback"`
+	RequireVectors bool   `json:"require_vectors"`
+}
+
+type OrgModelRoute struct {
+	Intent       string `json:"intent,omitempty"`
+	ProfileID    string `json:"profile_id,omitempty"`
+	Model        string `json:"model"`
+	MaxTokens    int    `json:"max_tokens,omitempty"`
+	CostClass    string `json:"cost_class,omitempty"`
+	FallbackMode string `json:"fallback_mode,omitempty"`
 }
 
 type RuntimePolicyAuditEntry struct {
@@ -163,6 +187,19 @@ func defaultOrgControlPlaneSettings() OrgControlPlaneSettings {
 			RequireProvenance: true,
 			MinConfidence:     0.5,
 		},
+		Embedding: OrgEmbeddingSettings{
+			Provider:       "internal",
+			Model:          "hash-v1",
+			VectorStore:    "postgres",
+			Dimensions:     64,
+			BatchSize:      64,
+			NamespaceMode:  "org_product_agent",
+			TextFallback:   true,
+			RequireVectors: false,
+		},
+		EvalThresholds: map[string]float64{
+			"security_adversarial": 1,
+		},
 	})
 }
 
@@ -203,10 +240,71 @@ func normalizeOrgControlPlaneSettings(settings OrgControlPlaneSettings) OrgContr
 	}
 	settings.Memory.AllowedMemoryKinds = normalizeStringList(settings.Memory.AllowedMemoryKinds)
 	settings.Memory.BlockedMemorySources = normalizeStringList(settings.Memory.BlockedMemorySources)
+	settings.Embedding = normalizeEmbeddingSettings(settings.Embedding)
+	settings.ModelRouting = normalizeModelRoutes(settings.ModelRouting)
+	settings.EvalThresholds = normalizeFloatMap(settings.EvalThresholds)
+	settings.DataResidency = strings.TrimSpace(settings.DataResidency)
 	if settings.Metadata == nil {
 		settings.Metadata = map[string]any{}
 	}
 	return settings
+}
+
+func normalizeEmbeddingSettings(settings OrgEmbeddingSettings) OrgEmbeddingSettings {
+	settings.Provider = strings.TrimSpace(settings.Provider)
+	if settings.Provider == "" {
+		settings.Provider = "internal"
+	}
+	settings.Model = strings.TrimSpace(settings.Model)
+	if settings.Model == "" {
+		settings.Model = "hash-v1"
+	}
+	settings.VectorStore = strings.TrimSpace(settings.VectorStore)
+	if settings.VectorStore == "" {
+		settings.VectorStore = "postgres"
+	}
+	settings.NamespaceMode = strings.TrimSpace(settings.NamespaceMode)
+	if settings.NamespaceMode == "" {
+		settings.NamespaceMode = "org_product_agent"
+	}
+	if settings.Dimensions == 0 {
+		settings.Dimensions = 64
+	}
+	if settings.BatchSize == 0 {
+		settings.BatchSize = 64
+	}
+	return settings
+}
+
+func normalizeModelRoutes(routes []OrgModelRoute) []OrgModelRoute {
+	out := make([]OrgModelRoute, 0, len(routes))
+	for _, route := range routes {
+		route.Intent = strings.TrimSpace(route.Intent)
+		route.ProfileID = strings.TrimSpace(route.ProfileID)
+		route.Model = strings.TrimSpace(route.Model)
+		route.CostClass = strings.TrimSpace(route.CostClass)
+		route.FallbackMode = strings.TrimSpace(route.FallbackMode)
+		if route.Model == "" {
+			continue
+		}
+		out = append(out, route)
+	}
+	return out
+}
+
+func normalizeFloatMap(values map[string]float64) map[string]float64 {
+	out := make(map[string]float64, len(values))
+	for key, value := range values {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		out[key] = value
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func applyRuntimePolicy(policy TenantRuntimePolicy, usage TenantRuntimeUsage, route AgentRoute, model string) runtimePolicyDecision {

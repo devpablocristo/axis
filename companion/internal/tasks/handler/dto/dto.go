@@ -2,6 +2,7 @@ package dto
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 
 	connectordomain "github.com/devpablocristo/companion/internal/connectors/usecases/domain"
@@ -187,6 +188,8 @@ type ChatResponse struct {
 	// Companion-specific extras: la task FSM + el log completo de mensajes.
 	Task     TaskResponse      `json:"task"`
 	Messages []MessageResponse `json:"messages"`
+	RunID    string            `json:"run_id,omitempty"`
+	AgentID  string            `json:"agent_id,omitempty"`
 }
 
 type InvestigateRequest struct {
@@ -367,6 +370,13 @@ func ChatResponseFromResult(task domain.Task, messages []domain.TaskMessage) Cha
 			break
 		}
 	}
+	return resp
+}
+
+func ChatResponseFromRuntimeResult(task domain.Task, messages []domain.TaskMessage, runID, agentID string) ChatResponse {
+	resp := ChatResponseFromResult(task, messages)
+	resp.RunID = strings.TrimSpace(runID)
+	resp.AgentID = strings.TrimSpace(agentID)
 	return resp
 }
 

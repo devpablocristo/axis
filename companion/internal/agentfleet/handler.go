@@ -13,8 +13,10 @@ import (
 )
 
 const (
-	scopeAgentAdmin = "companion:runtime:admin"
-	scopeCrossOrg   = "companion:cross_org"
+	scopeAgentRead         = "companion:agents:read"
+	scopeAgentAdmin        = "companion:agents:admin"
+	scopeAgentRuntimeAdmin = "companion:runtime:admin"
+	scopeCrossOrg          = "companion:cross_org"
 )
 
 type Handler struct {
@@ -30,6 +32,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/agents/{agent_id}", h.getAgent)
 	mux.HandleFunc("PUT /v1/agents/{agent_id}", h.putAgent)
 	mux.HandleFunc("POST /v1/agents/{agent_id}/disable", h.disableAgent)
+	mux.HandleFunc("POST /v1/agents/assignments", h.assignAgent)
 	mux.HandleFunc("GET /v1/agents/handoffs", h.listHandoffs)
 	mux.HandleFunc("POST /v1/agents/handoffs", h.createHandoff)
 	mux.HandleFunc("PATCH /v1/agents/handoffs/{id}", h.updateHandoff)
@@ -94,6 +97,26 @@ func (h *Handler) disableAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpjson.WriteJSON(w, http.StatusOK, agent)
+}
+
+func (h *Handler) assignAgent(w http.ResponseWriter, r *http.Request) {
+	orgID, surface, _, ok := agentRequestContext(w, r)
+	if !ok {
+		return
+	}
+	var body AssignmentInput
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid json body")
+		return
+	}
+	body.OrgID = orgID
+	body.ProductSurface = surface
+	result, err := h.uc.AssignAgent(r.Context(), body)
+	if err != nil {
+		writeAgentError(w, err)
+		return
+	}
+	httpjson.WriteJSON(w, http.StatusOK, result)
 }
 
 func (h *Handler) listHandoffs(w http.ResponseWriter, r *http.Request) {
@@ -169,7 +192,7 @@ func agentRequestContext(w http.ResponseWriter, r *http.Request) (string, string
 		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "agent fleet endpoints require authenticated admin context")
 		return "", "", "", false
 	}
-	if !identityctx.HasAnyScope(r, scopeAgentAdmin, scopeCrossOrg) {
+	if !identityctx.HasAnyScope(r, scopeAgentRead, scopeAgentAdmin, scopeAgentRuntimeAdmin, scopeCrossOrg) {
 		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "missing agent fleet admin scope")
 		return "", "", "", false
 	}

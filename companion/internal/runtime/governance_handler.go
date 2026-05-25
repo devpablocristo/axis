@@ -229,6 +229,20 @@ func validateOrgControlPlaneSettings(settings OrgControlPlaneSettings) error {
 	if !validRedactionMode(settings.Observability.RedactionMode) {
 		return errors.New("observability.redaction_mode must be strict, standard, or disabled")
 	}
+	if settings.Embedding.Dimensions <= 0 {
+		return errors.New("embedding.dimensions must be greater than zero")
+	}
+	if settings.Embedding.BatchSize <= 0 {
+		return errors.New("embedding.batch_size must be greater than zero")
+	}
+	if !validEmbeddingVectorStore(settings.Embedding.VectorStore) {
+		return errors.New("embedding.vector_store must be postgres, external, or disabled")
+	}
+	for _, threshold := range settings.EvalThresholds {
+		if threshold < 0 || threshold > 1 {
+			return errors.New("eval thresholds must be between 0 and 1")
+		}
+	}
 	return nil
 }
 
@@ -262,6 +276,15 @@ func validTraceLevel(value string) bool {
 func validRedactionMode(value string) bool {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "", "strict", "standard", "disabled":
+		return true
+	default:
+		return false
+	}
+}
+
+func validEmbeddingVectorStore(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "postgres", "external", "disabled":
 		return true
 	default:
 		return false

@@ -1,6 +1,6 @@
 services:
   companion-postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     restart: unless-stopped
     environment:
       POSTGRES_DB: companion
@@ -89,6 +89,11 @@ services:
       COMPANION_LLM_MODEL: "${COMPANION_LLM_MODEL:-fake}"
       COMPANION_LLM_VERTEX_PROJECT: "${COMPANION_LLM_VERTEX_PROJECT:-}"
       COMPANION_LLM_VERTEX_LOCATION: "${COMPANION_LLM_VERTEX_LOCATION:-}"
+      COMPANION_EMBEDDING_PROVIDER: "${COMPANION_EMBEDDING_PROVIDER:-hash-v1}"
+      COMPANION_EMBEDDING_MODEL: "${COMPANION_EMBEDDING_MODEL:-hash-v1}"
+      COMPANION_EMBEDDING_VERTEX_PROJECT: "${COMPANION_EMBEDDING_VERTEX_PROJECT:-}"
+      COMPANION_EMBEDDING_VERTEX_LOCATION: "${COMPANION_EMBEDDING_VERTEX_LOCATION:-}"
+      COMPANION_EMBEDDING_DIMENSIONS: "${COMPANION_EMBEDDING_DIMENSIONS:-64}"
       # ADC para Vertex AI / Gemini. Cuando COMPANION_LLM_PROVIDER=vertex_ai,
       # el binario llama `google.DefaultTokenSource()` que lee este path. El
       # archivo viene del `gcloud auth application-default login` del host y

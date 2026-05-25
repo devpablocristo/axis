@@ -15,12 +15,15 @@ import (
 	"github.com/devpablocristo/companion/internal/agentfleet"
 	"github.com/devpablocristo/companion/internal/assist"
 	"github.com/devpablocristo/companion/internal/business"
+	"github.com/devpablocristo/companion/internal/capabilities"
 	"github.com/devpablocristo/companion/internal/connectors"
 	"github.com/devpablocristo/companion/internal/connectors/registry"
+	connectordomain "github.com/devpablocristo/companion/internal/connectors/usecases/domain"
 	"github.com/devpablocristo/companion/internal/jobs"
 	"github.com/devpablocristo/companion/internal/memory"
 	nexusassist "github.com/devpablocristo/companion/internal/nexus_assist"
 	"github.com/devpablocristo/companion/internal/runtime"
+	"github.com/devpablocristo/companion/internal/securityevals"
 	"github.com/devpablocristo/companion/internal/tasks"
 	"github.com/devpablocristo/companion/internal/watchers"
 	"github.com/devpablocristo/companion/internal/watchers/pymesclient"
@@ -52,6 +55,14 @@ type agentRuntimeResolver struct {
 	uc *agentfleet.Usecases
 }
 
+type taskOwnershipAdapter struct {
+	repo tasks.Repository
+}
+
+type businessMemoryProjector struct {
+	uc *memory.Usecases
+}
+
 func (r agentRuntimeResolver) ResolveRuntimeAgent(ctx context.Context, orgID, productSurface, agentID string) (runtime.RuntimeAgentConfig, error) {
 	agent, err := r.uc.GetAgent(ctx, orgID, productSurface, agentID)
 	if err != nil {
@@ -72,6 +83,46 @@ func (r agentRuntimeResolver) ResolveRuntimeAgent(ctx context.Context, orgID, pr
 		SLA:                 agent.SLA,
 		Version:             agent.Version,
 	}, nil
+}
+
+func (a taskOwnershipAdapter) TransferTaskOwnership(ctx context.Context, orgID, taskID, agentID string) error {
+	id, err := uuid.Parse(taskID)
+	if err != nil || id == uuid.Nil {
+		return fmt.Errorf("invalid task_id")
+	}
+	task, err := a.repo.GetTaskByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if task.OrgID != orgID {
+		return fmt.Errorf("task belongs to a different customer org")
+	}
+	task.AssignedTo = agentID
+	_, err = a.repo.UpdateTask(ctx, task)
+	return err
+}
+
+func (p businessMemoryProjector) ProjectBusinessModel(ctx context.Context, model business.Model) error {
+	if p.uc == nil {
+		return nil
+	}
+	_, err := p.uc.Upsert(ctx, memory.UpsertInput{
+		OrgID:           model.OrgID,
+		ProductSurface:  model.ProductSurface,
+		Kind:            memdomain.MemoryBusinessContext,
+		MemoryType:      memdomain.MemoryTypeBusinessContext,
+		ScopeType:       memdomain.ScopeOrg,
+		ScopeID:         model.OrgID,
+		Key:             "business_model:active",
+		PayloadJSON:     business.BusinessModelMemoryPayload(model),
+		ContentText:     model.Summary(),
+		ProvenanceJSON:  json.RawMessage(`{"source":"business_model","projection":"active_summary"}`),
+		Confidence:      1,
+		RetentionPolicy: "business_model",
+		Source:          "business_model",
+		Supersede:       true,
+	})
+	return err
 }
 
 func (g taskOrgGetter) GetTaskOrg(ctx context.Context, taskID uuid.UUID) (string, error) {
@@ -247,6 +298,24 @@ func jobTimeout() time.Duration {
 	return envconfig.Duration("COMPANION_JOB_TIMEOUT_SEC", 5*time.Minute)
 }
 
+func activeManifestRegistry(ctx context.Context, uc *capabilities.Usecases) *capabilities.Registry {
+	records, err := uc.ListManifests(ctx, capabilities.ManifestFilter{Status: capabilities.ManifestStatusActive, Limit: 500})
+	if err != nil {
+		slog.Error("load active capability manifests", "error", err)
+		return nil
+	}
+	manifests := make([]capabilities.Manifest, 0, len(records))
+	for _, record := range records {
+		manifests = append(manifests, record.Manifest)
+	}
+	registry, err := capabilities.NewRegistry(manifests)
+	if err != nil {
+		slog.Error("build active capability manifest registry", "error", err)
+		return nil
+	}
+	return registry
+}
+
 // defaultAutonomyLevel lee el nivel de autonomía base del runtime desde env
 // (COMPANION_DEFAULT_AUTONOMY_LEVEL). Acepta A0..A5; cualquier otro valor causa
 // fail-fast en boot para evitar arrancar con configuración ambigua. Default A2.
@@ -280,6 +349,11 @@ type Config struct {
 	LLMModel            string
 	LLMVertexProject    string
 	LLMVertexLocation   string
+	EmbeddingProvider   string
+	EmbeddingModel      string
+	EmbeddingProject    string
+	EmbeddingLocation   string
+	EmbeddingDimensions int
 	MigrationFiles      fs.FS
 }
 
@@ -334,13 +408,24 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 
 	// Memory module
 	memRepo := memory.NewPostgresRepository(db)
-	memUC := memory.NewUsecases(memRepo)
+	embeddingProvider, err := memory.NewEmbeddingProvider(memory.EmbeddingProviderConfig{
+		Provider:       cfg.EmbeddingProvider,
+		Model:          cfg.EmbeddingModel,
+		VertexProject:  firstNonEmpty(cfg.EmbeddingProject, cfg.LLMVertexProject),
+		VertexLocation: firstNonEmpty(cfg.EmbeddingLocation, cfg.LLMVertexLocation),
+		Dimensions:     cfg.EmbeddingDimensions,
+	})
+	if err != nil {
+		db.Close()
+		return nil, nil, fmt.Errorf("configure embedding provider: %w", err)
+	}
+	memUC := memory.NewUsecases(memRepo).WithEmbeddingProvider(embeddingProvider).WithVectorStore(memory.NewPostgresVectorStore(db))
 	memHandler := memory.NewHandler(memUC, taskOrgGetter{repo: repo})
 	businessRepo := business.NewPostgresRepository(db)
-	businessUC := business.NewUsecases(businessRepo)
+	businessUC := business.NewUsecases(businessRepo).WithMemoryProjector(businessMemoryProjector{uc: memUC})
 	businessHandler := business.NewHandler(businessUC)
 	agentRepo := agentfleet.NewPostgresRepository(db)
-	agentUC := agentfleet.NewUsecases(agentRepo)
+	agentUC := agentfleet.NewUsecases(agentRepo).WithTaskOwnership(taskOwnershipAdapter{repo: repo})
 	agentHandler := agentfleet.NewHandler(agentUC)
 	uc.SetTaskMemory(taskMemoryAdapter{uc: memUC, repo: repo})
 
@@ -371,11 +456,23 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	for _, c := range connReg.List() {
 		connectorViews = append(connectorViews, c)
 	}
+	capabilityRepo := capabilities.NewPostgresRepository(db)
+	capabilityUC := capabilities.NewUsecases(capabilityRepo)
+	if generatedManifests, err := connUC.CapabilityManifests(connectordomain.CapabilityFilter{IncludeWrites: true}); err == nil {
+		if err := capabilityUC.SyncGenerated(ctx, generatedManifests); err != nil {
+			slog.Error("sync generated capability manifests", "error", err)
+		}
+	} else {
+		slog.Error("load generated capability manifests", "error", err)
+	}
+	capabilityHandler := capabilities.NewHandler(capabilityUC)
+	activeCapabilityRegistry := activeManifestRegistry(ctx, capabilityUC)
 	runtime.RegisterConnectorCapabilities(toolkit, runtime.CapabilityBridgeDeps{
-		Connectors: connectorViews,
-		Executor:   connUC,
-		Submitter:  nexusGateway,
-		Controls:   runtimeControlsRepo,
+		Connectors:       connectorViews,
+		Executor:         connUC,
+		Submitter:        nexusGateway,
+		Controls:         runtimeControlsRepo,
+		ManifestRegistry: activeCapabilityRegistry,
 	})
 	runtime.RegisterTaskPlannerTools(toolkit, taskPlannerAdapter{uc: uc})
 	contextPorts := runtime.ContextPorts{
@@ -406,11 +503,15 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	observabilityRepo := runtime.NewPostgresObservabilityRepository(db, traceRepo)
 	orchestrator.SetTraceRepository(traceRepo)
 	orchestrator.SetObservabilityRecorder(observabilityRepo)
+	orchestrator.SetCostLedger(observabilityRepo)
 	orchestrator.SetRuntimeControls(runtimeControlsRepo)
 	orchestrator.SetAgentResolver(agentRuntimeResolver{uc: agentUC})
 	traceHandler := runtime.NewTraceHandler(traceRepo)
 	observabilityHandler := runtime.NewObservabilityHandler(observabilityRepo)
 	runtimeControlsHandler := runtime.NewRuntimeControlsHandler(runtimeControlsRepo)
+	securityEvalRepo := securityevals.NewPostgresRepository(db)
+	securityEvalUC := securityevals.NewUsecases(securityEvalRepo)
+	securityEvalHandler := securityevals.NewHandler(securityEvalUC)
 	jobHandler := jobs.NewHandler(jobRepo)
 	adapter := runtime.NewOrchestratorAdapter(orchestrator)
 	uc.SetOrchestrator(adapter)
@@ -424,6 +525,7 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 		DefaultTimeout: jobTimeout(),
 	})
 	watcherUC.RegisterJobHandlers(jobWorker)
+	memUC.RegisterJobHandlers(jobWorker)
 	slog.Info("companion runtime initialized", "llm_provider", cfg.LLMProvider)
 
 	// Nexus-assist: lee Nexus + arma proposals/summaries con Gemini.
@@ -447,9 +549,11 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	agentHandler.Register(mux)
 	chatHandler.Register(mux)
 	connHandler.Register(mux)
+	capabilityHandler.Register(mux)
 	traceHandler.Register(mux)
 	observabilityHandler.Register(mux)
 	runtimeControlsHandler.Register(mux)
+	securityEvalHandler.Register(mux)
 	jobHandler.Register(mux)
 	nexusAssistHandler.Register(mux)
 	assistHandler.Register(mux)

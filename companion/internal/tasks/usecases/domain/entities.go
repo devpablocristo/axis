@@ -185,3 +185,19 @@ type TaskExecutionState struct {
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
 }
+
+type TaskExecutionGraphEvent struct {
+	ID                uuid.UUID
+	OrgID             string
+	TaskID            uuid.UUID
+	StepID            *uuid.UUID
+	EventType         string
+	Status            string
+	AgentID           string
+	CapabilityID      string
+	CapabilityVersion string
+	JobID             *uuid.UUID
+	NexusDecisionID   string
+	PayloadJSON       json.RawMessage
+	CreatedAt         time.Time
+}

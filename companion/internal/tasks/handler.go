@@ -36,6 +36,7 @@ type taskUsecase interface {
 	Investigate(ctx context.Context, taskID uuid.UUID, in InvestigateInput) (domain.Task, error)
 	Propose(ctx context.Context, taskID uuid.UUID, in ProposeInput) (domain.Task, domain.TaskAction, nexusclient.SubmitResponse, error)
 	SetTaskPlan(ctx context.Context, taskID uuid.UUID, in SetTaskPlanInput) (domain.TaskPlan, error)
+	ListTaskExecutionGraph(ctx context.Context, taskID uuid.UUID, limit int) ([]domain.TaskExecutionGraphEvent, error)
 	UpdateTaskPlanStep(ctx context.Context, taskID, stepID uuid.UUID, in UpdateTaskPlanStepInput) (domain.TaskPlan, error)
 	RecordTaskPlanCheckpoint(ctx context.Context, taskID uuid.UUID, in RecordTaskPlanCheckpointInput) (domain.TaskPlan, error)
 	SetExecutionPlan(ctx context.Context, taskID uuid.UUID, in SetExecutionPlanInput) (domain.TaskExecutionPlan, error)
@@ -61,6 +62,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/tasks/{id}/investigate", h.investigate)
 	mux.HandleFunc("POST /v1/tasks/{id}/propose", h.propose)
 	mux.HandleFunc("PUT /v1/tasks/{id}/plan", h.setTaskPlan)
+	mux.HandleFunc("GET /v1/tasks/{id}/graph", h.executionGraph)
 	mux.HandleFunc("PATCH /v1/tasks/{id}/plan/steps/{step_id}", h.updatePlanStep)
 	mux.HandleFunc("POST /v1/tasks/{id}/plan/checkpoint", h.recordPlanCheckpoint)
 	mux.HandleFunc("PUT /v1/tasks/{id}/execution-plan", h.setExecutionPlan)
@@ -219,6 +221,36 @@ func (h *Handler) getByID(w http.ResponseWriter, r *http.Request) {
 		resp.ExecutionState = tasksdto.ExecutionStateToResponse(*detail.ExecutionState)
 	}
 	httpjson.WriteJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) executionGraph(w http.ResponseWriter, r *http.Request) {
+	if !requireScope(w, r, scopeCompanionTasksRead) {
+		return
+	}
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil || id == uuid.Nil {
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid id")
+		return
+	}
+	task, err := h.uc.Get(r.Context(), id)
+	if err != nil {
+		if IsNotFound(err) {
+			httpjson.WriteFlatError(w, http.StatusNotFound, "NOT_FOUND", "task not found")
+			return
+		}
+		httpjson.WriteFlatInternalError(w, err, "get task failed")
+		return
+	}
+	if !canAccessTaskOrg(r, task) {
+		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "task org is not allowed for this principal")
+		return
+	}
+	events, err := h.uc.ListTaskExecutionGraph(r.Context(), id, queryLimit(r, 200, 1000))
+	if err != nil {
+		httpjson.WriteFlatInternalError(w, err, "list task execution graph failed")
+		return
+	}
+	httpjson.WriteJSON(w, http.StatusOK, map[string]any{"events": events})
 }
 
 func (h *Handler) addMessage(w http.ResponseWriter, r *http.Request) {
@@ -695,7 +727,7 @@ func (h *Handler) chat(w http.ResponseWriter, r *http.Request) {
 	for _, m := range result.Messages {
 		msgs = append(msgs, tasksdto.MessageToResponse(m))
 	}
-	httpjson.WriteJSON(w, http.StatusOK, tasksdto.ChatResponseFromResult(result.Task, result.Messages))
+	httpjson.WriteJSON(w, http.StatusOK, tasksdto.ChatResponseFromRuntimeResult(result.Task, result.Messages, result.RunID, result.AgentID))
 }
 
 type customerMessagingInboundRequest struct {
@@ -789,6 +821,20 @@ func lastAssistantReply(messages []domain.TaskMessage) string {
 		}
 	}
 	return ""
+}
+
+func queryLimit(r *http.Request, fallback, max int) int {
+	limit := fallback
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+	if max > 0 && limit > max {
+		return max
+	}
+	return limit
 }
 
 func (h *Handler) authorizeTaskOrg(w http.ResponseWriter, r *http.Request, id uuid.UUID) bool {

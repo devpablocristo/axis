@@ -4,9 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"hash/fnv"
 	"log/slog"
-	"math"
 	"sort"
 	"strings"
 	"time"
@@ -33,6 +31,7 @@ type FindQuery struct {
 	OrgID          string
 	UserID         string
 	ProductSurface string
+	AgentID        string
 	ScopeType      domain.ScopeType
 	ScopeID        string
 	Kind           domain.MemoryKind
@@ -45,6 +44,7 @@ type UpsertInput struct {
 	OrgID           string
 	UserID          string
 	ProductSurface  string
+	AgentID         string
 	Kind            domain.MemoryKind
 	MemoryType      domain.MemoryType
 	Classification  domain.MemoryClass
@@ -86,17 +86,53 @@ const defaultPerScopeQuota = 1000
 type Usecases struct {
 	repo          Repository
 	perScopeQuota int
+	embedder      EmbeddingProvider
+	vectors       VectorStore
+	ranker        MemoryRanker
+	curator       MemoryCurator
 }
 
 // NewUsecases crea una nueva instancia de Usecases con quota default.
 func NewUsecases(repo Repository) *Usecases {
-	return &Usecases{repo: repo, perScopeQuota: defaultPerScopeQuota}
+	return &Usecases{
+		repo:          repo,
+		perScopeQuota: defaultPerScopeQuota,
+		embedder:      NewHashEmbeddingProvider(),
+		ranker:        NewDefaultMemoryRanker(),
+		curator:       NewDefaultMemoryCurator(),
+	}
 }
 
 // WithPerScopeQuota override del tope de entradas vivas por scope. <=0 = sin
 // límite (no recomendado en multi-tenant).
 func (uc *Usecases) WithPerScopeQuota(n int) *Usecases {
 	uc.perScopeQuota = n
+	return uc
+}
+
+func (uc *Usecases) WithEmbeddingProvider(provider EmbeddingProvider) *Usecases {
+	if provider != nil {
+		uc.embedder = provider
+	}
+	return uc
+}
+
+func (uc *Usecases) WithVectorStore(store VectorStore) *Usecases {
+	uc.vectors = store
+	return uc
+}
+
+func (uc *Usecases) WithMemoryRanker(ranker MemoryRanker) *Usecases {
+	if ranker != nil {
+		uc.ranker = ranker
+	}
+	return uc
+}
+
+func (uc *Usecases) WithMemoryCurator(curator MemoryCurator) *Usecases {
+	if curator != nil {
+		uc.curator = curator
+	}
 	return uc
 }
 
@@ -147,7 +183,7 @@ func (uc *Usecases) Upsert(ctx context.Context, in UpsertInput) (domain.MemoryEn
 	if in.RetentionPolicy == "" {
 		in.RetentionPolicy = "default"
 	}
-	poisoningFlags := detectMemoryPoisoning(in.ContentText, in.PayloadJSON)
+	poisoningFlags := uc.curator.DetectPoisoning(in.ContentText, in.PayloadJSON)
 	if len(poisoningFlags) > 0 && !in.AllowPoisoned {
 		return domain.MemoryEntry{}, fmt.Errorf("%w: %s", ErrMemoryPoisoning, strings.Join(poisoningFlags, ","))
 	}
@@ -155,9 +191,22 @@ func (uc *Usecases) Upsert(ctx context.Context, in UpsertInput) (domain.MemoryEn
 	if in.LastVerifiedAt == nil {
 		in.LastVerifiedAt = &now
 	}
-	embeddingNamespace := in.OrgID + ":" + in.ProductSurface
-	embedding := buildMemoryEmbedding(in.ContentText)
-	embeddingJSON, err := json.Marshal(embedding)
+	embedding, err := uc.embedder.Embed(ctx, EmbeddingInput{
+		OrgID:          in.OrgID,
+		ProductSurface: in.ProductSurface,
+		AgentID:        in.AgentID,
+		Text:           in.ContentText,
+	})
+	if err != nil {
+		return domain.MemoryEntry{}, fmt.Errorf("embed memory: %w", err)
+	}
+	if embedding.Model == "" {
+		embedding.Model = defaultEmbeddingModel
+	}
+	if embedding.Namespace == "" {
+		embedding.Namespace = memoryNamespace(in.OrgID, in.ProductSurface, in.AgentID)
+	}
+	embeddingJSON, err := json.Marshal(embedding.Vector)
 	if err != nil {
 		return domain.MemoryEntry{}, fmt.Errorf("marshal memory embedding: %w", err)
 	}
@@ -176,12 +225,12 @@ func (uc *Usecases) Upsert(ctx context.Context, in UpsertInput) (domain.MemoryEn
 		ContentText:        in.ContentText,
 		ProvenanceJSON:     in.ProvenanceJSON,
 		Confidence:         in.Confidence,
-		TrustScore:         memoryTrustScore(in.Confidence, poisoningFlags),
+		TrustScore:         uc.curator.TrustScore(in.Confidence, poisoningFlags),
 		RetentionPolicy:    in.RetentionPolicy,
 		Status:             "active",
 		Source:             strings.TrimSpace(in.Source),
-		EmbeddingNamespace: embeddingNamespace,
-		EmbeddingModel:     "hash-v1",
+		EmbeddingNamespace: embedding.Namespace,
+		EmbeddingModel:     embedding.Model,
 		EmbeddingJSON:      embeddingJSON,
 		LastVerifiedAt:     in.LastVerifiedAt,
 		ConfidenceDecayAt:  confidenceDecayAt(in.Kind, now),
@@ -193,7 +242,7 @@ func (uc *Usecases) Upsert(ctx context.Context, in UpsertInput) (domain.MemoryEn
 	current, err := uc.repo.GetByScopeKey(ctx, in.OrgID, in.ProductSurface, in.ScopeType, in.ScopeID, in.Kind, in.Key)
 	switch {
 	case err == nil:
-		if shouldRequireConflictReview(current, entry) && !in.Supersede {
+		if uc.curator.ShouldRequireConflictReview(current, entry) && !in.Supersede {
 			entry.Status = "conflict"
 			conflictID := uuid.New()
 			entry.ConflictGroupID = &conflictID
@@ -236,6 +285,20 @@ func (uc *Usecases) Upsert(ctx context.Context, in UpsertInput) (domain.MemoryEn
 	if err != nil {
 		return domain.MemoryEntry{}, fmt.Errorf("upsert memory: %w", err)
 	}
+	if uc.vectors != nil {
+		if err := uc.vectors.UpsertVector(ctx, VectorRecord{
+			MemoryID:       result.ID,
+			OrgID:          result.OrgID,
+			ProductSurface: result.ProductSurface,
+			AgentID:        in.AgentID,
+			Namespace:      result.EmbeddingNamespace,
+			EmbeddingModel: result.EmbeddingModel,
+			Embedding:      embedding.Vector,
+			ContentHash:    embedding.ContentHash,
+		}); err != nil {
+			return domain.MemoryEntry{}, fmt.Errorf("upsert memory vector: %w", err)
+		}
+	}
 	return result, nil
 }
 
@@ -246,35 +309,84 @@ func (uc *Usecases) Search(ctx context.Context, q SearchQuery) ([]SearchResult, 
 	if q.Limit <= 0 {
 		q.Limit = 20
 	}
-	find := q.FindQuery
-	find.Limit = maxInt(q.Limit*5, q.Limit)
-	entries, err := uc.Find(ctx, find)
+	queryEmbedding := []float64(nil)
+	queryEmbeddingModel := defaultEmbeddingModel
+	if uc.embedder != nil {
+		embedding, err := uc.embedder.Embed(ctx, EmbeddingInput{
+			OrgID:          q.OrgID,
+			ProductSurface: q.ProductSurface,
+			AgentID:        q.AgentID,
+			Text:           q.Query,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("embed memory search: %w", err)
+		}
+		queryEmbedding = embedding.Vector
+		if strings.TrimSpace(embedding.Model) != "" {
+			queryEmbeddingModel = embedding.Model
+		}
+	}
+	entries, err := uc.searchEntries(ctx, q, queryEmbedding, queryEmbeddingModel)
 	if err != nil {
 		return nil, err
 	}
-	queryEmbedding := buildMemoryEmbedding(q.Query)
-	results := make([]SearchResult, 0, len(entries))
-	for _, entry := range entries {
-		if entry.Status != "" && entry.Status != "active" && entry.Status != "conflict" {
-			continue
+	return uc.ranker.Rank(q.Query, queryEmbedding, entries, q.MinConfidence, q.IncludeUntrusted, q.Limit), nil
+}
+
+func (uc *Usecases) searchEntries(ctx context.Context, q SearchQuery, queryEmbedding []float64, queryEmbeddingModel string) ([]domain.MemoryEntry, error) {
+	if uc.vectors != nil && len(queryEmbedding) > 0 {
+		namespace := memoryNamespace(q.OrgID, q.ProductSurface, q.AgentID)
+		matches, err := uc.vectors.SearchVectors(ctx, VectorSearchQuery{
+			OrgID:          q.OrgID,
+			ProductSurface: q.ProductSurface,
+			AgentID:        q.AgentID,
+			Namespace:      namespace,
+			EmbeddingModel: firstNonEmptyString(queryEmbeddingModel, defaultEmbeddingModel),
+			Embedding:      queryEmbedding,
+			Limit:          maxInt(q.Limit*5, q.Limit),
+		})
+		if err != nil {
+			return nil, err
 		}
-		if len(entry.PoisoningFlags) > 0 && !q.IncludeUntrusted {
-			continue
+		entries := make([]domain.MemoryEntry, 0, len(matches))
+		for _, match := range matches {
+			entry, err := uc.repo.Get(ctx, match.MemoryID)
+			if err != nil {
+				if IsNotFound(err) {
+					continue
+				}
+				return nil, fmt.Errorf("get vector memory result: %w", err)
+			}
+			if memoryEntryMatchesFind(entry, q.FindQuery) {
+				entries = append(entries, entry)
+			}
 		}
-		confidence := decayedConfidence(entry, time.Now().UTC())
-		if q.MinConfidence > 0 && confidence < q.MinConfidence {
-			continue
+		if len(entries) > 0 {
+			return entries, nil
 		}
-		score, reasons := scoreMemory(entry, q.Query, queryEmbedding, confidence)
-		results = append(results, SearchResult{Entry: entry, Score: score, Reasons: reasons})
 	}
-	sort.Slice(results, func(i, j int) bool {
-		return results[i].Score > results[j].Score
-	})
-	if len(results) > q.Limit {
-		results = results[:q.Limit]
+	find := q.FindQuery
+	find.Limit = maxInt(q.Limit*5, q.Limit)
+	return uc.Find(ctx, find)
+}
+
+func memoryEntryMatchesFind(entry domain.MemoryEntry, q FindQuery) bool {
+	if strings.TrimSpace(entry.OrgID) != strings.TrimSpace(q.OrgID) || strings.TrimSpace(entry.ProductSurface) != strings.TrimSpace(q.ProductSurface) {
+		return false
 	}
-	return results, nil
+	if entry.ScopeType != q.ScopeType || strings.TrimSpace(entry.ScopeID) != strings.TrimSpace(q.ScopeID) {
+		return false
+	}
+	if q.UserID != "" && entry.UserID != "" && strings.TrimSpace(entry.UserID) != strings.TrimSpace(q.UserID) {
+		return false
+	}
+	if q.Kind != "" && entry.Kind != q.Kind {
+		return false
+	}
+	if q.MemoryType != "" && entry.MemoryType != q.MemoryType {
+		return false
+	}
+	return true
 }
 
 func shouldRequireConflictReview(current, next domain.MemoryEntry) bool {
@@ -348,60 +460,6 @@ func decayedConfidence(entry domain.MemoryEntry, now time.Time) float64 {
 		confidence = entry.TrustScore
 	}
 	return confidence
-}
-
-func buildMemoryEmbedding(text string) []float64 {
-	const dims = 64
-	vec := make([]float64, dims)
-	for _, token := range strings.Fields(strings.ToLower(text)) {
-		token = strings.Trim(token, ".,;:!?()[]{}\"'")
-		if token == "" {
-			continue
-		}
-		h := fnv.New32a()
-		if _, err := h.Write([]byte(token)); err != nil {
-			continue
-		}
-		vec[int(h.Sum32())%dims]++
-	}
-	var norm float64
-	for _, value := range vec {
-		norm += value * value
-	}
-	if norm == 0 {
-		return vec
-	}
-	norm = math.Sqrt(norm)
-	for i := range vec {
-		vec[i] = vec[i] / norm
-	}
-	return vec
-}
-
-func scoreMemory(entry domain.MemoryEntry, query string, queryEmbedding []float64, confidence float64) (float64, []string) {
-	var embedding []float64
-	if len(entry.EmbeddingJSON) > 0 {
-		_ = json.Unmarshal(entry.EmbeddingJSON, &embedding)
-	}
-	similarity := cosine(queryEmbedding, embedding)
-	reasons := []string{"embedding"}
-	if strings.Contains(strings.ToLower(entry.ContentText), strings.ToLower(query)) {
-		similarity += 0.25
-		reasons = append(reasons, "text_match")
-	}
-	return similarity*0.7 + confidence*0.3, reasons
-}
-
-func cosine(a, b []float64) float64 {
-	if len(a) == 0 || len(b) == 0 {
-		return 0
-	}
-	n := minInt(len(a), len(b))
-	var dot float64
-	for i := 0; i < n; i++ {
-		dot += a[i] * b[i]
-	}
-	return dot
 }
 
 func maxInt(a, b int) int {

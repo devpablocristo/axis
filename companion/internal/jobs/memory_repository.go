@@ -231,6 +231,31 @@ func (r *MemoryRepository) Get(_ context.Context, jobID uuid.UUID) (Job, error) 
 	return job, nil
 }
 
+func (r *MemoryRepository) List(_ context.Context, orgID, status string, limit int) ([]Job, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if limit <= 0 {
+		limit = 100
+	}
+	out := make([]Job, 0)
+	for _, job := range r.jobs {
+		if strings.TrimSpace(orgID) != "" && job.OrgID != strings.TrimSpace(orgID) {
+			continue
+		}
+		if strings.TrimSpace(status) != "" && string(job.Status) != strings.TrimSpace(status) {
+			continue
+		}
+		out = append(out, job)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].CreatedAt.After(out[j].CreatedAt)
+	})
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
 func (r *MemoryRepository) RecoverExpiredLeases(_ context.Context, limit int) (int64, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

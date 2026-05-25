@@ -225,7 +225,7 @@ func CheckPromptInjection(input string) *GuardrailEvent {
 		switch finding.Type {
 		case "prompt_injection":
 			return &GuardrailEvent{Type: "prompt_injection", Target: "message", Reason: finding.Reason}
-		case "data_exfiltration", "ssrf", "approval_bypass", "memory_poisoning", "secret_leakage":
+		case "data_exfiltration", "ssrf", "approval_bypass", "memory_poisoning", "secret_leakage", "tool_poisoning", "unsafe_compensation", "cross_org_leakage", "pii_leakage":
 			return &GuardrailEvent{Type: finding.Type, Target: "message", Reason: finding.Reason}
 		}
 	}

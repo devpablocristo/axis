@@ -44,6 +44,14 @@ bash scripts/quality/check-migrations.sh
 - `COMPANION_JOB_POLL_INTERVAL_SEC`: intervalo de polling de la queue durable.
 - `COMPANION_JOB_LEASE_SEC`: duración del lease por claim.
 - `COMPANION_JOB_TIMEOUT_SEC`: timeout default por job.
+- `COMPANION_EMBEDDING_PROVIDER`: provider de embeddings (`vertex`,
+  `vertex_ai` o `hash-v1` para dev/test).
+- `COMPANION_EMBEDDING_MODEL`: modelo de embeddings persistido en memoria.
+- `COMPANION_EMBEDDING_VERTEX_PROJECT`: proyecto GCP para embeddings Vertex.
+- `COMPANION_EMBEDDING_VERTEX_LOCATION`: región Vertex. Default:
+  `us-central1`.
+- `COMPANION_EMBEDDING_DIMENSIONS`: dimensión esperada por provider/vector
+  store.
 - Memory purge corre cada hora.
 
 ## Jobs
@@ -63,6 +71,8 @@ inline para compatibilidad de desarrollo.
 - `GET /v1/observability/events?run_id=...` lista eventos por run.
 - `GET /v1/observability/events?limit=100` lista eventos recientes de la
   customer org autenticada.
+- `GET /v1/tasks/{id}/graph` devuelve el ledger de execution graph para
+  reconstruir planning/steps/checkpoints de una task.
 
 Los eventos guardan `org_id`, `run_id`, `task_id`, `job_id`, `agent_id`,
 `capability_id`, tipo/nombre de evento, payload redacted, severity y timestamp.
@@ -78,6 +88,15 @@ No se persisten secretos conocidos en payloads.
 Los endpoints requieren `companion:runtime:admin` o `companion:cross_org`. El
 chat puede enviar `agent_id`; si el agente no está activo, Companion falla
 cerrado antes de invocar el LLM.
+
+## Security evals
+
+- `GET /v1/security-evals/suites` lista suites disponibles.
+- `POST /v1/security-evals/runs` ejecuta una suite y guarda el reporte.
+- `GET /v1/security-evals/reports` lista reportes persistidos.
+
+Los endpoints requieren scopes admin de runtime/evals o cross-org. El check
+local obligatorio sigue siendo `bash scripts/evals/run-security-evals.sh`.
 
 ## Smoke
 

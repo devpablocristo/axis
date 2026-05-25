@@ -109,7 +109,9 @@ type OrchestratorInput struct {
 
 // OrchestratorResult resultado del runtime.
 type OrchestratorResult struct {
-	Reply string
+	Reply   string
+	RunID   string
+	AgentID string
 }
 
 // Usecases lógica de tareas e integración con Nexus.
@@ -348,6 +350,8 @@ type ChatInput struct {
 type ChatResult struct {
 	Task     domain.Task
 	Messages []domain.TaskMessage
+	RunID    string
+	AgentID  string
 }
 
 // agentConversationContextKey nombre del field en task.context_json que guarda
@@ -434,6 +438,7 @@ func (u *Usecases) Chat(ctx context.Context, in ChatInput) (ChatResult, error) {
 	u.persistAgentMessage(ctx, convID, t.OrgID, "user", in.Message)
 
 	// Si hay orchestrator, generar respuesta del compañero
+	runID := ""
 	if u.orchestrator != nil {
 		existingMsgs, listErr := u.repo.ListMessagesByTaskID(ctx, t.ID)
 		if listErr != nil {
@@ -458,7 +463,12 @@ func (u *Usecases) Chat(ctx context.Context, in ChatInput) (ChatResult, error) {
 			if runErr != nil {
 				slog.Error("orchestrator failed", "error", runErr)
 				return ChatResult{}, fmt.Errorf("run companion runtime: %w", runErr)
-			} else if result.Reply != "" {
+			} else {
+				in.AgentID = result.AgentID
+				runID = result.RunID
+				u.ensureTaskAgent(ctx, &t, in.AgentID)
+			}
+			if runErr == nil && result.Reply != "" {
 				// Guardar respuesta del compañero como mensaje del sistema
 				_, insertErr := u.repo.InsertMessage(ctx, domain.TaskMessage{
 					TaskID:     t.ID,
@@ -480,7 +490,7 @@ func (u *Usecases) Chat(ctx context.Context, in ChatInput) (ChatResult, error) {
 		return ChatResult{}, fmt.Errorf("list chat messages: %w", err)
 	}
 
-	return ChatResult{Task: t, Messages: msgs}, nil
+	return ChatResult{Task: t, Messages: msgs, RunID: runID, AgentID: in.AgentID}, nil
 }
 
 // ensureAgentConversation obtiene o crea la conversación durable asociada a la
@@ -1457,6 +1467,10 @@ type TaskPlanCompensationExecutionOutput struct {
 	ApprovalRequired bool
 }
 
+type taskExecutionGraphRepository interface {
+	ListTaskExecutionGraph(ctx context.Context, taskID uuid.UUID, limit int) ([]domain.TaskExecutionGraphEvent, error)
+}
+
 func (u *Usecases) SetTaskPlan(ctx context.Context, taskID uuid.UUID, in SetTaskPlanInput) (domain.TaskPlan, error) {
 	t, err := u.repo.GetTaskByID(ctx, taskID)
 	if err != nil {
@@ -1520,6 +1534,17 @@ func (u *Usecases) SetTaskPlan(ctx context.Context, taskID uuid.UUID, in SetTask
 	}
 	u.syncTaskMemory(ctx, taskID, "set_durable_plan")
 	return saved, nil
+}
+
+func (u *Usecases) ListTaskExecutionGraph(ctx context.Context, taskID uuid.UUID, limit int) ([]domain.TaskExecutionGraphEvent, error) {
+	if _, err := u.repo.GetTaskByID(ctx, taskID); err != nil {
+		return nil, err
+	}
+	repo, ok := u.repo.(taskExecutionGraphRepository)
+	if !ok {
+		return nil, fmt.Errorf("task execution graph repository is not configured")
+	}
+	return repo.ListTaskExecutionGraph(ctx, taskID, limit)
 }
 
 func (u *Usecases) UpdateTaskPlanStep(ctx context.Context, taskID, stepID uuid.UUID, in UpdateTaskPlanStepInput) (domain.TaskPlan, error) {

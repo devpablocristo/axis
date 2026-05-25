@@ -230,6 +230,37 @@ h1 {
   border-bottom: 1px solid #edf0f3;
 }
 
+.panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 14px 0;
+}
+
+.panel-actions button {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #cfd6dd;
+  border-radius: 8px;
+  background: #fff;
+  color: #17202a;
+  cursor: pointer;
+  padding: 0 10px;
+}
+
+.panel-actions button:disabled {
+  color: #8a96a3;
+  cursor: not-allowed;
+  background: #f7f9fb;
+}
+
+.panel-actions svg {
+  width: 16px;
+  height: 16px;
+}
+
 .panel h2 {
   display: flex;
   align-items: center;

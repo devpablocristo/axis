@@ -28,9 +28,36 @@ func NewHandler(repo Repository) *HTTPHandler {
 }
 
 func (h *HTTPHandler) Register(mux *http.ServeMux) {
+	mux.HandleFunc("GET /v1/jobs", h.list)
 	mux.HandleFunc("GET /v1/jobs/{id}", h.get)
 	mux.HandleFunc("POST /v1/jobs/{id}/cancel", h.cancel)
 	mux.HandleFunc("POST /v1/jobs/recover-expired", h.recoverExpired)
+}
+
+func (h *HTTPHandler) list(w http.ResponseWriter, r *http.Request) {
+	if !requireJobsAdmin(w, r) {
+		return
+	}
+	orgID := strings.TrimSpace(identityctx.PrincipalOrgID(r))
+	if orgID == "" {
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "customer org context is required")
+		return
+	}
+	limit := defaultRecoverJobLimit
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed <= 0 {
+			httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "limit must be a positive integer")
+			return
+		}
+		limit = parsed
+	}
+	jobs, err := h.repo.List(r.Context(), orgID, strings.TrimSpace(r.URL.Query().Get("status")), limit)
+	if err != nil {
+		httpjson.WriteFlatInternalError(w, err, "list jobs failed")
+		return
+	}
+	httpjson.WriteJSON(w, http.StatusOK, map[string]any{"jobs": jobs})
 }
 
 func (h *HTTPHandler) get(w http.ResponseWriter, r *http.Request) {

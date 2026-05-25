@@ -727,7 +727,6 @@ func TestPolicyUpdatePartialFields(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			rec := doRequest(t, mux, http.MethodPatch, "/v1/policies/"+created.ID, tt.body)
 			if rec.Code != http.StatusOK {
 				t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())

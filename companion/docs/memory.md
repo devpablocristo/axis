@@ -50,8 +50,10 @@ estabilidad/sensibilidad operativa; no debe usarse como tipo de memoria.
 La escritura de memoria ahora:
 
 - exige provenance por default desde el control plane;
-- calcula un embedding determinístico `hash-v1` namespaced por
-  `org_id:product_surface`;
+- calcula embeddings namespaced por `org_id:product_surface[:agent_id]`;
+- usa `pgvector` como búsqueda primaria cuando la extensión está disponible y
+  mantiene `embedding_json` como fallback/audit;
+- deja `hash-v1` solo como provider determinístico de dev/test/fallback local;
 - asigna `trust_score` desde confidence y señales adversariales;
 - rechaza memory poisoning salvo override explícito de infraestructura;
 - detecta conflictos en semantic/tenant/business memory de alta confianza;
@@ -65,3 +67,18 @@ infraestructura interna que lo permita.
 
 `companion_memory_summaries` queda como tabla versionada para compactación y
 summaries curados por scope.
+
+## Providers de embeddings
+
+Variables operativas:
+
+- `COMPANION_EMBEDDING_PROVIDER`: `vertex`, `vertex_ai` o `hash-v1`.
+- `COMPANION_EMBEDDING_MODEL`: modelo efectivo registrado en memoria.
+- `COMPANION_EMBEDDING_VERTEX_PROJECT`: proyecto GCP para Vertex embeddings.
+- `COMPANION_EMBEDDING_VERTEX_LOCATION`: región de Vertex. Default:
+  `us-central1`.
+- `COMPANION_EMBEDDING_DIMENSIONS`: dimensión esperada por provider/vector
+  store. Default local: `64`.
+
+En producción debe configurarse provider real; si no hay provider/proyecto,
+Companion cae a `hash-v1` para mantener entornos locales reproducibles.

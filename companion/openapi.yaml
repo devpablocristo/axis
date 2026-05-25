@@ -168,6 +168,26 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/TaskPlan" }
+  /v1/tasks/{id}/graph:
+    get:
+      summary: Lista eventos del execution graph durable de una task
+      description: Permite replay operacional por task/step sin depender del contexto conversacional.
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 1000, default: 200 }
+      responses:
+        "200":
+          description: Execution graph events
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  events:
+                    type: array
+                    items: { type: object, additionalProperties: true }
   /v1/tasks/{id}/plan/steps/{step_id}:
     patch:
       summary: Actualiza estado/evidencia de un paso del plan durable
@@ -292,6 +312,88 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/MemorySearchResponse" }
+  /v1/memory/conflicts:
+    get:
+      summary: Lista conflictos de memoria pendientes de revisión
+      description: Requiere `companion:memory:admin`.
+      responses:
+        "200": { description: Memory conflicts }
+  /v1/memory/reviews:
+    get:
+      summary: Lista reviews de memoria
+      description: Requiere `companion:memory:admin`.
+      responses:
+        "200": { description: Memory reviews }
+  /v1/memory/reviews/{review_id}/approve:
+    post:
+      summary: Aprueba una review de memoria
+      description: Requiere `companion:memory:admin`.
+      parameters:
+        - in: path
+          name: review_id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: Memory review approved }
+  /v1/memory/reviews/{review_id}/reject:
+    post:
+      summary: Rechaza una review de memoria
+      description: Requiere `companion:memory:admin`.
+      parameters:
+        - in: path
+          name: review_id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: Memory review rejected }
+  /v1/memory/reviews/{review_id}/apply:
+    post:
+      summary: Aplica una review aprobada u abierta de memoria
+      description: Ejecuta corrección, invalidación, resolución de conflicto o deletion con auditoría.
+      parameters:
+        - in: path
+          name: review_id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: Memory review applied }
+  /v1/memory/audit:
+    get:
+      summary: Lista auditoría de memoria
+      description: Requiere `companion:memory:admin`.
+      responses:
+        "200": { description: Memory audit }
+  /v1/memory/summaries:
+    get:
+      summary: Lista summaries versionados de memoria
+      description: Requiere `companion:memory:admin`.
+      responses:
+        "200": { description: Memory summaries }
+  /v1/memory/export:
+    get:
+      summary: Exporta memoria de la customer org autenticada
+      description: Requiere `companion:memory:admin`.
+      responses:
+        "200": { description: Memory export }
+  /v1/memory/org:
+    delete:
+      summary: Borra toda la memoria de la customer org autenticada
+      description: Requiere `companion:memory:admin` y `confirm=true`.
+      parameters:
+        - in: query
+          name: confirm
+          required: true
+          schema: { type: string, enum: ["true"] }
+      responses:
+        "200": { description: Deleted count }
+  /v1/memory/{id}/reviews:
+    post:
+      summary: Crea una review de memoria
+      description: Requiere `companion:memory:admin`.
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "201": { description: Memory review created }
   /v1/memory/{id}:
     get:
       summary: Obtiene memoria por ID
@@ -357,6 +459,48 @@ paths:
                   capabilities:
                     type: array
                     items: { $ref: "#/components/schemas/CapabilityManifest" }
+  /v1/capabilities:
+    get:
+      summary: Lista capability manifests persistidos
+      description: Requiere `companion:capabilities:read` o `companion:capabilities:admin`.
+      responses:
+        "200": { description: Capability records }
+    post:
+      summary: Importa un capability manifest como draft
+      description: Requiere `companion:capabilities:admin`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CapabilityManifest" }
+      responses:
+        "201": { description: Capability imported }
+  /v1/capabilities/validate:
+    post:
+      summary: Valida contrato y conformance de un manifest
+      description: Requiere `companion:capabilities:admin`.
+      responses:
+        "200": { description: Validation result }
+  /v1/capabilities/conformance-runs:
+    get:
+      summary: Lista conformance runs
+      responses:
+        "200": { description: Conformance runs }
+    post:
+      summary: Ejecuta conformance para una capability
+      description: Requiere `companion:capabilities:admin`.
+      responses:
+        "201": { description: Conformance run }
+  /v1/capabilities/{capability_id}/versions:
+    get:
+      summary: Lista versiones de una capability
+      parameters:
+        - in: path
+          name: capability_id
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Capability versions }
   /v1/connectors/{id}:
     get:
       summary: Obtiene connector
@@ -554,6 +698,60 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/RuntimeUsage" }
+  /v1/runtime/costs:
+    get:
+      summary: Consulta costos atribuidos a la customer org autenticada
+      description: Requiere contexto de org y devuelve eventos redacted.
+      parameters:
+        - in: query
+          name: period
+          schema:
+            type: string
+            pattern: "^[0-9]{4}-[0-9]{2}$"
+        - in: query
+          name: limit
+          schema: { type: integer, default: 100, minimum: 1, maximum: 500 }
+      responses:
+        "200": { description: Cost summary }
+  /v1/security-evals/suites:
+    get:
+      summary: Lista suites adversariales disponibles
+      description: Requiere `companion:evals:admin`, `companion:runtime:admin` o `companion:cross_org`.
+      responses:
+        "200": { description: Security eval suites }
+  /v1/security-evals/runs:
+    post:
+      summary: Ejecuta una suite adversarial y persiste el reporte
+      description: Falla con 422 cuando el score queda por debajo del threshold.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                suite: { type: string, default: security-adversarial }
+      responses:
+        "201": { description: Security eval report passed }
+        "422": { description: Security eval report failed }
+  /v1/security-evals/reports:
+    get:
+      summary: Lista reportes persistidos de security evals
+      parameters:
+        - in: query
+          name: suite
+          schema: { type: string }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+      responses:
+        "200": { description: Security eval reports }
+  /v1/jobs:
+    get:
+      summary: Lista jobs durables de la customer org autenticada
+      description: Requiere `companion:runtime:admin` o `companion:cross_org`.
+      responses:
+        "200": { description: Job list }
   /v1/business-model:
     get:
       summary: Obtiene el modelo empresarial activo
@@ -593,6 +791,12 @@ paths:
                   data:
                     type: array
                     items: { $ref: "#/components/schemas/Agent" }
+  /v1/agents/assignments:
+    post:
+      summary: Asigna un empleado IA activo para un intent/capability
+      description: Requiere `companion:runtime:admin` o `companion:cross_org`.
+      responses:
+        "200": { description: Agent assignment }
   /v1/agents/{agent_id}:
     get:
       summary: Obtiene un empleado IA
@@ -805,6 +1009,8 @@ components:
         routed_agent: { type: string }
         routing_source: { type: string }
         output_kind: { type: string }
+        run_id: { type: string, format: uuid }
+        agent_id: { type: string }
         task: { $ref: "#/components/schemas/Task" }
         messages:
           type: array

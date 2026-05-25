@@ -47,10 +47,11 @@ type RuntimePolicyReader interface {
 // connector types disponibles al boot (típicamente armada desde
 // connectors/registry.Registry.List() via un loop trivial).
 type CapabilityBridgeDeps struct {
-	Connectors []ConnectorTypeView
-	Executor   ConnectorExecutor
-	Submitter  NexusSubmitter
-	Controls   RuntimePolicyReader
+	Connectors       []ConnectorTypeView
+	Executor         ConnectorExecutor
+	Submitter        NexusSubmitter
+	Controls         RuntimePolicyReader
+	ManifestRegistry *capabilities.Registry
 }
 
 // RegisterConnectorCapabilities itera cada connector type registrado y expone
@@ -77,6 +78,14 @@ func RegisterConnectorCapabilities(tk *ToolKit, deps CapabilityBridgeDeps) {
 			if err != nil {
 				slog.Error("skip invalid capability manifest", "connector", conn.ID(), "operation", capability.Operation, "error", err)
 				continue
+			}
+			if deps.ManifestRegistry != nil {
+				active, ok := deps.ManifestRegistry.Lookup(manifest.CapabilityID, manifest.Version)
+				if !ok {
+					slog.Warn("skip capability without active manifest", "connector", conn.ID(), "operation", capability.Operation, "capability_id", manifest.CapabilityID, "version", manifest.Version)
+					continue
+				}
+				manifest = active
 			}
 			capability = manifest.ToConnectorCapability().Normalized(conn.ID(), kind)
 			name := operationToToolName(capability.Operation)
@@ -222,6 +231,14 @@ func capabilityToolHandler(kind string, capability connectorsdomain.Capability, 
 		payload, err := mergeOrgIDIntoArgs(args, id.OrgID)
 		if err != nil {
 			return `{"error":"invalid tool arguments"}`, nil
+		}
+		if event := ValidateEgressPayload(payload); event != nil {
+			slog.Warn("capability_blocked_by_egress_policy", "operation", capability.Operation, "kind", kind, "reason", event.Reason)
+			return jsonOrError(map[string]any{
+				"error":  "capability blocked by egress policy",
+				"target": event.Target,
+				"reason": event.Reason,
+			}), nil
 		}
 
 		spec := connectorsdomain.ExecutionSpec{

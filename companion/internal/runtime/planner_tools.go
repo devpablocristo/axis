@@ -21,6 +21,10 @@ type TaskPlanner interface {
 	ExecuteTaskPlanCompensation(ctx context.Context, taskID, stepID uuid.UUID, in PlannerExecuteTaskPlanCompensationInput) (PlannerTaskPlanCompensationExecutionResult, error)
 }
 
+type PlannerExecutor interface {
+	TaskPlanner
+}
+
 const (
 	toolSetTaskPlan              = "set_task_plan"
 	toolUpdateTaskPlanStep       = "update_task_plan_step"
