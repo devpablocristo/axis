@@ -8,6 +8,7 @@ import (
 
 	approvaldto "github.com/devpablocristo/nexus/internal/approvals/handler/dto"
 	approvaldomain "github.com/devpablocristo/nexus/internal/approvals/usecases/domain"
+	"github.com/devpablocristo/platform/authn/go/identityhttp"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
 	"github.com/devpablocristo/platform/http/go/httpjson"
 	"github.com/google/uuid"
@@ -186,6 +187,9 @@ func writeApprovalUsecaseError(w http.ResponseWriter, err error) {
 }
 
 func decisionActorID(r *http.Request, explicit string) string {
+	if ctx := identityhttp.FromRequest(r); strings.TrimSpace(ctx.Actor) != "" {
+		return strings.TrimSpace(ctx.Actor)
+	}
 	if actor := strings.TrimSpace(r.Header.Get("X-User-ID")); actor != "" {
 		return actor
 	}

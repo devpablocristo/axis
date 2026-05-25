@@ -84,6 +84,31 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/NotificationsResponse" }
+  /v1/customer-messaging/inbound:
+    post:
+      summary: Procesa un mensaje inbound server-to-server desde un producto autorizado
+      description: |
+        Contrato público server-to-server para integraciones de customer messaging.
+        Pymes usa este endpoint para inbound WhatsApp. Requiere Bearer JWT interno
+        o credencial de servicio equivalente con `companion:tasks:write`, `org_id`
+        de customer org y `product_surface=pymes`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CustomerMessagingInboundRequest" }
+      responses:
+        "200":
+          description: Message processed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CustomerMessagingInboundResponse" }
+        "400": { description: Invalid payload }
+        "401": { description: Missing or invalid service identity }
+        "403": { description: Missing scope, wrong org, or disallowed product surface }
+        "409": { description: Duplicate message or conflicting state }
+        "429": { description: Rate limited }
+        "500": { description: Processing failed }
   /v1/tasks:
     get:
       summary: Lista tasks de la customer org autenticada
@@ -995,6 +1020,7 @@ components:
       required: [reply, task, messages]
       properties:
         chat_id: { type: string, format: uuid }
+        task_id: { type: string, format: uuid, description: "ID operativo legacy de la task; frontends deben preferir chat_id." }
         reply: { type: string }
         blocks:
           type: array
@@ -1047,6 +1073,37 @@ components:
         id: { type: string }
         description: { type: string }
         binding_hash: { type: string }
+    CustomerMessagingInboundRequest:
+      type: object
+      required: [org_id, phone_number_id, from_phone, message]
+      properties:
+        org_id:
+          type: string
+          description: Customer org/work context where the AI employee operates.
+        phone_number_id:
+          type: string
+          description: WhatsApp/Meta phone number id that received the inbound message.
+        from_phone:
+          type: string
+          description: Sender phone in provider format.
+        message:
+          type: string
+          minLength: 1
+        message_id:
+          type: string
+          description: Provider message id used by callers for duplicate detection/replay diagnostics.
+        profile_name:
+          type: string
+    CustomerMessagingInboundResponse:
+      type: object
+      required: [conversation_id, reply, tokens_used, tool_calls]
+      properties:
+        conversation_id: { type: string }
+        reply: { type: string }
+        tokens_used: { type: integer }
+        tool_calls:
+          type: array
+          items: { type: string }
     TaskMessage:
       type: object
       properties:

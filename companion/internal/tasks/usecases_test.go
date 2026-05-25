@@ -59,6 +59,15 @@ func (f *fakeRepo) GetTaskByID(ctx context.Context, id uuid.UUID) (domain.Task, 
 	return t, nil
 }
 
+func (f *fakeRepo) GetTaskByAgentConversationID(ctx context.Context, conversationID uuid.UUID) (domain.Task, error) {
+	for _, t := range f.tasks {
+		if extractAgentConversationID(t.ContextJSON) == conversationID {
+			return t, nil
+		}
+	}
+	return domain.Task{}, ErrNotFound
+}
+
 func (f *fakeRepo) ListTasks(ctx context.Context, orgID tenant.ID, limit int) ([]domain.Task, error) {
 	if orgID.IsZero() {
 		return nil, domainerr.TenantMissing()
@@ -561,6 +570,41 @@ func TestUsecases_ChatDefaultsChannelToAPI(t *testing.T) {
 	}
 	if result.Task.Channel != "api" {
 		t.Fatalf("expected default channel api, got %q", result.Task.Channel)
+	}
+}
+
+func TestUsecases_ChatReusesTaskByChatID(t *testing.T) {
+	t.Parallel()
+
+	chatID := uuid.New()
+	taskID := uuid.New()
+	repo := &fakeRepo{tasks: map[uuid.UUID]domain.Task{
+		taskID: {
+			ID:          taskID,
+			OrgID:       "org-1",
+			Title:       "existing conversation",
+			Status:      domain.TaskStatusNew,
+			CreatedBy:   "user-1",
+			Channel:     "api",
+			ContextJSON: json.RawMessage(`{"agent_conversation_id":"` + chatID.String() + `"}`),
+		},
+	}}
+	uc := NewUsecases(repo, &stubNexus{})
+
+	result, err := uc.Chat(context.Background(), ChatInput{
+		ChatID:  &chatID,
+		UserID:  "user-1",
+		OrgID:   "org-1",
+		Message: "Seguimos",
+	})
+	if err != nil {
+		t.Fatalf("chat failed: %v", err)
+	}
+	if result.Task.ID != taskID {
+		t.Fatalf("expected task %s, got %s", taskID, result.Task.ID)
+	}
+	if len(repo.tasks) != 1 {
+		t.Fatalf("expected no new task, got %d tasks", len(repo.tasks))
 	}
 }
 

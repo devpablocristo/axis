@@ -247,13 +247,6 @@ type SubmitOutput struct {
 }
 
 func (u *Usecases) Submit(ctx context.Context, in SubmitInput) (SubmitOutput, error) {
-	// Idempotencia: si ya existe, retornar respuesta cacheada
-	if u.idemStore != nil && in.IdempotencyKey != nil && *in.IdempotencyKey != "" {
-		if reqID, resp, ok := u.idemStore.Get(ctx, *in.IdempotencyKey); ok {
-			return rebuildOutputFromCache(reqID, resp), nil
-		}
-	}
-
 	now := time.Now().UTC()
 	req := requestdomain.Request{
 		ID:             uuid.New(),
@@ -289,6 +282,17 @@ func (u *Usecases) Submit(ctx context.Context, in SubmitInput) (SubmitOutput, er
 	}
 	if err := u.validateContract(ctx, "tool_intent", "action_binding", req.ID.String(), req.OrgID, req.ActionBinding); err != nil {
 		return SubmitOutput{}, err
+	}
+	fingerprint := requestFingerprint(req)
+	// Idempotencia: si ya existe, retornar respuesta cacheada solo cuando el
+	// payload coincide. Reusar una key con otro payload es replay conflictivo.
+	if u.idemStore != nil && in.IdempotencyKey != nil && *in.IdempotencyKey != "" {
+		if reqID, resp, ok := u.idemStore.Get(ctx, *in.IdempotencyKey); ok {
+			if cachedFingerprint := strings.TrimSpace(fmt.Sprint(resp["_request_fingerprint"])); cachedFingerprint != "" && cachedFingerprint != fingerprint {
+				return SubmitOutput{}, ErrIdempotencyConflict
+			}
+			return rebuildOutputFromCache(reqID, resp), nil
+		}
 	}
 
 	var actionTypeRiskOverride *string
@@ -390,16 +394,16 @@ func (u *Usecases) Submit(ctx context.Context, in SubmitInput) (SubmitOutput, er
 
 	switch req.Decision {
 	case requestdomain.DecisionAllow:
-		return u.finalizeDecision(ctx, req, in.IdempotencyKey, now, auditdomain.EventAllowed, requestdomain.StatusAllowed)
+		return u.finalizeDecision(ctx, req, in.IdempotencyKey, now, auditdomain.EventAllowed, requestdomain.StatusAllowed, fingerprint)
 	case requestdomain.DecisionDeny:
-		return u.finalizeDecision(ctx, req, in.IdempotencyKey, now, auditdomain.EventDenied, requestdomain.StatusDenied)
+		return u.finalizeDecision(ctx, req, in.IdempotencyKey, now, auditdomain.EventDenied, requestdomain.StatusDenied, fingerprint)
 	}
 
 	// Require approval
-	return u.handleRequireApproval(ctx, req, in, now, forceBreakGlass)
+	return u.handleRequireApproval(ctx, req, in, now, forceBreakGlass, fingerprint)
 }
 
-func (u *Usecases) finalizeDecision(ctx context.Context, req requestdomain.Request, idemKey *string, now time.Time, auditEvent string, status requestdomain.RequestStatus) (SubmitOutput, error) {
+func (u *Usecases) finalizeDecision(ctx context.Context, req requestdomain.Request, idemKey *string, now time.Time, auditEvent string, status requestdomain.RequestStatus, fingerprint string) (SubmitOutput, error) {
 	req.Status = status
 	req.DecidedAt = &now
 	req.UpdatedAt = now
@@ -424,11 +428,11 @@ func (u *Usecases) finalizeDecision(ctx context.Context, req requestdomain.Reque
 		Status:         string(req.Status),
 		BindingHash:    req.BindingHash,
 	}
-	u.cacheIdempotency(ctx, idemKey, req.ID, out, now.Add(24*time.Hour))
+	u.cacheIdempotency(ctx, idemKey, req.ID, out, now.Add(24*time.Hour), fingerprint)
 	return out, nil
 }
 
-func (u *Usecases) handleRequireApproval(ctx context.Context, req requestdomain.Request, in SubmitInput, now time.Time, forceBreakGlass bool) (SubmitOutput, error) {
+func (u *Usecases) handleRequireApproval(ctx context.Context, req requestdomain.Request, in SubmitInput, now time.Time, forceBreakGlass bool, fingerprint string) (SubmitOutput, error) {
 	expiresAt := now.Add(u.approvalTTL)
 
 	// AISummary / AIDegraded quedan vacíos: Nexus es AI-independent. Quien necesite
@@ -522,7 +526,7 @@ func (u *Usecases) handleRequireApproval(ctx context.Context, req requestdomain.
 		AISummary:  req.AISummary,
 		AIDegraded: req.AIDegraded,
 	}
-	u.cacheIdempotency(ctx, in.IdempotencyKey, req.ID, out, expiresAt)
+	u.cacheIdempotency(ctx, in.IdempotencyKey, req.ID, out, expiresAt, fingerprint)
 	return out, nil
 }
 
@@ -607,6 +611,31 @@ func actionBindingHash(binding map[string]any) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
+func requestFingerprint(req requestdomain.Request) string {
+	var orgID string
+	if req.OrgID != nil {
+		orgID = strings.TrimSpace(*req.OrgID)
+	}
+	raw, err := json.Marshal(map[string]any{
+		"org_id":          orgID,
+		"requester_type":  req.RequesterType,
+		"requester_id":    req.RequesterID,
+		"requester_name":  req.RequesterName,
+		"action_type":     req.ActionType,
+		"target_system":   req.TargetSystem,
+		"target_resource": req.TargetResource,
+		"action_binding":  req.ActionBinding,
+		"params":          req.Params,
+		"reason":          req.Reason,
+		"context":         req.Context,
+	})
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
+}
+
 func validateActionBinding(req requestdomain.Request) error {
 	if len(req.ActionBinding) == 0 {
 		return nil
@@ -662,7 +691,7 @@ func timePtrRFC3339(value *time.Time) *string {
 	return &formatted
 }
 
-func (u *Usecases) cacheIdempotency(ctx context.Context, idemKey *string, reqID uuid.UUID, out SubmitOutput, expiresAt time.Time) {
+func (u *Usecases) cacheIdempotency(ctx context.Context, idemKey *string, reqID uuid.UUID, out SubmitOutput, expiresAt time.Time, requestFingerprint string) {
 	if u.idemStore == nil || idemKey == nil || *idemKey == "" {
 		return
 	}
@@ -671,6 +700,9 @@ func (u *Usecases) cacheIdempotency(ctx context.Context, idemKey *string, reqID 
 		"risk_level": out.RiskLevel, "status": out.Status,
 		"binding_hash": out.BindingHash,
 		"ai_summary":   out.AISummary, "ai_degraded": out.AIDegraded,
+	}
+	if requestFingerprint != "" {
+		resp["_request_fingerprint"] = requestFingerprint
 	}
 	if out.Approval != nil {
 		resp["approval"] = map[string]any{

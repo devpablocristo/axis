@@ -15,6 +15,8 @@ import (
 	approvaldomain "github.com/devpablocristo/nexus/internal/approvals/usecases/domain"
 	"github.com/devpablocristo/nexus/internal/callbacks"
 	requestdomain "github.com/devpablocristo/nexus/internal/requests/usecases/domain"
+	authn "github.com/devpablocristo/platform/authn/go"
+	"github.com/devpablocristo/platform/authn/go/identityhttp"
 	"github.com/google/uuid"
 )
 
@@ -707,6 +709,38 @@ func TestApproveHTTPEmitsAudit(t *testing.T) {
 	events := sink.getEvents()
 	if len(events) != 1 {
 		t.Fatalf("se esperaba 1 evento de audit, se obtuvieron %d", len(events))
+	}
+}
+
+func TestApproveHTTPUsesAuthenticatedPrincipalOverSpoofedBody(t *testing.T) {
+	t.Parallel()
+	mux, repo, reqUpdater, sink := setupMuxWithAudit()
+	approvalID := seedApproval(t, repo, reqUpdater)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/approvals/"+approvalID.String()+"/approve", strings.NewReader(`{"decided_by":"spoofed-body","note":"approved via HTTP"}`))
+	req = identityhttp.WithPrincipal(req, &authn.Principal{
+		OrgID:      testApprovalOrgID,
+		Actor:      "authenticated-reviewer",
+		Scopes:     []string{scopeNexusApprovalsDecide},
+		AuthMethod: "jwt",
+	}, "jwt")
+	req.Header.Set("X-User-ID", "spoofed-header")
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("código esperado 200, obtenido %d: %s", rec.Code, rec.Body.String())
+	}
+	a, err := repo.GetByID(context.Background(), approvalID)
+	if err != nil {
+		t.Fatalf("get approval: %v", err)
+	}
+	if a.DecidedBy != "authenticated-reviewer" {
+		t.Fatalf("decided_by = %q, want authenticated principal", a.DecidedBy)
+	}
+	events := sink.getEvents()
+	if len(events) != 1 || events[0].ActorID != "authenticated-reviewer" {
+		t.Fatalf("unexpected audit events: %+v", events)
 	}
 }
 

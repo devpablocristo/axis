@@ -167,11 +167,15 @@ type AddMessageRequest struct {
 
 // ChatRequest endpoint conversacional para el suscriptor.
 type ChatRequest struct {
-	TaskID         string `json:"task_id,omitempty"` // vacío = crear nueva conversación
-	Message        string `json:"message"`
-	Channel        string `json:"channel,omitempty"`         // default: "api"
-	ProductSurface string `json:"product_surface,omitempty"` // "companion" | "ponti" | "pymes"
-	AgentID        string `json:"agent_id,omitempty"`        // empleado IA persistente a usar
+	TaskID           string          `json:"task_id,omitempty"` // vacío = crear nueva conversación
+	ChatID           string          `json:"chat_id,omitempty"` // id público de conversación durable
+	Message          string          `json:"message"`
+	Channel          string          `json:"channel,omitempty"`           // default: "api"
+	ProductSurface   string          `json:"product_surface,omitempty"`   // "companion" | "ponti" | "pymes"
+	AgentID          string          `json:"agent_id,omitempty"`          // empleado IA persistente a usar
+	RouteHint        string          `json:"route_hint,omitempty"`        // compatibilidad: el runtime decide routing
+	ConfirmedActions []string        `json:"confirmed_actions,omitempty"` // compatibilidad UI legacy
+	Handoff          json.RawMessage `json:"handoff,omitempty"`           // compatibilidad UI legacy
 }
 
 // ChatResponse respuesta del chat con tarea y mensajes.
@@ -182,6 +186,7 @@ type ChatRequest struct {
 type ChatResponse struct {
 	// Canon contract fields (mirror github.com/devpablocristo/platform/contracts/ai/go ChatResponse).
 	ChatID uuid.UUID             `json:"chat_id,omitempty"`
+	TaskID string                `json:"task_id,omitempty"`
 	Reply  string                `json:"reply"`
 	Blocks []contracts.ChatBlock `json:"blocks,omitempty"`
 
@@ -357,6 +362,7 @@ func ChatResponseFromResult(task domain.Task, messages []domain.TaskMessage) Cha
 		Task:     TaskToResponse(task),
 		Messages: msgs,
 		ChatID:   extractChatID(task.ContextJSON),
+		TaskID:   task.ID.String(),
 	}
 
 	// Buscar último mensaje assistant/system para reply + blocks.

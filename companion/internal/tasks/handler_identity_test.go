@@ -1,12 +1,15 @@
 package tasks
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/devpablocristo/companion/internal/identityctx"
+	domain "github.com/devpablocristo/companion/internal/tasks/usecases/domain"
 	authn "github.com/devpablocristo/platform/authn/go"
 	"github.com/devpablocristo/platform/authn/go/identityhttp"
 	"github.com/google/uuid"
@@ -50,6 +53,55 @@ func TestChatUsesCanonicalPrincipalIdentity(t *testing.T) {
 	}
 	if task.CreatedBy == "subscriber" {
 		t.Fatal("chat must not use subscriber fallback with authenticated identity")
+	}
+}
+
+func TestChatAcceptsChatIDAndReturnsTaskID(t *testing.T) {
+	t.Parallel()
+
+	chatID := uuid.New()
+	taskID := uuid.New()
+	repo := &fakeRepo{tasks: map[uuid.UUID]domain.Task{
+		taskID: {
+			ID:          taskID,
+			OrgID:       "org-a",
+			Title:       "existing conversation",
+			Status:      domain.TaskStatusNew,
+			CreatedBy:   "user-a",
+			Channel:     "api",
+			ContextJSON: json.RawMessage(`{"agent_conversation_id":"` + chatID.String() + `"}`),
+		},
+	}}
+	mux := http.NewServeMux()
+	NewHandler(NewUsecases(repo, &stubNexus{})).Register(mux)
+
+	req := authenticatedTaskRequest(http.MethodPost, "/v1/chat", `{"chat_id":"`+chatID.String()+`","message":"seguimos"}`, &authn.Principal{
+		OrgID:  "org-a",
+		Actor:  "user-a",
+		Scopes: []string{scopeCompanionTasksWrite},
+		Claims: map[string]any{
+			"actor_id":   "user-a",
+			"actor_type": "human",
+		},
+	})
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		ChatID string `json:"chat_id"`
+		TaskID string `json:"task_id"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if out.ChatID != chatID.String() {
+		t.Fatalf("expected chat_id %s, got %q", chatID, out.ChatID)
+	}
+	if out.TaskID != taskID.String() {
+		t.Fatalf("expected task_id %s, got %q", taskID, out.TaskID)
 	}
 }
 
@@ -112,6 +164,134 @@ func TestChatRequiresCustomerOrg(t *testing.T) {
 	}
 	if len(repo.tasks) != 0 {
 		t.Fatalf("expected no task, got %d", len(repo.tasks))
+	}
+}
+
+func TestCustomerMessagingInboundUsesPublicContractAndIdentity(t *testing.T) {
+	t.Parallel()
+
+	repo := &fakeRepo{}
+	chatID := uuid.New()
+	uc := NewUsecases(repo, &stubNexus{})
+	uc.SetAgentMemory(stubAgentMemory{conversationID: chatID})
+	mux := http.NewServeMux()
+	NewHandler(uc).Register(mux)
+
+	req := authenticatedTaskRequest(http.MethodPost, "/v1/customer-messaging/inbound", `{
+		"org_id":"org-a",
+		"phone_number_id":"phone-1",
+		"from_phone":"5491112345678",
+		"message":"Hola",
+		"message_id":"wamid-1",
+		"profile_name":"Juan"
+	}`, &authn.Principal{
+		OrgID:      "org-a",
+		Actor:      "pymes-whatsapp-bridge",
+		Scopes:     []string{scopeCompanionTasksWrite},
+		AuthMethod: "internal_jwt",
+		Claims: map[string]any{
+			"actor_id":          "pymes-whatsapp-bridge",
+			"actor_type":        "service",
+			"service_principal": true,
+			"product_surface":   "pymes",
+		},
+	})
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	task := onlyTask(t, repo)
+	if task.OrgID != "org-a" || task.CreatedBy != "whatsapp:5491112345678:Juan" {
+		t.Fatalf("unexpected task identity: %+v", task)
+	}
+	var out customerMessagingInboundResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if out.ConversationID != chatID.String() {
+		t.Fatalf("expected conversation id %s, got %+v", chatID, out)
+	}
+}
+
+type stubAgentMemory struct {
+	conversationID uuid.UUID
+}
+
+func (s stubAgentMemory) StartConversation(ctx context.Context, orgID, userID, productSurface, title string) (uuid.UUID, error) {
+	return s.conversationID, nil
+}
+
+func (s stubAgentMemory) AppendMessage(ctx context.Context, conversationID uuid.UUID, orgID, role, content string) error {
+	return nil
+}
+
+func TestCustomerMessagingInboundRejectsInternalRouteAndInvalidAuth(t *testing.T) {
+	t.Parallel()
+
+	mux := http.NewServeMux()
+	NewHandler(NewUsecases(&fakeRepo{}, &stubNexus{})).Register(mux)
+
+	internal := httptest.NewRecorder()
+	mux.ServeHTTP(internal, httptest.NewRequest(http.MethodPost, "/v1/internal/customer-messaging/inbound", strings.NewReader(`{}`)))
+	if internal.Code != http.StatusNotFound {
+		t.Fatalf("expected old internal route 404, got %d: %s", internal.Code, internal.Body.String())
+	}
+
+	unauth := httptest.NewRecorder()
+	mux.ServeHTTP(unauth, httptest.NewRequest(http.MethodPost, "/v1/customer-messaging/inbound", strings.NewReader(`{}`)))
+	if unauth.Code != http.StatusUnauthorized {
+		t.Fatalf("expected unauthenticated request 401, got %d: %s", unauth.Code, unauth.Body.String())
+	}
+
+	wrongSurface := authenticatedTaskRequest(http.MethodPost, "/v1/customer-messaging/inbound", `{
+		"org_id":"org-a",
+		"phone_number_id":"phone-1",
+		"from_phone":"5491112345678",
+		"message":"Hola"
+	}`, &authn.Principal{
+		OrgID:  "org-a",
+		Actor:  "other-service",
+		Scopes: []string{scopeCompanionTasksWrite},
+		Claims: map[string]any{
+			"actor_id":        "other-service",
+			"actor_type":      "service",
+			"product_surface": "other",
+		},
+	})
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, wrongSurface)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected wrong product surface 403, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestCustomerMessagingInboundValidatesRequiredFields(t *testing.T) {
+	t.Parallel()
+
+	mux := http.NewServeMux()
+	NewHandler(NewUsecases(&fakeRepo{}, &stubNexus{})).Register(mux)
+
+	req := authenticatedTaskRequest(http.MethodPost, "/v1/customer-messaging/inbound", `{
+		"org_id":"org-a",
+		"phone_number_id":"phone-1",
+		"message":"Hola"
+	}`, &authn.Principal{
+		OrgID:  "org-a",
+		Actor:  "pymes-whatsapp-bridge",
+		Scopes: []string{scopeCompanionTasksWrite},
+		Claims: map[string]any{
+			"actor_id":        "pymes-whatsapp-bridge",
+			"actor_type":      "service",
+			"product_surface": "pymes",
+		},
+	})
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected missing from_phone 400, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 

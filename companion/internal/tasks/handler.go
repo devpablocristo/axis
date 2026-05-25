@@ -70,7 +70,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/tasks/{id}/retry", h.retry)
 	mux.HandleFunc("POST /v1/tasks/{id}/sync", h.syncNexus)
 	mux.HandleFunc("POST /v1/chat", h.chat)
-	mux.HandleFunc("POST /v1/internal/customer-messaging/inbound", h.customerMessagingInbound)
+	mux.HandleFunc("POST /v1/customer-messaging/inbound", h.customerMessagingInbound)
 }
 
 func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
@@ -693,6 +693,15 @@ func (h *Handler) chat(w http.ResponseWriter, r *http.Request) {
 		}
 		taskID = &parsed
 	}
+	var chatID *uuid.UUID
+	if body.ChatID != "" {
+		parsed, err := uuid.Parse(body.ChatID)
+		if err != nil {
+			httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid chat_id")
+			return
+		}
+		chatID = &parsed
+	}
 
 	identity, ok := workIdentity(r)
 	if !ok {
@@ -705,6 +714,7 @@ func (h *Handler) chat(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.uc.Chat(r.Context(), ChatInput{
 		TaskID:         taskID,
+		ChatID:         chatID,
 		UserID:         userID,
 		OrgID:          orgID,
 		AuthScopes:     identity.Scopes,
@@ -747,6 +757,10 @@ type customerMessagingInboundResponse struct {
 }
 
 func (h *Handler) customerMessagingInbound(w http.ResponseWriter, r *http.Request) {
+	if identityctx.HasNoAuthContext(r) {
+		httpjson.WriteFlatError(w, http.StatusUnauthorized, "UNAUTHORIZED", "customer messaging inbound requires authenticated Axis service identity")
+		return
+	}
 	if !requireScope(w, r, scopeCompanionTasksWrite) {
 		return
 	}
@@ -755,9 +769,35 @@ func (h *Handler) customerMessagingInbound(w http.ResponseWriter, r *http.Reques
 		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid json")
 		return
 	}
+	body.OrgID = strings.TrimSpace(body.OrgID)
+	body.PhoneNumberID = strings.TrimSpace(body.PhoneNumberID)
+	body.FromPhone = strings.TrimSpace(body.FromPhone)
+	body.Message = strings.TrimSpace(body.Message)
+	body.MessageID = strings.TrimSpace(body.MessageID)
+	body.ProfileName = strings.TrimSpace(body.ProfileName)
+	if body.OrgID == "" {
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "org_id is required")
+		return
+	}
+	if body.PhoneNumberID == "" {
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "phone_number_id is required")
+		return
+	}
+	if body.FromPhone == "" {
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "from_phone is required")
+		return
+	}
+	if body.Message == "" {
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "message is required")
+		return
+	}
 	identity, ok := identityctx.WorkIdentityForOrg(r, body.OrgID, scopeCompanionCrossOrg)
 	if !ok {
 		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "customer messaging org is not allowed for this principal")
+		return
+	}
+	if surface := strings.TrimSpace(identity.ProductSurface); surface != "" && surface != "pymes" {
+		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "customer messaging product surface is not allowed")
 		return
 	}
 	orgID := identity.CustomerOrgID
@@ -765,19 +805,15 @@ func (h *Handler) customerMessagingInbound(w http.ResponseWriter, r *http.Reques
 		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "org_id is required")
 		return
 	}
-	if strings.TrimSpace(body.Message) == "" {
-		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "message is required")
-		return
-	}
 
-	userID := strings.TrimSpace(body.FromPhone)
+	userID := body.FromPhone
 	if userID == "" {
 		userID = "whatsapp"
 	} else {
 		userID = "whatsapp:" + userID
 	}
-	if profile := strings.TrimSpace(body.ProfileName); profile != "" {
-		userID = userID + ":" + profile
+	if body.ProfileName != "" {
+		userID = userID + ":" + body.ProfileName
 	}
 
 	identity = identity.WithProductSurface("pymes")

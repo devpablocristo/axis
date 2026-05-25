@@ -724,6 +724,29 @@ func TestIdempotency(t *testing.T) {
 	}
 }
 
+func TestIdempotencyRejectsSameKeyDifferentPayload(t *testing.T) {
+	t.Parallel()
+	mux := setupRequestMux()
+
+	req1 := httptest.NewRequest(http.MethodPost, "/v1/requests", strings.NewReader(
+		`{"requester_type":"agent","requester_id":"bot","action_type":"alert.escalate","target_resource":"a"}`))
+	req1.Header.Set("Idempotency-Key", "conflict-key-123")
+	rec1 := httptest.NewRecorder()
+	mux.ServeHTTP(rec1, req1)
+	if rec1.Code != http.StatusCreated {
+		t.Fatalf("esperaba 201, obtuvo %d: %s", rec1.Code, rec1.Body.String())
+	}
+
+	req2 := httptest.NewRequest(http.MethodPost, "/v1/requests", strings.NewReader(
+		`{"requester_type":"agent","requester_id":"bot","action_type":"alert.escalate","target_resource":"b"}`))
+	req2.Header.Set("Idempotency-Key", "conflict-key-123")
+	rec2 := httptest.NewRecorder()
+	mux.ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusConflict {
+		t.Fatalf("esperaba 409, obtuvo %d: %s", rec2.Code, rec2.Body.String())
+	}
+}
+
 func TestIdempotencyDifferentKeys(t *testing.T) {
 	t.Parallel()
 	mux := setupRequestMux()
@@ -1377,6 +1400,50 @@ func TestSimulateValidation(t *testing.T) {
 				t.Fatalf("esperaba code VALIDATION, obtuvo %s", errResp.Code)
 			}
 		})
+	}
+}
+
+func TestSimulateInvalidActionBindingReturnsValidation(t *testing.T) {
+	t.Parallel()
+	mux := setupRequestMux()
+
+	binding := `{
+		"schema_version":"tool_intent.v1",
+		"org_id":"org-other",
+		"actor_id":"pymes-e2e",
+		"actor_type":"service",
+		"product_surface":"pymes",
+		"run_id":"run-e2e",
+		"tool_invocation_id":"tool-e2e",
+		"connector_id":"pymes.e2e",
+		"capability_id":"e2e.notification.bulk_send",
+		"operation":"invoke",
+		"target_system":"pymes",
+		"target_resource":"target-1",
+		"payload_hash":"hash-e2e",
+		"idempotency_key":"idem-e2e"
+	}`
+	body := fmt.Sprintf(`{
+		"requester_type":"service",
+		"requester_id":"pymes-e2e",
+		"action_type":"e2e.notification.bulk_send",
+		"target_system":"pymes",
+		"target_resource":"target-1",
+		"action_binding":%s,
+		"params":{"org_id":"org-a"}
+	}`, binding)
+
+	rec := doReq(t, mux, http.MethodPost, "/v1/requests/simulate", body)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("esperaba 400, obtuvo %d: %s", rec.Code, rec.Body.String())
+	}
+	var errResp struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	}
+	decJSON(t, rec, &errResp)
+	if errResp.Code != "VALIDATION" || !strings.Contains(errResp.Message, "action_binding.org_id") {
+		t.Fatalf("respuesta inesperada: %+v", errResp)
 	}
 }
 

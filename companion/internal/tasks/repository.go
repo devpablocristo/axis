@@ -22,6 +22,7 @@ var ErrNotFound = domainerr.NotFound("not found")
 type Repository interface {
 	CreateTask(ctx context.Context, t domain.Task) (domain.Task, error)
 	GetTaskByID(ctx context.Context, id uuid.UUID) (domain.Task, error)
+	GetTaskByAgentConversationID(ctx context.Context, conversationID uuid.UUID) (domain.Task, error)
 	// ListTasks devuelve tareas filtradas por tenant. `orgID` es obligatorio:
 	// si está vacío, retorna `domainerr.TenantMissing()` sin tocar la DB.
 	// Cerrá el leak histórico donde `orgID == ""` devolvía todas las filas
@@ -108,6 +109,22 @@ func (r *PostgresRepository) GetTaskByID(ctx context.Context, id uuid.UUID) (dom
 			return domain.Task{}, ErrNotFound
 		}
 		return domain.Task{}, fmt.Errorf("get task: %w", err)
+	}
+	return t, nil
+}
+
+func (r *PostgresRepository) GetTaskByAgentConversationID(ctx context.Context, conversationID uuid.UUID) (domain.Task, error) {
+	row := r.db.Pool().QueryRow(ctx, selectTask+`
+		WHERE t.context_json ->> 'agent_conversation_id' = $1
+		ORDER BY t.updated_at DESC
+		LIMIT 1
+	`, conversationID.String())
+	t, err := scanTask(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.Task{}, ErrNotFound
+		}
+		return domain.Task{}, fmt.Errorf("get task by agent conversation id: %w", err)
 	}
 	return t, nil
 }

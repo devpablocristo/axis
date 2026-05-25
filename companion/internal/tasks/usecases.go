@@ -336,6 +336,7 @@ func (u *Usecases) AddMessage(ctx context.Context, taskID uuid.UUID, in AddMessa
 // ChatInput entrada para el endpoint de chat conversacional.
 type ChatInput struct {
 	TaskID         *uuid.UUID // nil = crear tarea nueva
+	ChatID         *uuid.UUID // nil = resolver por task_id o crear task nueva
 	UserID         string
 	OrgID          string
 	AuthScopes     []string
@@ -382,6 +383,21 @@ func (u *Usecases) Chat(ctx context.Context, in ChatInput) (ChatResult, error) {
 		t, err = u.repo.GetTaskByID(ctx, *in.TaskID)
 		if err != nil {
 			return ChatResult{}, err
+		}
+		if in.OrgID != "" && t.OrgID != "" && t.OrgID != in.OrgID {
+			return ChatResult{}, ErrNotFound
+		}
+		if in.AgentID == "" {
+			in.AgentID = extractTaskAgentID(t.ContextJSON)
+		}
+	} else if in.ChatID != nil {
+		// Reusar tarea existente a partir del identificador público de conversación.
+		t, err = u.repo.GetTaskByAgentConversationID(ctx, *in.ChatID)
+		if err != nil {
+			return ChatResult{}, err
+		}
+		if in.OrgID != "" && t.OrgID != "" && t.OrgID != in.OrgID {
+			return ChatResult{}, ErrNotFound
 		}
 		if in.AgentID == "" {
 			in.AgentID = extractTaskAgentID(t.ContextJSON)

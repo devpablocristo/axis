@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/devpablocristo/platform/http/go/httpjson"
 	"github.com/devpablocristo/platform/authn/go/identityhttp"
+	"github.com/devpablocristo/platform/http/go/httpjson"
 
 	requestdto "github.com/devpablocristo/nexus/internal/requests/handler/dto"
 	requestdomain "github.com/devpablocristo/nexus/internal/requests/usecases/domain"
@@ -92,6 +92,23 @@ func (h *Handler) simulate(w http.ResponseWriter, r *http.Request) {
 		Context:        body.Context,
 	})
 	if err != nil {
+		errMsg := err.Error()
+		if errors.Is(err, ErrIdempotencyConflict) || domainerr.IsConflict(err) || strings.Contains(errMsg, "idempotency key conflict") {
+			httpjson.WriteFlatError(w, http.StatusConflict, "CONFLICT", errMsg)
+			return
+		}
+		if strings.Contains(errMsg, "unknown action_type") ||
+			strings.Contains(errMsg, "is disabled") ||
+			strings.Contains(errMsg, "not delegated") {
+			httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", errMsg)
+			return
+		}
+		if strings.Contains(errMsg, "missing required param") ||
+			strings.Contains(errMsg, "action_type schema") ||
+			strings.Contains(errMsg, "action_binding") {
+			httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", errMsg)
+			return
+		}
 		slog.Error("simulate failed", "error", err)
 		httpjson.WriteFlatInternalError(w, err, "simulate request")
 		return
@@ -184,6 +201,10 @@ func (h *Handler) submit(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		errMsg := err.Error()
+		if errors.Is(err, ErrIdempotencyConflict) || domainerr.IsConflict(err) || strings.Contains(errMsg, "idempotency key conflict") {
+			httpjson.WriteFlatError(w, http.StatusConflict, "CONFLICT", errMsg)
+			return
+		}
 		if strings.Contains(errMsg, "unknown action_type") ||
 			strings.Contains(errMsg, "is disabled") ||
 			strings.Contains(errMsg, "not delegated") {
