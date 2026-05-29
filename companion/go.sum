@@ -29,8 +29,8 @@ github.com/devpablocristo/platform/contracts/ai/go v0.1.0 h1:Jn0EmJ8QQOPmeL3QDum
 github.com/devpablocristo/platform/contracts/ai/go v0.1.0/go.mod h1:HY78nbPFch1IZbUv5Lq8O8FwqAMTvRr0TsV7LlAVozo=
 github.com/devpablocristo/platform/databases/postgres/go v0.1.0 h1:m8+iISxkiZO0He/rOxoteaFUTYireb3mI8uzNpbG97I=
 github.com/devpablocristo/platform/databases/postgres/go v0.1.0/go.mod h1:jgCqHHL8B9khk8K5GYA8LIDhnq6kQqAJEDwTk9pXQN4=
-github.com/devpablocristo/platform/errors/go v0.1.0 h1:lI+4cSrI1FNAfzgNBXEwSZemrsT7EJyaDJ3FkLt7Vfo=
-github.com/devpablocristo/platform/errors/go v0.1.0/go.mod h1:1cHoflrIdeQrLDtVPgsl5GqjYH7AZKASNYCMSAcdjOA=
+github.com/devpablocristo/platform/errors/go v0.2.0 h1:I7WZlgEd7ic6c2IETYgzA3ULykDd8Qnx+w6NYPXlRKM=
+github.com/devpablocristo/platform/errors/go v0.2.0/go.mod h1:1cHoflrIdeQrLDtVPgsl5GqjYH7AZKASNYCMSAcdjOA=
 github.com/devpablocristo/platform/http/go v0.1.0 h1:YQGApnAJx2+62HrLZ5G5Uf0Kq5phhV4JF6Be0IRZ//o=
 github.com/devpablocristo/platform/http/go v0.1.0/go.mod h1:qinUKdGJ51xbKMLYWF96bSGu8JSRAbWPsAqTusrg5tk=
 github.com/devpablocristo/platform/kernels/ai/go v0.1.0 h1:pp7w0fICDIcFp0NhYcWhZcHEHvcSzDbBdcYakKwOQ2M=
