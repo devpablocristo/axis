@@ -134,3 +134,22 @@ make smoke-companion
 
 Los smoke scripts esperan Companion y Nexus levantados, y usan las keys de
 `.env` en la raíz de Axis.
+
+El smoke MCP (`companion/scripts/smoke/run-companion-mcp-flow.sh`) verifica:
+
+- `POST /mcp` con `initialize`;
+- `tools/list`;
+- `tools/call axis.products.list` con policy Nexus `allow`;
+- `tools/call axis.evals.run` con policy Nexus `require_approval`;
+- `tools/call axis.tasks.create` con policy Nexus `deny`;
+- que una tool denegada no ejecute la creación de task.
+
+Las policies Nexus locales para MCP pueden seedearse de forma idempotente con:
+
+```bash
+# desde axis/
+bash nexus/scripts/seed-axis-mcp-policies.sh
+```
+
+Estas policies gobiernan `target_system=axis.mcp` y
+`action_type=agent.capability.invoke`.

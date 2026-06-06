@@ -53,6 +53,7 @@ smoke-companion:
 	cd companion && bash scripts/smoke/run-companion-execution-flow.sh
 	cd companion && bash scripts/smoke/run-companion-denied-flow.sh
 	cd companion && bash scripts/smoke/run-companion-nexus-assist-flow.sh
+	cd companion && bash scripts/smoke/run-companion-mcp-flow.sh
 
 smoke-nexus:
 	cd nexus && bash scripts/smoke/run-policies-crud.sh
@@ -85,7 +86,7 @@ dev-companion:
 	nexus_port="$${NEXUS_PORT:-18084}"; \
 	export PORT="$${COMPANION_PORT:-18085}"; \
 	export DATABASE_URL="$${COMPANION_DATABASE_URL:-postgres://postgres:postgres@localhost:$${COMPANION_POSTGRES_PORT:-15435}/companion?sslmode=disable}"; \
-	export COMPANION_API_KEYS="admin=$${COMPANION_ADMIN_API_KEY:-companion-admin-dev-key}|service_principal=true|org_id=$${AXIS_DEV_ORG_ID:-local-dev-org}|scopes=companion:tasks:read+companion:tasks:write+companion:connectors:execute+companion:connectors:admin+companion:watchers:read+companion:watchers:write+companion:watchers:execute+companion:nexus:read+companion:nexus:admin+companion:nexus-assist:read+companion:nexus-assist:admin+companion:assist:read+companion:assist:write+companion:cross_org,argos=$${COMPANION_ARGOS_API_KEY:-argos-companion-dev-key}|service_principal=true|org_id=$${ARGOS_ORG_ID:-argos-local-org}|scopes=companion:assist:read+companion:assist:write"; \
+	export COMPANION_API_KEYS="admin=$${COMPANION_ADMIN_API_KEY:-companion-admin-dev-key}|service_principal=true|org_id=$${AXIS_DEV_ORG_ID:-local-dev-org}|scopes=companion:tasks:read+companion:tasks:write+companion:connectors:execute+companion:connectors:admin+companion:capabilities:read+companion:capabilities:admin+companion:watchers:read+companion:watchers:write+companion:watchers:execute+companion:nexus:read+companion:nexus:admin+companion:nexus-assist:read+companion:nexus-assist:admin+companion:assist:read+companion:assist:write+companion:products:read+companion:products:admin+companion:ops:read+companion:observability:read+companion:costs:read+companion:evals:admin+companion:runtime:admin+companion:mcp:execute+companion:cross_org,argos=$${COMPANION_ARGOS_API_KEY:-argos-companion-dev-key}|service_principal=true|org_id=$${ARGOS_ORG_ID:-argos-local-org}|scopes=companion:assist:read+companion:assist:write"; \
 	export COMPANION_INTERNAL_JWT_SECRET="$${AXIS_INTERNAL_JWT_SECRET:-axis-dev-internal-jwt-secret-change-me}"; \
 	export COMPANION_INTERNAL_JWT_ISSUER="$${AXIS_INTERNAL_JWT_ISSUER:-axis-bff}"; \
 	export COMPANION_INTERNAL_JWT_AUDIENCE="$${COMPANION_INTERNAL_JWT_AUDIENCE:-companion}"; \
