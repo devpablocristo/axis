@@ -196,6 +196,15 @@ Los jobs durables transportan `product_surface` como campo first-class. Si no se
 informa, se asume `companion`; los jobs de producto deben setearlo
 explicitamente para auditoria, budgets y rate limits.
 
+El endpoint operativo `GET /v1/jobs` acepta `product_surface` como filtro. Los
+principales sin `companion:cross_org` quedan limitados al producto declarado en
+su identidad; `GET /v1/jobs/{id}` y cancelaciones validan `org_id +
+product_surface` antes de exponer o modificar un job.
+
+Las cuotas de memoria se calculan por `org_id + product_surface + scope_type +
+scope_id`. Dos productos de la misma organizacion no comparten cuota ni pueden
+bloquear inserciones entre si aunque reutilicen el mismo `scope_id`.
+
 ## Ponti
 
 Ponti no se implementa en esta fase. Cuando avance, Ponti debe:

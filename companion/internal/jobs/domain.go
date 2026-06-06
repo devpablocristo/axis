@@ -97,7 +97,7 @@ type Repository interface {
 	Fail(ctx context.Context, in FailInput) (Job, error)
 	Cancel(ctx context.Context, jobID uuid.UUID, reason string) error
 	Get(ctx context.Context, jobID uuid.UUID) (Job, error)
-	List(ctx context.Context, orgID, status string, limit int) ([]Job, error)
+	List(ctx context.Context, orgID, productSurface, status string, limit int) ([]Job, error)
 	RecoverExpiredLeases(ctx context.Context, limit int) (int64, error)
 }
 

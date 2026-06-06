@@ -52,7 +52,15 @@ func (h *HTTPHandler) list(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = parsed
 	}
-	jobs, err := h.repo.List(r.Context(), orgID, strings.TrimSpace(r.URL.Query().Get("status")), limit)
+	productSurface := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("product_surface")))
+	if productSurface == "" && !identityctx.HasScope(r, scopeJobsCrossOrg) {
+		productSurface = strings.TrimSpace(strings.ToLower(identityctx.ProductSurface(r)))
+	}
+	if productSurface != "" && !canAccessJobProduct(r, productSurface) {
+		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "job product surface is not allowed for this principal")
+		return
+	}
+	jobs, err := h.repo.List(r.Context(), orgID, productSurface, strings.TrimSpace(r.URL.Query().Get("status")), limit)
 	if err != nil {
 		httpjson.WriteFlatInternalError(w, err, "list jobs failed")
 		return
@@ -77,8 +85,8 @@ func (h *HTTPHandler) get(w http.ResponseWriter, r *http.Request) {
 		httpjson.WriteFlatInternalError(w, err, "get job failed")
 		return
 	}
-	if !canAccessJobOrg(r, job.OrgID) {
-		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "job org is not allowed for this principal")
+	if !canAccessJobScope(r, job.OrgID, job.ProductSurface) {
+		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "job scope is not allowed for this principal")
 		return
 	}
 	httpjson.WriteJSON(w, http.StatusOK, job)
@@ -101,8 +109,8 @@ func (h *HTTPHandler) cancel(w http.ResponseWriter, r *http.Request) {
 		httpjson.WriteFlatInternalError(w, err, "get job failed")
 		return
 	}
-	if !canAccessJobOrg(r, job.OrgID) {
-		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "job org is not allowed for this principal")
+	if !canAccessJobScope(r, job.OrgID, job.ProductSurface) {
+		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "job scope is not allowed for this principal")
 		return
 	}
 	var req struct {
@@ -172,4 +180,19 @@ func canAccessJobOrg(r *http.Request, orgID string) bool {
 		return false
 	}
 	return identityctx.CanAccessOrg(r, orgID, scopeJobsCrossOrg)
+}
+
+func canAccessJobProduct(r *http.Request, productSurface string) bool {
+	productSurface = strings.TrimSpace(strings.ToLower(productSurface))
+	if productSurface == "" {
+		return false
+	}
+	if identityctx.HasScope(r, scopeJobsCrossOrg) {
+		return true
+	}
+	return productSurface == strings.TrimSpace(strings.ToLower(identityctx.ProductSurface(r)))
+}
+
+func canAccessJobScope(r *http.Request, orgID, productSurface string) bool {
+	return canAccessJobOrg(r, orgID) && canAccessJobProduct(r, productSurface)
 }

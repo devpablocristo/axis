@@ -233,18 +233,24 @@ func (r *MemoryRepository) Get(_ context.Context, jobID uuid.UUID) (Job, error) 
 	return job, nil
 }
 
-func (r *MemoryRepository) List(_ context.Context, orgID, status string, limit int) ([]Job, error) {
+func (r *MemoryRepository) List(_ context.Context, orgID, productSurface, status string, limit int) ([]Job, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if limit <= 0 {
 		limit = 100
 	}
+	orgID = strings.TrimSpace(orgID)
+	productSurface = strings.TrimSpace(strings.ToLower(productSurface))
+	status = strings.TrimSpace(status)
 	out := make([]Job, 0)
 	for _, job := range r.jobs {
-		if strings.TrimSpace(orgID) != "" && job.OrgID != strings.TrimSpace(orgID) {
+		if orgID != "" && job.OrgID != orgID {
 			continue
 		}
-		if strings.TrimSpace(status) != "" && string(job.Status) != strings.TrimSpace(status) {
+		if productSurface != "" && strings.TrimSpace(strings.ToLower(job.ProductSurface)) != productSurface {
+			continue
+		}
+		if status != "" && string(job.Status) != status {
 			continue
 		}
 		out = append(out, job)

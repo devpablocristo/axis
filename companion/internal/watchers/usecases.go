@@ -1043,6 +1043,17 @@ func (uc *Usecases) handleWatcherRunJob(ctx context.Context, job jobs.Job) (json
 	if err != nil || watcherID == uuid.Nil {
 		return json.RawMessage(`{"reason":"invalid_watcher_id"}`), jobs.Permanent(fmt.Errorf("invalid watcher_id %q", payload.WatcherID))
 	}
+	w, err := uc.repo.GetWatcher(ctx, watcherID)
+	if err != nil {
+		return json.RawMessage(`{"reason":"watcher_not_found"}`), jobs.Permanent(fmt.Errorf("get watcher: %w", err))
+	}
+	config, err := resolveWatcherCapabilityConfig(w)
+	if err != nil {
+		return json.RawMessage(`{"reason":"invalid_watcher_config"}`), jobs.Permanent(err)
+	}
+	if err := requireWatcherJobProductScope(job, payload.ProductSurface, config.ProductSurface); err != nil {
+		return json.RawMessage(`{"reason":"product_surface_mismatch"}`), err
+	}
 	result, err := uc.RunWatcher(ctx, watcherID)
 	if err != nil {
 		if err == ErrWatcherDisabled {
@@ -1055,6 +1066,21 @@ func (uc *Usecases) handleWatcherRunJob(ctx context.Context, job jobs.Job) (json
 		return json.RawMessage(`{"reason":"marshal_result_failed"}`), err
 	}
 	return raw, nil
+}
+
+func requireWatcherJobProductScope(job jobs.Job, payloadProductSurface, configProductSurface string) error {
+	expected := strings.TrimSpace(strings.ToLower(configProductSurface))
+	if expected == "" {
+		return jobs.Permanent(fmt.Errorf("watcher config product_surface is required"))
+	}
+	if payloadProductSurface = strings.TrimSpace(strings.ToLower(payloadProductSurface)); payloadProductSurface != "" && payloadProductSurface != expected {
+		return jobs.Permanent(fmt.Errorf("watcher payload product_surface mismatch: payload=%s config=%s", payloadProductSurface, expected))
+	}
+	jobProductSurface := strings.TrimSpace(strings.ToLower(job.ProductSurface))
+	if jobProductSurface == "" || jobProductSurface != expected {
+		return jobs.Permanent(fmt.Errorf("watcher job product_surface mismatch: job=%s config=%s", jobProductSurface, expected))
+	}
+	return nil
 }
 
 func (uc *Usecases) handleWatcherProposalSyncJob(ctx context.Context, job jobs.Job) (json.RawMessage, error) {

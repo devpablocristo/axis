@@ -648,6 +648,9 @@ func TestUsecases_EnqueueWatcherRunsUsesDurableJobQueue(t *testing.T) {
 	if payload.WatcherID != enabled.ID.String() {
 		t.Fatalf("expected watcher_id %s, got %s", enabled.ID, payload.WatcherID)
 	}
+	if payload.ProductSurface != "pymes" || claimed[0].ProductSurface != "pymes" {
+		t.Fatalf("expected pymes product scope, payload=%+v job=%+v", payload, claimed[0])
+	}
 }
 
 func TestUsecases_JobHandlerRunsWatcherAndCompletes(t *testing.T) {
@@ -663,16 +666,17 @@ func TestUsecases_JobHandlerRunsWatcherAndCompletes(t *testing.T) {
 		OrgID: "org-1", Name: "Low stock", WatcherType: domain.WatcherLowStock,
 		Config: json.RawMessage(`{"threshold_units":1}`), Enabled: true,
 	})
-	payload, err := json.Marshal(watcherRunJobPayload{WatcherID: w.ID.String()})
+	payload, err := json.Marshal(watcherRunJobPayload{WatcherID: w.ID.String(), ProductSurface: "pymes"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	job, _, err := queue.Enqueue(context.Background(), jobs.EnqueueInput{
-		OrgID:     w.OrgID,
-		Kind:      JobKindWatcherRun,
-		ShardKey:  w.OrgID,
-		DedupeKey: "watcher.run:" + w.ID.String(),
-		Payload:   payload,
+		OrgID:          w.OrgID,
+		ProductSurface: "pymes",
+		Kind:           JobKindWatcherRun,
+		ShardKey:       w.OrgID + ":pymes",
+		DedupeKey:      "watcher.run:" + w.ID.String(),
+		Payload:        payload,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -688,5 +692,29 @@ func TestUsecases_JobHandlerRunsWatcherAndCompletes(t *testing.T) {
 	}
 	if stored.Status != jobs.StatusSucceeded {
 		t.Fatalf("expected job succeeded, got %+v", stored)
+	}
+}
+
+func TestUsecases_JobHandlerRejectsProductSurfaceMismatch(t *testing.T) {
+	t.Parallel()
+
+	repo := newFakeRepo()
+	uc := NewUsecases(repo, &fakeNexus{decision: "allowed"})
+	w, _ := uc.Create(context.Background(), CreateWatcherInput{
+		OrgID: "org-1", Name: "Low stock", WatcherType: domain.WatcherLowStock,
+		Config: json.RawMessage(`{"threshold_units":1}`), Enabled: true,
+	})
+	payload, err := json.Marshal(watcherRunJobPayload{WatcherID: w.ID.String(), ProductSurface: "ponti"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = uc.handleWatcherRunJob(context.Background(), jobs.Job{
+		OrgID:          w.OrgID,
+		ProductSurface: "ponti",
+		Kind:           JobKindWatcherRun,
+		Payload:        payload,
+	})
+	if !jobs.IsPermanent(err) {
+		t.Fatalf("expected permanent product mismatch error, got %v", err)
 	}
 }

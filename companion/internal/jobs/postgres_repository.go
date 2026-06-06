@@ -261,7 +261,7 @@ func (r *PostgresRepository) Get(ctx context.Context, jobID uuid.UUID) (Job, err
 	return job, nil
 }
 
-func (r *PostgresRepository) List(ctx context.Context, orgID, status string, limit int) ([]Job, error) {
+func (r *PostgresRepository) List(ctx context.Context, orgID, productSurface, status string, limit int) ([]Job, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
@@ -273,6 +273,10 @@ func (r *PostgresRepository) List(ctx context.Context, orgID, status string, lim
 		FROM companion_jobs
 		WHERE org_id = $1`
 	args := []any{strings.TrimSpace(orgID)}
+	if productSurface = strings.TrimSpace(strings.ToLower(productSurface)); productSurface != "" {
+		args = append(args, productSurface)
+		query += fmt.Sprintf(` AND product_surface = $%d`, len(args))
+	}
 	if status = strings.TrimSpace(status); status != "" {
 		args = append(args, status)
 		query += fmt.Sprintf(` AND status = $%d`, len(args))

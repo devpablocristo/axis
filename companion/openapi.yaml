@@ -834,7 +834,20 @@ paths:
   /v1/jobs:
     get:
       summary: Lista jobs durables de la customer org autenticada
-      description: Requiere `companion:runtime:admin` o `companion:cross_org`.
+      description: Requiere `companion:runtime:admin` o `companion:cross_org`. Sin `companion:cross_org`, el listado queda limitado al `product_surface` del principal.
+      parameters:
+        - in: query
+          name: product_surface
+          schema: { type: string }
+          description: Filtra jobs por producto. Requerido implicitamente para principales sin `companion:cross_org`.
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [queued, running, succeeded, failed, dead_letter, cancelled]
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
       responses:
         "200": { description: Job list }
   /v1/business-model:

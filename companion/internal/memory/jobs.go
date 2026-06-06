@@ -52,6 +52,9 @@ func (uc *Usecases) handleEmbeddingJob(ctx context.Context, job jobs.Job) (json.
 		}
 		return nil, err
 	}
+	if err := requireMemoryJobScope(job, entry.OrgID, entry.ProductSurface, "memory_embedding_job"); err != nil {
+		return nil, err
+	}
 	if err := uc.requireActiveInstallation(ctx, entry.OrgID, entry.ProductSurface, "memory_embedding_job"); err != nil {
 		return nil, jobs.Permanent(err)
 	}
@@ -104,6 +107,9 @@ func (uc *Usecases) handleDecayJob(ctx context.Context, job jobs.Job) (json.RawM
 	if err := json.Unmarshal(job.Payload, &payload); err != nil {
 		return nil, jobs.Permanent(fmt.Errorf("invalid decay job payload: %w", err))
 	}
+	if err := requireMemoryJobScope(job, payload.OrgID, payload.ProductSurface, "memory_decay_job"); err != nil {
+		return nil, err
+	}
 	if err := uc.requireActiveInstallation(ctx, payload.OrgID, payload.ProductSurface, "memory_decay_job"); err != nil {
 		return nil, jobs.Permanent(err)
 	}
@@ -127,6 +133,9 @@ func (uc *Usecases) handleCompactionJob(ctx context.Context, job jobs.Job) (json
 	}
 	if payload.OrgID == "" || payload.ProductSurface == "" || payload.ScopeType == "" || payload.ScopeID == "" {
 		return nil, jobs.Permanent(fmt.Errorf("org_id, product_surface, scope_type and scope_id are required"))
+	}
+	if err := requireMemoryJobScope(job, payload.OrgID, payload.ProductSurface, "memory_compaction_job"); err != nil {
+		return nil, err
 	}
 	if err := uc.requireActiveInstallation(ctx, payload.OrgID, payload.ProductSurface, "memory_compaction_job"); err != nil {
 		return nil, jobs.Permanent(err)
@@ -183,4 +192,21 @@ func (uc *Usecases) handleCompactionJob(ctx context.Context, job jobs.Job) (json
 		"source_count":    summary.SourceCount,
 		"status":          "compacted",
 	})
+}
+
+func requireMemoryJobScope(job jobs.Job, orgID, productSurface, reason string) error {
+	orgID = strings.TrimSpace(orgID)
+	productSurface = strings.TrimSpace(strings.ToLower(productSurface))
+	if orgID == "" || productSurface == "" {
+		return jobs.Permanent(fmt.Errorf("%s requires org_id and product_surface", reason))
+	}
+	jobOrgID := strings.TrimSpace(job.OrgID)
+	if jobOrgID != "" && jobOrgID != orgID {
+		return jobs.Permanent(fmt.Errorf("%s org_id mismatch: job=%s payload=%s", reason, jobOrgID, orgID))
+	}
+	jobProductSurface := strings.TrimSpace(strings.ToLower(job.ProductSurface))
+	if jobProductSurface != "" && jobProductSurface != productSurface {
+		return jobs.Permanent(fmt.Errorf("%s product_surface mismatch: job=%s payload=%s", reason, jobProductSurface, productSurface))
+	}
+	return nil
 }

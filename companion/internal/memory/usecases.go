@@ -26,7 +26,7 @@ type Repository interface {
 	Find(ctx context.Context, q FindQuery) ([]domain.MemoryEntry, error)
 	Delete(ctx context.Context, id uuid.UUID) error
 	PurgeExpired(ctx context.Context) (int64, error)
-	CountByScope(ctx context.Context, scopeType domain.ScopeType, scopeID string) (int, error)
+	CountByScope(ctx context.Context, orgID, productSurface string, scopeType domain.ScopeType, scopeID string) (int, error)
 }
 
 // FindQuery filtros de búsqueda de memoria.
@@ -285,7 +285,7 @@ func (uc *Usecases) Upsert(ctx context.Context, in UpsertInput) (domain.MemoryEn
 		// Camino de inserción: validar quota por scope. No se aplica a updates
 		// porque no agrandan la tabla.
 		if uc.perScopeQuota > 0 {
-			n, cErr := uc.repo.CountByScope(ctx, in.ScopeType, in.ScopeID)
+			n, cErr := uc.repo.CountByScope(ctx, in.OrgID, in.ProductSurface, in.ScopeType, in.ScopeID)
 			if cErr != nil {
 				return domain.MemoryEntry{}, fmt.Errorf("check memory quota: %w", cErr)
 			}

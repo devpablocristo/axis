@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/devpablocristo/companion/internal/jobs"
 	"github.com/google/uuid"
 
 	domain "github.com/devpablocristo/companion/internal/memory/usecases/domain"
@@ -104,10 +105,10 @@ func (f *fakeRepo) PurgeExpired(ctx context.Context) (int64, error) {
 	return 0, nil
 }
 
-func (f *fakeRepo) CountByScope(_ context.Context, scopeType domain.ScopeType, scopeID string) (int, error) {
+func (f *fakeRepo) CountByScope(_ context.Context, orgID, productSurface string, scopeType domain.ScopeType, scopeID string) (int, error) {
 	n := 0
 	for _, e := range f.entries {
-		if e.ScopeType == scopeType && e.ScopeID == scopeID {
+		if e.OrgID == orgID && e.ProductSurface == productSurface && e.ScopeType == scopeType && e.ScopeID == scopeID {
 			n++
 		}
 	}
@@ -244,6 +245,72 @@ func TestUsecases_Upsert_rejectsInsertOverQuota(t *testing.T) {
 		ContentText:    "updated",
 	}); err != nil {
 		t.Fatalf("update at quota should succeed, got: %v", err)
+	}
+}
+
+func TestUsecases_UpsertQuotaIsScopedByOrgAndProduct(t *testing.T) {
+	t.Parallel()
+
+	repo := &fakeRepo{}
+	uc := NewUsecases(repo).WithPerScopeQuota(1)
+
+	for _, productSurface := range []string{"pymes", "ponti"} {
+		if _, err := uc.Upsert(context.Background(), UpsertInput{
+			OrgID:          "org-a",
+			ProductSurface: productSurface,
+			Kind:           domain.MemoryBusinessContext,
+			ScopeType:      domain.ScopeOrg,
+			ScopeID:        "org-a",
+			Key:            productSurface + "-policy",
+			ContentText:    "Producto " + productSurface + " usa su propia cuota.",
+		}); err != nil {
+			t.Fatalf("insert for product %s should not share quota, got: %v", productSurface, err)
+		}
+	}
+
+	if _, err := uc.Upsert(context.Background(), UpsertInput{
+		OrgID:          "org-a",
+		ProductSurface: "pymes",
+		Kind:           domain.MemoryBusinessContext,
+		ScopeType:      domain.ScopeOrg,
+		ScopeID:        "org-a",
+		Key:            "pymes-second-policy",
+		ContentText:    "Otro dato para pymes.",
+	}); !IsQuotaExceeded(err) {
+		t.Fatalf("expected pymes quota to remain isolated and exceeded, got %v", err)
+	}
+
+	if _, err := uc.Upsert(context.Background(), UpsertInput{
+		OrgID:          "org-b",
+		ProductSurface: "pymes",
+		Kind:           domain.MemoryBusinessContext,
+		ScopeType:      domain.ScopeOrg,
+		ScopeID:        "org-a",
+		Key:            "org-b-policy",
+		ContentText:    "Otra org no comparte cuota aunque reuse scope_id.",
+	}); err != nil {
+		t.Fatalf("insert for different org should not share quota, got: %v", err)
+	}
+}
+
+func TestUsecases_DecayJobRejectsProductSurfaceMismatch(t *testing.T) {
+	t.Parallel()
+
+	uc := NewUsecases(&fakeRepo{})
+	payload := json.RawMessage(`{
+		"org_id":"org-a",
+		"product_surface":"pymes",
+		"scope_type":"org",
+		"scope_id":"org-a"
+	}`)
+	_, err := uc.handleDecayJob(context.Background(), jobs.Job{
+		OrgID:          "org-a",
+		ProductSurface: "ponti",
+		Kind:           JobKindMemoryDecay,
+		Payload:        payload,
+	})
+	if !jobs.IsPermanent(err) {
+		t.Fatalf("expected permanent product mismatch error, got %v", err)
 	}
 }
 

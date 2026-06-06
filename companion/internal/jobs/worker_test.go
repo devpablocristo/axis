@@ -62,6 +62,39 @@ func TestMemoryRepository_DedupeAndLeaseRecovery(t *testing.T) {
 	}
 }
 
+func TestMemoryRepository_ListFiltersByProductSurface(t *testing.T) {
+	t.Parallel()
+
+	repo := NewMemoryRepository()
+	for _, productSurface := range []string{"pymes", "ponti"} {
+		if _, _, err := repo.Enqueue(context.Background(), EnqueueInput{
+			OrgID:          "org-1",
+			ProductSurface: productSurface,
+			Kind:           "demo",
+			DedupeKey:      "demo:" + productSurface,
+			Payload:        json.RawMessage(`{}`),
+		}); err != nil {
+			t.Fatalf("enqueue %s: %v", productSurface, err)
+		}
+	}
+
+	pymesJobs, err := repo.List(context.Background(), "org-1", "pymes", "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pymesJobs) != 1 || pymesJobs[0].ProductSurface != "pymes" {
+		t.Fatalf("expected only pymes jobs, got %+v", pymesJobs)
+	}
+
+	allJobs, err := repo.List(context.Background(), "org-1", "", "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(allJobs) != 2 {
+		t.Fatalf("expected all product jobs without filter, got %+v", allJobs)
+	}
+}
+
 func TestWorker_RetryThenSuccess(t *testing.T) {
 	t.Parallel()
 

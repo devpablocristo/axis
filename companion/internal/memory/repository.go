@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -191,16 +192,18 @@ func (r *PostgresRepository) PurgeExpired(ctx context.Context) (int64, error) {
 	return tag.RowsAffected(), nil
 }
 
-// CountByScope devuelve cuántas entradas vivas existen en (scope_type, scope_id).
+// CountByScope devuelve cuántas entradas vivas existen en
+// (org_id, product_surface, scope_type, scope_id).
 // Excluye entradas expiradas (expires_at < now) porque PurgeExpired las va a
 // drenar en el próximo loop; contarlas inflaría el quota artificialmente.
-func (r *PostgresRepository) CountByScope(ctx context.Context, scopeType domain.ScopeType, scopeID string) (int, error) {
+func (r *PostgresRepository) CountByScope(ctx context.Context, orgID, productSurface string, scopeType domain.ScopeType, scopeID string) (int, error) {
 	var n int
 	err := r.db.Pool().QueryRow(ctx, `
 		SELECT COUNT(*) FROM companion_memory_entries
-		WHERE scope_type = $1 AND scope_id = $2
-		  AND (expires_at IS NULL OR expires_at > $3)
-	`, scopeType, scopeID, time.Now().UTC()).Scan(&n)
+		WHERE org_id = $1 AND product_surface = $2
+		  AND scope_type = $3 AND scope_id = $4
+		  AND (expires_at IS NULL OR expires_at > $5)
+	`, strings.TrimSpace(orgID), strings.TrimSpace(productSurface), scopeType, scopeID, time.Now().UTC()).Scan(&n)
 	if err != nil {
 		return 0, fmt.Errorf("count memory by scope: %w", err)
 	}
