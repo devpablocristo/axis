@@ -14,7 +14,6 @@ import (
 	"github.com/devpablocristo/companion/internal/securityevals"
 	authn "github.com/devpablocristo/platform/authn/go"
 	"github.com/devpablocristo/platform/authn/go/identityhttp"
-	"github.com/google/uuid"
 )
 
 type fakeOpsStore struct {
@@ -65,7 +64,7 @@ func (f fakeOpsStore) ListReports(_ context.Context, orgID, productSurface, _ st
 	return out, nil
 }
 
-func (f fakeOpsStore) ListObservabilityEvents(_ context.Context, orgID, productSurface string, _ *uuid.UUID, _ int) ([]runtime.ObservabilityEvent, error) {
+func (f fakeOpsStore) ListObservabilityEvents(_ context.Context, _ runtime.ObservabilityEventFilter) ([]runtime.ObservabilityEvent, error) {
 	return nil, nil
 }
 
@@ -213,7 +212,7 @@ type staticEvents struct {
 	events []runtime.ObservabilityEvent
 }
 
-func (s staticEvents) ListObservabilityEvents(context.Context, string, string, *uuid.UUID, int) ([]runtime.ObservabilityEvent, error) {
+func (s staticEvents) ListObservabilityEvents(context.Context, runtime.ObservabilityEventFilter) ([]runtime.ObservabilityEvent, error) {
 	return s.events, nil
 }
 

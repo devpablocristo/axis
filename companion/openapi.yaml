@@ -766,7 +766,38 @@ paths:
       summary: Lista eventos de observabilidad redacted
       parameters:
         - in: query
+          name: org_id
+          schema: { type: string }
+        - in: query
+          name: product_surface
+          schema: { type: string }
+        - in: query
           name: run_id
+          schema: { type: string, format: uuid }
+        - in: query
+          name: event_type
+          schema: { type: string }
+        - in: query
+          name: event_name
+          schema: { type: string }
+        - in: query
+          name: severity
+          schema: { type: string }
+        - in: query
+          name: capability_id
+          schema: { type: string }
+        - in: query
+          name: tool_name
+          description: Alias operativo de capability_id para herramientas MCP.
+          schema: { type: string }
+        - in: query
+          name: agent_id
+          schema: { type: string }
+        - in: query
+          name: task_id
+          schema: { type: string, format: uuid }
+        - in: query
+          name: job_id
           schema: { type: string, format: uuid }
         - in: query
           name: limit
@@ -2189,6 +2220,7 @@ components:
       properties:
         id: { type: string, format: uuid }
         org_id: { type: string }
+        product_surface: { type: string }
         run_id: { type: string, format: uuid }
         task_id: { type: string, format: uuid }
         job_id: { type: string, format: uuid }

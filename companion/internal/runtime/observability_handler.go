@@ -79,7 +79,16 @@ func (h *ObservabilityHandler) listEvents(w http.ResponseWriter, r *http.Request
 		}
 		runID = &parsed
 	}
-	orgID, ok := identityctx.EffectiveOrgID(r, q.Get("org_id"), scopeCompanionCrossOrg)
+	requestedOrgID := strings.TrimSpace(q.Get("org_id"))
+	taskID, ok := optionalUUIDQuery(w, q.Get("task_id"), "task_id")
+	if !ok {
+		return
+	}
+	jobID, ok := optionalUUIDQuery(w, q.Get("job_id"), "job_id")
+	if !ok {
+		return
+	}
+	orgID, ok := identityctx.EffectiveOrgID(r, requestedOrgID, scopeCompanionCrossOrg)
 	if orgID == "" && runID == nil {
 		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "customer org context or run_id is required")
 		return
@@ -88,7 +97,24 @@ func (h *ObservabilityHandler) listEvents(w http.ResponseWriter, r *http.Request
 		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "observability org is not allowed for this principal")
 		return
 	}
-	events, err := h.repo.ListObservabilityEvents(r.Context(), orgID, strings.TrimSpace(q.Get("product_surface")), runID, limit)
+	filterOrgID := orgID
+	if runID != nil && requestedOrgID == "" {
+		filterOrgID = ""
+	}
+	events, err := h.repo.ListObservabilityEvents(r.Context(), ObservabilityEventFilter{
+		OrgID:          filterOrgID,
+		ProductSurface: strings.TrimSpace(q.Get("product_surface")),
+		RunID:          runID,
+		EventType:      strings.TrimSpace(q.Get("event_type")),
+		EventName:      strings.TrimSpace(q.Get("event_name")),
+		Severity:       strings.TrimSpace(q.Get("severity")),
+		CapabilityID:   strings.TrimSpace(q.Get("capability_id")),
+		ToolName:       strings.TrimSpace(q.Get("tool_name")),
+		AgentID:        strings.TrimSpace(q.Get("agent_id")),
+		TaskID:         taskID,
+		JobID:          jobID,
+		Limit:          limit,
+	})
 	if err != nil {
 		httpjson.WriteFlatInternalError(w, err, "list observability events failed")
 		return
@@ -100,6 +126,19 @@ func (h *ObservabilityHandler) listEvents(w http.ResponseWriter, r *http.Request
 		}
 	}
 	httpjson.WriteJSON(w, http.StatusOK, map[string]any{"events": filtered})
+}
+
+func optionalUUIDQuery(w http.ResponseWriter, raw, field string) (*uuid.UUID, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, true
+	}
+	parsed, err := uuid.Parse(raw)
+	if err != nil || parsed == uuid.Nil {
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid "+field)
+		return nil, false
+	}
+	return &parsed, true
 }
 
 func (h *ObservabilityHandler) costs(w http.ResponseWriter, r *http.Request) {

@@ -16,8 +16,23 @@ import (
 
 type ObservabilityRepository interface {
 	ObservabilityRecorder
-	ListObservabilityEvents(ctx context.Context, orgID, productSurface string, runID *uuid.UUID, limit int) ([]ObservabilityEvent, error)
+	ListObservabilityEvents(ctx context.Context, filter ObservabilityEventFilter) ([]ObservabilityEvent, error)
 	GetRunReplay(ctx context.Context, runID uuid.UUID) (RunReplay, error)
+}
+
+type ObservabilityEventFilter struct {
+	OrgID          string
+	ProductSurface string
+	RunID          *uuid.UUID
+	EventType      string
+	EventName      string
+	Severity       string
+	CapabilityID   string
+	ToolName       string
+	AgentID        string
+	TaskID         *uuid.UUID
+	JobID          *uuid.UUID
+	Limit          int
 }
 
 type PostgresObservabilityRepository struct {
@@ -196,31 +211,8 @@ func (r *PostgresObservabilityRepository) listCostBreakdown(ctx context.Context,
 	return out, rows.Err()
 }
 
-func (r *PostgresObservabilityRepository) ListObservabilityEvents(ctx context.Context, orgID, productSurface string, runID *uuid.UUID, limit int) ([]ObservabilityEvent, error) {
-	orgID = strings.TrimSpace(orgID)
-	productSurface = strings.TrimSpace(productSurface)
-	if limit <= 0 || limit > 500 {
-		limit = 100
-	}
-	query := selectObservabilityEvent + ` WHERE true`
-	args := []any{}
-	if runID != nil && *runID != uuid.Nil {
-		args = append(args, *runID)
-		query += fmt.Sprintf(` AND run_id = $%d`, len(args))
-	} else {
-		args = append(args, orgID)
-		query += fmt.Sprintf(` AND org_id = $%d`, len(args))
-	}
-	if productSurface != "" {
-		args = append(args, productSurface)
-		query += fmt.Sprintf(` AND product_surface = $%d`, len(args))
-	}
-	args = append(args, limit)
-	if runID != nil && *runID != uuid.Nil {
-		query += fmt.Sprintf(` ORDER BY occurred_at ASC LIMIT $%d`, len(args))
-	} else {
-		query += fmt.Sprintf(` ORDER BY occurred_at DESC LIMIT $%d`, len(args))
-	}
+func (r *PostgresObservabilityRepository) ListObservabilityEvents(ctx context.Context, filter ObservabilityEventFilter) ([]ObservabilityEvent, error) {
+	query, args := observabilityEventQuery(filter)
 	rows, err := r.db.Pool().Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list observability events: %w", err)
@@ -245,11 +237,81 @@ func (r *PostgresObservabilityRepository) GetRunReplay(ctx context.Context, runI
 	if err != nil {
 		return RunReplay{}, err
 	}
-	events, err := r.ListObservabilityEvents(ctx, trace.OrgID, trace.ProductSurface, &runID, 500)
+	events, err := r.ListObservabilityEvents(ctx, ObservabilityEventFilter{
+		OrgID:          trace.OrgID,
+		ProductSurface: trace.ProductSurface,
+		RunID:          &runID,
+		Limit:          500,
+	})
 	if err != nil {
 		return RunReplay{}, err
 	}
 	return RunReplay{Trace: trace, Events: events}, nil
+}
+
+func observabilityEventQuery(filter ObservabilityEventFilter) (string, []any) {
+	filter = normalizeObservabilityEventFilter(filter)
+	query := selectObservabilityEvent + ` WHERE true`
+	args := []any{}
+	addStringFilter := func(column, value string) {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return
+		}
+		args = append(args, value)
+		query += fmt.Sprintf(` AND %s = $%d`, column, len(args))
+	}
+	addUUIDFilter := func(column string, value *uuid.UUID) {
+		if value == nil || *value == uuid.Nil {
+			return
+		}
+		args = append(args, *value)
+		query += fmt.Sprintf(` AND %s = $%d`, column, len(args))
+	}
+	addUUIDFilter("run_id", filter.RunID)
+	addStringFilter("org_id", filter.OrgID)
+	addStringFilter("product_surface", filter.ProductSurface)
+	addStringFilter("event_type", filter.EventType)
+	addStringFilter("event_name", filter.EventName)
+	addStringFilter("severity", filter.Severity)
+	addStringFilter("capability_id", filter.CapabilityID)
+	addStringFilter("agent_id", filter.AgentID)
+	addUUIDFilter("task_id", filter.TaskID)
+	addUUIDFilter("job_id", filter.JobID)
+	args = append(args, filter.Limit)
+	if filter.RunID != nil && *filter.RunID != uuid.Nil {
+		query += fmt.Sprintf(` ORDER BY occurred_at ASC LIMIT $%d`, len(args))
+	} else {
+		query += fmt.Sprintf(` ORDER BY occurred_at DESC LIMIT $%d`, len(args))
+	}
+	return query, args
+}
+
+func normalizeObservabilityEventFilter(filter ObservabilityEventFilter) ObservabilityEventFilter {
+	filter.OrgID = strings.TrimSpace(filter.OrgID)
+	filter.ProductSurface = strings.TrimSpace(filter.ProductSurface)
+	filter.EventType = strings.TrimSpace(filter.EventType)
+	filter.EventName = strings.TrimSpace(filter.EventName)
+	filter.Severity = strings.TrimSpace(filter.Severity)
+	filter.CapabilityID = strings.TrimSpace(filter.CapabilityID)
+	filter.ToolName = strings.TrimSpace(filter.ToolName)
+	filter.AgentID = strings.TrimSpace(filter.AgentID)
+	if filter.CapabilityID == "" {
+		filter.CapabilityID = filter.ToolName
+	}
+	if filter.RunID != nil && *filter.RunID == uuid.Nil {
+		filter.RunID = nil
+	}
+	if filter.TaskID != nil && *filter.TaskID == uuid.Nil {
+		filter.TaskID = nil
+	}
+	if filter.JobID != nil && *filter.JobID == uuid.Nil {
+		filter.JobID = nil
+	}
+	if filter.Limit <= 0 || filter.Limit > 500 {
+		filter.Limit = 100
+	}
+	return filter
 }
 
 const selectObservabilityEvent = `

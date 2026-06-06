@@ -13,7 +13,6 @@ import (
 	"github.com/devpablocristo/companion/internal/products"
 	"github.com/devpablocristo/companion/internal/runtime"
 	"github.com/devpablocristo/companion/internal/securityevals"
-	"github.com/google/uuid"
 )
 
 type ProductCatalog interface {
@@ -31,7 +30,7 @@ type EvalReports interface {
 }
 
 type ObservabilityEvents interface {
-	ListObservabilityEvents(ctx context.Context, orgID, productSurface string, runID *uuid.UUID, limit int) ([]runtime.ObservabilityEvent, error)
+	ListObservabilityEvents(ctx context.Context, filter runtime.ObservabilityEventFilter) ([]runtime.ObservabilityEvent, error)
 }
 
 type CostLedger interface {
@@ -156,7 +155,11 @@ func (u *Usecases) GetConsole(ctx context.Context, q Query) (Console, error) {
 		}
 	}
 	if u.deps.Observability != nil {
-		console.Events, err = u.deps.Observability.ListObservabilityEvents(ctx, q.OrgID, q.ProductSurface, nil, q.Limit)
+		console.Events, err = u.deps.Observability.ListObservabilityEvents(ctx, runtime.ObservabilityEventFilter{
+			OrgID:          q.OrgID,
+			ProductSurface: q.ProductSurface,
+			Limit:          q.Limit,
+		})
 		if err != nil {
 			return Console{}, fmt.Errorf("list observability events: %w", err)
 		}
