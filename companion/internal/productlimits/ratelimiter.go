@@ -16,6 +16,7 @@ const (
 	AreaConnectorExecution = "connector_execution"
 	AreaWatcher            = "watcher"
 	AreaEval               = "eval"
+	AreaMCP                = "mcp"
 )
 
 type Key struct {
@@ -88,6 +89,8 @@ func DefaultLimit(area string) Limit {
 		return Limit{Max: 300, Window: time.Minute}
 	case AreaEval:
 		return Limit{Max: 30, Window: time.Minute}
+	case AreaMCP:
+		return Limit{Max: 120, Window: time.Minute}
 	default:
 		return Limit{Max: 120, Window: time.Minute}
 	}

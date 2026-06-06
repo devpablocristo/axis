@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/devpablocristo/companion/internal/identityctx"
 	"github.com/devpablocristo/companion/internal/mcpgovernance"
 	"github.com/devpablocristo/companion/internal/ops"
+	"github.com/devpablocristo/companion/internal/productlimits"
 	"github.com/devpablocristo/companion/internal/products"
 	"github.com/devpablocristo/companion/internal/runtime"
 	"github.com/devpablocristo/companion/internal/securityevals"
@@ -28,6 +30,10 @@ const (
 	ProtocolVersion = "2025-11-25"
 
 	scopeCrossOrg = "companion:cross_org"
+
+	maxMCPRequestBytes   = 128 * 1024
+	maxMCPArgumentsBytes = 64 * 1024
+	maxMCPResultBytes    = 256 * 1024
 )
 
 var (
@@ -35,6 +41,7 @@ var (
 	ErrForbidden       = errors.New("mcp forbidden")
 	ErrNotImplemented  = errors.New("mcp tool executor not implemented")
 	ErrExecutionFailed = errors.New("mcp tool execution failed")
+	ErrPayloadTooLarge = errors.New("mcp payload too large")
 )
 
 type Authorizer interface {
@@ -79,22 +86,26 @@ type NexusRequestLister interface {
 }
 
 type Deps struct {
-	Registry     *mcpgovernance.Registry
-	Authorizer   Authorizer
-	Products     ProductUsecases
-	Capabilities CapabilityUsecases
-	Ops          OpsUsecases
-	Costs        CostSummaries
-	Traces       TraceReplays
-	Evals        EvalRunner
-	Tasks        TaskCreator
-	Nexus        NexusRequestLister
+	Registry      *mcpgovernance.Registry
+	Authorizer    Authorizer
+	Products      ProductUsecases
+	Capabilities  CapabilityUsecases
+	Ops           OpsUsecases
+	Costs         CostSummaries
+	Traces        TraceReplays
+	Evals         EvalRunner
+	Tasks         TaskCreator
+	Nexus         NexusRequestLister
+	RateLimiter   productlimits.Limiter
+	Observability runtime.ObservabilityRecorder
 }
 
 type Handler struct {
 	registry *mcpgovernance.Registry
 	authz    Authorizer
 	executor *Executor
+	limiter  productlimits.Limiter
+	recorder runtime.ObservabilityRecorder
 }
 
 func NewHandler(deps Deps) *Handler {
@@ -102,6 +113,8 @@ func NewHandler(deps Deps) *Handler {
 		registry: deps.Registry,
 		authz:    deps.Authorizer,
 		executor: &Executor{deps: deps},
+		limiter:  deps.RateLimiter,
+		recorder: deps.Observability,
 	}
 }
 
@@ -164,7 +177,14 @@ type mcpTool struct {
 
 func (h *Handler) rpc(w http.ResponseWriter, r *http.Request) {
 	var req rpcRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxMCPRequestBytes)).Decode(&req); err != nil {
+		if isRequestBodyTooLarge(err) {
+			writeRPCError(w, nil, -32600, "MCP request exceeds size limit", map[string]any{
+				"status":    http.StatusRequestEntityTooLarge,
+				"max_bytes": maxMCPRequestBytes,
+			})
+			return
+		}
 		writeRPCError(w, nil, -32700, "Parse error", nil)
 		return
 	}
@@ -235,7 +255,11 @@ func (h *Handler) callToolREST(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var call callRequest
-	if err := httpjson.DecodeJSON(r, &call); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxMCPRequestBytes)).Decode(&call); err != nil {
+		if isRequestBodyTooLarge(err) {
+			httpjson.WriteFlatError(w, http.StatusRequestEntityTooLarge, "PAYLOAD_TOO_LARGE", "mcp request exceeds size limit")
+			return
+		}
 		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid json")
 		return
 	}
@@ -247,10 +271,10 @@ func (h *Handler) callToolREST(w http.ResponseWriter, r *http.Request) {
 	httpjson.WriteJSON(w, status, out)
 }
 
-func (h *Handler) callTool(r *http.Request, call callRequest) (toolCallResponse, int, error) {
+func (h *Handler) callTool(r *http.Request, call callRequest) (out toolCallResponse, status int, err error) {
 	call.Name = strings.TrimSpace(call.Name)
 	if call.Name == "" {
-		err := fmt.Errorf("%w: tool name is required", ErrValidation)
+		err = fmt.Errorf("%w: tool name is required", ErrValidation)
 		return toolCallResponse{Status: "error", Error: err.Error()}, http.StatusBadRequest, err
 	}
 	if call.Arguments == nil {
@@ -261,9 +285,32 @@ func (h *Handler) callTool(r *http.Request, call callRequest) (toolCallResponse,
 		status := statusForError(err)
 		return toolCallResponse{Status: "error", ToolName: call.Name, Error: err.Error()}, status, err
 	}
+	started := time.Now().UTC()
+	out = toolCallResponse{ToolName: call.Name}
+	status = http.StatusInternalServerError
+	defer func() {
+		h.recordToolCall(r.Context(), invocation, call, out, status, err, started)
+	}()
+
+	if err = enforceJSONSize(call.Arguments, maxMCPArgumentsBytes, "arguments"); err != nil {
+		out.Status = "payload_too_large"
+		out.Error = err.Error()
+		status = statusForError(err)
+		return out, status, err
+	}
+	if err = h.enforceRateLimit(r.Context(), invocation); err != nil {
+		out.Status = "rate_limited"
+		out.Error = err.Error()
+		out.Metadata = rateLimitMetadata(err)
+		status = statusForError(err)
+		return out, status, err
+	}
 	if h.authz == nil {
-		err := fmt.Errorf("%w: mcp authorizer is not configured", ErrExecutionFailed)
-		return toolCallResponse{Status: "error", ToolName: call.Name, Error: err.Error()}, http.StatusInternalServerError, err
+		err = fmt.Errorf("%w: mcp authorizer is not configured", ErrExecutionFailed)
+		out.Status = "error"
+		out.Error = err.Error()
+		status = http.StatusInternalServerError
+		return out, status, err
 	}
 	decision, err := h.authz.Authorize(r.Context(), mcpgovernance.DecisionInput{
 		ToolName:         call.Name,
@@ -275,8 +322,10 @@ func (h *Handler) callTool(r *http.Request, call callRequest) (toolCallResponse,
 		Reason:           firstNonEmpty(call.Reason, stringArg(call.Arguments, "reason")),
 	})
 	if err != nil {
-		status := statusForError(err)
-		return toolCallResponse{Status: "error", ToolName: call.Name, Error: err.Error()}, status, err
+		out.Status = "error"
+		out.Error = err.Error()
+		status = statusForError(err)
+		return out, status, err
 	}
 	base := toolCallResponse{
 		ToolName:        call.Name,
@@ -287,35 +336,50 @@ func (h *Handler) callTool(r *http.Request, call callRequest) (toolCallResponse,
 		PendingApproval: decision.PendingApproval,
 		Denied:          decision.Denied,
 	}
+	out = base
 	if decision.PendingApproval {
-		base.Status = "pending_approval"
-		return base, http.StatusAccepted, nil
+		out.Status = "pending_approval"
+		status = http.StatusAccepted
+		return out, status, nil
 	}
 	if decision.Denied {
-		base.Status = "denied"
-		return base, http.StatusForbidden, ErrForbidden
+		out.Status = "denied"
+		err = ErrForbidden
+		status = http.StatusForbidden
+		return out, status, err
 	}
 	if !decision.CanExecute {
-		err := fmt.Errorf("%w: nexus did not allow execution", ErrForbidden)
-		base.Status = "blocked"
-		base.Error = err.Error()
-		return base, http.StatusForbidden, err
+		err = fmt.Errorf("%w: nexus did not allow execution", ErrForbidden)
+		out.Status = "blocked"
+		out.Error = err.Error()
+		status = http.StatusForbidden
+		return out, status, err
 	}
 	if h.executor == nil {
-		err := fmt.Errorf("%w: executor is not configured", ErrExecutionFailed)
-		base.Status = "error"
-		base.Error = err.Error()
-		return base, http.StatusInternalServerError, err
+		err = fmt.Errorf("%w: executor is not configured", ErrExecutionFailed)
+		out.Status = "error"
+		out.Error = err.Error()
+		status = http.StatusInternalServerError
+		return out, status, err
 	}
 	result, err := h.executor.Execute(r.Context(), call.Name, call.Arguments, invocation)
 	if err != nil {
-		base.Status = "execution_error"
-		base.Error = err.Error()
-		return base, statusForError(err), err
+		out.Status = "execution_error"
+		out.Error = err.Error()
+		status = statusForError(err)
+		return out, status, err
 	}
-	base.Status = "executed"
-	base.Result = result
-	return base, http.StatusOK, nil
+	redactedResult, err := redactAndLimitPayload(result, maxMCPResultBytes, "result")
+	if err != nil {
+		out.Status = "payload_too_large"
+		out.Error = err.Error()
+		status = statusForError(err)
+		return out, status, err
+	}
+	out.Status = "executed"
+	out.Result = redactedResult
+	status = http.StatusOK
+	return out, status, nil
 }
 
 func invocationContext(r *http.Request, args map[string]any) (mcpgovernance.InvocationContext, error) {
@@ -420,6 +484,183 @@ func toolResult(out toolCallResponse, isError bool) map[string]any {
 		"structuredContent": out,
 		"isError":           isError,
 	}
+}
+
+func (h *Handler) enforceRateLimit(ctx context.Context, invocation mcpgovernance.InvocationContext) error {
+	return productlimits.Enforce(ctx, h.limiter, productlimits.Key{
+		OrgID:          invocation.OrgID,
+		ProductSurface: invocation.ProductSurface,
+		Area:           productlimits.AreaMCP,
+	}, productlimits.DefaultLimit(productlimits.AreaMCP))
+}
+
+func (h *Handler) recordToolCall(ctx context.Context, invocation mcpgovernance.InvocationContext, call callRequest, out toolCallResponse, status int, callErr error, started time.Time) {
+	if h == nil || h.recorder == nil {
+		return
+	}
+	toolName := firstNonEmpty(out.ToolName, call.Name)
+	runID := firstNonEmpty(call.RunID, stringArg(call.Arguments, "run_id"))
+	payload := map[string]any{
+		"tool_name":           toolName,
+		"status":              out.Status,
+		"http_status":         status,
+		"request_id":          out.RequestID,
+		"nexus_status":        out.NexusStatus,
+		"nexus_decision":      out.NexusDecision,
+		"pending_approval":    out.PendingApproval,
+		"denied":              out.Denied,
+		"actor_id":            invocation.ActorID,
+		"actor_type":          invocation.ActorType,
+		"service_principal":   invocation.ServicePrincipal,
+		"on_behalf_of":        invocation.OnBehalfOf,
+		"run_id":              runID,
+		"tool_invocation_id":  firstNonEmpty(call.ToolInvocationID, stringArg(call.Arguments, "tool_invocation_id")),
+		"idempotency_key_set": firstNonEmpty(call.IdempotencyKey, stringArg(call.Arguments, "idempotency_key")) != "",
+		"duration_ms":         time.Since(started).Milliseconds(),
+	}
+	if callErr != nil {
+		payload["error"] = callErr.Error()
+	}
+	if out.Metadata != nil {
+		payload["metadata"] = out.Metadata
+	}
+	raw, err := marshalRedactedPayload(payload)
+	if err != nil {
+		raw = json.RawMessage(`{"redaction_error":"mcp observability payload could not be marshaled"}`)
+	}
+	event := runtime.ObservabilityEvent{
+		OrgID:          invocation.OrgID,
+		ProductSurface: invocation.ProductSurface,
+		RunID:          uuidPtr(runID),
+		CapabilityID:   toolName,
+		EventType:      "mcp",
+		EventName:      "mcp_tool_call",
+		Severity:       severityForMCPCall(status, callErr, out),
+		TraceID:        runID,
+		Payload:        raw,
+		Redacted:       true,
+		OccurredAt:     time.Now().UTC(),
+	}
+	_ = h.recorder.RecordObservabilityEvent(context.WithoutCancel(ctx), event)
+}
+
+func enforceJSONSize(value any, maxBytes int, label string) error {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return fmt.Errorf("%w: %s must be JSON-serializable: %v", ErrValidation, label, err)
+	}
+	if len(raw) > maxBytes {
+		return fmt.Errorf("%w: %s exceeds %d bytes", ErrPayloadTooLarge, label, maxBytes)
+	}
+	return nil
+}
+
+func redactAndLimitPayload(value any, maxBytes int, label string) (any, error) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s must be JSON-serializable: %v", ErrExecutionFailed, label, err)
+	}
+	var decoded any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return nil, fmt.Errorf("%w: %s must be valid JSON: %v", ErrExecutionFailed, label, err)
+	}
+	redacted := redactValue(decoded)
+	redactedRaw, err := json.Marshal(redacted)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s redaction failed: %v", ErrExecutionFailed, label, err)
+	}
+	if len(redactedRaw) > maxBytes {
+		return nil, fmt.Errorf("%w: %s exceeds %d bytes", ErrPayloadTooLarge, label, maxBytes)
+	}
+	return redacted, nil
+}
+
+func marshalRedactedPayload(value any) (json.RawMessage, error) {
+	redacted, err := redactAndLimitPayload(value, maxMCPArgumentsBytes, "observability_payload")
+	if err != nil {
+		return nil, err
+	}
+	raw, err := json.Marshal(redacted)
+	if err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+
+func redactValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(typed))
+		for key, item := range typed {
+			if isSensitiveKey(key) {
+				out[key] = "***"
+				continue
+			}
+			out[key] = redactValue(item)
+		}
+		return out
+	case []any:
+		out := make([]any, 0, len(typed))
+		for _, item := range typed {
+			out = append(out, redactValue(item))
+		}
+		return out
+	case json.RawMessage:
+		var decoded any
+		if err := json.Unmarshal(typed, &decoded); err != nil {
+			return "***"
+		}
+		return redactValue(decoded)
+	default:
+		return value
+	}
+}
+
+func isSensitiveKey(key string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(key))
+	for _, token := range []string{"password", "passwd", "secret", "token", "api_key", "apikey", "authorization", "private_key", "client_secret"} {
+		if strings.Contains(normalized, token) {
+			return true
+		}
+	}
+	return false
+}
+
+func rateLimitMetadata(err error) map[string]interface{} {
+	var rateErr productlimits.RateLimitError
+	if !errors.As(err, &rateErr) {
+		return nil
+	}
+	return map[string]interface{}{
+		"org_id":          rateErr.Key.OrgID,
+		"product_surface": rateErr.Key.ProductSurface,
+		"area":            rateErr.Key.Area,
+		"limit":           rateErr.Limit.Max,
+		"window_ms":       rateErr.Limit.Window.Milliseconds(),
+		"retry_after_ms":  rateErr.RetryAfter.Milliseconds(),
+	}
+}
+
+func severityForMCPCall(status int, callErr error, out toolCallResponse) string {
+	if status >= http.StatusInternalServerError {
+		return "error"
+	}
+	if callErr != nil || out.Denied || status == http.StatusTooManyRequests || status == http.StatusRequestEntityTooLarge {
+		return "warn"
+	}
+	return "info"
+}
+
+func uuidPtr(value string) *uuid.UUID {
+	parsed, err := uuid.Parse(strings.TrimSpace(value))
+	if err != nil || parsed == uuid.Nil {
+		return nil
+	}
+	return &parsed
+}
+
+func isRequestBodyTooLarge(err error) bool {
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "request body too large")
 }
 
 type Executor struct {
@@ -774,12 +1015,20 @@ func firstNonEmpty(values ...string) string {
 
 func statusForError(err error) int {
 	switch {
+	case productlimits.IsRateLimited(err):
+		return http.StatusTooManyRequests
+	case errors.Is(err, ErrPayloadTooLarge):
+		return http.StatusRequestEntityTooLarge
 	case errors.Is(err, ErrForbidden), errors.Is(err, mcpgovernance.ErrForbidden):
 		return http.StatusForbidden
-	case errors.Is(err, ErrValidation), errors.Is(err, mcpgovernance.ErrValidation):
+	case errors.Is(err, ErrValidation), errors.Is(err, mcpgovernance.ErrValidation), errors.Is(err, products.ErrValidation), errors.Is(err, capabilities.ErrInvalidManifest):
 		return http.StatusBadRequest
 	case errors.Is(err, mcpgovernance.ErrToolNotFound):
 		return http.StatusBadRequest
+	case errors.Is(err, products.ErrProductNotFound), errors.Is(err, products.ErrInstallationNotFound), errors.Is(err, capabilities.ErrManifestNotFound), errors.Is(err, runtime.ErrTraceNotFound):
+		return http.StatusNotFound
+	case errors.Is(err, products.ErrProductDisabled), errors.Is(err, products.ErrInstallationDisabled), errors.Is(err, products.ErrInstallationRequired):
+		return http.StatusForbidden
 	case errors.Is(err, ErrNotImplemented):
 		return http.StatusNotImplemented
 	default:

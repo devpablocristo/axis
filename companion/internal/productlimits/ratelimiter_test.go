@@ -33,3 +33,12 @@ func TestMemoryLimiterScopesByOrgProductAndArea(t *testing.T) {
 		t.Fatalf("bucket should reset after window: %v", err)
 	}
 }
+
+func TestDefaultLimitDefinesMCPArea(t *testing.T) {
+	t.Parallel()
+
+	limit := DefaultLimit(AreaMCP)
+	if limit.Max <= 0 || limit.Window <= 0 {
+		t.Fatalf("expected positive mcp default limit, got %+v", limit)
+	}
+}

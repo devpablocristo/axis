@@ -661,16 +661,18 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	}
 	mcpGateway := mcpgovernance.NewGateway(mcpRegistry, nexusGateway)
 	mcpHandler := mcpserver.NewHandler(mcpserver.Deps{
-		Registry:     mcpRegistry,
-		Authorizer:   mcpGateway,
-		Products:     productUC,
-		Capabilities: capabilityUC,
-		Ops:          opsUC,
-		Costs:        observabilityRepo,
-		Traces:       observabilityRepo,
-		Evals:        securityEvalUC,
-		Tasks:        uc,
-		Nexus:        rc,
+		Registry:      mcpRegistry,
+		Authorizer:    mcpGateway,
+		Products:      productUC,
+		Capabilities:  capabilityUC,
+		Ops:           opsUC,
+		Costs:         observabilityRepo,
+		Traces:        observabilityRepo,
+		Evals:         securityEvalUC,
+		Tasks:         uc,
+		Nexus:         rc,
+		RateLimiter:   productRateLimiter,
+		Observability: observabilityRepo,
 	})
 
 	assistRepo := assist.NewPostgresRepository(db)

@@ -93,8 +93,10 @@ EVAL_BODY=$(mcp_call_body "call-eval" "axis.evals.run" '{"product_surface":"comp
 EVAL_RESP=$(mcp_rpc "$EVAL_BODY")
 EVAL_STATUS=$(printf '%s' "$EVAL_RESP" | json_get 'result.structuredContent.status')
 EVAL_NEXUS=$(printf '%s' "$EVAL_RESP" | json_get 'result.structuredContent.nexus_status')
+EVAL_REQ=$(printf '%s' "$EVAL_RESP" | json_get 'result.structuredContent.request_id')
 [ "$EVAL_STATUS" = "pending_approval" ] && pass "axis.evals.run is pending approval" || fail "Expected pending_approval, got $EVAL_STATUS"
 [ "$EVAL_NEXUS" = "pending_approval" ] && pass "Nexus returned pending_approval" || fail "Expected Nexus pending_approval, got $EVAL_NEXUS"
+[ -n "$EVAL_REQ" ] && pass "Eval tool has Nexus request $EVAL_REQ" || fail "Eval tool missing Nexus request id"
 
 echo "Calling denied write tool..."
 DENY_TITLE="mcp-denied-$(date +%s)"
@@ -108,8 +110,10 @@ DENY_BODY=$(mcp_call_body "call-deny" "axis.tasks.create" "$DENY_ARGS" "$DENY_ID
 DENY_RESP=$(mcp_rpc "$DENY_BODY")
 DENY_STATUS=$(printf '%s' "$DENY_RESP" | json_get 'result.structuredContent.status')
 DENY_IS_ERROR=$(printf '%s' "$DENY_RESP" | json_get 'result.isError')
+DENY_REQ=$(printf '%s' "$DENY_RESP" | json_get 'result.structuredContent.request_id')
 [ "$DENY_STATUS" = "denied" ] && pass "axis.tasks.create denied by Nexus" || fail "Expected denied, got $DENY_STATUS"
 [ "$DENY_IS_ERROR" = "True" ] && pass "Denied MCP call is marked as tool error" || fail "Expected isError true, got $DENY_IS_ERROR"
+[ -n "$DENY_REQ" ] && pass "Denied tool has Nexus request $DENY_REQ" || fail "Denied tool missing Nexus request id"
 
 TASKS=$(companion_get "/v1/tasks?limit=200")
 if printf '%s' "$TASKS" | python3 -c "
@@ -122,6 +126,33 @@ raise SystemExit(1 if found else 0)
   pass "Denied MCP task was not created"
 else
   fail "Denied MCP task was created"
+fi
+
+echo "Verifying MCP observability audit..."
+AUDIT_ORG_ID="${AXIS_DEV_ORG_ID:-local-dev-org}"
+EVENTS=$(companion_get "/v1/observability/events?org_id=${AUDIT_ORG_ID}&product_surface=companion&limit=50")
+if EVENTS_JSON="$EVENTS" python3 - "$ALLOW_REQ" "$EVAL_REQ" "$DENY_REQ" <<'PY'
+import json, os, sys
+
+required = {value for value in sys.argv[1:] if value}
+events = json.loads(os.environ["EVENTS_JSON"]).get("events") or []
+seen = set()
+for event in events:
+    if event.get("event_type") != "mcp" or event.get("event_name") != "mcp_tool_call":
+        continue
+    payload = event.get("payload") or {}
+    request_id = payload.get("request_id")
+    if request_id:
+        seen.add(request_id)
+missing = required - seen
+if missing:
+    print("missing audit events for " + ", ".join(sorted(missing)), file=sys.stderr)
+    raise SystemExit(1)
+PY
+then
+  pass "MCP tool calls are recorded in observability"
+else
+  fail "MCP observability audit missing expected tool calls"
 fi
 
 echo ""

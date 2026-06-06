@@ -28,6 +28,64 @@ paths:
       security: []
       responses:
         "200": { description: Ready }
+  /mcp:
+    post:
+      summary: Axis MCP JSON-RPC endpoint
+      description: |
+        Endpoint MCP operativo para agentes externos autorizados. Soporta
+        `initialize`, `ping`, `tools/list` y `tools/call`. Toda llamada requiere
+        identidad autenticada con `companion:mcp:execute`; `tools/call` pasa por
+        Nexus antes de ejecutar cualquier herramienta.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MCPJSONRPCRequest" }
+      responses:
+        "200":
+          description: JSON-RPC response
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MCPJSONRPCResponse" }
+  /v1/mcp/tools:
+    get:
+      summary: Lista tools MCP gobernadas
+      description: Requiere `companion:mcp:execute`.
+      responses:
+        "200":
+          description: Tool registry
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MCPToolsResponse" }
+        "403": { description: Missing MCP execute scope }
+  /v1/mcp/tools/call:
+    post:
+      summary: Ejecuta una tool MCP gobernada
+      description: |
+        Invocación REST equivalente a `tools/call`. La llamada se rate-limitea
+        por `org_id + product_surface`, se audita en observabilidad, redacciona
+        payloads sensibles y siempre pasa por Nexus antes de ejecutar.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MCPToolCallRequest" }
+      responses:
+        "200":
+          description: Tool executed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MCPToolCallResponse" }
+        "202":
+          description: Nexus approval pending
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MCPToolCallResponse" }
+        "400": { description: Invalid MCP tool call }
+        "403": { description: Denied by auth, scope, or Nexus }
+        "413": { description: MCP request, arguments, or result exceeds size limits }
+        "429": { description: Rate limited by org and product surface }
+        "500": { description: MCP execution failed }
   /v1/chat:
     post:
       summary: Conversa con Companion
@@ -503,7 +561,9 @@ paths:
   /v1/capabilities/import-source:
     post:
       summary: Importa capability manifests desde una fuente JSON
-      description: Requiere `companion:capabilities:admin`. La fuente debe publicar un `CapabilityManifest` o `{ capabilities: [...] }`.
+      description: |
+        Requiere `companion:capabilities:admin`. La fuente debe publicar un
+        `CapabilityManifest` o `{ capabilities: [...] }`.
       requestBody:
         required: true
         content:
@@ -1289,6 +1349,92 @@ components:
         secret_ref: { type: string }
         enabled: { type: boolean, default: true }
         config:
+          type: object
+          additionalProperties: true
+    MCPJSONRPCRequest:
+      type: object
+      required: [jsonrpc, method]
+      additionalProperties: true
+      properties:
+        jsonrpc: { type: string, const: "2.0" }
+        id:
+          description: JSON-RPC request id.
+        method:
+          type: string
+          enum: [initialize, notifications/initialized, ping, tools/list, tools/call]
+        params:
+          description: JSON-RPC method params.
+    MCPJSONRPCResponse:
+      type: object
+      required: [jsonrpc]
+      additionalProperties: true
+      properties:
+        jsonrpc: { type: string, const: "2.0" }
+        id:
+          description: JSON-RPC request id or null.
+        result:
+          description: JSON-RPC result payload.
+        error:
+          $ref: "#/components/schemas/MCPJSONRPCError"
+    MCPJSONRPCError:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: integer }
+        message: { type: string }
+        data:
+          description: Optional structured error data.
+    MCPTool:
+      type: object
+      required: [name, inputSchema]
+      properties:
+        name: { type: string }
+        title: { type: string }
+        description: { type: string }
+        inputSchema:
+          type: object
+          additionalProperties: true
+        annotations:
+          type: object
+          additionalProperties: true
+    MCPToolsResponse:
+      type: object
+      required: [tools]
+      properties:
+        tools:
+          type: array
+          items: { $ref: "#/components/schemas/MCPTool" }
+    MCPToolCallRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, example: axis.products.list }
+        arguments:
+          type: object
+          additionalProperties: true
+          description: Tool arguments. Must include effective tenant/product context when not provided by JWT.
+        idempotency_key: { type: string }
+        run_id: { type: string }
+        tool_invocation_id: { type: string }
+        reason: { type: string }
+    MCPToolCallResponse:
+      type: object
+      required: [status, tool_name]
+      properties:
+        status:
+          type: string
+          enum: [executed, pending_approval, denied, blocked, rate_limited, payload_too_large, execution_error, error]
+        tool_name: { type: string }
+        request_id: { type: string, description: Nexus request id. }
+        nexus_status: { type: string }
+        nexus_decision: { type: string }
+        decision_reason: { type: string }
+        pending_approval: { type: boolean }
+        denied: { type: boolean }
+        result:
+          description: Redacted tool result when execution succeeds.
+        error: { type: string }
+        metadata:
           type: object
           additionalProperties: true
     ChatRequest:
