@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -13,6 +14,20 @@ import (
 
 type fakeRepo struct {
 	entries map[string]domain.MemoryEntry
+}
+
+type fakeInstallationGuard struct {
+	err            error
+	calls          int
+	productSurface string
+	reason         string
+}
+
+func (f *fakeInstallationGuard) RequireActiveInstallation(_ context.Context, _ string, productSurface, reason string) error {
+	f.calls++
+	f.productSurface = productSurface
+	f.reason = reason
+	return f.err
 }
 
 func memoryKey(orgID, productSurface string, scopeType domain.ScopeType, scopeID string, kind domain.MemoryKind, key string) string {
@@ -162,6 +177,29 @@ func TestUsecases_UpsertDefaultsMemoryTypeFromKind(t *testing.T) {
 	}
 	if entry.MemoryType != domain.MemoryTypeEpisodic {
 		t.Fatalf("expected episodic memory type, got %q", entry.MemoryType)
+	}
+}
+
+func TestUsecases_UpsertBlocksExternalWriteWithoutActiveInstallation(t *testing.T) {
+	t.Parallel()
+
+	guard := &fakeInstallationGuard{err: errors.New("active product installation required")}
+	uc := NewUsecases(&fakeRepo{}).WithProductInstallationGuard(guard)
+	_, err := uc.Upsert(context.Background(), UpsertInput{
+		OrgID:          "org-a",
+		UserID:         "user-a",
+		ProductSurface: "pymes",
+		Kind:           domain.MemoryEpisodicEvent,
+		ScopeType:      domain.ScopeUser,
+		ScopeID:        "org-a:user-a",
+		Key:            "episode-1",
+		ContentText:    "El usuario pidio una alerta de stock.",
+	})
+	if !IsForbidden(err) {
+		t.Fatalf("expected forbidden installation guard error, got %v", err)
+	}
+	if guard.calls != 1 || guard.productSurface != "pymes" || guard.reason != "memory_write" {
+		t.Fatalf("unexpected guard call: %+v", guard)
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/devpablocristo/companion/internal/productlimits"
 	"github.com/devpablocristo/companion/internal/runtime"
 )
 
@@ -39,29 +40,35 @@ type CaseResult struct {
 }
 
 type Report struct {
-	ID        uuid.UUID      `json:"id,omitempty"`
-	OrgID     string         `json:"org_id,omitempty"`
-	Suite     string         `json:"suite"`
-	Status    string         `json:"status"`
-	Score     float64        `json:"score"`
-	Threshold float64        `json:"threshold"`
-	Results   []CaseResult   `json:"results,omitempty"`
-	CreatedBy string         `json:"created_by,omitempty"`
-	CreatedAt time.Time      `json:"created_at,omitempty"`
-	Raw       map[string]any `json:"report_json,omitempty"`
+	ID             uuid.UUID      `json:"id,omitempty"`
+	OrgID          string         `json:"org_id,omitempty"`
+	ProductSurface string         `json:"product_surface,omitempty"`
+	Suite          string         `json:"suite"`
+	Status         string         `json:"status"`
+	Score          float64        `json:"score"`
+	Threshold      float64        `json:"threshold"`
+	Results        []CaseResult   `json:"results,omitempty"`
+	CreatedBy      string         `json:"created_by,omitempty"`
+	CreatedAt      time.Time      `json:"created_at,omitempty"`
+	Raw            map[string]any `json:"report_json,omitempty"`
 }
 
 type Repository interface {
 	SaveReport(ctx context.Context, report Report) (Report, error)
-	ListReports(ctx context.Context, orgID, suite string, limit int) ([]Report, error)
+	ListReports(ctx context.Context, orgID, productSurface, suite string, limit int) ([]Report, error)
 }
 
 type Usecases struct {
-	repo Repository
+	repo        Repository
+	rateLimiter productlimits.Limiter
 }
 
 func NewUsecases(repo Repository) *Usecases {
 	return &Usecases{repo: repo}
+}
+
+func (u *Usecases) SetRateLimiter(limiter productlimits.Limiter) {
+	u.rateLimiter = limiter
 }
 
 func (u *Usecases) ListSuites(ctx context.Context) ([]map[string]any, error) {
@@ -77,19 +84,32 @@ func (u *Usecases) ListSuites(ctx context.Context) ([]map[string]any, error) {
 	}}, nil
 }
 
-func (u *Usecases) RunSuite(ctx context.Context, orgID, suiteID, createdBy string) (Report, error) {
+func (u *Usecases) RunSuite(ctx context.Context, orgID, productSurface, suiteID, createdBy string) (Report, error) {
 	if strings.TrimSpace(suiteID) == "" {
 		suiteID = "security-adversarial"
 	}
 	if suiteID != "security-adversarial" {
 		return Report{}, fmt.Errorf("unknown security eval suite %q", suiteID)
 	}
+	orgID = strings.TrimSpace(orgID)
+	productSurface = strings.TrimSpace(productSurface)
+	if productSurface == "" {
+		productSurface = "companion"
+	}
+	if err := productlimits.Enforce(ctx, u.rateLimiter, productlimits.Key{
+		OrgID:          orgID,
+		ProductSurface: productSurface,
+		Area:           productlimits.AreaEval,
+	}, productlimits.DefaultLimit(productlimits.AreaEval)); err != nil {
+		return Report{}, err
+	}
 	suite, err := LoadAdversarialSuite()
 	if err != nil {
 		return Report{}, err
 	}
 	report := EvaluateSuite(suite)
-	report.OrgID = strings.TrimSpace(orgID)
+	report.OrgID = orgID
+	report.ProductSurface = productSurface
 	report.Suite = suiteID
 	report.CreatedBy = strings.TrimSpace(createdBy)
 	if u.repo == nil {
@@ -98,11 +118,11 @@ func (u *Usecases) RunSuite(ctx context.Context, orgID, suiteID, createdBy strin
 	return u.repo.SaveReport(ctx, report)
 }
 
-func (u *Usecases) ListReports(ctx context.Context, orgID, suite string, limit int) ([]Report, error) {
+func (u *Usecases) ListReports(ctx context.Context, orgID, productSurface, suite string, limit int) ([]Report, error) {
 	if u.repo == nil {
 		return nil, fmt.Errorf("security eval repository is not configured")
 	}
-	return u.repo.ListReports(ctx, orgID, suite, limit)
+	return u.repo.ListReports(ctx, orgID, productSurface, suite, limit)
 }
 
 func EvaluateSuite(s Suite) Report {

@@ -34,25 +34,29 @@ func (r *PostgresRepository) SaveReport(ctx context.Context, report Report) (Rep
 	}
 	row := r.db.Pool().QueryRow(ctx, `
 		INSERT INTO companion_security_eval_reports
-			(org_id, suite, status, score, threshold, report_json, created_by)
-		VALUES ($1,$2,$3,$4,$5,$6,$7)
-		RETURNING id, org_id, suite, status, score, threshold, report_json, created_by, created_at
-	`, strings.TrimSpace(report.OrgID), strings.TrimSpace(report.Suite), report.Status, report.Score, report.Threshold, payload, strings.TrimSpace(report.CreatedBy))
+			(org_id, product_surface, suite, status, score, threshold, report_json, created_by)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+		RETURNING id, org_id, product_surface, suite, status, score, threshold, report_json, created_by, created_at
+	`, strings.TrimSpace(report.OrgID), strings.TrimSpace(report.ProductSurface), strings.TrimSpace(report.Suite), report.Status, report.Score, report.Threshold, payload, strings.TrimSpace(report.CreatedBy))
 	return scanReport(row)
 }
 
-func (r *PostgresRepository) ListReports(ctx context.Context, orgID, suite string, limit int) ([]Report, error) {
+func (r *PostgresRepository) ListReports(ctx context.Context, orgID, productSurface, suite string, limit int) ([]Report, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
 	query := `
-		SELECT id, org_id, suite, status, score, threshold, report_json, created_by, created_at
+		SELECT id, org_id, product_surface, suite, status, score, threshold, report_json, created_by, created_at
 		FROM companion_security_eval_reports
 		WHERE true`
 	args := []any{}
 	if orgID = strings.TrimSpace(orgID); orgID != "" {
 		args = append(args, orgID)
 		query += fmt.Sprintf(" AND org_id = $%d", len(args))
+	}
+	if productSurface = strings.TrimSpace(productSurface); productSurface != "" {
+		args = append(args, productSurface)
+		query += fmt.Sprintf(" AND product_surface = $%d", len(args))
 	}
 	if suite = strings.TrimSpace(suite); suite != "" {
 		args = append(args, suite)
@@ -85,7 +89,7 @@ func scanReport(row rowScanner) (Report, error) {
 		report Report
 		raw    []byte
 	)
-	if err := row.Scan(&report.ID, &report.OrgID, &report.Suite, &report.Status, &report.Score, &report.Threshold, &raw, &report.CreatedBy, &report.CreatedAt); err != nil {
+	if err := row.Scan(&report.ID, &report.OrgID, &report.ProductSurface, &report.Suite, &report.Status, &report.Score, &report.Threshold, &raw, &report.CreatedBy, &report.CreatedAt); err != nil {
 		return Report{}, err
 	}
 	if len(raw) > 0 {

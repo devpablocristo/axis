@@ -3,13 +3,16 @@ package memory
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/devpablocristo/companion/internal/products"
 	"github.com/devpablocristo/platform/concurrency/go/worker"
+	"github.com/devpablocristo/platform/errors/go/domainerr"
 	"github.com/google/uuid"
 
 	domain "github.com/devpablocristo/companion/internal/memory/usecases/domain"
@@ -77,6 +80,10 @@ type SearchResult struct {
 	Reasons []string           `json:"reasons,omitempty"`
 }
 
+type ProductInstallationGuard interface {
+	RequireActiveInstallation(ctx context.Context, orgID, productSurface, reason string) error
+}
+
 // defaultPerScopeQuota es el tope de entradas vivas por (scope_type, scope_id).
 // Sin tope, una org maliciosa podría inflar la tabla via /v1/memory hasta DoS.
 // Configurable via WithPerScopeQuota desde wire.
@@ -84,12 +91,13 @@ const defaultPerScopeQuota = 1000
 
 // Usecases lógica de negocio de memoria operativa.
 type Usecases struct {
-	repo          Repository
-	perScopeQuota int
-	embedder      EmbeddingProvider
-	vectors       VectorStore
-	ranker        MemoryRanker
-	curator       MemoryCurator
+	repo              Repository
+	perScopeQuota     int
+	embedder          EmbeddingProvider
+	vectors           VectorStore
+	ranker            MemoryRanker
+	curator           MemoryCurator
+	installationGuard ProductInstallationGuard
 }
 
 // NewUsecases crea una nueva instancia de Usecases con quota default.
@@ -136,6 +144,11 @@ func (uc *Usecases) WithMemoryCurator(curator MemoryCurator) *Usecases {
 	return uc
 }
 
+func (uc *Usecases) WithProductInstallationGuard(guard ProductInstallationGuard) *Usecases {
+	uc.installationGuard = guard
+	return uc
+}
+
 // Upsert crea o actualiza una entrada de memoria.
 func (uc *Usecases) Upsert(ctx context.Context, in UpsertInput) (domain.MemoryEntry, error) {
 	if in.OrgID == "" || in.ProductSurface == "" {
@@ -152,6 +165,9 @@ func (uc *Usecases) Upsert(ctx context.Context, in UpsertInput) (domain.MemoryEn
 	}
 	if in.Key == "" {
 		return domain.MemoryEntry{}, fmt.Errorf("key is required")
+	}
+	if err := uc.requireActiveInstallation(ctx, in.OrgID, in.ProductSurface, "memory_write"); err != nil {
+		return domain.MemoryEntry{}, err
 	}
 
 	ttl := in.TTLDays
@@ -300,6 +316,19 @@ func (uc *Usecases) Upsert(ctx context.Context, in UpsertInput) (domain.MemoryEn
 		}
 	}
 	return result, nil
+}
+
+func (uc *Usecases) requireActiveInstallation(ctx context.Context, orgID, productSurface, reason string) error {
+	if uc.installationGuard == nil {
+		return nil
+	}
+	if err := uc.installationGuard.RequireActiveInstallation(ctx, orgID, productSurface, reason); err != nil {
+		if errors.Is(err, products.ErrValidation) {
+			return domainerr.Validation(err.Error())
+		}
+		return domainerr.Forbidden(err.Error())
+	}
+	return nil
 }
 
 func (uc *Usecases) Search(ctx context.Context, q SearchQuery) ([]SearchResult, error) {

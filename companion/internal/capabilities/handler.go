@@ -96,7 +96,7 @@ func (h *Handler) validate(w http.ResponseWriter, r *http.Request) {
 		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid json body")
 		return
 	}
-	checks, errs := CheckManifestConformance(manifest)
+	checks, errs := h.uc.CheckConformance(r.Context(), manifest)
 	status := ConformanceStatusPassed
 	if len(errs) > 0 {
 		status = ConformanceStatusFailed

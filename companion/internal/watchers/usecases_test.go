@@ -3,12 +3,15 @@ package watchers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
 	connectordomain "github.com/devpablocristo/companion/internal/connectors/usecases/domain"
 	"github.com/devpablocristo/companion/internal/jobs"
 	"github.com/devpablocristo/companion/internal/nexusclient"
+	"github.com/devpablocristo/companion/internal/productlimits"
+	"github.com/devpablocristo/platform/errors/go/domainerr"
 	"github.com/google/uuid"
 
 	domain "github.com/devpablocristo/companion/internal/watchers/usecases/domain"
@@ -188,6 +191,26 @@ type fakeConnectorExecutor struct {
 	readCalls     int
 	lastSpec      connectordomain.ExecutionSpec
 	readResults   map[string]json.RawMessage
+}
+
+type fakeProductGuard struct {
+	err            error
+	calls          int
+	productSurface string
+	reason         string
+}
+
+func (f *fakeProductGuard) RequireActiveInstallation(_ context.Context, _ string, productSurface, reason string) error {
+	f.calls++
+	f.productSurface = productSurface
+	f.reason = reason
+	return f.err
+}
+
+type denyingWatcherRateLimiter struct{}
+
+func (denyingWatcherRateLimiter) Allow(context.Context, productlimits.Key, productlimits.Limit) (productlimits.Decision, error) {
+	return productlimits.Decision{Allowed: false}, nil
 }
 
 func (f *fakeConnectorExecutor) ListConnectors(context.Context) ([]connectordomain.Connector, error) {
@@ -452,6 +475,86 @@ func TestUsecases_RunWatcher_GenericCapability_FailsClosedOnConnectorOrgMismatch
 	_, err := uc.RunWatcher(context.Background(), w.ID)
 	if err == nil {
 		t.Fatal("expected connector org mismatch to fail closed")
+	}
+	if executor.readCalls != 0 || executor.execCalls != 0 {
+		t.Fatalf("expected no connector execution, got read=%d exec=%d", executor.readCalls, executor.execCalls)
+	}
+}
+
+func TestUsecases_RunWatcher_BlocksExternalWithoutActiveInstallation(t *testing.T) {
+	t.Parallel()
+
+	repo := newFakeRepo()
+	uc := NewUsecases(repo, &fakeNexus{decision: "allowed"})
+	executor := &fakeConnectorExecutor{
+		connectorKind: "demo",
+		connectorOrg:  "org-1",
+		readResults: map[string]json.RawMessage{
+			"demo.orders.search": json.RawMessage(`{"items":[{"id":"order-1"}]}`),
+		},
+	}
+	uc.SetConnectorExecutor(executor)
+	guard := &fakeProductGuard{err: errors.New("active product installation required")}
+	uc.SetProductInstallationGuard(guard)
+
+	config := json.RawMessage(`{
+		"product_surface":"demo",
+		"connector_kind":"demo",
+		"query_operation":"demo.orders.search",
+		"result_items_path":"items",
+		"action_operation":"demo.orders.notify",
+		"action_payload_template":{"org_id":"${org_id}"},
+		"action_type":"notification.send"
+	}`)
+	w, _ := uc.Create(context.Background(), CreateWatcherInput{
+		OrgID: "org-1", Name: "Demo orders", WatcherType: domain.WatcherCapability,
+		Config: config, Enabled: true,
+	})
+
+	_, err := uc.RunWatcher(context.Background(), w.ID)
+	if !domainerr.IsForbidden(err) {
+		t.Fatalf("expected forbidden installation guard error, got %v", err)
+	}
+	if guard.calls != 1 || guard.productSurface != "demo" || guard.reason != "watcher_query" {
+		t.Fatalf("unexpected guard call: %+v", guard)
+	}
+	if executor.readCalls != 0 || executor.execCalls != 0 {
+		t.Fatalf("expected no connector execution, got read=%d exec=%d", executor.readCalls, executor.execCalls)
+	}
+}
+
+func TestUsecases_RunWatcher_RateLimitedByProduct(t *testing.T) {
+	t.Parallel()
+
+	repo := newFakeRepo()
+	uc := NewUsecases(repo, &fakeNexus{decision: "allowed"})
+	executor := &fakeConnectorExecutor{
+		connectorKind: "demo",
+		connectorOrg:  "org-1",
+		readResults: map[string]json.RawMessage{
+			"demo.orders.search": json.RawMessage(`{"items":[{"id":"order-1"}]}`),
+		},
+	}
+	uc.SetConnectorExecutor(executor)
+	uc.SetRateLimiter(denyingWatcherRateLimiter{})
+
+	config := json.RawMessage(`{
+		"product_surface":"demo",
+		"connector_kind":"demo",
+		"query_operation":"demo.orders.search",
+		"result_items_path":"items",
+		"action_operation":"demo.orders.notify",
+		"action_payload_template":{"org_id":"${org_id}"},
+		"action_type":"notification.send"
+	}`)
+	w, _ := uc.Create(context.Background(), CreateWatcherInput{
+		OrgID: "org-1", Name: "Demo orders", WatcherType: domain.WatcherCapability,
+		Config: config, Enabled: true,
+	})
+
+	_, err := uc.RunWatcher(context.Background(), w.ID)
+	if !productlimits.IsRateLimited(err) {
+		t.Fatalf("expected watcher product rate limit error, got %v", err)
 	}
 	if executor.readCalls != 0 || executor.execCalls != 0 {
 		t.Fatalf("expected no connector execution, got read=%d exec=%d", executor.readCalls, executor.execCalls)

@@ -4,6 +4,7 @@ package watchers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
@@ -13,7 +14,10 @@ import (
 	connectordomain "github.com/devpablocristo/companion/internal/connectors/usecases/domain"
 	"github.com/devpablocristo/companion/internal/identityctx"
 	"github.com/devpablocristo/companion/internal/jobs"
+	"github.com/devpablocristo/companion/internal/productlimits"
+	"github.com/devpablocristo/companion/internal/products"
 	"github.com/devpablocristo/platform/concurrency/go/worker"
+	"github.com/devpablocristo/platform/errors/go/domainerr"
 	"github.com/google/uuid"
 
 	"github.com/devpablocristo/companion/internal/nexusclient"
@@ -57,13 +61,19 @@ type ChatNotifier interface {
 	NotifyAlert(ctx context.Context, orgID, message string) error
 }
 
+type ProductInstallationGuard interface {
+	RequireActiveInstallation(ctx context.Context, orgID, productSurface, reason string) error
+}
+
 // Usecases contiene la lógica de negocio del módulo watchers.
 type Usecases struct {
-	repo     Repository
-	nexus    NexusGateway
-	executor ConnectorExecutor
-	notifier ChatNotifier // nil = sin notificaciones al chat
-	jobQueue jobs.Repository
+	repo              Repository
+	nexus             NexusGateway
+	executor          ConnectorExecutor
+	notifier          ChatNotifier // nil = sin notificaciones al chat
+	jobQueue          jobs.Repository
+	installationGuard ProductInstallationGuard
+	rateLimiter       productlimits.Limiter
 }
 
 // NewUsecases crea los usecases del módulo watchers.
@@ -83,6 +93,14 @@ func (uc *Usecases) SetConnectorExecutor(executor ConnectorExecutor) {
 
 func (uc *Usecases) SetJobQueue(queue jobs.Repository) {
 	uc.jobQueue = queue
+}
+
+func (uc *Usecases) SetProductInstallationGuard(guard ProductInstallationGuard) {
+	uc.installationGuard = guard
+}
+
+func (uc *Usecases) SetRateLimiter(limiter productlimits.Limiter) {
+	uc.rateLimiter = limiter
 }
 
 // --- CRUD ---
@@ -222,6 +240,16 @@ func (uc *Usecases) RunWatcher(ctx context.Context, watcherID uuid.UUID) (*domai
 func (uc *Usecases) queryProductCapability(ctx context.Context, w domain.Watcher) ([]domain.WatcherItem, domain.CapabilityWatcherConfig, error) {
 	config, err := resolveWatcherCapabilityConfig(w)
 	if err != nil {
+		return nil, config, err
+	}
+	if err := uc.requireActiveInstallation(ctx, w.OrgID, config.ProductSurface, "watcher_query"); err != nil {
+		return nil, config, err
+	}
+	if err := productlimits.Enforce(ctx, uc.rateLimiter, productlimits.Key{
+		OrgID:          w.OrgID,
+		ProductSurface: config.ProductSurface,
+		Area:           productlimits.AreaWatcher,
+	}, productlimits.DefaultLimit(productlimits.AreaWatcher)); err != nil {
 		return nil, config, err
 	}
 	result, err := uc.queryCapability(ctx, w, config)
@@ -588,6 +616,9 @@ func (uc *Usecases) buildWatcherExecutionSpec(ctx context.Context, w domain.Watc
 	if uc.executor == nil {
 		return connectordomain.ExecutionSpec{}, nil, "", fmt.Errorf("connector executor not configured")
 	}
+	if err := uc.requireActiveInstallation(ctx, w.OrgID, config.ProductSurface, "watcher_action"); err != nil {
+		return connectordomain.ExecutionSpec{}, nil, "", err
+	}
 	connectorID, err := uc.findConnectorByKind(ctx, config.ConnectorKind, w.OrgID)
 	if err != nil {
 		return connectordomain.ExecutionSpec{}, nil, "", err
@@ -616,6 +647,19 @@ func (uc *Usecases) buildWatcherExecutionSpec(ctx context.Context, w domain.Watc
 		return connectordomain.ExecutionSpec{}, nil, "", err
 	}
 	return spec, binding, bindingHash, nil
+}
+
+func (uc *Usecases) requireActiveInstallation(ctx context.Context, orgID, productSurface, reason string) error {
+	if uc.installationGuard == nil {
+		return nil
+	}
+	if err := uc.installationGuard.RequireActiveInstallation(ctx, orgID, productSurface, reason); err != nil {
+		if errors.Is(err, products.ErrValidation) {
+			return domainerr.Validation(err.Error())
+		}
+		return domainerr.Forbidden(err.Error())
+	}
+	return nil
 }
 
 func (uc *Usecases) findConnectorByKind(ctx context.Context, kind, orgID string) (uuid.UUID, error) {
@@ -885,7 +929,8 @@ const (
 )
 
 type watcherRunJobPayload struct {
-	WatcherID string `json:"watcher_id"`
+	WatcherID      string `json:"watcher_id"`
+	ProductSurface string `json:"product_surface,omitempty"`
 }
 
 type watcherProposalSyncJobPayload struct {
@@ -920,18 +965,23 @@ func (uc *Usecases) EnqueueWatcherRuns(ctx context.Context, batchSize int) (int,
 			if !w.Enabled {
 				continue
 			}
-			payload, err := json.Marshal(watcherRunJobPayload{WatcherID: w.ID.String()})
+			productSurface := jobs.DefaultProductSurface
+			if cfg, cfgErr := resolveWatcherCapabilityConfig(w); cfgErr == nil && strings.TrimSpace(cfg.ProductSurface) != "" {
+				productSurface = strings.TrimSpace(cfg.ProductSurface)
+			}
+			payload, err := json.Marshal(watcherRunJobPayload{WatcherID: w.ID.String(), ProductSurface: productSurface})
 			if err != nil {
 				return count, fmt.Errorf("marshal watcher job payload: %w", err)
 			}
 			_, _, err = uc.jobQueue.Enqueue(ctx, jobs.EnqueueInput{
-				OrgID:       w.OrgID,
-				Kind:        JobKindWatcherRun,
-				ShardKey:    w.OrgID + ":" + w.ID.String(),
-				DedupeKey:   JobKindWatcherRun + ":" + w.ID.String(),
-				Payload:     payload,
-				MaxAttempts: 3,
-				Timeout:     5 * time.Minute,
+				OrgID:          w.OrgID,
+				ProductSurface: productSurface,
+				Kind:           JobKindWatcherRun,
+				ShardKey:       w.OrgID + ":" + productSurface + ":" + w.ID.String(),
+				DedupeKey:      JobKindWatcherRun + ":" + w.ID.String(),
+				Payload:        payload,
+				MaxAttempts:    3,
+				Timeout:        5 * time.Minute,
 			})
 			if err != nil {
 				return count, fmt.Errorf("enqueue watcher job: %w", err)

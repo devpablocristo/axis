@@ -52,6 +52,9 @@ func (uc *Usecases) handleEmbeddingJob(ctx context.Context, job jobs.Job) (json.
 		}
 		return nil, err
 	}
+	if err := uc.requireActiveInstallation(ctx, entry.OrgID, entry.ProductSurface, "memory_embedding_job"); err != nil {
+		return nil, jobs.Permanent(err)
+	}
 	embedding, err := uc.embedder.Embed(ctx, EmbeddingInput{
 		OrgID:          entry.OrgID,
 		ProductSurface: entry.ProductSurface,
@@ -101,6 +104,9 @@ func (uc *Usecases) handleDecayJob(ctx context.Context, job jobs.Job) (json.RawM
 	if err := json.Unmarshal(job.Payload, &payload); err != nil {
 		return nil, jobs.Permanent(fmt.Errorf("invalid decay job payload: %w", err))
 	}
+	if err := uc.requireActiveInstallation(ctx, payload.OrgID, payload.ProductSurface, "memory_decay_job"); err != nil {
+		return nil, jobs.Permanent(err)
+	}
 	return json.Marshal(map[string]any{
 		"org_id":          payload.OrgID,
 		"product_surface": payload.ProductSurface,
@@ -121,6 +127,9 @@ func (uc *Usecases) handleCompactionJob(ctx context.Context, job jobs.Job) (json
 	}
 	if payload.OrgID == "" || payload.ProductSurface == "" || payload.ScopeType == "" || payload.ScopeID == "" {
 		return nil, jobs.Permanent(fmt.Errorf("org_id, product_surface, scope_type and scope_id are required"))
+	}
+	if err := uc.requireActiveInstallation(ctx, payload.OrgID, payload.ProductSurface, "memory_compaction_job"); err != nil {
+		return nil, jobs.Permanent(err)
 	}
 	entries, err := uc.Find(ctx, FindQuery{
 		OrgID:          payload.OrgID,

@@ -3,11 +3,13 @@ package wire
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -22,6 +24,8 @@ import (
 	"github.com/devpablocristo/companion/internal/jobs"
 	"github.com/devpablocristo/companion/internal/memory"
 	nexusassist "github.com/devpablocristo/companion/internal/nexus_assist"
+	"github.com/devpablocristo/companion/internal/productlimits"
+	"github.com/devpablocristo/companion/internal/products"
 	"github.com/devpablocristo/companion/internal/runtime"
 	"github.com/devpablocristo/companion/internal/securityevals"
 	"github.com/devpablocristo/companion/internal/tasks"
@@ -30,6 +34,7 @@ import (
 	"github.com/devpablocristo/platform/authn/go/internaljwt"
 	"github.com/devpablocristo/platform/config/go/envconfig"
 	sharedpostgres "github.com/devpablocristo/platform/databases/postgres/go"
+	"github.com/devpablocristo/platform/errors/go/domainerr"
 	"github.com/devpablocristo/platform/http/go/health"
 
 	memdomain "github.com/devpablocristo/companion/internal/memory/usecases/domain"
@@ -61,6 +66,91 @@ type taskOwnershipAdapter struct {
 
 type businessMemoryProjector struct {
 	uc *memory.Usecases
+}
+
+type productGuardObservabilityRecorder struct {
+	recorder runtime.ObservabilityRecorder
+}
+
+type connectorProductRuntimeController struct {
+	controls runtime.RuntimeControls
+	costs    runtime.CostLedger
+}
+
+func (r productGuardObservabilityRecorder) RecordProductInstallationGuardrail(ctx context.Context, event products.GuardrailEvent) error {
+	if r.recorder == nil {
+		return nil
+	}
+	payload, err := json.Marshal(map[string]any{
+		"org_id":          event.OrgID,
+		"product_surface": event.ProductSurface,
+		"reason":          event.Reason,
+		"error":           event.Error,
+	})
+	if err != nil {
+		payload = json.RawMessage(`{}`)
+	}
+	return r.recorder.RecordObservabilityEvent(ctx, runtime.ObservabilityEvent{
+		OrgID:          event.OrgID,
+		ProductSurface: event.ProductSurface,
+		EventType:      "guardrail",
+		EventName:      "product_installation_required",
+		Severity:       "warn",
+		Payload:        payload,
+		Redacted:       true,
+		OccurredAt:     time.Now().UTC(),
+	})
+}
+
+func (c connectorProductRuntimeController) EnforceProductConnectorExecution(ctx context.Context, orgID, productSurface string) error {
+	if c.controls == nil {
+		return nil
+	}
+	policy, err := c.controls.GetRuntimePolicy(ctx, orgID)
+	if err != nil {
+		if errors.Is(err, runtime.ErrRuntimePolicyNotFound) {
+			return nil
+		}
+		return fmt.Errorf("runtime policy lookup failed: %w", err)
+	}
+	productSurface = strings.TrimSpace(strings.ToLower(productSurface))
+	if productSurface == "" {
+		productSurface = runtime.DefaultProductSurface
+	}
+	if len(policy.AllowedProductSurfaces) > 0 && !stringListContainsFold(policy.AllowedProductSurfaces, productSurface) {
+		return domainerr.Forbidden(fmt.Sprintf("product surface %q is not allowed for this customer org", productSurface))
+	}
+	productPolicy, ok := policy.ControlPlane.ProductPolicies[productSurface]
+	if !ok {
+		return nil
+	}
+	if productPolicy.Denied {
+		return domainerr.Forbidden(fmt.Sprintf("product surface %q is denied by customer org policy", productSurface))
+	}
+	if c.costs == nil || (productPolicy.MonthlyCostBudgetCents <= 0 && productPolicy.MonthlyToolCallBudget <= 0) {
+		return nil
+	}
+	summary, err := c.costs.GetCostSummary(ctx, orgID, productSurface, time.Now().UTC().Format("2006-01"), 1)
+	if err != nil {
+		return fmt.Errorf("product cost summary lookup failed: %w", err)
+	}
+	if productPolicy.MonthlyCostBudgetCents > 0 && summary.EstimatedCostCents >= productPolicy.MonthlyCostBudgetCents {
+		return domainerr.Forbidden("monthly product cost budget exhausted")
+	}
+	if productPolicy.MonthlyToolCallBudget > 0 && summary.ToolCalls >= productPolicy.MonthlyToolCallBudget {
+		return domainerr.Forbidden("monthly product tool call budget exhausted")
+	}
+	return nil
+}
+
+func stringListContainsFold(values []string, want string) bool {
+	want = strings.TrimSpace(strings.ToLower(want))
+	for _, value := range values {
+		if strings.TrimSpace(strings.ToLower(value)) == want {
+			return true
+		}
+	}
+	return false
 }
 
 func (r agentRuntimeResolver) ResolveRuntimeAgent(ctx context.Context, orgID, productSurface, agentID string) (runtime.RuntimeAgentConfig, error) {
@@ -424,6 +514,16 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	businessRepo := business.NewPostgresRepository(db)
 	businessUC := business.NewUsecases(businessRepo).WithMemoryProjector(businessMemoryProjector{uc: memUC})
 	businessHandler := business.NewHandler(businessUC)
+	productRepo := products.NewPostgresRepository(db)
+	productUC := products.NewUsecases(productRepo)
+	productHandler := products.NewHandler(productUC)
+	productGuard := products.NewInstallationGuard(productUC)
+	productRateLimiter := productlimits.NewMemoryLimiter()
+	connUC.SetProductInstallationGuard(productGuard)
+	connUC.SetRateLimiter(productRateLimiter)
+	watcherUC.SetProductInstallationGuard(productGuard)
+	watcherUC.SetRateLimiter(productRateLimiter)
+	memUC.WithProductInstallationGuard(productGuard)
 	agentRepo := agentfleet.NewPostgresRepository(db)
 	agentUC := agentfleet.NewUsecases(agentRepo).WithTaskOwnership(taskOwnershipAdapter{repo: repo})
 	agentHandler := agentfleet.NewHandler(agentUC)
@@ -457,7 +557,7 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 		connectorViews = append(connectorViews, c)
 	}
 	capabilityRepo := capabilities.NewPostgresRepository(db)
-	capabilityUC := capabilities.NewUsecases(capabilityRepo)
+	capabilityUC := capabilities.NewUsecases(capabilityRepo).WithProductRegistry(productUC)
 	if generatedManifests, err := connUC.CapabilityManifests(connectordomain.CapabilityFilter{IncludeWrites: true}); err == nil {
 		if err := capabilityUC.SyncGenerated(ctx, generatedManifests); err != nil {
 			slog.Error("sync generated capability manifests", "error", err)
@@ -468,11 +568,12 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	capabilityHandler := capabilities.NewHandler(capabilityUC)
 	activeCapabilityRegistry := activeManifestRegistry(ctx, capabilityUC)
 	runtime.RegisterConnectorCapabilities(toolkit, runtime.CapabilityBridgeDeps{
-		Connectors:       connectorViews,
-		Executor:         connUC,
-		Submitter:        nexusGateway,
-		Controls:         runtimeControlsRepo,
-		ManifestRegistry: activeCapabilityRegistry,
+		Connectors:        connectorViews,
+		Executor:          connUC,
+		Submitter:         nexusGateway,
+		Controls:          runtimeControlsRepo,
+		ManifestRegistry:  activeCapabilityRegistry,
+		InstallationGuard: productGuard,
 	})
 	runtime.RegisterTaskPlannerTools(toolkit, taskPlannerAdapter{uc: uc})
 	contextPorts := runtime.ContextPorts{
@@ -501,16 +602,21 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	orchestrator.SetDefaultAutonomy(autonomy)
 	traceRepo := runtime.NewPostgresTraceRepository(db)
 	observabilityRepo := runtime.NewPostgresObservabilityRepository(db, traceRepo)
+	productGuard.WithRecorder(productGuardObservabilityRecorder{recorder: observabilityRepo})
 	orchestrator.SetTraceRepository(traceRepo)
 	orchestrator.SetObservabilityRecorder(observabilityRepo)
 	orchestrator.SetCostLedger(observabilityRepo)
 	orchestrator.SetRuntimeControls(runtimeControlsRepo)
 	orchestrator.SetAgentResolver(agentRuntimeResolver{uc: agentUC})
+	orchestrator.SetProductInstallationGuard(productGuard)
+	orchestrator.SetRateLimiter(productRateLimiter)
+	connUC.SetProductRuntimeController(connectorProductRuntimeController{controls: runtimeControlsRepo, costs: observabilityRepo})
 	traceHandler := runtime.NewTraceHandler(traceRepo)
 	observabilityHandler := runtime.NewObservabilityHandler(observabilityRepo)
 	runtimeControlsHandler := runtime.NewRuntimeControlsHandler(runtimeControlsRepo)
 	securityEvalRepo := securityevals.NewPostgresRepository(db)
 	securityEvalUC := securityevals.NewUsecases(securityEvalRepo)
+	securityEvalUC.SetRateLimiter(productRateLimiter)
 	securityEvalHandler := securityevals.NewHandler(securityEvalUC)
 	jobHandler := jobs.NewHandler(jobRepo)
 	adapter := runtime.NewOrchestratorAdapter(orchestrator)
@@ -546,6 +652,7 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	watcherHandler.Register(mux)
 	memHandler.Register(mux)
 	businessHandler.Register(mux)
+	productHandler.Register(mux)
 	agentHandler.Register(mux)
 	chatHandler.Register(mux)
 	connHandler.Register(mux)

@@ -13,6 +13,7 @@ import (
 
 	"github.com/devpablocristo/companion/internal/connectors/registry"
 	domain "github.com/devpablocristo/companion/internal/connectors/usecases/domain"
+	"github.com/devpablocristo/companion/internal/productlimits"
 )
 
 type fakeConnectorRepo struct {
@@ -147,6 +148,42 @@ func (s *stubChecker) AuthorizeExecution(ctx context.Context, intent NexusExecut
 	return s.approved, s.err
 }
 
+type stubInstallationGuard struct {
+	err            error
+	calls          int
+	orgID          string
+	productSurface string
+	reason         string
+}
+
+func (s *stubInstallationGuard) RequireActiveInstallation(_ context.Context, orgID, productSurface, reason string) error {
+	s.calls++
+	s.orgID = orgID
+	s.productSurface = productSurface
+	s.reason = reason
+	return s.err
+}
+
+type denyingConnectorRateLimiter struct{}
+
+func (denyingConnectorRateLimiter) Allow(context.Context, productlimits.Key, productlimits.Limit) (productlimits.Decision, error) {
+	return productlimits.Decision{Allowed: false}, nil
+}
+
+type stubProductRuntimeController struct {
+	err            error
+	calls          int
+	orgID          string
+	productSurface string
+}
+
+func (s *stubProductRuntimeController) EnforceProductConnectorExecution(_ context.Context, orgID, productSurface string) error {
+	s.calls++
+	s.orgID = orgID
+	s.productSurface = productSurface
+	return s.err
+}
+
 func TestNexusCheckerAdapter_AllowsExecutedStatus(t *testing.T) {
 	t.Parallel()
 
@@ -176,6 +213,152 @@ func TestNexusCheckerAdapter_RejectsBindingMismatch(t *testing.T) {
 	}
 	if ok {
 		t.Fatal("expected binding mismatch to deny execution")
+	}
+}
+
+func TestUsecases_ExecuteBlocksExternalWithoutActiveInstallation(t *testing.T) {
+	t.Parallel()
+
+	repo := &fakeConnectorRepo{connectors: make(map[uuid.UUID]domain.Connector)}
+	connectorID := uuid.New()
+	repo.connectors[connectorID] = domain.Connector{
+		ID:      connectorID,
+		OrgID:   "org-a",
+		Name:    "Mock Connector",
+		Kind:    "mock",
+		Enabled: true,
+	}
+	reg := registry.NewRegistry()
+	reg.Register(registry.NewMockConnector())
+	guard := &stubInstallationGuard{err: errors.New("active product installation required")}
+	uc := NewUsecases(repo, reg, &stubChecker{})
+	uc.SetProductInstallationGuard(guard)
+
+	_, err := uc.Execute(context.Background(), domain.ExecutionSpec{
+		ConnectorID:    connectorID,
+		OrgID:          "org-a",
+		ActorID:        "actor-1",
+		ProductSurface: "mock",
+		AuthScopes:     []string{"companion:connectors:execute"},
+		Operation:      "mock.echo",
+		Payload:        json.RawMessage(`{"message":"hello"}`),
+	})
+	if !IsForbidden(err) {
+		t.Fatalf("expected forbidden guard error, got %v", err)
+	}
+	if guard.calls != 1 || guard.orgID != "org-a" || guard.productSurface != "mock" || guard.reason != "connector_execution" {
+		t.Fatalf("unexpected guard call: %+v", guard)
+	}
+	if len(repo.executions) != 0 {
+		t.Fatalf("blocked connector execution should not persist executions, got %d", len(repo.executions))
+	}
+}
+
+func TestUsecases_BuildActionBindingBlocksExternalWithoutActiveInstallation(t *testing.T) {
+	t.Parallel()
+
+	repo := &fakeConnectorRepo{connectors: make(map[uuid.UUID]domain.Connector)}
+	connectorID := uuid.New()
+	repo.connectors[connectorID] = domain.Connector{
+		ID:      connectorID,
+		OrgID:   "org-a",
+		Name:    "Mock Connector",
+		Kind:    "mock",
+		Enabled: true,
+	}
+	reg := registry.NewRegistry()
+	reg.Register(registry.NewMockConnector())
+	guard := &stubInstallationGuard{err: errors.New("active product installation required")}
+	uc := NewUsecases(repo, reg, &stubChecker{})
+	uc.SetProductInstallationGuard(guard)
+
+	_, _, err := uc.BuildActionBinding(context.Background(), domain.ExecutionSpec{
+		ConnectorID:    connectorID,
+		OrgID:          "org-a",
+		ActorID:        "actor-1",
+		ProductSurface: "mock",
+		AuthScopes:     []string{"companion:connectors:execute"},
+		Operation:      "mock.write",
+		Payload:        json.RawMessage(`{"message":"hello"}`),
+		IdempotencyKey: "idem-binding",
+	})
+	if !IsForbidden(err) {
+		t.Fatalf("expected forbidden guard error, got %v", err)
+	}
+	if guard.reason != "connector_action_binding" {
+		t.Fatalf("expected connector_action_binding guard reason, got %q", guard.reason)
+	}
+}
+
+func TestUsecases_ExecuteBlocksRateLimitedProduct(t *testing.T) {
+	t.Parallel()
+
+	repo := &fakeConnectorRepo{connectors: make(map[uuid.UUID]domain.Connector)}
+	connectorID := uuid.New()
+	repo.connectors[connectorID] = domain.Connector{
+		ID:      connectorID,
+		OrgID:   "org-a",
+		Name:    "Mock Connector",
+		Kind:    "mock",
+		Enabled: true,
+	}
+	reg := registry.NewRegistry()
+	reg.Register(registry.NewMockConnector())
+	uc := NewUsecases(repo, reg, &stubChecker{})
+	uc.SetRateLimiter(denyingConnectorRateLimiter{})
+
+	_, err := uc.Execute(context.Background(), domain.ExecutionSpec{
+		ConnectorID:    connectorID,
+		OrgID:          "org-a",
+		ActorID:        "actor-1",
+		ProductSurface: "mock",
+		AuthScopes:     []string{"companion:connectors:execute"},
+		Operation:      "mock.echo",
+		Payload:        json.RawMessage(`{"message":"hello"}`),
+	})
+	if !IsRateLimited(err) {
+		t.Fatalf("expected product rate limit error, got %v", err)
+	}
+	if len(repo.executions) != 0 {
+		t.Fatalf("rate limited connector execution should not persist executions, got %d", len(repo.executions))
+	}
+}
+
+func TestUsecases_ExecuteBlocksDeniedProductRuntimePolicy(t *testing.T) {
+	t.Parallel()
+
+	repo := &fakeConnectorRepo{connectors: make(map[uuid.UUID]domain.Connector)}
+	connectorID := uuid.New()
+	repo.connectors[connectorID] = domain.Connector{
+		ID:      connectorID,
+		OrgID:   "org-a",
+		Name:    "Mock Connector",
+		Kind:    "mock",
+		Enabled: true,
+	}
+	reg := registry.NewRegistry()
+	reg.Register(registry.NewMockConnector())
+	controller := &stubProductRuntimeController{err: ErrForbidden}
+	uc := NewUsecases(repo, reg, &stubChecker{})
+	uc.SetProductRuntimeController(controller)
+
+	_, err := uc.Execute(context.Background(), domain.ExecutionSpec{
+		ConnectorID:    connectorID,
+		OrgID:          "org-a",
+		ActorID:        "actor-1",
+		ProductSurface: "mock",
+		AuthScopes:     []string{"companion:connectors:execute"},
+		Operation:      "mock.echo",
+		Payload:        json.RawMessage(`{"message":"hello"}`),
+	})
+	if !IsForbidden(err) {
+		t.Fatalf("expected product runtime policy forbidden error, got %v", err)
+	}
+	if controller.calls != 1 || controller.orgID != "org-a" || controller.productSurface != "mock" {
+		t.Fatalf("unexpected product runtime controller call: %+v", controller)
+	}
+	if len(repo.executions) != 0 {
+		t.Fatalf("policy-blocked connector execution should not persist executions, got %d", len(repo.executions))
 	}
 }
 

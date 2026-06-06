@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -15,6 +16,9 @@ import (
 	"github.com/devpablocristo/companion/internal/capabilities"
 	"github.com/devpablocristo/companion/internal/connectors/registry"
 	domain "github.com/devpablocristo/companion/internal/connectors/usecases/domain"
+	"github.com/devpablocristo/companion/internal/productlimits"
+	"github.com/devpablocristo/companion/internal/products"
+	"github.com/devpablocristo/platform/errors/go/domainerr"
 )
 
 // Repository port de persistencia para conectores y resultados de ejecución.
@@ -69,11 +73,22 @@ type NexusChecker interface {
 	AuthorizeExecution(ctx context.Context, intent NexusExecutionIntent) (bool, error)
 }
 
+type ProductInstallationGuard interface {
+	RequireActiveInstallation(ctx context.Context, orgID, productSurface, reason string) error
+}
+
+type ProductRuntimeController interface {
+	EnforceProductConnectorExecution(ctx context.Context, orgID, productSurface string) error
+}
+
 // Usecases lógica de negocio de conectores.
 type Usecases struct {
-	repo     Repository
-	registry *registry.Registry
-	checker  NexusChecker
+	repo                     Repository
+	registry                 *registry.Registry
+	checker                  NexusChecker
+	installationGuard        ProductInstallationGuard
+	productRuntimeController ProductRuntimeController
+	rateLimiter              productlimits.Limiter
 }
 
 // NewUsecases crea una nueva instancia de Usecases.
@@ -83,6 +98,18 @@ func NewUsecases(repo Repository, reg *registry.Registry, checker NexusChecker) 
 		registry: reg,
 		checker:  checker,
 	}
+}
+
+func (uc *Usecases) SetProductInstallationGuard(guard ProductInstallationGuard) {
+	uc.installationGuard = guard
+}
+
+func (uc *Usecases) SetProductRuntimeController(controller ProductRuntimeController) {
+	uc.productRuntimeController = controller
+}
+
+func (uc *Usecases) SetRateLimiter(limiter productlimits.Limiter) {
+	uc.rateLimiter = limiter
 }
 
 // ListConnectors lista conectores registrados con su estado en DB.
@@ -152,6 +179,20 @@ func (uc *Usecases) Execute(ctx context.Context, spec domain.ExecutionSpec) (dom
 		return domain.ExecutionResult{}, ErrOperationUnknown
 	}
 	if err := validateExecutionContext(spec, capability); err != nil {
+		return domain.ExecutionResult{}, err
+	}
+	productSurface := productSurfaceFor(capability, spec)
+	if err := uc.requireActiveInstallation(ctx, spec.OrgID, productSurface, "connector_execution"); err != nil {
+		return domain.ExecutionResult{}, err
+	}
+	if err := uc.enforceProductRuntime(ctx, spec.OrgID, productSurface); err != nil {
+		return domain.ExecutionResult{}, err
+	}
+	if err := productlimits.Enforce(ctx, uc.rateLimiter, productlimits.Key{
+		OrgID:          spec.OrgID,
+		ProductSurface: productSurface,
+		Area:           productlimits.AreaConnectorExecution,
+	}, productlimits.DefaultLimit(productlimits.AreaConnectorExecution)); err != nil {
 		return domain.ExecutionResult{}, err
 	}
 	payloadHash, err := payloadHash(spec.Payload)
@@ -306,6 +347,13 @@ func (uc *Usecases) BuildActionBinding(ctx context.Context, spec domain.Executio
 		if err := validateExecutionContext(spec, capability); err != nil {
 			return nil, "", err
 		}
+		productSurface := productSurfaceFor(capability, spec)
+		if err := uc.requireActiveInstallation(ctx, spec.OrgID, productSurface, "connector_action_binding"); err != nil {
+			return nil, "", err
+		}
+		if err := uc.enforceProductRuntime(ctx, spec.OrgID, productSurface); err != nil {
+			return nil, "", err
+		}
 		payloadHash, err := payloadHash(spec.Payload)
 		if err != nil {
 			return nil, "", fmt.Errorf("%w: payload must be canonical JSON", ErrInvalidPayload)
@@ -318,6 +366,26 @@ func (uc *Usecases) BuildActionBinding(ctx context.Context, spec domain.Executio
 		return binding, hash, nil
 	}
 	return nil, "", ErrOperationUnknown
+}
+
+func (uc *Usecases) enforceProductRuntime(ctx context.Context, orgID, productSurface string) error {
+	if uc.productRuntimeController == nil {
+		return nil
+	}
+	return uc.productRuntimeController.EnforceProductConnectorExecution(ctx, orgID, productSurface)
+}
+
+func (uc *Usecases) requireActiveInstallation(ctx context.Context, orgID, productSurface, reason string) error {
+	if uc.installationGuard == nil {
+		return nil
+	}
+	if err := uc.installationGuard.RequireActiveInstallation(ctx, orgID, productSurface, reason); err != nil {
+		if errors.Is(err, products.ErrValidation) {
+			return domainerr.Validation(err.Error())
+		}
+		return fmt.Errorf("%w: %v", ErrForbidden, err)
+	}
+	return nil
 }
 
 // ListExecutions lista resultados de ejecución de un conector.

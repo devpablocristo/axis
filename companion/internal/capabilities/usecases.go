@@ -5,14 +5,26 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/devpablocristo/companion/internal/products"
 )
 
 type Usecases struct {
-	repo Repository
+	repo            Repository
+	productRegistry ProductRegistry
+}
+
+type ProductRegistry interface {
+	GetProduct(ctx context.Context, productSurface string) (products.Product, error)
 }
 
 func NewUsecases(repo Repository) *Usecases {
 	return &Usecases{repo: repo}
+}
+
+func (uc *Usecases) WithProductRegistry(registry ProductRegistry) *Usecases {
+	uc.productRegistry = registry
+	return uc
 }
 
 func (uc *Usecases) SyncGenerated(ctx context.Context, manifests []Manifest) error {
@@ -73,7 +85,7 @@ func (uc *Usecases) PromoteManifest(ctx context.Context, capabilityID, version s
 	if err != nil {
 		return ManifestRecord{}, err
 	}
-	checks, errs := CheckManifestConformance(record.Manifest)
+	checks, errs := uc.checkManifestConformance(ctx, record.Manifest)
 	if len(errs) > 0 {
 		_, _ = uc.repo.SaveConformanceRun(ctx, ConformanceRun{
 			CapabilityID: record.Manifest.CapabilityID,
@@ -132,7 +144,7 @@ func (uc *Usecases) RunConformance(ctx context.Context, in ConformanceInput) (Co
 		}
 		manifest = record.Manifest.Normalize()
 	}
-	checks, errs := CheckManifestConformance(manifest)
+	checks, errs := uc.checkManifestConformance(ctx, manifest)
 	status := ConformanceStatusPassed
 	if len(errs) > 0 {
 		status = ConformanceStatusFailed
@@ -164,4 +176,33 @@ func (uc *Usecases) ListConformanceRuns(ctx context.Context, orgID, capabilityID
 		return nil, fmt.Errorf("capability repository is not configured")
 	}
 	return uc.repo.ListConformanceRuns(ctx, orgID, capabilityID, limit)
+}
+
+func (uc *Usecases) CheckConformance(ctx context.Context, manifest Manifest) (map[string]bool, []string) {
+	return uc.checkManifestConformance(ctx, manifest)
+}
+
+func (uc *Usecases) checkManifestConformance(ctx context.Context, manifest Manifest) (map[string]bool, []string) {
+	manifest = manifest.Normalize()
+	checks, errs := CheckManifestConformance(manifest)
+	if uc == nil || uc.productRegistry == nil {
+		return checks, errs
+	}
+	checks["product_active"] = false
+	productSurface := strings.TrimSpace(manifest.ProductSurface)
+	if productSurface == "" {
+		errs = append(errs, "product_surface is required")
+		return checks, dedupeStrings(errs)
+	}
+	product, err := uc.productRegistry.GetProduct(ctx, productSurface)
+	if err != nil {
+		errs = append(errs, fmt.Sprintf("product_surface %q is not registered or active", productSurface))
+		return checks, dedupeStrings(errs)
+	}
+	if product.Status != products.ProductStatusActive {
+		errs = append(errs, fmt.Sprintf("product_surface %q is disabled", productSurface))
+		return checks, dedupeStrings(errs)
+	}
+	checks["product_active"] = true
+	return checks, dedupeStrings(errs)
 }

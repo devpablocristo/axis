@@ -66,4 +66,5 @@ URL por defecto: `http://localhost:18085`.
 - `docs/security.md`
 - `docs/testing.md`
 - `docs/operations.md`
+- `docs/product-integration-contract-v1.md`
 - `openapi.yaml`

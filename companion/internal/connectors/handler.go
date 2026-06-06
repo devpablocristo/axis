@@ -253,8 +253,16 @@ func (h *Handler) execute(w http.ResponseWriter, r *http.Request) {
 			httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", err.Error())
 			return
 		}
+		if IsValidation(err) {
+			httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", err.Error())
+			return
+		}
+		if IsRateLimited(err) {
+			httpjson.WriteFlatError(w, http.StatusTooManyRequests, "RATE_LIMITED", err.Error())
+			return
+		}
 		if IsForbidden(err) {
-			httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "connector org is not allowed for this principal")
+			httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", err.Error())
 			return
 		}
 		if IsConflict(err) {

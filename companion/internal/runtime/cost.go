@@ -12,6 +12,7 @@ import (
 type CostEvent struct {
 	ID                 uuid.UUID       `json:"id,omitempty"`
 	OrgID              string          `json:"org_id"`
+	ProductSurface     string          `json:"product_surface"`
 	RunID              *uuid.UUID      `json:"run_id,omitempty"`
 	TaskID             *uuid.UUID      `json:"task_id,omitempty"`
 	JobID              *uuid.UUID      `json:"job_id,omitempty"`
@@ -28,20 +29,37 @@ type CostEvent struct {
 }
 
 type CostSummary struct {
-	OrgID              string      `json:"org_id"`
-	Period             string      `json:"period"`
-	EstimatedTokens    int64       `json:"estimated_tokens"`
-	EstimatedCostCents int64       `json:"estimated_cost_cents"`
-	LLMCalls           int64       `json:"llm_calls"`
-	ToolCalls          int64       `json:"tool_calls"`
-	JobEvents          int64       `json:"job_events"`
-	EmbeddingEvents    int64       `json:"embedding_events"`
-	Events             []CostEvent `json:"events,omitempty"`
+	OrgID              string          `json:"org_id"`
+	ProductSurface     string          `json:"product_surface,omitempty"`
+	Period             string          `json:"period"`
+	EstimatedTokens    int64           `json:"estimated_tokens"`
+	EstimatedCostCents int64           `json:"estimated_cost_cents"`
+	LLMCalls           int64           `json:"llm_calls"`
+	ToolCalls          int64           `json:"tool_calls"`
+	JobEvents          int64           `json:"job_events"`
+	EmbeddingEvents    int64           `json:"embedding_events"`
+	Events             []CostEvent     `json:"events,omitempty"`
+	ByProduct          []CostBreakdown `json:"by_product,omitempty"`
+	ByCapability       []CostBreakdown `json:"by_capability,omitempty"`
+	ByModel            []CostBreakdown `json:"by_model,omitempty"`
+	ByAgent            []CostBreakdown `json:"by_agent,omitempty"`
+}
+
+type CostBreakdown struct {
+	Dimension          string `json:"dimension"`
+	Key                string `json:"key"`
+	EstimatedTokens    int64  `json:"estimated_tokens"`
+	EstimatedCostCents int64  `json:"estimated_cost_cents"`
+	LLMCalls           int64  `json:"llm_calls"`
+	ToolCalls          int64  `json:"tool_calls"`
+	JobEvents          int64  `json:"job_events"`
+	EmbeddingEvents    int64  `json:"embedding_events"`
+	Quantity           int64  `json:"quantity"`
 }
 
 type CostLedger interface {
 	RecordCostEvent(ctx context.Context, event CostEvent) error
-	GetCostSummary(ctx context.Context, orgID, period string, limit int) (CostSummary, error)
+	GetCostSummary(ctx context.Context, orgID, productSurface, period string, limit int) (CostSummary, error)
 }
 
 func costEventForRun(trace RunTrace, in RunInput) CostEvent {
@@ -57,6 +75,7 @@ func costEventForRun(trace RunTrace, in RunInput) CostEvent {
 	}))
 	return CostEvent{
 		OrgID:              strings.TrimSpace(in.OrgID),
+		ProductSurface:     strings.TrimSpace(firstNonEmpty(trace.ProductSurface, in.ProductSurface)),
 		RunID:              runPtr,
 		TaskID:             in.TaskID,
 		AgentID:            trace.IdentityChain.AgentID,
@@ -79,16 +98,17 @@ func costEventForTools(trace RunTrace, in RunInput) CostEvent {
 	}
 	payload, _ := json.Marshal(redactValue(map[string]any{"tool_calls": trace.ToolCalls}))
 	return CostEvent{
-		OrgID:      strings.TrimSpace(in.OrgID),
-		RunID:      runPtr,
-		TaskID:     in.TaskID,
-		AgentID:    trace.IdentityChain.AgentID,
-		Model:      trace.Model,
-		CostClass:  "tool",
-		EventType:  "tool",
-		Quantity:   int64(len(trace.ToolCalls)),
-		Payload:    payload,
-		OccurredAt: time.Now().UTC(),
+		OrgID:          strings.TrimSpace(in.OrgID),
+		ProductSurface: strings.TrimSpace(firstNonEmpty(trace.ProductSurface, in.ProductSurface)),
+		RunID:          runPtr,
+		TaskID:         in.TaskID,
+		AgentID:        trace.IdentityChain.AgentID,
+		Model:          trace.Model,
+		CostClass:      "tool",
+		EventType:      "tool",
+		Quantity:       int64(len(trace.ToolCalls)),
+		Payload:        payload,
+		OccurredAt:     time.Now().UTC(),
 	}
 }
 

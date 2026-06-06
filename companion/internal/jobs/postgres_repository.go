@@ -31,14 +31,14 @@ func (r *PostgresRepository) Enqueue(ctx context.Context, in EnqueueInput) (Job,
 	timeoutSeconds := int(in.Timeout.Seconds())
 	row := r.db.Pool().QueryRow(ctx, `
 		INSERT INTO companion_jobs
-			(id, org_id, kind, shard_key, dedupe_key, payload_json, status, priority,
+			(id, org_id, product_surface, kind, shard_key, dedupe_key, payload_json, status, priority,
 			 max_attempts, run_after, deadline_at, timeout_seconds)
-		VALUES ($1,$2,$3,$4,$5,$6,'queued',$7,$8,$9,$10,$11)
-		RETURNING id, org_id, kind, shard_key, dedupe_key, payload_json, status,
+		VALUES ($1,$2,$3,$4,$5,$6,$7,'queued',$8,$9,$10,$11,$12)
+		RETURNING id, org_id, product_surface, kind, shard_key, dedupe_key, payload_json, status,
 		          priority, attempts, max_attempts, run_after, lease_owner,
 		          lease_until, locked_at, heartbeat_at, deadline_at, timeout_seconds,
 		          last_error, evidence_json, created_at, updated_at, completed_at
-	`, in.ID, in.OrgID, in.Kind, in.ShardKey, in.DedupeKey, in.Payload, in.Priority,
+	`, in.ID, in.OrgID, in.ProductSurface, in.Kind, in.ShardKey, in.DedupeKey, in.Payload, in.Priority,
 		in.MaxAttempts, in.RunAfter, in.DeadlineAt, timeoutSeconds)
 	job, err := scanJob(row)
 	if err == nil {
@@ -56,7 +56,7 @@ func (r *PostgresRepository) Enqueue(ctx context.Context, in EnqueueInput) (Job,
 		return Job{}, false, getErr
 	}
 	if in.ReplacePayload && existing.Status == StatusQueued {
-		updated, updateErr := r.replaceQueuedPayload(ctx, existing.ID, in.Payload, in.RunAfter, in.Priority)
+		updated, updateErr := r.replaceQueuedPayload(ctx, existing.ID, in.Payload, in.ProductSurface, in.RunAfter, in.Priority)
 		if updateErr != nil {
 			return Job{}, false, updateErr
 		}
@@ -91,7 +91,7 @@ func (r *PostgresRepository) Claim(ctx context.Context, opts ClaimOptions) ([]Jo
 		    updated_at = now()
 		FROM picked
 		WHERE j.id = picked.id
-		RETURNING j.id, j.org_id, j.kind, j.shard_key, j.dedupe_key, j.payload_json, j.status,
+		RETURNING j.id, j.org_id, j.product_surface, j.kind, j.shard_key, j.dedupe_key, j.payload_json, j.status,
 		          j.priority, j.attempts, j.max_attempts, j.run_after, j.lease_owner,
 		          j.lease_until, j.locked_at, j.heartbeat_at, j.deadline_at, j.timeout_seconds,
 		          j.last_error, j.evidence_json, j.created_at, j.updated_at, j.completed_at
@@ -196,7 +196,7 @@ func (r *PostgresRepository) Fail(ctx context.Context, in FailInput) (Job, error
 		    END,
 		    updated_at = now()
 		WHERE id = $1 AND lease_owner = $2 AND status = 'running'
-		RETURNING id, org_id, kind, shard_key, dedupe_key, payload_json, status,
+		RETURNING id, org_id, product_surface, kind, shard_key, dedupe_key, payload_json, status,
 		          priority, attempts, max_attempts, run_after, lease_owner,
 		          lease_until, locked_at, heartbeat_at, deadline_at, timeout_seconds,
 		          last_error, evidence_json, created_at, updated_at, completed_at
@@ -244,7 +244,7 @@ func (r *PostgresRepository) Cancel(ctx context.Context, jobID uuid.UUID, reason
 
 func (r *PostgresRepository) Get(ctx context.Context, jobID uuid.UUID) (Job, error) {
 	row := r.db.Pool().QueryRow(ctx, `
-		SELECT id, org_id, kind, shard_key, dedupe_key, payload_json, status,
+		SELECT id, org_id, product_surface, kind, shard_key, dedupe_key, payload_json, status,
 		       priority, attempts, max_attempts, run_after, lease_owner,
 		       lease_until, locked_at, heartbeat_at, deadline_at, timeout_seconds,
 		       last_error, evidence_json, created_at, updated_at, completed_at
@@ -266,7 +266,7 @@ func (r *PostgresRepository) List(ctx context.Context, orgID, status string, lim
 		limit = 100
 	}
 	query := `
-		SELECT id, org_id, kind, shard_key, dedupe_key, payload_json, status,
+		SELECT id, org_id, product_surface, kind, shard_key, dedupe_key, payload_json, status,
 		       priority, attempts, max_attempts, run_after, lease_owner,
 		       lease_until, locked_at, heartbeat_at, deadline_at, timeout_seconds,
 		       last_error, evidence_json, created_at, updated_at, completed_at
@@ -326,7 +326,7 @@ func (r *PostgresRepository) RecoverExpiredLeases(ctx context.Context, limit int
 
 func (r *PostgresRepository) getByDedupe(ctx context.Context, dedupeKey string) (Job, error) {
 	row := r.db.Pool().QueryRow(ctx, `
-		SELECT id, org_id, kind, shard_key, dedupe_key, payload_json, status,
+		SELECT id, org_id, product_surface, kind, shard_key, dedupe_key, payload_json, status,
 		       priority, attempts, max_attempts, run_after, lease_owner,
 		       lease_until, locked_at, heartbeat_at, deadline_at, timeout_seconds,
 		       last_error, evidence_json, created_at, updated_at, completed_at
@@ -345,19 +345,20 @@ func (r *PostgresRepository) getByDedupe(ctx context.Context, dedupeKey string) 
 	return job, nil
 }
 
-func (r *PostgresRepository) replaceQueuedPayload(ctx context.Context, jobID uuid.UUID, payload json.RawMessage, runAfter time.Time, priority int) (Job, error) {
+func (r *PostgresRepository) replaceQueuedPayload(ctx context.Context, jobID uuid.UUID, payload json.RawMessage, productSurface string, runAfter time.Time, priority int) (Job, error) {
 	row := r.db.Pool().QueryRow(ctx, `
 		UPDATE companion_jobs
 		SET payload_json = $2,
-		    run_after = $3,
-		    priority = $4,
+		    product_surface = $3,
+		    run_after = $4,
+		    priority = $5,
 		    updated_at = now()
 		WHERE id = $1 AND status = 'queued'
-		RETURNING id, org_id, kind, shard_key, dedupe_key, payload_json, status,
+		RETURNING id, org_id, product_surface, kind, shard_key, dedupe_key, payload_json, status,
 		          priority, attempts, max_attempts, run_after, lease_owner,
 		          lease_until, locked_at, heartbeat_at, deadline_at, timeout_seconds,
 		          last_error, evidence_json, created_at, updated_at, completed_at
-	`, jobID, payload, runAfter, priority)
+	`, jobID, payload, productSurface, runAfter, priority)
 	job, err := scanJob(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -392,7 +393,7 @@ func scanJob(row pgx.Row) (Job, error) {
 		lastError  *string
 	)
 	err := row.Scan(
-		&job.ID, &job.OrgID, &job.Kind, &job.ShardKey, &job.DedupeKey, &payload, &status,
+		&job.ID, &job.OrgID, &job.ProductSurface, &job.Kind, &job.ShardKey, &job.DedupeKey, &payload, &status,
 		&job.Priority, &job.Attempts, &job.MaxAttempts, &job.RunAfter, &leaseOwner,
 		&job.LeaseUntil, &job.LockedAt, &job.HeartbeatAt, &job.DeadlineAt, &job.TimeoutSeconds,
 		&lastError, &evidence, &job.CreatedAt, &job.UpdatedAt, &job.CompletedAt,

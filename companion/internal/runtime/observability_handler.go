@@ -79,12 +79,16 @@ func (h *ObservabilityHandler) listEvents(w http.ResponseWriter, r *http.Request
 		}
 		runID = &parsed
 	}
-	orgID := identityctx.FromRequest(r).CustomerOrgID
+	orgID, ok := identityctx.EffectiveOrgID(r, q.Get("org_id"), scopeCompanionCrossOrg)
 	if orgID == "" && runID == nil {
 		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "customer org context or run_id is required")
 		return
 	}
-	events, err := h.repo.ListObservabilityEvents(r.Context(), orgID, runID, limit)
+	if !ok {
+		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "observability org is not allowed for this principal")
+		return
+	}
+	events, err := h.repo.ListObservabilityEvents(r.Context(), orgID, strings.TrimSpace(q.Get("product_surface")), runID, limit)
 	if err != nil {
 		httpjson.WriteFlatInternalError(w, err, "list observability events failed")
 		return
@@ -107,8 +111,8 @@ func (h *ObservabilityHandler) costs(w http.ResponseWriter, r *http.Request) {
 		httpjson.WriteFlatError(w, http.StatusNotImplemented, "NOT_CONFIGURED", "cost ledger is not configured")
 		return
 	}
-	orgID := strings.TrimSpace(identityctx.FromRequest(r).CustomerOrgID)
-	if orgID == "" {
+	orgID, ok := identityctx.EffectiveOrgID(r, r.URL.Query().Get("org_id"), scopeCompanionCrossOrg)
+	if !ok || strings.TrimSpace(orgID) == "" {
 		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "customer org context is required")
 		return
 	}
@@ -126,7 +130,8 @@ func (h *ObservabilityHandler) costs(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = parsed
 	}
-	summary, err := ledger.GetCostSummary(r.Context(), orgID, period, limit)
+	productSurface := strings.TrimSpace(r.URL.Query().Get("product_surface"))
+	summary, err := ledger.GetCostSummary(r.Context(), orgID, productSurface, period, limit)
 	if err != nil {
 		httpjson.WriteFlatInternalError(w, err, "get cost summary failed")
 		return

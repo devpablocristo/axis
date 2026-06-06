@@ -39,3 +39,11 @@ func IsMemoryConflict(err error) bool {
 func IsMemoryPoisoning(err error) bool {
 	return errors.Is(err, ErrMemoryPoisoning)
 }
+
+func IsForbidden(err error) bool {
+	return domainerr.IsForbidden(err)
+}
+
+func IsValidation(err error) bool {
+	return domainerr.IsValidation(err)
+}

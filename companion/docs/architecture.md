@@ -15,6 +15,7 @@ Nexus decide decisiones sensibles; los productos exponen capacidades de dominio.
 | `internal/agentfleet` | Empleados IA persistentes, límites, ownership y handoffs |
 | `internal/agents` | Perfiles seedables, autonomy y allowlists de tools |
 | `internal/business` | Modelo empresarial persistente versionado por customer org |
+| `internal/products` | Registry de productos e installations `org_id + product_surface` |
 | `internal/capabilities` | Manifests versionados, validación estricta y registry canónico |
 | `internal/jobs` | Queue durable, workers, leases, retries y DLQ |
 | `internal/runtime` | LLM orchestration, prompt, tool calling, control plane, observability y traces |
@@ -51,6 +52,12 @@ Nexus decide decisiones sensibles; los productos exponen capacidades de dominio.
 - Business model: configuración versionada por org/product surface con áreas,
   roles, workflows, reglas, vocabulario y SLAs; el runtime la usa como contexto
   de negocio sin hardcodear verticales.
+- Product registry: productos e installations activos resuelven
+  `org_id + product_surface`; sin instalacion activa, las integraciones deben
+  fallar cerrado.
+- Product installation guard: `companion` es superficie interna; cualquier
+  superficie externa requiere instalacion activa antes de runtime runs,
+  capability tools, connector execution, watchers y memory writes.
 - Agent fleet: `/v1/chat` puede seleccionar `agent_id`; el runtime resuelve
   límites persistentes, recorta autonomía/tools/capabilities y registra
   ownership en traces y observability.
@@ -65,6 +72,10 @@ ledger redacted para replay. `companion_business_models` guarda el modelo
 empresarial activo y sus versiones. `companion_agents` y
 `companion_agent_handoffs` guardan flota, ownership y coordinación.
 `companion_run_traces` incluye `prompt_version` y `model` para auditar runtime IA.
+`companion_products` y `companion_product_installations` guardan el plano de
+control multi-producto. `companion_jobs` transporta `product_surface` como
+campo first-class para auditoria y control operacional. Costos, observability
+events y eval reports quedan etiquetados por `product_surface`.
 
 ## Runtime IA
 

@@ -1,6 +1,17 @@
 package securityevals
 
-import "testing"
+import (
+	"context"
+	"testing"
+
+	"github.com/devpablocristo/companion/internal/productlimits"
+)
+
+type denyingEvalRateLimiter struct{}
+
+func (denyingEvalRateLimiter) Allow(context.Context, productlimits.Key, productlimits.Limit) (productlimits.Decision, error) {
+	return productlimits.Decision{Allowed: false}, nil
+}
 
 func TestEvaluateSuiteComputesThresholdStatus(t *testing.T) {
 	suite := Suite{
@@ -33,5 +44,17 @@ func TestLoadAdversarialSuiteHasStrictThreshold(t *testing.T) {
 	}
 	if len(suite.Cases) == 0 {
 		t.Fatal("expected adversarial cases")
+	}
+}
+
+func TestUsecases_RunSuiteRateLimitedByProduct(t *testing.T) {
+	t.Parallel()
+
+	uc := NewUsecases(nil)
+	uc.SetRateLimiter(denyingEvalRateLimiter{})
+
+	_, err := uc.RunSuite(context.Background(), "org-a", "ponti", "security-adversarial", "user-1")
+	if !productlimits.IsRateLimited(err) {
+		t.Fatalf("expected product eval rate limit error, got %v", err)
 	}
 }

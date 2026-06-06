@@ -52,6 +52,7 @@ func (r *MemoryRepository) Enqueue(_ context.Context, in EnqueueInput) (Job, boo
 		if existing.DedupeKey == in.DedupeKey && (existing.Status == StatusQueued || existing.Status == StatusRunning) {
 			if in.ReplacePayload && existing.Status == StatusQueued {
 				existing.Payload = cloneRaw(in.Payload)
+				existing.ProductSurface = in.ProductSurface
 				existing.RunAfter = in.RunAfter
 				existing.Priority = in.Priority
 				existing.UpdatedAt = r.now()
@@ -65,6 +66,7 @@ func (r *MemoryRepository) Enqueue(_ context.Context, in EnqueueInput) (Job, boo
 	job := Job{
 		ID:             in.ID,
 		OrgID:          in.OrgID,
+		ProductSurface: in.ProductSurface,
 		Kind:           in.Kind,
 		ShardKey:       in.ShardKey,
 		DedupeKey:      in.DedupeKey,

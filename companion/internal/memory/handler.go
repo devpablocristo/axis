@@ -134,6 +134,14 @@ func (h *Handler) upsert(w http.ResponseWriter, r *http.Request) {
 			httpjson.WriteFlatError(w, http.StatusBadRequest, "MEMORY_POISONING", "memory input rejected by poisoning detector")
 			return
 		}
+		if IsValidation(err) {
+			httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", err.Error())
+			return
+		}
+		if IsForbidden(err) {
+			httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", err.Error())
+			return
+		}
 		httpjson.WriteFlatInternalError(w, err, "upsert memory failed")
 		return
 	}

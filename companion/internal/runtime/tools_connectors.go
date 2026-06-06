@@ -47,11 +47,12 @@ type RuntimePolicyReader interface {
 // connector types disponibles al boot (típicamente armada desde
 // connectors/registry.Registry.List() via un loop trivial).
 type CapabilityBridgeDeps struct {
-	Connectors       []ConnectorTypeView
-	Executor         ConnectorExecutor
-	Submitter        NexusSubmitter
-	Controls         RuntimePolicyReader
-	ManifestRegistry *capabilities.Registry
+	Connectors        []ConnectorTypeView
+	Executor          ConnectorExecutor
+	Submitter         NexusSubmitter
+	Controls          RuntimePolicyReader
+	ManifestRegistry  *capabilities.Registry
+	InstallationGuard ProductInstallationGuard
 }
 
 // RegisterConnectorCapabilities itera cada connector type registrado y expone
@@ -218,6 +219,18 @@ func capabilityToolHandler(kind string, capability connectorsdomain.Capability, 
 				"reason": event.Reason,
 			}), nil
 		}
+		productSurface := productSurfaceFromIdentity(id)
+		if deps.InstallationGuard != nil {
+			if err := deps.InstallationGuard.RequireActiveInstallation(ctx, id.OrgID, productSurface, "runtime_capability_tool"); err != nil {
+				slog.Warn("capability_blocked_by_product_installation", "operation", capability.Operation, "kind", kind, "product_surface", productSurface, "error", err)
+				return jsonOrError(map[string]any{
+					"error":           "active product installation required",
+					"org_id":          id.OrgID,
+					"product_surface": productSurface,
+					"details":         err.Error(),
+				}), nil
+			}
+		}
 
 		connID, err := resolveConnectorID(ctx, deps.Executor, id.OrgID, kind)
 		if err != nil {
@@ -249,7 +262,7 @@ func capabilityToolHandler(kind string, capability connectorsdomain.Capability, 
 			CompanionPrincipal: firstNonEmpty(id.CompanionPrincipal, CompanionPrincipal),
 			OnBehalfOf:         id.OnBehalfOf,
 			ServicePrincipal:   id.ServicePrincipal,
-			ProductSurface:     productSurfaceFromIdentity(id),
+			ProductSurface:     productSurface,
 			AuthScopes:         append([]string(nil), id.AuthScopes...),
 			Operation:          capability.Operation,
 			Payload:            payload,

@@ -35,30 +35,38 @@ type TenantRuntimePolicy struct {
 }
 
 type OrgControlPlaneSettings struct {
-	EnabledAgents          []string                 `json:"enabled_agents,omitempty"`
-	AllowedProfiles        []string                 `json:"allowed_profiles,omitempty"`
-	AllowedTools           []string                 `json:"allowed_tools,omitempty"`
-	DeniedTools            []string                 `json:"denied_tools,omitempty"`
-	AllowedCapabilities    []string                 `json:"allowed_capabilities,omitempty"`
-	DeniedCapabilities     []string                 `json:"denied_capabilities,omitempty"`
-	AllowedConnectors      []string                 `json:"allowed_connectors,omitempty"`
-	DeniedConnectors       []string                 `json:"denied_connectors,omitempty"`
-	AllowedModels          []string                 `json:"allowed_models,omitempty"`
-	MonthlyCostBudgetCents int64                    `json:"monthly_cost_budget_cents,omitempty"`
-	MaxRiskClass           string                   `json:"max_risk_class,omitempty"`
-	ApprovalThresholds     map[string]string        `json:"approval_thresholds,omitempty"`
-	Retention              OrgRetentionPolicy       `json:"retention,omitempty"`
-	Memory                 OrgMemoryPolicy          `json:"memory,omitempty"`
-	AgentKillSwitches      map[string]bool          `json:"agent_kill_switches,omitempty"`
-	ToolKillSwitches       map[string]bool          `json:"tool_kill_switches,omitempty"`
-	ConnectorKillSwitches  map[string]bool          `json:"connector_kill_switches,omitempty"`
-	DataIsolation          OrgDataIsolationPolicy   `json:"data_isolation,omitempty"`
-	Observability          OrgObservabilitySettings `json:"observability,omitempty"`
-	Embedding              OrgEmbeddingSettings     `json:"embedding,omitempty"`
-	ModelRouting           []OrgModelRoute          `json:"model_routing,omitempty"`
-	EvalThresholds         map[string]float64       `json:"eval_thresholds,omitempty"`
-	DataResidency          string                   `json:"data_residency,omitempty"`
-	Metadata               map[string]any           `json:"metadata,omitempty"`
+	EnabledAgents          []string                        `json:"enabled_agents,omitempty"`
+	AllowedProfiles        []string                        `json:"allowed_profiles,omitempty"`
+	AllowedTools           []string                        `json:"allowed_tools,omitempty"`
+	DeniedTools            []string                        `json:"denied_tools,omitempty"`
+	AllowedCapabilities    []string                        `json:"allowed_capabilities,omitempty"`
+	DeniedCapabilities     []string                        `json:"denied_capabilities,omitempty"`
+	AllowedConnectors      []string                        `json:"allowed_connectors,omitempty"`
+	DeniedConnectors       []string                        `json:"denied_connectors,omitempty"`
+	AllowedModels          []string                        `json:"allowed_models,omitempty"`
+	MonthlyCostBudgetCents int64                           `json:"monthly_cost_budget_cents,omitempty"`
+	ProductPolicies        map[string]ProductRuntimePolicy `json:"product_policies,omitempty"`
+	MaxRiskClass           string                          `json:"max_risk_class,omitempty"`
+	ApprovalThresholds     map[string]string               `json:"approval_thresholds,omitempty"`
+	Retention              OrgRetentionPolicy              `json:"retention,omitempty"`
+	Memory                 OrgMemoryPolicy                 `json:"memory,omitempty"`
+	AgentKillSwitches      map[string]bool                 `json:"agent_kill_switches,omitempty"`
+	ToolKillSwitches       map[string]bool                 `json:"tool_kill_switches,omitempty"`
+	ConnectorKillSwitches  map[string]bool                 `json:"connector_kill_switches,omitempty"`
+	DataIsolation          OrgDataIsolationPolicy          `json:"data_isolation,omitempty"`
+	Observability          OrgObservabilitySettings        `json:"observability,omitempty"`
+	Embedding              OrgEmbeddingSettings            `json:"embedding,omitempty"`
+	ModelRouting           []OrgModelRoute                 `json:"model_routing,omitempty"`
+	EvalThresholds         map[string]float64              `json:"eval_thresholds,omitempty"`
+	DataResidency          string                          `json:"data_residency,omitempty"`
+	Metadata               map[string]any                  `json:"metadata,omitempty"`
+}
+
+type ProductRuntimePolicy struct {
+	Denied                 bool          `json:"denied"`
+	MaxAutonomy            AutonomyLevel `json:"max_autonomy,omitempty"`
+	MonthlyCostBudgetCents int64         `json:"monthly_cost_budget_cents,omitempty"`
+	MonthlyToolCallBudget  int64         `json:"monthly_tool_call_budget,omitempty"`
 }
 
 type OrgRetentionPolicy struct {
@@ -213,6 +221,7 @@ func normalizeOrgControlPlaneSettings(settings OrgControlPlaneSettings) OrgContr
 	settings.AllowedConnectors = normalizeStringList(settings.AllowedConnectors)
 	settings.DeniedConnectors = normalizeStringList(settings.DeniedConnectors)
 	settings.AllowedModels = normalizeStringList(settings.AllowedModels)
+	settings.ProductPolicies = normalizeProductRuntimePolicies(settings.ProductPolicies)
 	settings.MaxRiskClass = strings.TrimSpace(settings.MaxRiskClass)
 	if settings.MaxRiskClass == "" {
 		settings.MaxRiskClass = "high"
@@ -248,6 +257,30 @@ func normalizeOrgControlPlaneSettings(settings OrgControlPlaneSettings) OrgContr
 		settings.Metadata = map[string]any{}
 	}
 	return settings
+}
+
+func normalizeProductRuntimePolicies(values map[string]ProductRuntimePolicy) map[string]ProductRuntimePolicy {
+	out := make(map[string]ProductRuntimePolicy, len(values))
+	for productSurface, policy := range values {
+		productSurface = strings.TrimSpace(strings.ToLower(productSurface))
+		if productSurface == "" {
+			continue
+		}
+		if !validAutonomy(policy.MaxAutonomy) {
+			policy.MaxAutonomy = ""
+		}
+		if policy.MonthlyCostBudgetCents < 0 {
+			policy.MonthlyCostBudgetCents = 0
+		}
+		if policy.MonthlyToolCallBudget < 0 {
+			policy.MonthlyToolCallBudget = 0
+		}
+		out[productSurface] = policy
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func normalizeEmbeddingSettings(settings OrgEmbeddingSettings) OrgEmbeddingSettings {
@@ -320,6 +353,19 @@ func applyRuntimePolicy(policy TenantRuntimePolicy, usage TenantRuntimeUsage, ro
 		out.Reply = "No puedo operar sobre esa superficie de producto para esta organización."
 		return out
 	}
+	if productPolicy, ok := policy.ControlPlane.ProductPolicies[strings.ToLower(strings.TrimSpace(route.Product))]; ok {
+		if productPolicy.Denied {
+			out.Event = &GuardrailEvent{Type: "product_runtime_policy", Target: "product_surface:" + route.Product, Reason: fmt.Sprintf("product surface %q is denied by customer org policy", route.Product)}
+			out.Reply = "No puedo operar sobre esa superficie de producto para esta organización."
+			return out
+		}
+		if productPolicy.MaxAutonomy != "" && autonomyRankRuntime(productPolicy.MaxAutonomy) < autonomyRankRuntime(route.Autonomy) {
+			route.Autonomy = productPolicy.MaxAutonomy
+			route.Profile.MaxAutonomy = productPolicy.MaxAutonomy
+			out.Route = route
+			out.Event = &GuardrailEvent{Type: "product_runtime_policy", Target: "autonomy:" + route.Product, Reason: fmt.Sprintf("autonomy capped to %s by product policy", productPolicy.MaxAutonomy)}
+		}
+	}
 	if len(policy.AllowedModels) > 0 && !stringListAllows(policy.AllowedModels, model) {
 		out.Event = &GuardrailEvent{Type: "tenant_runtime_policy", Target: "model", Reason: fmt.Sprintf("model %q is not allowed for this customer org", model)}
 		out.Reply = "El modelo configurado para Companion no está permitido por la política de esta organización."
@@ -353,6 +399,16 @@ func applyRuntimePolicy(policy TenantRuntimePolicy, usage TenantRuntimeUsage, ro
 	}
 	out.Route = route
 	return out
+}
+
+func productRuntimePolicyFor(policy TenantRuntimePolicy, productSurface string) (ProductRuntimePolicy, bool) {
+	policy = normalizeRuntimePolicy(policy)
+	productSurface = strings.TrimSpace(strings.ToLower(productSurface))
+	if productSurface == "" {
+		productSurface = DefaultProductSurface
+	}
+	productPolicy, ok := policy.ControlPlane.ProductPolicies[productSurface]
+	return productPolicy, ok
 }
 
 func applyControlPlaneToRoute(settings OrgControlPlaneSettings, route *AgentRoute) *GuardrailEvent {

@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/devpablocristo/companion/internal/identityctx"
+	"github.com/devpablocristo/companion/internal/productlimits"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
 	"github.com/google/uuid"
 
@@ -254,6 +255,18 @@ func (h *Handler) run(w http.ResponseWriter, r *http.Request) {
 		}
 		if errors.Is(err, ErrWatcherDisabled) {
 			httpjson.WriteFlatError(w, http.StatusConflict, "watcher_disabled", "watcher is disabled")
+			return
+		}
+		if domainerr.IsValidation(err) {
+			httpjson.WriteFlatError(w, http.StatusBadRequest, "validation", err.Error())
+			return
+		}
+		if domainerr.IsForbidden(err) {
+			httpjson.WriteFlatError(w, http.StatusForbidden, "forbidden", err.Error())
+			return
+		}
+		if productlimits.IsRateLimited(err) {
+			httpjson.WriteFlatError(w, http.StatusTooManyRequests, "rate_limited", err.Error())
 			return
 		}
 		httpjson.WriteFlatError(w, http.StatusInternalServerError, "internal_error", "could not run watcher")

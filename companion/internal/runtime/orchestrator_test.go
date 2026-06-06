@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/devpablocristo/companion/internal/identityctx"
+	"github.com/devpablocristo/companion/internal/productlimits"
 	taskdomain "github.com/devpablocristo/companion/internal/tasks/usecases/domain"
 	"github.com/google/uuid"
 )
@@ -41,6 +42,83 @@ type failingLLMProvider struct{}
 
 func (f *failingLLMProvider) Chat(_ context.Context, _ ChatRequest) (ChatResponse, error) {
 	return ChatResponse{}, context.DeadlineExceeded
+}
+
+type fakeProductInstallationGuard struct {
+	err            error
+	calls          int
+	orgID          string
+	productSurface string
+	reason         string
+}
+
+type denyingRateLimiter struct{}
+
+func (denyingRateLimiter) Allow(context.Context, productlimits.Key, productlimits.Limit) (productlimits.Decision, error) {
+	return productlimits.Decision{Allowed: false}, nil
+}
+
+func (f *fakeProductInstallationGuard) RequireActiveInstallation(_ context.Context, orgID, productSurface, reason string) error {
+	f.calls++
+	f.orgID = orgID
+	f.productSurface = productSurface
+	f.reason = reason
+	return f.err
+}
+
+func TestOrchestratorBlocksRateLimitedProductBeforeLLM(t *testing.T) {
+	t.Parallel()
+
+	provider := &fakeLLMProvider{responses: []ChatResponse{{Text: "should not run"}}}
+	orch := NewOrchestrator(provider, &ToolKit{Handlers: make(map[string]ToolHandler)}, ContextPorts{})
+	orch.SetRateLimiter(denyingRateLimiter{})
+
+	result, err := orch.Run(context.Background(), RunInput{
+		UserID:         "user-1",
+		OrgID:          "org-1",
+		ProductSurface: "pymes",
+		Message:        "analizá stock",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provider.callCount != 0 {
+		t.Fatalf("expected rate limit to reject before LLM call, got %d calls", provider.callCount)
+	}
+	if len(result.Trace.GuardrailEvents) != 1 || result.Trace.GuardrailEvents[0].Type != "product_rate_limit" {
+		t.Fatalf("expected product rate limit guardrail trace, got %+v", result.Trace.GuardrailEvents)
+	}
+}
+
+func TestOrchestratorBlocksExternalProductWithoutActiveInstallation(t *testing.T) {
+	t.Parallel()
+
+	provider := &fakeLLMProvider{responses: []ChatResponse{{Text: "should not run"}}}
+	orch := NewOrchestrator(provider, &ToolKit{Handlers: make(map[string]ToolHandler)}, ContextPorts{})
+	guard := &fakeProductInstallationGuard{err: fmt.Errorf("active product installation required")}
+	orch.SetProductInstallationGuard(guard)
+
+	result, err := orch.Run(context.Background(), RunInput{
+		UserID:         "user-1",
+		OrgID:          "org-1",
+		ProductSurface: "pymes",
+		Message:        "analizá stock",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provider.callCount != 0 {
+		t.Fatalf("expected guard to reject before LLM call, got %d calls", provider.callCount)
+	}
+	if guard.calls != 1 || guard.orgID != "org-1" || guard.productSurface != "pymes" || guard.reason != "runtime_run" {
+		t.Fatalf("unexpected guard call: %+v", guard)
+	}
+	if len(result.Trace.GuardrailEvents) != 1 || result.Trace.GuardrailEvents[0].Type != "product_installation" {
+		t.Fatalf("expected product installation guardrail trace, got %+v", result.Trace.GuardrailEvents)
+	}
+	if !strings.Contains(result.Reply, "instalación activa") {
+		t.Fatalf("unexpected reply: %q", result.Reply)
+	}
 }
 
 type fakeTaskPlanner struct {

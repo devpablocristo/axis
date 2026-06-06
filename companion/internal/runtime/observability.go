@@ -14,20 +14,21 @@ type ObservabilityRecorder interface {
 }
 
 type ObservabilityEvent struct {
-	ID           uuid.UUID       `json:"id,omitempty"`
-	OrgID        string          `json:"org_id"`
-	RunID        *uuid.UUID      `json:"run_id,omitempty"`
-	TaskID       *uuid.UUID      `json:"task_id,omitempty"`
-	JobID        *uuid.UUID      `json:"job_id,omitempty"`
-	AgentID      string          `json:"agent_id,omitempty"`
-	CapabilityID string          `json:"capability_id,omitempty"`
-	EventType    string          `json:"event_type"`
-	EventName    string          `json:"event_name"`
-	Severity     string          `json:"severity"`
-	TraceID      string          `json:"trace_id,omitempty"`
-	Payload      json.RawMessage `json:"payload"`
-	Redacted     bool            `json:"redacted"`
-	OccurredAt   time.Time       `json:"occurred_at,omitempty"`
+	ID             uuid.UUID       `json:"id,omitempty"`
+	OrgID          string          `json:"org_id"`
+	ProductSurface string          `json:"product_surface"`
+	RunID          *uuid.UUID      `json:"run_id,omitempty"`
+	TaskID         *uuid.UUID      `json:"task_id,omitempty"`
+	JobID          *uuid.UUID      `json:"job_id,omitempty"`
+	AgentID        string          `json:"agent_id,omitempty"`
+	CapabilityID   string          `json:"capability_id,omitempty"`
+	EventType      string          `json:"event_type"`
+	EventName      string          `json:"event_name"`
+	Severity       string          `json:"severity"`
+	TraceID        string          `json:"trace_id,omitempty"`
+	Payload        json.RawMessage `json:"payload"`
+	Redacted       bool            `json:"redacted"`
+	OccurredAt     time.Time       `json:"occurred_at,omitempty"`
 }
 
 type RunReplay struct {
@@ -46,17 +47,18 @@ func newObservabilityEvent(trace RunTrace, in RunInput, eventType, eventName str
 		raw = json.RawMessage(`{}`)
 	}
 	return ObservabilityEvent{
-		OrgID:      strings.TrimSpace(in.OrgID),
-		RunID:      runPtr,
-		TaskID:     in.TaskID,
-		AgentID:    trace.IdentityChain.AgentID,
-		EventType:  eventType,
-		EventName:  eventName,
-		Severity:   "info",
-		TraceID:    trace.RunID,
-		Payload:    raw,
-		Redacted:   true,
-		OccurredAt: time.Now().UTC(),
+		OrgID:          strings.TrimSpace(in.OrgID),
+		ProductSurface: strings.TrimSpace(firstNonEmpty(trace.ProductSurface, in.ProductSurface)),
+		RunID:          runPtr,
+		TaskID:         in.TaskID,
+		AgentID:        trace.IdentityChain.AgentID,
+		EventType:      eventType,
+		EventName:      eventName,
+		Severity:       "info",
+		TraceID:        trace.RunID,
+		Payload:        raw,
+		Redacted:       true,
+		OccurredAt:     time.Now().UTC(),
 	}
 }
 

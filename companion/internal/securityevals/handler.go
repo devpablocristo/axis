@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/devpablocristo/companion/internal/identityctx"
+	"github.com/devpablocristo/companion/internal/productlimits"
 	"github.com/devpablocristo/platform/http/go/httpjson"
 )
 
@@ -45,8 +46,12 @@ func (h *Handler) runSuite(w http.ResponseWriter, r *http.Request) {
 		Suite string `json:"suite"`
 	}
 	_ = httpjson.DecodeJSON(r, &body)
-	report, err := h.uc.RunSuite(r.Context(), identityctx.PrincipalOrgID(r), strings.TrimSpace(body.Suite), identityctx.PrincipalUserID(r))
+	report, err := h.uc.RunSuite(r.Context(), identityctx.PrincipalOrgID(r), identityctx.ProductSurface(r), strings.TrimSpace(body.Suite), identityctx.PrincipalUserID(r))
 	if err != nil {
+		if productlimits.IsRateLimited(err) {
+			httpjson.WriteFlatError(w, http.StatusTooManyRequests, "RATE_LIMITED", err.Error())
+			return
+		}
 		httpjson.WriteFlatError(w, http.StatusBadRequest, "EVAL_FAILED", err.Error())
 		return
 	}
@@ -70,7 +75,7 @@ func (h *Handler) listReports(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = parsed
 	}
-	reports, err := h.uc.ListReports(r.Context(), identityctx.PrincipalOrgID(r), strings.TrimSpace(r.URL.Query().Get("suite")), limit)
+	reports, err := h.uc.ListReports(r.Context(), identityctx.PrincipalOrgID(r), strings.TrimSpace(r.URL.Query().Get("product_surface")), strings.TrimSpace(r.URL.Query().Get("suite")), limit)
 	if err != nil {
 		httpjson.WriteFlatInternalError(w, err, "list security eval reports failed")
 		return

@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/devpablocristo/companion/internal/identityctx"
+	"github.com/devpablocristo/companion/internal/productlimits"
 	taskdomain "github.com/devpablocristo/companion/internal/tasks/usecases/domain"
 )
 
@@ -19,16 +20,22 @@ const maxToolRounds = 5
 
 // Orchestrator coordina LLM + tools + context para producir la respuesta del compañero.
 type Orchestrator struct {
-	provider        LLMProvider
-	toolkit         *ToolKit
-	ports           ContextPorts
-	traces          TraceRepository // opcional; nil = no persiste (uso en tests)
-	controls        RuntimeControls
-	observer        ObservabilityRecorder
-	costs           CostLedger
-	agents          AgentResolver
-	defaultAutonomy AutonomyLevel // "" → A2 (default conservador)
-	model           string
+	provider          LLMProvider
+	toolkit           *ToolKit
+	ports             ContextPorts
+	traces            TraceRepository // opcional; nil = no persiste (uso en tests)
+	controls          RuntimeControls
+	observer          ObservabilityRecorder
+	costs             CostLedger
+	agents            AgentResolver
+	installationGuard ProductInstallationGuard
+	rateLimiter       productlimits.Limiter
+	defaultAutonomy   AutonomyLevel // "" → A2 (default conservador)
+	model             string
+}
+
+type ProductInstallationGuard interface {
+	RequireActiveInstallation(ctx context.Context, orgID, productSurface, reason string) error
 }
 
 // NewOrchestrator crea el orquestador del runtime.
@@ -60,6 +67,14 @@ func (o *Orchestrator) SetCostLedger(ledger CostLedger) {
 
 func (o *Orchestrator) SetAgentResolver(resolver AgentResolver) {
 	o.agents = resolver
+}
+
+func (o *Orchestrator) SetProductInstallationGuard(guard ProductInstallationGuard) {
+	o.installationGuard = guard
+}
+
+func (o *Orchestrator) SetRateLimiter(limiter productlimits.Limiter) {
+	o.rateLimiter = limiter
 }
 
 // SetDefaultAutonomy fija el nivel de autonomía por defecto del runtime.
@@ -105,6 +120,20 @@ func (o *Orchestrator) Run(ctx context.Context, in RunInput) (RunResult, error) 
 		identity.TaskID = in.TaskID.String()
 	}
 	route := RouteAgent(in.Message, productSurface, o.toolkit, identity, o.defaultAutonomy)
+	if o.installationGuard != nil {
+		if err := o.installationGuard.RequireActiveInstallation(ctx, in.OrgID, productSurface, "runtime_run"); err != nil {
+			trace := o.rejectedProductInstallationTrace(ctx, in, identity, route, err.Error())
+			return RunResult{Reply: "No puedo operar con ese producto porque no tiene una instalación activa para esta organización.", Trace: trace}, nil
+		}
+	}
+	if err := productlimits.Enforce(ctx, o.rateLimiter, productlimits.Key{
+		OrgID:          in.OrgID,
+		ProductSurface: productSurface,
+		Area:           productlimits.AreaRuntime,
+	}, productlimits.DefaultLimit(productlimits.AreaRuntime)); err != nil {
+		trace := o.rejectedRateLimitTrace(ctx, in, identity, route, err.Error())
+		return RunResult{Reply: "La organización alcanzó el límite temporal de uso de runtime para este producto.", Trace: trace}, nil
+	}
 	if agentID := strings.TrimSpace(in.AgentID); agentID != "" {
 		identity.AgentID = agentID
 		if o.agents == nil {
@@ -151,7 +180,7 @@ func (o *Orchestrator) Run(ctx context.Context, in RunInput) (RunResult, error) 
 		}
 	}
 	if policy.ControlPlane.MonthlyCostBudgetCents > 0 && o.costs != nil && in.OrgID != "" {
-		summary, err := o.costs.GetCostSummary(ctx, in.OrgID, currentUsage.Period, 1)
+		summary, err := o.costs.GetCostSummary(ctx, in.OrgID, productSurface, currentUsage.Period, 1)
 		if err != nil {
 			slog.Error("runtime_cost_budget_lookup_failed", "customer_org_id", in.OrgID, "period", currentUsage.Period, "error", err)
 			policy.Enabled = false
@@ -175,6 +204,54 @@ func (o *Orchestrator) Run(ctx context.Context, in RunInput) (RunResult, error) 
 			}
 			o.finishTrace(ctx, trace, in, "monthly_cost_budget_exhausted")
 			return RunResult{Reply: "La organización alcanzó el presupuesto mensual de costo para Companion.", Trace: trace}, nil
+		}
+	}
+	if productPolicy, ok := productRuntimePolicyFor(policy, productSurface); ok && o.costs != nil && in.OrgID != "" {
+		if productPolicy.MonthlyCostBudgetCents > 0 || productPolicy.MonthlyToolCallBudget > 0 {
+			summary, err := o.costs.GetCostSummary(ctx, in.OrgID, productSurface, currentUsage.Period, 1)
+			if err != nil {
+				slog.Error("runtime_product_budget_lookup_failed", "customer_org_id", in.OrgID, "product_surface", productSurface, "period", currentUsage.Period, "error", err)
+				policy.Enabled = false
+				policy.KillSwitch = true
+			} else if productPolicy.MonthlyCostBudgetCents > 0 && summary.EstimatedCostCents >= productPolicy.MonthlyCostBudgetCents {
+				trace := RunTrace{
+					RunID:          uuid.NewString(),
+					IdentityChain:  identity,
+					Intent:         route.Intent,
+					ProductSurface: route.Product,
+					AutonomyLevel:  route.Autonomy,
+					PromptVersion:  SystemPromptVersion,
+					Model:          modelName,
+					StartedAt:      time.Now().UTC(),
+					CompletedAt:    time.Now().UTC(),
+					GuardrailEvents: []GuardrailEvent{{
+						Type:   "product_runtime_budget",
+						Target: "cost:" + productSurface,
+						Reason: "monthly product cost budget exhausted",
+					}},
+				}
+				o.finishTrace(ctx, trace, in, "monthly_product_cost_budget_exhausted")
+				return RunResult{Reply: "La organización alcanzó el presupuesto mensual de costo para este producto.", Trace: trace}, nil
+			} else if productPolicy.MonthlyToolCallBudget > 0 && summary.ToolCalls >= productPolicy.MonthlyToolCallBudget {
+				trace := RunTrace{
+					RunID:          uuid.NewString(),
+					IdentityChain:  identity,
+					Intent:         route.Intent,
+					ProductSurface: route.Product,
+					AutonomyLevel:  route.Autonomy,
+					PromptVersion:  SystemPromptVersion,
+					Model:          modelName,
+					StartedAt:      time.Now().UTC(),
+					CompletedAt:    time.Now().UTC(),
+					GuardrailEvents: []GuardrailEvent{{
+						Type:   "product_runtime_budget",
+						Target: "tools:" + productSurface,
+						Reason: "monthly product tool call budget exhausted",
+					}},
+				}
+				o.finishTrace(ctx, trace, in, "monthly_product_tool_budget_exhausted")
+				return RunResult{Reply: "La organización alcanzó el presupuesto mensual de tools para este producto.", Trace: trace}, nil
+			}
 		}
 	}
 	decision := applyRuntimePolicy(policy, currentUsage, route, modelName)
@@ -372,6 +449,62 @@ func (o *Orchestrator) Run(ctx context.Context, in RunInput) (RunResult, error) 
 	trace.CompletedAt = time.Now().UTC()
 	o.finishTrace(ctx, trace, in, "max_tool_rounds_exhausted")
 	return RunResult{Trace: trace}, fmt.Errorf("gemini tool loop exhausted after %d rounds", maxToolRounds)
+}
+
+func (o *Orchestrator) rejectedProductInstallationTrace(ctx context.Context, in RunInput, identity IdentityChain, route AgentRoute, reason string) RunTrace {
+	now := time.Now().UTC()
+	trace := RunTrace{
+		RunID:          uuid.NewString(),
+		IdentityChain:  identity,
+		Intent:         route.Intent,
+		ProductSurface: route.Product,
+		AutonomyLevel:  route.Autonomy,
+		PromptVersion:  SystemPromptVersion,
+		Model:          firstNonEmpty(o.model, DefaultGeminiModel),
+		StartedAt:      now,
+		CompletedAt:    now,
+		GuardrailEvents: []GuardrailEvent{{
+			Type:   "product_installation",
+			Target: "product:" + route.Product,
+			Reason: reason,
+		}},
+	}
+	o.recordObservabilityEvent(ctx, trace, in, "guardrail", "product_installation_required", map[string]any{
+		"target":          "product:" + route.Product,
+		"reason":          reason,
+		"org_id":          in.OrgID,
+		"product_surface": route.Product,
+	})
+	o.finishTrace(ctx, trace, in, reason)
+	return trace
+}
+
+func (o *Orchestrator) rejectedRateLimitTrace(ctx context.Context, in RunInput, identity IdentityChain, route AgentRoute, reason string) RunTrace {
+	now := time.Now().UTC()
+	trace := RunTrace{
+		RunID:          uuid.NewString(),
+		IdentityChain:  identity,
+		Intent:         route.Intent,
+		ProductSurface: route.Product,
+		AutonomyLevel:  route.Autonomy,
+		PromptVersion:  SystemPromptVersion,
+		Model:          firstNonEmpty(o.model, DefaultGeminiModel),
+		StartedAt:      now,
+		CompletedAt:    now,
+		GuardrailEvents: []GuardrailEvent{{
+			Type:   "product_rate_limit",
+			Target: "runtime:" + route.Product,
+			Reason: reason,
+		}},
+	}
+	o.recordObservabilityEvent(ctx, trace, in, "guardrail", "product_rate_limit", map[string]any{
+		"target":          "runtime:" + route.Product,
+		"reason":          reason,
+		"org_id":          in.OrgID,
+		"product_surface": route.Product,
+	})
+	o.finishTrace(ctx, trace, in, reason)
+	return trace
 }
 
 func (o *Orchestrator) rejectedAgentTrace(ctx context.Context, in RunInput, identity IdentityChain, route AgentRoute, reason string) RunTrace {

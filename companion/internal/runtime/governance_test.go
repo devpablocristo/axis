@@ -114,6 +114,28 @@ func TestOrchestrator_RuntimePolicyCapsAutonomyAndRecordsUsage(t *testing.T) {
 	}
 }
 
+func TestApplyRuntimePolicyHonorsProductPolicies(t *testing.T) {
+	t.Parallel()
+
+	route := AgentRoute{Product: "pymes", Autonomy: AutonomyA3, Profile: AgentProfile{MaxAutonomy: AutonomyA3}}
+	policy := defaultRuntimePolicy("org-1")
+	policy.ControlPlane.ProductPolicies = map[string]ProductRuntimePolicy{
+		"pymes": {Denied: true},
+	}
+	decision := applyRuntimePolicy(policy, TenantRuntimeUsage{OrgID: "org-1"}, route, DefaultGeminiModel)
+	if decision.Event == nil || decision.Event.Type != "product_runtime_policy" || decision.Reply == "" {
+		t.Fatalf("expected denied product policy decision, got %+v", decision)
+	}
+
+	policy.ControlPlane.ProductPolicies = map[string]ProductRuntimePolicy{
+		"pymes": {MaxAutonomy: AutonomyA1},
+	}
+	decision = applyRuntimePolicy(policy, TenantRuntimeUsage{OrgID: "org-1"}, route, DefaultGeminiModel)
+	if decision.Route.Autonomy != AutonomyA1 {
+		t.Fatalf("expected product policy to cap autonomy to A1, got %+v", decision.Route)
+	}
+}
+
 func TestOrchestrator_FiltersLLMVisibleToolsByAgentRoute(t *testing.T) {
 	t.Parallel()
 

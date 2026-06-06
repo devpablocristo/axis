@@ -23,14 +23,16 @@ const (
 )
 
 const (
-	DefaultMaxAttempts = 3
-	DefaultTimeout     = 5 * time.Minute
-	DefaultLease       = 30 * time.Second
+	DefaultMaxAttempts    = 3
+	DefaultTimeout        = 5 * time.Minute
+	DefaultLease          = 30 * time.Second
+	DefaultProductSurface = "companion"
 )
 
 type Job struct {
 	ID             uuid.UUID       `json:"id"`
 	OrgID          string          `json:"org_id"`
+	ProductSurface string          `json:"product_surface"`
 	Kind           string          `json:"kind"`
 	ShardKey       string          `json:"shard_key"`
 	DedupeKey      string          `json:"dedupe_key"`
@@ -56,6 +58,7 @@ type Job struct {
 type EnqueueInput struct {
 	ID             uuid.UUID
 	OrgID          string
+	ProductSurface string
 	Kind           string
 	ShardKey       string
 	DedupeKey      string
@@ -129,11 +132,15 @@ func IsPermanent(err error) bool {
 
 func NormalizeEnqueueInput(in EnqueueInput) (EnqueueInput, error) {
 	in.OrgID = strings.TrimSpace(in.OrgID)
+	in.ProductSurface = strings.TrimSpace(strings.ToLower(in.ProductSurface))
 	in.Kind = strings.TrimSpace(in.Kind)
 	in.ShardKey = strings.TrimSpace(in.ShardKey)
 	in.DedupeKey = strings.TrimSpace(in.DedupeKey)
 	if in.OrgID == "" {
 		return EnqueueInput{}, fmt.Errorf("org_id is required")
+	}
+	if in.ProductSurface == "" {
+		in.ProductSurface = DefaultProductSurface
 	}
 	if in.Kind == "" {
 		return EnqueueInput{}, fmt.Errorf("kind is required")
