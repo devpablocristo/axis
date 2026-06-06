@@ -144,6 +144,15 @@ El smoke MCP (`companion/scripts/smoke/run-companion-mcp-flow.sh`) verifica:
 - `tools/call axis.tasks.create` con policy Nexus `deny`;
 - que una tool denegada no ejecute la creación de task.
 
+El smoke de runtime policy MCP (`companion/scripts/smoke/run-companion-mcp-runtime-policy-flow.sh`) verifica:
+
+- `PUT /v1/runtime/mcp-policy` para bloquear `axis.products.list`;
+- que `tools/call axis.products.list` falle con JSON-RPC `status=403` y `mcp_status=blocked`;
+- que el bloqueo ocurra antes de Nexus, sin `request_id`;
+- que se registre `guardrail/mcp_runtime_policy`;
+- que `GET /v1/ops/alerts` exponga `mcp_runtime_policy_block`;
+- que `allowed_tools=["axis.products.*"]` vuelva a permitir la tool y pase por Nexus.
+
 Las policies Nexus locales para MCP pueden seedearse de forma idempotente con:
 
 ```bash
@@ -153,3 +162,22 @@ bash nexus/scripts/seed-axis-mcp-policies.sh
 
 Estas policies gobiernan `target_system=axis.mcp` y
 `action_type=agent.capability.invoke`.
+
+La runtime policy MCP corre antes de Nexus. Sirve como barrera operativa por
+org/product/tool; Nexus sigue regulando aprobación/denegación de ejecución.
+
+Ejemplos:
+
+```bash
+# bloquear una tool MCP puntual
+curl -X PUT "$COMPANION_BASE/v1/runtime/mcp-policy" \
+  -H "X-API-Key: $COMPANION_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"denied_tools":["axis.products.list"]}'
+
+# permitir solo tools de products
+curl -X PUT "$COMPANION_BASE/v1/runtime/mcp-policy" \
+  -H "X-API-Key: $COMPANION_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"allowed_tools":["axis.products.*"],"denied_tools":[]}'
+```

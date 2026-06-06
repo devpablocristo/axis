@@ -152,6 +152,8 @@ jobs:
           docker compose up -d --build companion
       - name: Run Companion MCP smoke
         run: bash companion/scripts/smoke/run-companion-mcp-flow.sh
+      - name: Run Companion MCP runtime policy smoke
+        run: bash companion/scripts/smoke/run-companion-mcp-runtime-policy-flow.sh
       - name: Dump compose logs
         if: failure()
         run: docker compose logs --no-color companion nexus companion-postgres nexus-postgres
