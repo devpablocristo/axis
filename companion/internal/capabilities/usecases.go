@@ -12,6 +12,7 @@ import (
 type Usecases struct {
 	repo            Repository
 	productRegistry ProductRegistry
+	sourceFetcher   ManifestSourceFetcher
 }
 
 type ProductRegistry interface {
@@ -24,6 +25,11 @@ func NewUsecases(repo Repository) *Usecases {
 
 func (uc *Usecases) WithProductRegistry(registry ProductRegistry) *Usecases {
 	uc.productRegistry = registry
+	return uc
+}
+
+func (uc *Usecases) WithManifestSourceFetcher(fetcher ManifestSourceFetcher) *Usecases {
+	uc.sourceFetcher = fetcher
 	return uc
 }
 
@@ -63,6 +69,63 @@ func (uc *Usecases) ImportManifest(ctx context.Context, manifest Manifest, impor
 	})
 }
 
+type ImportManifestSourceInput struct {
+	SourceURL              string
+	ExpectedProductSurface string
+	ImportedBy             string
+}
+
+func (uc *Usecases) ImportManifestSource(ctx context.Context, in ImportManifestSourceInput) ([]ManifestRecord, error) {
+	if uc == nil || uc.repo == nil {
+		return nil, fmt.Errorf("capability repository is not configured")
+	}
+	if uc.sourceFetcher == nil {
+		return nil, fmt.Errorf("capability manifest source fetcher is not configured")
+	}
+	sourceURL := strings.TrimSpace(in.SourceURL)
+	if sourceURL == "" {
+		return nil, fmt.Errorf("%w: source_url is required", ErrInvalidManifest)
+	}
+	manifests, err := uc.sourceFetcher.FetchManifests(ctx, ManifestSourceRequest{SourceURL: sourceURL})
+	if err != nil {
+		return nil, err
+	}
+	if len(manifests) == 0 {
+		return nil, fmt.Errorf("%w: manifest source returned no capabilities", ErrInvalidManifest)
+	}
+	expectedProductSurface := strings.TrimSpace(in.ExpectedProductSurface)
+	normalized := make([]Manifest, 0, len(manifests))
+	for _, manifest := range manifests {
+		manifest = manifest.Normalize()
+		if expectedProductSurface != "" && manifest.ProductSurface != expectedProductSurface {
+			return nil, fmt.Errorf("%w: manifest product_surface %q does not match expected %q", ErrInvalidManifest, manifest.ProductSurface, expectedProductSurface)
+		}
+		if err := manifest.Validate(); err != nil {
+			return nil, err
+		}
+		normalized = append(normalized, manifest)
+	}
+	reg, err := NewRegistry(normalized)
+	if err != nil {
+		return nil, err
+	}
+	records := make([]ManifestRecord, 0, len(normalized))
+	for _, manifest := range reg.All() {
+		record, err := uc.repo.UpsertManifest(ctx, ManifestRecord{
+			Manifest:   manifest,
+			Status:     ManifestStatusDraft,
+			Source:     ManifestSourceURL,
+			SourceURI:  sourceURL,
+			ImportedBy: strings.TrimSpace(in.ImportedBy),
+		})
+		if err != nil {
+			return nil, fmt.Errorf("import capability %s@%s from source: %w", manifest.CapabilityID, manifest.Version, err)
+		}
+		records = append(records, record)
+	}
+	return records, nil
+}
+
 func (uc *Usecases) ListManifests(ctx context.Context, filter ManifestFilter) ([]ManifestRecord, error) {
 	if uc == nil || uc.repo == nil {
 		return nil, fmt.Errorf("capability repository is not configured")
@@ -84,6 +147,9 @@ func (uc *Usecases) PromoteManifest(ctx context.Context, capabilityID, version s
 	record, err := uc.repo.GetManifest(ctx, capabilityID, version)
 	if err != nil {
 		return ManifestRecord{}, err
+	}
+	if record.Status == ManifestStatusBlocked {
+		return ManifestRecord{}, fmt.Errorf("%w: blocked capability manifests cannot be promoted", ErrInvalidManifest)
 	}
 	checks, errs := uc.checkManifestConformance(ctx, record.Manifest)
 	if len(errs) > 0 {
@@ -120,6 +186,13 @@ func (uc *Usecases) DeprecateManifest(ctx context.Context, capabilityID, version
 		return ManifestRecord{}, fmt.Errorf("capability repository is not configured")
 	}
 	return uc.repo.UpdateManifestStatus(ctx, capabilityID, version, ManifestStatusDeprecated)
+}
+
+func (uc *Usecases) BlockManifest(ctx context.Context, capabilityID, version string) (ManifestRecord, error) {
+	if uc == nil || uc.repo == nil {
+		return ManifestRecord{}, fmt.Errorf("capability repository is not configured")
+	}
+	return uc.repo.UpdateManifestStatus(ctx, capabilityID, version, ManifestStatusBlocked)
 }
 
 type ConformanceInput struct {

@@ -557,7 +557,9 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 		connectorViews = append(connectorViews, c)
 	}
 	capabilityRepo := capabilities.NewPostgresRepository(db)
-	capabilityUC := capabilities.NewUsecases(capabilityRepo).WithProductRegistry(productUC)
+	capabilityUC := capabilities.NewUsecases(capabilityRepo).
+		WithProductRegistry(productUC).
+		WithManifestSourceFetcher(capabilities.NewHTTPManifestSourceFetcher())
 	if generatedManifests, err := connUC.CapabilityManifests(connectordomain.CapabilityFilter{IncludeWrites: true}); err == nil {
 		if err := capabilityUC.SyncGenerated(ctx, generatedManifests); err != nil {
 			slog.Error("sync generated capability manifests", "error", err)

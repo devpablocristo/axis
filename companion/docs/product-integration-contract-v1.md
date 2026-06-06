@@ -130,15 +130,35 @@ Requisitos de conformance:
 
 - `product_surface` debe existir y estar activo en el product registry cuando
   el usecase de capabilities tiene registry inyectado;
+- `schema_version` debe ser `capability_manifest.v1` y `version` debe ser
+  semver;
 - schema valido;
+- `required_scopes`;
 - `risk_level`;
 - `side_effect_type`;
-- `scopes`;
-- `evidence_schema`;
+- compatibilidad entre `action_type` y `side_effect_type`;
+- `evidence_schema` con evidencia atribuible;
 - metadata Nexus cuando una write capability requiere approval.
 
 Una read capability puede exponerse al planner despues de pasar conformance.
 Una write capability sin metadata Nexus debe rechazarse.
+
+Estados persistidos:
+
+- `draft`: importado pero no visible al runtime.
+- `active`: visible para planner/runtime.
+- `deprecated`: no recomendado para nuevas ejecuciones.
+- `blocked`: bloqueado manualmente; no puede promoverse hasta ser reimportado o
+  corregido.
+
+Import soportado:
+
+- manual, enviando un `capability_manifest.v1`;
+- source URL generica, enviando una fuente JSON que contenga un manifest unico o
+  `{ "capabilities": [...] }`.
+
+Axis no llama a productos reales automaticamente para descubrir capabilities.
+La importacion por URL es una accion admin explicita y generica.
 
 ## Observabilidad, Costos y Evals
 

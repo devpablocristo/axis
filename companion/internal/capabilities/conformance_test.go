@@ -5,8 +5,10 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/devpablocristo/companion/internal/products"
+	"github.com/google/uuid"
 )
 
 type fakeProductRegistry struct {
@@ -19,6 +21,129 @@ func (f fakeProductRegistry) GetProduct(context.Context, string) (products.Produ
 		return products.Product{}, f.err
 	}
 	return f.product, nil
+}
+
+type fakeManifestSourceFetcher struct {
+	manifests []Manifest
+	err       error
+	sourceURL string
+}
+
+func (f *fakeManifestSourceFetcher) FetchManifests(_ context.Context, req ManifestSourceRequest) ([]Manifest, error) {
+	f.sourceURL = req.SourceURL
+	if f.err != nil {
+		return nil, f.err
+	}
+	return append([]Manifest(nil), f.manifests...), nil
+}
+
+type fakeCapabilityRepo struct {
+	records map[string]ManifestRecord
+	runs    []ConformanceRun
+}
+
+func newFakeCapabilityRepo() *fakeCapabilityRepo {
+	return &fakeCapabilityRepo{records: make(map[string]ManifestRecord)}
+}
+
+func (f *fakeCapabilityRepo) UpsertManifest(_ context.Context, record ManifestRecord) (ManifestRecord, error) {
+	record.Manifest = record.Manifest.Normalize()
+	if err := record.Manifest.Validate(); err != nil {
+		return ManifestRecord{}, err
+	}
+	if record.ID == uuid.Nil {
+		record.ID = uuid.New()
+	}
+	if record.Status == "" {
+		record.Status = ManifestStatusDraft
+	}
+	if record.Source == "" {
+		record.Source = ManifestSourceImported
+	}
+	now := time.Now().UTC()
+	if record.CreatedAt.IsZero() {
+		record.CreatedAt = now
+	}
+	record.UpdatedAt = now
+	f.records[record.Manifest.Key()] = record
+	return record, nil
+}
+
+func (f *fakeCapabilityRepo) GetManifest(_ context.Context, capabilityID, version string) (ManifestRecord, error) {
+	record, ok := f.records[keyFor(capabilityID, version)]
+	if !ok {
+		return ManifestRecord{}, ErrManifestNotFound
+	}
+	return record, nil
+}
+
+func (f *fakeCapabilityRepo) ListManifests(_ context.Context, filter ManifestFilter) ([]ManifestRecord, error) {
+	var out []ManifestRecord
+	for _, record := range f.records {
+		if filter.CapabilityID != "" && record.Manifest.CapabilityID != filter.CapabilityID {
+			continue
+		}
+		if filter.Status != "" && record.Status != filter.Status {
+			continue
+		}
+		out = append(out, record)
+	}
+	return out, nil
+}
+
+func (f *fakeCapabilityRepo) UpdateManifestStatus(_ context.Context, capabilityID, version, status string) (ManifestRecord, error) {
+	key := keyFor(capabilityID, version)
+	record, ok := f.records[key]
+	if !ok {
+		return ManifestRecord{}, ErrManifestNotFound
+	}
+	record.Status = normalizeManifestStatus(status)
+	record.UpdatedAt = time.Now().UTC()
+	f.records[key] = record
+	return record, nil
+}
+
+func (f *fakeCapabilityRepo) SaveConformanceRun(_ context.Context, run ConformanceRun) (ConformanceRun, error) {
+	run.ID = uuid.New()
+	run.CreatedAt = time.Now().UTC()
+	f.runs = append(f.runs, run)
+	return run, nil
+}
+
+func (f *fakeCapabilityRepo) ListConformanceRuns(_ context.Context, _ string, _ string, _ int) ([]ConformanceRun, error) {
+	return append([]ConformanceRun(nil), f.runs...), nil
+}
+
+func validReadManifest() Manifest {
+	return Manifest{
+		SchemaVersion:      SchemaVersion,
+		CapabilityID:       "demo.customer.lookup",
+		Version:            "1.0.0",
+		DisplayName:        "Lookup customer",
+		Description:        "Reads a customer record.",
+		Owner:              "demo",
+		ProductSurface:     "demo",
+		Connector:          "demo",
+		ActionType:         ActionTypeRead,
+		RiskLevel:          RiskLow,
+		SideEffectType:     SideEffectRead,
+		AuthMode:           "delegated_user",
+		RequiredScopes:     []string{"companion:connectors:execute"},
+		InputSchema:        objectSchema("org_id", "customer_id"),
+		OutputSchema:       objectSchema("customer_id"),
+		EvidenceSchema:     objectSchema("customer_id"),
+		RequiredEvidence:   []string{"customer_id"},
+		IdempotencyMode:    IdempotencyNone,
+		ApprovalRequired:   false,
+		TenantConfigurable: true,
+		EnabledByDefault:   true,
+		RateLimitClass:     "standard",
+		CostClass:          "low",
+		Timeout:            "15s",
+		Retries:            RetryPolicy{MaxAttempts: 1, Backoff: "none"},
+		Preconditions:      []string{"customer_org_context"},
+		ObservabilityTags:  []string{"connector:demo"},
+	}
 }
 
 func TestCheckManifestConformanceRequiresGovernedSideEffects(t *testing.T) {
@@ -37,9 +162,11 @@ func TestCheckManifestConformanceRequiresGovernedSideEffects(t *testing.T) {
 		RiskLevel:        RiskHigh,
 		SideEffectType:   SideEffectWrite,
 		AuthMode:         "hybrid",
+		RequiredScopes:   []string{"companion:connectors:execute"},
 		InputSchema:      map[string]any{"type": "object", "properties": map[string]any{}},
 		OutputSchema:     map[string]any{"type": "object", "properties": map[string]any{}},
-		EvidenceSchema:   map[string]any{"type": "object", "properties": map[string]any{}},
+		EvidenceSchema:   objectSchema("external_ref"),
+		RequiredEvidence: []string{"external_ref"},
 		IdempotencyMode:  IdempotencyOptional,
 		ApprovalRequired: false,
 		RateLimitClass:   "standard",
@@ -76,9 +203,11 @@ func TestCheckManifestConformanceAcceptsGovernedRead(t *testing.T) {
 		RiskLevel:        RiskLow,
 		SideEffectType:   SideEffectRead,
 		AuthMode:         "hybrid",
-		InputSchema:      map[string]any{"type": "object", "properties": map[string]any{}},
-		OutputSchema:     map[string]any{"type": "object", "properties": map[string]any{}},
-		EvidenceSchema:   map[string]any{"type": "object", "properties": map[string]any{}},
+		RequiredScopes:   []string{"companion:connectors:execute"},
+		InputSchema:      objectSchema("org_id"),
+		OutputSchema:     objectSchema("result_id"),
+		EvidenceSchema:   objectSchema("result_id"),
+		RequiredEvidence: []string{"result_id"},
 		IdempotencyMode:  IdempotencyNone,
 		ApprovalRequired: false,
 		RateLimitClass:   "standard",
@@ -112,9 +241,11 @@ func TestUsecases_CheckConformanceRequiresActiveProduct(t *testing.T) {
 		RiskLevel:        RiskLow,
 		SideEffectType:   SideEffectRead,
 		AuthMode:         "hybrid",
-		InputSchema:      map[string]any{"type": "object", "properties": map[string]any{}},
-		OutputSchema:     map[string]any{"type": "object", "properties": map[string]any{}},
-		EvidenceSchema:   map[string]any{"type": "object", "properties": map[string]any{}},
+		RequiredScopes:   []string{"companion:connectors:execute"},
+		InputSchema:      objectSchema("org_id"),
+		OutputSchema:     objectSchema("result_id"),
+		EvidenceSchema:   objectSchema("result_id"),
+		RequiredEvidence: []string{"result_id"},
 		IdempotencyMode:  IdempotencyNone,
 		ApprovalRequired: false,
 		RateLimitClass:   "standard",
@@ -151,5 +282,135 @@ func TestUsecases_CheckConformanceRequiresActiveProduct(t *testing.T) {
 	checks, errs = uc.CheckConformance(context.Background(), manifest)
 	if checks["product_active"] || len(errs) == 0 {
 		t.Fatalf("expected missing product to fail conformance, checks=%+v errs=%v", checks, errs)
+	}
+}
+
+func TestUsecases_PromoteValidReadManifestActivatesIt(t *testing.T) {
+	t.Parallel()
+
+	repo := newFakeCapabilityRepo()
+	uc := NewUsecases(repo).WithProductRegistry(fakeProductRegistry{product: products.Product{
+		ProductSurface: "demo",
+		Status:         products.ProductStatusActive,
+	}})
+	manifest := validReadManifest()
+	if _, err := uc.ImportManifest(context.Background(), manifest, "tester"); err != nil {
+		t.Fatal(err)
+	}
+
+	record, err := uc.PromoteManifest(context.Background(), manifest.CapabilityID, manifest.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.Status != ManifestStatusActive {
+		t.Fatalf("expected active manifest, got %+v", record)
+	}
+	if len(repo.runs) != 1 || repo.runs[0].Status != ConformanceStatusPassed {
+		t.Fatalf("expected passing conformance run, got %+v", repo.runs)
+	}
+}
+
+func TestUsecases_ImportRejectsWriteWithoutNexusMetadata(t *testing.T) {
+	t.Parallel()
+
+	repo := newFakeCapabilityRepo()
+	uc := NewUsecases(repo)
+	manifest := validManifest()
+	manifest.ApprovalRequired = false
+	manifest.NexusActionType = ""
+
+	if _, err := uc.ImportManifest(context.Background(), manifest, "tester"); !errors.Is(err, ErrInvalidManifest) {
+		t.Fatalf("expected invalid write manifest, got %v", err)
+	}
+}
+
+func TestUsecases_ImportRejectsInvalidSchema(t *testing.T) {
+	t.Parallel()
+
+	repo := newFakeCapabilityRepo()
+	uc := NewUsecases(repo)
+	manifest := validReadManifest()
+	manifest.InputSchema = map[string]any{
+		"type":     "object",
+		"required": []string{"missing"},
+		"properties": map[string]any{
+			"org_id": map[string]any{"type": "string"},
+		},
+	}
+
+	if _, err := uc.ImportManifest(context.Background(), manifest, "tester"); !errors.Is(err, ErrInvalidManifest) {
+		t.Fatalf("expected invalid schema manifest, got %v", err)
+	}
+}
+
+func TestUsecases_PromoteRejectsDisabledProduct(t *testing.T) {
+	t.Parallel()
+
+	repo := newFakeCapabilityRepo()
+	uc := NewUsecases(repo).WithProductRegistry(fakeProductRegistry{product: products.Product{
+		ProductSurface: "demo",
+		Status:         products.ProductStatusDisabled,
+	}})
+	manifest := validReadManifest()
+	if _, err := uc.ImportManifest(context.Background(), manifest, "tester"); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := uc.PromoteManifest(context.Background(), manifest.CapabilityID, manifest.Version)
+	if !errors.Is(err, ErrInvalidManifest) {
+		t.Fatalf("expected disabled product conformance failure, got %v", err)
+	}
+	if len(repo.runs) != 1 || repo.runs[0].Status != ConformanceStatusFailed {
+		t.Fatalf("expected failed conformance run, got %+v", repo.runs)
+	}
+}
+
+func TestUsecases_BlockManifestPreventsPromotion(t *testing.T) {
+	t.Parallel()
+
+	repo := newFakeCapabilityRepo()
+	uc := NewUsecases(repo).WithProductRegistry(fakeProductRegistry{product: products.Product{
+		ProductSurface: "demo",
+		Status:         products.ProductStatusActive,
+	}})
+	manifest := validReadManifest()
+	if _, err := uc.ImportManifest(context.Background(), manifest, "tester"); err != nil {
+		t.Fatal(err)
+	}
+	blocked, err := uc.BlockManifest(context.Background(), manifest.CapabilityID, manifest.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if blocked.Status != ManifestStatusBlocked {
+		t.Fatalf("expected blocked manifest, got %+v", blocked)
+	}
+	if _, err := uc.PromoteManifest(context.Background(), manifest.CapabilityID, manifest.Version); !errors.Is(err, ErrInvalidManifest) {
+		t.Fatalf("expected blocked manifest promotion rejection, got %v", err)
+	}
+}
+
+func TestUsecases_ImportManifestSourcePersistsDraftsFromFetcher(t *testing.T) {
+	t.Parallel()
+
+	repo := newFakeCapabilityRepo()
+	fetcher := &fakeManifestSourceFetcher{manifests: []Manifest{validReadManifest()}}
+	uc := NewUsecases(repo).WithManifestSourceFetcher(fetcher)
+
+	records, err := uc.ImportManifestSource(context.Background(), ImportManifestSourceInput{
+		SourceURL:              "https://example.test/capabilities.json",
+		ExpectedProductSurface: "demo",
+		ImportedBy:             "tester",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fetcher.sourceURL != "https://example.test/capabilities.json" {
+		t.Fatalf("expected source URL passed to fetcher, got %q", fetcher.sourceURL)
+	}
+	if len(records) != 1 {
+		t.Fatalf("expected one imported record, got %+v", records)
+	}
+	if records[0].Status != ManifestStatusDraft || records[0].Source != ManifestSourceURL || records[0].SourceURI != "https://example.test/capabilities.json" {
+		t.Fatalf("unexpected imported source record: %+v", records[0])
 	}
 }

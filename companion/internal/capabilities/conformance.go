@@ -10,9 +10,14 @@ func CheckManifestConformance(manifest Manifest) (map[string]bool, []string) {
 	manifest = manifest.Normalize()
 	checks := map[string]bool{
 		"manifest_valid":        false,
+		"version_compatibility": false,
 		"schema_contracts":      false,
 		"schema_types":          false,
+		"required_scopes":       false,
+		"side_effect_contract":  false,
+		"evidence_schema":       false,
 		"nexus_binding":         false,
+		"nexus_write_metadata":  false,
 		"idempotency":           false,
 		"rollback_contract":     false,
 		"timeout":               false,
@@ -30,6 +35,11 @@ func CheckManifestConformance(manifest Manifest) (map[string]bool, []string) {
 	} else {
 		checks["manifest_valid"] = true
 	}
+	if manifest.SchemaVersion == SchemaVersion && semverPattern.MatchString(manifest.Version) {
+		checks["version_compatibility"] = true
+	} else {
+		errs = append(errs, "schema_version must be capability_manifest.v1 and version must be semver")
+	}
 	if validateObjectSchema("input_schema", manifest.InputSchema) == nil &&
 		validateObjectSchema("output_schema", manifest.OutputSchema) == nil &&
 		validateObjectSchema("evidence_schema", manifest.EvidenceSchema) == nil {
@@ -44,6 +54,21 @@ func CheckManifestConformance(manifest Manifest) (map[string]bool, []string) {
 	} else {
 		errs = append(errs, "schemas may only use supported JSON schema primitive types")
 	}
+	if validateRequiredScopes(manifest.RequiredScopes) == nil {
+		checks["required_scopes"] = true
+	} else {
+		errs = append(errs, "required_scopes must declare at least one non-empty scope")
+	}
+	if validateSideEffectContract(manifest) == nil {
+		checks["side_effect_contract"] = true
+	} else {
+		errs = append(errs, "action_type and side_effect_type are incompatible")
+	}
+	if validateEvidenceSchema(manifest.EvidenceSchema) == nil {
+		checks["evidence_schema"] = true
+	} else {
+		errs = append(errs, "evidence_schema must declare at least one evidence property")
+	}
 	if err := validateRequiredEvidence(manifest.RequiredEvidence, manifest.EvidenceSchema); err == nil {
 		checks["required_evidence"] = true
 	} else {
@@ -53,6 +78,11 @@ func CheckManifestConformance(manifest Manifest) (map[string]bool, []string) {
 		checks["nexus_binding"] = true
 	} else {
 		errs = append(errs, "approval-required capabilities must declare nexus_action_type")
+	}
+	if validateNexusWriteMetadata(manifest) == nil {
+		checks["nexus_write_metadata"] = true
+	} else {
+		errs = append(errs, "write or side-effect capabilities must require approval, nexus_action_type and required idempotency")
 	}
 	if manifest.SideEffectType == SideEffectRead || manifest.IdempotencyMode == IdempotencyRequired {
 		checks["idempotency"] = true
@@ -95,6 +125,52 @@ func CheckManifestConformance(manifest Manifest) (map[string]bool, []string) {
 		errs = append(errs, "rate_limit_class and cost_class are required")
 	}
 	return checks, dedupeStrings(errs)
+}
+
+func validateRequiredScopes(scopes []string) error {
+	for _, scope := range scopes {
+		if strings.TrimSpace(scope) != "" {
+			return nil
+		}
+	}
+	return fmt.Errorf("required scopes missing")
+}
+
+func validateSideEffectContract(manifest Manifest) error {
+	switch manifest.ActionType {
+	case ActionTypeRead:
+		if manifest.SideEffectType != SideEffectRead {
+			return fmt.Errorf("read capability cannot declare side-effect %q", manifest.SideEffectType)
+		}
+	case ActionTypeWrite:
+		if manifest.SideEffectType == SideEffectRead {
+			return fmt.Errorf("write capability must declare a side-effect type")
+		}
+	default:
+		return fmt.Errorf("invalid action_type %q", manifest.ActionType)
+	}
+	return nil
+}
+
+func validateEvidenceSchema(schema map[string]any) error {
+	props, ok := schema["properties"].(map[string]any)
+	if !ok || len(props) == 0 {
+		return fmt.Errorf("evidence properties missing")
+	}
+	return nil
+}
+
+func validateNexusWriteMetadata(manifest Manifest) error {
+	if manifest.ActionType != ActionTypeWrite && manifest.SideEffectType == SideEffectRead {
+		return nil
+	}
+	if !manifest.ApprovalRequired || strings.TrimSpace(manifest.NexusActionType) == "" {
+		return fmt.Errorf("approval metadata missing")
+	}
+	if manifest.IdempotencyMode != IdempotencyRequired {
+		return fmt.Errorf("idempotency is required")
+	}
+	return nil
 }
 
 func validateSchemaTypes(schema map[string]any) error {

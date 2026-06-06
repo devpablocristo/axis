@@ -8,6 +8,8 @@ export type AxisProductInstallationAuthMode =
   | 'custom'
 
 export type AxisProductWorkspace = Record<string, unknown>
+export type AxisCapabilityManifestStatus = 'draft' | 'active' | 'deprecated' | 'blocked'
+export type AxisCapabilityManifestSource = 'generated' | 'imported' | 'url'
 
 export type AxisProductIdentityContextV1 = {
   org_id: string
@@ -59,6 +61,20 @@ export type AxisCapabilityManifestRef = {
   capability_id: string
   version: string
   product_surface: AxisProductSurface
+}
+
+export type AxisCapabilityManifestRecord = AxisCapabilityManifestRef & {
+  status: AxisCapabilityManifestStatus
+  source: AxisCapabilityManifestSource
+  source_uri?: string
+  imported_by?: string
+  created_at?: string
+  updated_at?: string
+}
+
+export type AxisCapabilityManifestSourceImport = {
+  source_url: string
+  product_surface?: AxisProductSurface
 }
 
 export type AxisProductIntegrationContractV1 = {

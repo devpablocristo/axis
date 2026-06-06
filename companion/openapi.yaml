@@ -500,6 +500,17 @@ paths:
             schema: { $ref: "#/components/schemas/CapabilityManifest" }
       responses:
         "201": { description: Capability imported }
+  /v1/capabilities/import-source:
+    post:
+      summary: Importa capability manifests desde una fuente JSON
+      description: Requiere `companion:capabilities:admin`. La fuente debe publicar un `CapabilityManifest` o `{ capabilities: [...] }`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CapabilityManifestSourceImportRequest" }
+      responses:
+        "201": { description: Capability manifests imported as draft }
   /v1/capabilities/validate:
     post:
       summary: Valida contrato y conformance de un manifest
@@ -526,6 +537,49 @@ paths:
           schema: { type: string }
       responses:
         "200": { description: Capability versions }
+  /v1/capabilities/{capability_id}/versions/{version}/promote:
+    post:
+      summary: Promueve un manifest a active si pasa conformance
+      parameters:
+        - in: path
+          name: capability_id
+          required: true
+          schema: { type: string }
+        - in: path
+          name: version
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Capability manifest promoted }
+        "400": { description: Conformance failed }
+  /v1/capabilities/{capability_id}/versions/{version}/deprecate:
+    post:
+      summary: Marca un manifest como deprecated
+      parameters:
+        - in: path
+          name: capability_id
+          required: true
+          schema: { type: string }
+        - in: path
+          name: version
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Capability manifest deprecated }
+  /v1/capabilities/{capability_id}/versions/{version}/block:
+    post:
+      summary: Bloquea manualmente un manifest
+      parameters:
+        - in: path
+          name: capability_id
+          required: true
+          schema: { type: string }
+        - in: path
+          name: version
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Capability manifest blocked }
   /v1/connectors/{id}:
     get:
       summary: Obtiene connector
@@ -1350,6 +1404,16 @@ components:
         observability_tags:
           type: array
           items: { type: string }
+    CapabilityManifestSourceImportRequest:
+      type: object
+      required: [source_url]
+      properties:
+        source_url:
+          type: string
+          format: uri
+        product_surface:
+          type: string
+          description: Optional expected product surface. Import fails if a manifest declares a different product.
     ConversationSummary:
       type: object
       required: [id, created_at, updated_at, message_count]

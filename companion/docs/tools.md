@@ -61,12 +61,22 @@ Endpoint operativo:
 
 - `GET /v1/connectors/capability-manifests`: devuelve los manifests efectivos
   filtrados por identidad, scopes, riesgo e `include_writes`.
+- `POST /v1/capabilities`: importa manualmente un manifest como `draft`.
+- `POST /v1/capabilities/import-source`: importa manifests desde una fuente JSON
+  generica como `draft`.
+- `POST /v1/capabilities/{capability_id}/versions/{version}/promote`: activa un
+  manifest solo si pasa conformance.
+- `POST /v1/capabilities/{capability_id}/versions/{version}/block`: bloquea un
+  manifest manualmente.
 
 Invariantes:
 
 - Companion decide qué capability quiere usar, no decide el resultado final de
   acciones críticas.
 - Los writes deben declarar `approval_required=true` y `nexus_action_type`.
+- Los manifests deben declarar `required_scopes`, version semver,
+  `evidence_schema` con propiedades y compatibilidad entre `action_type` y
+  `side_effect_type`.
 - Una capability con rollback automático debe declarar `rollback_capability_id`.
 - La metadata que ve el planner y la metadata enviada a Nexus derivan del mismo
   manifest versionado.

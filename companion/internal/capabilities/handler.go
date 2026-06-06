@@ -27,12 +27,14 @@ func NewHandler(uc *Usecases) *Handler {
 func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/capabilities", h.list)
 	mux.HandleFunc("POST /v1/capabilities", h.importManifest)
+	mux.HandleFunc("POST /v1/capabilities/import-source", h.importManifestSource)
 	mux.HandleFunc("POST /v1/capabilities/validate", h.validate)
 	mux.HandleFunc("GET /v1/capabilities/conformance-runs", h.listConformanceRuns)
 	mux.HandleFunc("POST /v1/capabilities/conformance-runs", h.runConformance)
 	mux.HandleFunc("GET /v1/capabilities/{capability_id}/versions", h.versions)
 	mux.HandleFunc("POST /v1/capabilities/{capability_id}/versions/{version}/promote", h.promote)
 	mux.HandleFunc("POST /v1/capabilities/{capability_id}/versions/{version}/deprecate", h.deprecate)
+	mux.HandleFunc("POST /v1/capabilities/{capability_id}/versions/{version}/block", h.block)
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
@@ -87,6 +89,34 @@ func (h *Handler) importManifest(w http.ResponseWriter, r *http.Request) {
 	httpjson.WriteJSON(w, http.StatusCreated, record)
 }
 
+func (h *Handler) importManifestSource(w http.ResponseWriter, r *http.Request) {
+	if !requireCapabilityScope(w, r, scopeCapabilitiesAdmin) {
+		return
+	}
+	var body struct {
+		SourceURL      string `json:"source_url"`
+		ProductSurface string `json:"product_surface,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid json body")
+		return
+	}
+	records, err := h.uc.ImportManifestSource(r.Context(), ImportManifestSourceInput{
+		SourceURL:              body.SourceURL,
+		ExpectedProductSurface: body.ProductSurface,
+		ImportedBy:             identityctx.FromRequest(r).EffectiveActorID(),
+	})
+	if err != nil {
+		if errors.Is(err, ErrInvalidManifest) || errors.Is(err, ErrDuplicateManifest) {
+			httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", err.Error())
+			return
+		}
+		httpjson.WriteFlatInternalError(w, err, "import capability source failed")
+		return
+	}
+	httpjson.WriteJSON(w, http.StatusCreated, map[string]any{"capabilities": records})
+}
+
 func (h *Handler) validate(w http.ResponseWriter, r *http.Request) {
 	if !requireCapabilityScope(w, r, scopeCapabilitiesAdmin) {
 		return
@@ -127,6 +157,18 @@ func (h *Handler) deprecate(w http.ResponseWriter, r *http.Request) {
 	record, err := h.uc.DeprecateManifest(r.Context(), r.PathValue("capability_id"), r.PathValue("version"))
 	if err != nil {
 		writeManifestError(w, err, "deprecate capability failed")
+		return
+	}
+	httpjson.WriteJSON(w, http.StatusOK, record)
+}
+
+func (h *Handler) block(w http.ResponseWriter, r *http.Request) {
+	if !requireCapabilityScope(w, r, scopeCapabilitiesAdmin) {
+		return
+	}
+	record, err := h.uc.BlockManifest(r.Context(), r.PathValue("capability_id"), r.PathValue("version"))
+	if err != nil {
+		writeManifestError(w, err, "block capability failed")
 		return
 	}
 	httpjson.WriteJSON(w, http.StatusOK, record)

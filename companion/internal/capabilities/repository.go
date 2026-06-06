@@ -18,9 +18,11 @@ const (
 	ManifestStatusDraft      = "draft"
 	ManifestStatusActive     = "active"
 	ManifestStatusDeprecated = "deprecated"
+	ManifestStatusBlocked    = "blocked"
 
 	ManifestSourceGenerated = "generated"
 	ManifestSourceImported  = "imported"
+	ManifestSourceURL       = "url"
 
 	ConformanceStatusPassed = "passed"
 	ConformanceStatusFailed = "failed"
@@ -33,6 +35,7 @@ type ManifestRecord struct {
 	Manifest   Manifest  `json:"manifest"`
 	Status     string    `json:"status"`
 	Source     string    `json:"source"`
+	SourceURI  string    `json:"source_uri,omitempty"`
 	ImportedBy string    `json:"imported_by,omitempty"`
 	CreatedAt  time.Time `json:"created_at,omitempty"`
 	UpdatedAt  time.Time `json:"updated_at,omitempty"`
@@ -91,16 +94,17 @@ func (r *PostgresRepository) UpsertManifest(ctx context.Context, record Manifest
 	}
 	row := r.db.Pool().QueryRow(ctx, `
 		INSERT INTO companion_capability_manifests
-			(capability_id, version, status, source, manifest_json, imported_by)
-		VALUES ($1,$2,$3,$4,$5,$6)
+			(capability_id, version, status, source, source_uri, manifest_json, imported_by)
+		VALUES ($1,$2,$3,$4,$5,$6,$7)
 		ON CONFLICT (capability_id, version) DO UPDATE SET
 			status = EXCLUDED.status,
 			source = EXCLUDED.source,
+			source_uri = EXCLUDED.source_uri,
 			manifest_json = EXCLUDED.manifest_json,
 			imported_by = EXCLUDED.imported_by,
 			updated_at = now()
-		RETURNING id, capability_id, version, status, source, manifest_json, imported_by, created_at, updated_at
-	`, record.Manifest.CapabilityID, record.Manifest.Version, record.Status, record.Source, raw, strings.TrimSpace(record.ImportedBy))
+		RETURNING id, capability_id, version, status, source, source_uri, manifest_json, imported_by, created_at, updated_at
+	`, record.Manifest.CapabilityID, record.Manifest.Version, record.Status, record.Source, strings.TrimSpace(record.SourceURI), raw, strings.TrimSpace(record.ImportedBy))
 	return scanManifestRecord(row)
 }
 
@@ -166,7 +170,7 @@ func (r *PostgresRepository) UpdateManifestStatus(ctx context.Context, capabilit
 		UPDATE companion_capability_manifests
 		SET status = $3, updated_at = now()
 		WHERE capability_id = $1 AND version = $2
-		RETURNING id, capability_id, version, status, source, manifest_json, imported_by, created_at, updated_at
+		RETURNING id, capability_id, version, status, source, source_uri, manifest_json, imported_by, created_at, updated_at
 	`, strings.TrimSpace(capabilityID), strings.TrimSpace(version), status)
 	return scanManifestRecord(row)
 }
@@ -238,7 +242,7 @@ func (r *PostgresRepository) ListConformanceRuns(ctx context.Context, orgID, cap
 }
 
 const selectCapabilityManifest = `
-	SELECT id, capability_id, version, status, source, manifest_json, imported_by, created_at, updated_at
+	SELECT id, capability_id, version, status, source, source_uri, manifest_json, imported_by, created_at, updated_at
 	FROM companion_capability_manifests`
 
 const selectConformanceRun = `
@@ -255,7 +259,7 @@ func scanManifestRecord(row rowScanner) (ManifestRecord, error) {
 		raw    []byte
 		id     string
 	)
-	if err := row.Scan(&record.ID, &id, &record.Manifest.Version, &record.Status, &record.Source, &raw, &record.ImportedBy, &record.CreatedAt, &record.UpdatedAt); err != nil {
+	if err := row.Scan(&record.ID, &id, &record.Manifest.Version, &record.Status, &record.Source, &record.SourceURI, &raw, &record.ImportedBy, &record.CreatedAt, &record.UpdatedAt); err != nil {
 		return ManifestRecord{}, err
 	}
 	if err := json.Unmarshal(raw, &record.Manifest); err != nil {
@@ -298,7 +302,7 @@ func scanConformanceRun(row rowScanner) (ConformanceRun, error) {
 
 func normalizeManifestStatus(status string) string {
 	switch strings.ToLower(strings.TrimSpace(status)) {
-	case ManifestStatusDraft, ManifestStatusDeprecated:
+	case ManifestStatusDraft, ManifestStatusDeprecated, ManifestStatusBlocked:
 		return strings.ToLower(strings.TrimSpace(status))
 	default:
 		return ManifestStatusActive
@@ -309,6 +313,8 @@ func normalizeManifestSource(source string) string {
 	switch strings.ToLower(strings.TrimSpace(source)) {
 	case ManifestSourceImported:
 		return ManifestSourceImported
+	case ManifestSourceURL:
+		return ManifestSourceURL
 	default:
 		return ManifestSourceGenerated
 	}
