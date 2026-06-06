@@ -44,6 +44,7 @@ func init() {
 			"companion:costs:read",
 			"companion:evals:admin",
 			"companion:runtime:admin",
+			"companion:mcp:execute",
 			"companion:cross_org",
 		},
 	})

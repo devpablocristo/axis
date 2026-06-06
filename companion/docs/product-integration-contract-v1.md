@@ -257,6 +257,58 @@ instalaciones, conformance, eval reports, eventos, costos y runtime usage. La
 capa es de lectura; no reemplaza los endpoints fuente de products,
 installations, capabilities, observability, costos ni runtime policy.
 
+## MCP Governance
+
+MCP queda definido como capa operativa opcional sobre APIs y usecases Axis; no
+duplica logica de negocio ni reemplaza los contratos HTTP principales.
+
+Antes de implementar un servidor MCP productivo, Axis define un registry interno
+de tools gobernadas. Cada tool MCP debe declarar:
+
+- `name`, siempre bajo namespace `axis.*`;
+- `required_scopes`, incluyendo `companion:mcp:execute`;
+- `risk_level`;
+- `side_effect_type`;
+- `nexus_action_type`;
+- `approval_required`.
+
+Toda invocacion MCP futura debe pasar primero por `MCP Governance Gateway`, que
+envia un request a Nexus con:
+
+- `action_type=agent.capability.invoke`;
+- `target_system=axis.mcp`;
+- `target_resource=<tool_name>`;
+- `org_id`;
+- `product_surface`;
+- `actor_id`;
+- `required_scopes`;
+- payload redaccionado;
+- metadata de riesgo, side-effect y approval.
+
+El servidor MCP, cuando exista, solo podra ejecutar una tool si el gateway
+devuelve `can_execute=true`. Si Nexus devuelve `pending_approval`, el servidor
+debe responder estado pendiente y no ejecutar. Si una tool marcada
+`approval_required=true` recibe `allowed` sin aprobacion explicita, Axis falla
+cerrado para obligar una policy Nexus correcta.
+
+Tools iniciales gobernadas:
+
+- `axis.products.list`
+- `axis.products.get`
+- `axis.installations.resolve`
+- `axis.capabilities.validate`
+- `axis.capabilities.import`
+- `axis.traces.replay`
+- `axis.costs.summary`
+- `axis.evals.run`
+- `axis.tasks.create`
+- `axis.nexus.requests.list`
+- `axis.ops.console`
+- `axis.ops.alerts`
+- `axis.ops.slos`
+
+Regla de arquitectura: MCP es interfaz, Axis es executor y Nexus es regulador.
+
 ## Ponti
 
 Ponti no se implementa en esta fase. Cuando avance, Ponti debe:
