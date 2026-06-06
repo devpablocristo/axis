@@ -205,6 +205,44 @@ Las cuotas de memoria se calculan por `org_id + product_surface + scope_type +
 scope_id`. Dos productos de la misma organizacion no comparten cuota ni pueden
 bloquear inserciones entre si aunque reutilicen el mismo `scope_id`.
 
+## Product Evals Y Contract Tests
+
+Cada producto debe tener un pack `scripts/evals/<product_surface>-golden.json`
+con:
+
+- `suite_id`;
+- `product_surface`;
+- `tenants.primary` y, si aplica, `tenants.shadow`;
+- thresholds por metrica (`*_min` y `*_max`);
+- casos de routing, tool selection, evidence, hallucination, tenant leakage y
+  action safety.
+
+Los packs son no bloqueantes al inicio (`non_blocking: true`), pero quedan
+listos para volverse bloqueantes por threshold cuando el producto pase a
+produccion.
+
+El paquete `internal/productevals` carga y evalua packs genericos. El paquete
+`internal/productcontracts` valida el onboarding reusable de un producto:
+
+- producto registrado y activo;
+- instalacion activa;
+- identity/JWT context;
+- manifests con conformance;
+- writes con metadata Nexus;
+- expected errors;
+- eval pack;
+- runtime enablement.
+
+Checklist ejecutable:
+
+```bash
+go run ./cmd/product-onboarding-check \
+  -contract /path/to/product-contract.json \
+  -eval-pack scripts/evals/ponti-golden.json
+```
+
+El comando devuelve un reporte JSON y exit code `1` si hay fallas bloqueantes.
+
 ## Ponti
 
 Ponti no se implementa en esta fase. Cuando avance, Ponti debe:

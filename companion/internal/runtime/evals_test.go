@@ -2,36 +2,12 @@ package runtime
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/devpablocristo/companion/internal/productevals"
 	"github.com/google/uuid"
 )
-
-// goldenCase es una entrada del archivo scripts/evals/ponti-golden.json.
-type goldenCase struct {
-	ID                   string   `json:"id"`
-	Query                string   `json:"query"`
-	ExpectedIntent       string   `json:"expected_intent"`
-	ExpectedCapability   string   `json:"expected_capability"`
-	ExpectedArgsContains []string `json:"expected_args_contains"`
-	ExpectedGuardrail    string   `json:"expected_guardrail"`
-	TenantLeakageCheck   bool     `json:"tenant_leakage_check"`
-}
-
-type goldenSuite struct {
-	Version    int                `json:"version"`
-	Thresholds map[string]float64 `json:"thresholds"`
-	Tenants    struct {
-		Primary string `json:"primary"`
-		Shadow  string `json:"shadow"`
-	} `json:"tenants"`
-	Cases []goldenCase `json:"cases"`
-}
 
 // TestEvals_PontiGolden corre la suite de golden queries del piloto Ponti.
 //
@@ -47,23 +23,13 @@ type goldenSuite struct {
 func TestEvals_PontiGolden(t *testing.T) {
 	t.Parallel()
 
-	path, err := findRepoFile("scripts/evals/ponti-golden.json")
+	path, err := productevals.FindRepoFile("scripts/evals/ponti-golden.json")
 	if err != nil {
 		t.Skipf("golden file not found, skipping eval (run from repo root): %v", err)
 	}
-	raw, err := os.ReadFile(path)
+	suite, err := productevals.LoadPack(path)
 	if err != nil {
-		t.Fatalf("read golden file: %v", err)
-	}
-	var suite goldenSuite
-	if err := json.Unmarshal(raw, &suite); err != nil {
-		t.Fatalf("parse golden file: %v", err)
-	}
-	if suite.Version != 1 {
-		t.Fatalf("unsupported golden suite version: %d", suite.Version)
-	}
-	if len(suite.Cases) == 0 {
-		t.Fatal("golden suite must contain at least one case")
+		t.Fatalf("load product eval pack: %v", err)
 	}
 
 	// Verificar que todos los thresholds críticos están declarados.
@@ -95,7 +61,7 @@ func TestEvals_PontiGolden(t *testing.T) {
 				UserID:         "u-eval",
 				OrgID:          suite.Tenants.Primary,
 				Message:        c.Query,
-				ProductSurface: "ponti",
+				ProductSurface: suite.ProductSurface,
 				TaskID:         func() *uuid.UUID { id := uuid.New(); return &id }(),
 			})
 			if err != nil {
@@ -160,21 +126,4 @@ func TestEvals_PontiGolden(t *testing.T) {
 	}
 	t.Logf("eval summary: routing_accuracy=%.2f (correct=%d/%d), guardrails_triggered=%d",
 		accuracy, correctRouted, totalRouted, guardrailTriggered)
-}
-
-// findRepoFile busca un archivo relativo a la raíz del repo subiendo
-// directorios desde el cwd. Permite que el test funcione tanto desde
-// scripts/ como desde internal/runtime/.
-func findRepoFile(rel string) (string, error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
-	for dir := cwd; dir != "/" && dir != "."; dir = filepath.Dir(dir) {
-		candidate := filepath.Join(dir, rel)
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate, nil
-		}
-	}
-	return "", fmt.Errorf("file %q not found searching upward from %s", rel, cwd)
 }

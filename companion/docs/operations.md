@@ -98,6 +98,17 @@ cerrado antes de invocar el LLM.
 Los endpoints requieren scopes admin de runtime/evals o cross-org. El check
 local obligatorio sigue siendo `bash scripts/evals/run-security-evals.sh`.
 
+## Product evals y onboarding
+
+- `scripts/evals/<product>-golden.json` define golden cases por producto.
+- `bash scripts/evals/run-product-evals.sh` valida packs y tests genericos.
+- `go run ./cmd/product-onboarding-check -contract <contract.json> -eval-pack
+  scripts/evals/<product>-golden.json` ejecuta el checklist de onboarding.
+
+Los evals de producto son no bloqueantes al inicio; el reporte mantiene
+thresholds por producto para convertirlos en gate cuando el producto tenga
+suficiente cobertura.
+
 ## Smoke
 
 ```bash

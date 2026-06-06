@@ -1,5 +1,8 @@
 {
   "version": 1,
+  "suite_id": "ponti-golden",
+  "product_surface": "ponti",
+  "non_blocking": true,
   "description": "Golden queries para fase 1 — Ponti read-only piloto. Cada caso fija una query típica de un usuario y la capability esperada que el agent router debería seleccionar. Si el agent invoca otra capability o filtra mal por tenant, el eval falla.",
   "thresholds": {
     "routing_accuracy_min": 0.85,
