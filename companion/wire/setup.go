@@ -672,6 +672,7 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 		Tasks:         uc,
 		Nexus:         rc,
 		RateLimiter:   productRateLimiter,
+		RuntimePolicy: runtimeControlsRepo,
 		Observability: observabilityRepo,
 	})
 

@@ -85,6 +85,10 @@ type NexusRequestLister interface {
 	ListRequestsForOrg(ctx context.Context, query, orgID string) (int, []byte, error)
 }
 
+type RuntimePolicyReader interface {
+	GetRuntimePolicy(ctx context.Context, orgID string) (runtime.TenantRuntimePolicy, error)
+}
+
 type Deps struct {
 	Registry      *mcpgovernance.Registry
 	Authorizer    Authorizer
@@ -97,24 +101,27 @@ type Deps struct {
 	Tasks         TaskCreator
 	Nexus         NexusRequestLister
 	RateLimiter   productlimits.Limiter
+	RuntimePolicy RuntimePolicyReader
 	Observability runtime.ObservabilityRecorder
 }
 
 type Handler struct {
-	registry *mcpgovernance.Registry
-	authz    Authorizer
-	executor *Executor
-	limiter  productlimits.Limiter
-	recorder runtime.ObservabilityRecorder
+	registry      *mcpgovernance.Registry
+	authz         Authorizer
+	executor      *Executor
+	limiter       productlimits.Limiter
+	runtimePolicy RuntimePolicyReader
+	recorder      runtime.ObservabilityRecorder
 }
 
 func NewHandler(deps Deps) *Handler {
 	return &Handler{
-		registry: deps.Registry,
-		authz:    deps.Authorizer,
-		executor: &Executor{deps: deps},
-		limiter:  deps.RateLimiter,
-		recorder: deps.Observability,
+		registry:      deps.Registry,
+		authz:         deps.Authorizer,
+		executor:      &Executor{deps: deps},
+		limiter:       deps.RateLimiter,
+		runtimePolicy: deps.RuntimePolicy,
+		recorder:      deps.Observability,
 	}
 }
 
@@ -233,8 +240,8 @@ func (h *Handler) rpc(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		out, status, err := h.callTool(r, call)
-		if err != nil && status >= 400 && status != http.StatusForbidden {
-			writeRPCError(w, req.ID, -32602, err.Error(), map[string]any{"status": status})
+		if err != nil && status >= 400 && (status != http.StatusForbidden || isRuntimePolicyBlocked(out)) {
+			writeRPCError(w, req.ID, -32602, err.Error(), rpcToolErrorData(out, status))
 			return
 		}
 		writeRPCResult(w, req.ID, toolResult(out, err != nil || out.Denied))
@@ -296,6 +303,19 @@ func (h *Handler) callTool(r *http.Request, call callRequest) (out toolCallRespo
 		out.Status = "payload_too_large"
 		out.Error = err.Error()
 		status = statusForError(err)
+		return out, status, err
+	}
+	if block := h.enforceRuntimePolicy(r.Context(), invocation, call.Name); block.Blocked() {
+		h.recordRuntimePolicyBlock(r.Context(), invocation, call.Name, block)
+		err = fmt.Errorf("%w: %s", ErrForbidden, block.Reason)
+		out.Status = "blocked"
+		out.Error = err.Error()
+		out.Metadata = map[string]interface{}{
+			"blocked_by": "runtime_policy",
+			"reason":     block.Reason,
+			"target":     block.Target,
+		}
+		status = http.StatusForbidden
 		return out, status, err
 	}
 	if err = h.enforceRateLimit(r.Context(), invocation); err != nil {
@@ -486,12 +506,133 @@ func toolResult(out toolCallResponse, isError bool) map[string]any {
 	}
 }
 
+func rpcToolErrorData(out toolCallResponse, status int) map[string]any {
+	data := map[string]any{"status": status}
+	if out.Status != "" {
+		data["mcp_status"] = out.Status
+	}
+	if out.ToolName != "" {
+		data["tool_name"] = out.ToolName
+	}
+	if out.Metadata != nil {
+		data["metadata"] = out.Metadata
+		if value, ok := out.Metadata["target"]; ok {
+			data["target"] = value
+		}
+		if value, ok := out.Metadata["reason"]; ok {
+			data["reason"] = value
+		}
+	}
+	return data
+}
+
+func isRuntimePolicyBlocked(out toolCallResponse) bool {
+	if out.Status != "blocked" || out.Metadata == nil {
+		return false
+	}
+	blockedBy, ok := out.Metadata["blocked_by"].(string)
+	return ok && blockedBy == "runtime_policy"
+}
+
 func (h *Handler) enforceRateLimit(ctx context.Context, invocation mcpgovernance.InvocationContext) error {
 	return productlimits.Enforce(ctx, h.limiter, productlimits.Key{
 		OrgID:          invocation.OrgID,
 		ProductSurface: invocation.ProductSurface,
 		Area:           productlimits.AreaMCP,
 	}, productlimits.DefaultLimit(productlimits.AreaMCP))
+}
+
+type runtimePolicyBlock struct {
+	Target string
+	Reason string
+}
+
+func (b runtimePolicyBlock) Blocked() bool {
+	return strings.TrimSpace(b.Target) != "" || strings.TrimSpace(b.Reason) != ""
+}
+
+func (h *Handler) enforceRuntimePolicy(ctx context.Context, invocation mcpgovernance.InvocationContext, toolName string) runtimePolicyBlock {
+	if h == nil || h.runtimePolicy == nil {
+		return runtimePolicyBlock{}
+	}
+	policy, err := h.runtimePolicy.GetRuntimePolicy(ctx, invocation.OrgID)
+	if err != nil {
+		if errors.Is(err, runtime.ErrRuntimePolicyNotFound) {
+			return runtimePolicyBlock{}
+		}
+		return runtimePolicyBlock{Target: "runtime_policy", Reason: "runtime policy lookup failed"}
+	}
+	productSurface := strings.TrimSpace(invocation.ProductSurface)
+	if productSurface == "" {
+		productSurface = identityctx.DefaultSurface
+	}
+	toolName = strings.TrimSpace(toolName)
+	if !policy.Enabled || policy.KillSwitch {
+		return runtimePolicyBlock{Target: "runtime", Reason: "companion runtime is disabled for this customer org"}
+	}
+	if len(policy.AllowedProductSurfaces) > 0 && !mcpPatternAllows(policy.AllowedProductSurfaces, productSurface) {
+		return runtimePolicyBlock{
+			Target: "product_surface",
+			Reason: fmt.Sprintf("product surface %q is not allowed for this customer org", productSurface),
+		}
+	}
+	if productPolicy, ok := mcpProductPolicyFor(policy, productSurface); ok && productPolicy.Denied {
+		return runtimePolicyBlock{
+			Target: "product_surface:" + productSurface,
+			Reason: fmt.Sprintf("product surface %q is denied by customer org policy", productSurface),
+		}
+	}
+	settings := policy.ControlPlane
+	if mcpBoolMapEnabled(settings.ToolKillSwitches, toolName) {
+		return runtimePolicyBlock{Target: "tool:" + toolName, Reason: "tool kill switch is active"}
+	}
+	if mcpPatternAllows(settings.DeniedTools, toolName) {
+		return runtimePolicyBlock{Target: "tool:" + toolName, Reason: "tool is denied for this customer org"}
+	}
+	if len(settings.AllowedTools) > 0 && !mcpPatternAllows(settings.AllowedTools, toolName) {
+		return runtimePolicyBlock{Target: "tool:" + toolName, Reason: "tool is not allowed for this customer org"}
+	}
+	return runtimePolicyBlock{}
+}
+
+func mcpProductPolicyFor(policy runtime.TenantRuntimePolicy, productSurface string) (runtime.ProductRuntimePolicy, bool) {
+	productSurface = strings.TrimSpace(strings.ToLower(productSurface))
+	if productSurface == "" {
+		productSurface = strings.TrimSpace(strings.ToLower(identityctx.DefaultSurface))
+	}
+	for key, value := range policy.ControlPlane.ProductPolicies {
+		if strings.TrimSpace(strings.ToLower(key)) == productSurface {
+			return value, true
+		}
+	}
+	return runtime.ProductRuntimePolicy{}, false
+}
+
+func mcpPatternAllows(patterns []string, value string) bool {
+	value = strings.TrimSpace(value)
+	for _, pattern := range patterns {
+		pattern = strings.TrimSpace(pattern)
+		if pattern == "" {
+			continue
+		}
+		if pattern == "*" || pattern == value {
+			return true
+		}
+		if strings.HasSuffix(pattern, "*") && strings.HasPrefix(value, strings.TrimSuffix(pattern, "*")) {
+			return true
+		}
+	}
+	return false
+}
+
+func mcpBoolMapEnabled(values map[string]bool, key string) bool {
+	key = strings.TrimSpace(key)
+	for candidate, enabled := range values {
+		if enabled && strings.TrimSpace(candidate) == key {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *Handler) recordToolCall(ctx context.Context, invocation mcpgovernance.InvocationContext, call callRequest, out toolCallResponse, status int, callErr error, started time.Time) {
@@ -537,6 +678,35 @@ func (h *Handler) recordToolCall(ctx context.Context, invocation mcpgovernance.I
 		EventName:      "mcp_tool_call",
 		Severity:       severityForMCPCall(status, callErr, out),
 		TraceID:        runID,
+		Payload:        raw,
+		Redacted:       true,
+		OccurredAt:     time.Now().UTC(),
+	}
+	_ = h.recorder.RecordObservabilityEvent(context.WithoutCancel(ctx), event)
+}
+
+func (h *Handler) recordRuntimePolicyBlock(ctx context.Context, invocation mcpgovernance.InvocationContext, toolName string, block runtimePolicyBlock) {
+	if h == nil || h.recorder == nil {
+		return
+	}
+	payload := map[string]any{
+		"tool_name":       toolName,
+		"org_id":          invocation.OrgID,
+		"product_surface": invocation.ProductSurface,
+		"reason":          block.Reason,
+		"target":          block.Target,
+	}
+	raw, err := marshalRedactedPayload(payload)
+	if err != nil {
+		raw = json.RawMessage(`{"redaction_error":"mcp runtime policy payload could not be marshaled"}`)
+	}
+	event := runtime.ObservabilityEvent{
+		OrgID:          invocation.OrgID,
+		ProductSurface: invocation.ProductSurface,
+		CapabilityID:   toolName,
+		EventType:      "guardrail",
+		EventName:      "mcp_runtime_policy",
+		Severity:       "warn",
 		Payload:        raw,
 		Redacted:       true,
 		OccurredAt:     time.Now().UTC(),
