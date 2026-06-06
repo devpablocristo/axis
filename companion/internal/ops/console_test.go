@@ -126,6 +126,13 @@ func TestUsecasesGetConsoleBuildsOperationalAlertsAndSLOs(t *testing.T) {
 			EventType:      "guardrail",
 			EventName:      "product_rate_limit",
 			OccurredAt:     now,
+		}, {
+			OrgID:          "org-a",
+			ProductSurface: "ponti",
+			EventType:      "guardrail",
+			EventName:      "mcp_runtime_policy",
+			Payload:        []byte(`{"tool_name":"axis.products.list","target":"tool:axis.products.list","reason":"tool is denied for this customer org"}`),
+			OccurredAt:     now,
 		}},
 		cost: runtime.CostSummary{
 			OrgID:              "org-a",
@@ -161,7 +168,7 @@ func TestUsecasesGetConsoleBuildsOperationalAlertsAndSLOs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"installation_disabled", "capability_conformance_failed", "eval_regression", "rate_limit_abuse", "cost_anomaly", "high_error_rate"} {
+	for _, want := range []string{"installation_disabled", "capability_conformance_failed", "eval_regression", "rate_limit_abuse", "mcp_runtime_policy_block", "cost_anomaly", "high_error_rate"} {
 		if !hasAlert(console.Alerts, want) {
 			t.Fatalf("expected alert %s in %+v", want, console.Alerts)
 		}

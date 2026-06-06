@@ -820,6 +820,30 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/RuntimePolicyAuditResponse" }
+  /v1/runtime/mcp-policy:
+    get:
+      summary: Obtiene la vista MCP de la política runtime
+      description: Requiere `companion:runtime:admin` o `companion:cross_org`. `enabled`, `kill_switch`, `allowed_product_surfaces` y `product_policies.denied` son controles runtime-level.
+      responses:
+        "200":
+          description: MCP runtime policy view
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MCPRuntimePolicy" }
+    put:
+      summary: Actualiza solo los controles MCP de la política runtime
+      description: Requiere `companion:runtime:admin` o `companion:cross_org`. Preserva modelos, budgets, autonomy, memory, connectors y otros campos no-MCP.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MCPRuntimePolicyUpdate" }
+      responses:
+        "200":
+          description: MCP runtime policy view
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MCPRuntimePolicy" }
   /v1/runtime/usage:
     get:
       summary: Consulta uso mensual de runtime de la customer org autenticada
@@ -2080,6 +2104,64 @@ components:
         reason: { type: string }
         policy: { $ref: "#/components/schemas/RuntimePolicy" }
         created_at: { type: string, format: date-time }
+    MCPRuntimePolicy:
+      type: object
+      properties:
+        org_id: { type: string }
+        enabled: { type: boolean }
+        kill_switch: { type: boolean }
+        allowed_product_surfaces:
+          type: array
+          items: { type: string }
+        allowed_tools:
+          type: array
+          items: { type: string }
+        denied_tools:
+          type: array
+          items: { type: string }
+        tool_kill_switches:
+          type: object
+          additionalProperties: { type: boolean }
+        product_policies:
+          type: object
+          additionalProperties: { $ref: "#/components/schemas/MCPProductRuntimePolicy" }
+        metadata: { $ref: "#/components/schemas/MCPRuntimePolicyMetadata" }
+        settings_version: { type: integer, format: int64 }
+        updated_at: { type: string, format: date-time }
+    MCPRuntimePolicyUpdate:
+      type: object
+      properties:
+        enabled: { type: boolean }
+        kill_switch: { type: boolean }
+        allowed_product_surfaces:
+          type: array
+          items: { type: string }
+        allowed_tools:
+          type: array
+          items:
+            type: string
+            description: Exact tool name, `*`, or prefix pattern ending in `*`.
+        denied_tools:
+          type: array
+          items:
+            type: string
+            description: Exact tool name, `*`, or prefix pattern ending in `*`.
+        tool_kill_switches:
+          type: object
+          additionalProperties: { type: boolean }
+        product_policies:
+          type: object
+          additionalProperties: { $ref: "#/components/schemas/MCPProductRuntimePolicy" }
+        metadata: { $ref: "#/components/schemas/MCPRuntimePolicyMetadata" }
+    MCPProductRuntimePolicy:
+      type: object
+      properties:
+        denied: { type: boolean }
+    MCPRuntimePolicyMetadata:
+      type: object
+      properties:
+        changed_by: { type: string }
+        change_reason: { type: string }
     RuntimeUsage:
       type: object
       properties:

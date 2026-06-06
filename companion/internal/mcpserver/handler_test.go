@@ -96,6 +96,24 @@ func (f *fakeRuntimePolicyReader) GetRuntimePolicy(_ context.Context, orgID stri
 	return f.policy, nil
 }
 
+func (f *fakeRuntimePolicyReader) UpsertRuntimePolicy(_ context.Context, policy runtime.TenantRuntimePolicy) (runtime.TenantRuntimePolicy, error) {
+	f.policy = policy
+	f.err = nil
+	return f.policy, nil
+}
+
+func (f *fakeRuntimePolicyReader) ListRuntimePolicyAudit(context.Context, string, int) ([]runtime.RuntimePolicyAuditEntry, error) {
+	return nil, nil
+}
+
+func (f *fakeRuntimePolicyReader) GetRuntimeUsage(_ context.Context, orgID, period string) (runtime.TenantRuntimeUsage, error) {
+	return runtime.TenantRuntimeUsage{OrgID: orgID, Period: period}, nil
+}
+
+func (f *fakeRuntimePolicyReader) AddRuntimeUsage(context.Context, string, string, runtime.RunUsage) error {
+	return nil
+}
+
 func TestRPCToolsListRequiresMCPExecuteScope(t *testing.T) {
 	reg, err := mcpgovernance.NewDefaultRegistry()
 	if err != nil {
@@ -485,6 +503,99 @@ func TestCallToolRuntimePolicyAllowedToolsWildcardAllowsNexus(t *testing.T) {
 
 	if err != nil || status != http.StatusOK || out.Status != "executed" {
 		t.Fatalf("expected execution through Nexus, status=%d out=%+v err=%v", status, out, err)
+	}
+	if authz.calls != 1 {
+		t.Fatalf("expected Nexus call, got %d", authz.calls)
+	}
+	if productStore.listCalls != 1 {
+		t.Fatalf("expected products list execution, got %d", productStore.listCalls)
+	}
+}
+
+func TestMCPPolicyEndpointDeniedToolsBlocksMCPBeforeNexus(t *testing.T) {
+	reg, err := mcpgovernance.NewDefaultRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	policyStore := &fakeRuntimePolicyReader{err: runtime.ErrRuntimePolicyNotFound}
+	policyMux := http.NewServeMux()
+	runtime.NewRuntimeControlsHandler(policyStore).Register(policyMux)
+	policyReq := httptest.NewRequest(http.MethodPut, "/v1/runtime/mcp-policy", strings.NewReader(`{"denied_tools":["axis.products.list"]}`))
+	policyReq = withPrincipal(policyReq, []string{"companion:runtime:admin"})
+	policyRes := httptest.NewRecorder()
+
+	policyMux.ServeHTTP(policyRes, policyReq)
+
+	if policyRes.Code != http.StatusOK {
+		t.Fatalf("expected mcp policy save 200, got %d body=%s", policyRes.Code, policyRes.Body.String())
+	}
+	authz := &fakeAuthorizer{decision: mcpgovernance.Decision{CanExecute: true}}
+	productStore := &fakeProducts{products: []products.Product{{ProductSurface: "ponti"}}}
+	handler := NewHandler(Deps{
+		Registry:      reg,
+		Authorizer:    authz,
+		Products:      productStore,
+		RuntimePolicy: policyStore,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
+	req = withPrincipal(req, []string{mcpgovernance.ScopeMCPExecute, "companion:products:read"})
+
+	out, status, err := handler.callTool(req, callRequest{
+		Name:      "axis.products.list",
+		Arguments: map[string]any{"product_surface": "companion"},
+	})
+
+	if err == nil || status != http.StatusForbidden || out.Status != "blocked" {
+		t.Fatalf("expected mcp policy block, status=%d out=%+v err=%v", status, out, err)
+	}
+	if authz.calls != 0 {
+		t.Fatalf("mcp policy block must not reach Nexus, authz calls=%d", authz.calls)
+	}
+	if productStore.listCalls != 0 {
+		t.Fatalf("mcp policy block must not execute tool, product calls=%d", productStore.listCalls)
+	}
+}
+
+func TestMCPPolicyEndpointAllowedToolsWildcardAllowsMCP(t *testing.T) {
+	reg, err := mcpgovernance.NewDefaultRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	policyStore := &fakeRuntimePolicyReader{err: runtime.ErrRuntimePolicyNotFound}
+	policyMux := http.NewServeMux()
+	runtime.NewRuntimeControlsHandler(policyStore).Register(policyMux)
+	policyReq := httptest.NewRequest(http.MethodPut, "/v1/runtime/mcp-policy", strings.NewReader(`{"allowed_tools":["axis.products.*"]}`))
+	policyReq = withPrincipal(policyReq, []string{"companion:runtime:admin"})
+	policyRes := httptest.NewRecorder()
+
+	policyMux.ServeHTTP(policyRes, policyReq)
+
+	if policyRes.Code != http.StatusOK {
+		t.Fatalf("expected mcp policy save 200, got %d body=%s", policyRes.Code, policyRes.Body.String())
+	}
+	authz := &fakeAuthorizer{decision: mcpgovernance.Decision{
+		RequestID:  "req-mcp-policy-allow",
+		Status:     "allowed",
+		Decision:   "allow",
+		CanExecute: true,
+	}}
+	productStore := &fakeProducts{products: []products.Product{{ProductSurface: "ponti"}}}
+	handler := NewHandler(Deps{
+		Registry:      reg,
+		Authorizer:    authz,
+		Products:      productStore,
+		RuntimePolicy: policyStore,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
+	req = withPrincipal(req, []string{mcpgovernance.ScopeMCPExecute, "companion:products:read"})
+
+	out, status, err := handler.callTool(req, callRequest{
+		Name:      "axis.products.list",
+		Arguments: map[string]any{"product_surface": "companion"},
+	})
+
+	if err != nil || status != http.StatusOK || out.Status != "executed" {
+		t.Fatalf("expected mcp execution, status=%d out=%+v err=%v", status, out, err)
 	}
 	if authz.calls != 1 {
 		t.Fatalf("expected Nexus call, got %d", authz.calls)

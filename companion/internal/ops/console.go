@@ -232,6 +232,9 @@ func buildAlerts(console Console) []Alert {
 		if event.EventType == "guardrail" && strings.Contains(event.EventName, "rate_limit") {
 			alerts = append(alerts, alert("rate_limit_abuse", "warning", event.ProductSurface, "Product rate limit guardrail triggered", "observability", map[string]any{"event_name": event.EventName}, event.OccurredAt))
 		}
+		if event.EventType == "guardrail" && event.EventName == "mcp_runtime_policy" {
+			alerts = append(alerts, alert("mcp_runtime_policy_block", "warning", event.ProductSurface, "MCP tool blocked by runtime policy", "observability", mcpRuntimePolicyEvidence(event), event.OccurredAt))
+		}
 		if isLeakageEvent(event) {
 			alerts = append(alerts, alert("tenant_product_leakage", "critical", event.ProductSurface, "Tenant/product leakage signal detected", "observability", map[string]any{"event_name": event.EventName}, event.OccurredAt))
 		}
@@ -254,6 +257,23 @@ func buildAlerts(console Console) []Alert {
 		return severityRank(alerts[i].Severity) > severityRank(alerts[j].Severity)
 	})
 	return alerts
+}
+
+func mcpRuntimePolicyEvidence(event runtime.ObservabilityEvent) map[string]any {
+	evidence := map[string]any{"event_name": event.EventName}
+	if len(event.Payload) == 0 {
+		return evidence
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		return evidence
+	}
+	for _, key := range []string{"tool_name", "target", "reason"} {
+		if value, ok := payload[key]; ok {
+			evidence[key] = value
+		}
+	}
+	return evidence
 }
 
 func buildSLOs(console Console) []ProductSLO {
