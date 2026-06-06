@@ -291,6 +291,20 @@ debe responder estado pendiente y no ejecutar. Si una tool marcada
 `approval_required=true` recibe `allowed` sin aprobacion explicita, Axis falla
 cerrado para obligar una policy Nexus correcta.
 
+Superficies implementadas:
+
+- `POST /mcp`: endpoint JSON-RPC para `initialize`, `ping`, `tools/list` y
+  `tools/call`;
+- `GET /v1/mcp/tools`: lista operativa de tools registradas;
+- `POST /v1/mcp/tools/call`: invocacion operativa/debug de una tool.
+
+Todas requieren autenticacion y scope `companion:mcp:execute`. `tools/call`
+ademas exige los scopes propios de la tool y siempre consulta Nexus antes de
+ejecutar. Las tools de lectura ejecutan usecases Axis existentes cuando Nexus
+devuelve `can_execute=true`. Las tools sensibles solo ejecutan si Nexus devuelve
+estado aprobado/ejecutado; si quedan pendientes, Axis responde
+`pending_approval` sin tocar el sistema destino.
+
 Tools iniciales gobernadas:
 
 - `axis.products.list`

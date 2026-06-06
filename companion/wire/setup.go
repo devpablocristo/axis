@@ -22,6 +22,8 @@ import (
 	"github.com/devpablocristo/companion/internal/connectors/registry"
 	connectordomain "github.com/devpablocristo/companion/internal/connectors/usecases/domain"
 	"github.com/devpablocristo/companion/internal/jobs"
+	"github.com/devpablocristo/companion/internal/mcpgovernance"
+	"github.com/devpablocristo/companion/internal/mcpserver"
 	"github.com/devpablocristo/companion/internal/memory"
 	nexusassist "github.com/devpablocristo/companion/internal/nexus_assist"
 	"github.com/devpablocristo/companion/internal/ops"
@@ -652,6 +654,25 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	nexusAssistContextualizer := nexusassist.NewContextualizer(rc, llmProvider)
 	nexusAssistHandler := nexusassist.NewHandler(nexusAssistProposer, nexusAssistContextualizer)
 
+	mcpRegistry, err := mcpgovernance.NewDefaultRegistry()
+	if err != nil {
+		db.Close()
+		return nil, nil, fmt.Errorf("configure mcp registry: %w", err)
+	}
+	mcpGateway := mcpgovernance.NewGateway(mcpRegistry, nexusGateway)
+	mcpHandler := mcpserver.NewHandler(mcpserver.Deps{
+		Registry:     mcpRegistry,
+		Authorizer:   mcpGateway,
+		Products:     productUC,
+		Capabilities: capabilityUC,
+		Ops:          opsUC,
+		Costs:        observabilityRepo,
+		Traces:       observabilityRepo,
+		Evals:        securityEvalUC,
+		Tasks:        uc,
+		Nexus:        rc,
+	})
+
 	assistRepo := assist.NewPostgresRepository(db)
 	assistUC := assist.NewUsecases(assistRepo, llmProvider)
 	assistHandler := assist.NewHandler(assistUC)
@@ -676,6 +697,7 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	opsHandler.Register(mux)
 	jobHandler.Register(mux)
 	nexusAssistHandler.Register(mux)
+	mcpHandler.Register(mux)
 	assistHandler.Register(mux)
 
 	// Seed conectores por defecto

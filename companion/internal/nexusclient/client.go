@@ -148,11 +148,23 @@ func (c *Client) GetRequest(ctx context.Context, id string) (RequestSummary, int
 }
 
 func (c *Client) ListRequests(ctx context.Context, query string) (int, []byte, error) {
+	return c.listRequests(ctx, query)
+}
+
+func (c *Client) ListRequestsForOrg(ctx context.Context, query, orgID string) (int, []byte, error) {
+	var opts []httpclient.RequestOption
+	if orgID != "" {
+		opts = append(opts, httpclient.WithHeader("X-Org-ID", orgID))
+	}
+	return c.listRequests(ctx, query, opts...)
+}
+
+func (c *Client) listRequests(ctx context.Context, query string, opts ...httpclient.RequestOption) (int, []byte, error) {
 	path := "/v1/requests"
 	if query != "" {
 		path += "?" + query
 	}
-	return c.caller.DoJSON(ctx, http.MethodGet, path, nil)
+	return c.caller.DoJSON(ctx, http.MethodGet, path, nil, opts...)
 }
 
 func (c *Client) SubmitProposal(ctx context.Context, body any) (int, []byte, error) {
