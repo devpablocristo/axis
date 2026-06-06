@@ -39,6 +39,7 @@ func init() {
 			"companion:assist:write",
 			"companion:products:read",
 			"companion:products:admin",
+			"companion:ops:read",
 			"companion:observability:read",
 			"companion:costs:read",
 			"companion:evals:admin",

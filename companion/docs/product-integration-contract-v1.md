@@ -243,6 +243,20 @@ go run ./cmd/product-onboarding-check \
 
 El comando devuelve un reporte JSON y exit code `1` si hay fallas bloqueantes.
 
+## Operacion
+
+Axis expone una console operativa agregada para operar N productos sin UI
+dedicada inicial:
+
+- `GET /v1/ops/console`;
+- `GET /v1/ops/alerts`;
+- `GET /v1/ops/slos`.
+
+Las rutas filtran por `org_id + product_surface` y derivan alertas de
+instalaciones, conformance, eval reports, eventos, costos y runtime usage. La
+capa es de lectura; no reemplaza los endpoints fuente de products,
+installations, capabilities, observability, costos ni runtime policy.
+
 ## Ponti
 
 Ponti no se implementa en esta fase. Cuando avance, Ponti debe:

@@ -109,6 +109,22 @@ Los evals de producto son no bloqueantes al inicio; el reporte mantiene
 thresholds por producto para convertirlos en gate cuando el producto tenga
 suficiente cobertura.
 
+## Ops console
+
+- `GET /v1/ops/console` devuelve una vista agregada por `org_id` y
+  `product_surface`: products, installations, capabilities, conformance,
+  security eval reports, cost summary, runtime policy/usage, eventos, alertas y
+  SLOs.
+- `GET /v1/ops/alerts` devuelve solo alertas derivadas.
+- `GET /v1/ops/slos` devuelve SLOs por producto.
+
+Las alertas iniciales son reglas deterministicas y baratas de operar:
+installation/product disabled, conformance failed, eval regression,
+tenant/product leakage signals, cost near/exhausted, high tool error rate y
+rate limit abuse. Los SLOs iniciales cubren availability, tool success rate,
+eval score y cost ceiling; latency queda `unknown` hasta persistir latencias por
+evento/tool.
+
 ## Smoke
 
 ```bash

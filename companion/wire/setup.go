@@ -24,6 +24,7 @@ import (
 	"github.com/devpablocristo/companion/internal/jobs"
 	"github.com/devpablocristo/companion/internal/memory"
 	nexusassist "github.com/devpablocristo/companion/internal/nexus_assist"
+	"github.com/devpablocristo/companion/internal/ops"
 	"github.com/devpablocristo/companion/internal/productlimits"
 	"github.com/devpablocristo/companion/internal/products"
 	"github.com/devpablocristo/companion/internal/runtime"
@@ -620,6 +621,15 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	securityEvalUC := securityevals.NewUsecases(securityEvalRepo)
 	securityEvalUC.SetRateLimiter(productRateLimiter)
 	securityEvalHandler := securityevals.NewHandler(securityEvalUC)
+	opsUC := ops.NewUsecases(ops.Deps{
+		Products:        productUC,
+		Capabilities:    capabilityUC,
+		Evals:           securityEvalUC,
+		Observability:   observabilityRepo,
+		Costs:           observabilityRepo,
+		RuntimeControls: runtimeControlsRepo,
+	})
+	opsHandler := ops.NewHandler(opsUC)
 	jobHandler := jobs.NewHandler(jobRepo)
 	adapter := runtime.NewOrchestratorAdapter(orchestrator)
 	uc.SetOrchestrator(adapter)
@@ -663,6 +673,7 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	observabilityHandler.Register(mux)
 	runtimeControlsHandler.Register(mux)
 	securityEvalHandler.Register(mux)
+	opsHandler.Register(mux)
 	jobHandler.Register(mux)
 	nexusAssistHandler.Register(mux)
 	assistHandler.Register(mux)
