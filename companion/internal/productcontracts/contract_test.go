@@ -20,6 +20,33 @@ func TestValidateSpecPassesReusableProductContract(t *testing.T) {
 	}
 }
 
+func TestReferenceProductContractFixturePasses(t *testing.T) {
+	t.Parallel()
+
+	contractPath, err := productevals.FindRepoFile("companion/scripts/onboarding/reference-product-contract.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	evalPackPath, err := productevals.FindRepoFile("companion/scripts/evals/reference-golden.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec, err := LoadSpec(contractPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pack, err := productevals.LoadPack(evalPackPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec.EvalPack = &pack
+
+	report := ValidateSpec(spec)
+	if report.Status != StatusPassed {
+		t.Fatalf("expected reference fixture to pass, got %+v", report)
+	}
+}
+
 func TestValidateSpecRejectsWriteWithoutNexusMetadata(t *testing.T) {
 	t.Parallel()
 

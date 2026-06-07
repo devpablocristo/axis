@@ -131,6 +131,8 @@ local obligatorio sigue siendo `bash scripts/evals/run-security-evals.sh`.
 - `bash scripts/evals/run-product-evals.sh` valida packs y tests genericos.
 - `go run ./cmd/product-onboarding-check -contract <contract.json> -eval-pack
   scripts/evals/<product>-golden.json` ejecuta el checklist de onboarding.
+- `bash scripts/onboarding/check-reference-product.sh` valida el producto
+  generico `reference` sin conectar ningun producto real.
 
 Los evals de producto son no bloqueantes al inicio; el reporte mantiene
 thresholds por producto para convertirlos en gate cuando el producto tenga
