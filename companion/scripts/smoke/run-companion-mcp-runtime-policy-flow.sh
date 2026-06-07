@@ -70,15 +70,13 @@ trap cleanup EXIT
 
 runtime_policy_guardrail_count() {
   local events
-  events=$(companion_get "/v1/observability/events?org_id=${AUDIT_ORG_ID}&product_surface=companion&limit=500")
+  events=$(companion_get "/v1/observability/events?org_id=${AUDIT_ORG_ID}&product_surface=companion&event_type=guardrail&event_name=mcp_runtime_policy&tool_name=axis.products.list&limit=50")
   EVENTS_JSON="$events" python3 - <<'PY'
 import json, os
 
 events = json.loads(os.environ["EVENTS_JSON"]).get("events") or []
 count = 0
 for event in events:
-    if event.get("event_type") != "guardrail" or event.get("event_name") != "mcp_runtime_policy":
-        continue
     payload = event.get("payload") or {}
     if payload.get("tool_name") == "axis.products.list" and payload.get("target") == "tool:axis.products.list":
         count += 1
