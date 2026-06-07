@@ -66,6 +66,8 @@ Endpoint operativo:
   generica como `draft`.
 - `POST /v1/capabilities/{capability_id}/versions/{version}/promote`: activa un
   manifest solo si pasa conformance.
+- `POST /v1/capabilities/{capability_id}/versions/{version}/deprecate`: marca
+  una version como no recomendada para nuevas ejecuciones.
 - `POST /v1/capabilities/{capability_id}/versions/{version}/block`: bloquea un
   manifest manualmente.
 
@@ -80,5 +82,13 @@ Invariantes:
 - Una capability con rollback automático debe declarar `rollback_capability_id`.
 - La metadata que ve el planner y la metadata enviada a Nexus derivan del mismo
   manifest versionado.
+- Cada import conserva provenance: `source`, `source_uri` cuando aplica,
+  `imported_by`, `created_at` como instante de import y `updated_at`.
+- `promote`, `deprecate` y `block` registran una conformance/audit run con
+  transicion de estado, actor y `impact=unknown` hasta persistir consumers.
+- Una version `blocked` no puede volver a `active` con promote directo; debe
+  reimportarse o pasar por un flujo explicito futuro de unblock auditado.
+- Una version `deprecated` puede reactivarse con promote si vuelve a pasar
+  conformance; esa reactivacion queda auditada.
 - Si existe runtime control plane y falta una política de customer org, la
   ejecución de capabilities falla cerrado.

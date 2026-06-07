@@ -151,6 +151,15 @@ Estados persistidos:
 - `blocked`: bloqueado manualmente; no puede promoverse hasta ser reimportado o
   corregido.
 
+Cada manifest conserva provenance operativo: `source`, `source_uri` cuando la
+importacion viene de URL, `imported_by`, `created_at` como momento de import y
+`updated_at`. Las transiciones `promote`, `deprecate` y `block` registran una
+conformance/audit run con actor, cambio de estado e `impact=unknown`; Axis no
+persiste todavia una relacion completa de consumers activos por capability.
+Una version `deprecated` puede reactivarse con `promote` si vuelve a pasar
+conformance. Una version `blocked` no se promueve directamente; debe reimportarse
+o esperar un flujo explicito futuro de unblock auditado.
+
 Import soportado:
 
 - manual, enviando un `capability_manifest.v1`;

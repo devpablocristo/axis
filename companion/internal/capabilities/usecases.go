@@ -75,6 +75,13 @@ type ImportManifestSourceInput struct {
 	ImportedBy             string
 }
 
+type ManifestStatusChangeInput struct {
+	CapabilityID string
+	Version      string
+	ActorID      string
+	Reason       string
+}
+
 func (uc *Usecases) ImportManifestSource(ctx context.Context, in ImportManifestSourceInput) ([]ManifestRecord, error) {
 	if uc == nil || uc.repo == nil {
 		return nil, fmt.Errorf("capability repository is not configured")
@@ -141,14 +148,33 @@ func (uc *Usecases) GetManifest(ctx context.Context, capabilityID, version strin
 }
 
 func (uc *Usecases) PromoteManifest(ctx context.Context, capabilityID, version string) (ManifestRecord, error) {
+	return uc.PromoteManifestWithAudit(ctx, ManifestStatusChangeInput{
+		CapabilityID: capabilityID,
+		Version:      version,
+	})
+}
+
+func (uc *Usecases) PromoteManifestWithAudit(ctx context.Context, in ManifestStatusChangeInput) (ManifestRecord, error) {
 	if uc == nil || uc.repo == nil {
 		return ManifestRecord{}, fmt.Errorf("capability repository is not configured")
 	}
-	record, err := uc.repo.GetManifest(ctx, capabilityID, version)
+	record, err := uc.repo.GetManifest(ctx, in.CapabilityID, in.Version)
 	if err != nil {
 		return ManifestRecord{}, err
 	}
 	if record.Status == ManifestStatusBlocked {
+		_, _ = uc.repo.SaveConformanceRun(ctx, ConformanceRun{
+			CapabilityID: record.Manifest.CapabilityID,
+			Version:      record.Manifest.Version,
+			Status:       ConformanceStatusFailed,
+			Checks:       map[string]bool{"blocked_promotion_rejected": false},
+			Errors:       []string{"blocked capability manifests cannot be promoted without reimport"},
+			Evidence: manifestTransitionEvidence(record, ManifestStatusActive, "promote", in.ActorID, in.Reason, map[string]any{
+				"blocked_promotion_rejected": true,
+				"evaluated_at":               time.Now().UTC().Format(time.RFC3339Nano),
+			}),
+			CreatedBy: strings.TrimSpace(in.ActorID),
+		})
 		return ManifestRecord{}, fmt.Errorf("%w: blocked capability manifests cannot be promoted", ErrInvalidManifest)
 	}
 	checks, errs := uc.checkManifestConformance(ctx, record.Manifest)
@@ -159,10 +185,11 @@ func (uc *Usecases) PromoteManifest(ctx context.Context, capabilityID, version s
 			Status:       ConformanceStatusFailed,
 			Checks:       checks,
 			Errors:       errs,
-			Evidence: map[string]any{
+			Evidence: manifestTransitionEvidence(record, ManifestStatusActive, "promote", in.ActorID, in.Reason, map[string]any{
 				"promotion_blocked": true,
 				"evaluated_at":      time.Now().UTC().Format(time.RFC3339Nano),
-			},
+			}),
+			CreatedBy: strings.TrimSpace(in.ActorID),
 		})
 		return ManifestRecord{}, fmt.Errorf("%w: conformance failed: %s", ErrInvalidManifest, strings.Join(errs, "; "))
 	}
@@ -171,28 +198,61 @@ func (uc *Usecases) PromoteManifest(ctx context.Context, capabilityID, version s
 		Version:      record.Manifest.Version,
 		Status:       ConformanceStatusPassed,
 		Checks:       checks,
-		Evidence: map[string]any{
+		Evidence: manifestTransitionEvidence(record, ManifestStatusActive, "promote", in.ActorID, in.Reason, map[string]any{
 			"promotion_gate": true,
 			"evaluated_at":   time.Now().UTC().Format(time.RFC3339Nano),
-		},
+		}),
+		CreatedBy: strings.TrimSpace(in.ActorID),
 	}); err != nil {
 		return ManifestRecord{}, err
 	}
-	return uc.repo.UpdateManifestStatus(ctx, capabilityID, version, ManifestStatusActive)
+	return uc.repo.UpdateManifestStatus(ctx, in.CapabilityID, in.Version, ManifestStatusActive)
 }
 
 func (uc *Usecases) DeprecateManifest(ctx context.Context, capabilityID, version string) (ManifestRecord, error) {
+	return uc.DeprecateManifestWithAudit(ctx, ManifestStatusChangeInput{
+		CapabilityID: capabilityID,
+		Version:      version,
+	})
+}
+
+func (uc *Usecases) DeprecateManifestWithAudit(ctx context.Context, in ManifestStatusChangeInput) (ManifestRecord, error) {
 	if uc == nil || uc.repo == nil {
 		return ManifestRecord{}, fmt.Errorf("capability repository is not configured")
 	}
-	return uc.repo.UpdateManifestStatus(ctx, capabilityID, version, ManifestStatusDeprecated)
+	record, err := uc.repo.GetManifest(ctx, in.CapabilityID, in.Version)
+	if err != nil {
+		return ManifestRecord{}, err
+	}
+	updated, err := uc.repo.UpdateManifestStatus(ctx, in.CapabilityID, in.Version, ManifestStatusDeprecated)
+	if err != nil {
+		return ManifestRecord{}, err
+	}
+	_, _ = uc.repo.SaveConformanceRun(ctx, transitionRun(record, ManifestStatusDeprecated, "deprecate", in.ActorID, in.Reason))
+	return updated, nil
 }
 
 func (uc *Usecases) BlockManifest(ctx context.Context, capabilityID, version string) (ManifestRecord, error) {
+	return uc.BlockManifestWithAudit(ctx, ManifestStatusChangeInput{
+		CapabilityID: capabilityID,
+		Version:      version,
+	})
+}
+
+func (uc *Usecases) BlockManifestWithAudit(ctx context.Context, in ManifestStatusChangeInput) (ManifestRecord, error) {
 	if uc == nil || uc.repo == nil {
 		return ManifestRecord{}, fmt.Errorf("capability repository is not configured")
 	}
-	return uc.repo.UpdateManifestStatus(ctx, capabilityID, version, ManifestStatusBlocked)
+	record, err := uc.repo.GetManifest(ctx, in.CapabilityID, in.Version)
+	if err != nil {
+		return ManifestRecord{}, err
+	}
+	updated, err := uc.repo.UpdateManifestStatus(ctx, in.CapabilityID, in.Version, ManifestStatusBlocked)
+	if err != nil {
+		return ManifestRecord{}, err
+	}
+	_, _ = uc.repo.SaveConformanceRun(ctx, transitionRun(record, ManifestStatusBlocked, "block", in.ActorID, in.Reason))
+	return updated, nil
 }
 
 type ConformanceInput struct {
@@ -278,4 +338,51 @@ func (uc *Usecases) checkManifestConformance(ctx context.Context, manifest Manif
 	}
 	checks["product_active"] = true
 	return checks, dedupeStrings(errs)
+}
+
+func transitionRun(record ManifestRecord, toStatus, operation, actorID, reason string) ConformanceRun {
+	return ConformanceRun{
+		CapabilityID: record.Manifest.CapabilityID,
+		Version:      record.Manifest.Version,
+		Status:       ConformanceStatusPassed,
+		Checks:       map[string]bool{"status_transition": true},
+		Evidence: manifestTransitionEvidence(record, toStatus, operation, actorID, reason, map[string]any{
+			"evaluated_at": time.Now().UTC().Format(time.RFC3339Nano),
+		}),
+		CreatedBy: strings.TrimSpace(actorID),
+	}
+}
+
+func manifestTransitionEvidence(record ManifestRecord, toStatus, operation, actorID, reason string, extra map[string]any) map[string]any {
+	evidence := map[string]any{
+		"operation": operation,
+		"status_transition": map[string]any{
+			"from": strings.TrimSpace(record.Status),
+			"to":   strings.TrimSpace(toStatus),
+		},
+		"impact":          "unknown",
+		"impact_reason":   "active capability consumers are not persisted yet",
+		"source":          strings.TrimSpace(record.Source),
+		"source_uri":      strings.TrimSpace(record.SourceURI),
+		"imported_by":     strings.TrimSpace(record.ImportedBy),
+		"capability_id":   record.Manifest.CapabilityID,
+		"version":         record.Manifest.Version,
+		"product_surface": strings.TrimSpace(record.Manifest.ProductSurface),
+	}
+	if !record.CreatedAt.IsZero() {
+		evidence["imported_at"] = record.CreatedAt.UTC().Format(time.RFC3339Nano)
+	}
+	if !record.UpdatedAt.IsZero() {
+		evidence["last_updated_at"] = record.UpdatedAt.UTC().Format(time.RFC3339Nano)
+	}
+	if actorID = strings.TrimSpace(actorID); actorID != "" {
+		evidence["actor_id"] = actorID
+	}
+	if reason = strings.TrimSpace(reason); reason != "" {
+		evidence["reason"] = reason
+	}
+	for key, value := range extra {
+		evidence[key] = value
+	}
+	return evidence
 }

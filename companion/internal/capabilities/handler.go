@@ -142,7 +142,11 @@ func (h *Handler) promote(w http.ResponseWriter, r *http.Request) {
 	if !requireCapabilityScope(w, r, scopeCapabilitiesAdmin) {
 		return
 	}
-	record, err := h.uc.PromoteManifest(r.Context(), r.PathValue("capability_id"), r.PathValue("version"))
+	record, err := h.uc.PromoteManifestWithAudit(r.Context(), ManifestStatusChangeInput{
+		CapabilityID: r.PathValue("capability_id"),
+		Version:      r.PathValue("version"),
+		ActorID:      identityctx.FromRequest(r).EffectiveActorID(),
+	})
 	if err != nil {
 		writeManifestError(w, err, "promote capability failed")
 		return
@@ -154,7 +158,11 @@ func (h *Handler) deprecate(w http.ResponseWriter, r *http.Request) {
 	if !requireCapabilityScope(w, r, scopeCapabilitiesAdmin) {
 		return
 	}
-	record, err := h.uc.DeprecateManifest(r.Context(), r.PathValue("capability_id"), r.PathValue("version"))
+	record, err := h.uc.DeprecateManifestWithAudit(r.Context(), ManifestStatusChangeInput{
+		CapabilityID: r.PathValue("capability_id"),
+		Version:      r.PathValue("version"),
+		ActorID:      identityctx.FromRequest(r).EffectiveActorID(),
+	})
 	if err != nil {
 		writeManifestError(w, err, "deprecate capability failed")
 		return
@@ -166,7 +174,11 @@ func (h *Handler) block(w http.ResponseWriter, r *http.Request) {
 	if !requireCapabilityScope(w, r, scopeCapabilitiesAdmin) {
 		return
 	}
-	record, err := h.uc.BlockManifest(r.Context(), r.PathValue("capability_id"), r.PathValue("version"))
+	record, err := h.uc.BlockManifestWithAudit(r.Context(), ManifestStatusChangeInput{
+		CapabilityID: r.PathValue("capability_id"),
+		Version:      r.PathValue("version"),
+		ActorID:      identityctx.FromRequest(r).EffectiveActorID(),
+	})
 	if err != nil {
 		writeManifestError(w, err, "block capability failed")
 		return

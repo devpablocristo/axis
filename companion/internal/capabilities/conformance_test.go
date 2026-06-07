@@ -310,6 +310,25 @@ func TestUsecases_PromoteValidReadManifestActivatesIt(t *testing.T) {
 	}
 }
 
+func TestUsecases_ImportManifestPersistsManualProvenance(t *testing.T) {
+	t.Parallel()
+
+	repo := newFakeCapabilityRepo()
+	uc := NewUsecases(repo)
+	manifest := validReadManifest()
+
+	record, err := uc.ImportManifest(context.Background(), manifest, "tester")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.Status != ManifestStatusDraft || record.Source != ManifestSourceImported || record.ImportedBy != "tester" {
+		t.Fatalf("unexpected manual import provenance: %+v", record)
+	}
+	if record.CreatedAt.IsZero() || record.UpdatedAt.IsZero() {
+		t.Fatalf("expected import timestamps, got %+v", record)
+	}
+}
+
 func TestUsecases_ImportRejectsWriteWithoutNexusMetadata(t *testing.T) {
 	t.Parallel()
 
@@ -321,6 +340,20 @@ func TestUsecases_ImportRejectsWriteWithoutNexusMetadata(t *testing.T) {
 
 	if _, err := uc.ImportManifest(context.Background(), manifest, "tester"); !errors.Is(err, ErrInvalidManifest) {
 		t.Fatalf("expected invalid write manifest, got %v", err)
+	}
+}
+
+func TestUsecases_ImportRejectsNonSemverVersionWithClearError(t *testing.T) {
+	t.Parallel()
+
+	repo := newFakeCapabilityRepo()
+	uc := NewUsecases(repo)
+	manifest := validReadManifest()
+	manifest.Version = "v1"
+
+	_, err := uc.ImportManifest(context.Background(), manifest, "tester")
+	if !errors.Is(err, ErrInvalidManifest) || !strings.Contains(err.Error(), "version must be semver") {
+		t.Fatalf("expected clear semver validation error, got %v", err)
 	}
 }
 
@@ -340,6 +373,59 @@ func TestUsecases_ImportRejectsInvalidSchema(t *testing.T) {
 
 	if _, err := uc.ImportManifest(context.Background(), manifest, "tester"); !errors.Is(err, ErrInvalidManifest) {
 		t.Fatalf("expected invalid schema manifest, got %v", err)
+	}
+}
+
+func TestUsecases_DeprecatedManifestCanBeReactivatedWithAudit(t *testing.T) {
+	t.Parallel()
+
+	repo := newFakeCapabilityRepo()
+	uc := NewUsecases(repo).WithProductRegistry(fakeProductRegistry{product: products.Product{
+		ProductSurface: "demo",
+		Status:         products.ProductStatusActive,
+	}})
+	manifest := validReadManifest()
+	if _, err := uc.ImportManifest(context.Background(), manifest, "tester"); err != nil {
+		t.Fatal(err)
+	}
+	deprecated, err := uc.DeprecateManifestWithAudit(context.Background(), ManifestStatusChangeInput{
+		CapabilityID: manifest.CapabilityID,
+		Version:      manifest.Version,
+		ActorID:      "admin-a",
+		Reason:       "newer version available",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deprecated.Status != ManifestStatusDeprecated {
+		t.Fatalf("expected deprecated manifest, got %+v", deprecated)
+	}
+	if len(repo.runs) != 1 || repo.runs[0].CreatedBy != "admin-a" {
+		t.Fatalf("expected deprecate audit run, got %+v", repo.runs)
+	}
+	assertTransitionEvidence(t, repo.runs[0].Evidence, "deprecate", ManifestStatusDraft, ManifestStatusDeprecated)
+	if repo.runs[0].Evidence["impact"] != "unknown" {
+		t.Fatalf("expected impact unknown, got %+v", repo.runs[0].Evidence)
+	}
+
+	record, err := uc.PromoteManifestWithAudit(context.Background(), ManifestStatusChangeInput{
+		CapabilityID: manifest.CapabilityID,
+		Version:      manifest.Version,
+		ActorID:      "admin-a",
+		Reason:       "reactivate after review",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.Status != ManifestStatusActive {
+		t.Fatalf("expected reactivated manifest, got %+v", record)
+	}
+	if len(repo.runs) != 2 || repo.runs[1].Status != ConformanceStatusPassed || repo.runs[1].CreatedBy != "admin-a" {
+		t.Fatalf("expected promotion audit run, got %+v", repo.runs)
+	}
+	assertTransitionEvidence(t, repo.runs[1].Evidence, "promote", ManifestStatusDeprecated, ManifestStatusActive)
+	if repo.runs[1].Evidence["promotion_gate"] != true {
+		t.Fatalf("expected promotion gate evidence, got %+v", repo.runs[1].Evidence)
 	}
 }
 
@@ -363,6 +449,7 @@ func TestUsecases_PromoteRejectsDisabledProduct(t *testing.T) {
 	if len(repo.runs) != 1 || repo.runs[0].Status != ConformanceStatusFailed {
 		t.Fatalf("expected failed conformance run, got %+v", repo.runs)
 	}
+	assertTransitionEvidence(t, repo.runs[0].Evidence, "promote", ManifestStatusDraft, ManifestStatusActive)
 }
 
 func TestUsecases_BlockManifestPreventsPromotion(t *testing.T) {
@@ -384,8 +471,19 @@ func TestUsecases_BlockManifestPreventsPromotion(t *testing.T) {
 	if blocked.Status != ManifestStatusBlocked {
 		t.Fatalf("expected blocked manifest, got %+v", blocked)
 	}
+	if len(repo.runs) != 1 || repo.runs[0].Status != ConformanceStatusPassed {
+		t.Fatalf("expected block audit run, got %+v", repo.runs)
+	}
+	assertTransitionEvidence(t, repo.runs[0].Evidence, "block", ManifestStatusDraft, ManifestStatusBlocked)
 	if _, err := uc.PromoteManifest(context.Background(), manifest.CapabilityID, manifest.Version); !errors.Is(err, ErrInvalidManifest) {
 		t.Fatalf("expected blocked manifest promotion rejection, got %v", err)
+	}
+	if len(repo.runs) != 2 || repo.runs[1].Status != ConformanceStatusFailed {
+		t.Fatalf("expected rejected promotion audit run, got %+v", repo.runs)
+	}
+	assertTransitionEvidence(t, repo.runs[1].Evidence, "promote", ManifestStatusBlocked, ManifestStatusActive)
+	if repo.runs[1].Evidence["blocked_promotion_rejected"] != true {
+		t.Fatalf("expected blocked promotion evidence, got %+v", repo.runs[1].Evidence)
 	}
 }
 
@@ -412,5 +510,45 @@ func TestUsecases_ImportManifestSourcePersistsDraftsFromFetcher(t *testing.T) {
 	}
 	if records[0].Status != ManifestStatusDraft || records[0].Source != ManifestSourceURL || records[0].SourceURI != "https://example.test/capabilities.json" {
 		t.Fatalf("unexpected imported source record: %+v", records[0])
+	}
+	if records[0].ImportedBy != "tester" {
+		t.Fatalf("expected imported_by provenance, got %+v", records[0])
+	}
+}
+
+func TestUsecases_ImportManifestSourceRejectsProductMismatchWithClearError(t *testing.T) {
+	t.Parallel()
+
+	repo := newFakeCapabilityRepo()
+	fetcher := &fakeManifestSourceFetcher{manifests: []Manifest{validReadManifest()}}
+	uc := NewUsecases(repo).WithManifestSourceFetcher(fetcher)
+
+	_, err := uc.ImportManifestSource(context.Background(), ImportManifestSourceInput{
+		SourceURL:              "https://example.test/capabilities.json",
+		ExpectedProductSurface: "other",
+		ImportedBy:             "tester",
+	})
+	if !errors.Is(err, ErrInvalidManifest) || !strings.Contains(err.Error(), `does not match expected "other"`) {
+		t.Fatalf("expected clear product mismatch error, got %v", err)
+	}
+	if len(repo.records) != 0 {
+		t.Fatalf("product mismatch must not persist records, got %+v", repo.records)
+	}
+}
+
+func assertTransitionEvidence(t *testing.T, evidence map[string]any, operation, from, to string) {
+	t.Helper()
+	if evidence["operation"] != operation {
+		t.Fatalf("expected operation %q, got %+v", operation, evidence)
+	}
+	transition, ok := evidence["status_transition"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected status_transition evidence, got %+v", evidence)
+	}
+	if transition["from"] != from || transition["to"] != to {
+		t.Fatalf("expected transition %s -> %s, got %+v", from, to, transition)
+	}
+	if evidence["impact"] != "unknown" || evidence["impact_reason"] == "" {
+		t.Fatalf("expected impact unknown evidence, got %+v", evidence)
 	}
 }
