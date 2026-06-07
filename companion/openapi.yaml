@@ -1385,7 +1385,11 @@ components:
         auth_mode:
           type: string
           enum: [none, api_key_ref, oauth2, internal_jwt, custom]
-        secret_ref: { type: string }
+        secret_ref:
+          type: string
+          description: >
+            Reference only; never inline secret. Supported refs: `env:NAME`,
+            `vault:path`, `secretmanager:path`.
         enabled: { type: boolean }
         config:
           type: object
@@ -1401,7 +1405,11 @@ components:
         auth_mode:
           type: string
           enum: [none, api_key_ref, oauth2, internal_jwt, custom]
-        secret_ref: { type: string }
+        secret_ref:
+          type: string
+          description: >
+            Reference only; never inline secret. Supported refs: `env:NAME`,
+            `vault:path`, `secretmanager:path`.
         enabled: { type: boolean, default: true }
         config:
           type: object

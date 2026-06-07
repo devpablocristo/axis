@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/devpablocristo/companion/internal/secrets"
 )
 
 type Repository interface {
@@ -16,11 +18,17 @@ type Repository interface {
 }
 
 type Usecases struct {
-	repo Repository
+	repo           Repository
+	secretResolver secrets.Resolver
 }
 
 func NewUsecases(repo Repository) *Usecases {
 	return &Usecases{repo: repo}
+}
+
+func (u *Usecases) WithSecretResolver(resolver secrets.Resolver) *Usecases {
+	u.secretResolver = resolver
+	return u
 }
 
 func (u *Usecases) SaveProduct(ctx context.Context, product Product) (Product, error) {
@@ -94,4 +102,18 @@ func (u *Usecases) ResolveInstallation(ctx context.Context, orgID, productSurfac
 		return Installation{}, ErrProductDisabled
 	}
 	return installation, nil
+}
+
+func (u *Usecases) ResolveInstallationSecret(ctx context.Context, orgID, productSurface string) (secrets.Secret, error) {
+	installation, err := u.ResolveInstallation(ctx, orgID, productSurface)
+	if err != nil {
+		return secrets.Secret{}, err
+	}
+	if installation.SecretRef == "" {
+		return secrets.Secret{}, fmt.Errorf("%w: installation has no secret_ref", ErrValidation)
+	}
+	if u.secretResolver == nil {
+		return secrets.Secret{}, ErrSecretResolverMissing
+	}
+	return u.secretResolver.Resolve(ctx, installation.SecretRef)
 }

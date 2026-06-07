@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/devpablocristo/companion/internal/secrets"
 )
 
 const (
@@ -28,6 +30,7 @@ var (
 	ErrInstallationRequired  = errors.New("active product installation required")
 	ErrProductDisabled       = errors.New("product disabled")
 	ErrValidation            = errors.New("product registry validation failed")
+	ErrSecretResolverMissing = errors.New("secret resolver not configured")
 	productSurfaceExpression = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
 )
 
@@ -133,6 +136,11 @@ func validateInstallation(installation Installation) error {
 	}
 	if authModeNeedsSecretRef(installation.AuthMode) && installation.SecretRef == "" {
 		return fmt.Errorf("%w: secret_ref is required for auth_mode %s", ErrValidation, installation.AuthMode)
+	}
+	if installation.SecretRef != "" {
+		if err := secrets.ValidateRef(installation.SecretRef); err != nil {
+			return fmt.Errorf("%w: invalid secret_ref: %v", ErrValidation, err)
+		}
 	}
 	if containsPlainSecret(installation.Config) {
 		return fmt.Errorf("%w: installation config must not contain inline secrets", ErrValidation)

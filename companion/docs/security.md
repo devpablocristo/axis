@@ -12,6 +12,13 @@ principal recibido desde servicios/gateways confiables y construye el
 - `companion_principal`, default `companion.employee_ai`.
 - `scopes` desde `scope`, `scp` o metadata autenticada.
 
+JWT interno service-to-service debe incluir `iss`, `aud`, `exp`, `iat` y `kid`
+cuando la key sea rotativa. `aud` debe apuntar al servicio Axis receptor,
+`exp` debe ser corto, y `kid` permite publicar una key nueva manteniendo una
+key anterior durante el periodo de gracia. La politica inicial de rotacion se
+documenta en `product-integration-contract-v1.md`; mientras no haya JWKS
+productivo, dev puede usar keys estaticas acotadas por entorno.
+
 API keys soportan metadata inline: `actor`, `org_id`, `scopes` y
 `service_principal`.
 
@@ -71,3 +78,9 @@ check rojo.
 
 Evidence de connector executions sanitiza claves sensibles conocidas. No se
 deben registrar API keys, bearer tokens ni payloads sensibles sin redacción.
+
+Product installations no guardan secretos planos. `api_key_ref`, `oauth2` y
+`custom` requieren `secret_ref` con esquema valido. El adapter local/dev resuelve
+solo `env:`; `vault:` y `secretmanager:` quedan como contrato para adapters
+productivos. Los valores resueltos se encapsulan como secretos redactados: APIs,
+logs y observability no deben serializar el valor.

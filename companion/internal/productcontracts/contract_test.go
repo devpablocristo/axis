@@ -80,6 +80,19 @@ func TestValidateSpecRequiresExpectedErrorContract(t *testing.T) {
 	}
 }
 
+func TestValidateSpecRejectsMalformedSecretRef(t *testing.T) {
+	t.Parallel()
+
+	spec := validSpec()
+	spec.Installation.AuthMode = products.AuthModeAPIKeyRef
+	spec.Installation.SecretRef = "plain-secret"
+
+	report := ValidateSpec(spec)
+	if report.Status != StatusFailed || !hasFailure(report, "installation_active") {
+		t.Fatalf("expected installation_active failure, got %+v", report)
+	}
+}
+
 func validSpec() Spec {
 	return Spec{
 		Version: 1,

@@ -3,8 +3,12 @@ package products
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
+	"strings"
 	"testing"
+
+	"github.com/devpablocristo/companion/internal/secrets"
 )
 
 type fakeRepo struct {
@@ -103,6 +107,99 @@ func TestSaveInstallationRejectsInlineSecrets(t *testing.T) {
 	})
 	if !errors.Is(err, ErrValidation) {
 		t.Fatalf("expected validation error, got %v", err)
+	}
+}
+
+func TestSaveInstallationRejectsSensitiveConfigKeys(t *testing.T) {
+	t.Parallel()
+
+	for _, key := range []string{"token", "secret", "api_key", "password", "authorization"} {
+		t.Run(key, func(t *testing.T) {
+			t.Parallel()
+			repo := newFakeRepo()
+			uc := NewUsecases(repo)
+			_, _ = uc.SaveProduct(context.Background(), Product{ProductSurface: "reference"})
+
+			_, err := uc.SaveInstallation(context.Background(), Installation{
+				OrgID:          "org-a",
+				ProductSurface: "reference",
+				BaseURL:        "https://reference.example",
+				AuthMode:       AuthModeNone,
+				Enabled:        true,
+				Config:         map[string]any{"nested": map[string]any{key: "plain"}},
+			})
+			if !errors.Is(err, ErrValidation) {
+				t.Fatalf("expected validation error for %s, got %v", key, err)
+			}
+		})
+	}
+}
+
+func TestSaveInstallationRequiresValidSecretRef(t *testing.T) {
+	t.Parallel()
+
+	repo := newFakeRepo()
+	uc := NewUsecases(repo)
+	_, _ = uc.SaveProduct(context.Background(), Product{ProductSurface: "reference"})
+
+	_, err := uc.SaveInstallation(context.Background(), Installation{
+		OrgID:          "org-a",
+		ProductSurface: "reference",
+		BaseURL:        "https://reference.example",
+		AuthMode:       AuthModeAPIKeyRef,
+		SecretRef:      "plain-secret",
+		Enabled:        true,
+	})
+	if !errors.Is(err, ErrValidation) {
+		t.Fatalf("expected invalid secret_ref validation error, got %v", err)
+	}
+	installation, err := uc.SaveInstallation(context.Background(), Installation{
+		OrgID:          "org-a",
+		ProductSurface: "reference",
+		BaseURL:        "https://reference.example",
+		AuthMode:       AuthModeAPIKeyRef,
+		SecretRef:      "env:AXIS_REFERENCE_API_KEY",
+		Enabled:        true,
+	})
+	if err != nil {
+		t.Fatalf("expected valid secret_ref to save: %v", err)
+	}
+	if installation.SecretRef != "env:AXIS_REFERENCE_API_KEY" {
+		t.Fatalf("unexpected secret_ref: %+v", installation)
+	}
+}
+
+func TestResolveInstallationSecretUsesConfiguredResolverAndRedactsValue(t *testing.T) {
+	t.Parallel()
+
+	repo := newFakeRepo()
+	uc := NewUsecases(repo).WithSecretResolver(secrets.NewEnvResolverWithLookup(func(name string) (string, bool) {
+		if name == "AXIS_REFERENCE_API_KEY" {
+			return "plain-secret", true
+		}
+		return "", false
+	}))
+	_, _ = uc.SaveProduct(context.Background(), Product{ProductSurface: "reference"})
+	_, err := uc.SaveInstallation(context.Background(), Installation{
+		OrgID:          "org-a",
+		ProductSurface: "reference",
+		BaseURL:        "https://reference.example",
+		AuthMode:       AuthModeAPIKeyRef,
+		SecretRef:      "env:AXIS_REFERENCE_API_KEY",
+		Enabled:        true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, err := uc.ResolveInstallationSecret(context.Background(), "org-a", "reference")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if secret.Value() != "plain-secret" {
+		t.Fatalf("unexpected secret value")
+	}
+	if strings.Contains(fmt.Sprintf("%v", secret), "plain-secret") {
+		t.Fatalf("secret formatter leaked value")
 	}
 }
 

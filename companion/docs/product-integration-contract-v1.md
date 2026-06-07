@@ -54,6 +54,21 @@ Claims minimos del JWT interno:
 - `service_principal`
 - `on_behalf_of`
 - `scopes`
+- `iss`: issuer interno de Axis.
+- `aud`: audiencia esperada por el servicio Axis receptor.
+- `exp`: expiracion corta obligatoria.
+- `iat`: fecha de emision.
+- `kid`: identificador de key para rotacion/JWKS cuando haya keyset
+  versionado.
+
+Politica inicial:
+
+- Tokens service-to-service deben ser de vida corta y con `aud` del servicio
+  destino.
+- `kid` es obligatorio cuando la key no sea estatica de dev.
+- La rotacion operativa mantiene al menos una key activa y una key anterior en
+  periodo de gracia.
+- Ningun producto debe enviar secretos en claims; solo referencias o scopes.
 
 ## Product Registry
 
@@ -120,7 +135,15 @@ Reglas:
 - `auth_mode` soporta `none`, `api_key_ref`, `oauth2`, `internal_jwt` y
   `custom`.
 - `api_key_ref`, `oauth2` y `custom` requieren `secret_ref`.
+- `secret_ref` debe usar una referencia segura con esquema:
+  - `env:AXIS_PRODUCT_API_KEY` para local/dev;
+  - `vault:axis/products/<product>/<org>/<name>` para adapter Vault futuro;
+  - `secretmanager:projects/<project>/secrets/<name>` para adapter cloud
+    futuro.
 - `config` no puede contener secretos planos; se usan referencias seguras.
+- El adapter local/dev solo resuelve `env:`. Los adapters productivos deben
+  resolver `vault:` o `secretmanager:` sin exponer valores en APIs, logs ni
+  observability.
 
 ## Capabilities
 

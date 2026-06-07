@@ -10,6 +10,7 @@ import (
 	"github.com/devpablocristo/companion/internal/capabilities"
 	"github.com/devpablocristo/companion/internal/productevals"
 	"github.com/devpablocristo/companion/internal/products"
+	"github.com/devpablocristo/companion/internal/secrets"
 )
 
 const (
@@ -148,6 +149,11 @@ func checkInstallation(spec Spec) StepResult {
 	}
 	if authModeNeedsSecretRef(installation.AuthMode) && installation.SecretRef == "" {
 		return failed("installation_active", "Active installation", "auth_mode requires secret_ref")
+	}
+	if installation.SecretRef != "" {
+		if err := secrets.ValidateRef(installation.SecretRef); err != nil {
+			return failed("installation_active", "Active installation", fmt.Sprintf("invalid secret_ref: %v", err))
+		}
 	}
 	return passed("installation_active", "Active installation")
 }
