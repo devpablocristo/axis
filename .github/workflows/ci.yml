@@ -2,6 +2,8 @@ name: Axis CI
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: "17 6 * * *"
   push:
     branches: [main, develop]
   pull_request:
@@ -66,6 +68,8 @@ jobs:
       - run: go vet ./...
         working-directory: companion
       - run: go test ./...
+        working-directory: companion
+      - run: bash scripts/onboarding/check-reference-product.sh
         working-directory: companion
       - run: bash scripts/quality/check-migrations.sh
         working-directory: companion
@@ -154,9 +158,58 @@ jobs:
         run: bash companion/scripts/smoke/run-companion-mcp-flow.sh
       - name: Run Companion MCP runtime policy smoke
         run: bash companion/scripts/smoke/run-companion-mcp-runtime-policy-flow.sh
-      - name: Dump compose logs
+      - name: Collect smoke diagnostics
         if: failure()
-        run: docker compose logs --no-color companion nexus companion-postgres nexus-postgres
+        run: |
+          mkdir -p smoke-artifacts
+          docker compose ps > smoke-artifacts/compose-ps.txt || true
+          docker compose logs --no-color companion nexus companion-postgres nexus-postgres > smoke-artifacts/compose.log || true
+          tail -n 500 smoke-artifacts/compose.log || true
+      - name: Upload smoke diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcp-smoke-diagnostics-${{ github.run_id }}
+          path: smoke-artifacts/
+          if-no-files-found: ignore
+      - name: Teardown
+        if: always()
+        run: |
+          docker compose down -v
+          docker network rm axis-local || true
+
+  platform-nightly:
+    name: platform-nightly
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    needs: [companion, nexus, bff, console, api-contracts]
+    steps:
+      - uses: actions/checkout@v6
+      - name: Prepare local compose secrets
+        run: |
+          touch /tmp/axis-empty-gcp-adc.json
+          echo "COMPANION_GCP_ADC_HOST_PATH=/tmp/axis-empty-gcp-adc.json" >> "$GITHUB_ENV"
+      - name: Start Axis platform stack
+        run: |
+          make network
+          docker compose up -d --build companion
+      - name: Run full local smoke suite
+        run: make smoke
+      - name: Collect nightly diagnostics
+        if: failure()
+        run: |
+          mkdir -p smoke-artifacts
+          docker compose ps > smoke-artifacts/compose-ps.txt || true
+          docker compose logs --no-color companion nexus companion-postgres nexus-postgres > smoke-artifacts/compose.log || true
+          tail -n 500 smoke-artifacts/compose.log || true
+      - name: Upload nightly diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: platform-nightly-diagnostics-${{ github.run_id }}
+          path: smoke-artifacts/
+          if-no-files-found: ignore
       - name: Teardown
         if: always()
         run: |

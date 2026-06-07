@@ -74,6 +74,9 @@ Los deploys Cloud Run viven en `.github/workflows/` y son independientes por
 deployable: `deploy-nexus-dev`, `deploy-companion-dev`, `deploy-bff-dev` y
 `deploy-console-dev`.
 
+Release, rollback y branch-protection recomendada estan documentados en
+`docs/release-rollback.md`.
+
 Variables GitHub comunes:
 
 - `GCP_PROJECT_ID_DEV`, `GCP_REGION`, `WIF_PROVIDER_DEV`,
