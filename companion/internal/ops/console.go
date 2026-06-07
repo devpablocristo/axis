@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -75,6 +76,7 @@ type Console struct {
 	CostSummary     *runtime.CostSummary          `json:"cost_summary,omitempty"`
 	RuntimePolicy   *runtime.TenantRuntimePolicy  `json:"runtime_policy,omitempty"`
 	RuntimeUsage    *runtime.TenantRuntimeUsage   `json:"runtime_usage,omitempty"`
+	RuntimeLimits   []ProductRuntimeLimit         `json:"runtime_limits,omitempty"`
 	Events          []runtime.ObservabilityEvent  `json:"events"`
 	Alerts          []Alert                       `json:"alerts"`
 	SLOs            []ProductSLO                  `json:"slos"`
@@ -89,6 +91,22 @@ type Alert struct {
 	Source         string         `json:"source"`
 	Evidence       map[string]any `json:"evidence,omitempty"`
 	OccurredAt     time.Time      `json:"occurred_at,omitempty"`
+}
+
+type ProductRuntimeLimit struct {
+	ProductSurface     string  `json:"product_surface"`
+	Period             string  `json:"period"`
+	CostUsedCents      int64   `json:"cost_used_cents"`
+	CostLimitCents     int64   `json:"cost_limit_cents,omitempty"`
+	CostRemainingCents int64   `json:"cost_remaining_cents,omitempty"`
+	CostUsageRatio     float64 `json:"cost_usage_ratio,omitempty"`
+	CostLimitSource    string  `json:"cost_limit_source,omitempty"`
+	ToolCallsUsed      int64   `json:"tool_calls_used"`
+	ToolCallLimit      int64   `json:"tool_call_limit,omitempty"`
+	ToolCallsRemaining int64   `json:"tool_calls_remaining,omitempty"`
+	ToolCallUsageRatio float64 `json:"tool_call_usage_ratio,omitempty"`
+	ToolCallSource     string  `json:"tool_call_source,omitempty"`
+	Status             string  `json:"status"`
 }
 
 type ProductSLO struct {
@@ -187,6 +205,7 @@ func (u *Usecases) GetConsole(ctx context.Context, q Query) (Console, error) {
 			console.RuntimeUsage = &usage
 		}
 	}
+	console.RuntimeLimits = buildRuntimeLimits(console)
 	console.Alerts = buildAlerts(console)
 	console.SLOs = buildSLOs(console)
 	return console, nil
@@ -233,7 +252,10 @@ func buildAlerts(console Console) []Alert {
 	}
 	for _, event := range console.Events {
 		if event.EventType == "guardrail" && strings.Contains(event.EventName, "rate_limit") {
-			alerts = append(alerts, alert("rate_limit_abuse", "warning", event.ProductSurface, "Product rate limit guardrail triggered", "observability", map[string]any{"event_name": event.EventName}, event.OccurredAt))
+			alerts = append(alerts, alert("rate_limit_abuse", "warning", event.ProductSurface, "Product rate limit guardrail triggered", "observability", guardrailEventEvidence(event), event.OccurredAt))
+		}
+		if event.EventType == "guardrail" && strings.Contains(event.EventName, "budget") {
+			alerts = append(alerts, alert("runtime_budget_block", "critical", event.ProductSurface, "Runtime budget guardrail triggered", "observability", guardrailEventEvidence(event), event.OccurredAt))
 		}
 		if event.EventType == "guardrail" && event.EventName == "mcp_runtime_policy" {
 			alerts = append(alerts, alert("mcp_runtime_policy_block", "warning", event.ProductSurface, "MCP tool blocked by runtime policy", "observability", mcpRuntimePolicyEvidence(event), event.OccurredAt))
@@ -253,6 +275,7 @@ func buildAlerts(console Console) []Alert {
 			alerts = append(alerts, alert("high_error_rate", "warning", console.ProductSurface, "Runtime tool error rate is elevated", "runtime_usage", map[string]any{"tool_error_rate": rate}, console.RuntimeUsage.UpdatedAt))
 		}
 	}
+	alerts = dedupeAlerts(alerts)
 	sort.Slice(alerts, func(i, j int) bool {
 		if alerts[i].Severity == alerts[j].Severity {
 			return alerts[i].OccurredAt.After(alerts[j].OccurredAt)
@@ -260,6 +283,23 @@ func buildAlerts(console Console) []Alert {
 		return severityRank(alerts[i].Severity) > severityRank(alerts[j].Severity)
 	})
 	return alerts
+}
+
+func guardrailEventEvidence(event runtime.ObservabilityEvent) map[string]any {
+	evidence := map[string]any{"event_name": event.EventName}
+	if len(event.Payload) == 0 {
+		return evidence
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		return evidence
+	}
+	for _, key := range []string{"tool_name", "target", "reason", "org_id", "product_surface"} {
+		if value, ok := payload[key]; ok {
+			evidence[key] = value
+		}
+	}
+	return evidence
 }
 
 func mcpRuntimePolicyEvidence(event runtime.ObservabilityEvent) map[string]any {
@@ -277,6 +317,276 @@ func mcpRuntimePolicyEvidence(event runtime.ObservabilityEvent) map[string]any {
 		}
 	}
 	return evidence
+}
+
+const alertDedupeWindow = 15 * time.Minute
+
+func dedupeAlerts(values []Alert) []Alert {
+	out := make([]Alert, 0, len(values))
+	for _, item := range values {
+		idx := duplicateAlertIndex(out, item)
+		if idx < 0 {
+			out = append(out, item)
+			continue
+		}
+		out[idx] = mergeDuplicateAlert(out[idx], item)
+	}
+	return out
+}
+
+func duplicateAlertIndex(values []Alert, candidate Alert) int {
+	key := alertDedupeKey(candidate)
+	for i, item := range values {
+		if alertDedupeKey(item) != key {
+			continue
+		}
+		if withinAlertDedupeWindow(item.OccurredAt, candidate.OccurredAt) {
+			return i
+		}
+	}
+	return -1
+}
+
+func alertDedupeKey(item Alert) string {
+	parts := []string{item.Type, item.Severity, item.ProductSurface, item.Source}
+	for _, key := range []string{"event_name", "tool_name", "target", "reason", "capability_id", "suite"} {
+		if item.Evidence == nil {
+			continue
+		}
+		if value, ok := item.Evidence[key]; ok {
+			parts = append(parts, key+"="+fmt.Sprint(value))
+		}
+	}
+	if len(parts) == 4 {
+		parts = append(parts, "message="+item.Message)
+	}
+	return strings.Join(parts, "|")
+}
+
+func withinAlertDedupeWindow(a, b time.Time) bool {
+	if a.IsZero() || b.IsZero() {
+		return true
+	}
+	diff := a.Sub(b)
+	if diff < 0 {
+		diff = -diff
+	}
+	return diff <= alertDedupeWindow
+}
+
+func mergeDuplicateAlert(current, duplicate Alert) Alert {
+	primary := current
+	if duplicate.OccurredAt.After(current.OccurredAt) {
+		primary = duplicate
+	}
+	evidence := copyEvidence(primary.Evidence)
+	suppressed := evidenceInt(current.Evidence, "suppressed_count") + evidenceInt(duplicate.Evidence, "suppressed_count") + 1
+	evidence["suppressed_count"] = suppressed
+	first := minAlertTime(current.OccurredAt, duplicate.OccurredAt)
+	last := maxAlertTime(current.OccurredAt, duplicate.OccurredAt)
+	if !first.IsZero() {
+		evidence["first_occurred_at"] = first.Format(time.RFC3339)
+	}
+	if !last.IsZero() {
+		evidence["last_occurred_at"] = last.Format(time.RFC3339)
+	}
+	primary.Evidence = evidence
+	return primary
+}
+
+func copyEvidence(values map[string]any) map[string]any {
+	if values == nil {
+		return map[string]any{}
+	}
+	out := make(map[string]any, len(values)+3)
+	for key, value := range values {
+		out[key] = value
+	}
+	return out
+}
+
+func evidenceInt(values map[string]any, key string) int {
+	if values == nil {
+		return 0
+	}
+	switch value := values[key].(type) {
+	case int:
+		return value
+	case int64:
+		return int(value)
+	case float64:
+		return int(value)
+	default:
+		return 0
+	}
+}
+
+func minAlertTime(a, b time.Time) time.Time {
+	if a.IsZero() {
+		return b
+	}
+	if b.IsZero() || a.Before(b) {
+		return a
+	}
+	return b
+}
+
+func maxAlertTime(a, b time.Time) time.Time {
+	if a.IsZero() {
+		return b
+	}
+	if b.IsZero() || a.After(b) {
+		return a
+	}
+	return b
+}
+
+func buildRuntimeLimits(console Console) []ProductRuntimeLimit {
+	if console.RuntimePolicy == nil && console.CostSummary == nil {
+		return nil
+	}
+	surfaces := runtimeLimitSurfaces(console)
+	out := make([]ProductRuntimeLimit, 0, len(surfaces))
+	for _, surface := range surfaces {
+		usage := productCostUsage(console.CostSummary, surface)
+		item := ProductRuntimeLimit{
+			ProductSurface: surface,
+			Period:         console.Period,
+			CostUsedCents:  usage.EstimatedCostCents,
+			ToolCallsUsed:  usage.ToolCalls,
+			Status:         "unknown",
+		}
+		if console.RuntimePolicy != nil {
+			applyRuntimeLimitPolicy(&item, *console.RuntimePolicy, surface)
+		}
+		item.Status = runtimeLimitStatus(item)
+		out = append(out, item)
+	}
+	return out
+}
+
+func runtimeLimitSurfaces(console Console) []string {
+	seen := map[string]struct{}{}
+	for _, surface := range productSurfaces(console) {
+		if surface != "" {
+			seen[surface] = struct{}{}
+		}
+	}
+	if console.CostSummary != nil {
+		if console.CostSummary.ProductSurface != "" {
+			seen[console.CostSummary.ProductSurface] = struct{}{}
+		}
+		for _, item := range console.CostSummary.ByProduct {
+			if item.Key != "" {
+				seen[item.Key] = struct{}{}
+			}
+		}
+	}
+	if console.RuntimePolicy != nil {
+		for surface := range console.RuntimePolicy.ControlPlane.ProductPolicies {
+			if surface != "" {
+				seen[surface] = struct{}{}
+			}
+		}
+	}
+	if console.ProductSurface != "" {
+		for surface := range seen {
+			if surface != console.ProductSurface {
+				delete(seen, surface)
+			}
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for surface := range seen {
+		out = append(out, surface)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func productCostUsage(summary *runtime.CostSummary, productSurface string) runtime.CostBreakdown {
+	if summary == nil {
+		return runtime.CostBreakdown{Dimension: "product", Key: productSurface}
+	}
+	if summary.ProductSurface == productSurface {
+		return runtime.CostBreakdown{
+			Dimension:          "product",
+			Key:                productSurface,
+			EstimatedTokens:    summary.EstimatedTokens,
+			EstimatedCostCents: summary.EstimatedCostCents,
+			LLMCalls:           summary.LLMCalls,
+			ToolCalls:          summary.ToolCalls,
+			JobEvents:          summary.JobEvents,
+			EmbeddingEvents:    summary.EmbeddingEvents,
+		}
+	}
+	for _, item := range summary.ByProduct {
+		if item.Key == productSurface {
+			return item
+		}
+	}
+	return runtime.CostBreakdown{Dimension: "product", Key: productSurface}
+}
+
+func applyRuntimeLimitPolicy(item *ProductRuntimeLimit, policy runtime.TenantRuntimePolicy, productSurface string) {
+	if policy.ControlPlane.MonthlyCostBudgetCents > 0 {
+		item.CostLimitCents = policy.ControlPlane.MonthlyCostBudgetCents
+		item.CostLimitSource = "org_control_plane"
+	}
+	if policy.MonthlyToolCallBudget > 0 {
+		item.ToolCallLimit = policy.MonthlyToolCallBudget
+		item.ToolCallSource = "org_runtime_policy"
+	}
+	if productPolicy, ok := policy.ControlPlane.ProductPolicies[productSurface]; ok {
+		if productPolicy.MonthlyCostBudgetCents > 0 {
+			item.CostLimitCents = productPolicy.MonthlyCostBudgetCents
+			item.CostLimitSource = "product_policy"
+		}
+		if productPolicy.MonthlyToolCallBudget > 0 {
+			item.ToolCallLimit = productPolicy.MonthlyToolCallBudget
+			item.ToolCallSource = "product_policy"
+		}
+	}
+	if item.CostLimitCents > 0 {
+		item.CostRemainingCents = item.CostLimitCents - item.CostUsedCents
+		item.CostUsageRatio = roundedRatio(item.CostUsedCents, item.CostLimitCents)
+	}
+	if item.ToolCallLimit > 0 {
+		item.ToolCallsRemaining = item.ToolCallLimit - item.ToolCallsUsed
+		item.ToolCallUsageRatio = roundedRatio(item.ToolCallsUsed, item.ToolCallLimit)
+	}
+}
+
+func runtimeLimitStatus(item ProductRuntimeLimit) string {
+	status := "unknown"
+	for _, ratio := range []float64{ratioIfLimited(item.CostUsageRatio, item.CostLimitCents), ratioIfLimited(item.ToolCallUsageRatio, item.ToolCallLimit)} {
+		if ratio < 0 {
+			continue
+		}
+		if ratio >= 1 {
+			return "critical"
+		}
+		if ratio >= 0.80 {
+			status = "warning"
+		} else if status == "unknown" {
+			status = "ok"
+		}
+	}
+	return status
+}
+
+func ratioIfLimited(ratio float64, limit int64) float64 {
+	if limit <= 0 {
+		return -1
+	}
+	return ratio
+}
+
+func roundedRatio(used, limit int64) float64 {
+	if limit <= 0 {
+		return 0
+	}
+	return math.Round((float64(used)/float64(limit))*10000) / 10000
 }
 
 func buildSLOs(console Console) []ProductSLO {

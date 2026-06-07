@@ -186,23 +186,11 @@ func (o *Orchestrator) Run(ctx context.Context, in RunInput) (RunResult, error) 
 			policy.Enabled = false
 			policy.KillSwitch = true
 		} else if summary.EstimatedCostCents >= policy.ControlPlane.MonthlyCostBudgetCents {
-			trace := RunTrace{
-				RunID:          uuid.NewString(),
-				IdentityChain:  identity,
-				Intent:         route.Intent,
-				ProductSurface: route.Product,
-				AutonomyLevel:  route.Autonomy,
-				PromptVersion:  SystemPromptVersion,
-				Model:          modelName,
-				StartedAt:      time.Now().UTC(),
-				CompletedAt:    time.Now().UTC(),
-				GuardrailEvents: []GuardrailEvent{{
-					Type:   "tenant_runtime_budget",
-					Target: "cost",
-					Reason: "monthly cost budget exhausted",
-				}},
-			}
-			o.finishTrace(ctx, trace, in, "monthly_cost_budget_exhausted")
+			trace := o.rejectedBudgetTrace(ctx, in, identity, route, modelName, GuardrailEvent{
+				Type:   "tenant_runtime_budget",
+				Target: "cost",
+				Reason: "monthly cost budget exhausted",
+			}, "monthly_cost_budget_exhausted")
 			return RunResult{Reply: "La organización alcanzó el presupuesto mensual de costo para Companion.", Trace: trace}, nil
 		}
 	}
@@ -214,42 +202,18 @@ func (o *Orchestrator) Run(ctx context.Context, in RunInput) (RunResult, error) 
 				policy.Enabled = false
 				policy.KillSwitch = true
 			} else if productPolicy.MonthlyCostBudgetCents > 0 && summary.EstimatedCostCents >= productPolicy.MonthlyCostBudgetCents {
-				trace := RunTrace{
-					RunID:          uuid.NewString(),
-					IdentityChain:  identity,
-					Intent:         route.Intent,
-					ProductSurface: route.Product,
-					AutonomyLevel:  route.Autonomy,
-					PromptVersion:  SystemPromptVersion,
-					Model:          modelName,
-					StartedAt:      time.Now().UTC(),
-					CompletedAt:    time.Now().UTC(),
-					GuardrailEvents: []GuardrailEvent{{
-						Type:   "product_runtime_budget",
-						Target: "cost:" + productSurface,
-						Reason: "monthly product cost budget exhausted",
-					}},
-				}
-				o.finishTrace(ctx, trace, in, "monthly_product_cost_budget_exhausted")
+				trace := o.rejectedBudgetTrace(ctx, in, identity, route, modelName, GuardrailEvent{
+					Type:   "product_runtime_budget",
+					Target: "cost:" + productSurface,
+					Reason: "monthly product cost budget exhausted",
+				}, "monthly_product_cost_budget_exhausted")
 				return RunResult{Reply: "La organización alcanzó el presupuesto mensual de costo para este producto.", Trace: trace}, nil
 			} else if productPolicy.MonthlyToolCallBudget > 0 && summary.ToolCalls >= productPolicy.MonthlyToolCallBudget {
-				trace := RunTrace{
-					RunID:          uuid.NewString(),
-					IdentityChain:  identity,
-					Intent:         route.Intent,
-					ProductSurface: route.Product,
-					AutonomyLevel:  route.Autonomy,
-					PromptVersion:  SystemPromptVersion,
-					Model:          modelName,
-					StartedAt:      time.Now().UTC(),
-					CompletedAt:    time.Now().UTC(),
-					GuardrailEvents: []GuardrailEvent{{
-						Type:   "product_runtime_budget",
-						Target: "tools:" + productSurface,
-						Reason: "monthly product tool call budget exhausted",
-					}},
-				}
-				o.finishTrace(ctx, trace, in, "monthly_product_tool_budget_exhausted")
+				trace := o.rejectedBudgetTrace(ctx, in, identity, route, modelName, GuardrailEvent{
+					Type:   "product_runtime_budget",
+					Target: "tools:" + productSurface,
+					Reason: "monthly product tool call budget exhausted",
+				}, "monthly_product_tool_budget_exhausted")
 				return RunResult{Reply: "La organización alcanzó el presupuesto mensual de tools para este producto.", Trace: trace}, nil
 			}
 		}
@@ -284,7 +248,7 @@ func (o *Orchestrator) Run(ctx context.Context, in RunInput) (RunResult, error) 
 	})
 	if decision.Event != nil {
 		trace.GuardrailEvents = append(trace.GuardrailEvents, *decision.Event)
-		o.recordObservabilityEvent(ctx, trace, in, "guardrail", "runtime_policy", map[string]any{
+		o.recordObservabilityEvent(ctx, trace, in, "guardrail", runtimeGuardrailEventName(*decision.Event), map[string]any{
 			"target": decision.Event.Target,
 			"reason": decision.Event.Reason,
 		})
@@ -507,6 +471,30 @@ func (o *Orchestrator) rejectedRateLimitTrace(ctx context.Context, in RunInput, 
 	return trace
 }
 
+func (o *Orchestrator) rejectedBudgetTrace(ctx context.Context, in RunInput, identity IdentityChain, route AgentRoute, modelName string, event GuardrailEvent, errMsg string) RunTrace {
+	now := time.Now().UTC()
+	trace := RunTrace{
+		RunID:           uuid.NewString(),
+		IdentityChain:   identity,
+		Intent:          route.Intent,
+		ProductSurface:  route.Product,
+		AutonomyLevel:   route.Autonomy,
+		PromptVersion:   SystemPromptVersion,
+		Model:           modelName,
+		StartedAt:       now,
+		CompletedAt:     now,
+		GuardrailEvents: []GuardrailEvent{event},
+	}
+	o.recordObservabilityEvent(ctx, trace, in, "guardrail", runtimeGuardrailEventName(event), map[string]any{
+		"target":          event.Target,
+		"reason":          event.Reason,
+		"org_id":          in.OrgID,
+		"product_surface": route.Product,
+	})
+	o.finishTrace(ctx, trace, in, errMsg)
+	return trace
+}
+
 func (o *Orchestrator) rejectedAgentTrace(ctx context.Context, in RunInput, identity IdentityChain, route AgentRoute, reason string) RunTrace {
 	now := time.Now().UTC()
 	trace := RunTrace{
@@ -529,6 +517,15 @@ func (o *Orchestrator) rejectedAgentTrace(ctx context.Context, in RunInput, iden
 	})
 	o.finishTrace(ctx, trace, in, reason)
 	return trace
+}
+
+func runtimeGuardrailEventName(event GuardrailEvent) string {
+	switch event.Type {
+	case "tenant_runtime_budget", "product_runtime_budget":
+		return event.Type
+	default:
+		return "runtime_policy"
+	}
 }
 
 func runIdentity(in RunInput) identityctx.IdentityContext {

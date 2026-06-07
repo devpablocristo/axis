@@ -14,6 +14,11 @@ type fakeRuntimeControls struct {
 	recorded []RunUsage
 }
 
+type fakeCostLedger struct {
+	summary CostSummary
+	events  []CostEvent
+}
+
 type fakeAgentResolver struct {
 	resolve func(context.Context, string, string, string) (RuntimeAgentConfig, error)
 	agent   RuntimeAgentConfig
@@ -56,6 +61,19 @@ func (f *fakeRuntimeControls) GetRuntimeUsage(_ context.Context, orgID, period s
 func (f *fakeRuntimeControls) AddRuntimeUsage(_ context.Context, _ string, _ string, usage RunUsage) error {
 	f.recorded = append(f.recorded, usage)
 	return nil
+}
+
+func (f *fakeCostLedger) RecordCostEvent(_ context.Context, event CostEvent) error {
+	f.events = append(f.events, event)
+	return nil
+}
+
+func (f *fakeCostLedger) GetCostSummary(_ context.Context, orgID, productSurface, period string, _ int) (CostSummary, error) {
+	summary := f.summary
+	summary.OrgID = orgID
+	summary.ProductSurface = productSurface
+	summary.Period = period
+	return summary, nil
 }
 
 func TestOrchestrator_RuntimeKillSwitchRejectsBeforeProvider(t *testing.T) {
@@ -111,6 +129,51 @@ func TestOrchestrator_RuntimePolicyCapsAutonomyAndRecordsUsage(t *testing.T) {
 	}
 	if len(gov.recorded) != 1 || gov.recorded[0].LLMCalls != 1 {
 		t.Fatalf("expected runtime usage recorded, got %+v", gov.recorded)
+	}
+}
+
+func TestOrchestrator_ProductBudgetRecordsGuardrailObservability(t *testing.T) {
+	t.Parallel()
+
+	observer := &fakeObserver{}
+	provider := &fakeLLMProvider{responses: []ChatResponse{{Text: "should not run"}}}
+	policy := defaultRuntimePolicy("org-1")
+	policy.ControlPlane.ProductPolicies = map[string]ProductRuntimePolicy{
+		"pymes": {MonthlyCostBudgetCents: 100},
+	}
+	orch := NewOrchestrator(provider, &ToolKit{Handlers: make(map[string]ToolHandler)}, ContextPorts{})
+	orch.SetRuntimeControls(&fakeRuntimeControls{policy: policy})
+	orch.SetCostLedger(&fakeCostLedger{summary: CostSummary{EstimatedCostCents: 100}})
+	orch.SetObservabilityRecorder(observer)
+
+	result, err := orch.Run(context.Background(), RunInput{
+		UserID:         "user-1",
+		OrgID:          "org-1",
+		ProductSurface: "pymes",
+		Message:        "analizá stock",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provider.callCount != 0 {
+		t.Fatalf("expected provider not called when product budget is exhausted, got %d", provider.callCount)
+	}
+	if len(result.Trace.GuardrailEvents) != 1 || result.Trace.GuardrailEvents[0].Type != "product_runtime_budget" {
+		t.Fatalf("expected product budget guardrail, got %+v", result.Trace.GuardrailEvents)
+	}
+	event := findRuntimeEvent(observer.events, "guardrail", "product_runtime_budget")
+	if event == nil {
+		t.Fatalf("expected product budget observability event, got %+v", observer.events)
+	}
+	if event.OrgID != "org-1" || event.ProductSurface != "pymes" {
+		t.Fatalf("expected org/product scoped event, got %+v", event)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["target"] != "cost:pymes" || payload["reason"] != "monthly product cost budget exhausted" {
+		t.Fatalf("unexpected guardrail payload: %+v", payload)
 	}
 }
 
@@ -413,4 +476,13 @@ func connectorsCapability(operation, risk string, approval bool) connectorsdomai
 		RiskClass:             risk,
 		RequiresNexusApproval: approval,
 	}
+}
+
+func findRuntimeEvent(events []ObservabilityEvent, eventType, eventName string) *ObservabilityEvent {
+	for i := range events {
+		if events[i].EventType == eventType && events[i].EventName == eventName {
+			return &events[i]
+		}
+	}
+	return nil
 }

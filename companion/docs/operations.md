@@ -142,17 +142,26 @@ suficiente cobertura.
 
 - `GET /v1/ops/console` devuelve una vista agregada por `org_id` y
   `product_surface`: products, installations, capabilities, conformance,
-  security eval reports, cost summary, runtime policy/usage, eventos, alertas y
-  SLOs.
+  security eval reports, cost summary, runtime policy/usage, runtime limits,
+  eventos, alertas y SLOs.
 - `GET /v1/ops/alerts` devuelve solo alertas derivadas.
 - `GET /v1/ops/slos` devuelve SLOs por producto.
 
+`runtime_limits` es una vista derivada, no una segunda fuente de verdad. Cruza
+`cost_summary` con `runtime_policy` para mostrar uso vs limite por
+`product_surface` cuando hay budget de costo o tools configurado. Si el limite
+viene de politica global, `*_source` indica `org_control_plane` o
+`org_runtime_policy`; si viene de politica puntual de producto indica
+`product_policy`.
+
 Las alertas iniciales son reglas deterministicas y baratas de operar:
 installation/product disabled, conformance failed, eval regression,
-tenant/product leakage signals, cost near/exhausted, high tool error rate y
-rate limit abuse. Los SLOs iniciales cubren availability, tool success rate,
-eval score y cost ceiling; latency queda `unknown` hasta persistir latencias por
-evento/tool.
+tenant/product leakage signals, runtime budget blocks, cost near/exhausted, high
+tool error rate, MCP runtime policy blocks y rate limit abuse. Eventos repetidos
+del mismo tipo/producto/target se agrupan en una ventana corta y exponen
+`suppressed_count` en la evidencia para evitar ruido operativo. Los SLOs
+iniciales cubren availability, tool success rate, eval score y cost ceiling;
+latency queda `unknown` hasta persistir latencias por evento/tool.
 
 ## Smoke
 

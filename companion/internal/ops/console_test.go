@@ -138,12 +138,13 @@ func TestUsecasesGetConsoleBuildsOperationalAlertsAndSLOs(t *testing.T) {
 			ProductSurface:     "ponti",
 			Period:             "2026-06",
 			EstimatedCostCents: 90,
+			ToolCalls:          45,
 		},
 		policy: runtime.TenantRuntimePolicy{
 			OrgID: "org-a",
 			ControlPlane: runtime.OrgControlPlaneSettings{
 				ProductPolicies: map[string]runtime.ProductRuntimePolicy{
-					"ponti": {MonthlyCostBudgetCents: 100},
+					"ponti": {MonthlyCostBudgetCents: 100, MonthlyToolCallBudget: 50},
 				},
 			},
 		},
@@ -174,6 +175,60 @@ func TestUsecasesGetConsoleBuildsOperationalAlertsAndSLOs(t *testing.T) {
 	}
 	if len(console.SLOs) != 1 || console.SLOs[0].Status != "critical" {
 		t.Fatalf("expected critical ponti slo, got %+v", console.SLOs)
+	}
+	if len(console.RuntimeLimits) != 1 {
+		t.Fatalf("expected one runtime limit row, got %+v", console.RuntimeLimits)
+	}
+	limit := console.RuntimeLimits[0]
+	if limit.ProductSurface != "ponti" || limit.Status != "warning" {
+		t.Fatalf("expected warning ponti runtime limit, got %+v", limit)
+	}
+	if limit.CostUsedCents != 90 || limit.CostLimitCents != 100 || limit.CostUsageRatio != 0.9 || limit.CostLimitSource != "product_policy" {
+		t.Fatalf("unexpected cost limit usage: %+v", limit)
+	}
+	if limit.ToolCallsUsed != 45 || limit.ToolCallLimit != 50 || limit.ToolCallUsageRatio != 0.9 || limit.ToolCallSource != "product_policy" {
+		t.Fatalf("unexpected tool call limit usage: %+v", limit)
+	}
+}
+
+func TestUsecasesGetConsoleDedupesRepeatedGuardrailAlerts(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now().UTC()
+	events := []runtime.ObservabilityEvent{{
+		OrgID:          "org-a",
+		ProductSurface: "companion",
+		EventType:      "guardrail",
+		EventName:      "mcp_runtime_policy",
+		Payload:        []byte(`{"tool_name":"axis.products.list","target":"tool:axis.products.list","reason":"tool denied"}`),
+		OccurredAt:     now,
+	}, {
+		OrgID:          "org-a",
+		ProductSurface: "companion",
+		EventType:      "guardrail",
+		EventName:      "mcp_runtime_policy",
+		Payload:        []byte(`{"tool_name":"axis.products.list","target":"tool:axis.products.list","reason":"tool denied"}`),
+		OccurredAt:     now.Add(-2 * time.Minute),
+	}}
+	uc := NewUsecases(Deps{Observability: staticEvents{events: events}})
+
+	console, err := uc.GetConsole(context.Background(), Query{OrgID: "org-a", ProductSurface: "companion"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	var found Alert
+	for _, item := range console.Alerts {
+		if item.Type == "mcp_runtime_policy_block" {
+			count++
+			found = item
+		}
+	}
+	if count != 1 {
+		t.Fatalf("expected one deduped MCP runtime policy alert, got %d alerts=%+v", count, console.Alerts)
+	}
+	if found.Evidence["suppressed_count"] != 1 {
+		t.Fatalf("expected one suppressed duplicate, got %+v", found.Evidence)
 	}
 }
 
