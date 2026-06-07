@@ -71,12 +71,39 @@ inline para compatibilidad de desarrollo.
 - `GET /v1/observability/events?run_id=...` lista eventos por run.
 - `GET /v1/observability/events?limit=100` lista eventos recientes de la
   customer org autenticada.
+- `GET /v1/observability/events?org_id=...&product_surface=...&event_type=...`
+  lista eventos recientes usando filtros operativos combinados con `AND`.
 - `GET /v1/tasks/{id}/graph` devuelve el ledger de execution graph para
   reconstruir planning/steps/checkpoints de una task.
 
 Los eventos guardan `org_id`, `run_id`, `task_id`, `job_id`, `agent_id`,
 `capability_id`, tipo/nombre de evento, payload redacted, severity y timestamp.
 No se persisten secretos conocidos en payloads.
+
+Filtros soportados por `GET /v1/observability/events`:
+
+- `org_id`, `product_surface`, `run_id`;
+- `event_type`, `event_name`, `severity`;
+- `capability_id` y `tool_name` como alias operativo de `capability_id`;
+- `agent_id`, `task_id`, `job_id`;
+- `limit` entre 1 y 500.
+
+Ejemplos de diagnostico:
+
+```bash
+# bloqueos MCP por runtime policy para una tool concreta
+curl "$COMPANION_BASE/v1/observability/events?org_id=$ORG_ID&product_surface=companion&event_type=guardrail&event_name=mcp_runtime_policy&tool_name=axis.products.list&limit=50" \
+  -H "X-API-Key: $COMPANION_API_KEY"
+
+# auditoria MCP filtrada por tipo/nombre de evento
+curl "$COMPANION_BASE/v1/observability/events?org_id=$ORG_ID&product_surface=companion&event_type=mcp&event_name=mcp_tool_call&limit=50" \
+  -H "X-API-Key: $COMPANION_API_KEY"
+```
+
+Para correlacionar una llamada MCP gobernada: tomar el `request_id` devuelto
+por la tool, consultar `GET /v1/requests/{request_id}` en Nexus, buscar el
+evento `mcp/mcp_tool_call` en observability y, si hubo bloqueo operativo,
+confirmar la alerta derivada en `GET /v1/ops/alerts`.
 
 ## Agent Fleet
 
@@ -142,14 +169,16 @@ El smoke MCP (`companion/scripts/smoke/run-companion-mcp-flow.sh`) verifica:
 - `tools/call axis.products.list` con policy Nexus `allow`;
 - `tools/call axis.evals.run` con policy Nexus `require_approval`;
 - `tools/call axis.tasks.create` con policy Nexus `deny`;
-- que una tool denegada no ejecute la creación de task.
+- que una tool denegada no ejecute la creación de task;
+- que las llamadas MCP se auditen usando filtros server-side de observability.
 
 El smoke de runtime policy MCP (`companion/scripts/smoke/run-companion-mcp-runtime-policy-flow.sh`) verifica:
 
 - `PUT /v1/runtime/mcp-policy` para bloquear `axis.products.list`;
 - que `tools/call axis.products.list` falle con JSON-RPC `status=403` y `mcp_status=blocked`;
 - que el bloqueo ocurra antes de Nexus, sin `request_id`;
-- que se registre `guardrail/mcp_runtime_policy`;
+- que se registre `guardrail/mcp_runtime_policy` usando filtros server-side de
+  observability;
 - que `GET /v1/ops/alerts` exponga `mcp_runtime_policy_block`;
 - que `allowed_tools=["axis.products.*"]` vuelva a permitir la tool y pase por Nexus.
 

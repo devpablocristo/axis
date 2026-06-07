@@ -38,6 +38,23 @@ MCP_SCHEMAS = {
     "MCPToolCallResponse",
 }
 
+OBSERVABILITY_EVENTS_PATH = "/v1/observability/events"
+
+OBSERVABILITY_EVENTS_QUERY_PARAMS = {
+    "org_id",
+    "product_surface",
+    "run_id",
+    "event_type",
+    "event_name",
+    "severity",
+    "capability_id",
+    "tool_name",
+    "agent_id",
+    "task_id",
+    "job_id",
+    "limit",
+}
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate Axis OpenAPI documents.")
@@ -80,6 +97,7 @@ def validate_file(path: Path) -> list[str]:
 
     if is_companion_openapi(path):
         failures.extend(validate_companion_mcp_contract(path, spec))
+        failures.extend(validate_companion_observability_contract(path, spec))
 
     if not failures:
         print(f"{path}: ok")
@@ -104,6 +122,30 @@ def validate_companion_mcp_contract(path: Path, spec: dict[str, Any]) -> list[st
             failures.append(f"{path}: missing MCP schema {required_schema}")
 
     return failures
+
+
+def validate_companion_observability_contract(path: Path, spec: dict[str, Any]) -> list[str]:
+    paths = spec.get("paths")
+    if not isinstance(paths, dict):
+        return [f"{path}: paths must be an object"]
+
+    operation = ((paths.get(OBSERVABILITY_EVENTS_PATH) or {}).get("get")) or {}
+    if not isinstance(operation, dict):
+        return [f"{path}: missing GET {OBSERVABILITY_EVENTS_PATH}"]
+
+    parameters = operation.get("parameters")
+    if not isinstance(parameters, list):
+        return [f"{path}: GET {OBSERVABILITY_EVENTS_PATH} parameters must be an array"]
+
+    query_params = {
+        item.get("name")
+        for item in parameters
+        if isinstance(item, dict) and item.get("in") == "query" and isinstance(item.get("name"), str)
+    }
+    missing = sorted(OBSERVABILITY_EVENTS_QUERY_PARAMS - query_params)
+    if missing:
+        return [f"{path}: GET {OBSERVABILITY_EVENTS_PATH} missing query params: {', '.join(missing)}"]
+    return []
 
 
 def is_companion_openapi(path: Path) -> bool:

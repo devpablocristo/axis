@@ -130,7 +130,7 @@ fi
 
 echo "Verifying MCP observability audit..."
 AUDIT_ORG_ID="${AXIS_DEV_ORG_ID:-local-dev-org}"
-EVENTS=$(companion_get "/v1/observability/events?org_id=${AUDIT_ORG_ID}&product_surface=companion&limit=50")
+EVENTS=$(companion_get "/v1/observability/events?org_id=${AUDIT_ORG_ID}&product_surface=companion&event_type=mcp&event_name=mcp_tool_call&limit=50")
 if EVENTS_JSON="$EVENTS" python3 - "$ALLOW_REQ" "$EVAL_REQ" "$DENY_REQ" <<'PY'
 import json, os, sys
 
@@ -138,8 +138,6 @@ required = {value for value in sys.argv[1:] if value}
 events = json.loads(os.environ["EVENTS_JSON"]).get("events") or []
 seen = set()
 for event in events:
-    if event.get("event_type") != "mcp" or event.get("event_name") != "mcp_tool_call":
-        continue
     payload = event.get("payload") or {}
     request_id = payload.get("request_id")
     if request_id:
