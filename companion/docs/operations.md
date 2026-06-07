@@ -163,6 +163,66 @@ del mismo tipo/producto/target se agrupan en una ventana corta y exponen
 iniciales cubren availability, tool success rate, eval score y cost ceiling;
 latency queda `unknown` hasta persistir latencias por evento/tool.
 
+## MCP runbook
+
+MCP es una capa operativa sobre APIs Axis existentes. No debe duplicar lógica de
+negocio ni saltar Nexus. El orden de control para `tools/call` es:
+
+1. auth principal + scope global `companion:mcp:execute`;
+2. scopes granulares declarados por tool;
+3. runtime policy MCP por org/product/tool;
+4. rate limit por `org_id + product_surface`;
+5. Nexus allow/deny/pending;
+6. ejecución real de la API Axis.
+
+`tools/list` filtra por scopes efectivos y por runtime policy cuando hay
+contexto de org/product disponible. Una tool sin scope granular no aparece en la
+lista y tampoco ejecuta si se llama manualmente.
+
+Bloquear por scope:
+
+- Revisar `annotations.required_scopes` en `tools/list`.
+- Si falta scope, `tools/call` responde `status=blocked` con
+  `metadata.blocked_by=scope`.
+- Observability registra `event_type=guardrail`,
+  `event_name=mcp_scope_required`.
+
+Bloquear o permitir por runtime policy:
+
+```bash
+# bloquear una tool MCP puntual
+curl -X PUT "$COMPANION_BASE/v1/runtime/mcp-policy" \
+  -H "X-API-Key: $COMPANION_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"denied_tools":["axis.products.list"]}'
+
+# permitir solo tools de products
+curl -X PUT "$COMPANION_BASE/v1/runtime/mcp-policy" \
+  -H "X-API-Key: $COMPANION_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"allowed_tools":["axis.products.*"],"denied_tools":[]}'
+```
+
+Auditar:
+
+```bash
+# scope faltante
+curl "$COMPANION_BASE/v1/observability/events?org_id=$ORG_ID&product_surface=companion&event_type=guardrail&event_name=mcp_scope_required&limit=50" \
+  -H "X-API-Key: $COMPANION_API_KEY"
+
+# runtime policy
+curl "$COMPANION_BASE/v1/observability/events?org_id=$ORG_ID&product_surface=companion&event_type=guardrail&event_name=mcp_runtime_policy&limit=50" \
+  -H "X-API-Key: $COMPANION_API_KEY"
+
+# llamadas MCP
+curl "$COMPANION_BASE/v1/observability/events?org_id=$ORG_ID&product_surface=companion&event_type=mcp&event_name=mcp_tool_call&limit=50" \
+  -H "X-API-Key: $COMPANION_API_KEY"
+```
+
+Para diagnostico completo: tomar `request_id` si existe, revisar Nexus, luego
+buscar `mcp/mcp_tool_call` y posibles guardrails asociados. Si no hay
+`request_id`, el bloqueo ocurrió antes de Nexus.
+
 ## Smoke
 
 ```bash
@@ -205,19 +265,3 @@ Estas policies gobiernan `target_system=axis.mcp` y
 
 La runtime policy MCP corre antes de Nexus. Sirve como barrera operativa por
 org/product/tool; Nexus sigue regulando aprobación/denegación de ejecución.
-
-Ejemplos:
-
-```bash
-# bloquear una tool MCP puntual
-curl -X PUT "$COMPANION_BASE/v1/runtime/mcp-policy" \
-  -H "X-API-Key: $COMPANION_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"denied_tools":["axis.products.list"]}'
-
-# permitir solo tools de products
-curl -X PUT "$COMPANION_BASE/v1/runtime/mcp-policy" \
-  -H "X-API-Key: $COMPANION_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"allowed_tools":["axis.products.*"],"denied_tools":[]}'
-```

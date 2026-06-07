@@ -260,6 +260,9 @@ func buildAlerts(console Console) []Alert {
 		if event.EventType == "guardrail" && event.EventName == "mcp_runtime_policy" {
 			alerts = append(alerts, alert("mcp_runtime_policy_block", "warning", event.ProductSurface, "MCP tool blocked by runtime policy", "observability", mcpRuntimePolicyEvidence(event), event.OccurredAt))
 		}
+		if event.EventType == "guardrail" && event.EventName == "mcp_scope_required" {
+			alerts = append(alerts, alert("mcp_scope_block", "warning", event.ProductSurface, "MCP tool blocked by missing scope", "observability", guardrailEventEvidence(event), event.OccurredAt))
+		}
 		if isLeakageEvent(event) {
 			alerts = append(alerts, alert("tenant_product_leakage", "critical", event.ProductSurface, "Tenant/product leakage signal detected", "observability", map[string]any{"event_name": event.EventName}, event.OccurredAt))
 		}
@@ -294,7 +297,7 @@ func guardrailEventEvidence(event runtime.ObservabilityEvent) map[string]any {
 	if err := json.Unmarshal(event.Payload, &payload); err != nil {
 		return evidence
 	}
-	for _, key := range []string{"tool_name", "target", "reason", "org_id", "product_surface"} {
+	for _, key := range []string{"tool_name", "target", "reason", "org_id", "product_surface", "missing_scopes"} {
 		if value, ok := payload[key]; ok {
 			evidence[key] = value
 		}

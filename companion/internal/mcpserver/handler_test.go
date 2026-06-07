@@ -139,6 +139,52 @@ func TestRPCToolsListRequiresMCPExecuteScope(t *testing.T) {
 	}
 }
 
+func TestRPCToolsListFiltersToolsByRequiredScopes(t *testing.T) {
+	reg, err := mcpgovernance.NewDefaultRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := NewHandler(Deps{Registry: reg})
+
+	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))
+	req = withPrincipal(req, []string{mcpgovernance.ScopeMCPExecute, "companion:products:read"})
+	res := httptest.NewRecorder()
+
+	handler.rpc(res, req)
+
+	names := rpcToolNames(t, res.Body.Bytes())
+	if !containsToolName(names, "axis.products.list") || !containsToolName(names, "axis.products.get") {
+		t.Fatalf("expected products tools visible, got %v", names)
+	}
+	if containsToolName(names, "axis.costs.summary") || containsToolName(names, "axis.tasks.create") {
+		t.Fatalf("expected tools without required scopes hidden, got %v", names)
+	}
+}
+
+func TestRPCToolsListFiltersRuntimePolicyDeniedTools(t *testing.T) {
+	reg, err := mcpgovernance.NewDefaultRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy := enabledRuntimePolicy("org-a")
+	policy.ControlPlane.DeniedTools = []string{"axis.products.*"}
+	handler := NewHandler(Deps{
+		Registry:      reg,
+		RuntimePolicy: &fakeRuntimePolicyReader{policy: policy},
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))
+	req = withPrincipal(req, []string{mcpgovernance.ScopeMCPExecute, "companion:products:read"})
+	res := httptest.NewRecorder()
+
+	handler.rpc(res, req)
+
+	names := rpcToolNames(t, res.Body.Bytes())
+	if containsToolName(names, "axis.products.list") || containsToolName(names, "axis.products.get") {
+		t.Fatalf("expected denied products tools hidden by runtime policy, got %v", names)
+	}
+}
+
 func TestRPCToolsCallExecutesAfterNexusAllow(t *testing.T) {
 	reg, err := mcpgovernance.NewDefaultRegistry()
 	if err != nil {
@@ -193,6 +239,41 @@ func TestRPCToolsCallExecutesAfterNexusAllow(t *testing.T) {
 	structured := result["structuredContent"].(map[string]any)
 	if structured["status"] != "executed" {
 		t.Fatalf("expected executed status, got %+v", structured)
+	}
+}
+
+func TestCallToolMissingGranularScopeBlocksBeforeNexus(t *testing.T) {
+	reg, err := mcpgovernance.NewDefaultRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	authz := &fakeAuthorizer{decision: mcpgovernance.Decision{CanExecute: true}}
+	recorder := &fakeRecorder{}
+	handler := NewHandler(Deps{Registry: reg, Authorizer: authz, Observability: recorder})
+	req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
+	req = withPrincipal(req, []string{mcpgovernance.ScopeMCPExecute})
+
+	out, status, err := handler.callTool(req, callRequest{
+		Name:      "axis.costs.summary",
+		Arguments: map[string]any{"product_surface": "companion"},
+	})
+
+	if err == nil || status != http.StatusForbidden || out.Status != "blocked" {
+		t.Fatalf("expected scope block 403, status=%d out=%+v err=%v", status, out, err)
+	}
+	if out.Metadata["blocked_by"] != "scope" || out.Metadata["target"] != "tool:axis.costs.summary" {
+		t.Fatalf("unexpected scope block metadata: %+v", out.Metadata)
+	}
+	if authz.calls != 0 {
+		t.Fatalf("scope block must not reach Nexus, authz calls=%d", authz.calls)
+	}
+	if event := findObservabilityEvent(recorder.events, "guardrail", "mcp_scope_required"); event == nil {
+		t.Fatalf("expected scope guardrail event, got %+v", recorder.events)
+	} else if event.CapabilityID != "axis.costs.summary" || event.Severity != "warn" {
+		t.Fatalf("unexpected scope guardrail event: %+v", event)
+	}
+	if event := findObservabilityEvent(recorder.events, "mcp", "mcp_tool_call"); event == nil || event.Severity != "warn" {
+		t.Fatalf("expected warned mcp tool call event, got %+v", recorder.events)
 	}
 }
 
@@ -863,4 +944,42 @@ func findObservabilityEvent(events []runtime.ObservabilityEvent, eventType, even
 		}
 	}
 	return nil
+}
+
+func rpcToolNames(t *testing.T, raw []byte) []string {
+	t.Helper()
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatal(err)
+	}
+	if out["error"] != nil {
+		t.Fatalf("expected RPC result, got error body=%s", string(raw))
+	}
+	result, ok := out["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected RPC result object, got %s", string(raw))
+	}
+	tools, ok := result["tools"].([]any)
+	if !ok {
+		t.Fatalf("expected tools array, got %s", string(raw))
+	}
+	names := make([]string, 0, len(tools))
+	for _, item := range tools {
+		tool, ok := item.(map[string]any)
+		if !ok {
+			t.Fatalf("expected tool object, got %+v", item)
+		}
+		name, _ := tool["name"].(string)
+		names = append(names, name)
+	}
+	return names
+}
+
+func containsToolName(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }

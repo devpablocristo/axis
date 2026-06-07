@@ -229,7 +229,7 @@ func (h *Handler) rpc(w http.ResponseWriter, r *http.Request) {
 		if !h.requireAccessRPC(w, req.ID, r) {
 			return
 		}
-		writeRPCResult(w, req.ID, map[string]any{"tools": h.toolViews()})
+		writeRPCResult(w, req.ID, map[string]any{"tools": h.toolViewsForRequest(r)})
 	case "tools/call":
 		if !h.requireAccessRPC(w, req.ID, r) {
 			return
@@ -254,7 +254,7 @@ func (h *Handler) listToolsREST(w http.ResponseWriter, r *http.Request) {
 	if !h.requireAccessREST(w, r) {
 		return
 	}
-	httpjson.WriteJSON(w, http.StatusOK, map[string]any{"tools": h.toolViews()})
+	httpjson.WriteJSON(w, http.StatusOK, map[string]any{"tools": h.toolViewsForRequest(r)})
 }
 
 func (h *Handler) callToolREST(w http.ResponseWriter, r *http.Request) {
@@ -303,6 +303,27 @@ func (h *Handler) callTool(r *http.Request, call callRequest) (out toolCallRespo
 		out.Status = "payload_too_large"
 		out.Error = err.Error()
 		status = statusForError(err)
+		return out, status, err
+	}
+	tool, ok := h.lookupTool(call.Name)
+	if !ok {
+		err = fmt.Errorf("%w: %s", mcpgovernance.ErrToolNotFound, call.Name)
+		out.Status = "error"
+		out.Error = err.Error()
+		status = statusForError(err)
+		return out, status, err
+	}
+	if missing := missingRequiredScopes(invocation.Scopes, tool.RequiredScopes); len(missing) > 0 {
+		h.recordScopeBlock(r.Context(), invocation, call.Name, missing)
+		err = fmt.Errorf("%w: missing scopes %s", ErrForbidden, strings.Join(missing, ","))
+		out.Status = "blocked"
+		out.Error = err.Error()
+		out.Metadata = map[string]interface{}{
+			"blocked_by":     "scope",
+			"missing_scopes": missing,
+			"target":         "tool:" + call.Name,
+		}
+		status = http.StatusForbidden
 		return out, status, err
 	}
 	if block := h.enforceRuntimePolicy(r.Context(), invocation, call.Name); block.Blocked() {
@@ -424,13 +445,25 @@ func invocationContext(r *http.Request, args map[string]any) (mcpgovernance.Invo
 	}, nil
 }
 
-func (h *Handler) toolViews() []mcpTool {
+func (h *Handler) toolViewsForRequest(r *http.Request) []mcpTool {
 	if h == nil || h.registry == nil {
 		return nil
+	}
+	identity := identityctx.FromRequest(r)
+	scopes := append([]string(nil), identity.Scopes...)
+	var invocation *mcpgovernance.InvocationContext
+	if resolved, err := invocationContext(r, map[string]any{}); err == nil {
+		invocation = &resolved
 	}
 	tools := h.registry.List()
 	out := make([]mcpTool, 0, len(tools))
 	for _, tool := range tools {
+		if len(missingRequiredScopes(scopes, tool.RequiredScopes)) > 0 {
+			continue
+		}
+		if invocation != nil && h.enforceRuntimePolicy(r.Context(), *invocation, tool.Name).Blocked() {
+			continue
+		}
 		out = append(out, mcpTool{
 			Name:        tool.Name,
 			Title:       titleForTool(tool.Name),
@@ -445,6 +478,34 @@ func (h *Handler) toolViews() []mcpTool {
 		})
 	}
 	return out
+}
+
+func (h *Handler) lookupTool(name string) (mcpgovernance.ToolDefinition, bool) {
+	if h == nil || h.registry == nil {
+		return mcpgovernance.ToolDefinition{}, false
+	}
+	return h.registry.Get(name)
+}
+
+func missingRequiredScopes(actual, required []string) []string {
+	owned := make(map[string]struct{}, len(actual))
+	for _, scope := range actual {
+		scope = strings.TrimSpace(scope)
+		if scope != "" {
+			owned[scope] = struct{}{}
+		}
+	}
+	missing := make([]string, 0)
+	for _, scope := range required {
+		scope = strings.TrimSpace(scope)
+		if scope == "" {
+			continue
+		}
+		if _, ok := owned[scope]; !ok {
+			missing = append(missing, scope)
+		}
+	}
+	return missing
 }
 
 func (h *Handler) requireAccessREST(w http.ResponseWriter, r *http.Request) bool {
@@ -706,6 +767,36 @@ func (h *Handler) recordRuntimePolicyBlock(ctx context.Context, invocation mcpgo
 		CapabilityID:   toolName,
 		EventType:      "guardrail",
 		EventName:      "mcp_runtime_policy",
+		Severity:       "warn",
+		Payload:        raw,
+		Redacted:       true,
+		OccurredAt:     time.Now().UTC(),
+	}
+	_ = h.recorder.RecordObservabilityEvent(context.WithoutCancel(ctx), event)
+}
+
+func (h *Handler) recordScopeBlock(ctx context.Context, invocation mcpgovernance.InvocationContext, toolName string, missing []string) {
+	if h == nil || h.recorder == nil {
+		return
+	}
+	payload := map[string]any{
+		"tool_name":       toolName,
+		"org_id":          invocation.OrgID,
+		"product_surface": invocation.ProductSurface,
+		"missing_scopes":  missing,
+		"target":          "tool:" + toolName,
+		"reason":          "mcp tool required scopes are missing",
+	}
+	raw, err := marshalRedactedPayload(payload)
+	if err != nil {
+		raw = json.RawMessage(`{"redaction_error":"mcp scope guardrail payload could not be marshaled"}`)
+	}
+	event := runtime.ObservabilityEvent{
+		OrgID:          invocation.OrgID,
+		ProductSurface: invocation.ProductSurface,
+		CapabilityID:   toolName,
+		EventType:      "guardrail",
+		EventName:      "mcp_scope_required",
 		Severity:       "warn",
 		Payload:        raw,
 		Redacted:       true,
