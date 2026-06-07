@@ -953,6 +953,49 @@ paths:
           schema: { type: integer, default: 100, minimum: 1, maximum: 500 }
       responses:
         "200": { description: Ops alerts }
+  /v1/ops/alerts/dispatch:
+    post:
+      summary: Despacha alertas operativas al webhook configurado
+      description: Requiere `companion:runtime:admin` o `companion:cross_org`. Usa `COMPANION_OPS_ALERT_WEBHOOK_URL`.
+      parameters:
+        - in: query
+          name: org_id
+          schema: { type: string }
+        - in: query
+          name: product_surface
+          schema: { type: string }
+        - in: query
+          name: period
+          schema:
+            type: string
+            pattern: "^[0-9]{4}-[0-9]{2}$"
+        - in: query
+          name: limit
+          schema: { type: integer, default: 100, minimum: 1, maximum: 500 }
+      responses:
+        "202": { description: Alert dispatch accepted }
+        "503": { description: Alert webhook not configured }
+  /v1/ops/metrics:
+    get:
+      summary: Lista metricas operativas derivadas por producto
+      description: Requiere `companion:ops:read`, `companion:runtime:admin` o `companion:cross_org`.
+      parameters:
+        - in: query
+          name: org_id
+          schema: { type: string }
+        - in: query
+          name: product_surface
+          schema: { type: string }
+        - in: query
+          name: period
+          schema:
+            type: string
+            pattern: "^[0-9]{4}-[0-9]{2}$"
+        - in: query
+          name: limit
+          schema: { type: integer, default: 100, minimum: 1, maximum: 500 }
+      responses:
+        "200": { description: Ops metrics }
   /v1/ops/slos:
     get:
       summary: Lista SLOs operativos por producto

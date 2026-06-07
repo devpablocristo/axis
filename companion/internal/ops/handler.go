@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -26,6 +27,8 @@ func NewHandler(uc *Usecases) *Handler {
 func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/ops/console", h.console)
 	mux.HandleFunc("GET /v1/ops/alerts", h.alerts)
+	mux.HandleFunc("POST /v1/ops/alerts/dispatch", h.dispatchAlerts)
+	mux.HandleFunc("GET /v1/ops/metrics", h.metrics)
 	mux.HandleFunc("GET /v1/ops/slos", h.slos)
 }
 
@@ -55,6 +58,39 @@ func (h *Handler) alerts(w http.ResponseWriter, r *http.Request) {
 	httpjson.WriteJSON(w, http.StatusOK, map[string]any{"alerts": alerts})
 }
 
+func (h *Handler) dispatchAlerts(w http.ResponseWriter, r *http.Request) {
+	if !requireOpsAdminScope(w, r) {
+		return
+	}
+	q, ok := parseOpsQuery(w, r)
+	if !ok {
+		return
+	}
+	result, err := h.uc.DispatchAlerts(r.Context(), q)
+	if err != nil {
+		if errors.Is(err, ErrAlertSinkNotConfigured) {
+			httpjson.WriteFlatError(w, http.StatusServiceUnavailable, "NOT_CONFIGURED", "ops alert webhook is not configured")
+			return
+		}
+		httpjson.WriteFlatInternalError(w, err, "dispatch ops alerts failed")
+		return
+	}
+	httpjson.WriteJSON(w, http.StatusAccepted, result)
+}
+
+func (h *Handler) metrics(w http.ResponseWriter, r *http.Request) {
+	q, ok := opsQuery(w, r)
+	if !ok {
+		return
+	}
+	metrics, err := h.uc.ListMetrics(r.Context(), q)
+	if err != nil {
+		httpjson.WriteFlatInternalError(w, err, "list ops metrics failed")
+		return
+	}
+	httpjson.WriteJSON(w, http.StatusOK, map[string]any{"metrics": metrics})
+}
+
 func (h *Handler) slos(w http.ResponseWriter, r *http.Request) {
 	q, ok := opsQuery(w, r)
 	if !ok {
@@ -72,6 +108,10 @@ func opsQuery(w http.ResponseWriter, r *http.Request) (Query, bool) {
 	if !requireOpsScope(w, r) {
 		return Query{}, false
 	}
+	return parseOpsQuery(w, r)
+}
+
+func parseOpsQuery(w http.ResponseWriter, r *http.Request) (Query, bool) {
 	orgID, ok := identityctx.EffectiveOrgID(r, r.URL.Query().Get("org_id"), scopeCrossOrg)
 	if !ok || strings.TrimSpace(orgID) == "" {
 		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "customer org context is required")
@@ -103,5 +143,17 @@ func requireOpsScope(w http.ResponseWriter, r *http.Request) bool {
 		return true
 	}
 	httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "missing ops scope")
+	return false
+}
+
+func requireOpsAdminScope(w http.ResponseWriter, r *http.Request) bool {
+	if identityctx.HasNoAuthContext(r) {
+		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "ops endpoints require authenticated context")
+		return false
+	}
+	if identityctx.HasAnyScope(r, scopeRuntimeAdmin, scopeCrossOrg) {
+		return true
+	}
+	httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "missing ops admin scope")
 	return false
 }

@@ -52,10 +52,16 @@ bash scripts/quality/check-migrations.sh
   `us-central1`.
 - `COMPANION_EMBEDDING_DIMENSIONS`: dimensión esperada por provider/vector
   store.
+- `COMPANION_OPS_ALERT_WEBHOOK_URL`: webhook opcional para despachar alertas
+  operativas derivadas desde `POST /v1/ops/alerts/dispatch`.
 - Memory purge corre cada hora.
 
 ## Jobs
 
+- `GET /v1/jobs?status=dead_letter&product_surface=...` lista DLQ por
+  producto.
+- `GET /v1/jobs?status=running&product_surface=...` permite revisar leases,
+  heartbeats, deadlines y jobs trabados.
 - `GET /v1/jobs/{id}` devuelve estado, attempts, lease, evidence y errores.
 - `POST /v1/jobs/{id}/cancel` cancela un job queued/running.
 - `POST /v1/jobs/recover-expired` reencola leases vencidos.
@@ -143,9 +149,13 @@ suficiente cobertura.
 - `GET /v1/ops/console` devuelve una vista agregada por `org_id` y
   `product_surface`: products, installations, capabilities, conformance,
   security eval reports, cost summary, runtime policy/usage, runtime limits,
-  eventos, alertas y SLOs.
+  metricas, salud de jobs, eventos, alertas y SLOs.
 - `GET /v1/ops/alerts` devuelve solo alertas derivadas.
+- `GET /v1/ops/metrics` devuelve metricas derivadas por producto: eventos,
+  tool/MCP calls, errores, guardrails, costo, eval score y latency.
 - `GET /v1/ops/slos` devuelve SLOs por producto.
+- `POST /v1/ops/alerts/dispatch` envia las alertas derivadas al webhook
+  configurado. Requiere `companion:runtime:admin` o `companion:cross_org`.
 
 `runtime_limits` es una vista derivada, no una segunda fuente de verdad. Cruza
 `cost_summary` con `runtime_policy` para mostrar uso vs limite por
@@ -157,11 +167,55 @@ viene de politica global, `*_source` indica `org_control_plane` o
 Las alertas iniciales son reglas deterministicas y baratas de operar:
 installation/product disabled, conformance failed, eval regression,
 tenant/product leakage signals, runtime budget blocks, cost near/exhausted, high
-tool error rate, MCP runtime policy blocks y rate limit abuse. Eventos repetidos
-del mismo tipo/producto/target se agrupan en una ventana corta y exponen
-`suppressed_count` en la evidencia para evitar ruido operativo. Los SLOs
-iniciales cubren availability, tool success rate, eval score y cost ceiling;
-latency queda `unknown` hasta persistir latencias por evento/tool.
+tool error rate, MCP runtime policy blocks, jobs en DLQ, jobs trabados, leases
+vencidos y rate limit abuse. Eventos repetidos del mismo tipo/producto/target
+se agrupan en una ventana corta y exponen `suppressed_count` en la evidencia
+para evitar ruido operativo. Los SLOs iniciales cubren latency, availability,
+tool success rate, eval score y cost ceiling. Latency se deriva de
+`duration_ms` redacted en observability events; si no hay muestras recientes,
+queda `unknown`.
+
+Ejemplos:
+
+```bash
+# metricas por producto
+curl "$COMPANION_BASE/v1/ops/metrics?org_id=$ORG_ID&product_surface=companion&limit=100" \
+  -H "X-API-Key: $COMPANION_API_KEY"
+
+# SLOs por producto
+curl "$COMPANION_BASE/v1/ops/slos?org_id=$ORG_ID&product_surface=companion" \
+  -H "X-API-Key: $COMPANION_API_KEY"
+
+# despachar alertas al webhook configurado
+curl -X POST "$COMPANION_BASE/v1/ops/alerts/dispatch?org_id=$ORG_ID&product_surface=companion" \
+  -H "X-API-Key: $COMPANION_API_KEY"
+```
+
+El webhook recibe un JSON redacted con `org_id`, `product_surface`, `period`,
+`generated_at` y `alerts`. Si `COMPANION_OPS_ALERT_WEBHOOK_URL` no está
+configurado, el endpoint devuelve `503 NOT_CONFIGURED`.
+
+## Retention
+
+Estado actual:
+
+- Memory expirada se purga con `memory.retention` / `PurgeExpired`.
+- Runtime policy ya contiene settings de retention (`run_trace_days`,
+  `tool_evidence_days`, `memory_days`) para gobernanza.
+- Observability events, traces, eval reports y cost ledger todavía no tienen
+  borrado automático dedicado en este corte.
+
+Runbook hasta automatizar cleanup:
+
+1. Definir retention por org/producto desde runtime policy.
+2. Exportar evidencia necesaria antes de borrar (`run replay`, cost summary,
+   eval reports).
+3. Ejecutar cleanup manual por ventana temporal solo con aprobación operativa.
+4. Registrar el cambio en el log/release notes del servicio.
+
+No automatizar deletes de traces/cost/evals antes de tener SLOs de auditoria y
+retención por tipo. Ese job debería agregarse como fase separada con tests de
+no-leakage y dry-run.
 
 ## MCP runbook
 

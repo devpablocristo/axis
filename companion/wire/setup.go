@@ -447,6 +447,7 @@ type Config struct {
 	EmbeddingProject    string
 	EmbeddingLocation   string
 	EmbeddingDimensions int
+	OpsAlertWebhookURL  string
 	MigrationFiles      fs.FS
 }
 
@@ -630,6 +631,8 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 		Observability:   observabilityRepo,
 		Costs:           observabilityRepo,
 		RuntimeControls: runtimeControlsRepo,
+		Jobs:            jobRepo,
+		AlertSink:       ops.NewWebhookAlertSink(cfg.OpsAlertWebhookURL, 5*time.Second),
 	})
 	opsHandler := ops.NewHandler(opsUC)
 	jobHandler := jobs.NewHandler(jobRepo)

@@ -68,6 +68,7 @@ func main() {
 		EmbeddingProject:    os.Getenv("COMPANION_EMBEDDING_VERTEX_PROJECT"),
 		EmbeddingLocation:   os.Getenv("COMPANION_EMBEDDING_VERTEX_LOCATION"),
 		EmbeddingDimensions: envInt("COMPANION_EMBEDDING_DIMENSIONS"),
+		OpsAlertWebhookURL:  os.Getenv("COMPANION_OPS_ALERT_WEBHOOK_URL"),
 		MigrationFiles:      migrations.Files,
 	}
 

@@ -564,6 +564,7 @@ func (o *Orchestrator) finishTrace(ctx context.Context, trace RunTrace, in RunIn
 		"usage":            trace.Usage,
 		"tool_calls":       len(trace.ToolCalls),
 		"guardrail_events": len(trace.GuardrailEvents),
+		"duration_ms":      runDurationMS(trace),
 	})
 	o.persistTrace(ctx, trace, in, errMsg)
 	recordRunMetrics(ctx, trace, in.OrgID)
@@ -576,6 +577,17 @@ func (o *Orchestrator) finishTrace(ctx context.Context, trace RunTrace, in RunIn
 	if err := o.controls.AddRuntimeUsage(recordCtx, in.OrgID, runtimeUsagePeriod(trace.StartedAt), trace.Usage); err != nil {
 		slog.Error("runtime_usage_record_failed", "run_id", trace.RunID, "customer_org_id", in.OrgID, "error", err)
 	}
+}
+
+func runDurationMS(trace RunTrace) int64 {
+	if trace.StartedAt.IsZero() || trace.CompletedAt.IsZero() {
+		return 0
+	}
+	duration := trace.CompletedAt.Sub(trace.StartedAt).Milliseconds()
+	if duration < 0 {
+		return 0
+	}
+	return duration
 }
 
 func (o *Orchestrator) recordObservabilityEvent(ctx context.Context, trace RunTrace, in RunInput, eventType, eventName string, payload map[string]any) {

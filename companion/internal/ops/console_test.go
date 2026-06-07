@@ -2,6 +2,7 @@ package ops
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -9,11 +10,13 @@ import (
 
 	"github.com/devpablocristo/companion/internal/capabilities"
 	"github.com/devpablocristo/companion/internal/identityctx"
+	"github.com/devpablocristo/companion/internal/jobs"
 	"github.com/devpablocristo/companion/internal/products"
 	"github.com/devpablocristo/companion/internal/runtime"
 	"github.com/devpablocristo/companion/internal/securityevals"
 	authn "github.com/devpablocristo/platform/authn/go"
 	"github.com/devpablocristo/platform/authn/go/identityhttp"
+	"github.com/google/uuid"
 )
 
 type fakeOpsStore struct {
@@ -128,6 +131,14 @@ func TestUsecasesGetConsoleBuildsOperationalAlertsAndSLOs(t *testing.T) {
 		}, {
 			OrgID:          "org-a",
 			ProductSurface: "ponti",
+			EventType:      "mcp",
+			EventName:      "mcp_tool_call",
+			Severity:       "info",
+			Payload:        []byte(`{"tool_name":"axis.products.list","status":"executed","duration_ms":120}`),
+			OccurredAt:     now,
+		}, {
+			OrgID:          "org-a",
+			ProductSurface: "ponti",
 			EventType:      "guardrail",
 			EventName:      "mcp_runtime_policy",
 			Payload:        []byte(`{"tool_name":"axis.products.list","target":"tool:axis.products.list","reason":"tool is denied for this customer org"}`),
@@ -196,6 +207,12 @@ func TestUsecasesGetConsoleBuildsOperationalAlertsAndSLOs(t *testing.T) {
 	if limit.ToolCallsUsed != 45 || limit.ToolCallLimit != 50 || limit.ToolCallUsageRatio != 0.9 || limit.ToolCallSource != "product_policy" {
 		t.Fatalf("unexpected tool call limit usage: %+v", limit)
 	}
+	if len(console.Metrics) != 1 || console.Metrics[0].P95LatencyMS != 120 || console.Metrics[0].MCPToolCalls != 1 {
+		t.Fatalf("expected latency and MCP metrics, got %+v", console.Metrics)
+	}
+	if console.SLOs[0].Latency.Status != "ok" || console.SLOs[0].Latency.Value != 120 {
+		t.Fatalf("expected latency SLO from metrics, got %+v", console.SLOs[0].Latency)
+	}
 }
 
 func TestUsecasesGetConsoleDedupesRepeatedGuardrailAlerts(t *testing.T) {
@@ -239,6 +256,56 @@ func TestUsecasesGetConsoleDedupesRepeatedGuardrailAlerts(t *testing.T) {
 	}
 }
 
+func TestUsecasesGetConsoleBuildsJobHealthAlerts(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now().UTC()
+	expired := now.Add(-time.Minute)
+	deadline := now.Add(-2 * time.Minute)
+	uc := NewUsecases(Deps{
+		Jobs: staticJobs{jobs: []jobs.Job{{
+			ID:             uuid.New(),
+			OrgID:          "org-a",
+			ProductSurface: "companion",
+			Kind:           "watcher.run",
+			Status:         jobs.StatusDeadLetter,
+			Attempts:       3,
+			MaxAttempts:    3,
+			LastError:      "permanent failure",
+			UpdatedAt:      now,
+		}, {
+			ID:             uuid.New(),
+			OrgID:          "org-a",
+			ProductSurface: "companion",
+			Kind:           "memory.embedding",
+			Status:         jobs.StatusRunning,
+			Attempts:       1,
+			MaxAttempts:    3,
+			LeaseUntil:     &expired,
+			DeadlineAt:     &deadline,
+			TimeoutSeconds: 30,
+			UpdatedAt:      now,
+		}}},
+	})
+
+	console, err := uc.GetConsole(context.Background(), Query{OrgID: "org-a", ProductSurface: "companion"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(console.JobHealth) != 1 {
+		t.Fatalf("expected one job health row, got %+v", console.JobHealth)
+	}
+	health := console.JobHealth[0]
+	if health.DeadLetter != 1 || health.ExpiredLeases != 1 || health.StuckJobs != 1 {
+		t.Fatalf("unexpected job health: %+v", health)
+	}
+	for _, want := range []string{"job_dead_letter", "job_expired_lease", "job_stuck"} {
+		if !hasAlert(console.Alerts, want) {
+			t.Fatalf("expected alert %s in %+v", want, console.Alerts)
+		}
+	}
+}
+
 func TestHandlerRequiresOpsScope(t *testing.T) {
 	t.Parallel()
 
@@ -270,12 +337,73 @@ func TestHandlerAllowsOpsScope(t *testing.T) {
 	}
 }
 
+func TestHandlerDispatchAlertsPostsWebhook(t *testing.T) {
+	t.Parallel()
+
+	var received AlertDispatchPayload
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("expected POST webhook, got %s", r.Method)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			t.Fatalf("decode webhook payload: %v", err)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	uc := NewUsecases(Deps{
+		Observability: staticEvents{events: []runtime.ObservabilityEvent{{
+			OrgID:          "org-a",
+			ProductSurface: "companion",
+			EventType:      "guardrail",
+			EventName:      "mcp_runtime_policy",
+			Payload:        []byte(`{"tool_name":"axis.products.list","target":"tool:axis.products.list","reason":"denied"}`),
+			OccurredAt:     time.Now().UTC(),
+		}}},
+		AlertSink: NewWebhookAlertSink(server.URL, time.Second),
+	})
+	mux := http.NewServeMux()
+	NewHandler(uc).Register(mux)
+	req := httptest.NewRequest(http.MethodPost, "/v1/ops/alerts/dispatch?org_id=org-a&product_surface=companion", nil)
+	req = withPrincipal(req, []string{"companion:runtime:admin"})
+	res := httptest.NewRecorder()
+	mux.ServeHTTP(res, req)
+	if res.Code != http.StatusAccepted {
+		t.Fatalf("expected accepted dispatch, got %d body=%s", res.Code, res.Body.String())
+	}
+	if received.OrgID != "org-a" || received.ProductSurface != "companion" || len(received.Alerts) != 1 || received.Alerts[0].Type != "mcp_runtime_policy_block" {
+		t.Fatalf("unexpected webhook payload: %+v", received)
+	}
+}
+
 type staticEvents struct {
 	events []runtime.ObservabilityEvent
 }
 
 func (s staticEvents) ListObservabilityEvents(context.Context, runtime.ObservabilityEventFilter) ([]runtime.ObservabilityEvent, error) {
 	return s.events, nil
+}
+
+type staticJobs struct {
+	jobs []jobs.Job
+}
+
+func (s staticJobs) List(_ context.Context, orgID, productSurface, status string, _ int) ([]jobs.Job, error) {
+	out := make([]jobs.Job, 0)
+	for _, item := range s.jobs {
+		if item.OrgID != orgID {
+			continue
+		}
+		if productSurface != "" && item.ProductSurface != productSurface {
+			continue
+		}
+		if status != "" && string(item.Status) != status {
+			continue
+		}
+		out = append(out, item)
+	}
+	return out, nil
 }
 
 func hasAlert(alerts []Alert, kind string) bool {
