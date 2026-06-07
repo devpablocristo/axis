@@ -26,6 +26,7 @@ bash scripts/quality/check-migrations.sh
 bash scripts/quality/check-nexus-imports.sh
 bash scripts/quality/check-side-effects-pipeline.sh
 bash scripts/evals/run-product-evals.sh
+bash scripts/onboarding/check-axis-readiness.sh
 ```
 
 ## Fixtures

@@ -69,7 +69,7 @@ jobs:
         working-directory: companion
       - run: go test ./...
         working-directory: companion
-      - run: bash scripts/onboarding/check-reference-product.sh
+      - run: bash scripts/onboarding/check-axis-readiness.sh
         working-directory: companion
       - run: bash scripts/quality/check-migrations.sh
         working-directory: companion

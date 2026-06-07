@@ -23,27 +23,30 @@ func TestValidateSpecPassesReusableProductContract(t *testing.T) {
 func TestReferenceProductContractFixturePasses(t *testing.T) {
 	t.Parallel()
 
-	contractPath, err := productevals.FindRepoFile("companion/scripts/onboarding/reference-product-contract.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	evalPackPath, err := productevals.FindRepoFile("companion/scripts/evals/reference-golden.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	spec, err := LoadSpec(contractPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pack, err := productevals.LoadPack(evalPackPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	spec.EvalPack = &pack
+	assertFixturePasses(t, "reference")
+}
 
-	report := ValidateSpec(spec)
-	if report.Status != StatusPassed {
-		t.Fatalf("expected reference fixture to pass, got %+v", report)
+func TestShadowProductContractFixturePasses(t *testing.T) {
+	t.Parallel()
+
+	assertFixturePasses(t, "shadow")
+}
+
+func TestReadinessFixturesUseDistinctProductsAndOrgs(t *testing.T) {
+	t.Parallel()
+
+	reference := loadFixtureSpec(t, "reference")
+	shadow := loadFixtureSpec(t, "shadow")
+	if reference.Product.ProductSurface == shadow.Product.ProductSurface {
+		t.Fatalf("expected distinct product surfaces, got %q", reference.Product.ProductSurface)
+	}
+	if reference.OrgID == shadow.OrgID {
+		t.Fatalf("expected distinct org ids, got %q", reference.OrgID)
+	}
+	for _, surface := range []string{reference.Product.ProductSurface, shadow.Product.ProductSurface} {
+		if surface == "ponti" || surface == "pymes" {
+			t.Fatalf("readiness fixture must not use real product surface %q", surface)
+		}
 	}
 }
 
@@ -179,4 +182,35 @@ func hasFailure(report Report, id string) bool {
 		}
 	}
 	return false
+}
+
+func assertFixturePasses(t *testing.T, product string) {
+	t.Helper()
+	spec := loadFixtureSpec(t, product)
+	report := ValidateSpec(spec)
+	if report.Status != StatusPassed {
+		t.Fatalf("expected %s fixture to pass, got %+v", product, report)
+	}
+}
+
+func loadFixtureSpec(t *testing.T, product string) Spec {
+	t.Helper()
+	contractPath, err := productevals.FindRepoFile("companion/scripts/onboarding/" + product + "-product-contract.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	evalPackPath, err := productevals.FindRepoFile("companion/scripts/evals/" + product + "-golden.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec, err := LoadSpec(contractPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pack, err := productevals.LoadPack(evalPackPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec.EvalPack = &pack
+	return spec
 }

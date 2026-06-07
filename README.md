@@ -77,6 +77,9 @@ deployable: `deploy-nexus-dev`, `deploy-companion-dev`, `deploy-bff-dev` y
 Release, rollback y branch-protection recomendada estan documentados en
 `docs/release-rollback.md`.
 
+Readiness multi-producto antes del primer producto real esta documentado en
+`docs/axis-ready-for-first-real-product.md`.
+
 Variables GitHub comunes:
 
 - `GCP_PROJECT_ID_DEV`, `GCP_REGION`, `WIF_PROVIDER_DEV`,

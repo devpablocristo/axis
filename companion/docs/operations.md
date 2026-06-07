@@ -139,6 +139,9 @@ local obligatorio sigue siendo `bash scripts/evals/run-security-evals.sh`.
   scripts/evals/<product>-golden.json` ejecuta el checklist de onboarding.
 - `bash scripts/onboarding/check-reference-product.sh` valida el producto
   generico `reference` sin conectar ningun producto real.
+- `bash scripts/onboarding/check-axis-readiness.sh` valida los productos fake
+  `reference` y `shadow`, comprueba que usen `product_surface` y `org_id`
+  distintos, y falla si algun fixture usa defaults reales como Ponti/Pymes.
 
 Los evals de producto son no bloqueantes al inicio; el reporte mantiene
 thresholds por producto para convertirlos en gate cuando el producto tenga

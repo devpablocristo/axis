@@ -239,6 +239,35 @@ bloquear inserciones entre si aunque reutilicen el mismo `scope_id`.
 
 ## Product Evals Y Contract Tests
 
+## Readiness Freeze
+
+Estado al 2026-06-07: `Product Integration Contract v1` queda congelado para
+conectar el primer producto real. Cambios incompatibles requieren ADR y una
+version `v2`; no deben hacerse como ajuste silencioso de Companion.
+
+Compatibilidad que debe preservarse:
+
+- `org_id` identifica la customer org real.
+- `product_surface` identifica el producto conectado.
+- toda superficie externa requiere `org_id + product_surface + installation`
+  activa.
+- `workspace` sigue siendo JSON opaco para Axis.
+- manifests usan `capability_manifest.v1`.
+- read capabilities pueden ejecutarse sin Nexus si pasan scopes/policy.
+- write/side-effect capabilities requieren metadata Nexus y aprobación según
+  policy.
+- observability, costs, evals, jobs y memory se atribuyen por `org_id +
+  product_surface`.
+
+Readiness ejecutable antes de conectar un producto real:
+
+```bash
+bash scripts/onboarding/check-axis-readiness.sh
+```
+
+El check valida dos productos fake (`reference` y `shadow`) para demostrar que
+Axis no depende de hardcode vertical ni de defaults Ponti/Pymes.
+
 Cada producto debe tener un pack `scripts/evals/<product_surface>-golden.json`
 con:
 
