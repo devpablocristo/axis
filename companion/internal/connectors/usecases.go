@@ -319,6 +319,26 @@ func (uc *Usecases) Execute(ctx context.Context, spec domain.ExecutionSpec) (dom
 		return domain.ExecutionResult{}, fmt.Errorf("save execution result: %w", saveErr)
 	}
 
+	logAttrs := []any{
+		"execution_id", result.ID.String(),
+		"connector_id", spec.ConnectorID.String(),
+		"connector_kind", config.Kind,
+		"operation", spec.Operation,
+		"status", string(result.Status),
+		"org_id", spec.OrgID,
+		"actor_id", spec.ActorID,
+		"product_surface", productSurface,
+		"external_ref", result.ExternalRef,
+		"duration_ms", result.DurationMS,
+	}
+	if spec.TaskID != nil {
+		logAttrs = append(logAttrs, "task_id", spec.TaskID.String())
+	}
+	if spec.NexusRequestID != nil {
+		logAttrs = append(logAttrs, "nexus_request_id", spec.NexusRequestID.String())
+	}
+	slog.InfoContext(ctx, "connector_execution_recorded", logAttrs...)
+
 	return result, nil
 }
 

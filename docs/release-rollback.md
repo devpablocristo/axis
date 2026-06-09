@@ -65,7 +65,11 @@ auditable.
 `Companion`:
 
 - Requiere base de datos, Nexus base URL, API keys e internal JWT secret.
+- Para exponer Ponti como producto Axis, requiere `PONTI_BASE_URL` y la secret
+  `PONTI_API_KEY` con el mismo valor que `PONTI_AXIS_API_KEY` en Ponti.
 - Sus watchers pueden apagarse con intervalos `0` durante incidentes.
+- Si el conector Ponti queda sin manifest luego de un rollback o deploy, correr
+  `POST /v1/connectors/refresh` y luego el smoke Ponti read-only.
 - Validar `mcp-smoke` y `platform-nightly` si el cambio tocó MCP, runtime,
   observability, products, capabilities o Nexus integration.
 
