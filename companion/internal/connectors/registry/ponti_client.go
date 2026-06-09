@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -52,6 +53,46 @@ func (c *PontiClient) doGet(ctx context.Context, path string, orgID string, out 
 		req.Header.Set("X-Tenant-Id", orgID)
 	}
 	req.Header.Set("Accept", "application/json")
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return fmt.Errorf("ponti http: %w", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("read body: %w", err)
+	}
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("ponti http %d: %s", resp.StatusCode, string(body))
+	}
+	if out == nil {
+		return nil
+	}
+	if err := json.Unmarshal(body, out); err != nil {
+		return fmt.Errorf("decode response: %w", err)
+	}
+	return nil
+}
+
+func (c *PontiClient) doPost(ctx context.Context, path string, orgID string, payload json.RawMessage, out any) error {
+	if len(payload) == 0 {
+		payload = json.RawMessage(`{}`)
+	}
+	url := c.BaseURL + path
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+	if err != nil {
+		return fmt.Errorf("build request: %w", err)
+	}
+	if c.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+c.APIKey)
+	}
+	if orgID != "" {
+		// Ponti extrae org_id del JWT en producción. En pruebas/dev el header
+		// X-Tenant-Id se usa como override del middleware de auth.
+		req.Header.Set("X-Tenant-Id", orgID)
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
 		return fmt.Errorf("ponti http: %w", err)
@@ -132,6 +173,30 @@ func (c *PontiClient) ExplainInsight(ctx context.Context, orgID, insightID strin
 	}
 	var raw json.RawMessage
 	if err := c.doGet(ctx, "/api/v1/insights/"+insightID+"/explain", orgID, &raw); err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+
+func (c *PontiClient) PrepareInsightResolve(ctx context.Context, orgID string, payload json.RawMessage) (json.RawMessage, error) {
+	var raw json.RawMessage
+	if err := c.doPost(ctx, "/api/v1/ai/actions/insight-resolve/prepare", orgID, payload, &raw); err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+
+func (c *PontiClient) PrepareWorkOrderDraft(ctx context.Context, orgID string, payload json.RawMessage) (json.RawMessage, error) {
+	var raw json.RawMessage
+	if err := c.doPost(ctx, "/api/v1/ai/actions/workorder-draft/prepare", orgID, payload, &raw); err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+
+func (c *PontiClient) PrepareStockAdjustment(ctx context.Context, orgID string, payload json.RawMessage) (json.RawMessage, error) {
+	var raw json.RawMessage
+	if err := c.doPost(ctx, "/api/v1/ai/actions/stock-adjustment/prepare", orgID, payload, &raw); err != nil {
 		return nil, err
 	}
 	return raw, nil

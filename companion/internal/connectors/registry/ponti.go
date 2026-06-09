@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -25,6 +24,8 @@ const pontiManifestDiscoveryTimeout = 5 * time.Second
 // manifest cacheado antes de re-fetchear. Refresh manual (POST
 // /v1/connectors/refresh) bypassa el TTL.
 const pontiManifestCacheTTL = 5 * time.Minute
+
+const pontiDefaultNexusActionType = "agent.capability.invoke"
 
 // PontiConnector adapter de Companion a Ponti (read-only).
 //
@@ -164,6 +165,12 @@ func (p *PontiConnector) Execute(ctx context.Context, spec domain.ExecutionSpec)
 		raw, execErr = p.client.SummaryInsights(ctx, spec.OrgID)
 	case "ponti.insights.explain":
 		raw, execErr = p.client.ExplainInsight(ctx, spec.OrgID, params.InsightID)
+	case "ponti.insight.resolve.prepare":
+		raw, execErr = p.client.PrepareInsightResolve(ctx, spec.OrgID, spec.Payload)
+	case "ponti.workorder.draft.prepare":
+		raw, execErr = p.client.PrepareWorkOrderDraft(ctx, spec.OrgID, spec.Payload)
+	case "ponti.stock_adjustment.prepare":
+		raw, execErr = p.client.PrepareStockAdjustment(ctx, spec.OrgID, spec.Payload)
 	default:
 		return domain.ExecutionResult{}, fmt.Errorf("unknown operation: %s", spec.Operation)
 	}
@@ -234,6 +241,23 @@ func capabilityFromTool(m ai.CapabilityManifest, tool ai.CapabilityTool) domain.
 		mode = domain.CapabilityModeWrite
 		sideEffectClass = domain.SideEffectClassWrite
 	}
+	idempotency := domain.IdempotencyContract{}
+	idempotencyMode := "none"
+	nexusActionType := ""
+	approvalPolicy := domain.ApprovalPolicy{Required: requiresNexus}
+	if !readOnly {
+		idempotency = domain.IdempotencyContract{
+			Required:  true,
+			KeyFields: []string{"tenant_id", "task_id", "operation", "idempotency_key"},
+		}
+		idempotencyMode = "required"
+	}
+	if requiresNexus {
+		nexusActionType = strings.TrimSpace(tool.Governance.ActionType)
+		if nexusActionType == "" {
+			nexusActionType = pontiDefaultNexusActionType
+		}
+	}
 	return domain.Capability{
 		ID:              tool.Name,
 		Version:         m.Version,
@@ -242,7 +266,9 @@ func capabilityFromTool(m ai.CapabilityManifest, tool ai.CapabilityTool) domain.
 		PublishedFrom:   domain.CapabilityPublishedFromProduct,
 		Product:         m.Product,
 		Operation:       tool.Name,
+		ActionType:      mode,
 		Mode:            mode,
+		SideEffectType:  sideEffectClass,
 		SideEffectClass: sideEffectClass,
 		SideEffect:      tool.SideEffect,
 		ReadOnly:        readOnly,
@@ -256,17 +282,18 @@ func capabilityFromTool(m ai.CapabilityManifest, tool ai.CapabilityTool) domain.
 		RequiredScopes:        []string{"companion:connectors:execute"},
 		RequiredModules:       append([]string(nil), tool.RequiredModules...),
 		RequiresNexusApproval: requiresNexus,
+		ApprovalPolicy:        approvalPolicy,
 		InputSchema:           tool.InputSchema,
 		OutputSchema:          tool.OutputSchema,
 		EvidenceFields:        append([]string(nil), tool.EvidenceFields...),
+		EvidenceRequired:      append([]string(nil), tool.EvidenceFields...),
+		Idempotency:           idempotency,
+		IdempotencyMode:       idempotencyMode,
+		NexusActionType:       nexusActionType,
+		Postconditions:        append([]string(nil), tool.EvidenceFields...),
 	}
 }
 
 func toolRequiresNexusApproval(tool ai.CapabilityTool) bool {
-	field := reflect.ValueOf(tool).FieldByName("Go" + "vernance")
-	if !field.IsValid() || field.IsNil() {
-		return false
-	}
-	req := field.Elem().FieldByName("RequiresApproval")
-	return req.IsValid() && req.Kind() == reflect.Bool && req.Bool()
+	return tool.Governance != nil && tool.Governance.RequiresApproval
 }
