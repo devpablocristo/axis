@@ -515,6 +515,30 @@ paths:
       responses:
         "200": { description: Execution result }
         "403": { description: Forbidden or nexus denied }
+  /v1/connectors/action-binding:
+    post:
+      summary: Calcula el action binding Nexus para una capability
+      description: Requiere `companion:connectors:execute`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200":
+          description: Action binding for Nexus
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [action_binding, binding_hash]
+                properties:
+                  action_binding:
+                    type: object
+                    additionalProperties: true
+                  binding_hash:
+                    type: string
+        "403": { description: Forbidden }
   /v1/connectors/capabilities:
     get:
       summary: Lista capabilities disponibles

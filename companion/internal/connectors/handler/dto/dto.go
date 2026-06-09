@@ -48,6 +48,15 @@ type ExecuteRequest struct {
 	NexusRequestID string          `json:"nexus_request_id,omitempty"`
 }
 
+// ActionBindingRequest pide el contrato exacto que debe aprobar Nexus antes
+// de una ejecución gobernada. Intencionalmente comparte shape con execute.
+type ActionBindingRequest = ExecuteRequest
+
+type ActionBindingResponse struct {
+	ActionBinding map[string]any `json:"action_binding"`
+	BindingHash   string         `json:"binding_hash"`
+}
+
 // ExecutionResponse resultado de una ejecución.
 type ExecutionResponse struct {
 	ID             string          `json:"id"`

@@ -26,6 +26,7 @@ type connectorUsecase interface {
 	SaveConnector(ctx context.Context, c domain.Connector) (domain.Connector, error)
 	DeleteConnector(ctx context.Context, id uuid.UUID) error
 	Execute(ctx context.Context, spec domain.ExecutionSpec) (domain.ExecutionResult, error)
+	BuildActionBinding(ctx context.Context, spec domain.ExecutionSpec) (map[string]any, string, error)
 	ListExecutions(ctx context.Context, connectorID uuid.UUID, limit int) ([]domain.ExecutionResult, error)
 	Capabilities(filter domain.CapabilityFilter) []ConnectorCapabilities
 	CapabilityManifests(filter domain.CapabilityFilter) ([]capabilities.Manifest, error)
@@ -50,6 +51,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/connectors/{id}", h.get)
 	mux.HandleFunc("DELETE /v1/connectors/{id}", h.delete)
 	mux.HandleFunc("POST /v1/connectors/execute", h.execute)
+	mux.HandleFunc("POST /v1/connectors/action-binding", h.actionBinding)
 	mux.HandleFunc("GET /v1/connectors/{id}/executions", h.listExecutions)
 	mux.HandleFunc("GET /v1/connectors/capabilities", h.capabilities)
 	mux.HandleFunc("GET /v1/connectors/capability-manifests", h.capabilityManifests)
@@ -178,57 +180,9 @@ func (h *Handler) execute(w http.ResponseWriter, r *http.Request) {
 	if !requireScope(w, r, scopeCompanionConnectorsExecute) {
 		return
 	}
-	id := identityctx.FromRequest(r)
-	if !identityctx.HasNoAuthContext(r) && (id.CustomerOrgID == "" || id.EffectiveActorID() == "") {
-		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "connector execution requires org and actor context")
-		return
-	}
-	var body dto.ExecuteRequest
-	if err := httpjson.DecodeJSON(r, &body); err != nil {
-		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid json")
-		return
-	}
-	if body.ConnectorID == "" || body.Operation == "" {
-		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "connector_id and operation are required")
-		return
-	}
-
-	connID, err := uuid.Parse(body.ConnectorID)
-	if err != nil {
-		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid connector_id")
-		return
-	}
-
-	payload, ok := bindPayloadToPrincipalOrg(r, body.Payload)
+	spec, ok := h.executionSpecFromRequest(w, r)
 	if !ok {
-		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "payload org is not allowed for this principal")
 		return
-	}
-	spec := domain.ExecutionSpec{
-		ConnectorID:        connID,
-		OrgID:              id.CustomerOrgID,
-		ActorID:            id.EffectiveActorID(),
-		ActorType:          id.ActorType,
-		CompanionPrincipal: id.CompanionPrincipal,
-		OnBehalfOf:         id.OnBehalfOf,
-		ServicePrincipal:   id.ServicePrincipal,
-		ProductSurface:     id.ProductSurface,
-		AuthScopes:         append([]string(nil), id.Scopes...),
-		Operation:          body.Operation,
-		Payload:            payload,
-		IdempotencyKey:     body.IdempotencyKey,
-	}
-	if body.TaskID != "" {
-		tid, err := uuid.Parse(body.TaskID)
-		if err == nil {
-			spec.TaskID = &tid
-		}
-	}
-	if body.NexusRequestID != "" {
-		rid, err := uuid.Parse(body.NexusRequestID)
-		if err == nil {
-			spec.NexusRequestID = &rid
-		}
 	}
 
 	result, err := h.uc.Execute(r.Context(), spec)
@@ -273,6 +227,102 @@ func (h *Handler) execute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpjson.WriteJSON(w, http.StatusOK, dto.ExecutionToResponse(result))
+}
+
+func (h *Handler) actionBinding(w http.ResponseWriter, r *http.Request) {
+	if !requireScope(w, r, scopeCompanionConnectorsExecute) {
+		return
+	}
+	spec, ok := h.executionSpecFromRequest(w, r)
+	if !ok {
+		return
+	}
+	binding, hash, err := h.uc.BuildActionBinding(r.Context(), spec)
+	if err != nil {
+		if IsNotFound(err) {
+			httpjson.WriteFlatError(w, http.StatusNotFound, "NOT_FOUND", "connector not found")
+			return
+		}
+		if err == ErrOperationUnknown {
+			httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "unknown operation for connector")
+			return
+		}
+		if IsInvalidPayload(err) {
+			httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", err.Error())
+			return
+		}
+		if IsValidation(err) {
+			httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", err.Error())
+			return
+		}
+		if IsRateLimited(err) {
+			httpjson.WriteFlatError(w, http.StatusTooManyRequests, "RATE_LIMITED", err.Error())
+			return
+		}
+		if IsForbidden(err) {
+			httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", err.Error())
+			return
+		}
+		httpjson.WriteFlatInternalError(w, err, "build connector action binding failed")
+		return
+	}
+	httpjson.WriteJSON(w, http.StatusOK, dto.ActionBindingResponse{ActionBinding: binding, BindingHash: hash})
+}
+
+func (h *Handler) executionSpecFromRequest(w http.ResponseWriter, r *http.Request) (domain.ExecutionSpec, bool) {
+	id := identityctx.FromRequest(r)
+	if !identityctx.HasNoAuthContext(r) && (id.CustomerOrgID == "" || id.EffectiveActorID() == "") {
+		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "connector execution requires org and actor context")
+		return domain.ExecutionSpec{}, false
+	}
+	var body dto.ExecuteRequest
+	if err := httpjson.DecodeJSON(r, &body); err != nil {
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid json")
+		return domain.ExecutionSpec{}, false
+	}
+	if body.ConnectorID == "" || body.Operation == "" {
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "connector_id and operation are required")
+		return domain.ExecutionSpec{}, false
+	}
+
+	connID, err := uuid.Parse(body.ConnectorID)
+	if err != nil {
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid connector_id")
+		return domain.ExecutionSpec{}, false
+	}
+
+	payload, ok := bindPayloadToPrincipalOrg(r, body.Payload)
+	if !ok {
+		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "payload org is not allowed for this principal")
+		return domain.ExecutionSpec{}, false
+	}
+	spec := domain.ExecutionSpec{
+		ConnectorID:        connID,
+		OrgID:              id.CustomerOrgID,
+		ActorID:            id.EffectiveActorID(),
+		ActorType:          id.ActorType,
+		CompanionPrincipal: id.CompanionPrincipal,
+		OnBehalfOf:         id.OnBehalfOf,
+		ServicePrincipal:   id.ServicePrincipal,
+		ProductSurface:     id.ProductSurface,
+		AuthScopes:         append([]string(nil), id.Scopes...),
+		Operation:          body.Operation,
+		Payload:            payload,
+		IdempotencyKey:     body.IdempotencyKey,
+	}
+	if body.TaskID != "" {
+		tid, err := uuid.Parse(body.TaskID)
+		if err == nil {
+			spec.TaskID = &tid
+		}
+	}
+	if body.NexusRequestID != "" {
+		rid, err := uuid.Parse(body.NexusRequestID)
+		if err == nil {
+			spec.NexusRequestID = &rid
+		}
+	}
+	return spec, true
 }
 
 func (h *Handler) listExecutions(w http.ResponseWriter, r *http.Request) {
