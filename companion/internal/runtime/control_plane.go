@@ -70,12 +70,13 @@ type RunUsage struct {
 }
 
 type ToolTrace struct {
-	Name           string `json:"name"`
-	ToolCallID     string `json:"tool_call_id,omitempty"`
-	Allowed        bool   `json:"allowed"`
-	DecisionReason string `json:"decision_reason,omitempty"`
-	DurationMS     int64  `json:"duration_ms"`
-	Error          string `json:"error,omitempty"`
+	Name           string          `json:"name"`
+	ToolCallID     string          `json:"tool_call_id,omitempty"`
+	Allowed        bool            `json:"allowed"`
+	DecisionReason string          `json:"decision_reason,omitempty"`
+	DurationMS     int64           `json:"duration_ms"`
+	Error          string          `json:"error,omitempty"`
+	Result         json.RawMessage `json:"result,omitempty"`
 }
 
 type GuardrailEvent struct {
@@ -146,7 +147,14 @@ func BuildIdentityChainFromContext(id identityctx.IdentityContext) IdentityChain
 // RouteAgent clasifica intent y devuelve la ruta del agente. defaultAutonomy
 // puede ser "" (vacío), en cuyo caso se asume A2.
 func RouteAgent(message, productSurface string, toolkit *ToolKit, identity IdentityChain, defaultAutonomy AutonomyLevel) AgentRoute {
-	intent := classifyIntent(message)
+	return RouteAgentWithContext(message, productSurface, "", nil, toolkit, identity, defaultAutonomy)
+}
+
+// RouteAgentWithContext clasifica intent usando, además del mensaje, pistas de
+// la pantalla de producto (route_hint/handoff). El ruteo sigue siendo
+// determinístico y las tools visibles se filtran después por perfil y scopes.
+func RouteAgentWithContext(message, productSurface, routeHint string, handoff json.RawMessage, toolkit *ToolKit, identity IdentityChain, defaultAutonomy AutonomyLevel) AgentRoute {
+	intent := classifyIntentWithContext(message, productSurface, routeHint, handoff)
 	autonomy := defaultAutonomy
 	if autonomy == "" {
 		autonomy = AutonomyA2
@@ -205,6 +213,10 @@ func cleanScopes(scopes []string) []string {
 }
 
 func classifyIntent(message string) string {
+	return classifyIntentWithContext(message, "", "", nil)
+}
+
+func classifyIntentWithContext(message, productSurface, routeHint string, handoff json.RawMessage) string {
 	text := strings.ToLower(message)
 	switch {
 	case strings.Contains(text, "aprobar"), strings.Contains(text, "rechazar"), strings.Contains(text, "approval"):
@@ -216,6 +228,9 @@ func classifyIntent(message string) string {
 	case strings.Contains(text, "política"), strings.Contains(text, "policy"):
 		return "nexus.policy"
 	default:
+		if intent := classifyPontiRouteIntent(productSurface, message, routeHint, handoff); intent != "" {
+			return intent
+		}
 		return "general.assist"
 	}
 }

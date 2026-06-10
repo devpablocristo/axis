@@ -835,6 +835,92 @@ func TestRouteAgent_filtersToolsByTenantAndScopes(t *testing.T) {
 	}
 }
 
+func TestRouteAgent_usesPontiRouteHint(t *testing.T) {
+	t.Parallel()
+
+	toolkit := &ToolKit{
+		Schemas: []ToolSchema{
+			{Name: "ponti_reports_summary_results_summary"},
+			{Name: "ponti_stock_summary"},
+		},
+		Handlers: map[string]ToolHandler{},
+	}
+	identity := BuildIdentityChain("user-1", "org-1", "ponti", "companion:connectors:execute")
+
+	route := RouteAgentWithContext(
+		"Resumí los informes económicos de la campaña",
+		"ponti",
+		"reports",
+		json.RawMessage(`{"source":"ponti-web","workspace":{"project_id":30}}`),
+		toolkit,
+		identity,
+		AutonomyA2,
+	)
+
+	if route.Intent != "ponti.reports" {
+		t.Fatalf("expected ponti reports intent, got %q", route.Intent)
+	}
+	if !routeAllowsTool(route, "ponti_reports_summary_results_summary") {
+		t.Fatalf("expected reports tool to be allowed, got %+v", route.AllowedTools)
+	}
+}
+
+func TestOrchestrator_PontiReportsRoutePrefetchesReadTool(t *testing.T) {
+	t.Parallel()
+
+	var capturedArgs json.RawMessage
+	toolkit := &ToolKit{
+		Schemas: []ToolSchema{
+			{Name: "ponti_reports_summary_results_summary", Description: "Report summary", Parameters: map[string]any{
+				"type":       "object",
+				"properties": map[string]any{"workspace": map[string]any{"type": "object"}},
+				"required":   []string{"workspace"},
+			}},
+		},
+		Handlers: map[string]ToolHandler{
+			"ponti_reports_summary_results_summary": func(_ context.Context, args json.RawMessage) (string, error) {
+				capturedArgs = append(json.RawMessage(nil), args...)
+				return `{"source":"ponti.reports.summary_results.summary","summary":{"result":"ok"},"items":[]}`, nil
+			},
+		},
+	}
+	provider := &fakeLLMProvider{responses: []ChatResponse{
+		{Text: "No tengo acceso a esos informes."},
+		{Text: "Resultado operativo: Ponti devolvió el resumen de informes."},
+	}}
+	orch := NewOrchestrator(provider, toolkit, ContextPorts{})
+
+	result, err := orch.Run(context.Background(), RunInput{
+		UserID:         "user-1",
+		OrgID:          "org-1",
+		Message:        "Resumí los informes económicos de la campaña y explicá el resultado operativo.",
+		RouteHint:      "reports",
+		ProductSurface: "ponti",
+		Handoff:        json.RawMessage(`{"source":"ponti-web","route_hint":"reports","workspace":{"customer_id":17,"project_id":30,"campaign_id":2}}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Trace.Intent != "ponti.reports" {
+		t.Fatalf("expected ponti reports intent, got %q", result.Trace.Intent)
+	}
+	if result.Reply != "Resultado operativo: Ponti devolvió el resumen de informes." {
+		t.Fatalf("unexpected reply %q", result.Reply)
+	}
+	if len(result.Trace.ToolCalls) != 1 || result.Trace.ToolCalls[0].Name != "ponti_reports_summary_results_summary" {
+		t.Fatalf("expected forced reports tool call, got %+v", result.Trace.ToolCalls)
+	}
+	if len(provider.requests) != 2 {
+		t.Fatalf("expected second LLM pass after prefetch, got %d requests", len(provider.requests))
+	}
+	if !strings.Contains(provider.requests[0].SystemPrompt, "Tools sugeridas para este contexto: ponti_reports_summary_results_summary") {
+		t.Fatalf("expected Ponti guidance in prompt, got %s", provider.requests[0].SystemPrompt)
+	}
+	if !strings.Contains(string(capturedArgs), `"project_id":30`) {
+		t.Fatalf("expected workspace in forced tool args, got %s", string(capturedArgs))
+	}
+}
+
 func TestValidateToolPolicy_rejectsToolOutsideRoute(t *testing.T) {
 	t.Parallel()
 

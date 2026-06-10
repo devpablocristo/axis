@@ -101,17 +101,30 @@ type OrchestratorInput struct {
 	AuthScopes     []string
 	Identity       identityctx.IdentityContext
 	Message        string
+	RouteHint      string
+	Handoff        json.RawMessage
 	Messages       []domain.TaskMessage
 	TaskID         *uuid.UUID // opcional: vincula el trace a una task
 	ProductSurface string     // opcional: "companion" (default) | "ponti" | "pymes" — afecta routing
 	AgentID        string     // opcional: empleado IA persistente que toma ownership de la ejecución
 }
 
+type OrchestratorToolCall struct {
+	Name           string          `json:"name"`
+	ToolCallID     string          `json:"tool_call_id,omitempty"`
+	Allowed        bool            `json:"allowed"`
+	DecisionReason string          `json:"decision_reason,omitempty"`
+	DurationMS     int64           `json:"duration_ms"`
+	Error          string          `json:"error,omitempty"`
+	Result         json.RawMessage `json:"result,omitempty"`
+}
+
 // OrchestratorResult resultado del runtime.
 type OrchestratorResult struct {
-	Reply   string
-	RunID   string
-	AgentID string
+	Reply     string
+	RunID     string
+	AgentID   string
+	ToolCalls []OrchestratorToolCall
 }
 
 // Usecases lógica de tareas e integración con Nexus.
@@ -344,15 +357,18 @@ type ChatInput struct {
 	Channel        string // "api", "watcher", "whatsapp", product-specific channels, etc.
 	ProductSurface string // opcional: "companion" | "ponti" | "pymes". Afecta routing del agent.
 	AgentID        string // opcional: empleado IA persistente para esta task/conversación.
+	RouteHint      string // opcional: pista de pantalla/módulo para ruteo operativo.
+	Handoff        json.RawMessage
 	Identity       identityctx.IdentityContext
 }
 
 // ChatResult resultado del chat.
 type ChatResult struct {
-	Task     domain.Task
-	Messages []domain.TaskMessage
-	RunID    string
-	AgentID  string
+	Task      domain.Task
+	Messages  []domain.TaskMessage
+	RunID     string
+	AgentID   string
+	ToolCalls []OrchestratorToolCall
 }
 
 // agentConversationContextKey nombre del field en task.context_json que guarda
@@ -455,6 +471,7 @@ func (u *Usecases) Chat(ctx context.Context, in ChatInput) (ChatResult, error) {
 
 	// Si hay orchestrator, generar respuesta del compañero
 	runID := ""
+	toolCalls := []OrchestratorToolCall{}
 	if u.orchestrator != nil {
 		existingMsgs, listErr := u.repo.ListMessagesByTaskID(ctx, t.ID)
 		if listErr != nil {
@@ -471,6 +488,8 @@ func (u *Usecases) Chat(ctx context.Context, in ChatInput) (ChatResult, error) {
 				AuthScopes:     in.AuthScopes,
 				Identity:       in.Identity,
 				Message:        in.Message,
+				RouteHint:      in.RouteHint,
+				Handoff:        in.Handoff,
 				Messages:       existingMsgs,
 				TaskID:         &taskID,
 				ProductSurface: in.ProductSurface,
@@ -482,6 +501,7 @@ func (u *Usecases) Chat(ctx context.Context, in ChatInput) (ChatResult, error) {
 			} else {
 				in.AgentID = result.AgentID
 				runID = result.RunID
+				toolCalls = result.ToolCalls
 				u.ensureTaskAgent(ctx, &t, in.AgentID)
 			}
 			if runErr == nil && result.Reply != "" {
@@ -506,7 +526,7 @@ func (u *Usecases) Chat(ctx context.Context, in ChatInput) (ChatResult, error) {
 		return ChatResult{}, fmt.Errorf("list chat messages: %w", err)
 	}
 
-	return ChatResult{Task: t, Messages: msgs, RunID: runID, AgentID: in.AgentID}, nil
+	return ChatResult{Task: t, Messages: msgs, RunID: runID, AgentID: in.AgentID, ToolCalls: toolCalls}, nil
 }
 
 // ensureAgentConversation obtiene o crea la conversación durable asociada a la

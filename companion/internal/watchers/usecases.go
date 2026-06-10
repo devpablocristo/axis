@@ -274,8 +274,11 @@ func resolveWatcherCapabilityConfig(w domain.Watcher) (domain.CapabilityWatcherC
 		cfg.QueryOperation = strings.TrimSpace(cfg.QueryOperation)
 		cfg.ActionOperation = strings.TrimSpace(cfg.ActionOperation)
 		cfg.ActionType = strings.TrimSpace(cfg.ActionType)
-		if cfg.ProductSurface == "" || cfg.ConnectorKind == "" || cfg.QueryOperation == "" || cfg.ActionOperation == "" || cfg.ActionType == "" {
-			return cfg, fmt.Errorf("product_surface, connector_kind, query_operation, action_operation and action_type are required")
+		if cfg.ProductSurface == "" || cfg.ConnectorKind == "" || cfg.QueryOperation == "" || cfg.ActionType == "" {
+			return cfg, fmt.Errorf("product_surface, connector_kind, query_operation and action_type are required")
+		}
+		if !cfg.ProposalOnly && cfg.ActionOperation == "" {
+			return cfg, fmt.Errorf("action_operation is required unless proposal_only is true")
 		}
 		return cfg, nil
 	}
@@ -509,6 +512,13 @@ func (uc *Usecases) processItem(ctx context.Context, w domain.Watcher, config do
 		return proposal, fmt.Errorf("create proposal: %w", err)
 	}
 	proposal = created
+	if config.ProposalOnly {
+		proposal.ExecutionStatus = domain.ProposalPending
+		if err := uc.repo.UpdateProposal(ctx, proposal); err != nil {
+			slog.Error("watcher update proposal-only proposal failed", "proposal_id", proposal.ID, "error", err)
+		}
+		return proposal, nil
+	}
 
 	execSpec, binding, bindingHash, err := uc.buildWatcherExecutionSpec(ctx, w, config, item, proposal.ID, nil)
 	if err != nil {

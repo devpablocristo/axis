@@ -27,7 +27,7 @@ const pontiManifestCacheTTL = 5 * time.Minute
 
 const pontiDefaultNexusActionType = "agent.capability.invoke"
 
-// PontiConnector adapter de Companion a Ponti (read-only).
+// PontiConnector adapter de Companion a Ponti.
 //
 // El catálogo de capabilities (tools, schemas, executor refs, roles) se
 // descubre dinámicamente desde Ponti vía GET /api/v1/capabilities y se
@@ -150,14 +150,19 @@ func (p *PontiConnector) Execute(ctx context.Context, spec domain.ExecutionSpec)
 		IncludeResolved bool   `json:"include_resolved"`
 		InsightID       string `json:"insight_id"`
 	}
+	var opPayload pontiOperationPayload
 	if len(spec.Payload) > 0 {
 		if err := json.Unmarshal(spec.Payload, &params); err != nil {
 			return domain.ExecutionResult{}, fmt.Errorf("parse payload: %w", err)
+		}
+		if err := json.Unmarshal(spec.Payload, &opPayload); err != nil {
+			return domain.ExecutionResult{}, fmt.Errorf("parse operation payload: %w", err)
 		}
 	}
 
 	var raw json.RawMessage
 	var execErr error
+	readWrap := false
 	switch spec.Operation {
 	case "ponti.insights.list":
 		raw, execErr = p.client.ListInsights(ctx, spec.OrgID, params.Limit, params.IncludeResolved)
@@ -165,12 +170,48 @@ func (p *PontiConnector) Execute(ctx context.Context, spec domain.ExecutionSpec)
 		raw, execErr = p.client.SummaryInsights(ctx, spec.OrgID)
 	case "ponti.insights.explain":
 		raw, execErr = p.client.ExplainInsight(ctx, spec.OrgID, params.InsightID)
+	case "ponti.dashboard.summary":
+		raw, execErr = p.client.DashboardSummary(ctx, spec.OrgID, opPayload)
+		readWrap = true
+	case "ponti.stock.summary":
+		raw, execErr = p.client.StockSummary(ctx, spec.OrgID, opPayload)
+		readWrap = true
+	case "ponti.workorders.list":
+		raw, execErr = p.client.WorkOrdersList(ctx, spec.OrgID, opPayload)
+		readWrap = true
+	case "ponti.workorders.metrics":
+		raw, execErr = p.client.WorkOrdersMetrics(ctx, spec.OrgID, opPayload)
+		readWrap = true
+	case "ponti.lots.summary":
+		raw, execErr = p.client.LotsSummary(ctx, spec.OrgID, opPayload)
+		readWrap = true
+	case "ponti.supplies.summary":
+		raw, execErr = p.client.SuppliesSummary(ctx, spec.OrgID, opPayload)
+		readWrap = true
+	case "ponti.reports.field_crop.summary":
+		raw, execErr = p.client.ReportSummary(ctx, spec.OrgID, "field-crop", opPayload)
+		readWrap = true
+	case "ponti.reports.investor_contribution.summary":
+		raw, execErr = p.client.ReportSummary(ctx, spec.OrgID, "investor-contribution", opPayload)
+		readWrap = true
+	case "ponti.reports.summary_results.summary":
+		raw, execErr = p.client.ReportSummary(ctx, spec.OrgID, "summary-results", opPayload)
+		readWrap = true
 	case "ponti.insight.resolve.prepare":
 		raw, execErr = p.client.PrepareInsightResolve(ctx, spec.OrgID, spec.Payload)
 	case "ponti.workorder.draft.prepare":
 		raw, execErr = p.client.PrepareWorkOrderDraft(ctx, spec.OrgID, spec.Payload)
 	case "ponti.stock_adjustment.prepare":
 		raw, execErr = p.client.PrepareStockAdjustment(ctx, spec.OrgID, spec.Payload)
+	case "ponti.workorder_draft.create":
+		raw, execErr = p.client.CreateWorkOrderDraft(ctx, spec.OrgID, spec.Payload, nexusRequestIDString(spec.NexusRequestID))
+		raw = wrapPontiDraftExecution(spec, raw, execErr)
+	case "ponti.insight_resolution.draft":
+		raw, execErr = p.client.DraftInsightResolution(ctx, spec.OrgID, spec.Payload, nexusRequestIDString(spec.NexusRequestID))
+		raw = wrapPontiDraftExecution(spec, raw, execErr)
+	case "ponti.stock_count.draft":
+		raw, execErr = p.client.DraftStockCount(ctx, spec.OrgID, spec.Payload, nexusRequestIDString(spec.NexusRequestID))
+		raw = wrapPontiDraftExecution(spec, raw, execErr)
 	default:
 		return domain.ExecutionResult{}, fmt.Errorf("unknown operation: %s", spec.Operation)
 	}
@@ -185,6 +226,9 @@ func (p *PontiConnector) Execute(ctx context.Context, spec domain.ExecutionSpec)
 
 	if raw == nil {
 		raw = json.RawMessage(`{}`)
+	}
+	if readWrap && execErr == nil {
+		raw = wrapPontiReadResult(spec, opPayload, raw)
 	}
 
 	evidence := map[string]any{
@@ -221,6 +265,131 @@ func (p *PontiConnector) Execute(ctx context.Context, spec domain.ExecutionSpec)
 		NexusRequestID: spec.NexusRequestID,
 		CreatedAt:      time.Now().UTC(),
 	}, nil
+}
+
+func wrapPontiReadResult(spec domain.ExecutionSpec, payload pontiOperationPayload, raw json.RawMessage) json.RawMessage {
+	var decoded map[string]any
+	if len(raw) > 0 {
+		_ = json.Unmarshal(raw, &decoded)
+	}
+	if decoded == nil {
+		decoded = map[string]any{}
+	}
+	items := firstArray(decoded, "items", "rows", "data")
+	summary := map[string]any{}
+	if value, ok := decoded["summary"].(map[string]any); ok {
+		summary = value
+	} else if value, ok := decoded["metrics"].(map[string]any); ok {
+		summary = value
+	}
+	totals := map[string]any{}
+	for _, key := range []string{"page_info", "net_total_usd", "total_liters", "total_kilograms", "sum_sowed", "sum_cost", "totals", "totals_row"} {
+		if value, ok := decoded[key]; ok {
+			totals[key] = value
+		}
+	}
+	filters := map[string]any{}
+	_ = json.Unmarshal(spec.Payload, &filters)
+	out := map[string]any{
+		"source":      spec.Operation,
+		"workspace":   workspaceEvidence(payload),
+		"filters":     filters,
+		"captured_at": time.Now().UTC().Format(time.RFC3339),
+		"summary":     summary,
+		"totals":      totals,
+		"items":       items,
+		"warnings":    []any{},
+		"raw":         decoded,
+	}
+	encoded, err := json.Marshal(out)
+	if err != nil {
+		return raw
+	}
+	return encoded
+}
+
+func wrapPontiDraftExecution(spec domain.ExecutionSpec, raw json.RawMessage, execErr error) json.RawMessage {
+	if execErr != nil {
+		return raw
+	}
+	var decoded any
+	if len(raw) > 0 {
+		_ = json.Unmarshal(raw, &decoded)
+	}
+	draftID := draftIDFromRaw(decoded)
+	nexusRequestID := nexusRequestIDString(spec.NexusRequestID)
+	out := map[string]any{
+		"status":           "draft",
+		"action":           spec.Operation,
+		"write_performed":  spec.Operation == "ponti.workorder_draft.create",
+		"draft_id":         draftID,
+		"execution_status": "draft_created",
+		"nexus_request_id": nexusRequestID,
+		"audit_ref":        fmt.Sprintf("ponti.%s:%v", spec.Operation, draftID),
+		"result":           decoded,
+		"evidence": map[string]any{
+			"source_ref":        "ponti." + spec.Operation,
+			"captured_at":       time.Now().UTC().Format(time.RFC3339),
+			"tenant_scope":      spec.OrgID,
+			"approval_required": true,
+			"nexus_request_id":  nexusRequestID,
+		},
+	}
+	if spec.Operation != "ponti.workorder_draft.create" {
+		out["execution_status"] = "draft_staged"
+	}
+	encoded, err := json.Marshal(out)
+	if err != nil {
+		return raw
+	}
+	return encoded
+}
+
+func firstArray(decoded map[string]any, keys ...string) []any {
+	for _, key := range keys {
+		if arr, ok := decoded[key].([]any); ok {
+			return arr
+		}
+	}
+	return []any{}
+}
+
+func workspaceEvidence(payload pontiOperationPayload) map[string]any {
+	out := map[string]any{}
+	set := func(key string, value *int64) {
+		if value != nil && *value > 0 {
+			out[key] = *value
+		}
+	}
+	set("customer_id", firstInt64Ptr(payload.Workspace.CustomerID, payload.CustomerID))
+	set("project_id", firstInt64Ptr(payload.Workspace.ProjectID, payload.ProjectID))
+	set("campaign_id", firstInt64Ptr(payload.Workspace.CampaignID, payload.CampaignID))
+	set("field_id", firstInt64Ptr(payload.Workspace.FieldID, payload.FieldID))
+	return out
+}
+
+func nexusRequestIDString(id *uuid.UUID) string {
+	if id == nil || *id == uuid.Nil {
+		return ""
+	}
+	return id.String()
+}
+
+func draftIDFromRaw(decoded any) any {
+	switch value := decoded.(type) {
+	case float64, string:
+		return value
+	case map[string]any:
+		for _, key := range []string{"draft_id", "id"} {
+			if v, ok := value[key]; ok {
+				return v
+			}
+		}
+		if result, ok := value["result"].(map[string]any); ok {
+			return draftIDFromRaw(result)
+		}
+	}
+	return nil
 }
 
 func (p *PontiConnector) isAvailable() bool {

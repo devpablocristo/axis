@@ -97,6 +97,8 @@ type RunInput struct {
 	ProductSurface string
 	AgentID        string
 	Message        string
+	RouteHint      string
+	Handoff        json.RawMessage
 	Messages       []taskdomain.TaskMessage // hilo completo hasta ahora
 	TaskID         *uuid.UUID               // opcional: vincula el trace a una task
 }
@@ -119,7 +121,7 @@ func (o *Orchestrator) Run(ctx context.Context, in RunInput) (RunResult, error) 
 	if in.TaskID != nil && *in.TaskID != uuid.Nil {
 		identity.TaskID = in.TaskID.String()
 	}
-	route := RouteAgent(in.Message, productSurface, o.toolkit, identity, o.defaultAutonomy)
+	route := RouteAgentWithContext(in.Message, productSurface, in.RouteHint, in.Handoff, o.toolkit, identity, o.defaultAutonomy)
 	if o.installationGuard != nil {
 		if err := o.installationGuard.RequireActiveInstallation(ctx, in.OrgID, productSurface, "runtime_run"); err != nil {
 			trace := o.rejectedProductInstallationTrace(ctx, in, identity, route, err.Error())
@@ -287,6 +289,12 @@ func (o *Orchestrator) Run(ctx context.Context, in RunInput) (RunResult, error) 
 	if assembled.Summary != "" {
 		systemPrompt += "\n\nContexto actual:\n" + assembled.Summary
 	}
+	if handoff := compactHandoffForPrompt(in.Handoff); handoff != "" {
+		systemPrompt += "\n\nContexto de la pantalla/producto:\n" + handoff
+	}
+	if guidance := pontiRuntimeGuidance(productSurface, in.RouteHint, in.Message, allowedSchemas); guidance != "" {
+		systemPrompt += "\n\nGuía operativa Ponti:\n" + guidance
+	}
 
 	llmMessages := make([]LLMMessage, 0, len(assembled.History)+1)
 	llmMessages = append(llmMessages, assembled.History...)
@@ -321,15 +329,26 @@ func (o *Orchestrator) Run(ctx context.Context, in RunInput) (RunResult, error) 
 			trace.Usage.AddOutput(string(tc.Args))
 		}
 
-		// Si no hay tool calls, tenemos la respuesta final
+		// Si no hay tool calls pero Ponti necesita evidencia operativa,
+		// ejecutamos una lectura compacta antes de redactar la respuesta final.
 		if len(resp.ToolCalls) == 0 {
-			reply := resp.Text
-			if reply == "" {
-				reply = "No pude generar una respuesta en este momento."
+			if forced, ok := o.pontiForcedReadToolCall(in, allowedSchemas, route, round, len(trace.ToolCalls)); ok {
+				slog.Info("ponti_forced_read_tool_call", "tool", forced.Name, "route_hint", in.RouteHint, "intent", route.Intent)
+				resp.ToolCalls = []LLMToolCall{forced}
+				trace.Usage.AddOutput(forced.Name)
+				trace.Usage.AddOutput(string(forced.Args))
+				if strings.TrimSpace(resp.Text) == "" {
+					resp.Text = "Voy a consultar Ponti antes de responder."
+				}
+			} else {
+				reply := resp.Text
+				if reply == "" {
+					reply = "No pude generar una respuesta en este momento."
+				}
+				trace.CompletedAt = time.Now().UTC()
+				o.finishTrace(ctx, trace, in, "")
+				return RunResult{Reply: reply, Trace: trace}, nil
 			}
-			trace.CompletedAt = time.Now().UTC()
-			o.finishTrace(ctx, trace, in, "")
-			return RunResult{Reply: reply, Trace: trace}, nil
 		}
 
 		// Hay tool calls: ejecutar y agregar resultados
@@ -384,6 +403,7 @@ func (o *Orchestrator) Run(ctx context.Context, in RunInput) (RunResult, error) 
 				Allowed:        true,
 				DecisionReason: "allowed_by_runtime_policy",
 				DurationMS:     durationMS,
+				Result:         compactToolResult(result),
 			})
 			metadata, _ := o.toolkit.ToolMetadata(tc.Name)
 			o.recordObservabilityEvent(ctx, trace, in, "tool", "executed", map[string]any{
@@ -413,6 +433,36 @@ func (o *Orchestrator) Run(ctx context.Context, in RunInput) (RunResult, error) 
 	trace.CompletedAt = time.Now().UTC()
 	o.finishTrace(ctx, trace, in, "max_tool_rounds_exhausted")
 	return RunResult{Trace: trace}, fmt.Errorf("gemini tool loop exhausted after %d rounds", maxToolRounds)
+}
+
+func compactHandoffForPrompt(raw json.RawMessage) string {
+	if len(raw) == 0 || strings.TrimSpace(string(raw)) == "" {
+		return ""
+	}
+	var decoded any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return ""
+	}
+	encoded, err := json.Marshal(decoded)
+	if err != nil {
+		return ""
+	}
+	return string(encoded)
+}
+
+func compactToolResult(result string) json.RawMessage {
+	result = strings.TrimSpace(result)
+	if result == "" {
+		return nil
+	}
+	if len(result) > 4000 {
+		result = result[:4000]
+	}
+	if json.Valid([]byte(result)) {
+		return json.RawMessage(result)
+	}
+	raw, _ := json.Marshal(map[string]any{"text": result})
+	return raw
 }
 
 func (o *Orchestrator) rejectedProductInstallationTrace(ctx context.Context, in RunInput, identity IdentityChain, route AgentRoute, reason string) RunTrace {

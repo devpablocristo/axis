@@ -719,6 +719,8 @@ func (h *Handler) chat(w http.ResponseWriter, r *http.Request) {
 		OrgID:          orgID,
 		AuthScopes:     identity.Scopes,
 		Message:        body.Message,
+		RouteHint:      body.RouteHint,
+		Handoff:        body.Handoff,
 		Channel:        body.Channel,
 		ProductSurface: identity.ProductSurface,
 		AgentID:        body.AgentID,
@@ -737,7 +739,31 @@ func (h *Handler) chat(w http.ResponseWriter, r *http.Request) {
 	for _, m := range result.Messages {
 		msgs = append(msgs, tasksdto.MessageToResponse(m))
 	}
-	httpjson.WriteJSON(w, http.StatusOK, tasksdto.ChatResponseFromRuntimeResult(result.Task, result.Messages, result.RunID, result.AgentID))
+	httpjson.WriteJSON(w, http.StatusOK, tasksdto.ChatResponseFromRuntimeResult(result.Task, result.Messages, result.RunID, result.AgentID, chatToolCallsToResponse(result.ToolCalls)))
+}
+
+func chatToolCallsToResponse(calls []OrchestratorToolCall) []tasksdto.ChatToolCallResponse {
+	out := make([]tasksdto.ChatToolCallResponse, 0, len(calls))
+	for _, call := range calls {
+		status := "executed"
+		if !call.Allowed {
+			status = "blocked"
+		}
+		if call.Error != "" {
+			status = "error"
+		}
+		out = append(out, tasksdto.ChatToolCallResponse{
+			Name:           call.Name,
+			ToolCallID:     call.ToolCallID,
+			Allowed:        call.Allowed,
+			DecisionReason: call.DecisionReason,
+			DurationMS:     call.DurationMS,
+			Error:          call.Error,
+			Status:         status,
+			Result:         call.Result,
+		})
+	}
+	return out
 }
 
 type customerMessagingInboundRequest struct {

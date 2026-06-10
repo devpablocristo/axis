@@ -163,10 +163,12 @@ func (f *fakePymes) SendWhatsAppText(_ context.Context, _, _, _ string) error {
 
 type fakeNexus struct {
 	decision    string
+	submitCalls int
 	reportCalls int
 }
 
 func (f *fakeNexus) SubmitRequest(_ context.Context, _ string, _ nexusclient.SubmitRequestBody) (nexusclient.SubmitResponse, error) {
+	f.submitCalls++
 	return nexusclient.SubmitResponse{
 		RequestID: uuid.New().String(),
 		Decision:  f.decision,
@@ -442,6 +444,52 @@ func TestUsecases_RunWatcher_GenericCapability_AutoExecutesNonPymes(t *testing.T
 	}
 	if payload["org_id"] != "org-1" || payload["party_id"] != "party-1" {
 		t.Fatalf("unexpected action payload: %+v", payload)
+	}
+}
+
+func TestUsecases_RunWatcher_GenericCapability_ProposalOnlyDoesNotExecute(t *testing.T) {
+	t.Parallel()
+	nexus := &fakeNexus{decision: "allowed"}
+	repo := newFakeRepo()
+	uc := NewUsecases(repo, nexus)
+	executor := &fakeConnectorExecutor{
+		connectorKind: "demo",
+		connectorOrg:  "org-1",
+		readResults: map[string]json.RawMessage{
+			"demo.stock.summary": json.RawMessage(`{"items":[{"id":"stock-1","type":"stock","name":"Seed low","status":"risk"}]}`),
+		},
+	}
+	uc.SetConnectorExecutor(executor)
+
+	config := json.RawMessage(`{
+		"product_surface":"demo",
+		"connector_kind":"demo",
+		"query_operation":"demo.stock.summary",
+		"result_items_path":"items",
+		"condition":{"path":"status","operator":"eq","value":"risk"},
+		"action_type":"demo.axis.propose.stock_review",
+		"proposal_only":true
+	}`)
+	w, _ := uc.Create(context.Background(), CreateWatcherInput{
+		OrgID: "org-1", Name: "Demo stock", WatcherType: domain.WatcherCapability,
+		Config: config, Enabled: true,
+	})
+
+	result, err := uc.RunWatcher(context.Background(), w.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Found != 1 || result.Proposed != 1 || result.Executed != 0 {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+	if executor.readCalls != 1 || executor.execCalls != 0 {
+		t.Fatalf("unexpected connector calls: read=%d exec=%d", executor.readCalls, executor.execCalls)
+	}
+	if nexus.submitCalls != 0 || nexus.reportCalls != 0 {
+		t.Fatalf("proposal-only should not call nexus: submit=%d report=%d", nexus.submitCalls, nexus.reportCalls)
+	}
+	if len(repo.proposals) != 1 || repo.proposals[0].ExecutionStatus != domain.ProposalPending {
+		t.Fatalf("expected one pending proposal, got %+v", repo.proposals)
 	}
 }
 

@@ -92,6 +92,7 @@ type CapabilityWatcherConfig struct {
 	ActionOperation       string           `json:"action_operation"`
 	ActionPayloadTemplate map[string]any   `json:"action_payload_template,omitempty"`
 	ActionType            string           `json:"action_type"`
+	ProposalOnly          bool             `json:"proposal_only,omitempty"`
 }
 
 type WatcherCondition struct {

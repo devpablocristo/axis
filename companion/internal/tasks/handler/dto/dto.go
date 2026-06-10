@@ -185,16 +185,36 @@ type ChatRequest struct {
 // task + messages son estado operativo estable de la API de Companion.
 type ChatResponse struct {
 	// Canon contract fields (mirror github.com/devpablocristo/platform/contracts/ai/go ChatResponse).
-	ChatID uuid.UUID             `json:"chat_id,omitempty"`
-	TaskID string                `json:"task_id,omitempty"`
-	Reply  string                `json:"reply"`
-	Blocks []contracts.ChatBlock `json:"blocks,omitempty"`
+	ChatID               uuid.UUID                     `json:"chat_id,omitempty"`
+	TaskID               string                        `json:"task_id,omitempty"`
+	Reply                string                        `json:"reply"`
+	Blocks               []contracts.ChatBlock         `json:"blocks,omitempty"`
+	ToolCalls            []ChatToolCallResponse        `json:"tool_calls,omitempty"`
+	PendingConfirmations []PendingConfirmationResponse `json:"pending_confirmations,omitempty"`
 
 	// Companion-specific extras: la task FSM + el log completo de mensajes.
 	Task     TaskResponse      `json:"task"`
 	Messages []MessageResponse `json:"messages"`
 	RunID    string            `json:"run_id,omitempty"`
 	AgentID  string            `json:"agent_id,omitempty"`
+}
+
+type ChatToolCallResponse struct {
+	Name           string          `json:"name"`
+	ToolCallID     string          `json:"tool_call_id,omitempty"`
+	Allowed        bool            `json:"allowed"`
+	DecisionReason string          `json:"decision_reason,omitempty"`
+	DurationMS     int64           `json:"duration_ms"`
+	Error          string          `json:"error,omitempty"`
+	Status         string          `json:"status,omitempty"`
+	Result         json.RawMessage `json:"result,omitempty"`
+}
+
+type PendingConfirmationResponse struct {
+	RequestID string `json:"request_id,omitempty"`
+	Status    string `json:"status,omitempty"`
+	Tool      string `json:"tool,omitempty"`
+	Message   string `json:"message,omitempty"`
 }
 
 type InvestigateRequest struct {
@@ -379,11 +399,40 @@ func ChatResponseFromResult(task domain.Task, messages []domain.TaskMessage) Cha
 	return resp
 }
 
-func ChatResponseFromRuntimeResult(task domain.Task, messages []domain.TaskMessage, runID, agentID string) ChatResponse {
+func ChatResponseFromRuntimeResult(task domain.Task, messages []domain.TaskMessage, runID, agentID string, toolCalls []ChatToolCallResponse) ChatResponse {
 	resp := ChatResponseFromResult(task, messages)
 	resp.RunID = strings.TrimSpace(runID)
 	resp.AgentID = strings.TrimSpace(agentID)
+	resp.ToolCalls = toolCalls
+	resp.PendingConfirmations = pendingConfirmationsFromToolCalls(toolCalls)
 	return resp
+}
+
+func pendingConfirmationsFromToolCalls(toolCalls []ChatToolCallResponse) []PendingConfirmationResponse {
+	out := make([]PendingConfirmationResponse, 0)
+	for _, call := range toolCalls {
+		if len(call.Result) == 0 {
+			continue
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(call.Result, &payload); err != nil {
+			continue
+		}
+		status, _ := payload["status"].(string)
+		status = strings.TrimSpace(strings.ToLower(status))
+		if status != "pending_approval" && status != "pending" {
+			continue
+		}
+		requestID, _ := payload["request_id"].(string)
+		message, _ := payload["message"].(string)
+		out = append(out, PendingConfirmationResponse{
+			RequestID: strings.TrimSpace(requestID),
+			Status:    status,
+			Tool:      call.Name,
+			Message:   strings.TrimSpace(message),
+		})
+	}
+	return out
 }
 
 // extractChatID lee task.context_json.agent_conversation_id (poblado en
