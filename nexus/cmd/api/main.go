@@ -47,6 +47,7 @@ func main() {
 		InternalJWTSecret:    os.Getenv("NEXUS_INTERNAL_JWT_SECRET"),
 		InternalJWTIssuer:    os.Getenv("NEXUS_INTERNAL_JWT_ISSUER"),
 		InternalJWTAudience:  os.Getenv("NEXUS_INTERNAL_JWT_AUDIENCE"),
+		ProductJWTKeys:       os.Getenv("NEXUS_PRODUCT_JWT_KEYS"),
 		ApprovalTTL:          approvalTTL,
 		SigningKey:           os.Getenv("NEXUS_SIGNING_KEY"),
 		CallbackToken:        strings.TrimSpace(os.Getenv("NEXUS_CALLBACK_TOKEN")),

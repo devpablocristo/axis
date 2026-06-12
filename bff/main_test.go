@@ -47,6 +47,51 @@ func TestDevProxyInjectsInternalJWTAndOrg(t *testing.T) {
 	}
 }
 
+func TestDevProxyStripsOnBehalfOfHeader(t *testing.T) {
+	var gotOnBehalfOf, gotCookie, gotAPIKey string
+	called := false
+	downstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		gotOnBehalfOf = r.Header.Get("X-On-Behalf-Of")
+		gotCookie = r.Header.Get("Cookie")
+		gotAPIKey = r.Header.Get("X-API-Key")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer downstream.Close()
+
+	srv, err := newTestServer(downstream.URL, []string{"nexus:approvals:decide"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A browser must not be able to smuggle identity delegation downstream:
+	// nexus honors X-On-Behalf-Of for api-key service principals, and a
+	// forwarded header would let a console human forge decided_by.
+	req := httptest.NewRequest(http.MethodGet, "/api/nexus/v1/approvals/pending", nil)
+	req.Header.Set("X-On-Behalf-Of", "forged-approver")
+	req.Header.Set("Cookie", "session=abc")
+	req.Header.Set("X-API-Key", "leaked-key")
+	rec := httptest.NewRecorder()
+	srv.routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !called {
+		t.Fatal("downstream was not called")
+	}
+	if gotOnBehalfOf != "" {
+		t.Fatalf("expected X-On-Behalf-Of stripped, got %q", gotOnBehalfOf)
+	}
+	if gotCookie != "" {
+		t.Fatalf("expected Cookie stripped, got %q", gotCookie)
+	}
+	if gotAPIKey != "" {
+		t.Fatalf("expected X-API-Key stripped, got %q", gotAPIKey)
+	}
+}
+
 func TestDevRejectsUnauthorizedOrgSelection(t *testing.T) {
 	downstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("downstream should not be called")

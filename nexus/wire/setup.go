@@ -38,6 +38,7 @@ type Config struct {
 	InternalJWTSecret    string
 	InternalJWTIssuer    string
 	InternalJWTAudience  string
+	ProductJWTKeys       string
 	ApprovalTTL          time.Duration
 	SigningKey           string
 	CallbackToken        string
@@ -253,7 +254,7 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 		Secret:   cfg.InternalJWTSecret,
 		Issuer:   cfg.InternalJWTIssuer,
 		Audience: cfg.InternalJWTAudience,
-	})
+	}, cfg.ProductJWTKeys)
 	if err != nil {
 		db.Close()
 		_ = shutdownTracing(ctx)

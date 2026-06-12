@@ -30,6 +30,41 @@ Companion no expone una UI propia ni espera sesiones de browser directas. Las
 consolas operativas deben autenticar usuarios fuera de Companion y llamarlo con
 identidad delegada.
 
+## Product JWT (per-producto)
+
+Ademas del JWT interno de plataforma, Companion y Nexus aceptan JWTs HS256
+emitidos por productos conectados. Cada producto tiene su propio secret e
+issuer, configurados por env:
+
+- `COMPANION_PRODUCT_JWT_KEYS` (Companion)
+- `NEXUS_PRODUCT_JWT_KEYS` (Nexus)
+
+Formato (entries separados por `;`, `,` o newline; atributos con `|`):
+
+```
+ponti=local-dev-ponti-jwt-secret|issuer=ponti-core
+```
+
+Contrato de claims del token emitido por el producto:
+
+- `iss`: issuer del producto (debe coincidir con el configurado).
+- `aud`: audiencia del servicio Axis receptor (`companion` o `nexus`).
+- `sub` / `actor_id`: identidad del caller.
+- `org_id`: customer org de Axis.
+- `product_surface`: producto emisor.
+- `scope`/`scopes`: scopes Axis solicitados.
+- `service_principal`: `true` para tokens service-to-service.
+- `on_behalf_of`: usuario delegado cuando aplica.
+- `exp` corto obligatorio (`iat` recomendado).
+
+Los principals autenticados por esta via quedan con
+`AuthMethod=product_jwt`, distinguible de `api_key` y de `internal_jwt`.
+Regla de seguridad: la delegacion de `decided_by` en approvals de Nexus
+exige `AuthMethod=api_key`; un product JWT con `service_principal:true` NO
+puede delegar via `X-On-Behalf-Of` ni `body.decided_by` (guard de regresion
+en `nexus/internal/approvals/handler_test.go`). Si un producto necesita
+delegacion legitima por JWT, requiere un diseno explicito, no un bypass.
+
 ## Scopes
 
 Endpoints sensibles usan scopes: tasks, connectors, watchers y

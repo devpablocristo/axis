@@ -393,3 +393,112 @@ Ponti no se implementa en esta fase. Cuando avance, Ponti debe:
 - conectar chat a Companion con feature flag;
 - empezar read-only;
 - delegar writes sensibles a Nexus.
+
+## Anexo (aditivo, post-freeze): Generic Product Connector — envelope `capability_execution.v1`
+
+Este anexo es aditivo al contrato congelado; no modifica ninguna seccion
+anterior. Define como un producto se conecta a Companion sin codigo vertical
+en Axis: el `ProductConnector` generico descubre el manifest del producto y
+ejecuta cualquier capability posteando un envelope unico. Un producto puede
+publicar nuevas capabilities sin cambios de codigo en Axis.
+
+### Habilitacion
+
+- Flag global: `COMPANION_PRODUCT_CONNECTOR_GENERIC=true` (default local on).
+- Por instalacion (`config` de la product installation):
+
+```json
+{
+  "connector_mode": "envelope.v1",
+  "discovery_path": "/api/v1/capabilities",
+  "execute_path": "/api/v1/capability-executions"
+}
+```
+
+- `connector_mode=envelope.v1` es obligatorio; `discovery_path` y
+  `execute_path` son opcionales (defaults mostrados).
+- Companion registra un connector generico por cada producto activo con al
+  menos una instalacion habilitada en modo envelope. Los connectors legacy solo
+  deben quedar como rollback explicito; Ponti legacy requiere
+  `COMPANION_LEGACY_PONTI_CONNECTOR_ENABLED=true` y gana si comparte
+  `product_surface`.
+- La auth hacia el producto se resuelve POR CALL desde la instalacion de
+  `org_id + product_surface`: `base_url` + bearer token resuelto del
+  `secret_ref` (esquema `env:` en dev). No hay credencial global por env.
+  Sin instalacion activa, Companion falla cerrado.
+
+### Discovery
+
+`GET {base_url}{discovery_path}` debe responder
+`{ "items": [<capability_manifest.v1>, ...] }`. Companion fusiona los
+manifests cuyo `product` coincide con el `product_surface` y normaliza cada
+tool a una capability del registry (mismo puente que el connector Ponti:
+mode/side-effect/risk/governance/idempotency). Cache con TTL de 5 minutos;
+`POST /v1/connectors/refresh` fuerza re-discovery.
+
+### Ejecucion
+
+`POST {base_url}{execute_path}` con headers `Authorization: Bearer <secret>`,
+`X-Tenant-Id: <external_tenant_id|org_id>` y, si aplica,
+`X-Nexus-Request-ID: <uuid>` (mismo esquema que el connector Ponti). Body:
+
+```json
+{
+  "schema_version": "capability_execution.v1",
+  "operation": "agro.workorder.draft",
+  "executor_ref": "agro-backend.workorder.draft",
+  "payload": { "work_type": "spray", "workspace": { "project_id": 10 } },
+  "workspace": { "project_id": 10 },
+  "idempotency_key": "idem-1",
+  "task_id": "<uuid>",
+  "run_id": "run-7",
+  "nexus_request_id": "<uuid>",
+  "actor": {
+    "actor_id": "user-456",
+    "actor_type": "human",
+    "on_behalf_of": "user-456",
+    "product_surface": "agro"
+  },
+  "org_id": "org-123"
+}
+```
+
+- `payload` es el input JSON de la capability, verbatim.
+- `workspace` se extrae de `payload.workspace` cuando existe; sigue siendo
+  JSON opaco para Axis.
+- `executor_ref` proviene del manifest descubierto.
+- `nexus_request_id` solo se envia en writes ya aprobados por Nexus.
+
+Respuesta esperada:
+
+```json
+{
+  "status": "success | partial | failure",
+  "external_ref": "agro:exec:42",
+  "result": {},
+  "evidence": {},
+  "error": "mensaje cuando status != success"
+}
+```
+
+- `status` vacio se interpreta como `success`; cualquier otro valor no
+  reconocido mapea a `failure`.
+- `result` llega verbatim al `result_json` de la ejecucion.
+- `evidence` del producto se mergea con el evidence canonico de identidad de
+  Axis (`org_id`, `customer_org_id`, `actor_id`, `actor_type`,
+  `companion_principal`, `on_behalf_of`, `service_principal`,
+  `product_surface`, `capability_operation`, `workspace`, `source_ref`,
+  `captured_at`). Las claves canonicas SIEMPRE ganan: el producto no puede
+  pisar la atribucion. La sanitizacion de claves sensibles existente
+  (payload/result) sigue aplicando en la capa de connectors.
+
+### Auth de producto hacia Axis (JWT per-producto)
+
+Complementario al envelope, los servicios Axis aceptan JWTs HS256 emitidos
+por productos via `COMPANION_PRODUCT_JWT_KEYS` / `NEXUS_PRODUCT_JWT_KEYS`
+(formato `product=<secret>|issuer=<issuer>[;product2=...]`). Claims esperados:
+`iss` (issuer del producto), `aud` (servicio Axis receptor), `sub`/`actor_id`,
+`org_id`, `product_surface`, `scopes`, `service_principal`, `on_behalf_of` y
+`exp` corto. Estos principals quedan con `AuthMethod=product_jwt`: NO pueden
+delegar decided_by en approvals de Nexus (ese gate sigue exigiendo
+`api_key`). Detalle en `companion/docs/security.md`.

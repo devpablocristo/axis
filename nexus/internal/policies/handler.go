@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/devpablocristo/nexus/internal/orgctx"
 	policydto "github.com/devpablocristo/nexus/internal/policies/handler/dto"
 	policydomain "github.com/devpablocristo/nexus/internal/policies/usecases/domain"
 	requesteval "github.com/devpablocristo/nexus/internal/requests"
@@ -123,10 +124,11 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	filters := ListFilters{IncludeArchived: archived}
 	if identityhttp.HasAnyScope(r, scopeNexusCrossOrg) {
 		// Cross-org callers (ej: Pymes service que sirve N tenants) pueden
-		// solicitar policies de un tenant específico via X-Org-ID. Sin el
-		// header, listan todas las policies del cluster.
-		if orgID := principalOrgID(r); orgID != nil {
-			filters.OrgID = orgID
+		// solicitar policies de un tenant específico via X-Org-ID inbound
+		// (preservado en orgctx antes del rebind del middleware de authn).
+		// Sin org solicitado ni bound, listan todas las policies del cluster.
+		if orgID := orgctx.Narrowed(r, identityhttp.PrincipalOrgID(r)); orgID != "" {
+			filters.OrgID = &orgID
 		}
 	} else if orgID := principalOrgID(r); orgID != nil {
 		filters.OrgID = orgID

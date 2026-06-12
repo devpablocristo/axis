@@ -53,6 +53,7 @@ func main() {
 		InternalJWTSecret:   os.Getenv("COMPANION_INTERNAL_JWT_SECRET"),
 		InternalJWTIssuer:   os.Getenv("COMPANION_INTERNAL_JWT_ISSUER"),
 		InternalJWTAudience: os.Getenv("COMPANION_INTERNAL_JWT_AUDIENCE"),
+		ProductJWTKeys:      os.Getenv("COMPANION_PRODUCT_JWT_KEYS"),
 		NexusBaseURL:        nexusBase,
 		NexusAPIKey:         nexusKey,
 		PymesBaseURL:        os.Getenv("PYMES_BASE_URL"),

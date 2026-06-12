@@ -1582,6 +1582,14 @@ components:
           type: array
           items: { type: string }
         handoff: { $ref: "#/components/schemas/ChatHandoff" }
+        workspace:
+          type: object
+          additionalProperties: true
+          description: |
+            Contexto operativo de pantalla del producto (ej. customer_id,
+            project_id, campaign_id, field_id). Gana sobre handoff.workspace
+            y se persiste en la task para reusarse en turnos siguientes si no
+            se reenvía.
     ChatResponse:
       description: |
         Response canónico del chat de Companion. Incluye chat_id, reply y

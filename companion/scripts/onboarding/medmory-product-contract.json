@@ -1,0 +1,191 @@
+{
+  "version": 1,
+  "org_id": "medmory-patient-local",
+  "product": {
+    "product_surface": "medmory",
+    "display_name": "Medmory",
+    "status": "active",
+    "metadata": {
+      "purpose": "axis real product onboarding contract"
+    }
+  },
+  "installation": {
+    "org_id": "medmory-patient-local",
+    "product_surface": "medmory",
+    "external_tenant_id": "medmory-patient-local",
+    "base_url": "http://localhost:3001",
+    "auth_mode": "api_key_ref",
+    "secret_ref": "env:MEDMORY_AXIS_API_KEY",
+    "enabled": true,
+    "config": {
+      "connector_mode": "envelope.v1",
+      "discovery_path": "/api/v1/capabilities",
+      "execute_path": "/api/v1/capability-executions"
+    }
+  },
+  "identity": {
+    "org_id": "medmory-patient-local",
+    "product_surface": "medmory",
+    "actor_id": "axis-companion",
+    "actor_type": "agent",
+    "on_behalf_of": "medmory-user-local",
+    "service_principal": true,
+    "scopes": [
+      "medmory:memory:read",
+      "medmory:share:write"
+    ]
+  },
+  "capabilities": [
+    {
+      "schema_version": "capability_manifest.v1",
+      "capability_id": "medmory.summary.read",
+      "version": "1.0.0",
+      "display_name": "Medmory clinical summary",
+      "description": "Read a redacted clinical memory summary.",
+      "owner": "medmory",
+      "product_surface": "medmory",
+      "connector": "medmory",
+      "action_type": "read",
+      "risk_level": "medium",
+      "side_effect_type": "read",
+      "auth_mode": "api_key_ref",
+      "required_scopes": ["medmory:memory:read"],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "payload": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "profile": {"type": "object"},
+          "conditions": {
+            "type": "array",
+            "items": {"type": "object"}
+          },
+          "medications": {
+            "type": "array",
+            "items": {"type": "object"}
+          }
+        },
+        "additionalProperties": true
+      },
+      "evidence_schema": {
+        "type": "object",
+        "properties": {
+          "source_ref": {"type": "string"},
+          "captured_at": {"type": "string"},
+          "tenant_scope": {"type": "string"}
+        },
+        "additionalProperties": true
+      },
+      "required_evidence": ["source_ref", "captured_at", "tenant_scope"],
+      "idempotency_mode": "none",
+      "rollback_supported": false,
+      "compensation_strategy": "none",
+      "approval_required": false,
+      "tenant_configurable": true,
+      "enabled_by_default": false,
+      "rate_limit_class": "sensitive",
+      "cost_class": "low",
+      "timeout": "30s",
+      "retries": {
+        "max_attempts": 1
+      },
+      "preconditions": ["patient_context", "active_product_installation"],
+      "postconditions": [],
+      "observability_tags": ["product:medmory", "capability:read", "data:clinical"]
+    },
+    {
+      "schema_version": "capability_manifest.v1",
+      "capability_id": "medmory.share_link.create",
+      "version": "1.0.0",
+      "display_name": "Medmory share link create",
+      "description": "Create a governed Medmory share link.",
+      "owner": "medmory",
+      "product_surface": "medmory",
+      "connector": "medmory",
+      "action_type": "write",
+      "risk_level": "high",
+      "side_effect_type": "write",
+      "auth_mode": "api_key_ref",
+      "required_scopes": ["medmory:share:write"],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "payload": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "share_link_id": {"type": "string"},
+          "status": {"type": "string"}
+        },
+        "additionalProperties": true
+      },
+      "evidence_schema": {
+        "type": "object",
+        "properties": {
+          "source_ref": {"type": "string"},
+          "captured_at": {"type": "string"},
+          "tenant_scope": {"type": "string"},
+          "nexus_request_id": {"type": "string"}
+        },
+        "additionalProperties": true
+      },
+      "required_evidence": ["source_ref", "captured_at", "tenant_scope", "nexus_request_id"],
+      "idempotency_mode": "required",
+      "rollback_supported": false,
+      "compensation_strategy": "manual",
+      "nexus_action_type": "medmory.share_link.create",
+      "approval_required": true,
+      "tenant_configurable": true,
+      "enabled_by_default": false,
+      "rate_limit_class": "sensitive",
+      "cost_class": "medium",
+      "timeout": "30s",
+      "retries": {
+        "max_attempts": 1
+      },
+      "preconditions": ["patient_context", "active_product_installation", "nexus_approval"],
+      "postconditions": ["share_link_created", "nexus_request_recorded"],
+      "observability_tags": ["product:medmory", "capability:write", "data:clinical", "nexus:required"]
+    }
+  ],
+  "expected_errors": [
+    {
+      "scenario": "installation_missing",
+      "expected_code": "FORBIDDEN"
+    },
+    {
+      "scenario": "product_disabled",
+      "expected_code": "FORBIDDEN"
+    },
+    {
+      "scenario": "scope_missing",
+      "expected_code": "FORBIDDEN"
+    },
+    {
+      "scenario": "write_without_nexus",
+      "expected_code": "VALIDATION"
+    }
+  ],
+  "runtime": {
+    "enabled": true,
+    "policy_ref": "medmory-runtime-policy"
+  },
+  "metadata": {
+    "fixture": false,
+    "purpose": "axis medmory product readiness"
+  }
+}

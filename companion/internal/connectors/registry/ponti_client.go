@@ -314,6 +314,10 @@ func (c *PontiClient) SuppliesSummary(ctx context.Context, orgID string, payload
 	return c.doGetRaw(ctx, "/api/v1/supplies?"+q.Encode(), orgID)
 }
 
+func (c *PontiClient) DataIntegritySummary(ctx context.Context, orgID string, payload pontiOperationPayload) (json.RawMessage, error) {
+	return c.doGetRaw(ctx, "/api/v1/data-integrity/summary?"+workspaceQuery(payload).Encode(), orgID)
+}
+
 func (c *PontiClient) ReportSummary(ctx context.Context, orgID, reportType string, payload pontiOperationPayload) (json.RawMessage, error) {
 	reportType = strings.Trim(reportType, "/")
 	if reportType == "" {

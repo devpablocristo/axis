@@ -89,6 +89,7 @@ type Usecases struct {
 	installationGuard        ProductInstallationGuard
 	productRuntimeController ProductRuntimeController
 	rateLimiter              productlimits.Limiter
+	dynamicRegistrar         func(context.Context)
 }
 
 // NewUsecases crea una nueva instancia de Usecases.
@@ -110,6 +111,10 @@ func (uc *Usecases) SetProductRuntimeController(controller ProductRuntimeControl
 
 func (uc *Usecases) SetRateLimiter(limiter productlimits.Limiter) {
 	uc.rateLimiter = limiter
+}
+
+func (uc *Usecases) SetDynamicConnectorRegistrar(registrar func(context.Context)) {
+	uc.dynamicRegistrar = registrar
 }
 
 // ListConnectors lista conectores registrados con su estado en DB.
@@ -420,6 +425,9 @@ func (uc *Usecases) ListExecutions(ctx context.Context, connectorID uuid.UUID, l
 // implementan registry.Refresher). Connectors estáticos se ignoran. Los
 // errores individuales viajan en cada item — el caller decide si reportar.
 func (uc *Usecases) RefreshConnectors(ctx context.Context) []registry.RefreshResult {
+	if uc.dynamicRegistrar != nil {
+		uc.dynamicRegistrar(ctx)
+	}
 	return uc.registry.Refresh(ctx)
 }
 

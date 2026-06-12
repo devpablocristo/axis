@@ -41,18 +41,20 @@ services:
     environment:
       PORT: "8080"
       DATABASE_URL: "postgres://postgres:postgres@nexus-postgres:5432/nexus?sslmode=disable"
-      NEXUS_API_KEYS: "admin=${NEXUS_ADMIN_API_KEY:-nexus-admin-dev-key}|service_principal=true|org_id=${AXIS_DEV_ORG_ID:-local-dev-org}|scopes=nexus:requests:read+nexus:requests:write+nexus:requests:result+nexus:approvals:decide+nexus:policies:admin+nexus:rbac:admin+nexus:evidence:write+nexus:findings:read+nexus:findings:write+nexus:dashboard:read+nexus:learning:propose+nexus:cross_org,admin-a=${NEXUS_ADMIN_A_API_KEY:-nexus-admin-a-dev-key}|actor=nexus-admin-a|role=admin|service_principal=true|org_id=${AXIS_DEV_ORG_ID:-local-dev-org}|scopes=nexus:requests:read+nexus:requests:write+nexus:policies:admin,admin-b=${NEXUS_ADMIN_B_API_KEY:-nexus-admin-b-dev-key}|actor=nexus-admin-b|role=admin|service_principal=true|org_id=${AXIS_DEV_ORG_ID:-local-dev-org}|scopes=nexus:requests:read+nexus:requests:write+nexus:policies:admin,admin-other=${NEXUS_OTHER_ORG_ADMIN_API_KEY:-nexus-admin-other-dev-key}|actor=nexus-admin-other|role=admin|service_principal=true|org_id=${AXIS_OTHER_ORG_ID:-other-dev-org}|scopes=nexus:requests:read+nexus:requests:write+nexus:policies:admin,ponti=${NEXUS_PONTI_API_KEY:-nexus-ponti-dev-key}|actor=ponti-backend|role=service|service_principal=true|org_id=${AXIS_DEV_ORG_ID:-local-dev-org}|scopes=nexus:requests:read+nexus:requests:write+nexus:requests:result,argos=${NEXUS_ARGOS_API_KEY:-argos-nexus-dev-key}|service_principal=true|org_id=${ARGOS_ORG_ID:-argos-local-org}|scopes=nexus:findings:read+nexus:findings:write"
+      NEXUS_API_KEYS: "admin=${NEXUS_ADMIN_API_KEY:-nexus-admin-dev-key}|service_principal=true|org_id=${AXIS_DEV_ORG_ID:-local-dev-org}|scopes=nexus:requests:read+nexus:requests:write+nexus:requests:result+nexus:approvals:decide+nexus:policies:admin+nexus:rbac:admin+nexus:evidence:write+nexus:findings:read+nexus:findings:write+nexus:dashboard:read+nexus:learning:propose+nexus:cross_org,admin-a=${NEXUS_ADMIN_A_API_KEY:-nexus-admin-a-dev-key}|actor=nexus-admin-a|role=admin|service_principal=true|org_id=${AXIS_DEV_ORG_ID:-local-dev-org}|scopes=nexus:requests:read+nexus:requests:write+nexus:policies:admin,admin-b=${NEXUS_ADMIN_B_API_KEY:-nexus-admin-b-dev-key}|actor=nexus-admin-b|role=admin|service_principal=true|org_id=${AXIS_DEV_ORG_ID:-local-dev-org}|scopes=nexus:requests:read+nexus:requests:write+nexus:policies:admin,admin-other=${NEXUS_OTHER_ORG_ADMIN_API_KEY:-nexus-admin-other-dev-key}|actor=nexus-admin-other|role=admin|service_principal=true|org_id=${AXIS_OTHER_ORG_ID:-other-dev-org}|scopes=nexus:requests:read+nexus:requests:write+nexus:policies:admin,ponti=${NEXUS_PONTI_API_KEY:-nexus-ponti-dev-key}|actor=ponti-backend|role=service|service_principal=true|org_id=${AXIS_DEV_ORG_ID:-local-dev-org}|scopes=nexus:requests:read+nexus:requests:write+nexus:requests:result+nexus:approvals:decide+nexus:evidence:write+nexus:cross_org,argos=${NEXUS_ARGOS_API_KEY:-argos-nexus-dev-key}|service_principal=true|org_id=${ARGOS_ORG_ID:-argos-local-org}|scopes=nexus:findings:read+nexus:findings:write"
       NEXUS_INTERNAL_JWT_SECRET: "${AXIS_INTERNAL_JWT_SECRET:-axis-dev-internal-jwt-secret-change-me}"
       NEXUS_INTERNAL_JWT_ISSUER: "${AXIS_INTERNAL_JWT_ISSUER:-axis-bff}"
       NEXUS_INTERNAL_JWT_AUDIENCE: "${NEXUS_INTERNAL_JWT_AUDIENCE:-nexus}"
+      # JWTs HS256 per-producto (mismo secret/issuer que ponti/core emite).
+      NEXUS_PRODUCT_JWT_KEYS: "${NEXUS_PRODUCT_JWT_KEYS:-ponti=local-dev-ponti-jwt-secret|issuer=ponti-core}"
       NEXUS_AUTH_ISSUER_URL: "${NEXUS_AUTH_ISSUER_URL:-}"
       NEXUS_AUTH_AUDIENCE: "${NEXUS_AUTH_AUDIENCE:-}"
       NEXUS_ENV: "${NEXUS_ENV:-local}"
       APPROVAL_DEFAULT_TTL: "${NEXUS_APPROVAL_TTL:-3600}"
       NEXUS_SIGNING_KEY: "${NEXUS_SIGNING_KEY:-nexus-dev-signing-key-change-in-production}"
-      NEXUS_CALLBACK_TOKEN: "${NEXUS_CALLBACK_TOKEN:-local-nexus-callback-token}"
-      NEXUS_APPROVAL_PENDING_CALLBACK_URLS: "${NEXUS_APPROVAL_PENDING_CALLBACK_URLS:-}"
-      NEXUS_APPROVAL_RESOLVED_CALLBACK_URLS: "${NEXUS_APPROVAL_RESOLVED_CALLBACK_URLS:-}"
+      NEXUS_CALLBACK_TOKEN: "${NEXUS_CALLBACK_TOKEN:-local-dev-callback-token}"
+      NEXUS_APPROVAL_PENDING_CALLBACK_URLS: "${NEXUS_APPROVAL_PENDING_CALLBACK_URLS:-http://host.docker.internal:8080/api/v1/governance/callbacks/nexus}"
+      NEXUS_APPROVAL_RESOLVED_CALLBACK_URLS: "${NEXUS_APPROVAL_RESOLVED_CALLBACK_URLS:-http://host.docker.internal:8080/api/v1/governance/callbacks/nexus}"
       NEXUS_ATTESTATION_VERIFIER: "${NEXUS_ATTESTATION_VERIFIER:-none}"
       NEXUS_ATTESTATION_HMAC_SECRET: "${NEXUS_ATTESTATION_HMAC_SECRET:-}"
     ports:
@@ -83,6 +85,8 @@ services:
       COMPANION_INTERNAL_JWT_SECRET: "${AXIS_INTERNAL_JWT_SECRET:-axis-dev-internal-jwt-secret-change-me}"
       COMPANION_INTERNAL_JWT_ISSUER: "${AXIS_INTERNAL_JWT_ISSUER:-axis-bff}"
       COMPANION_INTERNAL_JWT_AUDIENCE: "${COMPANION_INTERNAL_JWT_AUDIENCE:-companion}"
+      # JWTs HS256 per-producto (mismo secret/issuer que ponti/core emite).
+      COMPANION_PRODUCT_JWT_KEYS: "${COMPANION_PRODUCT_JWT_KEYS:-ponti=local-dev-ponti-jwt-secret|issuer=ponti-core}"
       COMPANION_AUTH_ISSUER_URL: "${COMPANION_AUTH_ISSUER_URL:-}"
       COMPANION_AUTH_AUDIENCE: "${COMPANION_AUTH_AUDIENCE:-}"
       COMPANION_CORS_ALLOWED_ORIGINS: "${COMPANION_CORS_ALLOWED_ORIGINS:-http://localhost:5180,http://127.0.0.1:5180,http://localhost:5173,http://127.0.0.1:5173}"
@@ -111,6 +115,9 @@ services:
       PYMES_API_KEY: "${PYMES_API_KEY:-}"
       PONTI_BASE_URL: "${PONTI_BASE_URL:-}"
       PONTI_API_KEY: "${PONTI_API_KEY:-}"
+      COMPANION_LEGACY_PONTI_CONNECTOR_ENABLED: "${COMPANION_LEGACY_PONTI_CONNECTOR_ENABLED:-false}"
+      # ProductConnector genérico (envelope capability_execution.v1), default local on.
+      COMPANION_PRODUCT_CONNECTOR_GENERIC: "${COMPANION_PRODUCT_CONNECTOR_GENERIC:-true}"
     volumes:
       # ADC (Application Default Credentials) del host. Read-only para que el
       # container pueda leer pero no modificar las credenciales del dev. El

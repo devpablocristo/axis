@@ -128,6 +128,26 @@ func (r *PostgresRepository) ListInstallations(ctx context.Context, orgID string
 	return out, rows.Err()
 }
 
+func (r *PostgresRepository) ListInstallationsByProduct(ctx context.Context, productSurface string) ([]Installation, error) {
+	rows, err := r.db.Pool().Query(ctx, selectInstallation+`
+		WHERE product_surface = $1
+		ORDER BY org_id ASC
+	`, normalizeProductSurface(productSurface))
+	if err != nil {
+		return nil, fmt.Errorf("list product installations by product: %w", err)
+	}
+	defer rows.Close()
+	out := make([]Installation, 0)
+	for rows.Next() {
+		installation, err := scanInstallation(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, installation)
+	}
+	return out, rows.Err()
+}
+
 const selectProduct = `
 	SELECT product_surface, display_name, status, metadata_json, created_by, created_at, updated_at
 	FROM companion_products`

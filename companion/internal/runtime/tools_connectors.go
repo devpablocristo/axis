@@ -245,6 +245,14 @@ func capabilityToolHandler(kind string, capability connectorsdomain.Capability, 
 		if err != nil {
 			return `{"error":"invalid tool arguments"}`, nil
 		}
+		// Workspace operativo del run: solo para capabilities publicadas por
+		// producto y sin pisar un workspace ya provisto por el LLM en los args.
+		if capability.PublishedFrom == connectorsdomain.CapabilityPublishedFromProduct {
+			payload, err = mergeWorkspaceIntoArgs(payload, id.Workspace)
+			if err != nil {
+				return `{"error":"invalid tool arguments"}`, nil
+			}
+		}
 		if event := ValidateEgressPayload(payload); event != nil {
 			slog.Warn("capability_blocked_by_egress_policy", "operation", capability.Operation, "kind", kind, "reason", event.Reason)
 			return jsonOrError(map[string]any{
@@ -536,6 +544,25 @@ func mergeOrgIDIntoArgs(args json.RawMessage, orgID string) (json.RawMessage, er
 		return nil, err
 	}
 	m["org_id"] = orgID
+	return json.Marshal(m)
+}
+
+// mergeWorkspaceIntoArgs completa el workspace del run en los args de la tool.
+// No-op si no hay workspace o si los args ya traen uno (el LLM gana).
+func mergeWorkspaceIntoArgs(args json.RawMessage, workspace map[string]any) (json.RawMessage, error) {
+	if len(workspace) == 0 {
+		return args, nil
+	}
+	var m map[string]any
+	if len(args) == 0 {
+		m = map[string]any{}
+	} else if err := json.Unmarshal(args, &m); err != nil {
+		return nil, err
+	}
+	if existing, ok := m["workspace"].(map[string]any); ok && len(existing) > 0 {
+		return args, nil
+	}
+	m["workspace"] = workspace
 	return json.Marshal(m)
 }
 

@@ -23,13 +23,25 @@ func TestValidateSpecPassesReusableProductContract(t *testing.T) {
 func TestReferenceProductContractFixturePasses(t *testing.T) {
 	t.Parallel()
 
-	assertFixturePasses(t, "reference")
+	assertContractPasses(t, "reference")
 }
 
 func TestShadowProductContractFixturePasses(t *testing.T) {
 	t.Parallel()
 
-	assertFixturePasses(t, "shadow")
+	assertContractPasses(t, "shadow")
+}
+
+func TestRealProductContractsPass(t *testing.T) {
+	t.Parallel()
+
+	for _, product := range []string{"ponti", "medmory"} {
+		product := product
+		t.Run(product, func(t *testing.T) {
+			t.Parallel()
+			assertContractPasses(t, product)
+		})
+	}
 }
 
 func TestReadinessFixturesUseDistinctProductsAndOrgs(t *testing.T) {
@@ -184,12 +196,12 @@ func hasFailure(report Report, id string) bool {
 	return false
 }
 
-func assertFixturePasses(t *testing.T, product string) {
+func assertContractPasses(t *testing.T, product string) {
 	t.Helper()
 	spec := loadFixtureSpec(t, product)
 	report := ValidateSpec(spec)
 	if report.Status != StatusPassed {
-		t.Fatalf("expected %s fixture to pass, got %+v", product, report)
+		t.Fatalf("expected %s contract to pass, got %+v", product, report)
 	}
 }
 

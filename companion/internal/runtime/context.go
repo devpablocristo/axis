@@ -32,6 +32,7 @@ type Identity struct {
 	AllowedTools       []string
 	AuthScopes         []string
 	ServicePrincipal   bool
+	Workspace          map[string]any
 }
 
 // WithIdentity inyecta identidad en el context.
@@ -79,6 +80,17 @@ func WithTaskID(ctx context.Context, taskID uuid.UUID) context.Context {
 func WithAllowedTools(ctx context.Context, allowedTools []string) context.Context {
 	id := IdentityFromContext(ctx)
 	id.AllowedTools = append([]string(nil), allowedTools...)
+	return context.WithValue(ctx, identityKey{}, id)
+}
+
+// WithWorkspace inyecta el workspace operativo del run para que las tools de
+// producto puedan completarlo en sus args si el LLM no lo provee.
+func WithWorkspace(ctx context.Context, workspace map[string]any) context.Context {
+	if len(workspace) == 0 {
+		return ctx
+	}
+	id := IdentityFromContext(ctx)
+	id.Workspace = workspace
 	return context.WithValue(ctx, identityKey{}, id)
 }
 

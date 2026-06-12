@@ -235,6 +235,14 @@ paths:
     get:
       summary: Lista approvals pendientes tenant-aware
       security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, default: 50, maximum: 200 }
+        - in: query
+          name: request_id
+          description: Filtra approvals de una request puntual
+          schema: { type: string, format: uuid }
       responses:
         "200": { description: Pending approval list }
   /v1/approvals/{id}/approve:

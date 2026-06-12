@@ -721,6 +721,7 @@ func (h *Handler) chat(w http.ResponseWriter, r *http.Request) {
 		Message:        body.Message,
 		RouteHint:      body.RouteHint,
 		Handoff:        body.Handoff,
+		Workspace:      body.Workspace,
 		Channel:        body.Channel,
 		ProductSurface: identity.ProductSurface,
 		AgentID:        body.AgentID,

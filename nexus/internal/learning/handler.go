@@ -7,6 +7,7 @@ import (
 
 	learningdto "github.com/devpablocristo/nexus/internal/learning/handler/dto"
 	learningdomain "github.com/devpablocristo/nexus/internal/learning/usecases/domain"
+	"github.com/devpablocristo/nexus/internal/orgctx"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
 	"github.com/devpablocristo/platform/http/go/httpjson"
 	"github.com/devpablocristo/platform/authn/go/identityhttp"
@@ -258,7 +259,9 @@ func decisionActorID(r *http.Request, explicit string) string {
 
 func proposalOrgScope(r *http.Request) (*string, bool, bool) {
 	if identityhttp.HasAnyScope(r, scopeNexusCrossOrg) {
-		if orgID := strings.TrimSpace(r.Header.Get("X-Org-ID")); orgID != "" {
+		// cross_org puede acotar la vista a un org puntual (X-Org-ID inbound,
+		// preservado en orgctx antes del rebind del middleware de authn).
+		if orgID := orgctx.Narrowed(r, r.Header.Get("X-Org-ID")); orgID != "" {
 			return &orgID, false, true
 		}
 		return nil, true, true

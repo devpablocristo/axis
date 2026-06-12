@@ -30,6 +30,7 @@ import (
 	"github.com/devpablocristo/companion/internal/productlimits"
 	"github.com/devpablocristo/companion/internal/products"
 	"github.com/devpablocristo/companion/internal/runtime"
+	"github.com/devpablocristo/companion/internal/secrets"
 	"github.com/devpablocristo/companion/internal/securityevals"
 	"github.com/devpablocristo/companion/internal/tasks"
 	"github.com/devpablocristo/companion/internal/watchers"
@@ -409,6 +410,48 @@ func activeManifestRegistry(ctx context.Context, uc *capabilities.Usecases) *cap
 	return registry
 }
 
+// registerEnvelopeProductConnectors registra un ProductConnector genérico por
+// cada producto activo con al menos una instalación habilitada cuyo config
+// declare connector_mode=envelope.v1. Solo corre con
+// COMPANION_PRODUCT_CONNECTOR_GENERIC=true. Los connectors legacy registrados
+// explicitamente como rollback ganan: no se pisan.
+func registerEnvelopeProductConnectors(ctx context.Context, connReg *registry.Registry, productUC *products.Usecases) {
+	productList, err := productUC.ListProducts(ctx)
+	if err != nil {
+		slog.Error("list products for generic product connectors", "error", err)
+		return
+	}
+	for _, product := range productList {
+		if product.Status != products.ProductStatusActive {
+			continue
+		}
+		installations, err := productUC.ListInstallationsByProduct(ctx, product.ProductSurface)
+		if err != nil {
+			slog.Error("list installations for generic product connector",
+				"product_surface", product.ProductSurface, "error", err)
+			continue
+		}
+		hasEnvelope := false
+		for _, installation := range installations {
+			if installation.Enabled && registry.IsEnvelopeInstallation(installation) {
+				hasEnvelope = true
+				break
+			}
+		}
+		if !hasEnvelope {
+			continue
+		}
+		if _, exists := connReg.Get(product.ProductSurface); exists {
+			slog.Warn("generic product connector skipped: connector already registered",
+				"product_surface", product.ProductSurface)
+			continue
+		}
+		client := registry.NewProductClient(product.ProductSurface, productUC)
+		connReg.Register(registry.NewProductConnector(client))
+		slog.Info("generic product connector registered", "product_surface", product.ProductSurface)
+	}
+}
+
 // defaultAutonomyLevel lee el nivel de autonomía base del runtime desde env
 // (COMPANION_DEFAULT_AUTONOMY_LEVEL). Acepta A0..A5; cualquier otro valor causa
 // fail-fast en boot para evitar arrancar con configuración ambigua. Default A2.
@@ -432,6 +475,7 @@ type Config struct {
 	InternalJWTSecret   string
 	InternalJWTIssuer   string
 	InternalJWTAudience string
+	ProductJWTKeys      string
 	NexusBaseURL        string
 	NexusAPIKey         string
 	PymesBaseURL        string
@@ -475,9 +519,11 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	if cfg.PymesBaseURL != "" {
 		connReg.Register(registry.NewPymesConnector(pymesClient))
 	}
-	if cfg.PontiBaseURL != "" {
+	if cfg.PontiBaseURL != "" && envconfig.Bool("COMPANION_LEGACY_PONTI_CONNECTOR_ENABLED", false) {
 		pontiClient := registry.NewPontiClient(cfg.PontiBaseURL, cfg.PontiAPIKey)
 		connReg.Register(registry.NewPontiConnector(pontiClient))
+		slog.Warn("legacy Ponti connector registered; prefer ProductConnector envelope.v1",
+			"product_surface", "ponti")
 	}
 	connRepo := connectors.NewPostgresRepository(db)
 	nexusChecker := connectors.NewNexusCheckerAdapter(func(c context.Context, id uuid.UUID) (connectors.NexusRequestMeta, int, error) {
@@ -521,6 +567,16 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	productRepo := products.NewPostgresRepository(db)
 	productUC := products.NewUsecases(productRepo)
 	productHandler := products.NewHandler(productUC)
+	// ProductConnector genérico (envelope capability_execution.v1), detrás de
+	// flag. Ponti legacy solo existe como rollback explícito y gana si se
+	// habilita con COMPANION_LEGACY_PONTI_CONNECTOR_ENABLED=true.
+	if envconfig.Bool("COMPANION_PRODUCT_CONNECTOR_GENERIC", false) {
+		productUC.WithSecretResolver(secrets.NewEnvResolver())
+		connUC.SetDynamicConnectorRegistrar(func(c context.Context) {
+			registerEnvelopeProductConnectors(c, connReg, productUC)
+		})
+		registerEnvelopeProductConnectors(ctx, connReg, productUC)
+	}
 	productGuard := products.NewInstallationGuard(productUC)
 	productRateLimiter := productlimits.NewMemoryLimiter()
 	connUC.SetProductInstallationGuard(productGuard)
@@ -715,7 +771,7 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 		Secret:   cfg.InternalJWTSecret,
 		Issuer:   cfg.InternalJWTIssuer,
 		Audience: cfg.InternalJWTAudience,
-	})
+	}, cfg.ProductJWTKeys)
 	if err != nil {
 		db.Close()
 		return nil, nil, fmt.Errorf("create authenticator: %w", err)

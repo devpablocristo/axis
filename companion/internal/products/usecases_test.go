@@ -77,6 +77,16 @@ func (f *fakeRepo) ListInstallations(_ context.Context, orgID string) ([]Install
 	return out, nil
 }
 
+func (f *fakeRepo) ListInstallationsByProduct(_ context.Context, productSurface string) ([]Installation, error) {
+	out := make([]Installation, 0)
+	for _, installation := range f.installations {
+		if installation.ProductSurface == productSurface {
+			out = append(out, installation)
+		}
+	}
+	return out, nil
+}
+
 func TestSaveProductNormalizesSurfaceAndDefaults(t *testing.T) {
 	t.Parallel()
 

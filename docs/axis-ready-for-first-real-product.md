@@ -15,6 +15,18 @@ El gate valida dos productos fake:
 - `reference`;
 - `shadow`.
 
+Para validar contratos reales sin convertirlos en default del gate base:
+
+```bash
+cd companion
+AXIS_REAL_PRODUCTS=ponti,medmory bash scripts/onboarding/check-axis-readiness.sh
+```
+
+Esto agrega `scripts/onboarding/ponti-product-contract.json` y
+`scripts/onboarding/medmory-product-contract.json` al mismo checklist. Los
+fixtures `reference`/`shadow` siguen siendo obligatorios y no pueden usar
+surfaces reales.
+
 Cada producto tiene contract spec, installation activa, identity/JWT context,
 read capability, write/draft capability gobernada por Nexus metadata, expected
 errors y eval pack con tenant leakage max `0`.

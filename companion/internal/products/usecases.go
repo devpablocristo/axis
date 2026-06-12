@@ -15,6 +15,7 @@ type Repository interface {
 	UpsertInstallation(ctx context.Context, installation Installation) (Installation, error)
 	GetInstallation(ctx context.Context, orgID, productSurface string) (Installation, error)
 	ListInstallations(ctx context.Context, orgID string) ([]Installation, error)
+	ListInstallationsByProduct(ctx context.Context, productSurface string) ([]Installation, error)
 }
 
 type Usecases struct {
@@ -84,6 +85,18 @@ func (u *Usecases) ListInstallations(ctx context.Context, orgID string) ([]Insta
 		return nil, fmt.Errorf("%w: org_id is required", ErrValidation)
 	}
 	return u.repo.ListInstallations(ctx, orgID)
+}
+
+// ListInstallationsByProduct lista las instalaciones de un producto a través
+// de todas las orgs. Lo usa el wiring del ProductConnector genérico para
+// detectar productos con instalaciones `connector_mode=envelope.v1` y para
+// resolver la instalación de discovery del manifest.
+func (u *Usecases) ListInstallationsByProduct(ctx context.Context, productSurface string) ([]Installation, error) {
+	productSurface = normalizeProductSurface(productSurface)
+	if !validProductSurface(productSurface) {
+		return nil, fmt.Errorf("%w: valid product_surface is required", ErrValidation)
+	}
+	return u.repo.ListInstallationsByProduct(ctx, productSurface)
 }
 
 func (u *Usecases) ResolveInstallation(ctx context.Context, orgID, productSurface string) (Installation, error) {

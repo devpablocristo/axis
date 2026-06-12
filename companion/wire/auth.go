@@ -55,15 +55,15 @@ func init() {
 	})
 }
 
-func newAuthMiddleware(apiKeys, issuerURL, audience string, internalJWT internaljwt.Config) (func(http.Handler) http.Handler, error) {
+func newAuthMiddleware(apiKeys, issuerURL, audience string, internalJWT internaljwt.Config, productJWTKeys string) (func(http.Handler) http.Handler, error) {
 	apiKeyAuth, err := newAPIKeyAuthenticator(apiKeys)
 	if err != nil {
 		return nil, err
 	}
-	jwtAuth := internaljwt.NewFallback(
-		internaljwt.NewAuthenticator(internalJWT),
-		newJWTAuthenticator(issuerURL, audience),
-	)
+	authenticators := []authn.Authenticator{internaljwt.NewAuthenticator(internalJWT)}
+	authenticators = append(authenticators, newProductJWTAuthenticators(productJWTKeys, internalJWT.Audience)...)
+	authenticators = append(authenticators, newJWTAuthenticator(issuerURL, audience))
+	jwtAuth := internaljwt.NewFallback(authenticators...)
 
 	return func(next http.Handler) http.Handler {
 		if next == nil {
@@ -123,6 +123,77 @@ func newAPIKeyAuthenticator(raw string) (authn.Authenticator, error) {
 			}, nil
 		},
 	}, nil
+}
+
+// productJWTAuthMethod es el AuthMethod de principals autenticados con JWT
+// de producto. Distinto de "api_key" a propósito: gates que confían en la
+// identidad delegada por el producto (ej. delegación de approvals en Nexus)
+// exigen api_key y NO deben abrirse silenciosamente a JWTs de producto.
+const productJWTAuthMethod = "product_jwt"
+
+// newProductJWTAuthenticators parsea COMPANION_PRODUCT_JWT_KEYS y construye
+// un authenticator HS256 por producto. Formato (espeja keycfg: `,`/`;`/`\n`
+// separan entries, `|` separa atributos):
+//
+//	product=<secret>|issuer=<issuer>[;product2=<secret2>|issuer=<issuer2>]
+//
+// Cada entry valida firma con su secret, issuer del producto y la audience
+// del servicio. Claims esperados: iss, aud, sub/actor_id, org_id,
+// product_surface, scopes, service_principal, on_behalf_of, exp corto.
+func newProductJWTAuthenticators(raw, audience string) []authn.Authenticator {
+	entries := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ';' || r == ',' || r == '\n'
+	})
+	out := make([]authn.Authenticator, 0, len(entries))
+	for _, entry := range entries {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		product, rhs, ok := strings.Cut(entry, "=")
+		if !ok || strings.TrimSpace(product) == "" {
+			continue
+		}
+		segments := strings.Split(rhs, "|")
+		secret := strings.TrimSpace(segments[0])
+		issuer := ""
+		for _, segment := range segments[1:] {
+			key, value, ok := strings.Cut(strings.TrimSpace(segment), "=")
+			if !ok {
+				continue
+			}
+			switch strings.TrimSpace(strings.ToLower(key)) {
+			case "issuer", "iss":
+				issuer = strings.TrimSpace(value)
+			}
+		}
+		base := internaljwt.NewAuthenticator(internaljwt.Config{
+			Secret:   secret,
+			Issuer:   issuer,
+			Audience: audience,
+		})
+		if base == nil {
+			continue
+		}
+		out = append(out, productJWTAuthenticator{base: base})
+	}
+	return out
+}
+
+// productJWTAuthenticator delega en internaljwt y rebrandea el AuthMethod a
+// "product_jwt" para que el principal quede auditable y distinguible tanto
+// del JWT interno de plataforma como de los API keys.
+type productJWTAuthenticator struct {
+	base authn.Authenticator
+}
+
+func (a productJWTAuthenticator) Authenticate(ctx context.Context, cred authn.Credential) (*authn.Principal, error) {
+	principal, err := a.base.Authenticate(ctx, cred)
+	if err != nil || principal == nil {
+		return nil, err
+	}
+	principal.AuthMethod = productJWTAuthMethod
+	return principal, nil
 }
 
 func newJWTAuthenticator(issuerURL, audience string) authn.Authenticator {

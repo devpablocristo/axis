@@ -99,6 +99,7 @@ type RunInput struct {
 	Message        string
 	RouteHint      string
 	Handoff        json.RawMessage
+	Workspace      json.RawMessage          // contexto operativo de pantalla; gana sobre handoff.workspace
 	Messages       []taskdomain.TaskMessage // hilo completo hasta ahora
 	TaskID         *uuid.UUID               // opcional: vincula el trace a una task
 }
@@ -222,6 +223,7 @@ func (o *Orchestrator) Run(ctx context.Context, in RunInput) (RunResult, error) 
 	}
 	decision := applyRuntimePolicy(policy, currentUsage, route, modelName)
 	route = decision.Route
+	runWorkspace := effectiveWorkspace(in)
 	trace := RunTrace{
 		RunID:          uuid.NewString(),
 		IdentityChain:  identity,
@@ -238,6 +240,7 @@ func (o *Orchestrator) Run(ctx context.Context, in RunInput) (RunResult, error) 
 		"agent_profile":          route.Profile,
 		"agent_id":               identity.AgentID,
 		"allowed_tools":          route.AllowedTools,
+		"workspace":              runWorkspace,
 		"runtime_policy_version": policy.SettingsVersion,
 		"control_plane": map[string]any{
 			"max_risk_class":        policy.ControlPlane.MaxRiskClass,
@@ -392,6 +395,7 @@ func (o *Orchestrator) Run(ctx context.Context, in RunInput) (RunResult, error) 
 				toolCtx = WithTaskID(toolCtx, *in.TaskID)
 			}
 			toolCtx = WithAllowedTools(toolCtx, route.AllowedTools)
+			toolCtx = WithWorkspace(toolCtx, runWorkspace)
 			toolCtx, cancel := context.WithTimeout(toolCtx, 15*time.Second)
 			result := o.toolkit.ExecuteTool(toolCtx, tc.Name, tc.Args)
 			cancel()

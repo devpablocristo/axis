@@ -14,6 +14,7 @@ import (
 	approvaldto "github.com/devpablocristo/nexus/internal/approvals/handler/dto"
 	approvaldomain "github.com/devpablocristo/nexus/internal/approvals/usecases/domain"
 	"github.com/devpablocristo/nexus/internal/callbacks"
+	"github.com/devpablocristo/nexus/internal/orgctx"
 	requestdomain "github.com/devpablocristo/nexus/internal/requests/usecases/domain"
 	authn "github.com/devpablocristo/platform/authn/go"
 	"github.com/devpablocristo/platform/authn/go/identityhttp"
@@ -206,11 +207,16 @@ func setupMuxWithAudit() (*http.ServeMux, *fakeApprovalRepo, *fakeRequestUpdater
 // seedApproval inserta una approval pendiente con su request asociada y retorna el ID.
 func seedApproval(t *testing.T, repo *fakeApprovalRepo, reqUpdater *fakeRequestUpdater) uuid.UUID {
 	t.Helper()
+	return seedApprovalForOrg(t, repo, reqUpdater, testApprovalOrgID)
+}
+
+// seedApprovalForOrg es la variante de seedApproval con org explícito.
+func seedApprovalForOrg(t *testing.T, repo *fakeApprovalRepo, reqUpdater *fakeRequestUpdater, orgID string) uuid.UUID {
+	t.Helper()
 	requestID := uuid.New()
 	reqUpdater.mu.Lock()
 	reqUpdater.requests[requestID] = requestdomain.Request{ID: requestID, Status: requestdomain.StatusPendingApproval}
 	reqUpdater.mu.Unlock()
-	orgID := testApprovalOrgID
 	a := approvaldomain.Approval{
 		ID:        uuid.New(),
 		OrgID:     &orgID,
@@ -334,6 +340,188 @@ func TestListPendingExcludesNonPending(t *testing.T) {
 	}
 	if resp.Data[0].OrgID != testApprovalOrgID {
 		t.Fatalf("se esperaba org_id %q, se obtuvo %q", testApprovalOrgID, resp.Data[0].OrgID)
+	}
+}
+
+// decodePendingList decodifica el body {"data": [...]} de listPending.
+func decodePendingList(t *testing.T, rec *httptest.ResponseRecorder) []approvaldto.ApprovalResponse {
+	t.Helper()
+	var resp struct {
+		Data []approvaldto.ApprovalResponse `json:"data"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("error decodificando respuesta: %v", err)
+	}
+	return resp.Data
+}
+
+// TestListPendingHonorsLimit verifica que ?limit= acota la cantidad de rows.
+func TestListPendingHonorsLimit(t *testing.T) {
+	t.Parallel()
+	mux, repo, reqUpdater := setupMux()
+	for range 5 {
+		seedApproval(t, repo, reqUpdater)
+	}
+
+	rec := doReq(t, mux, http.MethodGet, "/v1/approvals/pending?limit=2", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("código esperado 200, obtenido %d: %s", rec.Code, rec.Body.String())
+	}
+	if got := decodePendingList(t, rec); len(got) != 2 {
+		t.Fatalf("se esperaban 2 approvals con limit=2, se obtuvieron %d", len(got))
+	}
+}
+
+// TestListLimitParsing verifica default, techo y valores inválidos de ?limit=.
+func TestListLimitParsing(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		raw  string
+		want int
+	}{
+		{"", defaultListLimit},
+		{"abc", defaultListLimit},
+		{"0", defaultListLimit},
+		{"-5", defaultListLimit},
+		{"2", 2},
+		{"200", maxListLimit},
+		{"500", maxListLimit},
+	}
+	for _, tc := range tests {
+		if got := listLimit(tc.raw); got != tc.want {
+			t.Errorf("listLimit(%q) = %d, want %d", tc.raw, got, tc.want)
+		}
+	}
+}
+
+// TestListPendingFilterByRequestID verifica que ?request_id= retorna solo las
+// approvals de esa request.
+func TestListPendingFilterByRequestID(t *testing.T) {
+	t.Parallel()
+	mux, repo, reqUpdater := setupMux()
+	targetApprovalID := seedApproval(t, repo, reqUpdater)
+	seedApproval(t, repo, reqUpdater)
+	seedApproval(t, repo, reqUpdater)
+
+	target, err := repo.GetByID(context.Background(), targetApprovalID)
+	if err != nil {
+		t.Fatalf("get approval: %v", err)
+	}
+
+	rec := doReq(t, mux, http.MethodGet, "/v1/approvals/pending?request_id="+target.RequestID.String(), "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("código esperado 200, obtenido %d: %s", rec.Code, rec.Body.String())
+	}
+	got := decodePendingList(t, rec)
+	if len(got) != 1 {
+		t.Fatalf("se esperaba 1 approval para request_id, se obtuvieron %d", len(got))
+	}
+	if got[0].RequestID != target.RequestID.String() {
+		t.Fatalf("request_id = %q, want %q", got[0].RequestID, target.RequestID.String())
+	}
+}
+
+// TestListPendingInvalidRequestID verifica que un request_id no-UUID es 400.
+func TestListPendingInvalidRequestID(t *testing.T) {
+	t.Parallel()
+	mux, _, _ := setupMux()
+
+	rec := doReq(t, mux, http.MethodGet, "/v1/approvals/pending?request_id=not-a-uuid", "")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("código esperado 400, obtenido %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// pendingReqWithPrincipal arma un GET /v1/approvals/pending con el org
+// solicitado preservado en orgctx (como hace el middleware de wire ANTES de
+// WithPrincipal) y el principal indicado.
+func pendingReqWithPrincipal(requestedOrg string, principal *authn.Principal) *http.Request {
+	req := httptest.NewRequest(http.MethodGet, "/v1/approvals/pending", nil)
+	if requestedOrg != "" {
+		req = req.WithContext(orgctx.WithRequested(req.Context(), requestedOrg))
+	}
+	return identityhttp.WithPrincipal(req, principal, principal.AuthMethod)
+}
+
+// TestListPendingCrossOrgNarrowedByRequestedOrg verifica que un principal
+// cross_org con X-Org-ID inbound (preservado en orgctx) ve SOLO ese org en
+// vez de allowAll.
+func TestListPendingCrossOrgNarrowedByRequestedOrg(t *testing.T) {
+	t.Parallel()
+	mux, repo, reqUpdater := setupMux()
+	seedApprovalForOrg(t, repo, reqUpdater, "acme")
+	seedApprovalForOrg(t, repo, reqUpdater, "globex")
+
+	req := pendingReqWithPrincipal("acme", &authn.Principal{
+		Actor:      "pymes-service",
+		Scopes:     []string{scopeNexusApprovalsDecide, scopeNexusCrossOrg},
+		Claims:     map[string]any{"service_principal": true},
+		AuthMethod: "api_key",
+	})
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("código esperado 200, obtenido %d: %s", rec.Code, rec.Body.String())
+	}
+	got := decodePendingList(t, rec)
+	if len(got) != 1 {
+		t.Fatalf("se esperaba 1 approval (solo acme), se obtuvieron %d", len(got))
+	}
+	if got[0].OrgID != "acme" {
+		t.Fatalf("org_id = %q, want acme", got[0].OrgID)
+	}
+}
+
+// TestListPendingCrossOrgWithoutRequestedKeepsAllowAll verifica compat: un
+// principal cross_org sin org solicitado ni bound sigue viendo todos los orgs.
+func TestListPendingCrossOrgWithoutRequestedKeepsAllowAll(t *testing.T) {
+	t.Parallel()
+	mux, repo, reqUpdater := setupMux()
+	seedApprovalForOrg(t, repo, reqUpdater, "acme")
+	seedApprovalForOrg(t, repo, reqUpdater, "globex")
+
+	req := pendingReqWithPrincipal("", &authn.Principal{
+		Actor:      "pymes-service",
+		Scopes:     []string{scopeNexusApprovalsDecide, scopeNexusCrossOrg},
+		Claims:     map[string]any{"service_principal": true},
+		AuthMethod: "api_key",
+	})
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("código esperado 200, obtenido %d: %s", rec.Code, rec.Body.String())
+	}
+	if got := decodePendingList(t, rec); len(got) != 2 {
+		t.Fatalf("se esperaban 2 approvals (allowAll), se obtuvieron %d", len(got))
+	}
+}
+
+// TestListPendingNonCrossOrgIgnoresRequestedOrg verifica que un principal SIN
+// cross_org no puede escaparse de su org bound vía X-Org-ID inbound.
+func TestListPendingNonCrossOrgIgnoresRequestedOrg(t *testing.T) {
+	t.Parallel()
+	mux, repo, reqUpdater := setupMux()
+	seedApprovalForOrg(t, repo, reqUpdater, "acme")
+	seedApprovalForOrg(t, repo, reqUpdater, "globex")
+
+	req := pendingReqWithPrincipal("globex", &authn.Principal{
+		OrgID:      "acme",
+		Actor:      "acme-service",
+		Scopes:     []string{scopeNexusApprovalsDecide},
+		Claims:     map[string]any{"service_principal": true},
+		AuthMethod: "api_key",
+	})
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("código esperado 200, obtenido %d: %s", rec.Code, rec.Body.String())
+	}
+	got := decodePendingList(t, rec)
+	if len(got) != 1 {
+		t.Fatalf("se esperaba 1 approval (solo acme, su org bound), se obtuvieron %d", len(got))
+	}
+	if got[0].OrgID != "acme" {
+		t.Fatalf("org_id = %q, want acme (el org del principal, no el solicitado)", got[0].OrgID)
 	}
 }
 
@@ -740,6 +928,211 @@ func TestApproveHTTPUsesAuthenticatedPrincipalOverSpoofedBody(t *testing.T) {
 	}
 	events := sink.getEvents()
 	if len(events) != 1 || events[0].ActorID != "authenticated-reviewer" {
+		t.Fatalf("unexpected audit events: %+v", events)
+	}
+}
+
+// TestApproveHTTPServicePrincipalUsesDelegatedActor verifica que un service
+// principal (ej. ponti-backend) con X-On-Behalf-Of registra la decisión a
+// nombre del usuario delegado, no del principal del servicio.
+func TestApproveHTTPServicePrincipalUsesDelegatedActor(t *testing.T) {
+	t.Parallel()
+	mux, repo, reqUpdater, sink := setupMuxWithAudit()
+	approvalID := seedApproval(t, repo, reqUpdater)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/approvals/"+approvalID.String()+"/approve", strings.NewReader(`{"note":"approved on behalf"}`))
+	req = identityhttp.WithPrincipal(req, &authn.Principal{
+		OrgID:      testApprovalOrgID,
+		Actor:      "ponti-backend",
+		Scopes:     []string{scopeNexusApprovalsDecide},
+		Claims:     map[string]any{"service_principal": true},
+		AuthMethod: "api_key",
+	}, "api_key")
+	req.Header.Set("X-On-Behalf-Of", "user:ponti-operator")
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("código esperado 200, obtenido %d: %s", rec.Code, rec.Body.String())
+	}
+	a, err := repo.GetByID(context.Background(), approvalID)
+	if err != nil {
+		t.Fatalf("get approval: %v", err)
+	}
+	if a.DecidedBy != "user:ponti-operator" {
+		t.Fatalf("decided_by = %q, want delegated actor", a.DecidedBy)
+	}
+	events := sink.getEvents()
+	if len(events) != 1 || events[0].ActorID != "user:ponti-operator" {
+		t.Fatalf("unexpected audit events: %+v", events)
+	}
+}
+
+// TestRejectHTTPServicePrincipalUsesDecidedByBody verifica la delegación vía
+// body.decided_by para reject cuando no hay header X-On-Behalf-Of.
+func TestRejectHTTPServicePrincipalUsesDecidedByBody(t *testing.T) {
+	t.Parallel()
+	mux, repo, reqUpdater := setupMux()
+	approvalID := seedApproval(t, repo, reqUpdater)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/approvals/"+approvalID.String()+"/reject", strings.NewReader(`{"decided_by":"user:ponti-operator","note":"rejected on behalf"}`))
+	req = identityhttp.WithPrincipal(req, &authn.Principal{
+		OrgID:      testApprovalOrgID,
+		Actor:      "ponti-backend",
+		Scopes:     []string{scopeNexusApprovalsDecide},
+		Claims:     map[string]any{"service_principal": true},
+		AuthMethod: "api_key",
+	}, "api_key")
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("código esperado 200, obtenido %d: %s", rec.Code, rec.Body.String())
+	}
+	a, err := repo.GetByID(context.Background(), approvalID)
+	if err != nil {
+		t.Fatalf("get approval: %v", err)
+	}
+	if a.DecidedBy != "user:ponti-operator" {
+		t.Fatalf("decided_by = %q, want delegated actor from body", a.DecidedBy)
+	}
+}
+
+// TestApproveHTTPHumanIgnoresOnBehalfOf verifica que un humano autenticado no
+// puede delegar: su propio actor gana sobre X-On-Behalf-Of y body.decided_by.
+func TestApproveHTTPHumanIgnoresOnBehalfOf(t *testing.T) {
+	t.Parallel()
+	mux, repo, reqUpdater := setupMux()
+	approvalID := seedApproval(t, repo, reqUpdater)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/approvals/"+approvalID.String()+"/approve", strings.NewReader(`{"decided_by":"spoofed-body","note":"approved"}`))
+	req = identityhttp.WithPrincipal(req, &authn.Principal{
+		OrgID:      testApprovalOrgID,
+		Actor:      "authenticated-reviewer",
+		Scopes:     []string{scopeNexusApprovalsDecide},
+		AuthMethod: "jwt",
+	}, "jwt")
+	req.Header.Set("X-On-Behalf-Of", "spoofed-header")
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("código esperado 200, obtenido %d: %s", rec.Code, rec.Body.String())
+	}
+	a, err := repo.GetByID(context.Background(), approvalID)
+	if err != nil {
+		t.Fatalf("get approval: %v", err)
+	}
+	if a.DecidedBy != "authenticated-reviewer" {
+		t.Fatalf("decided_by = %q, want authenticated human actor", a.DecidedBy)
+	}
+}
+
+// TestApproveHTTPProductJWTServicePrincipalCannotDelegate es el guard de
+// regresión del rollout de product JWTs (Ola B): la delegación de decided_by
+// exige AuthMethod "api_key" (trusted boundary del producto). Un principal
+// autenticado con product JWT (AuthMethod "product_jwt") con
+// service_principal:true NO debe poder forjar decided_by vía X-On-Behalf-Of
+// ni body.decided_by — si los product JWTs necesitan delegación legítima más
+// adelante, requiere un diseño explícito, no un bypass silencioso.
+func TestApproveHTTPProductJWTServicePrincipalCannotDelegate(t *testing.T) {
+	t.Parallel()
+	mux, repo, reqUpdater := setupMux()
+	approvalID := seedApproval(t, repo, reqUpdater)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/approvals/"+approvalID.String()+"/approve", strings.NewReader(`{"decided_by":"user:forged-operator","note":"approved via product jwt"}`))
+	req = identityhttp.WithPrincipal(req, &authn.Principal{
+		OrgID:      testApprovalOrgID,
+		Actor:      "ponti-backend",
+		Scopes:     []string{scopeNexusApprovalsDecide},
+		Claims:     map[string]any{"service_principal": true, "product_surface": "ponti"},
+		AuthMethod: "product_jwt",
+	}, "product_jwt")
+	req.Header.Set("X-On-Behalf-Of", "user:forged-operator")
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("código esperado 200, obtenido %d: %s", rec.Code, rec.Body.String())
+	}
+	a, err := repo.GetByID(context.Background(), approvalID)
+	if err != nil {
+		t.Fatalf("get approval: %v", err)
+	}
+	if a.DecidedBy != "ponti-backend" {
+		t.Fatalf("decided_by = %q: la delegación vía product JWT debe rechazarse y registrar el actor del principal", a.DecidedBy)
+	}
+}
+
+// TestApproveHTTPServicePrincipalWithoutDelegationFallsBack verifica compat:
+// service principal sin X-On-Behalf-Of ni decided_by usa su propio actor.
+func TestApproveHTTPServicePrincipalWithoutDelegationFallsBack(t *testing.T) {
+	t.Parallel()
+	mux, repo, reqUpdater := setupMux()
+	approvalID := seedApproval(t, repo, reqUpdater)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/approvals/"+approvalID.String()+"/approve", strings.NewReader(`{"note":"approved by service"}`))
+	req = identityhttp.WithPrincipal(req, &authn.Principal{
+		OrgID:      testApprovalOrgID,
+		Actor:      "ponti-backend",
+		Scopes:     []string{scopeNexusApprovalsDecide},
+		Claims:     map[string]any{"service_principal": true},
+		AuthMethod: "api_key",
+	}, "api_key")
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("código esperado 200, obtenido %d: %s", rec.Code, rec.Body.String())
+	}
+	a, err := repo.GetByID(context.Background(), approvalID)
+	if err != nil {
+		t.Fatalf("get approval: %v", err)
+	}
+	if a.DecidedBy != "ponti-backend" {
+		t.Fatalf("decided_by = %q, want service principal actor", a.DecidedBy)
+	}
+}
+
+// TestApproveHTTPBFFHumanTokenCannotDelegate verifica el shape REAL del token
+// del BFF de consola: internal JWT con service_principal:true pero actor
+// humano (actor_type=human), AuthMethod "internal_jwt". La delegación se
+// rechaza: decided_by es el actor autenticado, no el X-On-Behalf-Of ni el
+// body.decided_by forjados (no-repudio + separation of duties).
+func TestApproveHTTPBFFHumanTokenCannotDelegate(t *testing.T) {
+	t.Parallel()
+	mux, repo, reqUpdater, sink := setupMuxWithAudit()
+	approvalID := seedApproval(t, repo, reqUpdater)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/approvals/"+approvalID.String()+"/approve", strings.NewReader(`{"decided_by":"forged-body-approver","note":"approved"}`))
+	req = identityhttp.WithPrincipal(req, &authn.Principal{
+		OrgID:  testApprovalOrgID,
+		Actor:  "console-user@axis",
+		Scopes: []string{scopeNexusApprovalsDecide},
+		Claims: map[string]any{
+			"service_principal": true,
+			"actor_type":        "human",
+			"on_behalf_of":      "console-user@axis",
+			"product_surface":   "axis-console",
+		},
+		AuthMethod: "internal_jwt",
+	}, "internal_jwt")
+	req.Header.Set("X-On-Behalf-Of", "forged-header-approver")
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("código esperado 200, obtenido %d: %s", rec.Code, rec.Body.String())
+	}
+	a, err := repo.GetByID(context.Background(), approvalID)
+	if err != nil {
+		t.Fatalf("get approval: %v", err)
+	}
+	if a.DecidedBy != "console-user@axis" {
+		t.Fatalf("decided_by = %q, want authenticated console actor", a.DecidedBy)
+	}
+	events := sink.getEvents()
+	if len(events) != 1 || events[0].ActorID != "console-user@axis" {
 		t.Fatalf("unexpected audit events: %+v", events)
 	}
 }

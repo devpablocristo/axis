@@ -265,6 +265,11 @@ func (s *server) proxy(name, prefix, target, audience string) http.Handler {
 		r2.Header = r.Header.Clone()
 		r2.Header.Del("Cookie")
 		r2.Header.Del("X-API-Key")
+		// Nunca reenviar delegación de identidad del browser: el canal
+		// legítimo es el claim on_behalf_of del internal JWT del BFF. Un
+		// X-On-Behalf-Of inbound permitiría a un humano de consola forjar
+		// decided_by aguas abajo (nexus approvals).
+		r2.Header.Del("X-On-Behalf-Of")
 		r2.Header.Set("Authorization", "Bearer "+token)
 		r2.Header.Set("X-Request-ID", requestID(r))
 		r2.Header.Set("X-Axis-Forwarded-By", "axis-bff")

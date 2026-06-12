@@ -13,6 +13,7 @@ import (
 	"github.com/devpablocristo/platform/authn/go/identityhttp"
 	"github.com/devpablocristo/platform/http/go/httpjson"
 
+	"github.com/devpablocristo/nexus/internal/orgctx"
 	requestdto "github.com/devpablocristo/nexus/internal/requests/handler/dto"
 	requestdomain "github.com/devpablocristo/nexus/internal/requests/usecases/domain"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
@@ -275,14 +276,15 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 // requestOrgScope extrae la regla de tenancy del request HTTP. Espeja la
 // semántica de canAccessRequestOrg pero la traduce a parámetros que el repo
 // pueda aplicar en SQL.
-//   - cross-org admin scope sin X-Org-ID → allowAll=true.
-//   - cross-org admin scope con X-Org-ID → orgID=&value, allowAll=false.
+//   - cross-org admin scope sin org solicitado/bound → allowAll=true.
+//   - cross-org admin scope con org solicitado (X-Org-ID inbound, preservado
+//     en orgctx) o bound al principal → orgID=&value, allowAll=false.
 //   - X-Org-ID presente → orgID=&value, allowAll=false.
 //   - sin auth context (dev/local) → allowAll=true para no romper smoke.
 //   - sino → fail closed.
 func requestOrgScope(r *http.Request) (*string, bool, bool) {
 	if identityhttp.HasAnyScope(r, scopeNexusCrossOrg) {
-		if orgID := strings.TrimSpace(r.Header.Get("X-Org-ID")); orgID != "" {
+		if orgID := orgctx.Narrowed(r, r.Header.Get("X-Org-ID")); orgID != "" {
 			return &orgID, false, true
 		}
 		return nil, true, true

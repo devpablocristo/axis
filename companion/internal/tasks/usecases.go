@@ -103,6 +103,7 @@ type OrchestratorInput struct {
 	Message        string
 	RouteHint      string
 	Handoff        json.RawMessage
+	Workspace      json.RawMessage // contexto operativo de pantalla; gana sobre handoff.workspace
 	Messages       []domain.TaskMessage
 	TaskID         *uuid.UUID // opcional: vincula el trace a una task
 	ProductSurface string     // opcional: "companion" (default) | "ponti" | "pymes" — afecta routing
@@ -359,6 +360,7 @@ type ChatInput struct {
 	AgentID        string // opcional: empleado IA persistente para esta task/conversación.
 	RouteHint      string // opcional: pista de pantalla/módulo para ruteo operativo.
 	Handoff        json.RawMessage
+	Workspace      json.RawMessage // contexto operativo de pantalla; gana sobre handoff.workspace
 	Identity       identityctx.IdentityContext
 }
 
@@ -376,6 +378,11 @@ type ChatResult struct {
 // conversation_id en mensajes sucesivos del mismo task.
 const agentConversationContextKey = "agent_conversation_id"
 const agentContextKey = "agent_id"
+
+// workspaceContextKey nombre del field en task.context_json que guarda el
+// workspace operativo del último chat. Permite reusar el mismo workspace en
+// turnos siguientes si el caller no lo reenvía.
+const workspaceContextKey = "workspace"
 
 // Chat combina crear/reusar tarea + agregar mensaje del usuario.
 // Es el endpoint principal para la interfaz conversacional del suscriptor.
@@ -457,6 +464,15 @@ func (u *Usecases) Chat(ctx context.Context, in ChatInput) (ChatResult, error) {
 	convID := u.ensureAgentConversation(ctx, &t, in, newTask)
 	u.ensureTaskAgent(ctx, &t, in.AgentID)
 
+	// Workspace operativo: si el caller no lo reenvía en este turno, reusamos
+	// el último persistido en task.context_json; si lo reenvía, lo stasheamos
+	// para los turnos siguientes (mismo patrón que agent_conversation_id).
+	if len(in.Workspace) == 0 {
+		in.Workspace = extractTaskWorkspace(t.ContextJSON)
+	} else {
+		u.ensureTaskWorkspace(ctx, &t, in.Workspace)
+	}
+
 	// Agregar mensaje del usuario
 	_, err = u.repo.InsertMessage(ctx, domain.TaskMessage{
 		TaskID:     t.ID,
@@ -490,6 +506,7 @@ func (u *Usecases) Chat(ctx context.Context, in ChatInput) (ChatResult, error) {
 				Message:        in.Message,
 				RouteHint:      in.RouteHint,
 				Handoff:        in.Handoff,
+				Workspace:      in.Workspace,
 				Messages:       existingMsgs,
 				TaskID:         &taskID,
 				ProductSurface: in.ProductSurface,
@@ -573,6 +590,17 @@ func (u *Usecases) ensureTaskAgent(ctx context.Context, t *domain.Task, agentID 
 	}
 }
 
+func (u *Usecases) ensureTaskWorkspace(ctx context.Context, t *domain.Task, workspace json.RawMessage) {
+	updated, ok := mergeTaskWorkspace(t.ContextJSON, workspace)
+	if !ok || string(updated) == string(t.ContextJSON) {
+		return
+	}
+	t.ContextJSON = updated
+	if _, err := u.repo.UpdateTask(ctx, *t); err != nil {
+		slog.Error("update task context with workspace", "error", err, "task_id", t.ID)
+	}
+}
+
 func (u *Usecases) persistAgentMessage(ctx context.Context, convID uuid.UUID, orgID, role, content string) {
 	if u.agentMemory == nil || convID == uuid.Nil || content == "" {
 		return
@@ -642,6 +670,40 @@ func mergeTaskAgentID(raw json.RawMessage, agentID string) (json.RawMessage, boo
 		}
 	}
 	holder[agentContextKey] = agentID
+	out, err := json.Marshal(holder)
+	if err != nil {
+		return nil, false
+	}
+	return out, true
+}
+
+func extractTaskWorkspace(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 {
+		return nil
+	}
+	var holder map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &holder); err != nil {
+		return nil
+	}
+	workspace, ok := holder[workspaceContextKey]
+	if !ok || len(workspace) == 0 || string(workspace) == "null" {
+		return nil
+	}
+	return workspace
+}
+
+func mergeTaskWorkspace(raw json.RawMessage, workspace json.RawMessage) (json.RawMessage, bool) {
+	var decoded map[string]any
+	if len(workspace) == 0 || json.Unmarshal(workspace, &decoded) != nil || len(decoded) == 0 {
+		return raw, false
+	}
+	holder := map[string]any{}
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &holder); err != nil {
+			holder = map[string]any{}
+		}
+	}
+	holder[workspaceContextKey] = decoded
 	out, err := json.Marshal(holder)
 	if err != nil {
 		return nil, false

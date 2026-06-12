@@ -78,7 +78,7 @@ func (o *Orchestrator) pontiForcedReadToolCall(in RunInput, allowedSchemas []Too
 	if toolName == "" {
 		return LLMToolCall{}, false
 	}
-	workspace := pontiHandoffWorkspace(in.Handoff)
+	workspace := effectiveWorkspace(in)
 	if !pontiToolCanRunWithoutWorkspace(toolName) && len(workspace) == 0 {
 		return LLMToolCall{}, false
 	}
@@ -165,37 +165,6 @@ func pontiHandoffRouteHint(raw json.RawMessage) string {
 		}
 	}
 	return ""
-}
-
-func pontiHandoffWorkspace(raw json.RawMessage) map[string]any {
-	var root map[string]any
-	if len(raw) == 0 || json.Unmarshal(raw, &root) != nil {
-		return nil
-	}
-	workspace, ok := root["workspace"].(map[string]any)
-	if !ok || len(workspace) == 0 {
-		return nil
-	}
-	out := make(map[string]any, len(workspace))
-	for key, value := range workspace {
-		switch v := value.(type) {
-		case nil:
-			continue
-		case string:
-			if strings.TrimSpace(v) == "" {
-				continue
-			}
-		case float64:
-			if v <= 0 {
-				continue
-			}
-		}
-		out[key] = value
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
 }
 
 func pontiNormalize(value string) string {

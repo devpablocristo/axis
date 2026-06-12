@@ -176,6 +176,7 @@ type ChatRequest struct {
 	RouteHint        string          `json:"route_hint,omitempty"`        // compatibilidad: el runtime decide routing
 	ConfirmedActions []string        `json:"confirmed_actions,omitempty"` // compatibilidad UI legacy
 	Handoff          json.RawMessage `json:"handoff,omitempty"`           // compatibilidad UI legacy
+	Workspace        json.RawMessage `json:"workspace,omitempty"`         // contexto operativo de pantalla; gana sobre handoff.workspace
 }
 
 // ChatResponse respuesta del chat con tarea y mensajes.

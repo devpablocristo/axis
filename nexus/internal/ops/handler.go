@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/devpablocristo/nexus/internal/orgctx"
 	"github.com/devpablocristo/platform/authn/go/identityhttp"
 	"github.com/devpablocristo/platform/http/go/httpjson"
 	"github.com/google/uuid"
@@ -211,7 +212,9 @@ func queryLimit(r *http.Request, fallback int) int {
 
 func opsOrgScope(r *http.Request) (*string, bool) {
 	if identityhttp.HasNoAuthContext(r) || identityhttp.HasScope(r, scopeNexusCrossOrg) {
-		if orgID := strings.TrimSpace(identityhttp.PrincipalOrgID(r)); orgID != "" {
+		// cross_org puede acotar la vista a un org puntual (X-Org-ID inbound,
+		// preservado en orgctx antes del rebind del middleware de authn).
+		if orgID := orgctx.Narrowed(r, identityhttp.PrincipalOrgID(r)); orgID != "" {
 			return &orgID, false
 		}
 		return nil, true

@@ -32,6 +32,7 @@ func (a *OrchestratorAdapter) Run(ctx context.Context, in tasks.OrchestratorInpu
 		ProductSurface: in.ProductSurface,
 		AgentID:        in.AgentID,
 		Handoff:        in.Handoff,
+		Workspace:      in.Workspace,
 	})
 	if err != nil {
 		return tasks.OrchestratorResult{}, err

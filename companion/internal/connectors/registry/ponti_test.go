@@ -160,6 +160,17 @@ func newPontiMock(t *testing.T) *pontiMock {
 			writeJSON(w, map[string]any{"items": []any{map[string]any{"name": "Urea", "is_partial_price": false}}})
 		case strings.HasPrefix(r.URL.Path, "/api/v1/reports/"):
 			writeJSON(w, map[string]any{"summary": map[string]any{"result_usd": 123}})
+		case r.URL.Path == "/api/v1/data-integrity/summary":
+			writeJSON(w, map[string]any{
+				"source":      "ponti.data_integrity.summary",
+				"workspace":   map[string]any{"project_id": 10},
+				"filters":     map[string]any{"project_id": 10},
+				"captured_at": "2026-06-10T12:00:00Z",
+				"summary": map[string]any{
+					"costs_check":      map[string]any{"status": "ERROR", "failed_checks": 2, "total_checks": 17},
+					"tentative_prices": map[string]any{"count": 1, "sample_items": []any{map[string]any{"supply_id": 7, "name": "Urea"}}},
+				},
+			})
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/work-order-drafts/digital":
 			writeJSON(w, map[string]any{"id": 99})
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/ai/actions/insight-resolution/draft":
@@ -532,6 +543,56 @@ func TestPontiConnector_StockSummary_UsesWorkspaceAndWrapsEvidence(t *testing.T)
 	}
 }
 
+func TestPontiConnector_DataIntegritySummary_UsesWorkspaceAndWrapsEvidence(t *testing.T) {
+	t.Parallel()
+	mock := newPontiMock(t)
+	conn, connID := newPontiConnector(t, mock)
+
+	res, err := conn.Execute(context.Background(), domain.ExecutionSpec{
+		ConnectorID: connID,
+		OrgID:       "tenant-A",
+		ActorID:     "user-A",
+		Operation:   "ponti.data_integrity.summary",
+		Payload:     json.RawMessage(`{"workspace":{"customer_id":1,"project_id":10,"campaign_id":20}}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != domain.ExecSuccess {
+		t.Fatalf("expected success, got %s err=%s", res.Status, res.ErrorMessage)
+	}
+	calls := mock.callsExcluding("/api/v1/capabilities")
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 summary call, got %d (paths: %v)", len(calls), mock.callPaths())
+	}
+	if calls[0].Path != "/api/v1/data-integrity/summary" {
+		t.Fatalf("unexpected path %q", calls[0].Path)
+	}
+	if calls[0].OrgID != "tenant-A" {
+		t.Fatalf("expected X-Tenant-Id=tenant-A, got %q", calls[0].OrgID)
+	}
+	if !strings.Contains(calls[0].RawQuery, "project_id=10") {
+		t.Fatalf("expected project_id query, got %q", calls[0].RawQuery)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(res.ResultJSON, &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["source"] != "ponti.data_integrity.summary" {
+		t.Fatalf("expected wrapped source, got %s", string(res.ResultJSON))
+	}
+	summary, ok := body["summary"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected summary key, got %s", string(res.ResultJSON))
+	}
+	if _, ok := summary["costs_check"]; !ok {
+		t.Fatalf("expected costs_check in summary, got %s", string(res.ResultJSON))
+	}
+	if _, ok := summary["tentative_prices"]; !ok {
+		t.Fatalf("expected tentative_prices in summary, got %s", string(res.ResultJSON))
+	}
+}
+
 func TestPontiConnector_WorkOrderDraftCreate_WrapsDraftExecution(t *testing.T) {
 	t.Parallel()
 	mock := newPontiMock(t)
@@ -664,6 +725,7 @@ func stubPontiOperationalManifest() ai.CapabilityManifest {
 		"ponti.reports.field_crop.summary",
 		"ponti.reports.investor_contribution.summary",
 		"ponti.reports.summary_results.summary",
+		"ponti.data_integrity.summary",
 	}
 	tools := make([]ai.CapabilityTool, 0, len(names))
 	for _, name := range names {
@@ -769,8 +831,8 @@ func TestPontiConnector_Discovery_PopulatesCapabilities(t *testing.T) {
 	conn, _ := newPontiConnector(t, mock)
 
 	caps := conn.Capabilities()
-	if len(caps) != 18 {
-		t.Fatalf("expected 18 capabilities discovered from Ponti, got %d", len(caps))
+	if len(caps) != 19 {
+		t.Fatalf("expected 19 capabilities discovered from Ponti, got %d", len(caps))
 	}
 	for _, c := range caps {
 		if c.RequiresNexusApproval {
@@ -847,7 +909,7 @@ func TestPontiConnector_Discovery_DownAtBoot(t *testing.T) {
 	if err := conn.Refresh(context.Background()); err != nil {
 		t.Fatalf("refresh after Ponti recovery: %v", err)
 	}
-	if caps := conn.Capabilities(); len(caps) != 18 {
-		t.Fatalf("expected 18 capabilities after refresh, got %d", len(caps))
+	if caps := conn.Capabilities(); len(caps) != 19 {
+		t.Fatalf("expected 19 capabilities after refresh, got %d", len(caps))
 	}
 }

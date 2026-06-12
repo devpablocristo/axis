@@ -197,6 +197,9 @@ func (p *PontiConnector) Execute(ctx context.Context, spec domain.ExecutionSpec)
 	case "ponti.reports.summary_results.summary":
 		raw, execErr = p.client.ReportSummary(ctx, spec.OrgID, "summary-results", opPayload)
 		readWrap = true
+	case "ponti.data_integrity.summary":
+		raw, execErr = p.client.DataIntegritySummary(ctx, spec.OrgID, opPayload)
+		readWrap = true
 	case "ponti.insight.resolve.prepare":
 		raw, execErr = p.client.PrepareInsightResolve(ctx, spec.OrgID, spec.Payload)
 	case "ponti.workorder.draft.prepare":
@@ -243,6 +246,9 @@ func (p *PontiConnector) Execute(ctx context.Context, spec domain.ExecutionSpec)
 		"service_principal":    spec.ServicePrincipal,
 		"product_surface":      spec.ProductSurface,
 		"capability_operation": spec.Operation,
+	}
+	if workspace := workspaceEvidence(opPayload); len(workspace) > 0 {
+		evidence["workspace"] = workspace
 	}
 	evidenceJSON, _ := json.Marshal(evidence)
 
