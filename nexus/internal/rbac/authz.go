@@ -25,4 +25,3 @@ func principalOrgID(r *http.Request) string { return identityhttp.PrincipalOrgID
 func canAccessOrg(r *http.Request, orgID string) bool {
 	return identityhttp.CanAccessOrg(r, orgID, scopeNexusCrossOrg)
 }
-

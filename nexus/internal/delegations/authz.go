@@ -48,4 +48,3 @@ func canWriteDelegationOrg(r *http.Request, d domain.Delegation) bool {
 	orgID := identityhttp.PrincipalOrgID(r)
 	return orgID != "" && d.OrgID != nil && strings.TrimSpace(*d.OrgID) == orgID
 }
-

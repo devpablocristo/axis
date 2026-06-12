@@ -27,4 +27,3 @@ func principalOrgID(r *http.Request) *string {
 	}
 	return &orgID
 }
-

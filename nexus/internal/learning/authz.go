@@ -21,4 +21,3 @@ func requireScope(w http.ResponseWriter, r *http.Request, scopes ...string) bool
 	httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "missing required scope")
 	return false
 }
-

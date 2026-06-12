@@ -33,4 +33,3 @@ func canWriteOwner(r *http.Request, ownerSystem string) bool {
 	actor := identityhttp.FromRequest(r).Actor
 	return actor != "" && strings.EqualFold(actor, strings.TrimSpace(ownerSystem))
 }
-

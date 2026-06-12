@@ -48,7 +48,7 @@ env:
   COMPANION_API_KEYS_SECRET: ${{ vars.COMPANION_API_KEYS_SECRET_NAME_STG || 'axis-companion-api-keys-stg' }}
   COMPANION_NEXUS_API_KEY_SECRET: ${{ vars.COMPANION_NEXUS_API_KEY_SECRET_NAME_STG || 'axis-companion-nexus-api-key-stg' }}
   PONTI_BASE_URL: ${{ vars.PONTI_BASE_URL_STG || 'https://pymes-core-sir42f2ama-uc.a.run.app' }}
-  AXIS_BFF_AUTH_MODE: ${{ vars.AXIS_BFF_AUTH_MODE_STG || 'oidc' }}
+  AXIS_BFF_AUTH_MODE: ${{ vars.AXIS_BFF_AUTH_MODE_STG || 'preview' }}
   AXIS_AUTH_ISSUER_URL: ${{ vars.AXIS_AUTH_ISSUER_URL_STG }}
   AXIS_AUTH_AUDIENCE: ${{ vars.AXIS_AUTH_AUDIENCE_STG }}
   AXIS_ALLOWED_ORIGIN: ${{ vars.AXIS_ALLOWED_ORIGIN_STG }}

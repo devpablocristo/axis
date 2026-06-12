@@ -25,4 +25,3 @@ CREATE INDEX IF NOT EXISTS idx_task_execution_graph_org_time
 CREATE INDEX IF NOT EXISTS idx_task_execution_graph_step
     ON companion_task_execution_graph_events (step_id, created_at ASC)
     WHERE step_id IS NOT NULL;
-

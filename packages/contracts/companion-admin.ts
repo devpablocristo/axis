@@ -77,4 +77,3 @@ export type CompanionAdminExecutionGraphEvent = {
   payload_json?: Record<string, unknown>
   created_at: string
 }
-
