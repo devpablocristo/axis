@@ -8,7 +8,7 @@ require (
 	github.com/devpablocristo/platform/config/go v0.1.0
 	github.com/devpablocristo/platform/contracts/ai/go v0.1.0
 	github.com/devpablocristo/platform/databases/postgres/go v0.1.0
-	github.com/devpablocristo/platform/errors/go v0.1.0
+	github.com/devpablocristo/platform/errors/go v0.2.0
 	github.com/devpablocristo/platform/http/go v0.1.0
 	github.com/devpablocristo/platform/kernels/ai/go v0.1.0
 	github.com/devpablocristo/platform/observability/go v0.2.1
