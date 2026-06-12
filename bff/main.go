@@ -162,7 +162,7 @@ func (s *server) withAuth(next http.Handler) http.Handler {
 }
 
 func (s *server) authenticate(r *http.Request) (authn.Principal, error) {
-	if s.cfg.AuthMode == "dev" || s.cfg.AuthMode == "preview" {
+	if s.cfg.AuthMode == "dev" || s.cfg.AuthMode == "preview" || s.cfg.AuthMode == "stg" {
 		return authn.Principal{
 			OrgID:      firstNonEmpty(r.Header.Get("X-Dev-Org-ID"), s.cfg.DevOrgID),
 			Actor:      firstNonEmpty(r.Header.Get("X-Dev-User-ID"), s.cfg.DevUserID),
