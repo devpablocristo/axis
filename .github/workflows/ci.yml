@@ -5,8 +5,9 @@ on:
   schedule:
     - cron: "17 6 * * *"
   push:
-    branches: [main, develop]
+    branches: [main]
   pull_request:
+    branches: [main]
 
 concurrency:
   group: axis-ci-${{ github.event_name }}-${{ github.ref }}
@@ -150,6 +151,10 @@ jobs:
         run: |
           touch /tmp/axis-empty-gcp-adc.json
           echo "COMPANION_GCP_ADC_HOST_PATH=/tmp/axis-empty-gcp-adc.json" >> "$GITHUB_ENV"
+          echo "COMPANION_LLM_PROVIDER=vertex" >> "$GITHUB_ENV"
+          echo "COMPANION_LLM_VERTEX_PROJECT=axis-ci-smoke" >> "$GITHUB_ENV"
+          echo "COMPANION_EMBEDDING_PROVIDER=hash" >> "$GITHUB_ENV"
+          echo "COMPANION_EMBEDDING_MODEL=hash-v1" >> "$GITHUB_ENV"
       - name: Start Companion MCP stack
         run: |
           make network

@@ -1,7 +1,7 @@
 # Axis Ready For First Real Product
 
 Estado al 2026-06-07: Axis queda listo para iniciar la integracion del primer
-producto real solo si este checklist pasa en `develop`.
+producto real solo si este checklist pasa antes de mergear a `main`.
 
 ## Gate Ejecutable
 

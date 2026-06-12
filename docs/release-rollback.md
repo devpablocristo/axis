@@ -5,7 +5,7 @@ Axis es un monorepo con deployables independientes. Un deploy de `Companion`,
 
 ## CI Gates
 
-`Axis CI` corre en PR, `develop`, `main`, manual y nightly:
+`Axis CI` corre en PR contra `main`, push a `main`, manual y nightly:
 
 - tests Go de `companion`, `nexus` y `bff`;
 - build/typecheck de `console`;
@@ -29,21 +29,23 @@ Los jobs que deberían ser branch protection mínimos son:
 `platform-nightly` no debería bloquear PR: cubre flujos pesados y deja
 artefactos de diagnóstico si falla.
 
-## Deploy DEV
+## Deploy STG / PRD
 
-Workflows independientes:
+Workflows:
 
-- `Deploy Companion DEV`: `.github/workflows/deploy-companion-dev.yml`;
-- `Deploy Nexus DEV`: `.github/workflows/deploy-nexus-dev.yml`;
-- `Deploy BFF DEV`: `.github/workflows/deploy-bff-dev.yml`;
-- `Deploy Console DEV`: `.github/workflows/deploy-console-dev.yml`.
+- `Deploy STG`: `.github/workflows/deploy-stg.yml`, automatico en push a
+  `main` y manual con `ref`/`product`. Usa los servicios actuales `axis-nexus`,
+  `axis-companion`, `axis-bff` y `axis-console`, por lo que conserva sus URLs.
+- `Deploy PRD`: `.github/workflows/deploy-prd.yml`, manual con GitHub
+  environment `prd`.
+- `Preview PR`: `.github/workflows/preview-pr.yml`, automatico para PRs a
+  `main`.
 
-Cada workflow acepta `workflow_dispatch.inputs.ref`. Para deployar un SHA o tag
-concreto:
+Para deployar un SHA o tag concreto:
 
-1. Abrir el workflow del servicio.
+1. Abrir `Deploy STG` o `Deploy PRD`.
 2. Ejecutar `Run workflow`.
-3. Pasar `ref=<sha|tag|branch>`.
+3. Pasar `ref=<sha|tag|branch>` y `product=<all|nexus|companion|bff|console>`.
 4. Confirmar que el smoke check del workflow queda verde.
 
 ## Rollback
@@ -51,7 +53,8 @@ concreto:
 Rollback recomendado:
 
 1. Identificar el último SHA sano del servicio afectado.
-2. Ejecutar manualmente el workflow DEV del servicio con `ref=<sha-sano>`.
+2. Ejecutar manualmente `Deploy STG` o `Deploy PRD` con `ref=<sha-sano>` y el
+   `product` afectado.
 3. Verificar `/readyz`.
 4. Revisar logs de Cloud Run y errores de dependencias.
 5. Si el servicio consume otro servicio Axis, confirmar URLs y audiencias JWT.
@@ -83,8 +86,8 @@ auditable.
 `BFF`:
 
 - Depende de URLs de Companion/Nexus y audiencias JWT.
-- Si falla después de deploy, revisar primero `AXIS_COMPANION_BASE_URL_DEV`,
-  `AXIS_NEXUS_BASE_URL_DEV` y `AXIS_INTERNAL_JWT_SECRET`.
+- Si falla después de deploy, revisar primero las URLs resueltas de
+  Companion/Nexus y `AXIS_INTERNAL_JWT_SECRET`.
 
 `Console`:
 

@@ -68,11 +68,13 @@ Puertos por defecto:
 | Companion API | `http://localhost:18085` |
 | Nexus API | `http://localhost:18084` |
 
-## Deploy DEV
+## GitHub Flow Deploys
 
-Los deploys Cloud Run viven en `.github/workflows/` y son independientes por
-deployable: `deploy-nexus-dev`, `deploy-companion-dev`, `deploy-bff-dev` y
-`deploy-console-dev`.
+Los deploys Cloud Run viven en `.github/workflows/` y siguen GitHub Flow:
+
+- PR contra `main`: CI y preview automatico.
+- Push a `main`: `deploy-stg`.
+- Produccion: `deploy-prd` manual con GitHub environment `prd`.
 
 Release, rollback y branch-protection recomendada estan documentados en
 `docs/release-rollback.md`.
@@ -80,23 +82,18 @@ Release, rollback y branch-protection recomendada estan documentados en
 Readiness multi-producto antes del primer producto real esta documentado en
 `docs/axis-ready-for-first-real-product.md`.
 
-Variables GitHub comunes:
+STG usa el proyecto `axis-stg-884236` y la instancia Cloud SQL existente
+`pymes-dev-352318:us-central1:pymes-dev-db`. No se crean instancias de base de
+datos desde los workflows. STG expone `axis-nexus`, `axis-companion`,
+`axis-bff` y `axis-console`.
 
-- `GCP_PROJECT_ID_DEV`, `GCP_REGION`, `WIF_PROVIDER_DEV`,
-  `WIF_SERVICE_ACCOUNT_DEV`, `ARTIFACT_REGISTRY`.
-- `CLOUDSQL_INSTANCE_DEV` para Nexus y Companion.
-- Service accounts: `NEXUS_CLOUD_RUN_SERVICE_ACCOUNT_DEV`,
-  `COMPANION_CLOUD_RUN_SERVICE_ACCOUNT_DEV`,
-  `AXIS_BFF_CLOUD_RUN_SERVICE_ACCOUNT_DEV`,
-  `AXIS_CONSOLE_CLOUD_RUN_SERVICE_ACCOUNT_DEV`.
-- URLs entre servicios: `COMPANION_NEXUS_BASE_URL_DEV`,
-  `AXIS_NEXUS_BASE_URL_DEV`, `AXIS_COMPANION_BASE_URL_DEV`,
-  `AXIS_BFF_BASE_URL_DEV`.
+PRD se configura con variables GitHub `*_PRD` y secrets de Secret Manager
+propios del entorno productivo.
 
 Secrets en Secret Manager:
 
-- Nexus: `nexus-db-password`, `nexus-api-keys`, `nexus-signing-key`,
-  `nexus-callback-token`.
-- Companion: `companion-db-password`, `companion-api-keys`,
-  `companion-nexus-api-key`.
-- Shared: `axis-internal-jwt-secret`, usado por BFF, Nexus y Companion.
+- Nexus STG: `axis-nexus-database-url-stg`, `axis-nexus-api-keys-stg`,
+  `axis-nexus-signing-key-stg`, `axis-nexus-callback-token-stg`.
+- Companion STG: `axis-companion-database-url-stg`,
+  `axis-companion-api-keys-stg`, `axis-companion-nexus-api-key-stg`.
+- Shared STG: `axis-internal-jwt-secret-stg`, usado por BFF, Nexus y Companion.

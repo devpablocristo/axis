@@ -81,13 +81,11 @@ func newVertexProvider(cfg ProviderConfig) (LLMProvider, error) {
 		return nil, fmt.Errorf("COMPANION_LLM_MODEL=%q is not a Gemini model", cfg.Model)
 	}
 
-	ts, err := google.DefaultTokenSource(context.Background(),
-		"https://www.googleapis.com/auth/cloud-platform")
-	if err != nil {
-		return nil, fmt.Errorf("load Google ADC for Gemini Vertex AI: %w", err)
-	}
-
 	tokenSource := func(ctx context.Context) (string, error) {
+		ts, err := google.DefaultTokenSource(ctx, "https://www.googleapis.com/auth/cloud-platform")
+		if err != nil {
+			return "", fmt.Errorf("load Google ADC for Gemini Vertex AI: %w", err)
+		}
 		tok, err := ts.Token()
 		if err != nil {
 			return "", fmt.Errorf("vertex token: %w", err)

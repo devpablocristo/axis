@@ -1,0 +1,281 @@
+name: Deploy STG
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "bff/**"
+      - "companion/**"
+      - "console/**"
+      - "nexus/**"
+      - "Dockerfile.*"
+      - "console.nginx.conf.template"
+      - ".github/workflows/deploy-stg.yml"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Ref to deploy"
+        required: false
+        default: "main"
+      product:
+        description: "Product to deploy"
+        required: true
+        type: choice
+        default: "all"
+        options: [all, nexus, companion, bff, console]
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: axis-stg-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGION: ${{ vars.GCP_REGION_STG || 'us-central1' }}
+  REGISTRY: ${{ vars.GCP_REGION_STG || 'us-central1' }}-docker.pkg.dev
+  PROJECT_ID: ${{ vars.GCP_PROJECT_ID_STG || 'axis-stg-884236' }}
+  AR_REPOSITORY: ${{ vars.ARTIFACT_REGISTRY_STG || 'axis' }}
+  WIF_PROVIDER: ${{ vars.WIF_PROVIDER_STG || 'projects/322954730450/locations/global/workloadIdentityPools/github-actions-pool/providers/github-actions-provider' }}
+  WIF_SERVICE_ACCOUNT: ${{ vars.WIF_SERVICE_ACCOUNT_STG || 'axis-github-actions-stg@axis-stg-884236.iam.gserviceaccount.com' }}
+  CLOUDSQL_INSTANCE: ${{ vars.CLOUDSQL_INSTANCE_STG || 'pymes-dev-352318:us-central1:pymes-dev-db' }}
+  NEXUS_SERVICE: axis-nexus
+  COMPANION_SERVICE: axis-companion
+  BFF_SERVICE: axis-bff
+  CONSOLE_SERVICE: axis-console
+  NEXUS_RUNTIME_SA: ${{ vars.NEXUS_CLOUD_RUN_SERVICE_ACCOUNT_STG || 'axis-nexus-runtime-stg@axis-stg-884236.iam.gserviceaccount.com' }}
+  COMPANION_RUNTIME_SA: ${{ vars.COMPANION_CLOUD_RUN_SERVICE_ACCOUNT_STG || 'axis-companion-runtime-stg@axis-stg-884236.iam.gserviceaccount.com' }}
+  BFF_RUNTIME_SA: ${{ vars.AXIS_BFF_CLOUD_RUN_SERVICE_ACCOUNT_STG || 'axis-bff-runtime-stg@axis-stg-884236.iam.gserviceaccount.com' }}
+  CONSOLE_RUNTIME_SA: ${{ vars.AXIS_CONSOLE_CLOUD_RUN_SERVICE_ACCOUNT_STG || 'axis-console-runtime-stg@axis-stg-884236.iam.gserviceaccount.com' }}
+  INTERNAL_JWT_SECRET: ${{ vars.AXIS_INTERNAL_JWT_SECRET_NAME_STG || 'axis-internal-jwt-secret-stg' }}
+  NEXUS_DATABASE_SECRET: ${{ vars.NEXUS_DATABASE_URL_SECRET_NAME_STG || 'axis-nexus-database-url-stg' }}
+  NEXUS_API_KEYS_SECRET: ${{ vars.NEXUS_API_KEYS_SECRET_NAME_STG || 'axis-nexus-api-keys-stg' }}
+  NEXUS_SIGNING_KEY_SECRET: ${{ vars.NEXUS_SIGNING_KEY_SECRET_NAME_STG || 'axis-nexus-signing-key-stg' }}
+  NEXUS_CALLBACK_TOKEN_SECRET: ${{ vars.NEXUS_CALLBACK_TOKEN_SECRET_NAME_STG || 'axis-nexus-callback-token-stg' }}
+  COMPANION_DATABASE_SECRET: ${{ vars.COMPANION_DATABASE_URL_SECRET_NAME_STG || 'axis-companion-database-url-stg' }}
+  COMPANION_API_KEYS_SECRET: ${{ vars.COMPANION_API_KEYS_SECRET_NAME_STG || 'axis-companion-api-keys-stg' }}
+  COMPANION_NEXUS_API_KEY_SECRET: ${{ vars.COMPANION_NEXUS_API_KEY_SECRET_NAME_STG || 'axis-companion-nexus-api-key-stg' }}
+  PONTI_BASE_URL: ${{ vars.PONTI_BASE_URL_STG || 'https://pymes-core-sir42f2ama-uc.a.run.app' }}
+  AXIS_BFF_AUTH_MODE: ${{ vars.AXIS_BFF_AUTH_MODE_STG || 'oidc' }}
+  AXIS_AUTH_ISSUER_URL: ${{ vars.AXIS_AUTH_ISSUER_URL_STG }}
+  AXIS_AUTH_AUDIENCE: ${{ vars.AXIS_AUTH_AUDIENCE_STG }}
+  AXIS_ALLOWED_ORIGIN: ${{ vars.AXIS_ALLOWED_ORIGIN_STG }}
+
+jobs:
+  prepare:
+    name: Resolve deploy scope
+    runs-on: ubuntu-latest
+    outputs:
+      ref: ${{ steps.resolve.outputs.ref }}
+      sha: ${{ steps.resolve.outputs.sha }}
+      nexus: ${{ steps.resolve.outputs.nexus }}
+      companion: ${{ steps.resolve.outputs.companion }}
+      bff: ${{ steps.resolve.outputs.bff }}
+      console: ${{ steps.resolve.outputs.console }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+      - id: resolve
+        env:
+          PRODUCT: ${{ inputs.product || 'all' }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for var_name in PROJECT_ID WIF_PROVIDER WIF_SERVICE_ACCOUNT CLOUDSQL_INSTANCE NEXUS_RUNTIME_SA COMPANION_RUNTIME_SA BFF_RUNTIME_SA CONSOLE_RUNTIME_SA NEXUS_DATABASE_SECRET NEXUS_API_KEYS_SECRET NEXUS_SIGNING_KEY_SECRET NEXUS_CALLBACK_TOKEN_SECRET COMPANION_DATABASE_SECRET COMPANION_API_KEYS_SECRET COMPANION_NEXUS_API_KEY_SECRET PONTI_BASE_URL; do
+            if [[ -z "${!var_name}" ]]; then
+              echo "::error::$var_name is required for STG"
+              missing=1
+            fi
+          done
+          if [[ "$AXIS_BFF_AUTH_MODE" == "oidc" ]]; then
+            for var_name in AXIS_AUTH_ISSUER_URL AXIS_AUTH_AUDIENCE; do
+              if [[ -z "${!var_name}" ]]; then
+                echo "::error::$var_name is required when AXIS_BFF_AUTH_MODE_STG=oidc"
+                missing=1
+              fi
+            done
+          fi
+          [[ "$missing" == "0" ]] || exit 1
+          sha="$(git rev-parse HEAD)"
+          nexus=false; companion=false; bff=false; console=false
+          case "$PRODUCT" in
+            all) nexus=true; companion=true; bff=true; console=true ;;
+            nexus) nexus=true ;;
+            companion) companion=true ;;
+            bff) bff=true ;;
+            console) console=true ;;
+            *) echo "Invalid product: $PRODUCT" >&2; exit 1 ;;
+          esac
+          {
+            echo "ref=$sha"
+            echo "sha=$sha"
+            echo "nexus=$nexus"
+            echo "companion=$companion"
+            echo "bff=$bff"
+            echo "console=$console"
+          } >> "$GITHUB_OUTPUT"
+
+  nexus:
+    name: Deploy Nexus STG
+    runs-on: ubuntu-latest
+    needs: prepare
+    if: needs.prepare.outputs.nexus == 'true'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.WIF_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v3
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+      - run: gcloud auth configure-docker "${REGISTRY}" --quiet
+      - name: Build and push
+        run: |
+          image_uri="${REGISTRY}/${PROJECT_ID}/${AR_REPOSITORY}/axis-nexus:${{ needs.prepare.outputs.sha }}"
+          docker build -f Dockerfile.nexus -t "$image_uri" .
+          docker push "$image_uri"
+          echo "IMAGE_URI=$image_uri" >> "$GITHUB_ENV"
+      - name: Deploy
+        run: |
+          gcloud run deploy "$NEXUS_SERVICE" \
+            --project="$PROJECT_ID" --region="$REGION" --image="$IMAGE_URI" \
+            --service-account="$NEXUS_RUNTIME_SA" \
+            --add-cloudsql-instances="$CLOUDSQL_INSTANCE" \
+            --set-env-vars="^|^NEXUS_ENV=stg|NEXUS_INTERNAL_JWT_ISSUER=axis-bff|NEXUS_INTERNAL_JWT_AUDIENCE=nexus|APPROVAL_DEFAULT_TTL=3600|NEXUS_ATTESTATION_VERIFIER=none" \
+            --set-secrets="DATABASE_URL=${NEXUS_DATABASE_SECRET}:latest,NEXUS_API_KEYS=${NEXUS_API_KEYS_SECRET}:latest,NEXUS_SIGNING_KEY=${NEXUS_SIGNING_KEY_SECRET}:latest,NEXUS_CALLBACK_TOKEN=${NEXUS_CALLBACK_TOKEN_SECRET}:latest,NEXUS_INTERNAL_JWT_SECRET=${INTERNAL_JWT_SECRET}:latest" \
+            --allow-unauthenticated --ingress=all --port=8080 --min-instances=0 --max-instances=3
+      - name: Smoke
+        run: |
+          url="$(gcloud run services describe "$NEXUS_SERVICE" --project="$PROJECT_ID" --region="$REGION" --format='value(status.url)')"
+          curl -fsS "$url/readyz"
+
+  companion:
+    name: Deploy Companion STG
+    runs-on: ubuntu-latest
+    needs: [prepare, nexus]
+    if: always() && needs.prepare.outputs.companion == 'true' && (needs.nexus.result == 'success' || needs.nexus.result == 'skipped')
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.WIF_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v3
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+      - run: gcloud auth configure-docker "${REGISTRY}" --quiet
+      - name: Resolve Nexus URL
+        run: |
+          nexus_url="$(gcloud run services describe "$NEXUS_SERVICE" --project="$PROJECT_ID" --region="$REGION" --format='value(status.url)')"
+          test -n "$nexus_url"
+          echo "NEXUS_URL=$nexus_url" >> "$GITHUB_ENV"
+      - name: Build and push
+        run: |
+          image_uri="${REGISTRY}/${PROJECT_ID}/${AR_REPOSITORY}/axis-companion:${{ needs.prepare.outputs.sha }}"
+          docker build -f Dockerfile.companion -t "$image_uri" .
+          docker push "$image_uri"
+          echo "IMAGE_URI=$image_uri" >> "$GITHUB_ENV"
+      - name: Deploy
+        run: |
+          gcloud run deploy "$COMPANION_SERVICE" \
+            --project="$PROJECT_ID" --region="$REGION" --image="$IMAGE_URI" \
+            --service-account="$COMPANION_RUNTIME_SA" \
+            --add-cloudsql-instances="$CLOUDSQL_INSTANCE" \
+            --set-env-vars="^|^NEXUS_BASE_URL=${NEXUS_URL}|PONTI_BASE_URL=${PONTI_BASE_URL}|COMPANION_INTERNAL_JWT_ISSUER=axis-bff|COMPANION_INTERNAL_JWT_AUDIENCE=companion|COMPANION_LLM_PROVIDER=vertex|COMPANION_LLM_MODEL=gemini-2.5-flash-lite|COMPANION_LLM_VERTEX_PROJECT=${PROJECT_ID}|COMPANION_LLM_VERTEX_LOCATION=${REGION}|COMPANION_EMBEDDING_PROVIDER=vertex|COMPANION_EMBEDDING_MODEL=text-embedding-005|COMPANION_EMBEDDING_VERTEX_PROJECT=${PROJECT_ID}|COMPANION_EMBEDDING_VERTEX_LOCATION=${REGION}|COMPANION_EMBEDDING_DIMENSIONS=768|COMPANION_NEXUS_SYNC_INTERVAL_SEC=30|COMPANION_STRICT_NEXUS=true|COMPANION_DEFAULT_AUTONOMY_LEVEL=A2|COMPANION_WATCHER_INTERVAL_SEC=0|COMPANION_WATCHER_SYNC_INTERVAL_SEC=0" \
+            --set-secrets="DATABASE_URL=${COMPANION_DATABASE_SECRET}:latest,COMPANION_API_KEYS=${COMPANION_API_KEYS_SECRET}:latest,NEXUS_API_KEY=${COMPANION_NEXUS_API_KEY_SECRET}:latest,COMPANION_INTERNAL_JWT_SECRET=${INTERNAL_JWT_SECRET}:latest" \
+            --allow-unauthenticated --ingress=all --port=8080 --min-instances=0 --max-instances=3
+      - name: Smoke
+        run: |
+          url="$(gcloud run services describe "$COMPANION_SERVICE" --project="$PROJECT_ID" --region="$REGION" --format='value(status.url)')"
+          curl -fsS "$url/readyz"
+
+  bff:
+    name: Deploy BFF STG
+    runs-on: ubuntu-latest
+    needs: [prepare, nexus, companion]
+    if: always() && needs.prepare.outputs.bff == 'true' && (needs.nexus.result == 'success' || needs.nexus.result == 'skipped') && (needs.companion.result == 'success' || needs.companion.result == 'skipped')
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.WIF_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v3
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+      - run: gcloud auth configure-docker "${REGISTRY}" --quiet
+      - name: Resolve service URLs
+        run: |
+          companion_url="$(gcloud run services describe "$COMPANION_SERVICE" --project="$PROJECT_ID" --region="$REGION" --format='value(status.url)')"
+          nexus_url="$(gcloud run services describe "$NEXUS_SERVICE" --project="$PROJECT_ID" --region="$REGION" --format='value(status.url)')"
+          test -n "$companion_url"
+          test -n "$nexus_url"
+          echo "COMPANION_URL=$companion_url" >> "$GITHUB_ENV"
+          echo "NEXUS_URL=$nexus_url" >> "$GITHUB_ENV"
+      - name: Build and push
+        run: |
+          image_uri="${REGISTRY}/${PROJECT_ID}/${AR_REPOSITORY}/axis-bff:${{ needs.prepare.outputs.sha }}"
+          docker build -f Dockerfile.bff -t "$image_uri" .
+          docker push "$image_uri"
+          echo "IMAGE_URI=$image_uri" >> "$GITHUB_ENV"
+      - name: Deploy
+        run: |
+          gcloud run deploy "$BFF_SERVICE" \
+            --project="$PROJECT_ID" --region="$REGION" --image="$IMAGE_URI" \
+            --service-account="$BFF_RUNTIME_SA" \
+            --set-env-vars="^|^AXIS_BFF_AUTH_MODE=${AXIS_BFF_AUTH_MODE}|AXIS_AUTH_ISSUER_URL=${AXIS_AUTH_ISSUER_URL}|AXIS_AUTH_AUDIENCE=${AXIS_AUTH_AUDIENCE}|AXIS_INTERNAL_JWT_ISSUER=axis-bff|AXIS_COMPANION_AUDIENCE=companion|AXIS_NEXUS_AUDIENCE=nexus|AXIS_ALLOWED_ORIGIN=${AXIS_ALLOWED_ORIGIN}|AXIS_DOWNSTREAM_TIMEOUT=10s|AXIS_READ_HEADER_TIMEOUT=5s|COMPANION_BASE_URL=${COMPANION_URL}|NEXUS_BASE_URL=${NEXUS_URL}" \
+            --set-secrets="AXIS_INTERNAL_JWT_SECRET=${INTERNAL_JWT_SECRET}:latest" \
+            --allow-unauthenticated --ingress=all --port=8080 --min-instances=0 --max-instances=3
+      - name: Smoke
+        run: |
+          url="$(gcloud run services describe "$BFF_SERVICE" --project="$PROJECT_ID" --region="$REGION" --format='value(status.url)')"
+          curl -fsS "$url/readyz"
+
+  console:
+    name: Deploy Console STG
+    runs-on: ubuntu-latest
+    needs: [prepare, bff]
+    if: always() && needs.prepare.outputs.console == 'true' && (needs.bff.result == 'success' || needs.bff.result == 'skipped')
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.WIF_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v3
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+      - run: gcloud auth configure-docker "${REGISTRY}" --quiet
+      - name: Resolve BFF URL
+        run: |
+          bff_url="$(gcloud run services describe "$BFF_SERVICE" --project="$PROJECT_ID" --region="$REGION" --format='value(status.url)')"
+          test -n "$bff_url"
+          echo "BFF_URL=$bff_url" >> "$GITHUB_ENV"
+      - name: Build and push
+        run: |
+          image_uri="${REGISTRY}/${PROJECT_ID}/${AR_REPOSITORY}/axis-console:${{ needs.prepare.outputs.sha }}"
+          docker build -f Dockerfile.console -t "$image_uri" .
+          docker push "$image_uri"
+          echo "IMAGE_URI=$image_uri" >> "$GITHUB_ENV"
+      - name: Deploy
+        run: |
+          gcloud run deploy "$CONSOLE_SERVICE" \
+            --project="$PROJECT_ID" --region="$REGION" --image="$IMAGE_URI" \
+            --service-account="$CONSOLE_RUNTIME_SA" \
+            --set-env-vars="AXIS_BFF_BASE_URL=${BFF_URL}" \
+            --allow-unauthenticated --ingress=all --port=80 --min-instances=0 --max-instances=3
+      - name: Smoke
+        run: |
+          url="$(gcloud run services describe "$CONSOLE_SERVICE" --project="$PROJECT_ID" --region="$REGION" --format='value(status.url)')"
+          curl -fsS "$url/readyz"
