@@ -6,28 +6,64 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/devpablocristo/companion/internal/identityctx"
 	authn "github.com/devpablocristo/platform/authn/go"
+	"github.com/devpablocristo/platform/authn/go/identityhttp"
+	"github.com/devpablocristo/platform/authn/go/internaljwt"
 	authoidc "github.com/devpablocristo/platform/authn/go/oidc"
 	sharedapikey "github.com/devpablocristo/platform/security/go/apikey"
+	"github.com/devpablocristo/platform/security/go/apikey/keycfg"
 )
 
-type apiKeyMetadata struct {
-	Actor            string
-	Role             string
-	OrgID            string
-	Scopes           []string
-	ServicePrincipal bool
+// init registra el perfil "admin" de companion con la lista canónica de
+// scopes. Permite que `keycfg.DefaultScopesFor("admin")` retorne los scopes
+// companion-específicos sin acoplar platform al producto.
+func init() {
+	keycfg.Register(keycfg.Profile{
+		Name: "admin",
+		Scopes: []string{
+			"companion:tasks:read",
+			"companion:tasks:write",
+			"companion:connectors:execute",
+			"companion:connectors:admin",
+			"companion:capabilities:read",
+			"companion:capabilities:admin",
+			"companion:watchers:read",
+			"companion:watchers:write",
+			"companion:watchers:execute",
+			"companion:memory:read",
+			"companion:memory:write",
+			"companion:memory:admin",
+			"companion:agents:read",
+			"companion:agents:admin",
+			"companion:nexus:read",
+			"companion:nexus:admin",
+			"companion:nexus-assist:read",
+			"companion:nexus-assist:admin",
+			"companion:assist:read",
+			"companion:assist:write",
+			"companion:products:read",
+			"companion:products:admin",
+			"companion:ops:read",
+			"companion:observability:read",
+			"companion:costs:read",
+			"companion:evals:admin",
+			"companion:runtime:admin",
+			"companion:mcp:execute",
+			"companion:cross_org",
+		},
+	})
 }
 
-func newAuthMiddleware(apiKeys, issuerURL, audience string, internalJWT internalJWTConfig) (func(http.Handler) http.Handler, error) {
+func newAuthMiddleware(apiKeys, issuerURL, audience string, internalJWT internaljwt.Config, productJWTKeys string) (func(http.Handler) http.Handler, error) {
 	apiKeyAuth, err := newAPIKeyAuthenticator(apiKeys)
 	if err != nil {
 		return nil, err
 	}
-	jwtAuth := newFallbackAuthenticator(
-		newInternalJWTAuthenticator(internalJWT),
-		newJWTAuthenticator(issuerURL, audience),
-	)
+	authenticators := []authn.Authenticator{internaljwt.NewAuthenticator(internalJWT)}
+	authenticators = append(authenticators, newProductJWTAuthenticators(productJWTKeys, internalJWT.Audience)...)
+	authenticators = append(authenticators, newJWTAuthenticator(issuerURL, audience))
+	jwtAuth := internaljwt.NewFallback(authenticators...)
 
 	return func(next http.Handler) http.Handler {
 		if next == nil {
@@ -51,14 +87,15 @@ func newAuthMiddleware(apiKeys, issuerURL, audience string, internalJWT internal
 				return
 			}
 
-			req := withIdentityHeaders(r, principal, method)
+			req := identityhttp.WithPrincipal(r, principal, method)
+			req = identityctx.WithPrincipal(req, principal)
 			next.ServeHTTP(w, req)
 		})
 	}, nil
 }
 
 func newAPIKeyAuthenticator(raw string) (authn.Authenticator, error) {
-	sanitized, metadata := parseAPIKeyConfig(raw)
+	sanitized, metadata := keycfg.Parse(raw)
 	base, err := sharedapikey.NewAuthenticator(sanitized)
 	if err != nil {
 		return nil, err
@@ -74,7 +111,7 @@ func newAPIKeyAuthenticator(raw string) (authn.Authenticator, error) {
 			role := firstNonEmpty(meta.Role, principal.Name)
 			scopes := append([]string(nil), meta.Scopes...)
 			if len(scopes) == 0 {
-				scopes = defaultAPIKeyScopes(principal.Name)
+				scopes = keycfg.DefaultScopesFor(principal.Name)
 			}
 			return &authn.Principal{
 				OrgID:      meta.OrgID,
@@ -86,6 +123,77 @@ func newAPIKeyAuthenticator(raw string) (authn.Authenticator, error) {
 			}, nil
 		},
 	}, nil
+}
+
+// productJWTAuthMethod es el AuthMethod de principals autenticados con JWT
+// de producto. Distinto de "api_key" a propósito: gates que confían en la
+// identidad delegada por el producto (ej. delegación de approvals en Nexus)
+// exigen api_key y NO deben abrirse silenciosamente a JWTs de producto.
+const productJWTAuthMethod = "product_jwt"
+
+// newProductJWTAuthenticators parsea COMPANION_PRODUCT_JWT_KEYS y construye
+// un authenticator HS256 por producto. Formato (espeja keycfg: `,`/`;`/`\n`
+// separan entries, `|` separa atributos):
+//
+//	product=<secret>|issuer=<issuer>[;product2=<secret2>|issuer=<issuer2>]
+//
+// Cada entry valida firma con su secret, issuer del producto y la audience
+// del servicio. Claims esperados: iss, aud, sub/actor_id, org_id,
+// product_surface, scopes, service_principal, on_behalf_of, exp corto.
+func newProductJWTAuthenticators(raw, audience string) []authn.Authenticator {
+	entries := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ';' || r == ',' || r == '\n'
+	})
+	out := make([]authn.Authenticator, 0, len(entries))
+	for _, entry := range entries {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		product, rhs, ok := strings.Cut(entry, "=")
+		if !ok || strings.TrimSpace(product) == "" {
+			continue
+		}
+		segments := strings.Split(rhs, "|")
+		secret := strings.TrimSpace(segments[0])
+		issuer := ""
+		for _, segment := range segments[1:] {
+			key, value, ok := strings.Cut(strings.TrimSpace(segment), "=")
+			if !ok {
+				continue
+			}
+			switch strings.TrimSpace(strings.ToLower(key)) {
+			case "issuer", "iss":
+				issuer = strings.TrimSpace(value)
+			}
+		}
+		base := internaljwt.NewAuthenticator(internaljwt.Config{
+			Secret:   secret,
+			Issuer:   issuer,
+			Audience: audience,
+		})
+		if base == nil {
+			continue
+		}
+		out = append(out, productJWTAuthenticator{base: base})
+	}
+	return out
+}
+
+// productJWTAuthenticator delega en internaljwt y rebrandea el AuthMethod a
+// "product_jwt" para que el principal quede auditable y distinguible tanto
+// del JWT interno de plataforma como de los API keys.
+type productJWTAuthenticator struct {
+	base authn.Authenticator
+}
+
+func (a productJWTAuthenticator) Authenticate(ctx context.Context, cred authn.Credential) (*authn.Principal, error) {
+	principal, err := a.base.Authenticate(ctx, cred)
+	if err != nil || principal == nil {
+		return nil, err
+	}
+	principal.AuthMethod = productJWTAuthMethod
+	return principal, nil
 }
 
 func newJWTAuthenticator(issuerURL, audience string) authn.Authenticator {
@@ -127,59 +235,23 @@ func newJWTAuthenticator(issuerURL, audience string) authn.Authenticator {
 	}
 }
 
-func withIdentityHeaders(r *http.Request, principal *authn.Principal, method string) *http.Request {
-	if principal == nil {
-		return r
-	}
-
-	req := r.Clone(r.Context())
-	req.Header = r.Header.Clone()
-	req.Header.Del("X-User-ID")
-	req.Header.Del("X-Org-ID")
-	req.Header.Del("X-Auth-Role")
-	req.Header.Del("X-Auth-Scopes")
-	req.Header.Del("X-Auth-Method")
-	req.Header.Del("X-Service-Principal")
-	if actor := strings.TrimSpace(principal.Actor); actor != "" {
-		req.Header.Set("X-User-ID", actor)
-	}
-	if orgID := strings.TrimSpace(principal.OrgID); orgID != "" {
-		req.Header.Set("X-Org-ID", orgID)
-	}
-	if role := strings.TrimSpace(principal.Role); role != "" {
-		req.Header.Set("X-Auth-Role", role)
-	}
-	if len(principal.Scopes) > 0 {
-		req.Header.Set("X-Auth-Scopes", strings.Join(principal.Scopes, " "))
-	}
-	if principal.AuthMethod != "" {
-		req.Header.Set("X-Auth-Method", principal.AuthMethod)
-	} else if method != "" {
-		req.Header.Set("X-Auth-Method", method)
-	}
-	if principalServicePrincipal(principal) {
-		req.Header.Set("X-Service-Principal", "true")
-	}
-	return req
-}
-
 func writeUnauthorized(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusUnauthorized)
 	_, _ = w.Write([]byte(`{"error":{"code":"UNAUTHORIZED","message":"valid credentials required"}}`))
 }
 
+// --- claim helpers (usados por newJWTAuthenticator OIDC) ---
+
 func normalizeIssuer(value any) string {
 	return strings.TrimRight(strings.TrimSpace(claimString(value)), "/")
 }
 
 func claimString(value any) string {
-	switch v := value.(type) {
-	case string:
-		return v
-	default:
-		return ""
+	if s, ok := value.(string); ok {
+		return s
 	}
+	return ""
 }
 
 func firstNonEmptyClaim(claims map[string]any, names ...string) string {
@@ -220,7 +292,6 @@ func claimScopes(claims map[string]any) []string {
 	if raw == nil {
 		raw = claims["scp"]
 	}
-
 	switch v := raw.(type) {
 	case string:
 		parts := strings.Fields(v)
@@ -247,135 +318,4 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
-}
-
-func parseAPIKeyConfig(raw string) (string, map[string]apiKeyMetadata) {
-	parts := strings.FieldsFunc(raw, func(r rune) bool {
-		return r == ',' || r == '\n'
-	})
-	sanitized := make([]string, 0, len(parts))
-	metadata := make(map[string]apiKeyMetadata, len(parts))
-	for _, part := range parts {
-		piece := strings.TrimSpace(part)
-		if piece == "" {
-			continue
-		}
-		name, rhs, ok := strings.Cut(piece, "=")
-		if !ok {
-			sanitized = append(sanitized, piece)
-			continue
-		}
-		name = strings.TrimSpace(name)
-		rhs = strings.TrimSpace(rhs)
-		if name == "" || rhs == "" {
-			sanitized = append(sanitized, piece)
-			continue
-		}
-		secret, meta := parseAPIKeyValue(rhs)
-		if secret == "" {
-			secret = rhs
-		}
-		sanitized = append(sanitized, name+"="+secret)
-		if meta.Actor == "" {
-			meta.Actor = name
-		}
-		if meta.Role == "" {
-			meta.Role = name
-		}
-		metadata[name] = meta
-	}
-	return strings.Join(sanitized, ","), metadata
-}
-
-func parseAPIKeyValue(value string) (string, apiKeyMetadata) {
-	segments := strings.Split(value, "|")
-	secret := strings.TrimSpace(segments[0])
-	meta := apiKeyMetadata{}
-	for _, segment := range segments[1:] {
-		key, raw, ok := strings.Cut(strings.TrimSpace(segment), "=")
-		if !ok {
-			continue
-		}
-		switch strings.TrimSpace(strings.ToLower(key)) {
-		case "actor", "actor_id", "user", "user_id":
-			meta.Actor = strings.TrimSpace(raw)
-		case "role":
-			meta.Role = strings.TrimSpace(raw)
-		case "org", "org_id", "tenant", "tenant_id":
-			meta.OrgID = strings.TrimSpace(raw)
-		case "scope", "scopes":
-			meta.Scopes = parseScopeList(raw)
-		case "service", "service_principal":
-			meta.ServicePrincipal = parseBool(raw)
-		}
-	}
-	return secret, meta
-}
-
-func parseScopeList(raw string) []string {
-	raw = strings.NewReplacer(";", " ", "+", " ").Replace(raw)
-	fields := strings.Fields(raw)
-	out := make([]string, 0, len(fields))
-	seen := make(map[string]struct{}, len(fields))
-	for _, field := range fields {
-		scope := strings.TrimSpace(field)
-		if scope == "" {
-			continue
-		}
-		if _, exists := seen[scope]; exists {
-			continue
-		}
-		seen[scope] = struct{}{}
-		out = append(out, scope)
-	}
-	return out
-}
-
-func parseBool(raw string) bool {
-	switch strings.TrimSpace(strings.ToLower(raw)) {
-	case "1", "true", "yes", "y", "service":
-		return true
-	default:
-		return false
-	}
-}
-
-func defaultAPIKeyScopes(name string) []string {
-	switch strings.TrimSpace(strings.ToLower(name)) {
-	case "admin":
-		return []string{
-			"companion:tasks:read",
-			"companion:tasks:write",
-			"companion:connectors:execute",
-			"companion:connectors:admin",
-			"companion:watchers:read",
-			"companion:watchers:write",
-			"companion:watchers:execute",
-			"companion:nexus:read",
-			"companion:nexus:admin",
-			"companion:nexus-assist:read",
-			"companion:nexus-assist:admin",
-		}
-	default:
-		return nil
-	}
-}
-
-func principalServicePrincipal(principal *authn.Principal) bool {
-	if principal == nil || principal.Claims == nil {
-		return false
-	}
-	for _, key := range []string{"service_principal", "service"} {
-		switch value := principal.Claims[key].(type) {
-		case bool:
-			if value {
-				return true
-			}
-		case string:
-			if parseBool(value) {
-				return true
-			}
-		}
-	}
-	return false
 }

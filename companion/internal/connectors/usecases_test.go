@@ -13,6 +13,7 @@ import (
 
 	"github.com/devpablocristo/companion/internal/connectors/registry"
 	domain "github.com/devpablocristo/companion/internal/connectors/usecases/domain"
+	"github.com/devpablocristo/companion/internal/productlimits"
 )
 
 type fakeConnectorRepo struct {
@@ -147,6 +148,42 @@ func (s *stubChecker) AuthorizeExecution(ctx context.Context, intent NexusExecut
 	return s.approved, s.err
 }
 
+type stubInstallationGuard struct {
+	err            error
+	calls          int
+	orgID          string
+	productSurface string
+	reason         string
+}
+
+func (s *stubInstallationGuard) RequireActiveInstallation(_ context.Context, orgID, productSurface, reason string) error {
+	s.calls++
+	s.orgID = orgID
+	s.productSurface = productSurface
+	s.reason = reason
+	return s.err
+}
+
+type denyingConnectorRateLimiter struct{}
+
+func (denyingConnectorRateLimiter) Allow(context.Context, productlimits.Key, productlimits.Limit) (productlimits.Decision, error) {
+	return productlimits.Decision{Allowed: false}, nil
+}
+
+type stubProductRuntimeController struct {
+	err            error
+	calls          int
+	orgID          string
+	productSurface string
+}
+
+func (s *stubProductRuntimeController) EnforceProductConnectorExecution(_ context.Context, orgID, productSurface string) error {
+	s.calls++
+	s.orgID = orgID
+	s.productSurface = productSurface
+	return s.err
+}
+
 func TestNexusCheckerAdapter_AllowsExecutedStatus(t *testing.T) {
 	t.Parallel()
 
@@ -176,6 +213,152 @@ func TestNexusCheckerAdapter_RejectsBindingMismatch(t *testing.T) {
 	}
 	if ok {
 		t.Fatal("expected binding mismatch to deny execution")
+	}
+}
+
+func TestUsecases_ExecuteBlocksExternalWithoutActiveInstallation(t *testing.T) {
+	t.Parallel()
+
+	repo := &fakeConnectorRepo{connectors: make(map[uuid.UUID]domain.Connector)}
+	connectorID := uuid.New()
+	repo.connectors[connectorID] = domain.Connector{
+		ID:      connectorID,
+		OrgID:   "org-a",
+		Name:    "Mock Connector",
+		Kind:    "mock",
+		Enabled: true,
+	}
+	reg := registry.NewRegistry()
+	reg.Register(registry.NewMockConnector())
+	guard := &stubInstallationGuard{err: errors.New("active product installation required")}
+	uc := NewUsecases(repo, reg, &stubChecker{})
+	uc.SetProductInstallationGuard(guard)
+
+	_, err := uc.Execute(context.Background(), domain.ExecutionSpec{
+		ConnectorID:    connectorID,
+		OrgID:          "org-a",
+		ActorID:        "actor-1",
+		ProductSurface: "mock",
+		AuthScopes:     []string{"companion:connectors:execute"},
+		Operation:      "mock.echo",
+		Payload:        json.RawMessage(`{"message":"hello"}`),
+	})
+	if !IsForbidden(err) {
+		t.Fatalf("expected forbidden guard error, got %v", err)
+	}
+	if guard.calls != 1 || guard.orgID != "org-a" || guard.productSurface != "mock" || guard.reason != "connector_execution" {
+		t.Fatalf("unexpected guard call: %+v", guard)
+	}
+	if len(repo.executions) != 0 {
+		t.Fatalf("blocked connector execution should not persist executions, got %d", len(repo.executions))
+	}
+}
+
+func TestUsecases_BuildActionBindingBlocksExternalWithoutActiveInstallation(t *testing.T) {
+	t.Parallel()
+
+	repo := &fakeConnectorRepo{connectors: make(map[uuid.UUID]domain.Connector)}
+	connectorID := uuid.New()
+	repo.connectors[connectorID] = domain.Connector{
+		ID:      connectorID,
+		OrgID:   "org-a",
+		Name:    "Mock Connector",
+		Kind:    "mock",
+		Enabled: true,
+	}
+	reg := registry.NewRegistry()
+	reg.Register(registry.NewMockConnector())
+	guard := &stubInstallationGuard{err: errors.New("active product installation required")}
+	uc := NewUsecases(repo, reg, &stubChecker{})
+	uc.SetProductInstallationGuard(guard)
+
+	_, _, err := uc.BuildActionBinding(context.Background(), domain.ExecutionSpec{
+		ConnectorID:    connectorID,
+		OrgID:          "org-a",
+		ActorID:        "actor-1",
+		ProductSurface: "mock",
+		AuthScopes:     []string{"companion:connectors:execute"},
+		Operation:      "mock.write",
+		Payload:        json.RawMessage(`{"message":"hello"}`),
+		IdempotencyKey: "idem-binding",
+	})
+	if !IsForbidden(err) {
+		t.Fatalf("expected forbidden guard error, got %v", err)
+	}
+	if guard.reason != "connector_action_binding" {
+		t.Fatalf("expected connector_action_binding guard reason, got %q", guard.reason)
+	}
+}
+
+func TestUsecases_ExecuteBlocksRateLimitedProduct(t *testing.T) {
+	t.Parallel()
+
+	repo := &fakeConnectorRepo{connectors: make(map[uuid.UUID]domain.Connector)}
+	connectorID := uuid.New()
+	repo.connectors[connectorID] = domain.Connector{
+		ID:      connectorID,
+		OrgID:   "org-a",
+		Name:    "Mock Connector",
+		Kind:    "mock",
+		Enabled: true,
+	}
+	reg := registry.NewRegistry()
+	reg.Register(registry.NewMockConnector())
+	uc := NewUsecases(repo, reg, &stubChecker{})
+	uc.SetRateLimiter(denyingConnectorRateLimiter{})
+
+	_, err := uc.Execute(context.Background(), domain.ExecutionSpec{
+		ConnectorID:    connectorID,
+		OrgID:          "org-a",
+		ActorID:        "actor-1",
+		ProductSurface: "mock",
+		AuthScopes:     []string{"companion:connectors:execute"},
+		Operation:      "mock.echo",
+		Payload:        json.RawMessage(`{"message":"hello"}`),
+	})
+	if !IsRateLimited(err) {
+		t.Fatalf("expected product rate limit error, got %v", err)
+	}
+	if len(repo.executions) != 0 {
+		t.Fatalf("rate limited connector execution should not persist executions, got %d", len(repo.executions))
+	}
+}
+
+func TestUsecases_ExecuteBlocksDeniedProductRuntimePolicy(t *testing.T) {
+	t.Parallel()
+
+	repo := &fakeConnectorRepo{connectors: make(map[uuid.UUID]domain.Connector)}
+	connectorID := uuid.New()
+	repo.connectors[connectorID] = domain.Connector{
+		ID:      connectorID,
+		OrgID:   "org-a",
+		Name:    "Mock Connector",
+		Kind:    "mock",
+		Enabled: true,
+	}
+	reg := registry.NewRegistry()
+	reg.Register(registry.NewMockConnector())
+	controller := &stubProductRuntimeController{err: ErrForbidden}
+	uc := NewUsecases(repo, reg, &stubChecker{})
+	uc.SetProductRuntimeController(controller)
+
+	_, err := uc.Execute(context.Background(), domain.ExecutionSpec{
+		ConnectorID:    connectorID,
+		OrgID:          "org-a",
+		ActorID:        "actor-1",
+		ProductSurface: "mock",
+		AuthScopes:     []string{"companion:connectors:execute"},
+		Operation:      "mock.echo",
+		Payload:        json.RawMessage(`{"message":"hello"}`),
+	})
+	if !IsForbidden(err) {
+		t.Fatalf("expected product runtime policy forbidden error, got %v", err)
+	}
+	if controller.calls != 1 || controller.orgID != "org-a" || controller.productSurface != "mock" {
+		t.Fatalf("unexpected product runtime controller call: %+v", controller)
+	}
+	if len(repo.executions) != 0 {
+		t.Fatalf("policy-blocked connector execution should not persist executions, got %d", len(repo.executions))
 	}
 }
 
@@ -357,6 +540,95 @@ func TestUsecases_CapabilitiesExposeConnectorContractV1(t *testing.T) {
 	if len(writeCap.InputSchema) == 0 || len(writeCap.EvidenceFields) == 0 {
 		t.Fatalf("expected schema and evidence fields: %+v", writeCap)
 	}
+	if writeCap.DisplayName == "" || writeCap.Description == "" || writeCap.Connector != "mock" || writeCap.ActionType == "" {
+		t.Fatalf("expected explicit manifest fields: %+v", writeCap)
+	}
+	if writeCap.NexusActionType != "agent.capability.invoke" || writeCap.IdempotencyMode != "required" || !writeCap.EnabledByDefault {
+		t.Fatalf("expected approval/idempotency defaults from manifest registry: %+v", writeCap)
+	}
+	if writeCap.Timeout == "" || writeCap.Retries.MaxAttempts < 1 || len(writeCap.ObservabilityTags) == 0 {
+		t.Fatalf("expected operational manifest fields: %+v", writeCap)
+	}
+}
+
+func TestUsecases_CapabilityManifestsExposeVersionedContracts(t *testing.T) {
+	t.Parallel()
+
+	reg := registry.NewRegistry()
+	reg.Register(registry.NewMockConnector())
+	uc := NewUsecases(&fakeConnectorRepo{}, reg, &stubChecker{})
+
+	manifests, err := uc.CapabilityManifests(domain.CapabilityFilter{
+		Scopes:             []string{"companion:connectors:execute"},
+		IncludeWrites:      true,
+		EnforcePermissions: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(manifests) != 2 {
+		t.Fatalf("expected mock manifests, got %+v", manifests)
+	}
+	var writeManifestFound bool
+	for _, manifest := range manifests {
+		if manifest.CapabilityID != "mock.write" {
+			continue
+		}
+		writeManifestFound = true
+		if manifest.SchemaVersion != "capability_manifest.v1" || manifest.NexusActionType != "agent.capability.invoke" {
+			t.Fatalf("unexpected write manifest identity: %+v", manifest)
+		}
+		if manifest.InputSchema["type"] != "object" || manifest.EvidenceSchema["type"] != "object" {
+			t.Fatalf("expected strict object schemas: %+v", manifest)
+		}
+	}
+	if !writeManifestFound {
+		t.Fatalf("mock.write manifest not found: %+v", manifests)
+	}
+}
+
+func TestUsecases_BuildActionBindingIncludesCapabilityManifestFields(t *testing.T) {
+	t.Parallel()
+
+	repo := &fakeConnectorRepo{connectors: make(map[uuid.UUID]domain.Connector)}
+	connectorID := uuid.New()
+	repo.connectors[connectorID] = domain.Connector{
+		ID:      connectorID,
+		OrgID:   "org-a",
+		Name:    "Mock Connector",
+		Kind:    "mock",
+		Enabled: true,
+	}
+	reg := registry.NewRegistry()
+	reg.Register(registry.NewMockConnector())
+	uc := NewUsecases(repo, reg, &stubChecker{})
+	taskID := uuid.New()
+
+	binding, hash, err := uc.BuildActionBinding(context.Background(), domain.ExecutionSpec{
+		ConnectorID:    connectorID,
+		OrgID:          "org-a",
+		ActorID:        "actor-1",
+		AuthScopes:     []string{"companion:connectors:execute"},
+		Operation:      "mock.write",
+		Payload:        json.RawMessage(`{"message":"hello"}`),
+		IdempotencyKey: "idem-binding",
+		TaskID:         &taskID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hash == "" {
+		t.Fatal("expected binding hash")
+	}
+	if binding["capability_id"] != "mock.write" || binding["capability_version"] != "1.0.0" {
+		t.Fatalf("expected capability identity in binding, got %+v", binding)
+	}
+	if binding["nexus_action_type"] != "agent.capability.invoke" || binding["side_effect_type"] != domain.SideEffectClassWrite {
+		t.Fatalf("expected approval manifest fields in binding, got %+v", binding)
+	}
+	if binding["cost_class"] == "" || binding["rate_limit_class"] == "" {
+		t.Fatalf("expected operational classes in binding, got %+v", binding)
+	}
 }
 
 func TestUsecases_CapabilitiesFiltersWritesByDefault(t *testing.T) {
@@ -519,14 +791,18 @@ func TestUsecases_Execute_persistsSanitizedEvidence(t *testing.T) {
 	taskID := uuid.New()
 
 	result, err := uc.Execute(context.Background(), domain.ExecutionSpec{
-		ConnectorID:    connectorID,
-		OrgID:          "org-a",
-		ActorID:        "actor-1",
-		Operation:      "mock.write",
-		Payload:        json.RawMessage(`{"message":"hello","api_key":"secret"}`),
-		IdempotencyKey: "idem-1",
-		TaskID:         &taskID,
-		NexusRequestID: &nexusRequestID,
+		ConnectorID:        connectorID,
+		OrgID:              "org-a",
+		ActorID:            "actor-1",
+		ActorType:          "human",
+		CompanionPrincipal: "companion.employee_ai",
+		OnBehalfOf:         "actor-1",
+		ServicePrincipal:   true,
+		Operation:          "mock.write",
+		Payload:            json.RawMessage(`{"message":"hello","api_key":"secret"}`),
+		IdempotencyKey:     "idem-1",
+		TaskID:             &taskID,
+		NexusRequestID:     &nexusRequestID,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -540,6 +816,9 @@ func TestUsecases_Execute_persistsSanitizedEvidence(t *testing.T) {
 	evidence := string(repo.executions[0].EvidenceJSON)
 	if !strings.Contains(evidence, `"org_id":"org-a"`) {
 		t.Fatalf("expected org evidence, got %s", evidence)
+	}
+	if !strings.Contains(evidence, `"companion_principal":"companion.employee_ai"`) || !strings.Contains(evidence, `"on_behalf_of":"actor-1"`) {
+		t.Fatalf("expected companion identity evidence, got %s", evidence)
 	}
 	if strings.Contains(evidence, "secret") || !strings.Contains(evidence, `"api_key":"***"`) {
 		t.Fatalf("expected sanitized evidence, got %s", evidence)

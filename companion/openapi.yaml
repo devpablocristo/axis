@@ -2,7 +2,14 @@ openapi: 3.1.0
 info:
   title: Companion API
   version: 0.1.0
-  description: API del empleado IA central del ecosistema.
+  description: |
+    API del empleado IA central del ecosistema.
+
+    Companion acepta API key o Bearer JWT interno. Cuando hay principal
+    autenticado, `org_id` se interpreta como customer org/work context: la
+    empresa cliente donde trabaja el empleado IA. Headers como `X-Org-ID` y
+    `X-User-ID` quedan como compatibilidad de dev/test, no como fuente canonica
+    productiva.
 servers:
   - url: http://localhost:18085
 security:
@@ -21,6 +28,64 @@ paths:
       security: []
       responses:
         "200": { description: Ready }
+  /mcp:
+    post:
+      summary: Axis MCP JSON-RPC endpoint
+      description: |
+        Endpoint MCP operativo para agentes externos autorizados. Soporta
+        `initialize`, `ping`, `tools/list` y `tools/call`. Toda llamada requiere
+        identidad autenticada con `companion:mcp:execute`; `tools/call` pasa por
+        Nexus antes de ejecutar cualquier herramienta.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MCPJSONRPCRequest" }
+      responses:
+        "200":
+          description: JSON-RPC response
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MCPJSONRPCResponse" }
+  /v1/mcp/tools:
+    get:
+      summary: Lista tools MCP gobernadas
+      description: Requiere `companion:mcp:execute`.
+      responses:
+        "200":
+          description: Tool registry
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MCPToolsResponse" }
+        "403": { description: Missing MCP execute scope }
+  /v1/mcp/tools/call:
+    post:
+      summary: Ejecuta una tool MCP gobernada
+      description: |
+        Invocación REST equivalente a `tools/call`. La llamada se rate-limitea
+        por `org_id + product_surface`, se audita en observabilidad, redacciona
+        payloads sensibles y siempre pasa por Nexus antes de ejecutar.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MCPToolCallRequest" }
+      responses:
+        "200":
+          description: Tool executed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MCPToolCallResponse" }
+        "202":
+          description: Nexus approval pending
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MCPToolCallResponse" }
+        "400": { description: Invalid MCP tool call }
+        "403": { description: "Denied by auth, scope, or Nexus" }
+        "413": { description: "MCP request, arguments, or result exceeds size limits" }
+        "429": { description: Rate limited by org and product surface }
+        "500": { description: MCP execution failed }
   /v1/chat:
     post:
       summary: Conversa con Companion
@@ -65,7 +130,7 @@ paths:
         "404": { description: Conversation not found }
   /v1/notifications:
     post:
-      summary: Genera insights/notificaciones del tenant
+      summary: Genera insights/notificaciones de la customer org
       requestBody:
         required: false
         content:
@@ -77,9 +142,34 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/NotificationsResponse" }
+  /v1/customer-messaging/inbound:
+    post:
+      summary: Procesa un mensaje inbound server-to-server desde un producto autorizado
+      description: |
+        Contrato público server-to-server para integraciones de customer messaging.
+        Pymes usa este endpoint para inbound WhatsApp. Requiere Bearer JWT interno
+        o credencial de servicio equivalente con `companion:tasks:write`, `org_id`
+        de customer org y `product_surface=pymes`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CustomerMessagingInboundRequest" }
+      responses:
+        "200":
+          description: Message processed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CustomerMessagingInboundResponse" }
+        "400": { description: Invalid payload }
+        "401": { description: Missing or invalid service identity }
+        "403": { description: "Missing scope, wrong org, or disallowed product surface" }
+        "409": { description: Duplicate message or conflicting state }
+        "429": { description: Rate limited }
+        "500": { description: Processing failed }
   /v1/tasks:
     get:
-      summary: Lista tasks del tenant
+      summary: Lista tasks de la customer org autenticada
       parameters:
         - in: query
           name: limit
@@ -145,6 +235,78 @@ paths:
         - $ref: "#/components/parameters/UUIDPath"
       responses:
         "200": { description: Nexus submit result }
+  /v1/tasks/{id}/plan:
+    put:
+      summary: Crea o reemplaza el plan durable cognitivo de una task
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SetTaskPlanRequest" }
+      responses:
+        "200":
+          description: Durable task plan
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TaskPlan" }
+  /v1/tasks/{id}/graph:
+    get:
+      summary: Lista eventos del execution graph durable de una task
+      description: Permite replay operacional por task/step sin depender del contexto conversacional.
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 1000, default: 200 }
+      responses:
+        "200":
+          description: Execution graph events
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  events:
+                    type: array
+                    items: { type: object, additionalProperties: true }
+  /v1/tasks/{id}/plan/steps/{step_id}:
+    patch:
+      summary: Actualiza estado/evidencia de un paso del plan durable
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+        - in: path
+          name: step_id
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateTaskPlanStepRequest" }
+      responses:
+        "200":
+          description: Durable task plan
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TaskPlan" }
+  /v1/tasks/{id}/plan/checkpoint:
+    post:
+      summary: Registra checkpoint/next action del plan durable
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RecordTaskPlanCheckpointRequest" }
+      responses:
+        "200":
+          description: Durable task plan
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TaskPlan" }
   /v1/tasks/{id}/execution-plan:
     put:
       summary: Guarda plan de ejecución
@@ -205,6 +367,116 @@ paths:
             schema: { $ref: "#/components/schemas/UpsertMemoryRequest" }
       responses:
         "200": { description: Memory entry }
+  /v1/memory/search:
+    get:
+      summary: Busca memoria con ranking v2
+      parameters:
+        - in: query
+          name: q
+          required: true
+          schema: { type: string }
+        - in: query
+          name: scope_type
+          required: true
+          schema: { type: string, enum: [task, org, user] }
+        - in: query
+          name: scope_id
+          required: true
+          schema: { type: string }
+        - in: query
+          name: kind
+          schema: { type: string }
+        - in: query
+          name: memory_type
+          schema: { type: string }
+      responses:
+        "200":
+          description: Ranked memory results
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MemorySearchResponse" }
+  /v1/memory/conflicts:
+    get:
+      summary: Lista conflictos de memoria pendientes de revisión
+      description: Requiere `companion:memory:admin`.
+      responses:
+        "200": { description: Memory conflicts }
+  /v1/memory/reviews:
+    get:
+      summary: Lista reviews de memoria
+      description: Requiere `companion:memory:admin`.
+      responses:
+        "200": { description: Memory reviews }
+  /v1/memory/reviews/{review_id}/approve:
+    post:
+      summary: Aprueba una review de memoria
+      description: Requiere `companion:memory:admin`.
+      parameters:
+        - in: path
+          name: review_id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: Memory review approved }
+  /v1/memory/reviews/{review_id}/reject:
+    post:
+      summary: Rechaza una review de memoria
+      description: Requiere `companion:memory:admin`.
+      parameters:
+        - in: path
+          name: review_id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: Memory review rejected }
+  /v1/memory/reviews/{review_id}/apply:
+    post:
+      summary: Aplica una review aprobada u abierta de memoria
+      description: Ejecuta corrección, invalidación, resolución de conflicto o deletion con auditoría.
+      parameters:
+        - in: path
+          name: review_id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: Memory review applied }
+  /v1/memory/audit:
+    get:
+      summary: Lista auditoría de memoria
+      description: Requiere `companion:memory:admin`.
+      responses:
+        "200": { description: Memory audit }
+  /v1/memory/summaries:
+    get:
+      summary: Lista summaries versionados de memoria
+      description: Requiere `companion:memory:admin`.
+      responses:
+        "200": { description: Memory summaries }
+  /v1/memory/export:
+    get:
+      summary: Exporta memoria de la customer org autenticada
+      description: Requiere `companion:memory:admin`.
+      responses:
+        "200": { description: Memory export }
+  /v1/memory/org:
+    delete:
+      summary: Borra toda la memoria de la customer org autenticada
+      description: Requiere `companion:memory:admin` y `confirm=true`.
+      parameters:
+        - in: query
+          name: confirm
+          required: true
+          schema: { type: string, enum: ["true"] }
+      responses:
+        "200": { description: Deleted count }
+  /v1/memory/{id}/reviews:
+    post:
+      summary: Crea una review de memoria
+      description: Requiere `companion:memory:admin`.
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "201": { description: Memory review created }
   /v1/memory/{id}:
     get:
       summary: Obtiene memoria por ID
@@ -243,11 +515,155 @@ paths:
       responses:
         "200": { description: Execution result }
         "403": { description: Forbidden or nexus denied }
+  /v1/connectors/action-binding:
+    post:
+      summary: Calcula el action binding Nexus para una capability
+      description: Requiere `companion:connectors:execute`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200":
+          description: Action binding for Nexus
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [action_binding, binding_hash]
+                properties:
+                  action_binding:
+                    type: object
+                    additionalProperties: true
+                  binding_hash:
+                    type: string
+        "403": { description: Forbidden }
   /v1/connectors/capabilities:
     get:
       summary: Lista capabilities disponibles
       responses:
         "200": { description: Capability list }
+  /v1/connectors/capability-manifests:
+    get:
+      summary: Lista manifests versionados de capabilities
+      parameters:
+        - in: query
+          name: include_writes
+          schema: { type: boolean, default: false }
+        - in: query
+          name: max_risk_class
+          schema: { type: string, enum: [low, medium, high, critical] }
+      responses:
+        "200":
+          description: Capability manifest list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [capabilities]
+                properties:
+                  capabilities:
+                    type: array
+                    items: { $ref: "#/components/schemas/CapabilityManifest" }
+  /v1/capabilities:
+    get:
+      summary: Lista capability manifests persistidos
+      description: Requiere `companion:capabilities:read` o `companion:capabilities:admin`.
+      responses:
+        "200": { description: Capability records }
+    post:
+      summary: Importa un capability manifest como draft
+      description: Requiere `companion:capabilities:admin`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CapabilityManifest" }
+      responses:
+        "201": { description: Capability imported }
+  /v1/capabilities/import-source:
+    post:
+      summary: Importa capability manifests desde una fuente JSON
+      description: |
+        Requiere `companion:capabilities:admin`. La fuente debe publicar un
+        `CapabilityManifest` o `{ capabilities: [...] }`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CapabilityManifestSourceImportRequest" }
+      responses:
+        "201": { description: Capability manifests imported as draft }
+  /v1/capabilities/validate:
+    post:
+      summary: Valida contrato y conformance de un manifest
+      description: Requiere `companion:capabilities:admin`.
+      responses:
+        "200": { description: Validation result }
+  /v1/capabilities/conformance-runs:
+    get:
+      summary: Lista conformance runs
+      responses:
+        "200": { description: Conformance runs }
+    post:
+      summary: Ejecuta conformance para una capability
+      description: Requiere `companion:capabilities:admin`.
+      responses:
+        "201": { description: Conformance run }
+  /v1/capabilities/{capability_id}/versions:
+    get:
+      summary: Lista versiones de una capability
+      parameters:
+        - in: path
+          name: capability_id
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Capability versions }
+  /v1/capabilities/{capability_id}/versions/{version}/promote:
+    post:
+      summary: Promueve un manifest a active si pasa conformance
+      parameters:
+        - in: path
+          name: capability_id
+          required: true
+          schema: { type: string }
+        - in: path
+          name: version
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Capability manifest promoted }
+        "400": { description: Conformance failed }
+  /v1/capabilities/{capability_id}/versions/{version}/deprecate:
+    post:
+      summary: Marca un manifest como deprecated
+      parameters:
+        - in: path
+          name: capability_id
+          required: true
+          schema: { type: string }
+        - in: path
+          name: version
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Capability manifest deprecated }
+  /v1/capabilities/{capability_id}/versions/{version}/block:
+    post:
+      summary: Bloquea manualmente un manifest
+      parameters:
+        - in: path
+          name: capability_id
+          required: true
+          schema: { type: string }
+        - in: path
+          name: version
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Capability manifest blocked }
   /v1/connectors/{id}:
     get:
       summary: Obtiene connector
@@ -270,17 +686,27 @@ paths:
         "200": { description: Execution list }
   /v1/watchers:
     get:
-      summary: Lista watchers por tenant
+      summary: Lista watchers por customer org
       parameters:
         - in: query
           name: org_id
+          description: Customer org/work context. Direct cross-org requiere `companion:cross_org`.
           schema: { type: string }
       responses:
         "200": { description: Watcher list }
     post:
       summary: Crea watcher
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateWatcherRequest" }
       responses:
-        "201": { description: Watcher created }
+        "201":
+          description: Watcher created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Watcher" }
   /v1/watchers/{id}:
     get:
       summary: Obtiene watcher
@@ -292,8 +718,17 @@ paths:
       summary: Actualiza watcher
       parameters:
         - $ref: "#/components/parameters/UUIDPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateWatcherRequest" }
       responses:
-        "200": { description: Watcher updated }
+        "200":
+          description: Watcher updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Watcher" }
     delete:
       summary: Borra watcher
       parameters:
@@ -336,6 +771,620 @@ paths:
           schema: { type: string, format: uuid }
       responses:
         "200": { description: Run trace }
+  /v1/run-traces/{run_id}/replay:
+    get:
+      summary: Obtiene replay operativo de un run
+      parameters:
+        - in: path
+          name: run_id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Run replay
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RunReplay" }
+  /v1/observability/events:
+    get:
+      summary: Lista eventos de observabilidad redacted
+      parameters:
+        - in: query
+          name: org_id
+          schema: { type: string }
+        - in: query
+          name: product_surface
+          schema: { type: string }
+        - in: query
+          name: run_id
+          schema: { type: string, format: uuid }
+        - in: query
+          name: event_type
+          schema: { type: string }
+        - in: query
+          name: event_name
+          schema: { type: string }
+        - in: query
+          name: severity
+          schema: { type: string }
+        - in: query
+          name: capability_id
+          schema: { type: string }
+        - in: query
+          name: tool_name
+          description: Alias operativo de capability_id para herramientas MCP.
+          schema: { type: string }
+        - in: query
+          name: agent_id
+          schema: { type: string }
+        - in: query
+          name: task_id
+          schema: { type: string, format: uuid }
+        - in: query
+          name: job_id
+          schema: { type: string, format: uuid }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 100, minimum: 1, maximum: 500 }
+      responses:
+        "200":
+          description: Observability events
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  events:
+                    type: array
+                    items: { $ref: "#/components/schemas/ObservabilityEvent" }
+  /v1/runtime/policy:
+    get:
+      summary: Obtiene la política runtime de la customer org autenticada
+      description: Requiere `companion:runtime:admin` o `companion:cross_org`.
+      responses:
+        "200":
+          description: Runtime policy
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RuntimePolicy" }
+    put:
+      summary: Actualiza la política runtime de la customer org autenticada
+      description: Requiere `companion:runtime:admin` o `companion:cross_org`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RuntimePolicyUpdate" }
+      responses:
+        "200":
+          description: Runtime policy
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RuntimePolicy" }
+  /v1/runtime/policy/audit:
+    get:
+      summary: Lista cambios versionados de la política runtime
+      description: Requiere `companion:runtime:admin` o `companion:cross_org`.
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, default: 50, minimum: 1, maximum: 200 }
+      responses:
+        "200":
+          description: Runtime policy audit entries
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RuntimePolicyAuditResponse" }
+  /v1/runtime/mcp-policy:
+    get:
+      summary: Obtiene la vista MCP de la política runtime
+      description: Requiere `companion:runtime:admin` o `companion:cross_org`. `enabled`, `kill_switch`, `allowed_product_surfaces` y `product_policies.denied` son controles runtime-level.
+      responses:
+        "200":
+          description: MCP runtime policy view
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MCPRuntimePolicy" }
+    put:
+      summary: Actualiza solo los controles MCP de la política runtime
+      description: Requiere `companion:runtime:admin` o `companion:cross_org`. Preserva modelos, budgets, autonomy, memory, connectors y otros campos no-MCP.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MCPRuntimePolicyUpdate" }
+      responses:
+        "200":
+          description: MCP runtime policy view
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MCPRuntimePolicy" }
+  /v1/runtime/usage:
+    get:
+      summary: Consulta uso mensual de runtime de la customer org autenticada
+      description: Requiere `companion:runtime:admin` o `companion:cross_org`.
+      parameters:
+        - in: query
+          name: period
+          schema:
+            type: string
+            pattern: "^[0-9]{4}-[0-9]{2}$"
+          description: "Periodo YYYY-MM. Default: mes actual."
+      responses:
+        "200":
+          description: Runtime usage
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RuntimeUsage" }
+  /v1/runtime/costs:
+    get:
+      summary: Consulta costos atribuidos a la customer org autenticada
+      description: Requiere contexto de org y devuelve eventos redacted.
+      parameters:
+        - in: query
+          name: period
+          schema:
+            type: string
+            pattern: "^[0-9]{4}-[0-9]{2}$"
+        - in: query
+          name: product_surface
+          schema: { type: string }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 100, minimum: 1, maximum: 500 }
+      responses:
+        "200": { description: Cost summary }
+  /v1/ops/console:
+    get:
+      summary: Vista operativa agregada por org/producto
+      description: Requiere `companion:ops:read`, `companion:runtime:admin` o `companion:cross_org`.
+      parameters:
+        - in: query
+          name: org_id
+          schema: { type: string }
+          description: Solo disponible para principales con `companion:cross_org`; si falta se usa la org del principal.
+        - in: query
+          name: product_surface
+          schema: { type: string }
+        - in: query
+          name: period
+          schema:
+            type: string
+            pattern: "^[0-9]{4}-[0-9]{2}$"
+        - in: query
+          name: limit
+          schema: { type: integer, default: 100, minimum: 1, maximum: 500 }
+      responses:
+        "200": { description: Ops console snapshot }
+  /v1/ops/alerts:
+    get:
+      summary: Lista alertas operativas derivadas
+      description: Requiere `companion:ops:read`, `companion:runtime:admin` o `companion:cross_org`.
+      parameters:
+        - in: query
+          name: org_id
+          schema: { type: string }
+        - in: query
+          name: product_surface
+          schema: { type: string }
+        - in: query
+          name: period
+          schema:
+            type: string
+            pattern: "^[0-9]{4}-[0-9]{2}$"
+        - in: query
+          name: limit
+          schema: { type: integer, default: 100, minimum: 1, maximum: 500 }
+      responses:
+        "200": { description: Ops alerts }
+  /v1/ops/alerts/dispatch:
+    post:
+      summary: Despacha alertas operativas al webhook configurado
+      description: Requiere `companion:runtime:admin` o `companion:cross_org`. Usa `COMPANION_OPS_ALERT_WEBHOOK_URL`.
+      parameters:
+        - in: query
+          name: org_id
+          schema: { type: string }
+        - in: query
+          name: product_surface
+          schema: { type: string }
+        - in: query
+          name: period
+          schema:
+            type: string
+            pattern: "^[0-9]{4}-[0-9]{2}$"
+        - in: query
+          name: limit
+          schema: { type: integer, default: 100, minimum: 1, maximum: 500 }
+      responses:
+        "202": { description: Alert dispatch accepted }
+        "503": { description: Alert webhook not configured }
+  /v1/ops/metrics:
+    get:
+      summary: Lista metricas operativas derivadas por producto
+      description: Requiere `companion:ops:read`, `companion:runtime:admin` o `companion:cross_org`.
+      parameters:
+        - in: query
+          name: org_id
+          schema: { type: string }
+        - in: query
+          name: product_surface
+          schema: { type: string }
+        - in: query
+          name: period
+          schema:
+            type: string
+            pattern: "^[0-9]{4}-[0-9]{2}$"
+        - in: query
+          name: limit
+          schema: { type: integer, default: 100, minimum: 1, maximum: 500 }
+      responses:
+        "200": { description: Ops metrics }
+  /v1/ops/slos:
+    get:
+      summary: Lista SLOs operativos por producto
+      description: Requiere `companion:ops:read`, `companion:runtime:admin` o `companion:cross_org`.
+      parameters:
+        - in: query
+          name: org_id
+          schema: { type: string }
+        - in: query
+          name: product_surface
+          schema: { type: string }
+        - in: query
+          name: period
+          schema:
+            type: string
+            pattern: "^[0-9]{4}-[0-9]{2}$"
+        - in: query
+          name: limit
+          schema: { type: integer, default: 100, minimum: 1, maximum: 500 }
+      responses:
+        "200": { description: Product SLOs }
+  /v1/security-evals/suites:
+    get:
+      summary: Lista suites adversariales disponibles
+      description: Requiere `companion:evals:admin`, `companion:runtime:admin` o `companion:cross_org`.
+      responses:
+        "200": { description: Security eval suites }
+  /v1/security-evals/runs:
+    post:
+      summary: Ejecuta una suite adversarial y persiste el reporte
+      description: Falla con 422 cuando el score queda por debajo del threshold.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                suite: { type: string, default: security-adversarial }
+      responses:
+        "201": { description: Security eval report passed }
+        "422": { description: Security eval report failed }
+  /v1/security-evals/reports:
+    get:
+      summary: Lista reportes persistidos de security evals
+      parameters:
+        - in: query
+          name: suite
+          schema: { type: string }
+        - in: query
+          name: product_surface
+          schema: { type: string }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+      responses:
+        "200": { description: Security eval reports }
+  /v1/jobs:
+    get:
+      summary: Lista jobs durables de la customer org autenticada
+      description: Requiere `companion:runtime:admin` o `companion:cross_org`. Sin `companion:cross_org`, el listado queda limitado al `product_surface` del principal.
+      parameters:
+        - in: query
+          name: product_surface
+          schema: { type: string }
+          description: Filtra jobs por producto. Requerido implicitamente para principales sin `companion:cross_org`.
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [queued, running, succeeded, failed, dead_letter, cancelled]
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+      responses:
+        "200": { description: Job list }
+  /v1/business-model:
+    get:
+      summary: Obtiene el modelo empresarial activo
+      description: Requiere `companion:runtime:admin` o `companion:cross_org`.
+      responses:
+        "200":
+          description: Business model
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BusinessModel" }
+    put:
+      summary: Guarda una nueva versión del modelo empresarial
+      description: Requiere `companion:runtime:admin` o `companion:cross_org`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BusinessModel" }
+      responses:
+        "200":
+          description: Business model
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BusinessModel" }
+  /v1/products:
+    get:
+      summary: Lista productos registrados en Axis
+      description: Requiere `companion:products:read`, `companion:products:admin`, `companion:runtime:admin` o `companion:cross_org`.
+      responses:
+        "200":
+          description: Product list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  products:
+                    type: array
+                    items: { $ref: "#/components/schemas/Product" }
+  /v1/products/{product_surface}:
+    get:
+      summary: Obtiene un producto registrado
+      parameters:
+        - in: path
+          name: product_surface
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Product }
+        "404": { description: Product not found }
+    put:
+      summary: Crea o actualiza un producto registrado
+      parameters:
+        - in: path
+          name: product_surface
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ProductInput" }
+      responses:
+        "200": { description: Product saved }
+  /v1/product-installations:
+    get:
+      summary: Lista installations por customer org
+      parameters:
+        - in: query
+          name: org_id
+          schema: { type: string }
+      responses:
+        "200":
+          description: Installation list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  installations:
+                    type: array
+                    items: { $ref: "#/components/schemas/ProductInstallation" }
+  /v1/product-installations/{product_surface}:
+    get:
+      summary: Obtiene una installation por `org_id + product_surface`
+      parameters:
+        - in: path
+          name: product_surface
+          required: true
+          schema: { type: string }
+        - in: query
+          name: org_id
+          schema: { type: string }
+      responses:
+        "200": { description: Product installation }
+        "404": { description: Product installation not found }
+    put:
+      summary: Crea o actualiza una installation
+      parameters:
+        - in: path
+          name: product_surface
+          required: true
+          schema: { type: string }
+        - in: query
+          name: org_id
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ProductInstallationInput" }
+      responses:
+        "200": { description: Product installation saved }
+  /v1/product-installations/{product_surface}/resolve:
+    get:
+      summary: Resuelve una installation activa y falla cerrado si no existe
+      parameters:
+        - in: path
+          name: product_surface
+          required: true
+          schema: { type: string }
+        - in: query
+          name: org_id
+          schema: { type: string }
+      responses:
+        "200": { description: Active product installation }
+        "403": { description: Installation or product disabled }
+        "404": { description: Product installation not found }
+  /v1/agents:
+    get:
+      summary: Lista empleados IA de la customer org
+      description: Requiere `companion:runtime:admin` o `companion:cross_org`.
+      responses:
+        "200":
+          description: Agent list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Agent" }
+  /v1/agents/assignments:
+    post:
+      summary: Asigna un empleado IA activo para un intent/capability
+      description: Requiere `companion:runtime:admin` o `companion:cross_org`.
+      responses:
+        "200": { description: Agent assignment }
+  /v1/agents/{agent_id}:
+    get:
+      summary: Obtiene un empleado IA
+      description: Requiere `companion:runtime:admin` o `companion:cross_org`.
+      parameters:
+        - in: path
+          name: agent_id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Agent
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Agent" }
+    put:
+      summary: Crea o actualiza un empleado IA
+      description: Requiere `companion:runtime:admin` o `companion:cross_org`.
+      parameters:
+        - in: path
+          name: agent_id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Agent" }
+      responses:
+        "200":
+          description: Agent
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Agent" }
+  /v1/agents/{agent_id}/disable:
+    post:
+      summary: Deshabilita un empleado IA
+      description: Requiere `companion:runtime:admin` o `companion:cross_org`.
+      parameters:
+        - in: path
+          name: agent_id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Agent
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Agent" }
+  /v1/agents/handoffs:
+    get:
+      summary: Lista handoffs entre empleados IA
+      description: Requiere `companion:runtime:admin` o `companion:cross_org`.
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        "200":
+          description: Handoff list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/AgentHandoff" }
+    post:
+      summary: Crea un handoff entre empleados IA
+      description: Requiere `companion:runtime:admin` o `companion:cross_org`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AgentHandoff" }
+      responses:
+        "201":
+          description: Handoff
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentHandoff" }
+  /v1/agents/handoffs/{id}:
+    patch:
+      summary: Actualiza estado de handoff
+      description: Requiere `companion:runtime:admin` o `companion:cross_org`.
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { type: string, enum: [accepted, rejected, completed, cancelled] }
+      responses:
+        "200":
+          description: Handoff
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentHandoff" }
+  /v1/jobs/{id}:
+    get:
+      summary: Obtiene estado y evidence de un job durable
+      description: Requiere `companion:runtime:admin` o `companion:cross_org`.
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200":
+          description: Job durable
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+  /v1/jobs/{id}/cancel:
+    post:
+      summary: Cancela un job durable queued/running
+      description: Requiere `companion:runtime:admin` o `companion:cross_org`.
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string }
+      responses:
+        "200": { description: Cancelled }
+  /v1/jobs/recover-expired:
+    post:
+      summary: Reencola jobs con leases vencidos
+      description: Requiere `companion:runtime:admin` o `companion:cross_org`.
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, default: 100, minimum: 1 }
+      responses:
+        "200": { description: Recovery summary }
   /v1/nexus-assist/propose:
     post:
       summary: Analiza historial Nexus y propone learning/policies
@@ -370,6 +1419,154 @@ components:
         type: string
         format: uuid
   schemas:
+    Product:
+      type: object
+      required: [product_surface, display_name, status]
+      properties:
+        product_surface: { type: string }
+        display_name: { type: string }
+        status: { type: string, enum: [active, disabled] }
+        metadata:
+          type: object
+          additionalProperties: true
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ProductInput:
+      type: object
+      properties:
+        display_name: { type: string }
+        status: { type: string, enum: [active, disabled] }
+        metadata:
+          type: object
+          additionalProperties: true
+    ProductInstallation:
+      type: object
+      required: [org_id, product_surface, auth_mode, enabled]
+      properties:
+        id: { type: string, format: uuid }
+        org_id: { type: string }
+        product_surface: { type: string }
+        external_tenant_id: { type: string }
+        base_url: { type: string, format: uri }
+        auth_mode:
+          type: string
+          enum: [none, api_key_ref, oauth2, internal_jwt, custom]
+        secret_ref:
+          type: string
+          description: >
+            Reference only; never inline secret. Supported refs: `env:NAME`,
+            `vault:path`, `secretmanager:path`.
+        enabled: { type: boolean }
+        config:
+          type: object
+          additionalProperties: true
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ProductInstallationInput:
+      type: object
+      properties:
+        external_tenant_id: { type: string }
+        base_url: { type: string, format: uri }
+        auth_mode:
+          type: string
+          enum: [none, api_key_ref, oauth2, internal_jwt, custom]
+        secret_ref:
+          type: string
+          description: >
+            Reference only; never inline secret. Supported refs: `env:NAME`,
+            `vault:path`, `secretmanager:path`.
+        enabled: { type: boolean, default: true }
+        config:
+          type: object
+          additionalProperties: true
+    MCPJSONRPCRequest:
+      type: object
+      required: [jsonrpc, method]
+      additionalProperties: true
+      properties:
+        jsonrpc: { type: string, const: "2.0" }
+        id:
+          description: JSON-RPC request id.
+        method:
+          type: string
+          enum: [initialize, notifications/initialized, ping, tools/list, tools/call]
+        params:
+          description: JSON-RPC method params.
+    MCPJSONRPCResponse:
+      type: object
+      required: [jsonrpc]
+      additionalProperties: true
+      properties:
+        jsonrpc: { type: string, const: "2.0" }
+        id:
+          description: JSON-RPC request id or null.
+        result:
+          description: JSON-RPC result payload.
+        error:
+          $ref: "#/components/schemas/MCPJSONRPCError"
+    MCPJSONRPCError:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: integer }
+        message: { type: string }
+        data:
+          description: Optional structured error data.
+    MCPTool:
+      type: object
+      required: [name, inputSchema]
+      properties:
+        name: { type: string }
+        title: { type: string }
+        description: { type: string }
+        inputSchema:
+          type: object
+          additionalProperties: true
+        annotations:
+          type: object
+          additionalProperties: true
+    MCPToolsResponse:
+      type: object
+      required: [tools]
+      properties:
+        tools:
+          type: array
+          items: { $ref: "#/components/schemas/MCPTool" }
+    MCPToolCallRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, example: axis.products.list }
+        arguments:
+          type: object
+          additionalProperties: true
+          description: Tool arguments. Must include effective tenant/product context when not provided by JWT.
+        idempotency_key: { type: string }
+        run_id: { type: string }
+        tool_invocation_id: { type: string }
+        reason: { type: string }
+    MCPToolCallResponse:
+      type: object
+      required: [status, tool_name]
+      properties:
+        status:
+          type: string
+          enum: [executed, pending_approval, denied, blocked, rate_limited, payload_too_large, execution_error, error]
+        tool_name: { type: string }
+        request_id: { type: string, description: Nexus request id. }
+        nexus_status: { type: string }
+        nexus_decision: { type: string }
+        decision_reason: { type: string }
+        pending_approval: { type: boolean }
+        denied: { type: boolean }
+        result:
+          description: Redacted tool result when execution succeeds.
+        error: { type: string }
+        metadata:
+          type: object
+          additionalProperties: true
     ChatRequest:
       type: object
       required: [message]
@@ -379,11 +1576,20 @@ components:
         chat_id: { type: string, format: uuid, description: "Continúa conversación durable existente" }
         channel: { type: string, description: "Canal del caller. Default: api." }
         product_surface: { type: string }
+        agent_id: { type: string, description: "Empleado IA persistente que toma ownership de la ejecución" }
         route_hint: { type: string }
         confirmed_actions:
           type: array
           items: { type: string }
         handoff: { $ref: "#/components/schemas/ChatHandoff" }
+        workspace:
+          type: object
+          additionalProperties: true
+          description: |
+            Contexto operativo de pantalla del producto (ej. customer_id,
+            project_id, campaign_id, field_id). Gana sobre handoff.workspace
+            y se persiste en la task para reusarse en turnos siguientes si no
+            se reenvía.
     ChatResponse:
       description: |
         Response canónico del chat de Companion. Incluye chat_id, reply y
@@ -393,6 +1599,7 @@ components:
       required: [reply, task, messages]
       properties:
         chat_id: { type: string, format: uuid }
+        task_id: { type: string, format: uuid, description: "ID operativo legacy de la task; frontends deben preferir chat_id." }
         reply: { type: string }
         blocks:
           type: array
@@ -407,6 +1614,8 @@ components:
         routed_agent: { type: string }
         routing_source: { type: string }
         output_kind: { type: string }
+        run_id: { type: string, format: uuid }
+        agent_id: { type: string }
         task: { $ref: "#/components/schemas/Task" }
         messages:
           type: array
@@ -443,6 +1652,37 @@ components:
         id: { type: string }
         description: { type: string }
         binding_hash: { type: string }
+    CustomerMessagingInboundRequest:
+      type: object
+      required: [org_id, phone_number_id, from_phone, message]
+      properties:
+        org_id:
+          type: string
+          description: Customer org/work context where the AI employee operates.
+        phone_number_id:
+          type: string
+          description: WhatsApp/Meta phone number id that received the inbound message.
+        from_phone:
+          type: string
+          description: Sender phone in provider format.
+        message:
+          type: string
+          minLength: 1
+        message_id:
+          type: string
+          description: Provider message id used by callers for duplicate detection/replay diagnostics.
+        profile_name:
+          type: string
+    CustomerMessagingInboundResponse:
+      type: object
+      required: [conversation_id, reply, tokens_used, tool_calls]
+      properties:
+        conversation_id: { type: string }
+        reply: { type: string }
+        tokens_used: { type: integer }
+        tool_calls:
+          type: array
+          items: { type: string }
     TaskMessage:
       type: object
       properties:
@@ -452,6 +1692,89 @@ components:
         body: { type: string }
         metadata: { type: object, additionalProperties: true }
         created_at: { type: string, format: date-time }
+    CapabilityManifest:
+      type: object
+      required:
+        - schema_version
+        - capability_id
+        - version
+        - display_name
+        - description
+        - owner
+        - product_surface
+        - connector
+        - action_type
+        - risk_level
+        - side_effect_type
+        - auth_mode
+        - input_schema
+        - output_schema
+        - evidence_schema
+        - idempotency_mode
+        - approval_required
+        - tenant_configurable
+        - enabled_by_default
+        - rate_limit_class
+        - cost_class
+        - timeout
+        - retries
+      properties:
+        schema_version: { type: string, enum: [capability_manifest.v1] }
+        capability_id: { type: string }
+        version: { type: string }
+        display_name: { type: string }
+        description: { type: string }
+        owner: { type: string }
+        product_surface: { type: string }
+        connector: { type: string }
+        action_type: { type: string, enum: [read, write] }
+        risk_level: { type: string, enum: [low, medium, high, critical] }
+        side_effect_type: { type: string, enum: [read, write, notify, execute] }
+        auth_mode: { type: string }
+        required_scopes:
+          type: array
+          items: { type: string }
+        input_schema: { type: object, additionalProperties: true }
+        output_schema: { type: object, additionalProperties: true }
+        evidence_schema: { type: object, additionalProperties: true }
+        required_evidence:
+          type: array
+          items: { type: string }
+        idempotency_mode: { type: string, enum: [none, optional, required] }
+        rollback_supported: { type: boolean }
+        rollback_capability_id: { type: string }
+        compensation_strategy: { type: string }
+        nexus_action_type: { type: string }
+        approval_required: { type: boolean }
+        tenant_configurable: { type: boolean }
+        enabled_by_default: { type: boolean }
+        rate_limit_class: { type: string }
+        cost_class: { type: string }
+        timeout: { type: string }
+        retries:
+          type: object
+          properties:
+            max_attempts: { type: integer, minimum: 1 }
+            backoff: { type: string }
+        postconditions:
+          type: array
+          items: { type: string }
+        preconditions:
+          type: array
+          items: { type: string }
+        observability_tags:
+          type: array
+          items: { type: string }
+    CapabilityManifestSourceImportRequest:
+      type: object
+      required: [source_url]
+      properties:
+        source_url:
+          type: string
+          format: uri
+        product_surface:
+          type: string
+          description: Optional expected product surface. Import fails if a manifest declares a different product.
     ConversationSummary:
       type: object
       required: [id, created_at, updated_at, message_count]
@@ -526,7 +1849,9 @@ components:
         title: { type: string }
         goal: { type: string }
         priority: { type: string }
-        created_by: { type: string }
+        created_by:
+          type: string
+          description: Si falta, Companion usa el actor efectivo autenticado; si difiere, debe coincidir con `on_behalf_of` o requerir scope operador.
         assigned_to: { type: string }
         channel: { type: string }
         summary: { type: string }
@@ -535,17 +1860,107 @@ components:
       type: object
       properties:
         id: { type: string, format: uuid }
-        org_id: { type: string }
+        org_id: { type: string, description: Customer org/work context donde trabaja Companion. }
         title: { type: string }
         status: { type: string }
         nexus_status: { type: string }
         nexus_last_checked_at: { type: string, format: date-time }
+    SetTaskPlanRequest:
+      type: object
+      required: [steps]
+      properties:
+        objective: { type: string }
+        status: { type: string, enum: [draft, active, blocked, completed, failed, escalated] }
+        strategy: { type: string }
+        assumptions: {}
+        constraints: {}
+        checkpoint: {}
+        next_action: { type: string }
+        blocker: { type: string }
+        steps:
+          type: array
+          items: { $ref: "#/components/schemas/SetTaskPlanStepRequest" }
+    SetTaskPlanStepRequest:
+      type: object
+      required: [title]
+      properties:
+        id: { type: string, format: uuid }
+        step_key: { type: string }
+        title: { type: string }
+        status: { type: string, enum: [pending, ready, running, blocked, done, failed, skipped] }
+        depends_on: {}
+        tool_name: { type: string }
+        capability: { type: string }
+        expected_outcome: { type: string }
+        postcondition: { type: string }
+        evidence: {}
+        observation: { type: string }
+        blocker: { type: string }
+        error_message: { type: string }
+        attempt_count: { type: integer }
+        sort_order: { type: integer }
+    UpdateTaskPlanStepRequest:
+      type: object
+      properties:
+        status: { type: string, enum: [pending, ready, running, blocked, done, failed, skipped] }
+        evidence: {}
+        observation: { type: string }
+        blocker: { type: string }
+        error_message: { type: string }
+        checkpoint: {}
+        next_action: { type: string }
+    RecordTaskPlanCheckpointRequest:
+      type: object
+      properties:
+        status: { type: string, enum: [draft, active, blocked, completed, failed, escalated] }
+        checkpoint: {}
+        next_action: { type: string }
+        blocker: { type: string }
+    TaskPlan:
+      type: object
+      properties:
+        objective: { type: string }
+        status: { type: string }
+        strategy: { type: string }
+        assumptions: {}
+        constraints: {}
+        checkpoint: {}
+        next_action: { type: string }
+        blocker: { type: string }
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        completed_at: { type: string, format: date-time }
+        steps:
+          type: array
+          items: { $ref: "#/components/schemas/TaskPlanStep" }
+    TaskPlanStep:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        step_key: { type: string }
+        title: { type: string }
+        status: { type: string }
+        depends_on: {}
+        tool_name: { type: string }
+        capability: { type: string }
+        expected_outcome: { type: string }
+        postcondition: { type: string }
+        evidence: {}
+        observation: { type: string }
+        blocker: { type: string }
+        error_message: { type: string }
+        attempt_count: { type: integer }
+        sort_order: { type: integer }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        completed_at: { type: string, format: date-time }
     UpsertMemoryRequest:
       type: object
       required: [kind, scope_type, scope_id, key]
       properties:
         kind: { type: string }
-        memory_type: { type: string, enum: [episodic, semantic, operational, preference, playbook, task_projection] }
+        memory_type: { type: string, enum: [episodic, semantic, operational, preference, playbook, task_projection, tenant_knowledge, business_context, procedural] }
         classification: { type: string, enum: [stable, operational, audit] }
         scope_type: { type: string, enum: [task, org, user] }
         scope_id: { type: string }
@@ -555,13 +1970,15 @@ components:
         provenance: { type: object, additionalProperties: true }
         confidence: { type: number, format: double }
         retention_policy: { type: string }
+        source: { type: string }
+        supersede: { type: boolean }
         version: { type: integer }
         ttl_days: { type: integer }
     MemoryEntry:
       type: object
       properties:
         id: { type: string, format: uuid }
-        org_id: { type: string }
+        org_id: { type: string, description: Customer org/work context propietario de la memoria. }
         user_id: { type: string }
         product_surface: { type: string }
         kind: { type: string }
@@ -574,8 +1991,459 @@ components:
         payload_json: { type: object, additionalProperties: true }
         provenance: { type: object, additionalProperties: true }
         confidence: { type: number, format: double }
+        trust_score: { type: number, format: double }
         retention_policy: { type: string }
+        status: { type: string, enum: [active, superseded, conflict, rejected, forgotten] }
+        source: { type: string }
+        embedding_namespace: { type: string }
+        embedding_model: { type: string }
+        poisoning_flags:
+          type: array
+          items: { type: string }
         version: { type: integer }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
         expires_at: { type: string, format: date-time }
+    MemorySearchResponse:
+      type: object
+      properties:
+        results:
+          type: array
+          items: { $ref: "#/components/schemas/MemorySearchResult" }
+    MemorySearchResult:
+      type: object
+      properties:
+        entry: { $ref: "#/components/schemas/MemoryEntry" }
+        score: { type: number, format: double }
+        reasons:
+          type: array
+          items: { type: string }
+    CreateWatcherRequest:
+      type: object
+      required: [name, watcher_type, config]
+      properties:
+        org_id:
+          type: string
+          description: Customer org/work context. Si falta, se deriva de la identidad autenticada.
+        name: { type: string }
+        watcher_type:
+          type: string
+          enum: [capability, stale_work_orders, unconfirmed_appointments, low_stock, inactive_customers, revenue_drop]
+        config:
+          oneOf:
+            - $ref: "#/components/schemas/CapabilityWatcherConfig"
+            - type: object
+              additionalProperties: true
+          description: Para `watcher_type=capability`, usar `CapabilityWatcherConfig`; los tipos Pymes existentes aceptan su config historica.
+        enabled: { type: boolean }
+    UpdateWatcherRequest:
+      type: object
+      properties:
+        name: { type: string }
+        config:
+          oneOf:
+            - $ref: "#/components/schemas/CapabilityWatcherConfig"
+            - type: object
+              additionalProperties: true
+        enabled: { type: boolean }
+    CapabilityWatcherConfig:
+      type: object
+      required: [product_surface, connector_kind, query_operation, action_operation, action_type]
+      properties:
+        product_surface: { type: string }
+        connector_kind: { type: string }
+        query_operation: { type: string }
+        query_payload: { type: object, additionalProperties: true }
+        result_items_path:
+          type: string
+          description: Path opcional dentro del JSON de resultado donde vive la lista de items.
+        condition:
+          $ref: "#/components/schemas/WatcherCondition"
+        action_operation: { type: string }
+        action_payload_template:
+          type: object
+          additionalProperties: true
+        action_type: { type: string }
+    WatcherCondition:
+      type: object
+      properties:
+        path: { type: string }
+        operator: { type: string, enum: [exists, eq, ne, gt, gte, lt, lte, contains] }
+        value: {}
+    Watcher:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        org_id: { type: string, description: Customer org/work context propietario del watcher. }
+        name: { type: string }
+        watcher_type: { type: string }
+        config: { type: object, additionalProperties: true }
+        enabled: { type: boolean }
+        last_run_at: { type: string, format: date-time }
+        last_result: { type: object, additionalProperties: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    RuntimePolicy:
+      type: object
+      properties:
+        org_id: { type: string }
+        enabled: { type: boolean }
+        kill_switch: { type: boolean }
+        max_autonomy: { type: string, enum: [A0, A1, A2, A3, A4, A5] }
+        allowed_product_surfaces:
+          type: array
+          items: { type: string }
+        allowed_models:
+          type: array
+          items: { type: string }
+        monthly_token_budget: { type: integer, format: int64 }
+        monthly_tool_call_budget: { type: integer, format: int64 }
+        settings_version: { type: integer, format: int64 }
+        control_plane: { $ref: "#/components/schemas/OrgControlPlane" }
+        metadata: { type: object, additionalProperties: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    RuntimePolicyUpdate:
+      type: object
+      properties:
+        enabled: { type: boolean }
+        kill_switch: { type: boolean }
+        max_autonomy: { type: string, enum: [A0, A1, A2, A3, A4, A5] }
+        allowed_product_surfaces:
+          type: array
+          items: { type: string }
+        allowed_models:
+          type: array
+          items: { type: string }
+        monthly_token_budget: { type: integer, format: int64, minimum: 0 }
+        monthly_tool_call_budget: { type: integer, format: int64, minimum: 0 }
+        control_plane: { $ref: "#/components/schemas/OrgControlPlane" }
+        metadata: { type: object, additionalProperties: true }
+    OrgControlPlane:
+      type: object
+      properties:
+        enabled_agents:
+          type: array
+          items: { type: string }
+        allowed_profiles:
+          type: array
+          items: { type: string }
+        allowed_tools:
+          type: array
+          items: { type: string }
+        denied_tools:
+          type: array
+          items: { type: string }
+        allowed_capabilities:
+          type: array
+          items: { type: string }
+        denied_capabilities:
+          type: array
+          items: { type: string }
+        allowed_connectors:
+          type: array
+          items: { type: string }
+        denied_connectors:
+          type: array
+          items: { type: string }
+        allowed_models:
+          type: array
+          items: { type: string }
+        monthly_cost_budget_cents: { type: integer, format: int64, minimum: 0 }
+        max_risk_class: { type: string, enum: [none, low, medium, high, critical] }
+        approval_thresholds:
+          type: object
+          additionalProperties: { type: string }
+        retention: { $ref: "#/components/schemas/OrgRetentionPolicy" }
+        memory: { $ref: "#/components/schemas/OrgMemoryPolicy" }
+        agent_kill_switches:
+          type: object
+          additionalProperties: { type: boolean }
+        tool_kill_switches:
+          type: object
+          additionalProperties: { type: boolean }
+        connector_kill_switches:
+          type: object
+          additionalProperties: { type: boolean }
+        data_isolation: { $ref: "#/components/schemas/OrgDataIsolationPolicy" }
+        observability: { $ref: "#/components/schemas/OrgObservabilitySettings" }
+        metadata: { type: object, additionalProperties: true }
+    OrgRetentionPolicy:
+      type: object
+      properties:
+        run_trace_days: { type: integer, minimum: 0 }
+        tool_evidence_days: { type: integer, minimum: 0 }
+        memory_days: { type: integer, minimum: 0 }
+    OrgMemoryPolicy:
+      type: object
+      properties:
+        retention_days: { type: integer, minimum: 0 }
+        compaction_after_days: { type: integer, minimum: 0 }
+        require_provenance: { type: boolean }
+        min_confidence: { type: number, minimum: 0, maximum: 1 }
+        allowed_memory_kinds:
+          type: array
+          items: { type: string }
+        blocked_memory_sources:
+          type: array
+          items: { type: string }
+    OrgDataIsolationPolicy:
+      type: object
+      properties:
+        mode: { type: string, enum: [strict_org, dedicated_store, inherited] }
+        require_org_scoped_memory: { type: boolean }
+        require_org_scoped_tools: { type: boolean }
+        forbid_cross_org_retrieval: { type: boolean }
+    OrgObservabilitySettings:
+      type: object
+      properties:
+        trace_level: { type: string, enum: [minimal, standard, debug] }
+        redaction_mode: { type: string, enum: [strict, standard, disabled] }
+        replay_enabled: { type: boolean }
+        capture_prompts: { type: boolean }
+        capture_tool_payloads: { type: boolean }
+    RuntimePolicyAuditResponse:
+      type: object
+      properties:
+        entries:
+          type: array
+          items: { $ref: "#/components/schemas/RuntimePolicyAuditEntry" }
+    RuntimePolicyAuditEntry:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        org_id: { type: string }
+        settings_version: { type: integer, format: int64 }
+        changed_by: { type: string }
+        reason: { type: string }
+        policy: { $ref: "#/components/schemas/RuntimePolicy" }
+        created_at: { type: string, format: date-time }
+    MCPRuntimePolicy:
+      type: object
+      properties:
+        org_id: { type: string }
+        enabled: { type: boolean }
+        kill_switch: { type: boolean }
+        allowed_product_surfaces:
+          type: array
+          items: { type: string }
+        allowed_tools:
+          type: array
+          items: { type: string }
+        denied_tools:
+          type: array
+          items: { type: string }
+        tool_kill_switches:
+          type: object
+          additionalProperties: { type: boolean }
+        product_policies:
+          type: object
+          additionalProperties: { $ref: "#/components/schemas/MCPProductRuntimePolicy" }
+        metadata: { $ref: "#/components/schemas/MCPRuntimePolicyMetadata" }
+        settings_version: { type: integer, format: int64 }
+        updated_at: { type: string, format: date-time }
+    MCPRuntimePolicyUpdate:
+      type: object
+      properties:
+        enabled: { type: boolean }
+        kill_switch: { type: boolean }
+        allowed_product_surfaces:
+          type: array
+          items: { type: string }
+        allowed_tools:
+          type: array
+          items:
+            type: string
+            description: Exact tool name, `*`, or prefix pattern ending in `*`.
+        denied_tools:
+          type: array
+          items:
+            type: string
+            description: Exact tool name, `*`, or prefix pattern ending in `*`.
+        tool_kill_switches:
+          type: object
+          additionalProperties: { type: boolean }
+        product_policies:
+          type: object
+          additionalProperties: { $ref: "#/components/schemas/MCPProductRuntimePolicy" }
+        metadata: { $ref: "#/components/schemas/MCPRuntimePolicyMetadata" }
+    MCPProductRuntimePolicy:
+      type: object
+      properties:
+        denied: { type: boolean }
+    MCPRuntimePolicyMetadata:
+      type: object
+      properties:
+        changed_by: { type: string }
+        change_reason: { type: string }
+    RuntimeUsage:
+      type: object
+      properties:
+        org_id: { type: string }
+        period: { type: string }
+        estimated_tokens: { type: integer, format: int64 }
+        llm_calls: { type: integer, format: int64 }
+        tool_calls: { type: integer, format: int64 }
+        tool_errors: { type: integer, format: int64 }
+        monthly_token_budget: { type: integer, format: int64 }
+        monthly_tool_call_budget: { type: integer, format: int64 }
+        token_budget_remaining: { type: integer, format: int64 }
+        tool_call_budget_remaining: { type: integer, format: int64 }
+        last_run_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    RunReplay:
+      type: object
+      properties:
+        trace: { type: object, additionalProperties: true }
+        events:
+          type: array
+          items: { $ref: "#/components/schemas/ObservabilityEvent" }
+    ObservabilityEvent:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        org_id: { type: string }
+        product_surface: { type: string }
+        run_id: { type: string, format: uuid }
+        task_id: { type: string, format: uuid }
+        job_id: { type: string, format: uuid }
+        agent_id: { type: string }
+        capability_id: { type: string }
+        event_type: { type: string }
+        event_name: { type: string }
+        severity: { type: string }
+        trace_id: { type: string }
+        payload: { type: object, additionalProperties: true }
+        redacted: { type: boolean }
+        occurred_at: { type: string, format: date-time }
+    Agent:
+      type: object
+      properties:
+        org_id: { type: string }
+        product_surface: { type: string }
+        agent_id: { type: string }
+        display_name: { type: string }
+        role: { type: string }
+        profile_id: { type: string }
+        status: { type: string, enum: [active, disabled] }
+        max_autonomy: { type: string, enum: [A0, A1, A2, A3, A4, A5] }
+        allowed_tools:
+          type: array
+          items: { type: string }
+        allowed_capabilities:
+          type: array
+          items: { type: string }
+        allowed_connectors:
+          type: array
+          items: { type: string }
+        memory_scope_id: { type: string }
+        shared_memory_policy: { type: object, additionalProperties: true }
+        limits: { type: object, additionalProperties: true }
+        sla: { type: object, additionalProperties: true }
+        metadata: { type: object, additionalProperties: true }
+        version: { type: integer, format: int64 }
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    AgentHandoff:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        org_id: { type: string }
+        product_surface: { type: string }
+        task_id: { type: string }
+        from_agent_id: { type: string }
+        to_agent_id: { type: string }
+        status: { type: string, enum: [pending, accepted, rejected, completed, cancelled] }
+        reason: { type: string }
+        context: { type: object, additionalProperties: true }
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    Job:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        org_id: { type: string }
+        kind: { type: string }
+        shard_key: { type: string }
+        dedupe_key: { type: string }
+        payload: { type: object, additionalProperties: true }
+        status: { type: string, enum: [queued, running, succeeded, failed, dead_letter, cancelled] }
+        priority: { type: integer }
+        attempts: { type: integer }
+        max_attempts: { type: integer }
+        run_after: { type: string, format: date-time }
+        lease_owner: { type: string }
+        lease_until: { type: string, format: date-time }
+        locked_at: { type: string, format: date-time }
+        heartbeat_at: { type: string, format: date-time }
+        deadline_at: { type: string, format: date-time }
+        timeout_seconds: { type: integer }
+        last_error: { type: string }
+        evidence: { type: object, additionalProperties: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        completed_at: { type: string, format: date-time }
+    BusinessModel:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        org_id: { type: string }
+        product_surface: { type: string }
+        version: { type: integer }
+        status: { type: string }
+        organization:
+          type: object
+          additionalProperties: true
+        areas:
+          type: array
+          items: { type: object, additionalProperties: true }
+        roles:
+          type: array
+          items: { type: object, additionalProperties: true }
+        users:
+          type: array
+          items: { type: object, additionalProperties: true }
+        agents:
+          type: array
+          items: { type: object, additionalProperties: true }
+        workflows:
+          type: array
+          items: { type: object, additionalProperties: true }
+        processes:
+          type: array
+          items: { type: object, additionalProperties: true }
+        rules:
+          type: array
+          items: { type: object, additionalProperties: true }
+        preferences:
+          type: array
+          items: { type: object, additionalProperties: true }
+        priorities:
+          type: array
+          items: { type: object, additionalProperties: true }
+        exceptions:
+          type: array
+          items: { type: object, additionalProperties: true }
+        vocabulary:
+          type: array
+          items: { type: object, additionalProperties: true }
+        schedules:
+          type: array
+          items: { type: object, additionalProperties: true }
+        slas:
+          type: array
+          items: { type: object, additionalProperties: true }
+        tools:
+          type: array
+          items: { type: object, additionalProperties: true }
+        relationships:
+          type: array
+          items: { type: object, additionalProperties: true }
+        context:
+          type: object
+          additionalProperties: true
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }

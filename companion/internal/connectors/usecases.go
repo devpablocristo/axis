@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -12,8 +13,12 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/devpablocristo/companion/internal/capabilities"
 	"github.com/devpablocristo/companion/internal/connectors/registry"
 	domain "github.com/devpablocristo/companion/internal/connectors/usecases/domain"
+	"github.com/devpablocristo/companion/internal/productlimits"
+	"github.com/devpablocristo/companion/internal/products"
+	"github.com/devpablocristo/platform/errors/go/domainerr"
 )
 
 // Repository port de persistencia para conectores y resultados de ejecución.
@@ -68,11 +73,23 @@ type NexusChecker interface {
 	AuthorizeExecution(ctx context.Context, intent NexusExecutionIntent) (bool, error)
 }
 
+type ProductInstallationGuard interface {
+	RequireActiveInstallation(ctx context.Context, orgID, productSurface, reason string) error
+}
+
+type ProductRuntimeController interface {
+	EnforceProductConnectorExecution(ctx context.Context, orgID, productSurface string) error
+}
+
 // Usecases lógica de negocio de conectores.
 type Usecases struct {
-	repo     Repository
-	registry *registry.Registry
-	checker  NexusChecker
+	repo                     Repository
+	registry                 *registry.Registry
+	checker                  NexusChecker
+	installationGuard        ProductInstallationGuard
+	productRuntimeController ProductRuntimeController
+	rateLimiter              productlimits.Limiter
+	dynamicRegistrar         func(context.Context)
 }
 
 // NewUsecases crea una nueva instancia de Usecases.
@@ -82,6 +99,22 @@ func NewUsecases(repo Repository, reg *registry.Registry, checker NexusChecker) 
 		registry: reg,
 		checker:  checker,
 	}
+}
+
+func (uc *Usecases) SetProductInstallationGuard(guard ProductInstallationGuard) {
+	uc.installationGuard = guard
+}
+
+func (uc *Usecases) SetProductRuntimeController(controller ProductRuntimeController) {
+	uc.productRuntimeController = controller
+}
+
+func (uc *Usecases) SetRateLimiter(limiter productlimits.Limiter) {
+	uc.rateLimiter = limiter
+}
+
+func (uc *Usecases) SetDynamicConnectorRegistrar(registrar func(context.Context)) {
+	uc.dynamicRegistrar = registrar
 }
 
 // ListConnectors lista conectores registrados con su estado en DB.
@@ -141,13 +174,30 @@ func (uc *Usecases) Execute(ctx context.Context, spec domain.ExecutionSpec) (dom
 			continue
 		}
 		operationKnown = true
-		capability = cap.Normalized(conn.ID(), conn.Kind())
+		capability, err = connectorCapability(conn, cap)
+		if err != nil {
+			return domain.ExecutionResult{}, err
+		}
 		break
 	}
 	if !operationKnown {
 		return domain.ExecutionResult{}, ErrOperationUnknown
 	}
 	if err := validateExecutionContext(spec, capability); err != nil {
+		return domain.ExecutionResult{}, err
+	}
+	productSurface := productSurfaceFor(capability, spec)
+	if err := uc.requireActiveInstallation(ctx, spec.OrgID, productSurface, "connector_execution"); err != nil {
+		return domain.ExecutionResult{}, err
+	}
+	if err := uc.enforceProductRuntime(ctx, spec.OrgID, productSurface); err != nil {
+		return domain.ExecutionResult{}, err
+	}
+	if err := productlimits.Enforce(ctx, uc.rateLimiter, productlimits.Key{
+		OrgID:          spec.OrgID,
+		ProductSurface: productSurface,
+		Area:           productlimits.AreaConnectorExecution,
+	}, productlimits.DefaultLimit(productlimits.AreaConnectorExecution)); err != nil {
 		return domain.ExecutionResult{}, err
 	}
 	payloadHash, err := payloadHash(spec.Payload)
@@ -274,6 +324,26 @@ func (uc *Usecases) Execute(ctx context.Context, spec domain.ExecutionSpec) (dom
 		return domain.ExecutionResult{}, fmt.Errorf("save execution result: %w", saveErr)
 	}
 
+	logAttrs := []any{
+		"execution_id", result.ID.String(),
+		"connector_id", spec.ConnectorID.String(),
+		"connector_kind", config.Kind,
+		"operation", spec.Operation,
+		"status", string(result.Status),
+		"org_id", spec.OrgID,
+		"actor_id", spec.ActorID,
+		"product_surface", productSurface,
+		"external_ref", result.ExternalRef,
+		"duration_ms", result.DurationMS,
+	}
+	if spec.TaskID != nil {
+		logAttrs = append(logAttrs, "task_id", spec.TaskID.String())
+	}
+	if spec.NexusRequestID != nil {
+		logAttrs = append(logAttrs, "nexus_request_id", spec.NexusRequestID.String())
+	}
+	slog.InfoContext(ctx, "connector_execution_recorded", logAttrs...)
+
 	return result, nil
 }
 
@@ -295,8 +365,18 @@ func (uc *Usecases) BuildActionBinding(ctx context.Context, spec domain.Executio
 		if cap.Operation != spec.Operation {
 			continue
 		}
-		capability := cap.Normalized(conn.ID(), conn.Kind())
+		capability, err := connectorCapability(conn, cap)
+		if err != nil {
+			return nil, "", err
+		}
 		if err := validateExecutionContext(spec, capability); err != nil {
+			return nil, "", err
+		}
+		productSurface := productSurfaceFor(capability, spec)
+		if err := uc.requireActiveInstallation(ctx, spec.OrgID, productSurface, "connector_action_binding"); err != nil {
+			return nil, "", err
+		}
+		if err := uc.enforceProductRuntime(ctx, spec.OrgID, productSurface); err != nil {
 			return nil, "", err
 		}
 		payloadHash, err := payloadHash(spec.Payload)
@@ -313,6 +393,26 @@ func (uc *Usecases) BuildActionBinding(ctx context.Context, spec domain.Executio
 	return nil, "", ErrOperationUnknown
 }
 
+func (uc *Usecases) enforceProductRuntime(ctx context.Context, orgID, productSurface string) error {
+	if uc.productRuntimeController == nil {
+		return nil
+	}
+	return uc.productRuntimeController.EnforceProductConnectorExecution(ctx, orgID, productSurface)
+}
+
+func (uc *Usecases) requireActiveInstallation(ctx context.Context, orgID, productSurface, reason string) error {
+	if uc.installationGuard == nil {
+		return nil
+	}
+	if err := uc.installationGuard.RequireActiveInstallation(ctx, orgID, productSurface, reason); err != nil {
+		if errors.Is(err, products.ErrValidation) {
+			return domainerr.Validation(err.Error())
+		}
+		return fmt.Errorf("%w: %v", ErrForbidden, err)
+	}
+	return nil
+}
+
 // ListExecutions lista resultados de ejecución de un conector.
 func (uc *Usecases) ListExecutions(ctx context.Context, connectorID uuid.UUID, limit int) ([]domain.ExecutionResult, error) {
 	if limit <= 0 {
@@ -325,6 +425,9 @@ func (uc *Usecases) ListExecutions(ctx context.Context, connectorID uuid.UUID, l
 // implementan registry.Refresher). Connectors estáticos se ignoran. Los
 // errores individuales viajan en cada item — el caller decide si reportar.
 func (uc *Usecases) RefreshConnectors(ctx context.Context) []registry.RefreshResult {
+	if uc.dynamicRegistrar != nil {
+		uc.dynamicRegistrar(ctx)
+	}
 	return uc.registry.Refresh(ctx)
 }
 
@@ -334,7 +437,11 @@ func (uc *Usecases) Capabilities(filter domain.CapabilityFilter) []ConnectorCapa
 	for _, c := range uc.registry.List() {
 		caps := make([]domain.Capability, 0, len(c.Capabilities()))
 		for _, cap := range c.Capabilities() {
-			manifest := cap.Normalized(c.ID(), c.Kind())
+			manifest, err := connectorCapability(c, cap)
+			if err != nil {
+				slog.Error("invalid connector capability manifest", "connector", c.ID(), "operation", cap.Operation, "error", err)
+				continue
+			}
 			if !manifest.MatchesFilter(filter) {
 				continue
 			}
@@ -352,11 +459,42 @@ func (uc *Usecases) Capabilities(filter domain.CapabilityFilter) []ConnectorCapa
 	return out
 }
 
+// CapabilityManifests devuelve el catálogo canónico versionado de capabilities
+// compilado desde todos los connector manifests disponibles.
+func (uc *Usecases) CapabilityManifests(filter domain.CapabilityFilter) ([]capabilities.Manifest, error) {
+	manifests := make([]capabilities.Manifest, 0)
+	for _, c := range uc.registry.List() {
+		for _, cap := range c.Capabilities() {
+			manifest, err := capabilities.FromConnectorCapability(c.ID(), c.Kind(), cap)
+			if err != nil {
+				return nil, err
+			}
+			if !manifest.ToConnectorCapability().MatchesFilter(filter) {
+				continue
+			}
+			manifests = append(manifests, manifest)
+		}
+	}
+	reg, err := capabilities.NewRegistry(manifests)
+	if err != nil {
+		return nil, err
+	}
+	return reg.All(), nil
+}
+
 // ConnectorCapabilities agrupa capacidades por conector.
 type ConnectorCapabilities struct {
 	ID           string
 	Kind         string
 	Capabilities []domain.Capability
+}
+
+func connectorCapability(conn registry.Connector, cap domain.Capability) (domain.Capability, error) {
+	manifest, err := capabilities.FromConnectorCapability(conn.ID(), conn.Kind(), cap)
+	if err != nil {
+		return domain.Capability{}, fmt.Errorf("capability manifest %s.%s: %w", conn.ID(), cap.Operation, err)
+	}
+	return manifest.ToConnectorCapability().Normalized(conn.ID(), conn.Kind()), nil
 }
 
 // NexusCheckerAdapter adapta el nexusclient para verificar aprobaciones.
@@ -393,7 +531,7 @@ func (uc *Usecases) SeedDefaultConnectors(ctx context.Context) error {
 			slog.Error("seed connector marshal capabilities", "kind", conn.Kind(), "error", mErr)
 			capsJSON = []byte(`[]`)
 		}
-		// Final boundary: connector rows are tenant-owned credentials/config.
+		// Final boundary: connector rows are customer-org-owned credentials/config.
 		// Static registry entries publish capability schemas only; they must not
 		// create org_id='' rows that later act as global execution wildcard.
 		slog.InfoContext(ctx, "registered connector capability template", "kind", conn.Kind(), "capabilities", string(capsJSON))
@@ -541,21 +679,31 @@ func actionBindingHash(binding map[string]any) (string, error) {
 
 func buildActionBinding(config domain.Connector, capability domain.Capability, spec domain.ExecutionSpec, payloadHash string) map[string]any {
 	binding := map[string]any{
-		"schema_version":     toolIntentSchemaVersion,
-		"org_id":             strings.TrimSpace(spec.OrgID),
-		"actor_id":           strings.TrimSpace(spec.ActorID),
-		"actor_type":         "agent",
-		"product_surface":    productSurfaceFor(capability, spec),
-		"run_id":             runIDFor(spec),
-		"tool_invocation_id": toolInvocationIDFor(capability, spec),
-		"connector_id":       spec.ConnectorID.String(),
-		"capability_id":      capability.ID,
-		"operation":          spec.Operation,
-		"target_system":      config.Kind,
-		"target_resource":    config.ID.String(),
-		"payload_hash":       payloadHash,
-		"idempotency_key":    strings.TrimSpace(spec.IdempotencyKey),
-		"risk_hint":          capability.RiskClass,
+		"schema_version":      toolIntentSchemaVersion,
+		"org_id":              strings.TrimSpace(spec.OrgID),
+		"actor_id":            strings.TrimSpace(spec.ActorID),
+		"actor_type":          firstNonEmpty(spec.ActorType, "agent"),
+		"companion_principal": firstNonEmpty(spec.CompanionPrincipal, "companion.employee_ai"),
+		"on_behalf_of":        strings.TrimSpace(spec.OnBehalfOf),
+		"service_principal":   spec.ServicePrincipal,
+		"product_surface":     productSurfaceFor(capability, spec),
+		"run_id":              runIDFor(spec),
+		"tool_invocation_id":  toolInvocationIDFor(capability, spec),
+		"connector_id":        spec.ConnectorID.String(),
+		"capability_id":       capability.ID,
+		"capability_version":  capability.Version,
+		"operation":           spec.Operation,
+		"action_type":         capability.ActionType,
+		"target_system":       config.Kind,
+		"target_resource":     config.ID.String(),
+		"payload_hash":        payloadHash,
+		"idempotency_key":     strings.TrimSpace(spec.IdempotencyKey),
+		"risk_hint":           capability.RiskClass,
+		"side_effect_type":    capability.SideEffectType,
+		"nexus_action_type":   capability.NexusActionType,
+		"cost_class":          capability.CostClass,
+		"rate_limit_class":    capability.RateLimitClass,
+		"observability_tags":  append([]string(nil), capability.ObservabilityTags...),
 	}
 	if spec.TaskID != nil {
 		binding["task_id"] = spec.TaskID.String()
@@ -590,6 +738,15 @@ func productSurfaceFor(capability domain.Capability, spec domain.ExecutionSpec) 
 	return "companion"
 }
 
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
 func executionLockKey(spec domain.ExecutionSpec) string {
 	if spec.TaskID == nil || strings.TrimSpace(spec.IdempotencyKey) == "" {
 		return ""
@@ -603,28 +760,32 @@ func executionLockKey(spec domain.ExecutionSpec) string {
 
 func buildExecutionEvidence(config domain.Connector, capability domain.Capability, spec domain.ExecutionSpec, result domain.ExecutionResult) json.RawMessage {
 	evidence := map[string]any{
-		"actor_id":           strings.TrimSpace(spec.ActorID),
-		"org_id":             strings.TrimSpace(spec.OrgID),
-		"connector_id":       spec.ConnectorID.String(),
-		"connector_kind":     config.Kind,
-		"capability_id":      capability.ID,
-		"capability_version": capability.Version,
-		"operation":          spec.Operation,
-		"mode":               capability.Mode,
-		"side_effect_class":  capability.SideEffectClass,
-		"side_effect":        capability.HasSideEffect(),
-		"risk_class":         capability.RiskClass,
-		"payload":            sanitizeJSONPayload(spec.Payload),
-		"result":             sanitizeJSONPayload(result.ResultJSON),
-		"external_ref":       result.ExternalRef,
-		"status":             result.Status,
-		"error_message":      result.ErrorMessage,
-		"duration_ms":        result.DurationMS,
-		"idempotency_key":    spec.IdempotencyKey,
-		"action_binding":     buildActionBinding(config, capability, spec, mustPayloadHash(spec.Payload)),
-		"created_at":         result.CreatedAt.UTC().Format(time.RFC3339Nano),
-		"verification":       "unsigned",
-		"attestation_ready":  true,
+		"actor_id":            strings.TrimSpace(spec.ActorID),
+		"actor_type":          firstNonEmpty(spec.ActorType, "agent"),
+		"companion_principal": firstNonEmpty(spec.CompanionPrincipal, "companion.employee_ai"),
+		"on_behalf_of":        strings.TrimSpace(spec.OnBehalfOf),
+		"service_principal":   spec.ServicePrincipal,
+		"org_id":              strings.TrimSpace(spec.OrgID),
+		"connector_id":        spec.ConnectorID.String(),
+		"connector_kind":      config.Kind,
+		"capability_id":       capability.ID,
+		"capability_version":  capability.Version,
+		"operation":           spec.Operation,
+		"mode":                capability.Mode,
+		"side_effect_class":   capability.SideEffectClass,
+		"side_effect":         capability.HasSideEffect(),
+		"risk_class":          capability.RiskClass,
+		"payload":             sanitizeJSONPayload(spec.Payload),
+		"result":              sanitizeJSONPayload(result.ResultJSON),
+		"external_ref":        result.ExternalRef,
+		"status":              result.Status,
+		"error_message":       result.ErrorMessage,
+		"duration_ms":         result.DurationMS,
+		"idempotency_key":     spec.IdempotencyKey,
+		"action_binding":      buildActionBinding(config, capability, spec, mustPayloadHash(spec.Payload)),
+		"created_at":          result.CreatedAt.UTC().Format(time.RFC3339Nano),
+		"verification":        "unsigned",
+		"attestation_ready":   true,
 	}
 	if spec.TaskID != nil {
 		evidence["task_id"] = spec.TaskID.String()

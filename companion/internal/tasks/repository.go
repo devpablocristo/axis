@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/devpablocristo/platform/errors/go/domainerr"
+	"github.com/devpablocristo/platform/security/go/tenant"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
@@ -21,10 +22,16 @@ var ErrNotFound = domainerr.NotFound("not found")
 type Repository interface {
 	CreateTask(ctx context.Context, t domain.Task) (domain.Task, error)
 	GetTaskByID(ctx context.Context, id uuid.UUID) (domain.Task, error)
-	// ListTasks devuelve tareas. Si orgID es no-vacío, filtra a nivel SQL
-	// por (org_id = orgID OR org_id IS NULL OR org_id = '') para preservar
-	// aislamiento multi-tenant. Si orgID es vacío, devuelve todas las tareas.
-	ListTasks(ctx context.Context, orgID string, limit int) ([]domain.Task, error)
+	GetTaskByAgentConversationID(ctx context.Context, conversationID uuid.UUID) (domain.Task, error)
+	// ListTasks devuelve tareas filtradas por tenant. `orgID` es obligatorio:
+	// si está vacío, retorna `domainerr.TenantMissing()` sin tocar la DB.
+	// Cerrá el leak histórico donde `orgID == ""` devolvía todas las filas
+	// de TODOS los tenants.
+	ListTasks(ctx context.Context, orgID tenant.ID, limit int) ([]domain.Task, error)
+	// ListAllTasks devuelve tareas SIN filtrar por tenant. SOLO para flows
+	// admin/audit con scope `companion:cross_org` o requests sin auth context
+	// (dev/healthcheck). El handler debe validar el caller antes de invocar.
+	ListAllTasks(ctx context.Context, limit int) ([]domain.Task, error)
 	UpdateTask(ctx context.Context, t domain.Task) (domain.Task, error)
 	ListTasksByStatus(ctx context.Context, status string, limit int) ([]domain.Task, error)
 	ListTasksPendingNexusSync(ctx context.Context, now time.Time, limit int) ([]domain.Task, error)
@@ -33,6 +40,10 @@ type Repository interface {
 	UpsertNexusSyncState(ctx context.Context, s domain.TaskNexusSyncState) (domain.TaskNexusSyncState, error)
 	GetExecutionPlan(ctx context.Context, taskID uuid.UUID) (domain.TaskExecutionPlan, error)
 	UpsertExecutionPlan(ctx context.Context, plan domain.TaskExecutionPlan) (domain.TaskExecutionPlan, error)
+	GetTaskPlan(ctx context.Context, taskID uuid.UUID) (domain.TaskPlan, error)
+	UpsertTaskPlan(ctx context.Context, plan domain.TaskPlan) (domain.TaskPlan, error)
+	UpdateTaskPlan(ctx context.Context, plan domain.TaskPlan) (domain.TaskPlan, error)
+	UpdateTaskPlanStep(ctx context.Context, step domain.TaskPlanStep) (domain.TaskPlanStep, error)
 	GetExecutionState(ctx context.Context, taskID uuid.UUID) (domain.TaskExecutionState, error)
 	UpsertExecutionState(ctx context.Context, state domain.TaskExecutionState) (domain.TaskExecutionState, error)
 
@@ -102,25 +113,59 @@ func (r *PostgresRepository) GetTaskByID(ctx context.Context, id uuid.UUID) (dom
 	return t, nil
 }
 
-func (r *PostgresRepository) ListTasks(ctx context.Context, orgID string, limit int) ([]domain.Task, error) {
+func (r *PostgresRepository) GetTaskByAgentConversationID(ctx context.Context, conversationID uuid.UUID) (domain.Task, error) {
+	row := r.db.Pool().QueryRow(ctx, selectTask+`
+		WHERE t.context_json ->> 'agent_conversation_id' = $1
+		ORDER BY t.updated_at DESC
+		LIMIT 1
+	`, conversationID.String())
+	t, err := scanTask(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.Task{}, ErrNotFound
+		}
+		return domain.Task{}, fmt.Errorf("get task by agent conversation id: %w", err)
+	}
+	return t, nil
+}
+
+func (r *PostgresRepository) ListTasks(ctx context.Context, orgID tenant.ID, limit int) ([]domain.Task, error) {
+	if orgID.IsZero() {
+		return nil, domainerr.TenantMissing()
+	}
 	if limit <= 0 {
 		limit = 50
 	}
-	var (
-		rows pgx.Rows
-		err  error
-	)
-	if orgID != "" {
-		rows, err = r.db.Pool().Query(ctx,
-			selectTask+` WHERE t.org_id = $1
-				ORDER BY t.updated_at DESC LIMIT $2`,
-			orgID, limit)
-	} else {
-		rows, err = r.db.Pool().Query(ctx,
-			selectTask+` ORDER BY t.updated_at DESC LIMIT $1`, limit)
-	}
+	rows, err := r.db.Pool().Query(ctx,
+		selectTask+` WHERE t.org_id = $1
+			ORDER BY t.updated_at DESC LIMIT $2`,
+		orgID.String(), limit)
 	if err != nil {
 		return nil, fmt.Errorf("list tasks: %w", err)
+	}
+	defer rows.Close()
+	var out []domain.Task
+	for rows.Next() {
+		t, err := scanTask(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// ListAllTasks ejecuta el SELECT sin filtro de tenant. Caller responsibility:
+// confirmar via scope/auth context que la llamada está autorizada para acceder
+// cross-org. Ver handler.list para el routing.
+func (r *PostgresRepository) ListAllTasks(ctx context.Context, limit int) ([]domain.Task, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := r.db.Pool().Query(ctx,
+		selectTask+` ORDER BY t.updated_at DESC LIMIT $1`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list all tasks: %w", err)
 	}
 	defer rows.Close()
 	var out []domain.Task
@@ -300,6 +345,255 @@ func (r *PostgresRepository) UpsertExecutionPlan(ctx context.Context, plan domai
 		return domain.TaskExecutionPlan{}, fmt.Errorf("upsert execution plan: %w", err)
 	}
 	return plan, nil
+}
+
+func (r *PostgresRepository) GetTaskPlan(ctx context.Context, taskID uuid.UUID) (domain.TaskPlan, error) {
+	row := r.db.Pool().QueryRow(ctx, `
+		SELECT task_id, org_id, objective, status, strategy, assumptions_json, constraints_json,
+		       checkpoint_json, next_action, blocker, created_by, created_at, updated_at, completed_at
+		FROM companion_task_plans
+		WHERE task_id = $1
+	`, taskID)
+	plan, err := scanTaskPlan(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.TaskPlan{}, ErrNotFound
+		}
+		return domain.TaskPlan{}, fmt.Errorf("get task plan: %w", err)
+	}
+	steps, err := r.listTaskPlanSteps(ctx, taskID)
+	if err != nil {
+		return domain.TaskPlan{}, err
+	}
+	plan.Steps = steps
+	return plan, nil
+}
+
+func (r *PostgresRepository) UpsertTaskPlan(ctx context.Context, plan domain.TaskPlan) (domain.TaskPlan, error) {
+	now := time.Now().UTC()
+	normalizeTaskPlanJSON(&plan)
+	if plan.CreatedAt.IsZero() {
+		plan.CreatedAt = now
+	}
+	plan.UpdatedAt = now
+	tx, err := r.db.Pool().Begin(ctx)
+	if err != nil {
+		return domain.TaskPlan{}, fmt.Errorf("begin upsert task plan: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	_, err = tx.Exec(ctx, `
+		INSERT INTO companion_task_plans (
+			task_id, org_id, objective, status, strategy, assumptions_json, constraints_json,
+			checkpoint_json, next_action, blocker, created_by, created_at, updated_at, completed_at
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+		ON CONFLICT (task_id) DO UPDATE SET
+			org_id = EXCLUDED.org_id,
+			objective = EXCLUDED.objective,
+			status = EXCLUDED.status,
+			strategy = EXCLUDED.strategy,
+			assumptions_json = EXCLUDED.assumptions_json,
+			constraints_json = EXCLUDED.constraints_json,
+			checkpoint_json = EXCLUDED.checkpoint_json,
+			next_action = EXCLUDED.next_action,
+			blocker = EXCLUDED.blocker,
+			created_by = EXCLUDED.created_by,
+			updated_at = EXCLUDED.updated_at,
+			completed_at = EXCLUDED.completed_at
+	`, plan.TaskID, plan.OrgID, plan.Objective, plan.Status, plan.Strategy,
+		plan.AssumptionsJSON, plan.ConstraintsJSON, plan.CheckpointJSON,
+		plan.NextAction, plan.Blocker, plan.CreatedBy, plan.CreatedAt, plan.UpdatedAt, plan.CompletedAt)
+	if err != nil {
+		return domain.TaskPlan{}, fmt.Errorf("upsert task plan: %w", err)
+	}
+	if err := r.insertTaskGraphEventTx(ctx, tx, plan.OrgID, plan.TaskID, uuid.Nil, "plan_upserted", plan.Status, "", "", json.RawMessage(plan.CheckpointJSON)); err != nil {
+		return domain.TaskPlan{}, err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM companion_task_plan_steps WHERE task_id = $1`, plan.TaskID); err != nil {
+		return domain.TaskPlan{}, fmt.Errorf("replace task plan steps: %w", err)
+	}
+	for i := range plan.Steps {
+		step := plan.Steps[i]
+		normalizeTaskPlanStepJSON(&step)
+		if step.ID == uuid.Nil {
+			step.ID = uuid.New()
+		}
+		if step.CreatedAt.IsZero() {
+			step.CreatedAt = now
+		}
+		step.UpdatedAt = now
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO companion_task_plan_steps (
+				id, task_id, org_id, step_key, title, status, depends_on_json,
+				tool_name, capability, expected_outcome, postcondition,
+				evidence_json, observation, blocker, error_message,
+				attempt_count, sort_order, created_at, updated_at, completed_at
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+		`, step.ID, plan.TaskID, plan.OrgID, step.StepKey, step.Title, step.Status,
+			step.DependsOnJSON, step.ToolName, step.Capability, step.ExpectedOutcome,
+			step.Postcondition, step.EvidenceJSON, step.Observation, step.Blocker,
+			step.ErrorMessage, step.AttemptCount, step.SortOrder, step.CreatedAt, step.UpdatedAt, step.CompletedAt); err != nil {
+			return domain.TaskPlan{}, fmt.Errorf("insert task plan step: %w", err)
+		}
+		if err := r.insertTaskGraphEventTx(ctx, tx, plan.OrgID, plan.TaskID, step.ID, "step_planned", step.Status, step.Capability, "", json.RawMessage(step.EvidenceJSON)); err != nil {
+			return domain.TaskPlan{}, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return domain.TaskPlan{}, fmt.Errorf("commit upsert task plan: %w", err)
+	}
+	return r.GetTaskPlan(ctx, plan.TaskID)
+}
+
+func (r *PostgresRepository) UpdateTaskPlan(ctx context.Context, plan domain.TaskPlan) (domain.TaskPlan, error) {
+	normalizeTaskPlanJSON(&plan)
+	plan.UpdatedAt = time.Now().UTC()
+	tag, err := r.db.Pool().Exec(ctx, `
+		UPDATE companion_task_plans SET
+			objective = $2,
+			status = $3,
+			strategy = $4,
+			assumptions_json = $5,
+			constraints_json = $6,
+			checkpoint_json = $7,
+			next_action = $8,
+			blocker = $9,
+			updated_at = $10,
+			completed_at = $11
+		WHERE task_id = $1
+	`, plan.TaskID, plan.Objective, plan.Status, plan.Strategy,
+		plan.AssumptionsJSON, plan.ConstraintsJSON, plan.CheckpointJSON,
+		plan.NextAction, plan.Blocker, plan.UpdatedAt, plan.CompletedAt)
+	if err != nil {
+		return domain.TaskPlan{}, fmt.Errorf("update task plan: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.TaskPlan{}, ErrNotFound
+	}
+	return r.GetTaskPlan(ctx, plan.TaskID)
+}
+
+func (r *PostgresRepository) UpdateTaskPlanStep(ctx context.Context, step domain.TaskPlanStep) (domain.TaskPlanStep, error) {
+	normalizeTaskPlanStepJSON(&step)
+	step.UpdatedAt = time.Now().UTC()
+	tag, err := r.db.Pool().Exec(ctx, `
+		UPDATE companion_task_plan_steps SET
+			status = $3,
+			depends_on_json = $4,
+			tool_name = $5,
+			capability = $6,
+			expected_outcome = $7,
+			postcondition = $8,
+			evidence_json = $9,
+			observation = $10,
+			blocker = $11,
+			error_message = $12,
+			attempt_count = $13,
+			sort_order = $14,
+			updated_at = $15,
+			completed_at = $16
+		WHERE task_id = $1 AND id = $2
+	`, step.TaskID, step.ID, step.Status, step.DependsOnJSON, step.ToolName,
+		step.Capability, step.ExpectedOutcome, step.Postcondition, step.EvidenceJSON,
+		step.Observation, step.Blocker, step.ErrorMessage, step.AttemptCount,
+		step.SortOrder, step.UpdatedAt, step.CompletedAt)
+	if err != nil {
+		return domain.TaskPlanStep{}, fmt.Errorf("update task plan step: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.TaskPlanStep{}, ErrNotFound
+	}
+	if err := r.insertTaskGraphEvent(ctx, step.OrgID, step.TaskID, step.ID, "step_updated", step.Status, step.Capability, "", json.RawMessage(step.EvidenceJSON)); err != nil {
+		return domain.TaskPlanStep{}, err
+	}
+	return step, nil
+}
+
+func (r *PostgresRepository) insertTaskGraphEvent(ctx context.Context, orgID string, taskID, stepID uuid.UUID, eventType, status, capabilityID, capabilityVersion string, payload json.RawMessage) error {
+	_, err := r.db.Pool().Exec(ctx, `
+		INSERT INTO companion_task_execution_graph_events
+			(org_id, task_id, step_id, event_type, status, capability_id, capability_version, payload_json)
+		VALUES ($1,$2,NULLIF($3, '00000000-0000-0000-0000-000000000000'::uuid),$4,$5,$6,$7,$8)
+	`, orgID, taskID, stepID, eventType, status, capabilityID, capabilityVersion, jsonOrDefault(payload, `{}`))
+	if err != nil {
+		return fmt.Errorf("insert task execution graph event: %w", err)
+	}
+	return nil
+}
+
+func (r *PostgresRepository) insertTaskGraphEventTx(ctx context.Context, tx pgx.Tx, orgID string, taskID, stepID uuid.UUID, eventType, status, capabilityID, capabilityVersion string, payload json.RawMessage) error {
+	_, err := tx.Exec(ctx, `
+		INSERT INTO companion_task_execution_graph_events
+			(org_id, task_id, step_id, event_type, status, capability_id, capability_version, payload_json)
+		VALUES ($1,$2,NULLIF($3, '00000000-0000-0000-0000-000000000000'::uuid),$4,$5,$6,$7,$8)
+	`, orgID, taskID, stepID, eventType, status, capabilityID, capabilityVersion, jsonOrDefault(payload, `{}`))
+	if err != nil {
+		return fmt.Errorf("insert task execution graph event: %w", err)
+	}
+	return nil
+}
+
+func (r *PostgresRepository) listTaskPlanSteps(ctx context.Context, taskID uuid.UUID) ([]domain.TaskPlanStep, error) {
+	rows, err := r.db.Pool().Query(ctx, `
+		SELECT id, task_id, org_id, step_key, title, status, depends_on_json,
+		       tool_name, capability, expected_outcome, postcondition,
+		       evidence_json, observation, blocker, error_message,
+		       attempt_count, sort_order, created_at, updated_at, completed_at
+		FROM companion_task_plan_steps
+		WHERE task_id = $1
+		ORDER BY sort_order ASC, created_at ASC
+	`, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("list task plan steps: %w", err)
+	}
+	defer rows.Close()
+	var out []domain.TaskPlanStep
+	for rows.Next() {
+		step, err := scanTaskPlanStep(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, step)
+	}
+	return out, rows.Err()
+}
+
+func (r *PostgresRepository) ListTaskExecutionGraph(ctx context.Context, taskID uuid.UUID, limit int) ([]domain.TaskExecutionGraphEvent, error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 200
+	}
+	rows, err := r.db.Pool().Query(ctx, `
+		SELECT id, org_id, task_id, step_id, event_type, status, agent_id,
+		       capability_id, capability_version, job_id, nexus_decision_id,
+		       payload_json, created_at
+		FROM companion_task_execution_graph_events
+		WHERE task_id = $1
+		ORDER BY created_at ASC
+		LIMIT $2
+	`, taskID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list task execution graph: %w", err)
+	}
+	defer rows.Close()
+	out := make([]domain.TaskExecutionGraphEvent, 0)
+	for rows.Next() {
+		var (
+			event domain.TaskExecutionGraphEvent
+			raw   []byte
+		)
+		if err := rows.Scan(&event.ID, &event.OrgID, &event.TaskID, &event.StepID,
+			&event.EventType, &event.Status, &event.AgentID, &event.CapabilityID,
+			&event.CapabilityVersion, &event.JobID, &event.NexusDecisionID,
+			&raw, &event.CreatedAt); err != nil {
+			return nil, err
+		}
+		event.PayloadJSON = json.RawMessage(raw)
+		if len(event.PayloadJSON) == 0 {
+			event.PayloadJSON = json.RawMessage(`{}`)
+		}
+		out = append(out, event)
+	}
+	return out, rows.Err()
 }
 
 func (r *PostgresRepository) GetExecutionState(ctx context.Context, taskID uuid.UUID) (domain.TaskExecutionState, error) {
@@ -587,6 +881,94 @@ func scanExecutionPlan(row rowScanner) (domain.TaskExecutionPlan, error) {
 		plan.Payload = json.RawMessage(payloadRaw)
 	}
 	return plan, nil
+}
+
+func scanTaskPlan(row rowScanner) (domain.TaskPlan, error) {
+	var plan domain.TaskPlan
+	var assumptionsRaw, constraintsRaw, checkpointRaw []byte
+	var completedAt *time.Time
+	err := row.Scan(
+		&plan.TaskID,
+		&plan.OrgID,
+		&plan.Objective,
+		&plan.Status,
+		&plan.Strategy,
+		&assumptionsRaw,
+		&constraintsRaw,
+		&checkpointRaw,
+		&plan.NextAction,
+		&plan.Blocker,
+		&plan.CreatedBy,
+		&plan.CreatedAt,
+		&plan.UpdatedAt,
+		&completedAt,
+	)
+	if err != nil {
+		return domain.TaskPlan{}, err
+	}
+	plan.AssumptionsJSON = json.RawMessage(assumptionsRaw)
+	plan.ConstraintsJSON = json.RawMessage(constraintsRaw)
+	plan.CheckpointJSON = json.RawMessage(checkpointRaw)
+	plan.CompletedAt = completedAt
+	normalizeTaskPlanJSON(&plan)
+	return plan, nil
+}
+
+func scanTaskPlanStep(row rowScanner) (domain.TaskPlanStep, error) {
+	var step domain.TaskPlanStep
+	var dependsRaw, evidenceRaw []byte
+	var completedAt *time.Time
+	err := row.Scan(
+		&step.ID,
+		&step.TaskID,
+		&step.OrgID,
+		&step.StepKey,
+		&step.Title,
+		&step.Status,
+		&dependsRaw,
+		&step.ToolName,
+		&step.Capability,
+		&step.ExpectedOutcome,
+		&step.Postcondition,
+		&evidenceRaw,
+		&step.Observation,
+		&step.Blocker,
+		&step.ErrorMessage,
+		&step.AttemptCount,
+		&step.SortOrder,
+		&step.CreatedAt,
+		&step.UpdatedAt,
+		&completedAt,
+	)
+	if err != nil {
+		return domain.TaskPlanStep{}, err
+	}
+	step.DependsOnJSON = json.RawMessage(dependsRaw)
+	step.EvidenceJSON = json.RawMessage(evidenceRaw)
+	step.CompletedAt = completedAt
+	normalizeTaskPlanStepJSON(&step)
+	return step, nil
+}
+
+func normalizeTaskPlanJSON(plan *domain.TaskPlan) {
+	if len(plan.AssumptionsJSON) == 0 {
+		plan.AssumptionsJSON = json.RawMessage(`[]`)
+	}
+	if len(plan.ConstraintsJSON) == 0 {
+		plan.ConstraintsJSON = json.RawMessage(`[]`)
+	}
+	if len(plan.CheckpointJSON) == 0 {
+		plan.CheckpointJSON = json.RawMessage(`{}`)
+	}
+}
+
+func normalizeTaskPlanStepJSON(step *domain.TaskPlanStep) {
+	if len(step.DependsOnJSON) == 0 {
+		step.DependsOnJSON = json.RawMessage(`[]`)
+	}
+	if len(step.EvidenceJSON) == 0 {
+		step.EvidenceJSON = json.RawMessage(`{}`)
+	}
 }
 
 func scanExecutionState(row rowScanner) (domain.TaskExecutionState, error) {

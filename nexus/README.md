@@ -40,10 +40,16 @@ make qa-nexus
 make dev-nexus
 make smoke-nexus
 make e2e-nexus
+make e2e-nexus-policy-promotion
 docker compose up -d --build nexus-postgres nexus
 ```
 
 URL por defecto: `http://localhost:18084`.
+
+Para validar promociones gobernadas con Separation of Duties, el entorno local
+expone `NEXUS_ADMIN_A_API_KEY` y `NEXUS_ADMIN_B_API_KEY` como dos actores admin
+distintos dentro de la misma org. El self-approval esperado devuelve `409` y el
+happy path completo se cubre con `make e2e-nexus-policy-promotion`.
 
 ## Documentación
 

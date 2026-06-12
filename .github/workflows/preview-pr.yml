@@ -1,0 +1,62 @@
+name: Preview PR
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, reopened, synchronize, ready_for_review, closed]
+
+permissions:
+  contents: read
+  pull-requests: read
+  id-token: write
+
+jobs:
+  changes:
+    name: Detect preview eligibility
+    runs-on: ubuntu-latest
+    if: github.event.action != 'closed'
+    outputs:
+      should_deploy: ${{ steps.resolve.outputs.should_deploy }}
+    steps:
+      - uses: actions/checkout@v6
+      - id: filter
+        uses: dorny/paths-filter@v4.0.1
+        with:
+          filters: |
+            axis:
+              - 'bff/**'
+              - 'companion/**'
+              - 'console/**'
+              - 'nexus/**'
+              - 'Dockerfile.*'
+              - 'console.nginx.conf.template'
+              - '.github/workflows/**'
+      - id: resolve
+        env:
+          SAME_REPO: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+          IS_DRAFT: ${{ github.event.pull_request.draft }}
+          AXIS_CHANGED: ${{ steps.filter.outputs.axis }}
+        run: |
+          should_deploy=false
+          if [[ "$SAME_REPO" == "true" && "$IS_DRAFT" != "true" && "$AXIS_CHANGED" == "true" ]]; then
+            should_deploy=true
+          fi
+          echo "should_deploy=$should_deploy" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    name: Deploy PR preview
+    needs: changes
+    if: needs.changes.outputs.should_deploy == 'true'
+    uses: ./.github/workflows/preview-deploy.yml
+    with:
+      pr_number: ${{ github.event.pull_request.number }}
+      ref: ${{ github.event.pull_request.head.sha }}
+    secrets: inherit
+
+  cleanup:
+    name: Cleanup PR preview
+    if: github.event.action == 'closed' && github.event.pull_request.head.repo.full_name == github.repository
+    uses: ./.github/workflows/preview-cleanup.yml
+    with:
+      pr_number: ${{ github.event.pull_request.number }}
+    secrets: inherit

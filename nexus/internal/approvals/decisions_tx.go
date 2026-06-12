@@ -76,6 +76,9 @@ func (l *pgDecisionLock) PersistPartial(ctx context.Context, a approvaldomain.Ap
 	if err := updateApprovalInTx(ctx, l.tx, a); err != nil {
 		return err
 	}
+	if err := updateApprovalPlanInTx(ctx, l.tx, a); err != nil {
+		return err
+	}
 	if err := l.tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit partial decision: %w", err)
 	}
@@ -90,6 +93,9 @@ func (l *pgDecisionLock) PersistFinal(ctx context.Context, a approvaldomain.Appr
 	if err := updateApprovalInTx(ctx, l.tx, a); err != nil {
 		return err
 	}
+	if err := updateApprovalPlanInTx(ctx, l.tx, a); err != nil {
+		return err
+	}
 	if err := updateRequestInTx(ctx, l.tx, r); err != nil {
 		return err
 	}
@@ -97,6 +103,21 @@ func (l *pgDecisionLock) PersistFinal(ctx context.Context, a approvaldomain.Appr
 		return fmt.Errorf("commit final decision: %w", err)
 	}
 	l.finished = true
+	return nil
+}
+
+func updateApprovalPlanInTx(ctx context.Context, tx pgx.Tx, a approvaldomain.Approval) error {
+	status := "active"
+	if a.Status != approvaldomain.ApprovalStatusPending {
+		status = "completed"
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE approval_plans
+		SET status = $2, updated_at = now()
+		WHERE approval_id = $1
+	`, a.ID, status); err != nil {
+		return fmt.Errorf("update approval plan in tx: %w", err)
+	}
 	return nil
 }
 

@@ -23,6 +23,7 @@ var (
 	ErrAlreadyDecided = domainerr.Conflict("approver already decided on this approval")
 	ErrExpired        = domainerr.Conflict("approval is expired")
 	ErrActorRequired  = domainerr.Conflict("approval actor is required")
+	ErrSeparationDuty = domainerr.Conflict("approver cannot approve their own request")
 )
 
 // Repository define el port de persistencia para approvals.
@@ -66,6 +67,30 @@ func (r *PostgresRepository) Create(ctx context.Context, a approvaldomain.Approv
 	`, a.ID, a.OrgID, a.RequestID, a.Status, a.DecidedBy, a.DecisionNote, a.DecidedAt, a.ExpiresAt, a.CreatedAt, a.BreakGlass, a.RequiredApprovals, decisionsJSON)
 	if err != nil {
 		return approvaldomain.Approval{}, fmt.Errorf("insert approval: %w", err)
+	}
+	if a.RequiredApprovals <= 0 {
+		a.RequiredApprovals = 1
+	}
+	_, err = r.db.Pool().Exec(ctx, `
+		INSERT INTO approval_plans
+			(approval_id, org_id, request_id, status, required_approvals, separation_of_duties, stages, constraints, created_at, updated_at)
+		VALUES ($1,$2,$3,'active',$4,true,$5,$6,$7,$7)
+		ON CONFLICT (approval_id) DO NOTHING
+	`, a.ID, a.OrgID, a.RequestID, a.RequiredApprovals,
+		`[{"name":"default","required_approvals":`+fmt.Sprint(a.RequiredApprovals)+`}]`,
+		`{"separation_of_duties":true}`, a.CreatedAt)
+	if err != nil {
+		return approvaldomain.Approval{}, fmt.Errorf("insert approval plan: %w", err)
+	}
+	if a.BreakGlass {
+		_, err = r.db.Pool().Exec(ctx, `
+			INSERT INTO break_glass_reviews (approval_id, org_id, request_id, status, justification)
+			VALUES ($1,$2,$3,'pending',$4)
+			ON CONFLICT DO NOTHING
+		`, a.ID, a.OrgID, a.RequestID, a.DecisionNote)
+		if err != nil {
+			return approvaldomain.Approval{}, fmt.Errorf("insert break-glass review: %w", err)
+		}
 	}
 	return a, nil
 }

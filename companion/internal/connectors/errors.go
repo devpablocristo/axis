@@ -3,6 +3,7 @@ package connectors
 import (
 	"errors"
 
+	"github.com/devpablocristo/companion/internal/productlimits"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
 )
 
@@ -33,6 +34,14 @@ func IsInvalidPayload(err error) bool {
 
 func IsForbidden(err error) bool {
 	return domainerr.IsForbidden(err)
+}
+
+func IsValidation(err error) bool {
+	return domainerr.IsValidation(err)
+}
+
+func IsRateLimited(err error) bool {
+	return productlimits.IsRateLimited(err)
 }
 
 func IsConflict(err error) bool {

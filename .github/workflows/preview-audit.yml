@@ -1,0 +1,56 @@
+name: Preview Audit
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+  id-token: write
+
+env:
+  REGION: ${{ vars.GCP_REGION_STG || 'us-central1' }}
+  PROJECT_ID: ${{ vars.GCP_PROJECT_ID_STG || 'axis-stg-884236' }}
+  WIF_PROVIDER: ${{ vars.WIF_PROVIDER_STG || 'projects/322954730450/locations/global/workloadIdentityPools/github-actions-pool/providers/github-actions-provider' }}
+  WIF_SERVICE_ACCOUNT: ${{ vars.WIF_SERVICE_ACCOUNT_STG || 'axis-github-actions-stg@axis-stg-884236.iam.gserviceaccount.com' }}
+
+jobs:
+  audit:
+    name: Audit preview resources
+    runs-on: ubuntu-latest
+    steps:
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.WIF_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v3
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+      - name: Audit Cloud Run previews
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for var_name in PROJECT_ID WIF_PROVIDER WIF_SERVICE_ACCOUNT; do
+            if [[ -z "${!var_name}" ]]; then
+              echo "::error::$var_name is required for preview audit"
+              exit 1
+            fi
+          done
+          open_prs="$(mktemp)"
+          gh pr list --repo "$GITHUB_REPOSITORY" --state open --limit 200 --json number --jq '.[].number' | sort -n > "$open_prs"
+          orphan_count=0
+          printf '%-32s %-12s %s\n' "SERVICE" "PR" "STATUS"
+          while IFS= read -r service; do
+            if [[ "$service" =~ ^axis-(nexus|companion|bff|console)-pr-([1-9][0-9]*)$ ]]; then
+              pr="${BASH_REMATCH[2]}"
+              if grep -qx "$pr" "$open_prs"; then
+                status=open-pr
+              else
+                status=orphan-candidate
+                orphan_count=$((orphan_count + 1))
+              fi
+              printf '%-32s %-12s %s\n' "$service" "$pr" "$status"
+            fi
+          done < <(gcloud run services list --project="$PROJECT_ID" --region="$REGION" --format='value(metadata.name)' 2>/dev/null || true)
+          echo "Orphan candidates: $orphan_count"

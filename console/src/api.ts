@@ -81,6 +81,143 @@ export type RunTrace = {
   started_at?: string
 }
 
+export type RuntimePolicy = {
+  org_id: string
+  enabled: boolean
+  kill_switch: boolean
+  max_autonomy: string
+  allowed_models?: string[]
+  monthly_token_budget?: number
+  monthly_tool_call_budget?: number
+  control_plane?: {
+    monthly_cost_budget_cents?: number
+    max_risk_class?: string
+    allowed_capabilities?: string[]
+    denied_capabilities?: string[]
+    allowed_connectors?: string[]
+    denied_connectors?: string[]
+    embedding?: {
+      provider?: string
+      model?: string
+      vector_store?: string
+      namespace_mode?: string
+    }
+    observability?: {
+      trace_level?: string
+      redaction_mode?: string
+      replay_enabled?: boolean
+    }
+  }
+}
+
+export type CompanionAgent = {
+  agent_id: string
+  display_name?: string
+  role?: string
+  profile_id?: string
+  status: string
+  max_autonomy: string
+  allowed_capabilities?: string[]
+  allowed_connectors?: string[]
+}
+
+export type CapabilityRecord = {
+  id: string
+  status: string
+  source: string
+  manifest: {
+    capability_id: string
+    version: string
+    display_name: string
+    connector: string
+    risk_level: string
+    side_effect_type: string
+    approval_required: boolean
+    cost_class: string
+  }
+  updated_at?: string
+}
+
+export type MemoryConflict = {
+  id: string
+  kind: string
+  memory_type: string
+  key: string
+  status: string
+  confidence: number
+  updated_at: string
+}
+
+export type MemorySummary = {
+  id: string
+  scope_type: string
+  scope_id: string
+  summary_type: string
+  version: number
+  source_count: number
+  created_at: string
+}
+
+export type MemoryReview = {
+  id: string
+  memory_id?: string
+  review_type: string
+  status: string
+  reason?: string
+  created_at?: string
+}
+
+export type CompanionJob = {
+  id: string
+  kind: string
+  status: string
+  attempts: number
+  max_attempts: number
+  created_at: string
+}
+
+export type ObservabilityEvent = {
+  id: string
+  event_type: string
+  event_name: string
+  severity: string
+  agent_id?: string
+  capability_id?: string
+  occurred_at: string
+}
+
+export type CostSummary = {
+  org_id: string
+  period: string
+  estimated_tokens: number
+  estimated_cost_cents: number
+  llm_calls: number
+  tool_calls: number
+  job_events: number
+  embedding_events: number
+}
+
+export type SecurityEvalReport = {
+  id: string
+  suite: string
+  status: string
+  score: number
+  threshold: number
+  created_at?: string
+}
+
+export type BusinessModel = {
+  org_id: string
+  product_surface: string
+  version?: number
+  status?: string
+  areas?: unknown[]
+  roles?: unknown[]
+  workflows?: unknown[]
+  rules?: unknown[]
+  vocabulary?: Record<string, string>
+}
+
 export async function axisFetch<T>(path: string, orgId: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers)
   headers.set('Accept', 'application/json')

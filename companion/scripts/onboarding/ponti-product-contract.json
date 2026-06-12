@@ -1,0 +1,192 @@
+{
+  "version": 1,
+  "org_id": "ponti-local-org",
+  "product": {
+    "product_surface": "ponti",
+    "display_name": "Ponti",
+    "status": "active",
+    "metadata": {
+      "purpose": "axis real product onboarding contract"
+    }
+  },
+  "installation": {
+    "org_id": "ponti-local-org",
+    "product_surface": "ponti",
+    "external_tenant_id": "ponti-local-org",
+    "base_url": "http://localhost:8080",
+    "auth_mode": "api_key_ref",
+    "secret_ref": "env:PONTI_API_KEY",
+    "enabled": true,
+    "config": {
+      "connector_mode": "envelope.v1",
+      "discovery_path": "/api/v1/capabilities",
+      "execute_path": "/api/v1/capability-executions"
+    }
+  },
+  "identity": {
+    "org_id": "ponti-local-org",
+    "product_surface": "ponti",
+    "actor_id": "axis-companion",
+    "actor_type": "agent",
+    "on_behalf_of": "ponti-service",
+    "service_principal": true,
+    "scopes": [
+      "ponti:insights:read",
+      "ponti:workorders:write"
+    ]
+  },
+  "capabilities": [
+    {
+      "schema_version": "capability_manifest.v1",
+      "capability_id": "ponti.insights.summary",
+      "version": "1.0.0",
+      "display_name": "Ponti insights summary",
+      "description": "Read aggregated Ponti operational insights.",
+      "owner": "ponti",
+      "product_surface": "ponti",
+      "connector": "ponti",
+      "action_type": "read",
+      "risk_level": "low",
+      "side_effect_type": "read",
+      "auth_mode": "api_key_ref",
+      "required_scopes": ["ponti:insights:read"],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "workspace": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {"type": "object"}
+          },
+          "summary": {"type": "object"}
+        },
+        "additionalProperties": true
+      },
+      "evidence_schema": {
+        "type": "object",
+        "properties": {
+          "source_ref": {"type": "string"},
+          "captured_at": {"type": "string"},
+          "tenant_scope": {"type": "string"}
+        },
+        "additionalProperties": true
+      },
+      "required_evidence": ["source_ref", "captured_at", "tenant_scope"],
+      "idempotency_mode": "none",
+      "rollback_supported": false,
+      "compensation_strategy": "none",
+      "approval_required": false,
+      "tenant_configurable": true,
+      "enabled_by_default": false,
+      "rate_limit_class": "standard",
+      "cost_class": "low",
+      "timeout": "30s",
+      "retries": {
+        "max_attempts": 1
+      },
+      "preconditions": ["customer_org_context", "active_product_installation"],
+      "postconditions": [],
+      "observability_tags": ["product:ponti", "capability:read"]
+    },
+    {
+      "schema_version": "capability_manifest.v1",
+      "capability_id": "ponti.workorder_draft.create",
+      "version": "1.0.0",
+      "display_name": "Ponti work order draft",
+      "description": "Create a Ponti work order draft after Nexus approval.",
+      "owner": "ponti",
+      "product_surface": "ponti",
+      "connector": "ponti",
+      "action_type": "write",
+      "risk_level": "medium",
+      "side_effect_type": "write",
+      "auth_mode": "api_key_ref",
+      "required_scopes": ["ponti:workorders:write"],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "payload": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "workspace": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "additionalProperties": true
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "external_ref": {"type": "string"},
+          "status": {"type": "string"},
+          "result": {"type": "object"}
+        },
+        "additionalProperties": true
+      },
+      "evidence_schema": {
+        "type": "object",
+        "properties": {
+          "source_ref": {"type": "string"},
+          "captured_at": {"type": "string"},
+          "tenant_scope": {"type": "string"},
+          "nexus_request_id": {"type": "string"}
+        },
+        "additionalProperties": true
+      },
+      "required_evidence": ["source_ref", "captured_at", "tenant_scope", "nexus_request_id"],
+      "idempotency_mode": "required",
+      "rollback_supported": false,
+      "compensation_strategy": "manual",
+      "nexus_action_type": "ponti.workorder.draft.create",
+      "approval_required": true,
+      "tenant_configurable": true,
+      "enabled_by_default": false,
+      "rate_limit_class": "standard",
+      "cost_class": "medium",
+      "timeout": "30s",
+      "retries": {
+        "max_attempts": 1
+      },
+      "preconditions": ["customer_org_context", "active_product_installation", "nexus_approval"],
+      "postconditions": ["draft_created", "nexus_request_recorded"],
+      "observability_tags": ["product:ponti", "capability:write", "nexus:required"]
+    }
+  ],
+  "expected_errors": [
+    {
+      "scenario": "installation_missing",
+      "expected_code": "FORBIDDEN"
+    },
+    {
+      "scenario": "product_disabled",
+      "expected_code": "FORBIDDEN"
+    },
+    {
+      "scenario": "scope_missing",
+      "expected_code": "FORBIDDEN"
+    },
+    {
+      "scenario": "write_without_nexus",
+      "expected_code": "VALIDATION"
+    }
+  ],
+  "runtime": {
+    "enabled": true,
+    "policy_ref": "ponti-runtime-policy"
+  },
+  "metadata": {
+    "fixture": false,
+    "purpose": "axis ponti product readiness"
+  }
+}

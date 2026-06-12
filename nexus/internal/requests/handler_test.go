@@ -18,9 +18,12 @@ import (
 	approvaldomain "github.com/devpablocristo/nexus/internal/approvals/usecases/domain"
 	auditdomain "github.com/devpablocristo/nexus/internal/audit/usecases/domain"
 	"github.com/devpablocristo/nexus/internal/callbacks"
+	"github.com/devpablocristo/nexus/internal/orgctx"
 	"github.com/devpablocristo/nexus/internal/requests"
 	requestdto "github.com/devpablocristo/nexus/internal/requests/handler/dto"
 	requestdomain "github.com/devpablocristo/nexus/internal/requests/usecases/domain"
+	authn "github.com/devpablocristo/platform/authn/go"
+	"github.com/devpablocristo/platform/authn/go/identityhttp"
 )
 
 // --- Fakes para tests ---
@@ -273,6 +276,13 @@ func setupRequestMux() *http.ServeMux {
 
 // setupRequestMuxWithPolicies crea un mux con las políticas indicadas.
 func setupRequestMuxWithPolicies(policies []requests.PolicyForEval) *http.ServeMux {
+	mux, _ := setupRequestMuxWithRepo(policies)
+	return mux
+}
+
+// setupRequestMuxWithRepo expone además el repo fake para sembrar requests
+// directamente (ej. rows de orgs distintos para tests de tenancy).
+func setupRequestMuxWithRepo(policies []requests.PolicyForEval) (*http.ServeMux, *fakeRequestRepo) {
 	reqRepo := newFakeRequestRepo()
 	auditSink := requests.NewAuditSinkAdapter(&fakeAuditRepo{})
 	evaluator := requests.NewPolicyEvaluator()
@@ -286,7 +296,7 @@ func setupRequestMuxWithPolicies(policies []requests.PolicyForEval) *http.ServeM
 	)
 	mux := http.NewServeMux()
 	requests.NewHandler(uc).Register(mux)
-	return mux
+	return mux, reqRepo
 }
 
 func doReq(t *testing.T, mux *http.ServeMux, method, path, body string) *httptest.ResponseRecorder {
@@ -724,6 +734,29 @@ func TestIdempotency(t *testing.T) {
 	}
 }
 
+func TestIdempotencyRejectsSameKeyDifferentPayload(t *testing.T) {
+	t.Parallel()
+	mux := setupRequestMux()
+
+	req1 := httptest.NewRequest(http.MethodPost, "/v1/requests", strings.NewReader(
+		`{"requester_type":"agent","requester_id":"bot","action_type":"alert.escalate","target_resource":"a"}`))
+	req1.Header.Set("Idempotency-Key", "conflict-key-123")
+	rec1 := httptest.NewRecorder()
+	mux.ServeHTTP(rec1, req1)
+	if rec1.Code != http.StatusCreated {
+		t.Fatalf("esperaba 201, obtuvo %d: %s", rec1.Code, rec1.Body.String())
+	}
+
+	req2 := httptest.NewRequest(http.MethodPost, "/v1/requests", strings.NewReader(
+		`{"requester_type":"agent","requester_id":"bot","action_type":"alert.escalate","target_resource":"b"}`))
+	req2.Header.Set("Idempotency-Key", "conflict-key-123")
+	rec2 := httptest.NewRecorder()
+	mux.ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusConflict {
+		t.Fatalf("esperaba 409, obtuvo %d: %s", rec2.Code, rec2.Body.String())
+	}
+}
+
 func TestIdempotencyDifferentKeys(t *testing.T) {
 	t.Parallel()
 	mux := setupRequestMux()
@@ -1015,6 +1048,124 @@ func TestListRequestsCombinedFilters(t *testing.T) {
 		if d.ActionType != "alert.escalate" {
 			t.Fatalf("esperaba action_type alert.escalate, obtuvo %s", d.ActionType)
 		}
+	}
+}
+
+// --- Tests de List: narrowing cross_org vía orgctx ---
+
+// seedRequestForOrg inserta una request directamente en el repo fake.
+func seedRequestForOrg(t *testing.T, repo *fakeRequestRepo, orgID string) {
+	t.Helper()
+	org := orgID
+	if _, err := repo.Create(context.Background(), requestdomain.Request{
+		ID:         uuid.New(),
+		OrgID:      &org,
+		ActionType: "alert.escalate",
+		Status:     requestdomain.StatusAllowed,
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// listReqWithPrincipal arma un GET /v1/requests con el org solicitado
+// preservado en orgctx (como hace el middleware de wire ANTES de
+// WithPrincipal) y el principal indicado.
+func listReqWithPrincipal(requestedOrg string, principal *authn.Principal) *http.Request {
+	req := httptest.NewRequest(http.MethodGet, "/v1/requests", nil)
+	if requestedOrg != "" {
+		req = req.WithContext(orgctx.WithRequested(req.Context(), requestedOrg))
+	}
+	return identityhttp.WithPrincipal(req, principal, principal.AuthMethod)
+}
+
+// TestListRequestsCrossOrgNarrowedByRequestedOrg verifica que un principal
+// cross_org con X-Org-ID inbound (preservado en orgctx) ve SOLO ese org.
+func TestListRequestsCrossOrgNarrowedByRequestedOrg(t *testing.T) {
+	t.Parallel()
+	mux, repo := setupRequestMuxWithRepo(nil)
+	seedRequestForOrg(t, repo, "acme")
+	seedRequestForOrg(t, repo, "globex")
+
+	req := listReqWithPrincipal("acme", &authn.Principal{
+		Actor:      "pymes-service",
+		Scopes:     []string{"nexus:requests:read", "nexus:cross_org"},
+		Claims:     map[string]any{"service_principal": true},
+		AuthMethod: "api_key",
+	})
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("esperaba 200, obtuvo %d: %s", rec.Code, rec.Body.String())
+	}
+	var listResp struct {
+		Data []requestdto.RequestResponse `json:"data"`
+	}
+	decJSON(t, rec, &listResp)
+	if len(listResp.Data) != 1 {
+		t.Fatalf("esperaba 1 request (solo acme), obtuvo %d", len(listResp.Data))
+	}
+	if listResp.Data[0].OrgID != "acme" {
+		t.Fatalf("org_id = %q, esperaba acme", listResp.Data[0].OrgID)
+	}
+}
+
+// TestListRequestsCrossOrgWithoutRequestedKeepsAllowAll verifica compat: un
+// principal cross_org sin org solicitado ni bound sigue viendo todos los orgs.
+func TestListRequestsCrossOrgWithoutRequestedKeepsAllowAll(t *testing.T) {
+	t.Parallel()
+	mux, repo := setupRequestMuxWithRepo(nil)
+	seedRequestForOrg(t, repo, "acme")
+	seedRequestForOrg(t, repo, "globex")
+
+	req := listReqWithPrincipal("", &authn.Principal{
+		Actor:      "pymes-service",
+		Scopes:     []string{"nexus:requests:read", "nexus:cross_org"},
+		Claims:     map[string]any{"service_principal": true},
+		AuthMethod: "api_key",
+	})
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("esperaba 200, obtuvo %d: %s", rec.Code, rec.Body.String())
+	}
+	var listResp struct {
+		Data []requestdto.RequestResponse `json:"data"`
+	}
+	decJSON(t, rec, &listResp)
+	if len(listResp.Data) != 2 {
+		t.Fatalf("esperaba 2 requests (allowAll), obtuvo %d", len(listResp.Data))
+	}
+}
+
+// TestListRequestsNonCrossOrgIgnoresRequestedOrg verifica que un principal
+// SIN cross_org no puede escaparse de su org bound vía X-Org-ID inbound.
+func TestListRequestsNonCrossOrgIgnoresRequestedOrg(t *testing.T) {
+	t.Parallel()
+	mux, repo := setupRequestMuxWithRepo(nil)
+	seedRequestForOrg(t, repo, "acme")
+	seedRequestForOrg(t, repo, "globex")
+
+	req := listReqWithPrincipal("globex", &authn.Principal{
+		OrgID:      "acme",
+		Actor:      "acme-service",
+		Scopes:     []string{"nexus:requests:read"},
+		Claims:     map[string]any{"service_principal": true},
+		AuthMethod: "api_key",
+	})
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("esperaba 200, obtuvo %d: %s", rec.Code, rec.Body.String())
+	}
+	var listResp struct {
+		Data []requestdto.RequestResponse `json:"data"`
+	}
+	decJSON(t, rec, &listResp)
+	if len(listResp.Data) != 1 {
+		t.Fatalf("esperaba 1 request (solo acme, su org bound), obtuvo %d", len(listResp.Data))
+	}
+	if listResp.Data[0].OrgID != "acme" {
+		t.Fatalf("org_id = %q, esperaba acme (org del principal, no el solicitado)", listResp.Data[0].OrgID)
 	}
 }
 
@@ -1377,6 +1528,50 @@ func TestSimulateValidation(t *testing.T) {
 				t.Fatalf("esperaba code VALIDATION, obtuvo %s", errResp.Code)
 			}
 		})
+	}
+}
+
+func TestSimulateInvalidActionBindingReturnsValidation(t *testing.T) {
+	t.Parallel()
+	mux := setupRequestMux()
+
+	binding := `{
+		"schema_version":"tool_intent.v1",
+		"org_id":"org-other",
+		"actor_id":"pymes-e2e",
+		"actor_type":"service",
+		"product_surface":"pymes",
+		"run_id":"run-e2e",
+		"tool_invocation_id":"tool-e2e",
+		"connector_id":"pymes.e2e",
+		"capability_id":"e2e.notification.bulk_send",
+		"operation":"invoke",
+		"target_system":"pymes",
+		"target_resource":"target-1",
+		"payload_hash":"hash-e2e",
+		"idempotency_key":"idem-e2e"
+	}`
+	body := fmt.Sprintf(`{
+		"requester_type":"service",
+		"requester_id":"pymes-e2e",
+		"action_type":"e2e.notification.bulk_send",
+		"target_system":"pymes",
+		"target_resource":"target-1",
+		"action_binding":%s,
+		"params":{"org_id":"org-a"}
+	}`, binding)
+
+	rec := doReq(t, mux, http.MethodPost, "/v1/requests/simulate", body)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("esperaba 400, obtuvo %d: %s", rec.Code, rec.Body.String())
+	}
+	var errResp struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	}
+	decJSON(t, rec, &errResp)
+	if errResp.Code != "VALIDATION" || !strings.Contains(errResp.Message, "action_binding.org_id") {
+		t.Fatalf("respuesta inesperada: %+v", errResp)
 	}
 }
 

@@ -62,7 +62,7 @@ approve_until_resolved() {
 
 echo "=== E2E: full lifecycle ==="
 
-wait_for_http "$API_BASE/healthz"
+wait_for_http "$API_BASE/readyz"
 
 # Setup: crear policy
 POLICY=$(api_post "/v1/policies" '{"name":"e2e-require-approval","expression":"request.action_type == '\''alert.escalate'\''","effect":"require_approval","priority":5,"enabled":true}')

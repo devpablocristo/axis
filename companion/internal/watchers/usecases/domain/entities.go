@@ -12,6 +12,7 @@ import (
 type WatcherType string
 
 const (
+	WatcherCapability              WatcherType = "capability"
 	WatcherStaleWorkOrders         WatcherType = "stale_work_orders"
 	WatcherUnconfirmedAppointments WatcherType = "unconfirmed_appointments"
 	WatcherLowStock                WatcherType = "low_stock"
@@ -65,8 +66,8 @@ type WatcherResult struct {
 	Executed int `json:"executed"`
 }
 
-// PymesItem representa un item genérico devuelto por la API de Pymes.
-type PymesItem struct {
+// WatcherItem representa un item genérico devuelto por una capability de producto.
+type WatcherItem struct {
 	ID        string          `json:"id"`
 	Type      string          `json:"type"`
 	Name      string          `json:"name"`
@@ -75,6 +76,29 @@ type PymesItem struct {
 	PartyID   string          `json:"party_id"`
 	Metadata  json.RawMessage `json:"metadata"`
 	UpdatedAt string          `json:"updated_at"`
+}
+
+// PymesItem mantiene compatibilidad con watchers creados antes del modelo
+// genérico por capability.
+type PymesItem = WatcherItem
+
+type CapabilityWatcherConfig struct {
+	ProductSurface        string           `json:"product_surface"`
+	ConnectorKind         string           `json:"connector_kind"`
+	QueryOperation        string           `json:"query_operation"`
+	QueryPayload          map[string]any   `json:"query_payload,omitempty"`
+	ResultItemsPath       string           `json:"result_items_path,omitempty"`
+	Condition             WatcherCondition `json:"condition,omitempty"`
+	ActionOperation       string           `json:"action_operation"`
+	ActionPayloadTemplate map[string]any   `json:"action_payload_template,omitempty"`
+	ActionType            string           `json:"action_type"`
+	ProposalOnly          bool             `json:"proposal_only,omitempty"`
+}
+
+type WatcherCondition struct {
+	Path     string `json:"path,omitempty"`
+	Operator string `json:"operator,omitempty"`
+	Value    any    `json:"value,omitempty"`
 }
 
 // RevenueComparison contiene la comparación de facturación mensual.

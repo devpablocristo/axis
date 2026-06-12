@@ -197,6 +197,20 @@ func (r *failingRepo) RestoreByID(ctx context.Context, id uuid.UUID) error {
 	return r.fakeRepo.RestoreByID(ctx, id)
 }
 
+type changelogRepo struct {
+	*fakeRepo
+	entries []policies.PolicyChangelogEntry
+}
+
+func (r *changelogRepo) ListChangelog(_ context.Context, _ uuid.UUID) ([]policies.PolicyChangelogEntry, error) {
+	if len(r.entries) == 0 {
+		return nil, policies.ErrNotFound
+	}
+	out := make([]policies.PolicyChangelogEntry, len(r.entries))
+	copy(out, r.entries)
+	return out, nil
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -223,6 +237,21 @@ func doRequest(t *testing.T, mux *http.ServeMux, method, path, body string) *htt
 	}
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest(method, path, r))
+	return rec
+}
+
+func doRequestWithHeaders(t *testing.T, mux *http.ServeMux, method, path, body string, headers map[string]string) *httptest.ResponseRecorder {
+	t.Helper()
+	var r io.Reader
+	if body != "" {
+		r = strings.NewReader(body)
+	}
+	req := httptest.NewRequest(method, path, r)
+	for key, value := range headers {
+		req.Header.Set(key, value)
+	}
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
 	return rec
 }
 
@@ -344,6 +373,72 @@ func TestPolicyCRUDLifecycle(t *testing.T) {
 	rec = doRequest(t, mux, http.MethodGet, "/v1/policies/"+policyID, "")
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("get after delete: expected 404, got %d", rec.Code)
+	}
+}
+
+func TestPolicyChangelogIsTenantScoped(t *testing.T) {
+	t.Parallel()
+
+	orgID := "org-a"
+	policyID := uuid.New()
+	versionID := uuid.New()
+	artifactID := uuid.New()
+	repo := &changelogRepo{
+		fakeRepo: newFakeRepo(),
+		entries: []policies.PolicyChangelogEntry{{
+			ID:               uuid.New(),
+			PolicyArtifactID: artifactID,
+			PolicyVersionID:  &versionID,
+			ActorID:          "nexus-admin-b",
+			Action:           "promotion_approved",
+			Summary:          "Policy promotion approved",
+			Data: map[string]any{
+				"promotion_id": "promotion-1",
+				"requested_by": "nexus-admin-a",
+				"approved_by":  "nexus-admin-b",
+			},
+			CreatedAt: time.Now().UTC(),
+		}},
+	}
+	repo.byID[policyID] = policydomain.Policy{
+		ID:         policyID,
+		OrgID:      &orgID,
+		Name:       "tenant-policy",
+		Expression: "true",
+		Effect:     "allow",
+		Priority:   1,
+		Origin:     "manual",
+		Mode:       policydomain.PolicyModeEnforced,
+		Enabled:    true,
+		CreatedAt:  time.Now().UTC(),
+		UpdatedAt:  time.Now().UTC(),
+	}
+	repo.order = append(repo.order, policyID)
+
+	mux := setupPolicyMuxWithRepo(repo)
+	headers := map[string]string{
+		"X-Auth-Scopes": "nexus:policies:admin",
+		"X-Org-ID":      "org-a",
+	}
+	rec := doRequestWithHeaders(t, mux, http.MethodGet, "/v1/policies/"+policyID.String()+"/changelog", "", headers)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Data []policydto.PolicyChangelogResponse `json:"data"`
+	}
+	decodeJSON(t, rec, &resp)
+	if len(resp.Data) != 1 {
+		t.Fatalf("expected 1 changelog entry, got %d", len(resp.Data))
+	}
+	if resp.Data[0].ActorID != "nexus-admin-b" || resp.Data[0].Action != "promotion_approved" {
+		t.Fatalf("unexpected changelog entry: %+v", resp.Data[0])
+	}
+
+	headers["X-Org-ID"] = "org-b"
+	rec = doRequestWithHeaders(t, mux, http.MethodGet, "/v1/policies/"+policyID.String()+"/changelog", "", headers)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for foreign org, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -727,7 +822,6 @@ func TestPolicyUpdatePartialFields(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			rec := doRequest(t, mux, http.MethodPatch, "/v1/policies/"+created.ID, tt.body)
 			if rec.Code != http.StatusOK {
 				t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())

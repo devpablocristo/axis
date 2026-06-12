@@ -13,6 +13,7 @@ import (
 	approvaldomain "github.com/devpablocristo/nexus/internal/approvals/usecases/domain"
 	auditdomain "github.com/devpablocristo/nexus/internal/audit/usecases/domain"
 	"github.com/devpablocristo/nexus/internal/callbacks"
+	"github.com/devpablocristo/nexus/internal/contracts"
 	requestdomain "github.com/devpablocristo/nexus/internal/requests/usecases/domain"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
 	"github.com/google/uuid"
@@ -64,6 +65,10 @@ type ApprovalGetter interface {
 	GetByID(ctx context.Context, id uuid.UUID) (approvaldomain.Approval, error)
 }
 
+type ContractValidator interface {
+	Validate(ctx context.Context, in contracts.ValidateInput) (contracts.ValidateOutput, error)
+}
+
 // PolicyForEval contiene solo los campos necesarios para evaluación.
 type PolicyForEval struct {
 	ID           uuid.UUID
@@ -109,6 +114,7 @@ type Usecases struct {
 	approvalGetter ApprovalGetter
 	approvalEvents callbacks.ApprovalPublisher
 	resultReports  ResultReportStore
+	contracts      ContractValidator
 }
 
 // AttestationVerifier valida criptográficamente la firma + atester antes de
@@ -178,6 +184,10 @@ func WithResultReportStore(s ResultReportStore) Option {
 	return func(u *Usecases) { u.resultReports = s }
 }
 
+func WithContractValidator(v ContractValidator) Option {
+	return func(u *Usecases) { u.contracts = v }
+}
+
 func WithPendingApprovalCreator(c pendingApprovalCreator) Option {
 	return func(u *Usecases) { u.pendingCreator = c }
 }
@@ -237,13 +247,6 @@ type SubmitOutput struct {
 }
 
 func (u *Usecases) Submit(ctx context.Context, in SubmitInput) (SubmitOutput, error) {
-	// Idempotencia: si ya existe, retornar respuesta cacheada
-	if u.idemStore != nil && in.IdempotencyKey != nil && *in.IdempotencyKey != "" {
-		if reqID, resp, ok := u.idemStore.Get(ctx, *in.IdempotencyKey); ok {
-			return rebuildOutputFromCache(reqID, resp), nil
-		}
-	}
-
 	now := time.Now().UTC()
 	req := requestdomain.Request{
 		ID:             uuid.New(),
@@ -276,6 +279,20 @@ func (u *Usecases) Submit(ctx context.Context, in SubmitInput) (SubmitOutput, er
 	req.BindingHash = bindingHash
 	if err := validateActionBinding(req); err != nil {
 		return SubmitOutput{}, err
+	}
+	if err := u.validateContract(ctx, "tool_intent", "action_binding", req.ID.String(), req.OrgID, req.ActionBinding); err != nil {
+		return SubmitOutput{}, err
+	}
+	fingerprint := requestFingerprint(req)
+	// Idempotencia: si ya existe, retornar respuesta cacheada solo cuando el
+	// payload coincide. Reusar una key con otro payload es replay conflictivo.
+	if u.idemStore != nil && in.IdempotencyKey != nil && *in.IdempotencyKey != "" {
+		if reqID, resp, ok := u.idemStore.Get(ctx, *in.IdempotencyKey); ok {
+			if cachedFingerprint := strings.TrimSpace(fmt.Sprint(resp["_request_fingerprint"])); cachedFingerprint != "" && cachedFingerprint != fingerprint {
+				return SubmitOutput{}, ErrIdempotencyConflict
+			}
+			return rebuildOutputFromCache(reqID, resp), nil
+		}
 	}
 
 	var actionTypeRiskOverride *string
@@ -377,16 +394,16 @@ func (u *Usecases) Submit(ctx context.Context, in SubmitInput) (SubmitOutput, er
 
 	switch req.Decision {
 	case requestdomain.DecisionAllow:
-		return u.finalizeDecision(ctx, req, in.IdempotencyKey, now, auditdomain.EventAllowed, requestdomain.StatusAllowed)
+		return u.finalizeDecision(ctx, req, in.IdempotencyKey, now, auditdomain.EventAllowed, requestdomain.StatusAllowed, fingerprint)
 	case requestdomain.DecisionDeny:
-		return u.finalizeDecision(ctx, req, in.IdempotencyKey, now, auditdomain.EventDenied, requestdomain.StatusDenied)
+		return u.finalizeDecision(ctx, req, in.IdempotencyKey, now, auditdomain.EventDenied, requestdomain.StatusDenied, fingerprint)
 	}
 
 	// Require approval
-	return u.handleRequireApproval(ctx, req, in, now, forceBreakGlass)
+	return u.handleRequireApproval(ctx, req, in, now, forceBreakGlass, fingerprint)
 }
 
-func (u *Usecases) finalizeDecision(ctx context.Context, req requestdomain.Request, idemKey *string, now time.Time, auditEvent string, status requestdomain.RequestStatus) (SubmitOutput, error) {
+func (u *Usecases) finalizeDecision(ctx context.Context, req requestdomain.Request, idemKey *string, now time.Time, auditEvent string, status requestdomain.RequestStatus, fingerprint string) (SubmitOutput, error) {
 	req.Status = status
 	req.DecidedAt = &now
 	req.UpdatedAt = now
@@ -411,11 +428,11 @@ func (u *Usecases) finalizeDecision(ctx context.Context, req requestdomain.Reque
 		Status:         string(req.Status),
 		BindingHash:    req.BindingHash,
 	}
-	u.cacheIdempotency(ctx, idemKey, req.ID, out, now.Add(24*time.Hour))
+	u.cacheIdempotency(ctx, idemKey, req.ID, out, now.Add(24*time.Hour), fingerprint)
 	return out, nil
 }
 
-func (u *Usecases) handleRequireApproval(ctx context.Context, req requestdomain.Request, in SubmitInput, now time.Time, forceBreakGlass bool) (SubmitOutput, error) {
+func (u *Usecases) handleRequireApproval(ctx context.Context, req requestdomain.Request, in SubmitInput, now time.Time, forceBreakGlass bool, fingerprint string) (SubmitOutput, error) {
 	expiresAt := now.Add(u.approvalTTL)
 
 	// AISummary / AIDegraded quedan vacíos: Nexus es AI-independent. Quien necesite
@@ -509,7 +526,7 @@ func (u *Usecases) handleRequireApproval(ctx context.Context, req requestdomain.
 		AISummary:  req.AISummary,
 		AIDegraded: req.AIDegraded,
 	}
-	u.cacheIdempotency(ctx, in.IdempotencyKey, req.ID, out, expiresAt)
+	u.cacheIdempotency(ctx, in.IdempotencyKey, req.ID, out, expiresAt, fingerprint)
 	return out, nil
 }
 
@@ -594,6 +611,31 @@ func actionBindingHash(binding map[string]any) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
+func requestFingerprint(req requestdomain.Request) string {
+	var orgID string
+	if req.OrgID != nil {
+		orgID = strings.TrimSpace(*req.OrgID)
+	}
+	raw, err := json.Marshal(map[string]any{
+		"org_id":          orgID,
+		"requester_type":  req.RequesterType,
+		"requester_id":    req.RequesterID,
+		"requester_name":  req.RequesterName,
+		"action_type":     req.ActionType,
+		"target_system":   req.TargetSystem,
+		"target_resource": req.TargetResource,
+		"action_binding":  req.ActionBinding,
+		"params":          req.Params,
+		"reason":          req.Reason,
+		"context":         req.Context,
+	})
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
+}
+
 func validateActionBinding(req requestdomain.Request) error {
 	if len(req.ActionBinding) == 0 {
 		return nil
@@ -627,6 +669,20 @@ func validateActionBinding(req requestdomain.Request) error {
 	return nil
 }
 
+func (u *Usecases) validateContract(ctx context.Context, name, subjectType, subjectID string, orgID *string, payload map[string]any) error {
+	if u.contracts == nil || len(payload) == 0 {
+		return nil
+	}
+	_, err := u.contracts.Validate(ctx, contracts.ValidateInput{
+		OrgID:       orgID,
+		Name:        name,
+		SubjectType: subjectType,
+		SubjectID:   subjectID,
+		Payload:     payload,
+	})
+	return err
+}
+
 func timePtrRFC3339(value *time.Time) *string {
 	if value == nil || value.IsZero() {
 		return nil
@@ -635,7 +691,7 @@ func timePtrRFC3339(value *time.Time) *string {
 	return &formatted
 }
 
-func (u *Usecases) cacheIdempotency(ctx context.Context, idemKey *string, reqID uuid.UUID, out SubmitOutput, expiresAt time.Time) {
+func (u *Usecases) cacheIdempotency(ctx context.Context, idemKey *string, reqID uuid.UUID, out SubmitOutput, expiresAt time.Time, requestFingerprint string) {
 	if u.idemStore == nil || idemKey == nil || *idemKey == "" {
 		return
 	}
@@ -644,6 +700,9 @@ func (u *Usecases) cacheIdempotency(ctx context.Context, idemKey *string, reqID 
 		"risk_level": out.RiskLevel, "status": out.Status,
 		"binding_hash": out.BindingHash,
 		"ai_summary":   out.AISummary, "ai_degraded": out.AIDegraded,
+	}
+	if requestFingerprint != "" {
+		resp["_request_fingerprint"] = requestFingerprint
 	}
 	if out.Approval != nil {
 		resp["approval"] = map[string]any{
@@ -811,42 +870,17 @@ func validateParamsSchema(params map[string]any, schema map[string]any) error {
 	if len(schema) == 0 {
 		return nil
 	}
-	if typ, ok := schema["type"].(string); ok && typ != "" && typ != "object" {
-		return fmt.Errorf("action_type schema must describe an object")
-	}
-	rawRequired, ok := schema["required"]
-	if !ok {
+	errs := contracts.ValidateSchema(params, schema)
+	if len(errs) == 0 {
 		return nil
 	}
-	required, ok := requiredKeys(rawRequired)
-	if !ok {
-		return fmt.Errorf("action_type schema required must be an array")
-	}
-	for _, key := range required {
-		key = strings.TrimSpace(key)
-		if key == "" {
-			continue
-		}
-		if _, exists := params[key]; !exists {
+	for _, msg := range errs {
+		if strings.HasSuffix(msg, " is required") {
+			key := strings.TrimSuffix(msg, " is required")
 			return fmt.Errorf("missing required param %q for action_type", key)
 		}
 	}
-	return nil
-}
-
-func requiredKeys(raw any) ([]string, bool) {
-	switch values := raw.(type) {
-	case []any:
-		keys := make([]string, 0, len(values))
-		for _, item := range values {
-			keys = append(keys, fmt.Sprint(item))
-		}
-		return keys, true
-	case []string:
-		return values, true
-	default:
-		return nil, false
-	}
+	return fmt.Errorf("action_type schema validation failed: %s", strings.Join(errs, "; "))
 }
 
 func requestToMap(r requestdomain.Request) map[string]any {
@@ -909,6 +943,9 @@ func (u *Usecases) Simulate(ctx context.Context, in SubmitInput) (SimulateOutput
 	}
 	req.BindingHash = bindingHash
 	if err := validateActionBinding(req); err != nil {
+		return SimulateOutput{}, err
+	}
+	if err := u.validateContract(ctx, "tool_intent", "action_binding", "simulate", req.OrgID, req.ActionBinding); err != nil {
 		return SimulateOutput{}, err
 	}
 	var actionTypeRiskOverride *string
@@ -1208,12 +1245,15 @@ type ReplaySimulateInput struct {
 
 // ReplaySimulateOutput es el resultado de una replay simulation
 type ReplaySimulateOutput struct {
-	TotalEvaluated int                    `json:"total_evaluated"`
-	WouldMatch     int                    `json:"would_match"`
-	WouldAllow     int                    `json:"would_allow"`
-	WouldDeny      int                    `json:"would_deny"`
-	WouldRequire   int                    `json:"would_require_approval"`
-	Samples        []ReplaySimulateSample `json:"samples"`
+	SimulationID    string                 `json:"simulation_id,omitempty"`
+	ReportHash      string                 `json:"report_hash,omitempty"`
+	SnapshotQuality string                 `json:"snapshot_quality,omitempty"`
+	TotalEvaluated  int                    `json:"total_evaluated"`
+	WouldMatch      int                    `json:"would_match"`
+	WouldAllow      int                    `json:"would_allow"`
+	WouldDeny       int                    `json:"would_deny"`
+	WouldRequire    int                    `json:"would_require_approval"`
+	Samples         []ReplaySimulateSample `json:"samples"`
 }
 
 type ReplaySimulateSample struct {
@@ -1284,7 +1324,17 @@ func (u *Usecases) ReplaySimulate(ctx context.Context, in ReplaySimulateInput) (
 			})
 		}
 	}
-
+	out.SnapshotQuality = "legacy"
+	if recorder, ok := u.reqRepo.(interface {
+		RecordPolicySimulation(context.Context, ReplaySimulateInput, ReplaySimulateOutput) (string, string, error)
+	}); ok {
+		id, hash, err := recorder.RecordPolicySimulation(ctx, in, out)
+		if err != nil {
+			return ReplaySimulateOutput{}, fmt.Errorf("record policy simulation: %w", err)
+		}
+		out.SimulationID = id
+		out.ReportHash = hash
+	}
 	return out, nil
 }
 
@@ -1339,6 +1389,20 @@ func (u *Usecases) ReportResult(ctx context.Context, requestID uuid.UUID, in Rep
 	if err != nil {
 		return fmt.Errorf("get request: %w", err)
 	}
+	if in.OrgID != nil {
+		if req.OrgID == nil || strings.TrimSpace(*in.OrgID) != strings.TrimSpace(*req.OrgID) {
+			return domainerr.TenantMismatch()
+		}
+	}
+	if err := u.validateContract(ctx, "result_report", "result_report", requestID.String(), req.OrgID, map[string]any{
+		"result_id":     strings.TrimSpace(in.ResultKey),
+		"success":       in.Success,
+		"result":        sanitizedResult,
+		"duration_ms":   in.DurationMs,
+		"error_message": strings.TrimSpace(in.ErrorMessage),
+	}); err != nil {
+		return err
+	}
 	if req.Status != requestdomain.StatusAllowed && req.Status != requestdomain.StatusApproved {
 		return ErrInvalidState
 	}
@@ -1349,7 +1413,7 @@ func (u *Usecases) ReportResult(ctx context.Context, requestID uuid.UUID, in Rep
 			RequestID:    requestID,
 			ResultKey:    strings.TrimSpace(in.ResultKey),
 			ActorID:      strings.TrimSpace(in.ActorID),
-			OrgID:        in.OrgID,
+			OrgID:        req.OrgID,
 			Success:      in.Success,
 			Result:       sanitizedResult,
 			ErrorMessage: in.ErrorMessage,

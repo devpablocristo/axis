@@ -5,6 +5,58 @@ info:
 servers:
   - url: http://localhost:18084
 paths:
+  /v1/metrics/summary:
+    get:
+      summary: Resumen operacional de métricas Nexus
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      responses:
+        "200": { description: Metrics summary }
+  /v1/requests/simulate:
+    post:
+      summary: Simula una request sin persistir aprobación ni audit row
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmitRequest"
+      responses:
+        "200":
+          description: Simulated decision
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimulateResponse"
+  /v1/requests/simulate/replay:
+    post:
+      summary: Re-ejecuta simulaciones sobre requests históricas
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      responses:
+        "200": { description: Replay simulation report }
+  /v1/requests/simulate/batch:
+    post:
+      summary: Simula múltiples requests en batch
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                requests:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/SubmitRequest"
+      responses:
+        "200": { description: Batch simulation report }
+  /v1/requests/simulate/approval:
+    post:
+      summary: Simula una decisión de aprobación/rechazo sobre una request pendiente
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      responses:
+        "200": { description: Approval simulation report }
   /v1/requests:
     post:
       summary: Evalua una request controlada
@@ -68,6 +120,23 @@ paths:
       responses:
         "204": { description: Result accepted }
         "409": { description: Request is not executable }
+  /v1/requests/{id}/attest:
+    post:
+      summary: Registra una attestation firmada sobre una ejecución
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "201": { description: Attestation stored }
+  /v1/requests/{id}/attestation:
+    get:
+      summary: Obtiene la attestation de una request
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Attestation }
+        "404": { description: Not found }
   /v1/requests/{id}/evidence:
     get:
       summary: Devuelve evidence pack firmado
@@ -76,6 +145,576 @@ paths:
         - $ref: "#/components/parameters/UUIDPath"
       responses:
         "200": { description: Evidence pack }
+  /v1/requests/{id}/replay:
+    get:
+      summary: Devuelve el replay auditable de una request
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Audit replay }
+  /v1/requests/{id}/replay/verify:
+    get:
+      summary: Verifica integridad tamper-evident del replay
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200":
+          description: Audit integrity verification
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditIntegrity"
+  /v1/policies:
+    get:
+      summary: Lista policies tenant-aware
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - in: query
+          name: archived
+          schema: { type: boolean }
+      responses:
+        "200": { description: Policy list }
+    post:
+      summary: Crea una policy
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Policy"
+      responses:
+        "201": { description: Policy created }
+  /v1/policies/{id}:
+    get:
+      summary: Obtiene una policy
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Policy }
+        "404": { description: Not found }
+    patch:
+      summary: Actualiza una policy
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Policy"
+      responses:
+        "200": { description: Policy updated }
+    delete:
+      summary: Elimina físicamente una policy archivada
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "204": { description: Policy deleted }
+  /v1/policies/{id}/archive:
+    post:
+      summary: Archiva una policy
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Policy archived }
+  /v1/policies/{id}/restore:
+    post:
+      summary: Restaura una policy archivada
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Policy restored }
+  /v1/approvals/pending:
+    get:
+      summary: Lista approvals pendientes tenant-aware
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, default: 50, maximum: 200 }
+        - in: query
+          name: request_id
+          description: Filtra approvals de una request puntual
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: Pending approval list }
+  /v1/approvals/{id}/approve:
+    post:
+      summary: Aprueba una approval pendiente
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Approval accepted }
+  /v1/approvals/{id}/reject:
+    post:
+      summary: Rechaza una approval pendiente
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Approval rejected }
+  /v1/action-types:
+    get:
+      summary: Lista action types registrados
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      responses:
+        "200": { description: Action type list }
+    post:
+      summary: Registra un action type
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ActionType"
+      responses:
+        "201": { description: Action type created }
+  /v1/action-types/{id}:
+    get:
+      summary: Obtiene un action type
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Action type }
+    patch:
+      summary: Actualiza un action type
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Action type updated }
+    delete:
+      summary: Elimina un action type
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "204": { description: Action type deleted }
+  /v1/delegations:
+    get:
+      summary: Lista delegations
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      responses:
+        "200": { description: Delegation list }
+    post:
+      summary: Crea una delegation
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      responses:
+        "201": { description: Delegation created }
+  /v1/delegations/{id}:
+    get:
+      summary: Obtiene una delegation
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Delegation }
+    patch:
+      summary: Actualiza una delegation
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Delegation updated }
+    delete:
+      summary: Elimina una delegation
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "204": { description: Delegation deleted }
+  /v1/rbac/assignments:
+    get:
+      summary: Lista asignaciones RBAC
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      responses:
+        "200": { description: RBAC assignment list }
+    post:
+      summary: Crea una asignación RBAC
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      responses:
+        "201": { description: RBAC assignment created }
+  /v1/rbac/assignments/{id}:
+    get:
+      summary: Obtiene una asignación RBAC
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: RBAC assignment }
+    delete:
+      summary: Elimina una asignación RBAC
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "204": { description: RBAC assignment deleted }
+  /v1/rbac/assignments/{id}/archive:
+    post:
+      summary: Archiva una asignación RBAC
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: RBAC assignment archived }
+  /v1/rbac/assignments/{id}/restore:
+    post:
+      summary: Restaura una asignación RBAC
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: RBAC assignment restored }
+  /v1/rbac/check:
+    get:
+      summary: Evalúa permisos RBAC para un principal
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      responses:
+        "200": { description: RBAC check result }
+  /v1/config:
+    get:
+      summary: Obtiene configuración runtime de Nexus
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      responses:
+        "200": { description: Nexus config }
+    patch:
+      summary: Actualiza configuración runtime de Nexus
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      responses:
+        "200": { description: Nexus config updated }
+  /v1/config/{section}:
+    patch:
+      summary: Actualiza una sección de configuración runtime
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: section
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Nexus config section updated }
+  /v1/config/reset:
+    post:
+      summary: Resetea configuración runtime a defaults seguros
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      responses:
+        "200": { description: Nexus config reset }
+  /v1/learning/proposals:
+    get:
+      summary: Lista propuestas de aprendizaje governance
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      responses:
+        "200": { description: Learning proposal list }
+    post:
+      summary: Crea una propuesta de aprendizaje
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      responses:
+        "201": { description: Learning proposal created }
+  /v1/learning/proposals/{id}:
+    get:
+      summary: Obtiene una propuesta de aprendizaje
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Learning proposal }
+  /v1/learning/proposals/{id}/accept:
+    post:
+      summary: Acepta una propuesta de aprendizaje
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Learning proposal accepted }
+  /v1/learning/proposals/{id}/dismiss:
+    post:
+      summary: Descarta una propuesta de aprendizaje
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Learning proposal dismissed }
+  /v1/learning/analyze:
+    post:
+      summary: Analiza historial governance para sugerir mejoras
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      responses:
+        "200": { description: Learning analysis }
+  /v1/finding-rules:
+    get:
+      summary: Lista reglas de findings
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      responses:
+        "200": { description: Finding rule list }
+    post:
+      summary: Crea o actualiza una regla de findings
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      responses:
+        "201": { description: Finding rule stored }
+  /v1/finding-rules/archived:
+    get:
+      summary: Lista reglas de findings archivadas
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      responses:
+        "200": { description: Archived finding rule list }
+  /v1/finding-rules/{id}:
+    get:
+      summary: Obtiene una regla de findings
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Finding rule }
+    patch:
+      summary: Actualiza una regla de findings
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Finding rule updated }
+  /v1/finding-rules/{id}/archive:
+    post:
+      summary: Archiva una regla de findings
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "204": { description: Finding rule archived }
+  /v1/finding-rules/{id}/restore:
+    post:
+      summary: Restaura una regla de findings
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Finding rule restored }
+  /v1/finding-rules/{id}/hard:
+    delete:
+      summary: Elimina físicamente una regla archivada de findings
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "204": { description: Finding rule hard deleted }
+  /v1/fact-evaluations:
+    post:
+      summary: Evalúa facts contra reglas de findings
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      responses:
+        "201": { description: Fact evaluation submitted }
+  /v1/fact-evaluations/{id}:
+    get:
+      summary: Obtiene una evaluación de facts
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Fact evaluation }
+  /v1/findings:
+    get:
+      summary: Lista findings
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      responses:
+        "200": { description: Finding list }
+  /v1/findings/{id}:
+    get:
+      summary: Obtiene un finding
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Finding }
+    patch:
+      summary: Actualiza estado/resolución de un finding
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Finding updated }
+  /v1/governance/contracts:
+    get:
+      summary: Lista contratos de gobierno versionados
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      responses:
+        "200": { description: Governance contract list }
+    post:
+      summary: Crea o actualiza un contrato de gobierno
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GovernanceContract"
+      responses:
+        "201": { description: Governance contract stored }
+  /v1/governance/contracts/validate:
+    post:
+      summary: Valida un payload contra un contrato activo
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ContractValidationRequest"
+      responses:
+        "200":
+          description: Validation report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContractValidationResponse"
+  /v1/policies/{id}/versions:
+    get:
+      summary: Lista versiones inmutables lifecycle v2 de una policy
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Policy version list }
+  /v1/policies/{id}/changelog:
+    get:
+      summary: Lista eventos auditables del lifecycle de una policy
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Policy changelog list }
+  /v1/policies/{id}/promotions:
+    get:
+      summary: Lista promociones gobernadas de una policy
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Policy promotion list }
+    post:
+      summary: Solicita una promocion gobernada de policy
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PolicyPromotionRequest"
+      responses:
+        "201": { description: Policy promotion requested }
+  /v1/policy-promotions/{id}/approve:
+    post:
+      summary: Aprueba una promocion de policy con separation of duties
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Policy promotion approved }
+  /v1/policy-promotions/{id}/enforce:
+    post:
+      summary: Aplica una promocion de policy aprobada
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Policy promotion enforced }
+  /v1/policy-promotions/{id}/rollback:
+    post:
+      summary: Revierte una promocion de policy hacia su version anterior
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string }
+      responses:
+        "200": { description: Policy promotion rolled back }
+  /v1/ops/governance/summary:
+    get:
+      summary: Diagnostico operativo de governance
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      responses:
+        "200":
+          description: Governance operational summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GovernanceOpsSummary"
+  /v1/ops/callback-deliveries:
+    get:
+      summary: Lista entregas outbox/DLQ de callbacks
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - in: query
+          name: status
+          schema: { type: string }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 100, maximum: 500 }
+      responses:
+        "200": { description: Callback delivery list }
+  /v1/ops/callback-deliveries/{id}/retry:
+    post:
+      summary: Reencola una callback delivery de forma auditada
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      responses:
+        "200": { description: Callback delivery queued }
+  /v1/ops/legal-holds:
+    get:
+      summary: Lista legal holds de governance
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      responses:
+        "200": { description: Legal hold list }
+    post:
+      summary: Crea un legal hold
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LegalHoldRequest"
+      responses:
+        "201": { description: Legal hold created }
+  /v1/ops/exports:
+    get:
+      summary: Lista export jobs de governance
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      responses:
+        "200": { description: Export job list }
+    post:
+      summary: Crea un export manifest verificable
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GovernanceExportRequest"
+      responses:
+        "201": { description: Export job created }
+  /v1/ops/reconciliation/run:
+    post:
+      summary: Ejecuta reconciliacion operacional de Nexus
+      security: [{ apiKeyAuth: [] }, { bearerAuth: [] }]
+      responses:
+        "201": { description: Reconciliation report }
 components:
   securitySchemes:
     apiKeyAuth:
@@ -93,6 +732,30 @@ components:
       required: true
       schema: { type: string, format: uuid }
   schemas:
+    Policy:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        org_id: { type: string }
+        name: { type: string }
+        action_type: { type: string }
+        effect: { type: string, enum: [allow, deny, require_approval] }
+        mode: { type: string, enum: [enforced, shadow] }
+        expression: { type: string }
+        enabled: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ActionType:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        org_id: { type: string }
+        name: { type: string }
+        display_name: { type: string }
+        category: { type: string }
+        risk_class: { type: string }
+        requires_break_glass: { type: boolean }
+        enabled: { type: boolean }
     ToolIntent:
       type: object
       required:
@@ -161,6 +824,19 @@ components:
           properties:
             id: { type: string, format: uuid }
             expires_at: { type: string, format: date-time }
+    SimulateResponse:
+      type: object
+      required: [decision, risk_level, status, would_require_approval]
+      properties:
+        decision: { type: string, enum: [allow, deny, require_approval] }
+        risk_level: { type: string }
+        decision_reason: { type: string }
+        status:
+          type: string
+          enum: [allowed, denied, pending_approval]
+        would_require_approval: { type: boolean }
+        policy_matched: { type: boolean }
+        risk_assessment: { type: object, additionalProperties: true }
     Request:
       allOf:
         - $ref: "#/components/schemas/SubmitResponse"
@@ -182,3 +858,84 @@ components:
         result: { type: object, additionalProperties: true }
         duration_ms: { type: integer }
         error_message: { type: string }
+    AuditIntegrity:
+      type: object
+      required: [status, checked_events]
+      properties:
+        status: { type: string, enum: [ok, failed] }
+        checked_events: { type: integer }
+        first_hash: { type: string }
+        last_hash: { type: string }
+        error: { type: string }
+    GovernanceContract:
+      type: object
+      required: [name, version, schema]
+      properties:
+        org_id: { type: string }
+        name: { type: string }
+        version: { type: string }
+        subject_type: { type: string }
+        schema: { type: object, additionalProperties: true }
+        status: { type: string, enum: [draft, active, deprecated, archived] }
+        validation_mode: { type: string, enum: [report_only, enforce] }
+        compatibility: { type: string }
+    ContractValidationRequest:
+      type: object
+      required: [name, payload]
+      properties:
+        org_id: { type: string }
+        name: { type: string }
+        subject_type: { type: string }
+        subject_id: { type: string }
+        payload: { type: object, additionalProperties: true }
+    ContractValidationResponse:
+      type: object
+      required: [contract_name, contract_version, mode, valid, payload_hash]
+      properties:
+        contract_name: { type: string }
+        contract_version: { type: string }
+        mode: { type: string, enum: [report_only, enforce] }
+        valid: { type: boolean }
+        errors:
+          type: array
+          items: { type: string }
+        payload_hash: { type: string }
+    GovernanceOpsSummary:
+      type: object
+      properties:
+        contracts_active: { type: integer }
+        contract_reports_failed: { type: integer }
+        callback_pending: { type: integer }
+        callback_dead: { type: integer }
+        callback_stuck: { type: integer }
+        audit_integrity_failed: { type: integer }
+        rate_limit_rules: { type: integer }
+        rate_limit_blocks_24h: { type: integer }
+        legal_holds_active: { type: integer }
+        exports_failed: { type: integer }
+        reconciliation_critical: { type: integer }
+        reconciliation_last_status: { type: string }
+    PolicyPromotionRequest:
+      type: object
+      required: [to_version_id, dry_run_report]
+      properties:
+        to_version_id: { type: string, format: uuid }
+        reason: { type: string }
+        dry_run_report: { type: object, additionalProperties: true }
+    LegalHoldRequest:
+      type: object
+      required: [subject_type, reason]
+      properties:
+        org_id: { type: string }
+        subject_type: { type: string }
+        subject_id: { type: string }
+        reason: { type: string }
+    GovernanceExportRequest:
+      type: object
+      required: [export_type]
+      properties:
+        org_id: { type: string }
+        export_type: { type: string, enum: [audit, evidence, replay, governance_bundle] }
+        subject_type: { type: string }
+        subject_id: { type: string }
+        manifest: { type: object, additionalProperties: true }

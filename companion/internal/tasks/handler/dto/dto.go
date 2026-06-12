@@ -2,6 +2,7 @@ package dto
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 
 	connectordomain "github.com/devpablocristo/companion/internal/connectors/usecases/domain"
@@ -109,6 +110,43 @@ type TaskExecutionStateResponse struct {
 	VerificationResult  TaskVerificationResultResponse `json:"verification_result"`
 }
 
+type TaskPlanResponse struct {
+	Objective   string                 `json:"objective"`
+	Status      string                 `json:"status"`
+	Strategy    string                 `json:"strategy,omitempty"`
+	Assumptions json.RawMessage        `json:"assumptions,omitempty"`
+	Constraints json.RawMessage        `json:"constraints,omitempty"`
+	Checkpoint  json.RawMessage        `json:"checkpoint,omitempty"`
+	NextAction  string                 `json:"next_action,omitempty"`
+	Blocker     string                 `json:"blocker,omitempty"`
+	CreatedBy   string                 `json:"created_by,omitempty"`
+	CreatedAt   string                 `json:"created_at"`
+	UpdatedAt   string                 `json:"updated_at"`
+	CompletedAt string                 `json:"completed_at,omitempty"`
+	Steps       []TaskPlanStepResponse `json:"steps"`
+}
+
+type TaskPlanStepResponse struct {
+	ID              string          `json:"id"`
+	StepKey         string          `json:"step_key"`
+	Title           string          `json:"title"`
+	Status          string          `json:"status"`
+	DependsOn       json.RawMessage `json:"depends_on,omitempty"`
+	ToolName        string          `json:"tool_name,omitempty"`
+	Capability      string          `json:"capability,omitempty"`
+	ExpectedOutcome string          `json:"expected_outcome,omitempty"`
+	Postcondition   string          `json:"postcondition,omitempty"`
+	Evidence        json.RawMessage `json:"evidence,omitempty"`
+	Observation     string          `json:"observation,omitempty"`
+	Blocker         string          `json:"blocker,omitempty"`
+	ErrorMessage    string          `json:"error_message,omitempty"`
+	AttemptCount    int             `json:"attempt_count"`
+	SortOrder       int             `json:"sort_order"`
+	CreatedAt       string          `json:"created_at"`
+	UpdatedAt       string          `json:"updated_at"`
+	CompletedAt     string          `json:"completed_at,omitempty"`
+}
+
 type TaskDetailResponse struct {
 	Task                TaskResponse                 `json:"task"`
 	Messages            []MessageResponse            `json:"messages"`
@@ -117,6 +155,7 @@ type TaskDetailResponse struct {
 	LinkedNexusRequests []LinkedNexusRequestResponse `json:"linked_nexus_requests"`
 	NexusSync           *NexusSyncStateResponse      `json:"nexus_sync,omitempty"`
 	ExecutionPlan       *TaskExecutionPlanResponse   `json:"execution_plan,omitempty"`
+	DurablePlan         *TaskPlanResponse            `json:"durable_plan,omitempty"`
 	ExecutionState      *TaskExecutionStateResponse  `json:"execution_state,omitempty"`
 }
 
@@ -128,10 +167,16 @@ type AddMessageRequest struct {
 
 // ChatRequest endpoint conversacional para el suscriptor.
 type ChatRequest struct {
-	TaskID         string `json:"task_id,omitempty"` // vacío = crear nueva conversación
-	Message        string `json:"message"`
-	Channel        string `json:"channel,omitempty"`         // default: "api"
-	ProductSurface string `json:"product_surface,omitempty"` // "companion" | "ponti" | "pymes"
+	TaskID           string          `json:"task_id,omitempty"` // vacío = crear nueva conversación
+	ChatID           string          `json:"chat_id,omitempty"` // id público de conversación durable
+	Message          string          `json:"message"`
+	Channel          string          `json:"channel,omitempty"`           // default: "api"
+	ProductSurface   string          `json:"product_surface,omitempty"`   // "companion" | "ponti" | "pymes"
+	AgentID          string          `json:"agent_id,omitempty"`          // empleado IA persistente a usar
+	RouteHint        string          `json:"route_hint,omitempty"`        // compatibilidad: el runtime decide routing
+	ConfirmedActions []string        `json:"confirmed_actions,omitempty"` // compatibilidad UI legacy
+	Handoff          json.RawMessage `json:"handoff,omitempty"`           // compatibilidad UI legacy
+	Workspace        json.RawMessage `json:"workspace,omitempty"`         // contexto operativo de pantalla; gana sobre handoff.workspace
 }
 
 // ChatResponse respuesta del chat con tarea y mensajes.
@@ -141,13 +186,36 @@ type ChatRequest struct {
 // task + messages son estado operativo estable de la API de Companion.
 type ChatResponse struct {
 	// Canon contract fields (mirror github.com/devpablocristo/platform/contracts/ai/go ChatResponse).
-	ChatID uuid.UUID             `json:"chat_id,omitempty"`
-	Reply  string                `json:"reply"`
-	Blocks []contracts.ChatBlock `json:"blocks,omitempty"`
+	ChatID               uuid.UUID                     `json:"chat_id,omitempty"`
+	TaskID               string                        `json:"task_id,omitempty"`
+	Reply                string                        `json:"reply"`
+	Blocks               []contracts.ChatBlock         `json:"blocks,omitempty"`
+	ToolCalls            []ChatToolCallResponse        `json:"tool_calls,omitempty"`
+	PendingConfirmations []PendingConfirmationResponse `json:"pending_confirmations,omitempty"`
 
 	// Companion-specific extras: la task FSM + el log completo de mensajes.
 	Task     TaskResponse      `json:"task"`
 	Messages []MessageResponse `json:"messages"`
+	RunID    string            `json:"run_id,omitempty"`
+	AgentID  string            `json:"agent_id,omitempty"`
+}
+
+type ChatToolCallResponse struct {
+	Name           string          `json:"name"`
+	ToolCallID     string          `json:"tool_call_id,omitempty"`
+	Allowed        bool            `json:"allowed"`
+	DecisionReason string          `json:"decision_reason,omitempty"`
+	DurationMS     int64           `json:"duration_ms"`
+	Error          string          `json:"error,omitempty"`
+	Status         string          `json:"status,omitempty"`
+	Result         json.RawMessage `json:"result,omitempty"`
+}
+
+type PendingConfirmationResponse struct {
+	RequestID string `json:"request_id,omitempty"`
+	Status    string `json:"status,omitempty"`
+	Tool      string `json:"tool,omitempty"`
+	Message   string `json:"message,omitempty"`
 }
 
 type InvestigateRequest struct {
@@ -178,6 +246,53 @@ type SetExecutionPlanRequest struct {
 	Operation      string          `json:"operation"`
 	Payload        json.RawMessage `json:"payload,omitempty"`
 	IdempotencyKey string          `json:"idempotency_key,omitempty"`
+}
+
+type SetTaskPlanRequest struct {
+	Objective   string                   `json:"objective,omitempty"`
+	Status      string                   `json:"status,omitempty"`
+	Strategy    string                   `json:"strategy,omitempty"`
+	Assumptions json.RawMessage          `json:"assumptions,omitempty"`
+	Constraints json.RawMessage          `json:"constraints,omitempty"`
+	Checkpoint  json.RawMessage          `json:"checkpoint,omitempty"`
+	NextAction  string                   `json:"next_action,omitempty"`
+	Blocker     string                   `json:"blocker,omitempty"`
+	Steps       []SetTaskPlanStepRequest `json:"steps"`
+}
+
+type SetTaskPlanStepRequest struct {
+	ID              string          `json:"id,omitempty"`
+	StepKey         string          `json:"step_key,omitempty"`
+	Title           string          `json:"title"`
+	Status          string          `json:"status,omitempty"`
+	DependsOn       json.RawMessage `json:"depends_on,omitempty"`
+	ToolName        string          `json:"tool_name,omitempty"`
+	Capability      string          `json:"capability,omitempty"`
+	ExpectedOutcome string          `json:"expected_outcome,omitempty"`
+	Postcondition   string          `json:"postcondition,omitempty"`
+	Evidence        json.RawMessage `json:"evidence,omitempty"`
+	Observation     string          `json:"observation,omitempty"`
+	Blocker         string          `json:"blocker,omitempty"`
+	ErrorMessage    string          `json:"error_message,omitempty"`
+	AttemptCount    int             `json:"attempt_count,omitempty"`
+	SortOrder       int             `json:"sort_order,omitempty"`
+}
+
+type UpdateTaskPlanStepRequest struct {
+	Status       string          `json:"status,omitempty"`
+	Evidence     json.RawMessage `json:"evidence,omitempty"`
+	Observation  string          `json:"observation,omitempty"`
+	Blocker      string          `json:"blocker,omitempty"`
+	ErrorMessage string          `json:"error_message,omitempty"`
+	Checkpoint   json.RawMessage `json:"checkpoint,omitempty"`
+	NextAction   string          `json:"next_action,omitempty"`
+}
+
+type RecordTaskPlanCheckpointRequest struct {
+	Status     string          `json:"status,omitempty"`
+	Checkpoint json.RawMessage `json:"checkpoint,omitempty"`
+	NextAction string          `json:"next_action,omitempty"`
+	Blocker    string          `json:"blocker,omitempty"`
 }
 
 type ExecuteTaskResponse struct {
@@ -268,6 +383,7 @@ func ChatResponseFromResult(task domain.Task, messages []domain.TaskMessage) Cha
 		Task:     TaskToResponse(task),
 		Messages: msgs,
 		ChatID:   extractChatID(task.ContextJSON),
+		TaskID:   task.ID.String(),
 	}
 
 	// Buscar último mensaje assistant/system para reply + blocks.
@@ -282,6 +398,42 @@ func ChatResponseFromResult(task domain.Task, messages []domain.TaskMessage) Cha
 		}
 	}
 	return resp
+}
+
+func ChatResponseFromRuntimeResult(task domain.Task, messages []domain.TaskMessage, runID, agentID string, toolCalls []ChatToolCallResponse) ChatResponse {
+	resp := ChatResponseFromResult(task, messages)
+	resp.RunID = strings.TrimSpace(runID)
+	resp.AgentID = strings.TrimSpace(agentID)
+	resp.ToolCalls = toolCalls
+	resp.PendingConfirmations = pendingConfirmationsFromToolCalls(toolCalls)
+	return resp
+}
+
+func pendingConfirmationsFromToolCalls(toolCalls []ChatToolCallResponse) []PendingConfirmationResponse {
+	out := make([]PendingConfirmationResponse, 0)
+	for _, call := range toolCalls {
+		if len(call.Result) == 0 {
+			continue
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(call.Result, &payload); err != nil {
+			continue
+		}
+		status, _ := payload["status"].(string)
+		status = strings.TrimSpace(strings.ToLower(status))
+		if status != "pending_approval" && status != "pending" {
+			continue
+		}
+		requestID, _ := payload["request_id"].(string)
+		message, _ := payload["message"].(string)
+		out = append(out, PendingConfirmationResponse{
+			RequestID: strings.TrimSpace(requestID),
+			Status:    status,
+			Tool:      call.Name,
+			Message:   strings.TrimSpace(message),
+		})
+	}
+	return out
 }
 
 // extractChatID lee task.context_json.agent_conversation_id (poblado en
@@ -352,6 +504,59 @@ func ExecutionPlanToResponse(plan domain.TaskExecutionPlan) *TaskExecutionPlanRe
 		IdempotencyKey: plan.IdempotencyKey,
 		CreatedAt:      plan.CreatedAt.UTC().Format(time.RFC3339),
 		UpdatedAt:      plan.UpdatedAt.UTC().Format(time.RFC3339),
+	}
+}
+
+func TaskPlanToResponse(plan domain.TaskPlan) *TaskPlanResponse {
+	steps := make([]TaskPlanStepResponse, 0, len(plan.Steps))
+	for _, step := range plan.Steps {
+		steps = append(steps, TaskPlanStepToResponse(step))
+	}
+	completedAt := ""
+	if plan.CompletedAt != nil {
+		completedAt = plan.CompletedAt.UTC().Format(time.RFC3339)
+	}
+	return &TaskPlanResponse{
+		Objective:   plan.Objective,
+		Status:      plan.Status,
+		Strategy:    plan.Strategy,
+		Assumptions: plan.AssumptionsJSON,
+		Constraints: plan.ConstraintsJSON,
+		Checkpoint:  plan.CheckpointJSON,
+		NextAction:  plan.NextAction,
+		Blocker:     plan.Blocker,
+		CreatedBy:   plan.CreatedBy,
+		CreatedAt:   plan.CreatedAt.UTC().Format(time.RFC3339),
+		UpdatedAt:   plan.UpdatedAt.UTC().Format(time.RFC3339),
+		CompletedAt: completedAt,
+		Steps:       steps,
+	}
+}
+
+func TaskPlanStepToResponse(step domain.TaskPlanStep) TaskPlanStepResponse {
+	completedAt := ""
+	if step.CompletedAt != nil {
+		completedAt = step.CompletedAt.UTC().Format(time.RFC3339)
+	}
+	return TaskPlanStepResponse{
+		ID:              step.ID.String(),
+		StepKey:         step.StepKey,
+		Title:           step.Title,
+		Status:          step.Status,
+		DependsOn:       step.DependsOnJSON,
+		ToolName:        step.ToolName,
+		Capability:      step.Capability,
+		ExpectedOutcome: step.ExpectedOutcome,
+		Postcondition:   step.Postcondition,
+		Evidence:        step.EvidenceJSON,
+		Observation:     step.Observation,
+		Blocker:         step.Blocker,
+		ErrorMessage:    step.ErrorMessage,
+		AttemptCount:    step.AttemptCount,
+		SortOrder:       step.SortOrder,
+		CreatedAt:       step.CreatedAt.UTC().Format(time.RFC3339),
+		UpdatedAt:       step.UpdatedAt.UTC().Format(time.RFC3339),
+		CompletedAt:     completedAt,
 	}
 }
 

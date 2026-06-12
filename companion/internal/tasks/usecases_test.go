@@ -15,6 +15,8 @@ import (
 	connectordomain "github.com/devpablocristo/companion/internal/connectors/usecases/domain"
 	"github.com/devpablocristo/companion/internal/nexusclient"
 	domain "github.com/devpablocristo/companion/internal/tasks/usecases/domain"
+	"github.com/devpablocristo/platform/errors/go/domainerr"
+	"github.com/devpablocristo/platform/security/go/tenant"
 )
 
 type fakeRepo struct {
@@ -24,6 +26,7 @@ type fakeRepo struct {
 	artifacts      []domain.TaskArtifact
 	nexusSync      map[uuid.UUID]domain.TaskNexusSyncState
 	executionPlan  map[uuid.UUID]domain.TaskExecutionPlan
+	taskPlan       map[uuid.UUID]domain.TaskPlan
 	executionState map[uuid.UUID]domain.TaskExecutionState
 }
 
@@ -56,12 +59,38 @@ func (f *fakeRepo) GetTaskByID(ctx context.Context, id uuid.UUID) (domain.Task, 
 	return t, nil
 }
 
-func (f *fakeRepo) ListTasks(ctx context.Context, orgID string, limit int) ([]domain.Task, error) {
+func (f *fakeRepo) GetTaskByAgentConversationID(ctx context.Context, conversationID uuid.UUID) (domain.Task, error) {
+	for _, t := range f.tasks {
+		if extractAgentConversationID(t.ContextJSON) == conversationID {
+			return t, nil
+		}
+	}
+	return domain.Task{}, ErrNotFound
+}
+
+func (f *fakeRepo) ListTasks(ctx context.Context, orgID tenant.ID, limit int) ([]domain.Task, error) {
+	if orgID.IsZero() {
+		return nil, domainerr.TenantMissing()
+	}
+	scope := orgID.String()
 	var out []domain.Task
 	for _, t := range f.tasks {
-		if orgID != "" && t.OrgID != "" && t.OrgID != orgID {
+		if t.OrgID != "" && t.OrgID != scope {
 			continue
 		}
+		if state, ok := f.nexusSync[t.ID]; ok {
+			t.NexusStatus = state.LastNexusStatus
+			t.NexusLastCheckedAt = &state.LastCheckedAt
+			t.NexusSyncError = state.LastError
+		}
+		out = append(out, t)
+	}
+	return out, nil
+}
+
+func (f *fakeRepo) ListAllTasks(ctx context.Context, limit int) ([]domain.Task, error) {
+	var out []domain.Task
+	for _, t := range f.tasks {
 		if state, ok := f.nexusSync[t.ID]; ok {
 			t.NexusStatus = state.LastNexusStatus
 			t.NexusLastCheckedAt = &state.LastCheckedAt
@@ -178,6 +207,86 @@ func (f *fakeRepo) UpsertExecutionPlan(ctx context.Context, plan domain.TaskExec
 	}
 	f.executionPlan[plan.TaskID] = plan
 	return plan, nil
+}
+
+func (f *fakeRepo) GetTaskPlan(ctx context.Context, taskID uuid.UUID) (domain.TaskPlan, error) {
+	if f.taskPlan == nil {
+		return domain.TaskPlan{}, ErrNotFound
+	}
+	plan, ok := f.taskPlan[taskID]
+	if !ok {
+		return domain.TaskPlan{}, ErrNotFound
+	}
+	return plan, nil
+}
+
+func (f *fakeRepo) UpsertTaskPlan(ctx context.Context, plan domain.TaskPlan) (domain.TaskPlan, error) {
+	if f.taskPlan == nil {
+		f.taskPlan = make(map[uuid.UUID]domain.TaskPlan)
+	}
+	if existing, ok := f.taskPlan[plan.TaskID]; ok && plan.CreatedAt.IsZero() {
+		plan.CreatedAt = existing.CreatedAt
+	}
+	now := time.Now().UTC()
+	if plan.CreatedAt.IsZero() {
+		plan.CreatedAt = now
+	}
+	if plan.UpdatedAt.IsZero() {
+		plan.UpdatedAt = now
+	}
+	for i := range plan.Steps {
+		if plan.Steps[i].ID == uuid.Nil {
+			plan.Steps[i].ID = uuid.New()
+		}
+		if plan.Steps[i].CreatedAt.IsZero() {
+			plan.Steps[i].CreatedAt = now
+		}
+		if plan.Steps[i].UpdatedAt.IsZero() {
+			plan.Steps[i].UpdatedAt = now
+		}
+	}
+	f.taskPlan[plan.TaskID] = plan
+	return plan, nil
+}
+
+func (f *fakeRepo) UpdateTaskPlan(ctx context.Context, plan domain.TaskPlan) (domain.TaskPlan, error) {
+	if f.taskPlan == nil {
+		return domain.TaskPlan{}, ErrNotFound
+	}
+	existing, ok := f.taskPlan[plan.TaskID]
+	if !ok {
+		return domain.TaskPlan{}, ErrNotFound
+	}
+	plan.Steps = existing.Steps
+	if plan.CreatedAt.IsZero() {
+		plan.CreatedAt = existing.CreatedAt
+	}
+	if plan.UpdatedAt.IsZero() {
+		plan.UpdatedAt = time.Now().UTC()
+	}
+	f.taskPlan[plan.TaskID] = plan
+	return plan, nil
+}
+
+func (f *fakeRepo) UpdateTaskPlanStep(ctx context.Context, step domain.TaskPlanStep) (domain.TaskPlanStep, error) {
+	if f.taskPlan == nil {
+		return domain.TaskPlanStep{}, ErrNotFound
+	}
+	plan, ok := f.taskPlan[step.TaskID]
+	if !ok {
+		return domain.TaskPlanStep{}, ErrNotFound
+	}
+	for i := range plan.Steps {
+		if plan.Steps[i].ID == step.ID {
+			if step.UpdatedAt.IsZero() {
+				step.UpdatedAt = time.Now().UTC()
+			}
+			plan.Steps[i] = step
+			f.taskPlan[step.TaskID] = plan
+			return step, nil
+		}
+	}
+	return domain.TaskPlanStep{}, ErrNotFound
 }
 
 func (f *fakeRepo) GetExecutionState(ctx context.Context, taskID uuid.UUID) (domain.TaskExecutionState, error) {
@@ -347,17 +456,20 @@ func (s *stubExecutor) BuildActionBinding(ctx context.Context, spec connectordom
 		return s.bindingFn(ctx, spec)
 	}
 	binding := map[string]any{
-		"org_id":          spec.OrgID,
-		"actor_id":        spec.ActorID,
-		"actor_type":      "agent",
-		"product_surface": "companion",
-		"connector_id":    spec.ConnectorID.String(),
-		"capability_id":   spec.Operation,
-		"operation":       spec.Operation,
-		"target_system":   "mock",
-		"target_resource": spec.ConnectorID.String(),
-		"payload_hash":    "payload-hash",
-		"idempotency_key": spec.IdempotencyKey,
+		"schema_version":     nexusclient.ToolIntentSchemaVersion,
+		"org_id":             spec.OrgID,
+		"actor_id":           spec.ActorID,
+		"actor_type":         "agent",
+		"product_surface":    "companion",
+		"run_id":             "test-run",
+		"tool_invocation_id": "test-tool",
+		"connector_id":       spec.ConnectorID.String(),
+		"capability_id":      spec.Operation,
+		"operation":          spec.Operation,
+		"target_system":      "mock",
+		"target_resource":    spec.ConnectorID.String(),
+		"payload_hash":       "payload-hash",
+		"idempotency_key":    spec.IdempotencyKey,
 	}
 	return binding, "binding-hash", nil
 }
@@ -461,6 +573,63 @@ func TestUsecases_ChatDefaultsChannelToAPI(t *testing.T) {
 	}
 }
 
+func TestUsecases_ChatReusesTaskByChatID(t *testing.T) {
+	t.Parallel()
+
+	chatID := uuid.New()
+	taskID := uuid.New()
+	repo := &fakeRepo{tasks: map[uuid.UUID]domain.Task{
+		taskID: {
+			ID:          taskID,
+			OrgID:       "org-1",
+			Title:       "existing conversation",
+			Status:      domain.TaskStatusNew,
+			CreatedBy:   "user-1",
+			Channel:     "api",
+			ContextJSON: json.RawMessage(`{"agent_conversation_id":"` + chatID.String() + `"}`),
+		},
+	}}
+	uc := NewUsecases(repo, &stubNexus{})
+
+	result, err := uc.Chat(context.Background(), ChatInput{
+		ChatID:  &chatID,
+		UserID:  "user-1",
+		OrgID:   "org-1",
+		Message: "Seguimos",
+	})
+	if err != nil {
+		t.Fatalf("chat failed: %v", err)
+	}
+	if result.Task.ID != taskID {
+		t.Fatalf("expected task %s, got %s", taskID, result.Task.ID)
+	}
+	if len(repo.tasks) != 1 {
+		t.Fatalf("expected no new task, got %d tasks", len(repo.tasks))
+	}
+}
+
+func TestUsecases_ChatPersistsAgentIDInTaskContext(t *testing.T) {
+	t.Parallel()
+	uc := NewUsecases(&fakeRepo{}, &stubNexus{})
+
+	result, err := uc.Chat(context.Background(), ChatInput{
+		UserID:  "user-1",
+		OrgID:   "org-1",
+		Message: "Hola",
+		AgentID: "support-agent",
+	})
+	if err != nil {
+		t.Fatalf("chat failed: %v", err)
+	}
+	var contextJSON map[string]string
+	if err := json.Unmarshal(result.Task.ContextJSON, &contextJSON); err != nil {
+		t.Fatal(err)
+	}
+	if contextJSON[agentContextKey] != "support-agent" {
+		t.Fatalf("expected task context agent_id, got %s", contextJSON[agentContextKey])
+	}
+}
+
 func TestUsecases_SetExecutionPlan_persistsAndAudits(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -492,6 +661,432 @@ func TestUsecases_SetExecutionPlan_persistsAndAudits(t *testing.T) {
 	}
 	if repo.countActions(TaskActionSetExecutionPlan) != 1 {
 		t.Fatalf("expected one set_execution_plan action, got %d", repo.countActions(TaskActionSetExecutionPlan))
+	}
+}
+
+func TestUsecases_SetTaskPlan_persistsStepsAndAudits(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	repo := &fakeRepo{}
+	uc := NewUsecases(repo, &stubNexus{})
+	mem := &stubTaskMemory{}
+	uc.SetTaskMemory(mem)
+
+	task, err := uc.Create(ctx, CreateTaskInput{OrgID: "org-a", CreatedBy: "user-a", Title: "durable work", Goal: "finish safely"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := uc.SetTaskPlan(ctx, task.ID, SetTaskPlanInput{
+		Objective:  "finish safely",
+		Strategy:   "plan then verify",
+		NextAction: "inspect context",
+		Steps: []SetTaskPlanStepInput{
+			{StepKey: "inspect", Title: "Inspect context", Status: domain.TaskPlanStepStatusReady, ExpectedOutcome: "facts collected"},
+			{StepKey: "verify", Title: "Verify result", Postcondition: "evidence exists"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Status != domain.TaskPlanStatusActive || len(plan.Steps) != 2 {
+		t.Fatalf("unexpected durable plan %+v", plan)
+	}
+	if plan.Steps[0].OrgID != "org-a" || plan.Steps[0].StepKey != "inspect" {
+		t.Fatalf("unexpected step %+v", plan.Steps[0])
+	}
+	if repo.countActions(TaskActionSetDurablePlan) != 1 {
+		t.Fatalf("expected one set durable plan action, got %d", repo.countActions(TaskActionSetDurablePlan))
+	}
+	if len(mem.writes) < 4 {
+		t.Fatalf("expected task memory projection for durable plan, got %d writes", len(mem.writes))
+	}
+}
+
+func TestUsecases_UpdateTaskPlanStepCompletesPlan(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	repo := &fakeRepo{}
+	uc := NewUsecases(repo, &stubNexus{})
+	task, err := uc.Create(ctx, CreateTaskInput{OrgID: "org-a", Title: "complete plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := uc.SetTaskPlan(ctx, task.ID, SetTaskPlanInput{
+		Objective: "complete plan",
+		Steps: []SetTaskPlanStepInput{
+			{StepKey: "only", Title: "Only step", Status: domain.TaskPlanStepStatusReady},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	updated, err := uc.UpdateTaskPlanStep(ctx, task.ID, plan.Steps[0].ID, UpdateTaskPlanStepInput{
+		Status:       domain.TaskPlanStepStatusDone,
+		Observation:  "done",
+		EvidenceJSON: json.RawMessage(`{"checked":true}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Status != domain.TaskPlanStatusCompleted || updated.CompletedAt == nil {
+		t.Fatalf("expected completed durable plan, got %+v", updated)
+	}
+	if updated.Steps[0].CompletedAt == nil || updated.Steps[0].Observation != "done" {
+		t.Fatalf("expected completed step, got %+v", updated.Steps[0])
+	}
+	if repo.countActions(TaskActionUpdatePlanStep) != 1 {
+		t.Fatalf("expected one update plan step action, got %d", repo.countActions(TaskActionUpdatePlanStep))
+	}
+}
+
+func TestUsecases_RecordTaskPlanCheckpoint(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	repo := &fakeRepo{}
+	uc := NewUsecases(repo, &stubNexus{})
+	task, err := uc.Create(ctx, CreateTaskInput{OrgID: "org-a", Title: "checkpoint"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = uc.SetTaskPlan(ctx, task.ID, SetTaskPlanInput{
+		Objective: "checkpoint",
+		Steps:     []SetTaskPlanStepInput{{Title: "Step"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, err := uc.RecordTaskPlanCheckpoint(ctx, task.ID, RecordTaskPlanCheckpointInput{
+		CheckpointJSON: json.RawMessage(`{"phase":"observed"}`),
+		NextAction:     "continue",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.NextAction != "continue" || !strings.Contains(string(updated.CheckpointJSON), "observed") {
+		t.Fatalf("unexpected checkpoint %+v", updated)
+	}
+	if repo.countActions(TaskActionPlanCheckpoint) != 1 {
+		t.Fatalf("expected one plan checkpoint action, got %d", repo.countActions(TaskActionPlanCheckpoint))
+	}
+}
+
+func TestUsecases_PrepareTaskPlanCompensationSubmitsGenericNexusRequest(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	repo := &fakeRepo{}
+	nexusRequestID := uuid.New()
+	connectorID := uuid.New()
+	var capturedKey string
+	var capturedBody nexusclient.SubmitRequestBody
+	uc := NewUsecases(repo, &stubNexus{
+		submitFn: func(ctx context.Context, idempotencyKey string, body nexusclient.SubmitRequestBody) (nexusclient.SubmitResponse, error) {
+			capturedKey = idempotencyKey
+			capturedBody = body
+			return nexusclient.SubmitResponse{
+				RequestID:   nexusRequestID.String(),
+				Status:      nexusclient.StatusPendingApproval,
+				Decision:    nexusclient.DecisionRequireApproval,
+				RiskLevel:   "high",
+				BindingHash: "binding-hash",
+			}, nil
+		},
+	})
+	uc.SetExecutor(&stubExecutor{
+		bindingFn: func(ctx context.Context, spec connectordomain.ExecutionSpec) (map[string]any, string, error) {
+			if spec.ConnectorID != connectorID {
+				t.Fatalf("unexpected compensation connector id %s", spec.ConnectorID)
+			}
+			if spec.Operation != "invoice.cancel" {
+				t.Fatalf("unexpected compensation operation %q", spec.Operation)
+			}
+			binding := map[string]any{
+				"schema_version":     nexusclient.ToolIntentSchemaVersion,
+				"org_id":             spec.OrgID,
+				"actor_id":           spec.ActorID,
+				"actor_type":         "agent",
+				"product_surface":    spec.ProductSurface,
+				"run_id":             spec.RunID,
+				"tool_invocation_id": spec.ToolInvocationID,
+				"connector_id":       spec.ConnectorID.String(),
+				"capability_id":      spec.Operation,
+				"operation":          spec.Operation,
+				"target_system":      "billing",
+				"target_resource":    spec.ConnectorID.String(),
+				"payload_hash":       "comp-payload-hash",
+				"idempotency_key":    spec.IdempotencyKey,
+			}
+			return binding, "binding-hash", nil
+		},
+	})
+	task, err := uc.Create(ctx, CreateTaskInput{OrgID: "org-a", CreatedBy: "user-a", Title: "compensate invoice"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalBinding, err := json.Marshal(map[string]any{
+		"schema_version":     nexusclient.ToolIntentSchemaVersion,
+		"org_id":             "org-a",
+		"actor_id":           "user-a",
+		"actor_type":         "human",
+		"product_surface":    "companion",
+		"run_id":             "run-1",
+		"tool_invocation_id": "invoke-1",
+		"connector_id":       connectorID.String(),
+		"capability_id":      "invoice.create",
+		"operation":          "invoice.create",
+		"target_system":      "billing",
+		"target_resource":    connectorID.String(),
+		"payload_hash":       "payload-hash",
+		"idempotency_key":    "original-idem",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalBindingJSON := string(originalBinding)
+	plan, err := uc.SetTaskPlan(ctx, task.ID, SetTaskPlanInput{
+		Objective: "compensate invoice",
+		Steps: []SetTaskPlanStepInput{{
+			StepKey:       "invoice",
+			Title:         "Create invoice",
+			Status:        domain.TaskPlanStepStatusDone,
+			ToolName:      "billing_invoice_create",
+			Capability:    "invoice.create",
+			EvidenceJSON:  json.RawMessage(`{"compensation":{"supported":true,"capability_id":"invoice.cancel","requires_nexus":true},"tool_metadata":{"connector_kind":"billing","rollback_supported":true,"rollback_capability_id":"invoice.cancel"},"tool_result":{"evidence":{"action_binding":` + originalBindingJSON + `}}}`),
+			Postcondition: "invoice exists",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := uc.PrepareTaskPlanCompensation(ctx, task.ID, plan.Steps[0].ID, PrepareTaskPlanCompensationInput{Reason: "customer cancelled"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Status != "compensation_approval_requested" || out.NexusRequestID != nexusRequestID.String() {
+		t.Fatalf("unexpected compensation output: %+v", out)
+	}
+	if capturedBody.ActionType != nexusclient.ActionTypeAgentCapabilityCompensate || capturedBody.RequesterType != "agent" {
+		t.Fatalf("expected generic agent compensation request, got %+v", capturedBody)
+	}
+	if capturedBody.TargetSystem != "billing" || capturedBody.TargetResource != connectorID.String() {
+		t.Fatalf("expected target from original binding, got %+v", capturedBody)
+	}
+	if capturedBody.ActionBinding["org_id"] != "org-a" || capturedBody.ActionBinding["capability_id"] != "invoice.cancel" {
+		t.Fatalf("unexpected compensation action binding: %+v", capturedBody.ActionBinding)
+	}
+	if !strings.HasPrefix(capturedKey, "task-plan-compensation-"+task.ID.String()) {
+		t.Fatalf("expected deterministic compensation idempotency key, got %q", capturedKey)
+	}
+	if repo.countActions(TaskActionPrepareComp) != 1 {
+		t.Fatalf("expected one compensation action, got %d", repo.countActions(TaskActionPrepareComp))
+	}
+}
+
+func TestUsecases_PrepareTaskPlanCompensationRejectsAmbiguousRollbackOperation(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	repo := &fakeRepo{}
+	connectorID := uuid.New()
+	submitted := false
+	uc := NewUsecases(repo, &stubNexus{
+		submitFn: func(ctx context.Context, idempotencyKey string, body nexusclient.SubmitRequestBody) (nexusclient.SubmitResponse, error) {
+			submitted = true
+			return nexusclient.SubmitResponse{}, nil
+		},
+	})
+	uc.SetExecutor(&stubExecutor{})
+	task, err := uc.Create(ctx, CreateTaskInput{OrgID: "org-a", CreatedBy: "user-a", Title: "ambiguous compensation"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalBinding, err := json.Marshal(map[string]any{
+		"schema_version":     nexusclient.ToolIntentSchemaVersion,
+		"org_id":             "org-a",
+		"actor_id":           "user-a",
+		"actor_type":         "human",
+		"product_surface":    "companion",
+		"run_id":             "run-1",
+		"tool_invocation_id": "invoke-1",
+		"connector_id":       connectorID.String(),
+		"capability_id":      "invoice.create",
+		"operation":          "invoice.create",
+		"target_system":      "billing",
+		"target_resource":    connectorID.String(),
+		"payload_hash":       "payload-hash",
+		"idempotency_key":    "original-idem",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := uc.SetTaskPlan(ctx, task.ID, SetTaskPlanInput{
+		Objective: "ambiguous compensation",
+		Steps: []SetTaskPlanStepInput{{
+			StepKey:      "invoice",
+			Title:        "Create invoice",
+			Status:       domain.TaskPlanStepStatusDone,
+			ToolName:     "billing_invoice_create",
+			Capability:   "invoice.create",
+			EvidenceJSON: json.RawMessage(`{"compensation":{"supported":true,"requires_nexus":true},"tool_result":{"evidence":{"action_binding":` + string(originalBinding) + `}}}`),
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := uc.PrepareTaskPlanCompensation(ctx, task.ID, plan.Steps[0].ID, PrepareTaskPlanCompensationInput{Reason: "customer cancelled"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Status != "compensation_contract_invalid" {
+		t.Fatalf("expected invalid compensation contract, got %+v", out)
+	}
+	if submitted {
+		t.Fatal("ambiguous compensation should not be submitted to Nexus")
+	}
+}
+
+func TestUsecases_ExecuteTaskPlanCompensationRequiresApprovedNexusAndReports(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	repo := &fakeRepo{}
+	nexusRequestID := uuid.New()
+	connectorID := uuid.New()
+	var reported bool
+	var executedSpec connectordomain.ExecutionSpec
+	uc := NewUsecases(repo, &stubNexus{
+		submitFn: func(ctx context.Context, idempotencyKey string, body nexusclient.SubmitRequestBody) (nexusclient.SubmitResponse, error) {
+			return nexusclient.SubmitResponse{
+				RequestID:   nexusRequestID.String(),
+				Status:      nexusclient.StatusPendingApproval,
+				Decision:    nexusclient.DecisionRequireApproval,
+				RiskLevel:   "high",
+				BindingHash: "binding-hash",
+			}, nil
+		},
+		getFn: func(ctx context.Context, id string) (nexusclient.RequestSummary, int, error) {
+			if id != nexusRequestID.String() {
+				t.Fatalf("unexpected nexus request lookup %q", id)
+			}
+			return nexusclient.RequestSummary{
+				ID:     nexusRequestID.String(),
+				Status: nexusclient.StatusApproved,
+			}, http.StatusOK, nil
+		},
+		reportFn: func(ctx context.Context, id string, success bool, result map[string]any, durationMS int64, errorMessage string) (int, error) {
+			reported = true
+			if id != nexusRequestID.String() || !success {
+				t.Fatalf("unexpected nexus report id=%q success=%v", id, success)
+			}
+			if result["external_ref"] != "rollback-ref" || result["operation"] != "invoice.cancel" {
+				t.Fatalf("unexpected nexus report payload %+v", result)
+			}
+			return http.StatusOK, nil
+		},
+	})
+	uc.SetExecutor(&stubExecutor{
+		bindingFn: func(ctx context.Context, spec connectordomain.ExecutionSpec) (map[string]any, string, error) {
+			binding := map[string]any{
+				"schema_version":     nexusclient.ToolIntentSchemaVersion,
+				"org_id":             spec.OrgID,
+				"actor_id":           spec.ActorID,
+				"actor_type":         "agent",
+				"product_surface":    spec.ProductSurface,
+				"run_id":             spec.RunID,
+				"tool_invocation_id": spec.ToolInvocationID,
+				"connector_id":       spec.ConnectorID.String(),
+				"capability_id":      spec.Operation,
+				"operation":          spec.Operation,
+				"target_system":      "billing",
+				"target_resource":    spec.ConnectorID.String(),
+				"payload_hash":       "comp-payload-hash",
+				"idempotency_key":    spec.IdempotencyKey,
+			}
+			return binding, "binding-hash", nil
+		},
+		executeFn: func(ctx context.Context, spec connectordomain.ExecutionSpec) (connectordomain.ExecutionResult, error) {
+			executedSpec = spec
+			return connectordomain.ExecutionResult{
+				ID:             uuid.New(),
+				ConnectorID:    spec.ConnectorID,
+				OrgID:          spec.OrgID,
+				ActorID:        spec.ActorID,
+				Operation:      spec.Operation,
+				Status:         connectordomain.ExecSuccess,
+				ExternalRef:    "rollback-ref",
+				Payload:        spec.Payload,
+				ResultJSON:     json.RawMessage(`{"ok":true}`),
+				EvidenceJSON:   json.RawMessage(`{"external_ref":"rollback-ref"}`),
+				IdempotencyKey: spec.IdempotencyKey,
+				TaskID:         spec.TaskID,
+				NexusRequestID: spec.NexusRequestID,
+				DurationMS:     42,
+				CreatedAt:      time.Now().UTC(),
+			}, nil
+		},
+	})
+
+	task, err := uc.Create(ctx, CreateTaskInput{OrgID: "org-a", CreatedBy: "user-a", Title: "execute compensation"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalBinding, err := json.Marshal(map[string]any{
+		"schema_version":     nexusclient.ToolIntentSchemaVersion,
+		"org_id":             "org-a",
+		"actor_id":           "user-a",
+		"actor_type":         "human",
+		"product_surface":    "companion",
+		"run_id":             "run-1",
+		"tool_invocation_id": "invoke-1",
+		"connector_id":       connectorID.String(),
+		"capability_id":      "invoice.create",
+		"operation":          "invoice.create",
+		"target_system":      "billing",
+		"target_resource":    connectorID.String(),
+		"payload_hash":       "payload-hash",
+		"idempotency_key":    "original-idem",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := uc.SetTaskPlan(ctx, task.ID, SetTaskPlanInput{
+		Objective: "execute compensation",
+		Steps: []SetTaskPlanStepInput{{
+			StepKey:       "invoice",
+			Title:         "Create invoice",
+			Status:        domain.TaskPlanStepStatusDone,
+			ToolName:      "billing_invoice_create",
+			Capability:    "invoice.create",
+			EvidenceJSON:  json.RawMessage(`{"compensation":{"supported":true,"capability_id":"invoice.cancel","requires_nexus":true},"tool_result":{"evidence":{"action_binding":` + string(originalBinding) + `}}}`),
+			Postcondition: "invoice exists",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := uc.PrepareTaskPlanCompensation(ctx, task.ID, plan.Steps[0].ID, PrepareTaskPlanCompensationInput{Reason: "customer cancelled"}); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := uc.ExecuteTaskPlanCompensation(ctx, task.ID, plan.Steps[0].ID, ExecuteTaskPlanCompensationInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Status != "compensation_executed" || out.NexusRequestID != nexusRequestID.String() {
+		t.Fatalf("unexpected compensation execution output: %+v", out)
+	}
+	if executedSpec.Operation != "invoice.cancel" || executedSpec.ConnectorID != connectorID {
+		t.Fatalf("unexpected executed compensation spec: %+v", executedSpec)
+	}
+	if executedSpec.NexusRequestID == nil || *executedSpec.NexusRequestID != nexusRequestID {
+		t.Fatalf("expected approved nexus request in execution spec, got %+v", executedSpec.NexusRequestID)
+	}
+	if !reported {
+		t.Fatal("expected compensation execution result to be reported to Nexus")
+	}
+	if repo.countActions(TaskActionExecuteComp) != 1 {
+		t.Fatalf("expected one execute compensation action, got %d", repo.countActions(TaskActionExecuteComp))
 	}
 }
 
@@ -1213,6 +1808,74 @@ func TestUsecases_RetryTask_reexecutesRetryableFailure(t *testing.T) {
 	}
 	if repo.countActions(TaskActionRetryExecution) != 1 {
 		t.Fatalf("expected one retry action, got %d", repo.countActions(TaskActionRetryExecution))
+	}
+}
+
+// TestList_RejectsEmptyOrgID asegura que la firma strict de Usecases.List
+// cierre el leak histórico: orgID vacío debe fallar con TenantMissing y
+// nunca devolver tasks (Fase 5 del plan multitenancy).
+func TestList_RejectsEmptyOrgID(t *testing.T) {
+	t.Parallel()
+	repo := &fakeRepo{tasks: map[uuid.UUID]domain.Task{
+		uuid.New(): {ID: uuid.New(), Title: "leak-bait", OrgID: "tenant-A"},
+		uuid.New(): {ID: uuid.New(), Title: "leak-bait-2", OrgID: "tenant-B"},
+	}}
+	uc := NewUsecases(repo, &stubNexus{})
+
+	got, err := uc.List(context.Background(), tenant.ID(""), 100)
+	if err == nil {
+		t.Fatal("expected error for empty orgID")
+	}
+	if !errors.Is(err, domainerr.TenantMissing()) {
+		t.Errorf("expected TenantMissing, got %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("expected zero rows on error, got %d (LEAK)", len(got))
+	}
+}
+
+// TestList_FiltersByOrgID confirma que orgID válido SÍ aplica el filtro
+// y no incluye tasks de otros tenants.
+func TestList_FiltersByOrgID(t *testing.T) {
+	t.Parallel()
+	repo := &fakeRepo{tasks: map[uuid.UUID]domain.Task{
+		uuid.New(): {ID: uuid.New(), Title: "A1", OrgID: "tenant-A"},
+		uuid.New(): {ID: uuid.New(), Title: "A2", OrgID: "tenant-A"},
+		uuid.New(): {ID: uuid.New(), Title: "B1", OrgID: "tenant-B"},
+	}}
+	uc := NewUsecases(repo, &stubNexus{})
+
+	got, err := uc.List(context.Background(), tenant.FromString("tenant-A"), 100)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 rows for tenant-A, got %d", len(got))
+	}
+	for _, task := range got {
+		if task.OrgID != "tenant-A" {
+			t.Errorf("leaked row: %+v", task)
+		}
+	}
+}
+
+// TestListAll_BypassesTenantScope confirma que ListAll devuelve TODAS las
+// rows — pensado para flows admin con scope companion:cross_org. El handler
+// es quien valida el caller; el usecase confía en lo que recibe.
+func TestListAll_BypassesTenantScope(t *testing.T) {
+	t.Parallel()
+	repo := &fakeRepo{tasks: map[uuid.UUID]domain.Task{
+		uuid.New(): {ID: uuid.New(), Title: "A", OrgID: "tenant-A"},
+		uuid.New(): {ID: uuid.New(), Title: "B", OrgID: "tenant-B"},
+	}}
+	uc := NewUsecases(repo, &stubNexus{})
+
+	got, err := uc.ListAll(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("ListAll: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 rows across orgs, got %d", len(got))
 	}
 }
 

@@ -162,13 +162,13 @@ func (s *server) withAuth(next http.Handler) http.Handler {
 }
 
 func (s *server) authenticate(r *http.Request) (authn.Principal, error) {
-	if s.cfg.AuthMode == "dev" {
+	if s.cfg.AuthMode == "dev" || s.cfg.AuthMode == "preview" {
 		return authn.Principal{
 			OrgID:      firstNonEmpty(r.Header.Get("X-Dev-Org-ID"), s.cfg.DevOrgID),
 			Actor:      firstNonEmpty(r.Header.Get("X-Dev-User-ID"), s.cfg.DevUserID),
 			Role:       firstNonEmpty(r.Header.Get("X-Dev-Role"), "axis-admin"),
 			Scopes:     firstNonEmptyScopes(splitScopes(r.Header.Get("X-Dev-Scopes")), s.cfg.DevScopes),
-			AuthMethod: "dev",
+			AuthMethod: s.cfg.AuthMode,
 		}, nil
 	}
 	if s.oidcAuth == nil {
@@ -265,6 +265,11 @@ func (s *server) proxy(name, prefix, target, audience string) http.Handler {
 		r2.Header = r.Header.Clone()
 		r2.Header.Del("Cookie")
 		r2.Header.Del("X-API-Key")
+		// Nunca reenviar delegación de identidad del browser: el canal
+		// legítimo es el claim on_behalf_of del internal JWT del BFF. Un
+		// X-On-Behalf-Of inbound permitiría a un humano de consola forjar
+		// decided_by aguas abajo (nexus approvals).
+		r2.Header.Del("X-On-Behalf-Of")
 		r2.Header.Set("Authorization", "Bearer "+token)
 		r2.Header.Set("X-Request-ID", requestID(r))
 		r2.Header.Set("X-Axis-Forwarded-By", "axis-bff")
@@ -284,7 +289,7 @@ func (s *server) selectedOrg(r *http.Request, p authn.Principal) (string, error)
 	if principalOrg != "" && requested == principalOrg {
 		return requested, nil
 	}
-	if hasScope(p.Scopes, "axis:cross_org", "nexus:cross_org") {
+	if hasScope(p.Scopes, "axis:cross_org", "nexus:cross_org", "companion:cross_org") {
 		return requested, nil
 	}
 	return "", errors.New("selected org is not allowed for this principal")
@@ -418,10 +423,22 @@ func requestID(r *http.Request) string {
 func defaultAdminScopes() []string {
 	return []string{
 		"axis:cross_org",
+		"companion:cross_org",
+		"companion:runtime:admin",
 		"companion:tasks:read",
 		"companion:tasks:write",
 		"companion:connectors:execute",
 		"companion:connectors:admin",
+		"companion:memory:read",
+		"companion:memory:write",
+		"companion:memory:admin",
+		"companion:capabilities:read",
+		"companion:capabilities:admin",
+		"companion:agents:read",
+		"companion:agents:admin",
+		"companion:observability:read",
+		"companion:costs:read",
+		"companion:evals:admin",
 		"companion:watchers:read",
 		"companion:watchers:write",
 		"companion:watchers:execute",

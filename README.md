@@ -67,3 +67,33 @@ Puertos por defecto:
 | Axis BFF | `http://localhost:18080` |
 | Companion API | `http://localhost:18085` |
 | Nexus API | `http://localhost:18084` |
+
+## GitHub Flow Deploys
+
+Los deploys Cloud Run viven en `.github/workflows/` y siguen GitHub Flow:
+
+- PR contra `main`: CI y preview automatico.
+- Push a `main`: `deploy-stg`.
+- Produccion: `deploy-prd` manual con GitHub environment `prd`.
+
+Release, rollback y branch-protection recomendada estan documentados en
+`docs/release-rollback.md`.
+
+Readiness multi-producto antes del primer producto real esta documentado en
+`docs/axis-ready-for-first-real-product.md`.
+
+STG usa el proyecto `axis-stg-884236` y la instancia Cloud SQL existente
+`pymes-dev-352318:us-central1:pymes-dev-db`. No se crean instancias de base de
+datos desde los workflows. STG expone `axis-nexus`, `axis-companion`,
+`axis-bff` y `axis-console`.
+
+PRD se configura con variables GitHub `*_PRD` y secrets de Secret Manager
+propios del entorno productivo.
+
+Secrets en Secret Manager:
+
+- Nexus STG: `axis-nexus-database-url-stg`, `axis-nexus-api-keys-stg`,
+  `axis-nexus-signing-key-stg`, `axis-nexus-callback-token-stg`.
+- Companion STG: `axis-companion-database-url-stg`,
+  `axis-companion-api-keys-stg`, `axis-companion-nexus-api-key-stg`.
+- Shared STG: `axis-internal-jwt-secret-stg`, usado por BFF, Nexus y Companion.

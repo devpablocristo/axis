@@ -45,8 +45,8 @@ func NewPostgresTraceRepository(db *sharedpostgres.DB) *PostgresTraceRepository 
 
 const selectRunTrace = `
 	SELECT run_id, org_id, user_id, task_id, product_surface, intent, autonomy_level,
-	       prompt_version, model,
-	       identity_chain_json, guardrail_events_json, tool_calls_json, error,
+	prompt_version, model,
+	       identity_chain_json, usage_json, guardrail_events_json, tool_calls_json, error,
 	       started_at, completed_at
 	FROM companion_run_traces`
 
@@ -65,6 +65,10 @@ func (r *PostgresTraceRepository) Save(ctx context.Context, trace RunTrace, orgI
 	if err != nil {
 		return fmt.Errorf("marshal guardrail_events: %w", err)
 	}
+	usageJSON, err := json.Marshal(trace.Usage)
+	if err != nil {
+		return fmt.Errorf("marshal usage: %w", err)
+	}
 	toolCallsJSON, err := json.Marshal(emptyArrayIfNilTools(trace.ToolCalls))
 	if err != nil {
 		return fmt.Errorf("marshal tool_calls: %w", err)
@@ -79,19 +83,20 @@ func (r *PostgresTraceRepository) Save(ctx context.Context, trace RunTrace, orgI
 	_, err = r.db.Pool().Exec(ctx, `
 		INSERT INTO companion_run_traces
 			(run_id, org_id, user_id, task_id, product_surface, intent, autonomy_level,
-			 prompt_version, model, identity_chain_json, guardrail_events_json, tool_calls_json, error,
+			 prompt_version, model, identity_chain_json, usage_json, guardrail_events_json, tool_calls_json, error,
 			 started_at, completed_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
 		ON CONFLICT (run_id) DO UPDATE SET
 			prompt_version        = EXCLUDED.prompt_version,
 			model                 = EXCLUDED.model,
+			usage_json            = EXCLUDED.usage_json,
 			guardrail_events_json = EXCLUDED.guardrail_events_json,
 			tool_calls_json       = EXCLUDED.tool_calls_json,
 			error                 = EXCLUDED.error,
 			completed_at          = EXCLUDED.completed_at
 	`, runID, orgID, userID, taskID, trace.ProductSurface, trace.Intent, string(trace.AutonomyLevel),
 		firstNonEmpty(trace.PromptVersion, SystemPromptVersion), trace.Model,
-		identityJSON, guardrailJSON, toolCallsJSON, errMsg,
+		identityJSON, usageJSON, guardrailJSON, toolCallsJSON, errMsg,
 		trace.StartedAt, completedAt)
 	if err != nil {
 		return fmt.Errorf("save run trace: %w", err)
@@ -163,6 +168,7 @@ func scanRunTrace(row rowScanner) (StoredTrace, error) {
 		runID         uuid.UUID
 		taskID        *uuid.UUID
 		identityRaw   []byte
+		usageRaw      []byte
 		guardrailRaw  []byte
 		toolCallsRaw  []byte
 		autonomyLevel string
@@ -173,7 +179,7 @@ func scanRunTrace(row rowScanner) (StoredTrace, error) {
 	err := row.Scan(
 		&runID, &st.OrgID, &st.UserID, &taskID, &st.ProductSurface, &st.Intent, &autonomyLevel,
 		&promptVersion, &model,
-		&identityRaw, &guardrailRaw, &toolCallsRaw, &st.Error,
+		&identityRaw, &usageRaw, &guardrailRaw, &toolCallsRaw, &st.Error,
 		&st.StartedAt, &completedAt,
 	)
 	if err != nil {
@@ -190,6 +196,11 @@ func scanRunTrace(row rowScanner) (StoredTrace, error) {
 	if len(identityRaw) > 0 {
 		if err := json.Unmarshal(identityRaw, &st.IdentityChain); err != nil {
 			return StoredTrace{}, fmt.Errorf("unmarshal identity_chain: %w", err)
+		}
+	}
+	if len(usageRaw) > 0 {
+		if err := json.Unmarshal(usageRaw, &st.Usage); err != nil {
+			return StoredTrace{}, fmt.Errorf("unmarshal usage: %w", err)
 		}
 	}
 	if len(guardrailRaw) > 0 {

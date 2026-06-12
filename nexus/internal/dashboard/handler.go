@@ -5,8 +5,10 @@ import (
 	"net/http"
 
 	dashboarddto "github.com/devpablocristo/nexus/internal/dashboard/handler/dto"
+	"github.com/devpablocristo/nexus/internal/orgctx"
 	requestdomain "github.com/devpablocristo/nexus/internal/requests/usecases/domain"
 	"github.com/devpablocristo/platform/http/go/httpjson"
+	"github.com/devpablocristo/platform/authn/go/identityhttp"
 )
 
 const maxListLimit = 1000
@@ -42,11 +44,14 @@ func (h *Handler) summary(w http.ResponseWriter, r *http.Request) {
 	var orgFilter *string
 	allowAll := false
 	switch {
-	case requestHasNoAuthContext(r):
+	case identityhttp.HasNoAuthContext(r):
 		allowAll = true
-	case requestHasScope(r, scopeNexusCrossOrg):
-		// Admin global: si pasa X-Org-ID se filtra ese org; sin header ve todo.
-		orgFilter = principalOrgID(r)
+	case identityhttp.HasAnyScope(r, scopeNexusCrossOrg):
+		// Admin global: puede acotar a un org puntual (X-Org-ID inbound,
+		// preservado en orgctx, o el org del principal); sin org ve todo.
+		if orgID := orgctx.Narrowed(r, identityhttp.PrincipalOrgID(r)); orgID != "" {
+			orgFilter = &orgID
+		}
 		allowAll = orgFilter == nil
 	default:
 		// Caller scopeado: solo su propio org. Sin org_id fallamos cerrado.

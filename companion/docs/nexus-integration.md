@@ -6,9 +6,10 @@ obedece.
 ## Contrato operacional
 
 1. Companion detecta intención o capability sensible.
-2. Companion construye `ToolIntent v1` con `schema_version`, tenant, actor,
-   product surface, connector/capability, operación, target, `payload_hash`,
-   `idempotency_key`, `run_id` y `tool_invocation_id`.
+2. Companion construye `ToolIntent v1` con `schema_version`, customer org
+   (`org_id`), actor humano/delegado, `companion_principal`, product surface,
+   connector/capability, operación, target, `payload_hash`, `idempotency_key`,
+   `run_id` y `tool_invocation_id`.
 3. Companion envía el intent a Nexus como `action_binding`; Nexus calcula y
    persiste `binding_hash`.
 4. Nexus responde decisión/estado y `binding_hash`.
@@ -23,6 +24,8 @@ obedece.
   habilitan ejecución.
 - Connectors rechazan side effects sin `org_id`, `actor_id`,
   `idempotency_key` y `binding_hash` válido.
+- Evidence y traces distinguen `actor_id`/`human_user_id`/`on_behalf_of` de la
+  identidad tecnica `companion.employee_ai`.
 - Watcher proposals tienen loop de reconciliación para decisiones pendientes.
 - Nexus assist requiere scopes dedicados.
 

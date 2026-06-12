@@ -40,6 +40,7 @@ type ReplayOutput struct {
 	FinalStatus   string                    `json:"final_status"`
 	DurationTotal string                    `json:"duration_total,omitempty"`
 	Timeline      []TimelineEntry           `json:"timeline"`
+	Integrity     *IntegrityOutput          `json:"integrity,omitempty"`
 }
 
 type TimelineEntry struct {
@@ -47,6 +48,14 @@ type TimelineEntry struct {
 	Actor   string `json:"actor"`
 	At      string `json:"at"`
 	Summary string `json:"summary"`
+}
+
+type IntegrityOutput struct {
+	Status        string `json:"status"`
+	CheckedEvents int    `json:"checked_events"`
+	FirstHash     string `json:"first_hash,omitempty"`
+	LastHash      string `json:"last_hash,omitempty"`
+	Error         string `json:"error,omitempty"`
 }
 
 func (u *Usecases) Replay(ctx context.Context, requestID uuid.UUID) (ReplayOutput, error) {
@@ -83,7 +92,90 @@ func (u *Usecases) Replay(ctx context.Context, requestID uuid.UUID) (ReplayOutpu
 	if !first.IsZero() && !last.IsZero() {
 		out.DurationTotal = last.Sub(first).Round(time.Second).String()
 	}
+	integrity := verifyEvents(events)
+	if integrity.Status == "ok" {
+		integrity = u.verifySignatures(events, integrity)
+	}
+	out.Integrity = &integrity
 	return out, nil
+}
+
+func (u *Usecases) Verify(ctx context.Context, requestID uuid.UUID) (IntegrityOutput, error) {
+	if _, err := u.requestRepo.GetReplayInfo(ctx, requestID); err != nil {
+		return IntegrityOutput{}, err
+	}
+	events, err := u.repo.ListByRequestID(ctx, requestID)
+	if err != nil {
+		return IntegrityOutput{}, err
+	}
+	out := verifyEvents(events)
+	if out.Status == "ok" {
+		out = u.verifySignatures(events, out)
+	}
+	if recorder, ok := u.repo.(interface {
+		RecordIntegrityCheck(context.Context, IntegrityCheck) error
+	}); ok {
+		_ = recorder.RecordIntegrityCheck(ctx, IntegrityCheck{
+			Scope:          "request",
+			ScopeID:        requestID.String(),
+			Status:         out.Status,
+			CheckedEvents:  out.CheckedEvents,
+			FirstEventHash: out.FirstHash,
+			LastEventHash:  out.LastHash,
+			ErrorMessage:   out.Error,
+		})
+	}
+	return out, nil
+}
+
+func (u *Usecases) verifySignatures(events []auditdomain.RequestEvent, out IntegrityOutput) IntegrityOutput {
+	verifier, ok := u.repo.(interface {
+		VerifySignatures([]auditdomain.RequestEvent) error
+	})
+	if !ok {
+		return out
+	}
+	if err := verifier.VerifySignatures(events); err != nil {
+		out.Status = "failed"
+		out.Error = err.Error()
+	}
+	return out
+}
+
+func verifyEvents(events []auditdomain.RequestEvent) IntegrityOutput {
+	out := IntegrityOutput{Status: "ok", CheckedEvents: len(events)}
+	var previous string
+	for i, event := range events {
+		if event.EventHash == "" {
+			return IntegrityOutput{Status: "failed", CheckedEvents: i, Error: "legacy or unsealed event encountered"}
+		}
+		if event.ChainScope == "" {
+			event.ChainScope = event.RequestID.String()
+		}
+		expectedPayloadHash, err := ComputePayloadHash(event)
+		if err != nil {
+			return IntegrityOutput{Status: "failed", CheckedEvents: i, Error: err.Error()}
+		}
+		if event.PayloadHash != expectedPayloadHash {
+			return IntegrityOutput{Status: "failed", CheckedEvents: i, Error: "payload hash mismatch"}
+		}
+		if event.PreviousHash != previous {
+			return IntegrityOutput{Status: "failed", CheckedEvents: i, Error: "previous hash mismatch"}
+		}
+		expectedEventHash, err := ComputeEventHash(event, event.PayloadHash)
+		if err != nil {
+			return IntegrityOutput{Status: "failed", CheckedEvents: i, Error: err.Error()}
+		}
+		if event.EventHash != expectedEventHash {
+			return IntegrityOutput{Status: "failed", CheckedEvents: i, Error: "event hash mismatch"}
+		}
+		if i == 0 {
+			out.FirstHash = event.EventHash
+		}
+		previous = event.EventHash
+		out.LastHash = event.EventHash
+	}
+	return out
 }
 
 func timelineEntryFromEvent(e auditdomain.RequestEvent) TimelineEntry {

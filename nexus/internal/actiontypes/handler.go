@@ -9,6 +9,7 @@ import (
 	domain "github.com/devpablocristo/nexus/internal/actiontypes/usecases/domain"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
 	"github.com/devpablocristo/platform/http/go/httpjson"
+	"github.com/devpablocristo/platform/authn/go/identityhttp"
 	"github.com/google/uuid"
 )
 
@@ -83,7 +84,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		list []domain.ActionType
 		err  error
 	)
-	if requestHasNoAuthContext(r) || requestHasScope(r, scopeNexusCrossOrg) {
+	if identityhttp.HasNoAuthContext(r) || identityhttp.HasAnyScope(r, scopeNexusCrossOrg) {
 		rawOrgID := r.URL.Query().Get("org_id")
 		orgID := normalizeOrgPtr(&rawOrgID)
 		if orgID != nil {

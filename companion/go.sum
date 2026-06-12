@@ -19,8 +19,8 @@ github.com/containerd/errdefs/pkg v0.3.0/go.mod h1:NJw6s9HwNuRhnjJhM7pylWwMyAkmC
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc h1:U9qPSI2PIWSS1VwoXQT9A3Wy9MM3WgvqSxFWenqJduM=
 github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
-github.com/devpablocristo/platform/authn/go v0.1.0 h1:woGSnfKFW4ORVm1/E4x0yafHlIE4F/8RRLNm/xZAmUg=
-github.com/devpablocristo/platform/authn/go v0.1.0/go.mod h1:u2frPGnCJXqyQQO6tDYwvsWAyZuwFm2BJp9XPzAV4BI=
+github.com/devpablocristo/platform/authn/go v0.2.0 h1:/DNUrCp17iQpFndS1/dJcoMXbbXW8hC+e3T1+WlZ1Ns=
+github.com/devpablocristo/platform/authn/go v0.2.0/go.mod h1:tib4hqfWR4Lf5cBrZ014JTn9/rZg+tuCr/tFLBequWc=
 github.com/devpablocristo/platform/concurrency/go v0.1.1 h1:4fqMFUPxRR6HJvoYYub+oc75MSAPQ8VjY4Am2cljvQo=
 github.com/devpablocristo/platform/concurrency/go v0.1.1/go.mod h1:oPl9CQ3M+/sgKNXnF5qJxByNBlnUT0Dvop/yhs0vAqg=
 github.com/devpablocristo/platform/config/go v0.1.0 h1:NZyxtVcfzRVigmXypsKsPFdebESEaf3JYGqmCyIqW5w=
@@ -35,10 +35,12 @@ github.com/devpablocristo/platform/http/go v0.1.0 h1:YQGApnAJx2+62HrLZ5G5Uf0Kq5p
 github.com/devpablocristo/platform/http/go v0.1.0/go.mod h1:qinUKdGJ51xbKMLYWF96bSGu8JSRAbWPsAqTusrg5tk=
 github.com/devpablocristo/platform/kernels/ai/go v0.1.0 h1:pp7w0fICDIcFp0NhYcWhZcHEHvcSzDbBdcYakKwOQ2M=
 github.com/devpablocristo/platform/kernels/ai/go v0.1.0/go.mod h1:ACh3XVzWoqiU963vxBi/ph+d3GkhHr87K36+cG+Lkgw=
+github.com/devpablocristo/platform/lifecycle/go v0.2.0 h1:yPqGPfZSu0KaRvU72dtet8J0A1vV/hxsIBay7F7jGJI=
+github.com/devpablocristo/platform/lifecycle/go v0.2.0/go.mod h1:8XcEUg6JKgzL+Bg0widQ5kUenQ/ZbY2zWaTEkHJGg9Y=
 github.com/devpablocristo/platform/observability/go v0.2.1 h1:lu5nefAmX6NTHbjRs4lhx6WUyvG2ubE3Jw1vP7q0Oec=
 github.com/devpablocristo/platform/observability/go v0.2.1/go.mod h1:5wQDDBbjRN2m1S1rcmZzfavQeXN6CPnDvGpgF19uU38=
-github.com/devpablocristo/platform/security/go v0.1.0 h1:XVpaxj8y0uiNRPGi60KZx7YqVCLkC5erJXSl03kUm9M=
-github.com/devpablocristo/platform/security/go v0.1.0/go.mod h1:Urgj+tAuwcOtJMTAlLA7BDbUgKvz2yfNPcXpK3G2OnQ=
+github.com/devpablocristo/platform/security/go v0.2.2 h1:qVHSXm659qnzUf4qCFFf4WD1aVWnAz5TWgkKinknvyk=
+github.com/devpablocristo/platform/security/go v0.2.2/go.mod h1:P0FEZO5qZDDOxLk6+d90AFlQeiK3qiQ3CnTKqscCmeg=
 github.com/dhui/dktest v0.4.6 h1:+DPKyScKSEp3VLtbMDHcUq6V5Lm5zfZZVb0Sk7Ahom4=
 github.com/dhui/dktest v0.4.6/go.mod h1:JHTSYDtKkvFNFHJKqCzVzqXecyv+tKt8EzceOmQOgbU=
 github.com/distribution/reference v0.6.0 h1:0IXCQ5g4/QMHHkarYzh5l+u8T3t73zM5QvfrDyIgxBk=

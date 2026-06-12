@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 
 	"github.com/devpablocristo/companion/migrations"
@@ -52,6 +53,7 @@ func main() {
 		InternalJWTSecret:   os.Getenv("COMPANION_INTERNAL_JWT_SECRET"),
 		InternalJWTIssuer:   os.Getenv("COMPANION_INTERNAL_JWT_ISSUER"),
 		InternalJWTAudience: os.Getenv("COMPANION_INTERNAL_JWT_AUDIENCE"),
+		ProductJWTKeys:      os.Getenv("COMPANION_PRODUCT_JWT_KEYS"),
 		NexusBaseURL:        nexusBase,
 		NexusAPIKey:         nexusKey,
 		PymesBaseURL:        os.Getenv("PYMES_BASE_URL"),
@@ -62,6 +64,12 @@ func main() {
 		LLMModel:            os.Getenv("COMPANION_LLM_MODEL"),
 		LLMVertexProject:    os.Getenv("COMPANION_LLM_VERTEX_PROJECT"),
 		LLMVertexLocation:   os.Getenv("COMPANION_LLM_VERTEX_LOCATION"),
+		EmbeddingProvider:   os.Getenv("COMPANION_EMBEDDING_PROVIDER"),
+		EmbeddingModel:      os.Getenv("COMPANION_EMBEDDING_MODEL"),
+		EmbeddingProject:    os.Getenv("COMPANION_EMBEDDING_VERTEX_PROJECT"),
+		EmbeddingLocation:   os.Getenv("COMPANION_EMBEDDING_VERTEX_LOCATION"),
+		EmbeddingDimensions: envInt("COMPANION_EMBEDDING_DIMENSIONS"),
+		OpsAlertWebhookURL:  os.Getenv("COMPANION_OPS_ALERT_WEBHOOK_URL"),
 		MigrationFiles:      migrations.Files,
 	}
 
@@ -93,4 +101,16 @@ func main() {
 		logger.Error("server stopped", "error", err)
 		os.Exit(1)
 	}
+}
+
+func envInt(key string) int {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return 0
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0
+	}
+	return value
 }

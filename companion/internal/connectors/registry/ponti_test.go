@@ -3,6 +3,7 @@ package registry
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -35,6 +36,7 @@ type recordedCall struct {
 	OrgID    string
 	AuthHdr  string
 	RawQuery string
+	Body     string
 }
 
 func newPontiMock(t *testing.T) *pontiMock {
@@ -59,6 +61,7 @@ func newPontiMock(t *testing.T) *pontiMock {
 		},
 	}
 	m.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
 		orgID := r.Header.Get("X-Tenant-Id")
 		auth := r.Header.Get("Authorization")
 		m.calls = append(m.calls, recordedCall{
@@ -67,6 +70,7 @@ func newPontiMock(t *testing.T) *pontiMock {
 			OrgID:    orgID,
 			AuthHdr:  auth,
 			RawQuery: r.URL.RawQuery,
+			Body:     string(body),
 		})
 		if auth != m.expectToken {
 			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
@@ -80,7 +84,11 @@ func newPontiMock(t *testing.T) *pontiMock {
 				http.Error(w, `{"error":"missing tenant"}`, http.StatusBadRequest)
 				return
 			}
-			writeJSON(w, map[string]any{"items": []ai.CapabilityManifest{stubPontiManifest()}})
+			writeJSON(w, map[string]any{"items": []ai.CapabilityManifest{
+				stubPontiManifest(),
+				stubPontiOperationalManifest(),
+				stubPontiActionsManifest(),
+			}})
 			return
 		}
 
@@ -132,6 +140,43 @@ func newPontiMock(t *testing.T) *pontiMock {
 					"tenant_scope": orgID,
 				},
 			})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/ai/actions/insight-resolve/prepare":
+			writeDraftPreview(w, orgID, "ponti.insight.resolve.prepare")
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/ai/actions/workorder-draft/prepare":
+			writeDraftPreview(w, orgID, "ponti.workorder.draft.prepare")
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/ai/actions/stock-adjustment/prepare":
+			writeDraftPreview(w, orgID, "ponti.stock_adjustment.prepare")
+		case r.URL.Path == "/api/v1/dashboard":
+			writeJSON(w, map[string]any{"metrics": map[string]any{"costs": map[string]any{"progress_pct": 42}}, "items": []any{}})
+		case strings.HasPrefix(r.URL.Path, "/api/v1/projects/") && strings.HasSuffix(r.URL.Path, "/stocks/summary"):
+			writeJSON(w, map[string]any{"items": []any{map[string]any{"supply_name": "Urea", "stock_units": "10.00"}}, "net_total_usd": "100"})
+		case r.URL.Path == "/api/v1/work-orders":
+			writeJSON(w, map[string]any{"items": []any{map[string]any{"number": "OT-1", "status": "draft"}}, "page_info": map[string]any{"total": 1}})
+		case r.URL.Path == "/api/v1/work-orders/metrics":
+			writeJSON(w, map[string]any{"total": 1, "draft": 1})
+		case r.URL.Path == "/api/v1/lots":
+			writeJSON(w, map[string]any{"items": []any{map[string]any{"lot_name": "Lote 1"}}, "sum_sowed": "12"})
+		case r.URL.Path == "/api/v1/supplies":
+			writeJSON(w, map[string]any{"items": []any{map[string]any{"name": "Urea", "is_partial_price": false}}})
+		case strings.HasPrefix(r.URL.Path, "/api/v1/reports/"):
+			writeJSON(w, map[string]any{"summary": map[string]any{"result_usd": 123}})
+		case r.URL.Path == "/api/v1/data-integrity/summary":
+			writeJSON(w, map[string]any{
+				"source":      "ponti.data_integrity.summary",
+				"workspace":   map[string]any{"project_id": 10},
+				"filters":     map[string]any{"project_id": 10},
+				"captured_at": "2026-06-10T12:00:00Z",
+				"summary": map[string]any{
+					"costs_check":      map[string]any{"status": "ERROR", "failed_checks": 2, "total_checks": 17},
+					"tentative_prices": map[string]any{"count": 1, "sample_items": []any{map[string]any{"supply_id": 7, "name": "Urea"}}},
+				},
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/work-order-drafts/digital":
+			writeJSON(w, map[string]any{"id": 99})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/ai/actions/insight-resolution/draft":
+			writeDraftExecution(w, orgID, "ponti.insight_resolution.draft")
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/ai/actions/stock-count/draft":
+			writeDraftExecution(w, orgID, "ponti.stock_count.draft")
 		default:
 			http.NotFound(w, r)
 		}
@@ -171,6 +216,38 @@ func writeJSON(w http.ResponseWriter, payload any) {
 	_ = json.NewEncoder(w).Encode(payload)
 }
 
+func writeDraftPreview(w http.ResponseWriter, orgID, operation string) {
+	writeJSON(w, map[string]any{
+		"status":    "preview",
+		"operation": operation,
+		"proposal": map[string]any{
+			"approval_required": true,
+			"preview_only":      true,
+			"write_performed":   false,
+			"execution_allowed": false,
+		},
+		"evidence": map[string]any{
+			"source_ref":        operation,
+			"tenant_scope":      orgID,
+			"approval_required": true,
+		},
+	})
+}
+
+func writeDraftExecution(w http.ResponseWriter, orgID, operation string) {
+	writeJSON(w, map[string]any{
+		"status":           "draft",
+		"action":           operation,
+		"write_performed":  false,
+		"draft_id":         operation + "-draft",
+		"execution_status": "draft_staged",
+		"evidence": map[string]any{
+			"source_ref":   operation,
+			"tenant_scope": orgID,
+		},
+	})
+}
+
 func newPontiConnector(t *testing.T, m *pontiMock) (*PontiConnector, uuid.UUID) {
 	t.Helper()
 	client := NewPontiClient(m.server.URL, "ponti-test-key")
@@ -184,11 +261,16 @@ func TestPontiConnector_ListInsights_PropagatesTenant(t *testing.T) {
 	conn, connID := newPontiConnector(t, mock)
 
 	res, err := conn.Execute(context.Background(), domain.ExecutionSpec{
-		ConnectorID: connID,
-		OrgID:       "tenant-A",
-		ActorID:     "user-A",
-		Operation:   "ponti.insights.list",
-		Payload:     json.RawMessage(`{"limit":10}`),
+		ConnectorID:        connID,
+		OrgID:              "tenant-A",
+		ActorID:            "user-A",
+		ActorType:          "human",
+		CompanionPrincipal: "companion.employee_ai",
+		OnBehalfOf:         "user-A",
+		ServicePrincipal:   true,
+		ProductSurface:     "ponti",
+		Operation:          "ponti.insights.list",
+		Payload:            json.RawMessage(`{"limit":10}`),
 	})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
@@ -224,6 +306,16 @@ func TestPontiConnector_ListInsights_PropagatesTenant(t *testing.T) {
 	// Evidence pack obligatorio.
 	if len(res.EvidenceJSON) == 0 {
 		t.Fatal("expected evidence_json populated")
+	}
+	var evidence map[string]any
+	if err := json.Unmarshal(res.EvidenceJSON, &evidence); err != nil {
+		t.Fatal(err)
+	}
+	if evidence["actor_id"] != "user-A" || evidence["companion_principal"] != "companion.employee_ai" || evidence["on_behalf_of"] != "user-A" {
+		t.Fatalf("expected canonical identity evidence, got %+v", evidence)
+	}
+	if evidence["customer_org_id"] != "tenant-A" || evidence["product_surface"] != "ponti" {
+		t.Fatalf("expected customer org/product evidence, got %+v", evidence)
 	}
 }
 
@@ -365,6 +457,180 @@ func TestPontiConnector_RejectsInvalidToken(t *testing.T) {
 	}
 }
 
+func TestPontiConnector_DraftAction_ForwardsRawPayload(t *testing.T) {
+	t.Parallel()
+	mock := newPontiMock(t)
+	conn, connID := newPontiConnector(t, mock)
+
+	payload := json.RawMessage(`{"project_id":10,"work_type":"spray","workspace":{"project_id":10}}`)
+	res, err := conn.Execute(context.Background(), domain.ExecutionSpec{
+		ConnectorID:    connID,
+		OrgID:          "tenant-A",
+		ActorID:        "user-A",
+		ProductSurface: "ponti",
+		Operation:      "ponti.workorder.draft.prepare",
+		Payload:        payload,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != domain.ExecSuccess {
+		t.Fatalf("expected success, got %s err=%s", res.Status, res.ErrorMessage)
+	}
+	calls := mock.callsExcluding("/api/v1/capabilities")
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 draft call, got %d (paths: %v)", len(calls), mock.callPaths())
+	}
+	got := calls[0]
+	if got.Method != http.MethodPost {
+		t.Fatalf("expected POST, got %s", got.Method)
+	}
+	if got.Path != "/api/v1/ai/actions/workorder-draft/prepare" {
+		t.Fatalf("unexpected path %q", got.Path)
+	}
+	if got.OrgID != "tenant-A" {
+		t.Fatalf("expected tenant-A, got %q", got.OrgID)
+	}
+	if got.Body != string(payload) {
+		t.Fatalf("payload should be forwarded verbatim, got %s", got.Body)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(res.ResultJSON, &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["status"] != "preview" {
+		t.Fatalf("expected preview response, got %s", string(res.ResultJSON))
+	}
+}
+
+func TestPontiConnector_StockSummary_UsesWorkspaceAndWrapsEvidence(t *testing.T) {
+	t.Parallel()
+	mock := newPontiMock(t)
+	conn, connID := newPontiConnector(t, mock)
+
+	res, err := conn.Execute(context.Background(), domain.ExecutionSpec{
+		ConnectorID: connID,
+		OrgID:       "tenant-A",
+		ActorID:     "user-A",
+		Operation:   "ponti.stock.summary",
+		Payload:     json.RawMessage(`{"workspace":{"customer_id":1,"project_id":10,"campaign_id":20},"limit":5}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != domain.ExecSuccess {
+		t.Fatalf("expected success, got %s err=%s", res.Status, res.ErrorMessage)
+	}
+	calls := mock.callsExcluding("/api/v1/capabilities")
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 stock call, got %d (paths: %v)", len(calls), mock.callPaths())
+	}
+	if calls[0].Path != "/api/v1/projects/10/stocks/summary" {
+		t.Fatalf("unexpected path %q", calls[0].Path)
+	}
+	if !strings.Contains(calls[0].RawQuery, "project_id=10") {
+		t.Fatalf("expected project_id query, got %q", calls[0].RawQuery)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(res.ResultJSON, &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["source"] != "ponti.stock.summary" {
+		t.Fatalf("expected wrapped source, got %s", string(res.ResultJSON))
+	}
+	if _, ok := body["items"].([]any); !ok {
+		t.Fatalf("expected wrapped items, got %s", string(res.ResultJSON))
+	}
+}
+
+func TestPontiConnector_DataIntegritySummary_UsesWorkspaceAndWrapsEvidence(t *testing.T) {
+	t.Parallel()
+	mock := newPontiMock(t)
+	conn, connID := newPontiConnector(t, mock)
+
+	res, err := conn.Execute(context.Background(), domain.ExecutionSpec{
+		ConnectorID: connID,
+		OrgID:       "tenant-A",
+		ActorID:     "user-A",
+		Operation:   "ponti.data_integrity.summary",
+		Payload:     json.RawMessage(`{"workspace":{"customer_id":1,"project_id":10,"campaign_id":20}}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != domain.ExecSuccess {
+		t.Fatalf("expected success, got %s err=%s", res.Status, res.ErrorMessage)
+	}
+	calls := mock.callsExcluding("/api/v1/capabilities")
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 summary call, got %d (paths: %v)", len(calls), mock.callPaths())
+	}
+	if calls[0].Path != "/api/v1/data-integrity/summary" {
+		t.Fatalf("unexpected path %q", calls[0].Path)
+	}
+	if calls[0].OrgID != "tenant-A" {
+		t.Fatalf("expected X-Tenant-Id=tenant-A, got %q", calls[0].OrgID)
+	}
+	if !strings.Contains(calls[0].RawQuery, "project_id=10") {
+		t.Fatalf("expected project_id query, got %q", calls[0].RawQuery)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(res.ResultJSON, &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["source"] != "ponti.data_integrity.summary" {
+		t.Fatalf("expected wrapped source, got %s", string(res.ResultJSON))
+	}
+	summary, ok := body["summary"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected summary key, got %s", string(res.ResultJSON))
+	}
+	if _, ok := summary["costs_check"]; !ok {
+		t.Fatalf("expected costs_check in summary, got %s", string(res.ResultJSON))
+	}
+	if _, ok := summary["tentative_prices"]; !ok {
+		t.Fatalf("expected tentative_prices in summary, got %s", string(res.ResultJSON))
+	}
+}
+
+func TestPontiConnector_WorkOrderDraftCreate_WrapsDraftExecution(t *testing.T) {
+	t.Parallel()
+	mock := newPontiMock(t)
+	conn, connID := newPontiConnector(t, mock)
+	nexusRequestID := uuid.New()
+
+	res, err := conn.Execute(context.Background(), domain.ExecutionSpec{
+		ConnectorID:    connID,
+		OrgID:          "tenant-A",
+		ActorID:        "user-A",
+		ProductSurface: "ponti",
+		Operation:      "ponti.workorder_draft.create",
+		Payload:        json.RawMessage(`{"date":"2026-07-01","customer_id":1,"project_id":10,"field_id":20,"lot_id":30,"crop_id":40,"labor_id":50,"contractor":"ACME","effective_area":12.5,"workspace":{"project_id":10}}`),
+		NexusRequestID: &nexusRequestID,
+		IdempotencyKey: "idem-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != domain.ExecSuccess {
+		t.Fatalf("expected success, got %s err=%s", res.Status, res.ErrorMessage)
+	}
+	calls := mock.callsExcluding("/api/v1/capabilities")
+	if len(calls) != 1 || calls[0].Path != "/api/v1/work-order-drafts/digital" {
+		t.Fatalf("unexpected calls: %+v", calls)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(res.ResultJSON, &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["write_performed"] != true || body["nexus_request_id"] != nexusRequestID.String() {
+		t.Fatalf("unexpected draft execution wrapper: %s", string(res.ResultJSON))
+	}
+	if body["draft_id"].(float64) != 99 {
+		t.Fatalf("expected draft id 99, got %s", string(res.ResultJSON))
+	}
+}
+
 // stubPontiManifest replica el shape canónico que Ponti publica en
 // /api/v1/capabilities. Sirve a los tests para asegurar que el discovery
 // dinámico es lo que Companion consume; pasar ValidateCapabilityManifest
@@ -446,6 +712,116 @@ func stubPontiManifest() ai.CapabilityManifest {
 	}
 }
 
+func stubPontiOperationalManifest() ai.CapabilityManifest {
+	roles := []string{"ponti.operational.viewer"}
+	modules := []string{"ponti", "operational"}
+	names := []string{
+		"ponti.dashboard.summary",
+		"ponti.stock.summary",
+		"ponti.workorders.list",
+		"ponti.workorders.metrics",
+		"ponti.lots.summary",
+		"ponti.supplies.summary",
+		"ponti.reports.field_crop.summary",
+		"ponti.reports.investor_contribution.summary",
+		"ponti.reports.summary_results.summary",
+		"ponti.data_integrity.summary",
+	}
+	tools := make([]ai.CapabilityTool, 0, len(names))
+	for _, name := range names {
+		tools = append(tools, ai.CapabilityTool{
+			Name:        name,
+			Description: "Read-only Ponti operational capability.",
+			Mode:        ai.CapabilityModeRead,
+			SideEffect:  false,
+			RiskClass:   ai.CapabilityRiskLow,
+			InputSchema: map[string]any{
+				"type":       "object",
+				"properties": map[string]any{"workspace": map[string]any{"type": "object"}},
+				"required":   []string{"workspace"},
+			},
+			OutputSchema: map[string]any{
+				"type":       "object",
+				"properties": map[string]any{"summary": map[string]any{"type": "object"}, "evidence": map[string]any{"type": "object"}},
+			},
+			EvidenceFields:     []string{"source_ref", "captured_at", "workspace"},
+			CapabilityAuthz:    ai.CapabilityAuthz{RequiredRoles: roles, RequiredModules: modules},
+			CapabilityExecutor: ai.CapabilityExecutor{ExecutorRef: "ponti-backend." + name},
+		})
+	}
+	return ai.CapabilityManifest{
+		SchemaVersion: ai.CapabilityManifestSchemaVersion,
+		ID:            "ponti.operational",
+		Product:       "ponti",
+		Version:       "1.0.0",
+		TenantScope:   ai.CapabilityTenantScopeOrg,
+		Name:          "Ponti Operational Data",
+		Description:   "Read-only operational data.",
+		Agents:        []ai.CapabilityAgentDescriptor{{Name: "ponti_operational", Description: "Operational assistant."}},
+		Tools:         tools,
+	}
+}
+
+func stubPontiActionsManifest() ai.CapabilityManifest {
+	return ai.CapabilityManifest{
+		SchemaVersion: ai.CapabilityManifestSchemaVersion,
+		ID:            "ponti.actions",
+		Product:       "ponti",
+		Version:       "1.0.0",
+		TenantScope:   ai.CapabilityTenantScopeOrg,
+		Name:          "Ponti Actions",
+		Description:   "Governed Ponti draft actions.",
+		Agents:        []ai.CapabilityAgentDescriptor{{Name: "ponti_actions", Description: "Draft action assistant."}},
+		Tools: []ai.CapabilityTool{
+			stubPontiDraftTool(
+				"ponti.insight.resolve.prepare",
+				"Prepares a proposed insight resolution for Nexus approval without resolving it directly.",
+				"ponti-backend.actions.insight.resolve.prepare",
+				map[string]any{"type": "object", "properties": map[string]any{"insight_id": map[string]any{"type": "string", "format": "uuid"}}, "required": []string{"insight_id"}},
+			),
+			stubPontiDraftTool(
+				"ponti.workorder.draft.prepare",
+				"Prepares a work-order draft proposal for Nexus approval without publishing an order.",
+				"ponti-backend.actions.workorder.draft.prepare",
+				map[string]any{"type": "object", "properties": map[string]any{"project_id": map[string]any{"type": "integer", "minimum": 1}, "work_type": map[string]any{"type": "string", "minLength": 1}}, "required": []string{"project_id", "work_type"}},
+			),
+			stubPontiDraftTool(
+				"ponti.stock_adjustment.prepare",
+				"Prepares a stock adjustment proposal for Nexus approval without applying inventory changes.",
+				"ponti-backend.actions.stock_adjustment.prepare",
+				map[string]any{"type": "object", "properties": map[string]any{"project_id": map[string]any{"type": "integer", "minimum": 1}, "supply_id": map[string]any{"type": "integer", "minimum": 1}, "quantity_delta": map[string]any{"type": "number"}, "reason": map[string]any{"type": "string", "minLength": 1}}, "required": []string{"project_id", "supply_id", "quantity_delta", "reason"}},
+			),
+			stubPontiDraftTool("ponti.workorder_draft.create", "Creates a digital work-order draft.", "ponti-backend.actions.workorder_draft.create", map[string]any{"type": "object", "properties": map[string]any{"workspace": map[string]any{"type": "object"}}, "required": []string{"workspace"}}),
+			stubPontiDraftTool("ponti.insight_resolution.draft", "Creates an insight resolution draft.", "ponti-backend.actions.insight_resolution.draft", map[string]any{"type": "object", "properties": map[string]any{"insight_id": map[string]any{"type": "string"}, "workspace": map[string]any{"type": "object"}}, "required": []string{"insight_id", "workspace"}}),
+			stubPontiDraftTool("ponti.stock_count.draft", "Creates a stock count draft.", "ponti-backend.actions.stock_count.draft", map[string]any{"type": "object", "properties": map[string]any{"project_id": map[string]any{"type": "integer"}, "supply_id": map[string]any{"type": "integer"}, "real_stock_units": map[string]any{"type": "number"}, "workspace": map[string]any{"type": "object"}}, "required": []string{"project_id", "supply_id", "real_stock_units", "workspace"}}),
+		},
+	}
+}
+
+func stubPontiDraftTool(name, description, executorRef string, inputSchema map[string]any) ai.CapabilityTool {
+	return ai.CapabilityTool{
+		Name:        name,
+		Description: description,
+		Mode:        ai.CapabilityModeWrite,
+		SideEffect:  true,
+		RiskClass:   ai.CapabilityRiskMedium,
+		InputSchema: inputSchema,
+		OutputSchema: map[string]any{
+			"type":       "object",
+			"properties": map[string]any{"status": map[string]any{"type": "string"}, "proposal": map[string]any{"type": "object"}, "evidence": map[string]any{"type": "object"}},
+			"required":   []string{"status", "proposal", "evidence"},
+		},
+		EvidenceFields:     []string{"source_ref", "captured_at", "tenant_scope", "workspace", "approval_required"},
+		CapabilityAuthz:    ai.CapabilityAuthz{RequiredRoles: []string{"ponti.actions.preparer"}, RequiredModules: []string{"ponti", "actions"}},
+		CapabilityExecutor: ai.CapabilityExecutor{ExecutorRef: executorRef},
+		Governance: &ai.CapabilityGovernance{
+			RequiresApproval: true,
+			ActionType:       "agent.capability.invoke",
+			TargetSystem:     "ponti",
+		},
+	}
+}
+
 // TestPontiConnector_Discovery_PopulatesCapabilities valida que el
 // connector descubre el manifest desde /api/v1/capabilities al boot y lo
 // expone como capabilities normalizadas (sin copia hardcoded).
@@ -455,18 +831,33 @@ func TestPontiConnector_Discovery_PopulatesCapabilities(t *testing.T) {
 	conn, _ := newPontiConnector(t, mock)
 
 	caps := conn.Capabilities()
-	if len(caps) != 3 {
-		t.Fatalf("expected 3 capabilities discovered from Ponti, got %d", len(caps))
+	if len(caps) != 19 {
+		t.Fatalf("expected 19 capabilities discovered from Ponti, got %d", len(caps))
 	}
 	for _, c := range caps {
+		if c.RequiresNexusApproval {
+			if c.ReadOnly || !c.SideEffect {
+				t.Errorf("draft capability %q must be write side-effect", c.ID)
+			}
+			if !c.RequiresNexusApproval || c.NexusActionType != "agent.capability.invoke" {
+				t.Errorf("draft capability %q must require Nexus action, got requires=%v type=%q", c.ID, c.RequiresNexusApproval, c.NexusActionType)
+			}
+			if !c.Idempotency.Required || c.IdempotencyMode != "required" {
+				t.Errorf("draft capability %q must require idempotency, got %+v mode=%q", c.ID, c.Idempotency, c.IdempotencyMode)
+			}
+			if c.RiskClass != domain.RiskClassMedium {
+				t.Errorf("draft capability %q must risk_class=medium, got %s", c.ID, c.RiskClass)
+			}
+			continue
+		}
 		if !c.ReadOnly {
-			t.Errorf("capability %q must be read_only=true", c.ID)
+			t.Errorf("read capability %q must be read_only=true", c.ID)
 		}
 		if c.RequiresNexusApproval {
-			t.Errorf("capability %q must NOT require nexus (read-only)", c.ID)
+			t.Errorf("read capability %q must NOT require nexus", c.ID)
 		}
 		if c.RiskClass != domain.RiskClassLow {
-			t.Errorf("capability %q must risk_class=low, got %s", c.ID, c.RiskClass)
+			t.Errorf("read capability %q must risk_class=low, got %s", c.ID, c.RiskClass)
 		}
 	}
 
@@ -495,7 +886,11 @@ func TestPontiConnector_Discovery_DownAtBoot(t *testing.T) {
 			return
 		}
 		if r.URL.Path == "/api/v1/capabilities" {
-			writeJSON(w, map[string]any{"items": []ai.CapabilityManifest{stubPontiManifest()}})
+			writeJSON(w, map[string]any{"items": []ai.CapabilityManifest{
+				stubPontiManifest(),
+				stubPontiOperationalManifest(),
+				stubPontiActionsManifest(),
+			}})
 			return
 		}
 		http.NotFound(w, r)
@@ -514,7 +909,7 @@ func TestPontiConnector_Discovery_DownAtBoot(t *testing.T) {
 	if err := conn.Refresh(context.Background()); err != nil {
 		t.Fatalf("refresh after Ponti recovery: %v", err)
 	}
-	if caps := conn.Capabilities(); len(caps) != 3 {
-		t.Fatalf("expected 3 capabilities after refresh, got %d", len(caps))
+	if caps := conn.Capabilities(); len(caps) != 19 {
+		t.Fatalf("expected 19 capabilities after refresh, got %d", len(caps))
 	}
 }

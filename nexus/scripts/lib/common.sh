@@ -5,6 +5,9 @@ set -euo pipefail
 
 API_BASE="${API_BASE:-http://localhost:18084}"
 API_KEY="${API_KEY:-nexus-admin-dev-key}"
+API_KEY_ADMIN_A="${API_KEY_ADMIN_A:-${NEXUS_ADMIN_A_API_KEY:-nexus-admin-a-dev-key}}"
+API_KEY_ADMIN_B="${API_KEY_ADMIN_B:-${NEXUS_ADMIN_B_API_KEY:-nexus-admin-b-dev-key}}"
+API_KEY_OTHER_ORG="${API_KEY_OTHER_ORG:-${NEXUS_OTHER_ORG_ADMIN_API_KEY:-nexus-admin-other-dev-key}}"
 
 # Esperar a que un endpoint HTTP responda 200
 wait_for_http() {
@@ -24,17 +27,62 @@ wait_for_http() {
 
 # GET con API key
 api_get() {
-  curl -sf -H "X-API-Key: $API_KEY" "$API_BASE$1"
+  api_get_as "$API_KEY" "$1"
 }
 
 # POST con API key y body JSON
 api_post() {
-  curl -sf -X POST -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" -d "$2" "$API_BASE$1"
+  api_post_as "$API_KEY" "$1" "$2"
+}
+
+api_get_as() {
+  local key="$1"
+  local path="$2"
+  curl -sf -H "X-API-Key: $key" "$API_BASE$path"
+}
+
+api_post_as() {
+  local key="$1"
+  local path="$2"
+  local body="${3-}"
+  if [ -z "$body" ]; then
+    body="{}"
+  fi
+  curl -sf -X POST -H "X-API-Key: $key" -H "Content-Type: application/json" -d "$body" "$API_BASE$path"
+}
+
+api_patch_as() {
+  local key="$1"
+  local path="$2"
+  local body="$3"
+  curl -sf -X PATCH -H "X-API-Key: $key" -H "Content-Type: application/json" -d "$body" "$API_BASE$path"
 }
 
 # DELETE con API key
 api_delete() {
-  curl -sf -o /dev/null -w "%{http_code}" -X DELETE -H "X-API-Key: $API_KEY" "$API_BASE$1"
+  api_delete_as "$API_KEY" "$1"
+}
+
+api_delete_as() {
+  local key="$1"
+  local path="$2"
+  curl -sf -o /dev/null -w "%{http_code}" -X DELETE -H "X-API-Key: $key" "$API_BASE$path"
+}
+
+api_status_as() {
+  local key="$1"
+  local method="$2"
+  local path="$3"
+  local body="${4:-}"
+  if [ -n "$body" ]; then
+    curl -s -o /dev/null -w "%{http_code}" -X "$method" -H "X-API-Key: $key" -H "Content-Type: application/json" -d "$body" "$API_BASE$path"
+  else
+    curl -s -o /dev/null -w "%{http_code}" -X "$method" -H "X-API-Key: $key" "$API_BASE$path"
+  fi
+}
+
+json_string() {
+  python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$1"
 }
 
 # Extraer campo JSON: json_get 'key' o json_get 'key.sub' o json_get 'len(key)'

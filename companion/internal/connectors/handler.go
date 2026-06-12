@@ -6,9 +6,11 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/devpablocristo/companion/internal/identityctx"
 	"github.com/devpablocristo/platform/http/go/httpjson"
 	"github.com/google/uuid"
 
+	"github.com/devpablocristo/companion/internal/capabilities"
 	"github.com/devpablocristo/companion/internal/connectors/handler/dto"
 	"github.com/devpablocristo/companion/internal/connectors/registry"
 	domain "github.com/devpablocristo/companion/internal/connectors/usecases/domain"
@@ -24,8 +26,10 @@ type connectorUsecase interface {
 	SaveConnector(ctx context.Context, c domain.Connector) (domain.Connector, error)
 	DeleteConnector(ctx context.Context, id uuid.UUID) error
 	Execute(ctx context.Context, spec domain.ExecutionSpec) (domain.ExecutionResult, error)
+	BuildActionBinding(ctx context.Context, spec domain.ExecutionSpec) (map[string]any, string, error)
 	ListExecutions(ctx context.Context, connectorID uuid.UUID, limit int) ([]domain.ExecutionResult, error)
 	Capabilities(filter domain.CapabilityFilter) []ConnectorCapabilities
+	CapabilityManifests(filter domain.CapabilityFilter) ([]capabilities.Manifest, error)
 	RefreshConnectors(ctx context.Context) []registry.RefreshResult
 }
 
@@ -47,8 +51,10 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/connectors/{id}", h.get)
 	mux.HandleFunc("DELETE /v1/connectors/{id}", h.delete)
 	mux.HandleFunc("POST /v1/connectors/execute", h.execute)
+	mux.HandleFunc("POST /v1/connectors/action-binding", h.actionBinding)
 	mux.HandleFunc("GET /v1/connectors/{id}/executions", h.listExecutions)
 	mux.HandleFunc("GET /v1/connectors/capabilities", h.capabilities)
+	mux.HandleFunc("GET /v1/connectors/capability-manifests", h.capabilityManifests)
 }
 
 func (h *Handler) refresh(w http.ResponseWriter, r *http.Request) {
@@ -106,7 +112,7 @@ func (h *Handler) save(w http.ResponseWriter, r *http.Request) {
 	if !requireScope(w, r, scopeCompanionConnectorsAdmin) {
 		return
 	}
-	if !requestHasNoAuthContext(r) && principalOrgID(r) == "" {
+	if !identityctx.HasNoAuthContext(r) && principalOrgID(r) == "" {
 		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "connector save requires org context")
 		return
 	}
@@ -174,52 +180,9 @@ func (h *Handler) execute(w http.ResponseWriter, r *http.Request) {
 	if !requireScope(w, r, scopeCompanionConnectorsExecute) {
 		return
 	}
-	if !requestHasNoAuthContext(r) && (principalOrgID(r) == "" || principalActorID(r) == "") {
-		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "connector execution requires org and actor context")
-		return
-	}
-	var body dto.ExecuteRequest
-	if err := httpjson.DecodeJSON(r, &body); err != nil {
-		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid json")
-		return
-	}
-	if body.ConnectorID == "" || body.Operation == "" {
-		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "connector_id and operation are required")
-		return
-	}
-
-	connID, err := uuid.Parse(body.ConnectorID)
-	if err != nil {
-		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid connector_id")
-		return
-	}
-
-	payload, ok := bindPayloadToPrincipalOrg(r, body.Payload)
+	spec, ok := h.executionSpecFromRequest(w, r)
 	if !ok {
-		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "payload org is not allowed for this principal")
 		return
-	}
-	spec := domain.ExecutionSpec{
-		ConnectorID:    connID,
-		OrgID:          principalOrgID(r),
-		ActorID:        principalActorID(r),
-		ProductSurface: strings.TrimSpace(r.Header.Get("X-Product-Surface")),
-		AuthScopes:     parseHeaderValues(r.Header.Get("X-Auth-Scopes")),
-		Operation:      body.Operation,
-		Payload:        payload,
-		IdempotencyKey: body.IdempotencyKey,
-	}
-	if body.TaskID != "" {
-		tid, err := uuid.Parse(body.TaskID)
-		if err == nil {
-			spec.TaskID = &tid
-		}
-	}
-	if body.NexusRequestID != "" {
-		rid, err := uuid.Parse(body.NexusRequestID)
-		if err == nil {
-			spec.NexusRequestID = &rid
-		}
 	}
 
 	result, err := h.uc.Execute(r.Context(), spec)
@@ -244,8 +207,16 @@ func (h *Handler) execute(w http.ResponseWriter, r *http.Request) {
 			httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", err.Error())
 			return
 		}
+		if IsValidation(err) {
+			httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", err.Error())
+			return
+		}
+		if IsRateLimited(err) {
+			httpjson.WriteFlatError(w, http.StatusTooManyRequests, "RATE_LIMITED", err.Error())
+			return
+		}
 		if IsForbidden(err) {
-			httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "connector org is not allowed for this principal")
+			httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", err.Error())
 			return
 		}
 		if IsConflict(err) {
@@ -256,6 +227,102 @@ func (h *Handler) execute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpjson.WriteJSON(w, http.StatusOK, dto.ExecutionToResponse(result))
+}
+
+func (h *Handler) actionBinding(w http.ResponseWriter, r *http.Request) {
+	if !requireScope(w, r, scopeCompanionConnectorsExecute) {
+		return
+	}
+	spec, ok := h.executionSpecFromRequest(w, r)
+	if !ok {
+		return
+	}
+	binding, hash, err := h.uc.BuildActionBinding(r.Context(), spec)
+	if err != nil {
+		if IsNotFound(err) {
+			httpjson.WriteFlatError(w, http.StatusNotFound, "NOT_FOUND", "connector not found")
+			return
+		}
+		if err == ErrOperationUnknown {
+			httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "unknown operation for connector")
+			return
+		}
+		if IsInvalidPayload(err) {
+			httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", err.Error())
+			return
+		}
+		if IsValidation(err) {
+			httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", err.Error())
+			return
+		}
+		if IsRateLimited(err) {
+			httpjson.WriteFlatError(w, http.StatusTooManyRequests, "RATE_LIMITED", err.Error())
+			return
+		}
+		if IsForbidden(err) {
+			httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", err.Error())
+			return
+		}
+		httpjson.WriteFlatInternalError(w, err, "build connector action binding failed")
+		return
+	}
+	httpjson.WriteJSON(w, http.StatusOK, dto.ActionBindingResponse{ActionBinding: binding, BindingHash: hash})
+}
+
+func (h *Handler) executionSpecFromRequest(w http.ResponseWriter, r *http.Request) (domain.ExecutionSpec, bool) {
+	id := identityctx.FromRequest(r)
+	if !identityctx.HasNoAuthContext(r) && (id.CustomerOrgID == "" || id.EffectiveActorID() == "") {
+		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "connector execution requires org and actor context")
+		return domain.ExecutionSpec{}, false
+	}
+	var body dto.ExecuteRequest
+	if err := httpjson.DecodeJSON(r, &body); err != nil {
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid json")
+		return domain.ExecutionSpec{}, false
+	}
+	if body.ConnectorID == "" || body.Operation == "" {
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "connector_id and operation are required")
+		return domain.ExecutionSpec{}, false
+	}
+
+	connID, err := uuid.Parse(body.ConnectorID)
+	if err != nil {
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid connector_id")
+		return domain.ExecutionSpec{}, false
+	}
+
+	payload, ok := bindPayloadToPrincipalOrg(r, body.Payload)
+	if !ok {
+		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "payload org is not allowed for this principal")
+		return domain.ExecutionSpec{}, false
+	}
+	spec := domain.ExecutionSpec{
+		ConnectorID:        connID,
+		OrgID:              id.CustomerOrgID,
+		ActorID:            id.EffectiveActorID(),
+		ActorType:          id.ActorType,
+		CompanionPrincipal: id.CompanionPrincipal,
+		OnBehalfOf:         id.OnBehalfOf,
+		ServicePrincipal:   id.ServicePrincipal,
+		ProductSurface:     id.ProductSurface,
+		AuthScopes:         append([]string(nil), id.Scopes...),
+		Operation:          body.Operation,
+		Payload:            payload,
+		IdempotencyKey:     body.IdempotencyKey,
+	}
+	if body.TaskID != "" {
+		tid, err := uuid.Parse(body.TaskID)
+		if err == nil {
+			spec.TaskID = &tid
+		}
+	}
+	if body.NexusRequestID != "" {
+		rid, err := uuid.Parse(body.NexusRequestID)
+		if err == nil {
+			spec.NexusRequestID = &rid
+		}
+	}
+	return spec, true
 }
 
 func (h *Handler) listExecutions(w http.ResponseWriter, r *http.Request) {
@@ -280,15 +347,7 @@ func (h *Handler) listExecutions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) capabilities(w http.ResponseWriter, r *http.Request) {
-	filter := domain.CapabilityFilter{
-		TenantID:           principalOrgID(r),
-		Roles:              parseHeaderValues(r.Header.Get("X-Auth-Roles")),
-		Scopes:             parseHeaderValues(r.Header.Get("X-Auth-Scopes")),
-		Modules:            parseHeaderValues(r.Header.Get("X-Enabled-Modules")),
-		MaxRiskClass:       strings.TrimSpace(r.URL.Query().Get("max_risk_class")),
-		IncludeWrites:      strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("include_writes")), "true"),
-		EnforcePermissions: !requestHasNoAuthContext(r),
-	}
+	filter := capabilityFilterFromRequest(r)
 	caps := h.uc.Capabilities(filter)
 	out := make([]dto.CapabilityResponse, 0, len(caps))
 	for _, c := range caps {
@@ -304,4 +363,26 @@ func (h *Handler) capabilities(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	httpjson.WriteJSON(w, http.StatusOK, dto.CapabilitiesListResponse{Connectors: out})
+}
+
+func (h *Handler) capabilityManifests(w http.ResponseWriter, r *http.Request) {
+	manifests, err := h.uc.CapabilityManifests(capabilityFilterFromRequest(r))
+	if err != nil {
+		httpjson.WriteFlatInternalError(w, err, "list capability manifests failed")
+		return
+	}
+	httpjson.WriteJSON(w, http.StatusOK, dto.CapabilityManifestListResponse{Capabilities: manifests})
+}
+
+func capabilityFilterFromRequest(r *http.Request) domain.CapabilityFilter {
+	id := identityctx.FromRequest(r)
+	return domain.CapabilityFilter{
+		TenantID:           id.CustomerOrgID,
+		Roles:              parseHeaderValues(r.Header.Get("X-Auth-Roles")),
+		Scopes:             append([]string(nil), id.Scopes...),
+		Modules:            parseHeaderValues(r.Header.Get("X-Enabled-Modules")),
+		MaxRiskClass:       strings.TrimSpace(r.URL.Query().Get("max_risk_class")),
+		IncludeWrites:      strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("include_writes")), "true"),
+		EnforcePermissions: !identityctx.HasNoAuthContext(r),
+	}
 }

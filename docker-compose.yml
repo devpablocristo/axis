@@ -1,6 +1,6 @@
 services:
   companion-postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     restart: unless-stopped
     environment:
       POSTGRES_DB: companion
@@ -41,18 +41,32 @@ services:
     environment:
       PORT: "8080"
       DATABASE_URL: "postgres://postgres:postgres@nexus-postgres:5432/nexus?sslmode=disable"
-      NEXUS_API_KEYS: "admin=${NEXUS_ADMIN_API_KEY:-nexus-admin-dev-key}|service_principal=true|org_id=${AXIS_DEV_ORG_ID:-local-dev-org}|scopes=nexus:requests:read+nexus:requests:write+nexus:requests:result+nexus:approvals:decide+nexus:policies:admin+nexus:rbac:admin+nexus:evidence:write+nexus:dashboard:read+nexus:learning:propose+nexus:cross_org"
+      NEXUS_API_KEYS: "admin=${NEXUS_ADMIN_API_KEY:-nexus-admin-dev-key}|service_principal=true|org_id=${AXIS_DEV_ORG_ID:-local-dev-org}|scopes=nexus:requests:read+nexus:requests:write+nexus:requests:result+nexus:approvals:decide+nexus:policies:admin+nexus:rbac:admin+nexus:evidence:write+nexus:findings:read+nexus:findings:write+nexus:dashboard:read+nexus:learning:propose+nexus:cross_org,admin-a=${NEXUS_ADMIN_A_API_KEY:-nexus-admin-a-dev-key}|actor=nexus-admin-a|role=admin|service_principal=true|org_id=${AXIS_DEV_ORG_ID:-local-dev-org}|scopes=nexus:requests:read+nexus:requests:write+nexus:policies:admin,admin-b=${NEXUS_ADMIN_B_API_KEY:-nexus-admin-b-dev-key}|actor=nexus-admin-b|role=admin|service_principal=true|org_id=${AXIS_DEV_ORG_ID:-local-dev-org}|scopes=nexus:requests:read+nexus:requests:write+nexus:policies:admin,admin-other=${NEXUS_OTHER_ORG_ADMIN_API_KEY:-nexus-admin-other-dev-key}|actor=nexus-admin-other|role=admin|service_principal=true|org_id=${AXIS_OTHER_ORG_ID:-other-dev-org}|scopes=nexus:requests:read+nexus:requests:write+nexus:policies:admin,ponti=${NEXUS_PONTI_API_KEY:-nexus-ponti-dev-key}|actor=ponti-backend|role=service|service_principal=true|org_id=${AXIS_DEV_ORG_ID:-local-dev-org}|scopes=nexus:requests:read+nexus:requests:write+nexus:requests:result+nexus:approvals:decide+nexus:evidence:write+nexus:cross_org,argos=${NEXUS_ARGOS_API_KEY:-argos-nexus-dev-key}|service_principal=true|org_id=${ARGOS_ORG_ID:-argos-local-org}|scopes=nexus:findings:read+nexus:findings:write"
       NEXUS_INTERNAL_JWT_SECRET: "${AXIS_INTERNAL_JWT_SECRET:-axis-dev-internal-jwt-secret-change-me}"
       NEXUS_INTERNAL_JWT_ISSUER: "${AXIS_INTERNAL_JWT_ISSUER:-axis-bff}"
-      NEXUS_INTERNAL_JWT_AUDIENCE: "nexus"
+      NEXUS_INTERNAL_JWT_AUDIENCE: "${NEXUS_INTERNAL_JWT_AUDIENCE:-nexus}"
+      # JWTs HS256 per-producto (mismo secret/issuer que ponti/core emite).
+      NEXUS_PRODUCT_JWT_KEYS: "${NEXUS_PRODUCT_JWT_KEYS:-ponti=local-dev-ponti-jwt-secret|issuer=ponti-core}"
+      NEXUS_AUTH_ISSUER_URL: "${NEXUS_AUTH_ISSUER_URL:-}"
+      NEXUS_AUTH_AUDIENCE: "${NEXUS_AUTH_AUDIENCE:-}"
+      NEXUS_ENV: "${NEXUS_ENV:-local}"
       APPROVAL_DEFAULT_TTL: "${NEXUS_APPROVAL_TTL:-3600}"
       NEXUS_SIGNING_KEY: "${NEXUS_SIGNING_KEY:-nexus-dev-signing-key-change-in-production}"
-      NEXUS_CALLBACK_TOKEN: "${NEXUS_CALLBACK_TOKEN:-local-nexus-callback-token}"
+      NEXUS_CALLBACK_TOKEN: "${NEXUS_CALLBACK_TOKEN:-local-dev-callback-token}"
+      NEXUS_APPROVAL_PENDING_CALLBACK_URLS: "${NEXUS_APPROVAL_PENDING_CALLBACK_URLS:-http://host.docker.internal:8080/api/v1/governance/callbacks/nexus}"
+      NEXUS_APPROVAL_RESOLVED_CALLBACK_URLS: "${NEXUS_APPROVAL_RESOLVED_CALLBACK_URLS:-http://host.docker.internal:8080/api/v1/governance/callbacks/nexus}"
+      NEXUS_ATTESTATION_VERIFIER: "${NEXUS_ATTESTATION_VERIFIER:-none}"
+      NEXUS_ATTESTATION_HMAC_SECRET: "${NEXUS_ATTESTATION_HMAC_SECRET:-}"
     ports:
       - "${NEXUS_PORT:-18084}:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       nexus-postgres:
         condition: service_healthy
+    networks:
+      default:
+      axis-local:
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/readyz >/dev/null 2>&1 || exit 1"]
       interval: 2s
@@ -67,23 +81,60 @@ services:
     environment:
       PORT: "8080"
       DATABASE_URL: "postgres://postgres:postgres@companion-postgres:5432/companion?sslmode=disable"
-      COMPANION_API_KEYS: "admin=${COMPANION_ADMIN_API_KEY:-companion-admin-dev-key}|service_principal=true|org_id=${AXIS_DEV_ORG_ID:-local-dev-org}|scopes=companion:tasks:read+companion:tasks:write+companion:connectors:execute+companion:connectors:admin+companion:watchers:read+companion:watchers:write+companion:watchers:execute+companion:nexus:read+companion:nexus:admin+companion:nexus-assist:read+companion:nexus-assist:admin"
+      COMPANION_API_KEYS: "admin=${COMPANION_ADMIN_API_KEY:-companion-admin-dev-key}|service_principal=true|org_id=${AXIS_DEV_ORG_ID:-local-dev-org}|scopes=companion:tasks:read+companion:tasks:write+companion:connectors:execute+companion:connectors:admin+companion:capabilities:read+companion:capabilities:admin+companion:watchers:read+companion:watchers:write+companion:watchers:execute+companion:memory:read+companion:memory:write+companion:memory:admin+companion:agents:read+companion:agents:admin+companion:nexus:read+companion:nexus:admin+companion:nexus-assist:read+companion:nexus-assist:admin+companion:assist:read+companion:assist:write+companion:products:read+companion:products:admin+companion:ops:read+companion:observability:read+companion:costs:read+companion:evals:admin+companion:runtime:admin+companion:mcp:execute+companion:cross_org,argos=${COMPANION_ARGOS_API_KEY:-argos-companion-dev-key}|service_principal=true|org_id=${ARGOS_ORG_ID:-argos-local-org}|scopes=companion:assist:read+companion:assist:write"
       COMPANION_INTERNAL_JWT_SECRET: "${AXIS_INTERNAL_JWT_SECRET:-axis-dev-internal-jwt-secret-change-me}"
       COMPANION_INTERNAL_JWT_ISSUER: "${AXIS_INTERNAL_JWT_ISSUER:-axis-bff}"
-      COMPANION_INTERNAL_JWT_AUDIENCE: "companion"
+      COMPANION_INTERNAL_JWT_AUDIENCE: "${COMPANION_INTERNAL_JWT_AUDIENCE:-companion}"
+      # JWTs HS256 per-producto (mismo secret/issuer que ponti/core emite).
+      COMPANION_PRODUCT_JWT_KEYS: "${COMPANION_PRODUCT_JWT_KEYS:-ponti=local-dev-ponti-jwt-secret|issuer=ponti-core}"
+      COMPANION_AUTH_ISSUER_URL: "${COMPANION_AUTH_ISSUER_URL:-}"
+      COMPANION_AUTH_AUDIENCE: "${COMPANION_AUTH_AUDIENCE:-}"
+      COMPANION_CORS_ALLOWED_ORIGINS: "${COMPANION_CORS_ALLOWED_ORIGINS:-http://localhost:5180,http://127.0.0.1:5180,http://localhost:5173,http://127.0.0.1:5173}"
       NEXUS_BASE_URL: "http://nexus:8080"
-      NEXUS_API_KEY: "${NEXUS_ADMIN_API_KEY:-nexus-admin-dev-key}"
-      COMPANION_LLM_PROVIDER: "${COMPANION_LLM_PROVIDER:-fake}"
-      COMPANION_LLM_MODEL: "${COMPANION_LLM_MODEL:-fake}"
-      COMPANION_WATCHER_INTERVAL_SEC: "0"
-      COMPANION_WATCHER_SYNC_INTERVAL_SEC: "0"
+      NEXUS_API_KEY: "${NEXUS_API_KEY:-${NEXUS_ADMIN_API_KEY:-nexus-admin-dev-key}}"
+      COMPANION_LLM_PROVIDER: "${COMPANION_LLM_PROVIDER:-vertex}"
+      COMPANION_LLM_MODEL: "${COMPANION_LLM_MODEL:-gemini-2.5-flash-lite}"
+      COMPANION_LLM_VERTEX_PROJECT: "${COMPANION_LLM_VERTEX_PROJECT:-}"
+      COMPANION_LLM_VERTEX_LOCATION: "${COMPANION_LLM_VERTEX_LOCATION:-}"
+      COMPANION_EMBEDDING_PROVIDER: "${COMPANION_EMBEDDING_PROVIDER:-}"
+      COMPANION_EMBEDDING_MODEL: "${COMPANION_EMBEDDING_MODEL:-}"
+      COMPANION_EMBEDDING_VERTEX_PROJECT: "${COMPANION_EMBEDDING_VERTEX_PROJECT:-}"
+      COMPANION_EMBEDDING_VERTEX_LOCATION: "${COMPANION_EMBEDDING_VERTEX_LOCATION:-}"
+      COMPANION_EMBEDDING_DIMENSIONS: "${COMPANION_EMBEDDING_DIMENSIONS:-64}"
+      # ADC para Vertex AI / Gemini. Cuando COMPANION_LLM_PROVIDER=vertex,
+      # el binario llama `google.DefaultTokenSource()` que lee este path. El
+      # archivo viene del `gcloud auth application-default login` del host y
+      # se monta read-only abajo en `volumes`.
+      GOOGLE_APPLICATION_CREDENTIALS: "/secrets/gcp-adc.json"
+      COMPANION_NEXUS_SYNC_INTERVAL_SEC: "${COMPANION_NEXUS_SYNC_INTERVAL_SEC:-30}"
+      COMPANION_STRICT_NEXUS: "${COMPANION_STRICT_NEXUS:-false}"
+      COMPANION_DEFAULT_AUTONOMY_LEVEL: "${COMPANION_DEFAULT_AUTONOMY_LEVEL:-A2}"
+      COMPANION_WATCHER_INTERVAL_SEC: "${COMPANION_WATCHER_INTERVAL_SEC:-0}"
+      COMPANION_WATCHER_SYNC_INTERVAL_SEC: "${COMPANION_WATCHER_SYNC_INTERVAL_SEC:-0}"
+      PYMES_BASE_URL: "${PYMES_BASE_URL:-}"
+      PYMES_API_KEY: "${PYMES_API_KEY:-}"
+      PONTI_BASE_URL: "${PONTI_BASE_URL:-}"
+      PONTI_API_KEY: "${PONTI_API_KEY:-}"
+      COMPANION_LEGACY_PONTI_CONNECTOR_ENABLED: "${COMPANION_LEGACY_PONTI_CONNECTOR_ENABLED:-false}"
+      # ProductConnector genérico (envelope capability_execution.v1), default local on.
+      COMPANION_PRODUCT_CONNECTOR_GENERIC: "${COMPANION_PRODUCT_CONNECTOR_GENERIC:-true}"
+    volumes:
+      # ADC (Application Default Credentials) del host. Read-only para que el
+      # container pueda leer pero no modificar las credenciales del dev. El
+      # path en el host viene de `gcloud auth application-default login`.
+      - "${COMPANION_GCP_ADC_HOST_PATH:-~/.config/gcloud/application_default_credentials.json}:/secrets/gcp-adc.json:ro"
     ports:
       - "${COMPANION_PORT:-18085}:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       companion-postgres:
         condition: service_healthy
       nexus:
         condition: service_healthy
+    networks:
+      default:
+      axis-local:
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/readyz >/dev/null 2>&1 || exit 1"]
       interval: 2s
@@ -100,8 +151,16 @@ services:
       AXIS_BFF_AUTH_MODE: "${AXIS_BFF_AUTH_MODE:-dev}"
       AXIS_DEV_ORG_ID: "${AXIS_DEV_ORG_ID:-local-dev-org}"
       AXIS_DEV_USER_ID: "${AXIS_DEV_USER_ID:-local-dev-admin}"
+      AXIS_DEV_SCOPES: "${AXIS_DEV_SCOPES:-}"
       AXIS_INTERNAL_JWT_SECRET: "${AXIS_INTERNAL_JWT_SECRET:-axis-dev-internal-jwt-secret-change-me}"
       AXIS_INTERNAL_JWT_ISSUER: "${AXIS_INTERNAL_JWT_ISSUER:-axis-bff}"
+      AXIS_AUTH_ISSUER_URL: "${AXIS_AUTH_ISSUER_URL:-}"
+      AXIS_AUTH_AUDIENCE: "${AXIS_AUTH_AUDIENCE:-}"
+      AXIS_COMPANION_AUDIENCE: "${AXIS_COMPANION_AUDIENCE:-companion}"
+      AXIS_NEXUS_AUDIENCE: "${AXIS_NEXUS_AUDIENCE:-nexus}"
+      AXIS_ALLOWED_ORIGIN: "${AXIS_ALLOWED_ORIGIN:-}"
+      AXIS_DOWNSTREAM_TIMEOUT: "${AXIS_DOWNSTREAM_TIMEOUT:-10s}"
+      AXIS_READ_HEADER_TIMEOUT: "${AXIS_READ_HEADER_TIMEOUT:-5s}"
       COMPANION_BASE_URL: "http://companion:8080"
       NEXUS_BASE_URL: "http://nexus:8080"
     ports:
@@ -128,3 +187,7 @@ services:
 volumes:
   companion-postgres-data:
   nexus-postgres-data:
+
+networks:
+  axis-local:
+    external: true

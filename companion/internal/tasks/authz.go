@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/devpablocristo/companion/internal/identityctx"
 	domain "github.com/devpablocristo/companion/internal/tasks/usecases/domain"
 	"github.com/devpablocristo/platform/http/go/httpjson"
 )
@@ -15,63 +16,43 @@ const (
 )
 
 func requireScope(w http.ResponseWriter, r *http.Request, scopes ...string) bool {
-	if requestHasNoAuthContext(r) || requestHasScope(r, scopes...) {
+	if identityctx.HasNoAuthContext(r) || identityctx.HasAnyScope(r, scopes...) {
 		return true
 	}
 	httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "missing required scope")
 	return false
 }
 
-func principalOrgID(r *http.Request) string {
-	return strings.TrimSpace(r.Header.Get("X-Org-ID"))
-}
+func principalOrgID(r *http.Request) string { return identityctx.PrincipalOrgID(r) }
+
+func principalUserID(r *http.Request) string { return identityctx.FromRequest(r).EffectiveActorID() }
 
 func canAccessTaskOrg(r *http.Request, task domain.Task) bool {
-	orgID := principalOrgID(r)
-	if requestHasNoAuthContext(r) {
+	taskOrg := strings.TrimSpace(task.OrgID)
+	if identityctx.HasNoAuthContext(r) || identityctx.HasScope(r, "companion:cross_org") {
 		return true
 	}
-	if orgID == "" || strings.TrimSpace(task.OrgID) == "" {
+	orgID := principalOrgID(r)
+	if orgID == "" || taskOrg == "" {
 		return false
 	}
-	return strings.TrimSpace(task.OrgID) == orgID
+	return taskOrg == orgID
 }
 
-func principalScopes(r *http.Request) []string {
-	raw := strings.NewReplacer(",", " ", ";", " ", "+", " ").Replace(r.Header.Get("X-Auth-Scopes"))
-	fields := strings.Fields(raw)
-	out := make([]string, 0, len(fields))
-	for _, field := range fields {
-		if scope := strings.TrimSpace(field); scope != "" {
-			out = append(out, scope)
-		}
+func principalScopes(r *http.Request) []string { return identityctx.FromRequest(r).Scopes }
+
+func workIdentity(r *http.Request) (identityctx.IdentityContext, bool) {
+	return identityctx.WorkIdentity(r)
+}
+
+func resolveCreatedBy(r *http.Request, requested string) (string, bool) {
+	requested = strings.TrimSpace(requested)
+	id := identityctx.FromRequest(r)
+	if requested == "" {
+		return id.EffectiveActorID(), true
 	}
-	return out
-}
-
-func requestHasNoAuthContext(r *http.Request) bool {
-	return strings.TrimSpace(r.Header.Get("X-Auth-Method")) == "" &&
-		strings.TrimSpace(r.Header.Get("X-Auth-Scopes")) == ""
-}
-
-func requestHasScope(r *http.Request, scopes ...string) bool {
-	have := parseHeaderScopes(r.Header.Get("X-Auth-Scopes"))
-	for _, scope := range scopes {
-		if _, ok := have[scope]; ok {
-			return true
-		}
+	if identityctx.HasNoAuthContext(r) || id.CanActAs(requested, scopeCompanionCrossOrg) {
+		return requested, true
 	}
-	return false
-}
-
-func parseHeaderScopes(raw string) map[string]struct{} {
-	raw = strings.NewReplacer(",", " ", ";", " ", "+", " ").Replace(raw)
-	fields := strings.Fields(raw)
-	out := make(map[string]struct{}, len(fields))
-	for _, field := range fields {
-		if scope := strings.TrimSpace(field); scope != "" {
-			out[scope] = struct{}{}
-		}
-	}
-	return out
+	return "", false
 }

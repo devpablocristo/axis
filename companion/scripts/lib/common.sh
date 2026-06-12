@@ -6,12 +6,12 @@ set -euo pipefail
 # Cargar .env de Axis para alinear smoke con `docker compose` root.
 _companion_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 _axis_root="$(cd "$_companion_root/.." && pwd)"
-if [ -f "$_axis_root/.env" ]; then
+if [ "${COMPANION_SMOKE_LOAD_ENV:-1}" != "0" ] && [ -f "$_axis_root/.env" ]; then
   set -a
   # shellcheck disable=SC1091
   . "$_axis_root/.env"
   set +a
-elif [ -f "$_companion_root/.env" ]; then
+elif [ "${COMPANION_SMOKE_LOAD_ENV:-1}" != "0" ] && [ -f "$_companion_root/.env" ]; then
   set -a
   # shellcheck disable=SC1091
   . "$_companion_root/.env"

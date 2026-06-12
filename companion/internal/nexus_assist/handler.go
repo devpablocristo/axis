@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/devpablocristo/companion/internal/identityctx"
 	"github.com/devpablocristo/platform/http/go/httpjson"
 
 	gadto "github.com/devpablocristo/companion/internal/nexus_assist/handler/dto"
@@ -48,7 +49,7 @@ func (h *Handler) propose(w http.ResponseWriter, r *http.Request) {
 		httpjson.WriteFlatError(w, http.StatusServiceUnavailable, "UNAVAILABLE", "proposer not configured")
 		return
 	}
-	orgID := strings.TrimSpace(r.Header.Get("X-Org-ID"))
+	orgID := identityctx.FromRequest(r).CustomerOrgID
 	if orgID == "" {
 		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "nexus assist propose requires org context")
 		return
@@ -91,36 +92,9 @@ func (h *Handler) explain(w http.ResponseWriter, r *http.Request) {
 }
 
 func requireScope(w http.ResponseWriter, r *http.Request, scopes ...string) bool {
-	if requestHasNoAuthContext(r) || requestHasScope(r, scopes...) {
+	if identityctx.HasNoAuthContext(r) || identityctx.HasAnyScope(r, scopes...) {
 		return true
 	}
 	httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "missing required scope")
 	return false
-}
-
-func requestHasNoAuthContext(r *http.Request) bool {
-	return strings.TrimSpace(r.Header.Get("X-Auth-Method")) == "" &&
-		strings.TrimSpace(r.Header.Get("X-Auth-Scopes")) == ""
-}
-
-func requestHasScope(r *http.Request, scopes ...string) bool {
-	have := parseHeaderScopes(r.Header.Get("X-Auth-Scopes"))
-	for _, scope := range scopes {
-		if _, ok := have[scope]; ok {
-			return true
-		}
-	}
-	return false
-}
-
-func parseHeaderScopes(raw string) map[string]struct{} {
-	raw = strings.NewReplacer(",", " ", ";", " ", "+", " ").Replace(raw)
-	fields := strings.Fields(raw)
-	out := make(map[string]struct{}, len(fields))
-	for _, field := range fields {
-		if scope := strings.TrimSpace(field); scope != "" {
-			out[scope] = struct{}{}
-		}
-	}
-	return out
 }

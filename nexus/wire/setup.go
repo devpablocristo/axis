@@ -14,15 +14,20 @@ import (
 	"github.com/devpablocristo/nexus/internal/audit"
 	"github.com/devpablocristo/nexus/internal/callbacks"
 	nexusconfig "github.com/devpablocristo/nexus/internal/config"
+	"github.com/devpablocristo/nexus/internal/contracts"
 	"github.com/devpablocristo/nexus/internal/dashboard"
 	"github.com/devpablocristo/nexus/internal/delegations"
 	"github.com/devpablocristo/nexus/internal/evidence"
+	"github.com/devpablocristo/nexus/internal/findings"
 	"github.com/devpablocristo/nexus/internal/learning"
+	"github.com/devpablocristo/nexus/internal/ops"
 	"github.com/devpablocristo/nexus/internal/policies"
 	"github.com/devpablocristo/nexus/internal/rbac"
 	"github.com/devpablocristo/nexus/internal/requests"
+	"github.com/devpablocristo/platform/authn/go/internaljwt"
 	sharedpostgres "github.com/devpablocristo/platform/databases/postgres/go"
 	"github.com/devpablocristo/platform/http/go/health"
+	sharedobservability "github.com/devpablocristo/platform/observability/go"
 )
 
 type Config struct {
@@ -33,45 +38,69 @@ type Config struct {
 	InternalJWTSecret    string
 	InternalJWTIssuer    string
 	InternalJWTAudience  string
+	ProductJWTKeys       string
 	ApprovalTTL          time.Duration
 	SigningKey           string
 	CallbackToken        string
 	PendingCallbackURLs  []string
 	ResolvedCallbackURLs []string
 	MigrationFiles       fs.FS
+	TracingExporter      string
+	TracingEndpoint      string
+	TracingInsecure      bool
+	TracingSampleRatio   float64
+	Environment          string
 }
 
 func NewServer(cfg Config) (http.Handler, func(), error) {
 	ctx := context.Background()
+	shutdownTracing, err := sharedobservability.NewTracerProvider(ctx, sharedobservability.TracingConfig{
+		ServiceName:    "nexus",
+		Environment:    cfg.Environment,
+		Exporter:       cfg.TracingExporter,
+		OTLPEndpoint:   cfg.TracingEndpoint,
+		OTLPInsecure:   cfg.TracingInsecure,
+		SampleRatio:    cfg.TracingSampleRatio,
+		ServiceVersion: "0.0.0",
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("configure tracing: %w", err)
+	}
 
 	// Base de datos
 	db, err := sharedpostgres.OpenWithConfig(ctx, cfg.DatabaseURL, sharedpostgres.DefaultConfig("nexus"))
 	if err != nil {
+		_ = shutdownTracing(ctx)
 		return nil, nil, fmt.Errorf("open database: %w", err)
 	}
 
 	// Migraciones del servicio nexus.
 	if err := sharedpostgres.MigrateUp(ctx, db, "nexus", cfg.MigrationFiles, "."); err != nil {
 		db.Close()
+		_ = shutdownTracing(ctx)
 		return nil, nil, fmt.Errorf("run migrations: %w", err)
 	}
 
 	// Repositorios (todos postgres)
 	policyRepo := policies.NewPostgresRepository(db)
 	approvalRepo := approvals.NewPostgresRepository(db)
-	auditRepo := audit.NewPostgresRepository(db)
+	auditRepo := audit.NewPostgresRepository(db, audit.WithSigner(cfg.SigningKey, "default"))
 	reqRepo := requests.NewPostgresRepository(db)
 	idemStore := requests.NewPostgresIdempotencyStore(db)
 	resultReportStore := requests.NewPostgresResultReportStore(db)
 	learningRepo := learning.NewPostgresRepository(db)
 	configRepo := nexusconfig.NewPostgresRepository(db.Pool())
+	contractRepo := contracts.NewPostgresRepository(db)
 	actionTypeRepo := actiontypes.NewPostgresRepository(db)
+	findingRepo := findings.NewPostgresRepository(db)
+	opsRepo := ops.NewRepository(db)
+	rateLimiter := ops.NewRateLimiter(db)
 
 	// Adapters
 	auditSink := requests.NewAuditSinkAdapter(auditRepo)
 	evaluator := requests.NewPolicyEvaluator()
 	riskConfig := requests.DefaultRiskConfig()
-	callbackPublisher := callbacks.NewHTTPApprovalPublisher(cfg.CallbackToken, cfg.PendingCallbackURLs, cfg.ResolvedCallbackURLs)
+	callbackPublisher := callbacks.NewOutboxApprovalPublisher(db, cfg.CallbackToken, cfg.PendingCallbackURLs, cfg.ResolvedCallbackURLs)
 
 	ttl := cfg.ApprovalTTL
 	if ttl <= 0 {
@@ -80,6 +109,7 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 
 	// Usecases
 	configUC := nexusconfig.NewUsecases(configRepo)
+	contractUC := contracts.NewUsecases(contractRepo)
 	policyUC := policies.NewUsecases(policyRepo)
 	policyLister := newPolicyListerAdapter(policyUC)
 	execStats := requests.NewPostgresExecutionStatsStore(db.Pool())
@@ -98,6 +128,8 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	delegationUC := delegations.NewUsecases(delegationRepo)
 	rbacRepo := rbac.NewPostgresRepository(db)
 	rbacUC := rbac.NewUsecases(rbacRepo)
+	findingUC := findings.NewUsecases(findingRepo, findings.NewEvaluator())
+	opsHandler := ops.NewHandler(opsRepo)
 
 	attestationStore := requests.NewPostgresAttestationStore(db.Pool())
 
@@ -112,17 +144,20 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	case "none":
 		if nexusProdEnv() {
 			db.Close()
+			_ = shutdownTracing(ctx)
 			return nil, nil, fmt.Errorf("NEXUS_ATTESTATION_VERIFIER=none is not allowed in production")
 		}
 	case "hmac", "hmac-sha256":
 		verifier, err := requests.NewHMACAttestationVerifier(os.Getenv("NEXUS_ATTESTATION_HMAC_SECRET"))
 		if err != nil {
 			db.Close()
+			_ = shutdownTracing(ctx)
 			return nil, nil, err
 		}
 		attestVerifier = verifier
 	default:
 		db.Close()
+		_ = shutdownTracing(ctx)
 		return nil, nil, fmt.Errorf("unsupported NEXUS_ATTESTATION_VERIFIER=%q", attestVerifierMode)
 	}
 
@@ -140,6 +175,7 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 		requests.WithApprovalGetter(approvalRepo),
 		requests.WithApprovalCallbacks(callbackPublisher),
 		requests.WithResultReportStore(resultReportStore),
+		requests.WithContractValidator(contractUC),
 	}
 	if attestVerifier != nil {
 		reqOptions = append(reqOptions, requests.WithAttestationVerifier(attestVerifier))
@@ -169,9 +205,11 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	learningHandler := learning.NewHandler(learningUC)
 	dashboardHandler := dashboard.NewHandler(reqRepo)
 	configHandler := nexusconfig.NewHandler(configUC)
+	contractHandler := contracts.NewHandler(contractUC)
 	actionTypeHandler := actiontypes.NewHandler(actionTypeUC)
 	delegationHandler := delegations.NewHandler(delegationUC)
 	rbacHandler := rbac.NewHandler(rbacUC)
+	findingHandler := findings.NewHandler(findingUC)
 
 	// Evidence packs.
 	// Sin default fallback: si la clave no está, falla startup. Un default
@@ -179,11 +217,13 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	// pública.
 	if cfg.SigningKey == "" {
 		db.Close()
+		_ = shutdownTracing(ctx)
 		return nil, nil, fmt.Errorf("NEXUS_SIGNING_KEY is required")
 	}
 	signer, err := evidence.NewSigner(cfg.SigningKey, "default")
 	if err != nil {
 		db.Close()
+		_ = shutdownTracing(ctx)
 		return nil, nil, fmt.Errorf("create evidence signer: %w", err)
 	}
 	evidenceUC := evidence.NewUsecases(reqRepo, approvalRepo, auditRepo, signer).
@@ -202,26 +242,36 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	learningHandler.Register(mux)
 	dashboardHandler.Register(mux)
 	configHandler.Register(mux)
+	contractHandler.Register(mux)
 	actionTypeHandler.Register(mux)
 	delegationHandler.Register(mux)
 	rbacHandler.Register(mux)
 	evidenceHandler.Register(mux)
+	findingHandler.Register(mux)
+	opsHandler.Register(mux)
 
-	authMW, err := newAuthMiddleware(cfg.APIKeys, cfg.AuthIssuerURL, cfg.AuthAudience, internalJWTConfig{
+	authMW, err := newAuthMiddleware(cfg.APIKeys, cfg.AuthIssuerURL, cfg.AuthAudience, internaljwt.Config{
 		Secret:   cfg.InternalJWTSecret,
 		Issuer:   cfg.InternalJWTIssuer,
 		Audience: cfg.InternalJWTAudience,
-	})
+	}, cfg.ProductJWTKeys)
 	if err != nil {
 		db.Close()
+		_ = shutdownTracing(ctx)
 		return nil, nil, fmt.Errorf("create authenticator: %w", err)
 	}
+	workerCtx, stopWorkers := context.WithCancel(context.Background())
+	callbackPublisher.StartWorker(workerCtx, 2*time.Second, 25)
 
 	cleanup := func() {
+		stopWorkers()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = shutdownTracing(shutdownCtx)
 		db.Close()
 	}
 
-	return authMW(mux), cleanup, nil
+	return authMW(traceMiddleware(rateLimiter.Middleware(mux))), cleanup, nil
 }
 
 func nexusProdEnv() bool {
@@ -232,4 +282,16 @@ func nexusProdEnv() bool {
 		}
 	}
 	return false
+}
+
+func traceMiddleware(next http.Handler) http.Handler {
+	if next == nil {
+		next = http.NotFoundHandler()
+	}
+	tracer := sharedobservability.Tracer("nexus/http")
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx, span := tracer.Start(r.Context(), strings.TrimSpace(r.Method+" "+r.URL.Path))
+		defer span.End()
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
 }

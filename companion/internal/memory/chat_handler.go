@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/devpablocristo/companion/internal/identityctx"
 	"github.com/devpablocristo/platform/http/go/httpjson"
 	"github.com/google/uuid"
 
@@ -57,12 +58,9 @@ func (h *ChatHandler) listConversations(w http.ResponseWriter, r *http.Request) 
 	if !requireScope(w, r, chatScopeRead) {
 		return
 	}
-	orgID := strings.TrimSpace(r.Header.Get("X-Org-ID"))
-	if orgID == "" {
-		// Fallback al principal del API key (mismo patrón que tasks).
-		orgID = principalOrgID(r)
-	}
-	userID := strings.TrimSpace(r.Header.Get("X-User-ID"))
+	id := identityctx.FromRequest(r)
+	orgID := id.CustomerOrgID
+	userID := id.HumanUserID
 
 	limit := defaultConversationListLimit
 	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
@@ -118,10 +116,7 @@ func (h *ChatHandler) getConversation(w http.ResponseWriter, r *http.Request) {
 	}
 	// Fail-closed multi-tenant: el orgID del header debe coincidir con la
 	// org de la conversación.
-	headerOrg := strings.TrimSpace(r.Header.Get("X-Org-ID"))
-	if headerOrg == "" {
-		headerOrg = principalOrgID(r)
-	}
+	headerOrg := identityctx.FromRequest(r).CustomerOrgID
 	if headerOrg != "" && conv.OrgID != headerOrg {
 		httpjson.WriteFlatError(w, http.StatusNotFound, "NOT_FOUND", "conversation not found")
 		return

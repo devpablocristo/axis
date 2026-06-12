@@ -34,6 +34,12 @@ const (
 )
 
 const (
+	ToolIntentSchemaVersion             = "tool_intent.v1"
+	ActionTypeAgentCapabilityInvoke     = "agent.capability.invoke"
+	ActionTypeAgentCapabilityCompensate = "agent.capability.compensate"
+)
+
+const (
 	StatusPending         = "pending"
 	StatusEvaluated       = "evaluated"
 	StatusAllowed         = "allowed"
@@ -68,6 +74,7 @@ type SubmitRequestBody struct {
 	ActionType     string         `json:"action_type"`
 	TargetSystem   string         `json:"target_system,omitempty"`
 	TargetResource string         `json:"target_resource,omitempty"`
+	ActionBinding  map[string]any `json:"action_binding,omitempty"`
 	Params         map[string]any `json:"params,omitempty"`
 	Reason         string         `json:"reason,omitempty"`
 	Context        string         `json:"context,omitempty"`
@@ -79,6 +86,11 @@ type SubmitResponse struct {
 	RiskLevel      string `json:"risk_level"`
 	DecisionReason string `json:"decision_reason"`
 	Status         string `json:"status"`
+	BindingHash    string `json:"binding_hash,omitempty"`
+	Approval       *struct {
+		ID        string `json:"id"`
+		ExpiresAt string `json:"expires_at"`
+	} `json:"approval,omitempty"`
 }
 
 type RequestSummary struct {
@@ -136,11 +148,23 @@ func (c *Client) GetRequest(ctx context.Context, id string) (RequestSummary, int
 }
 
 func (c *Client) ListRequests(ctx context.Context, query string) (int, []byte, error) {
+	return c.listRequests(ctx, query)
+}
+
+func (c *Client) ListRequestsForOrg(ctx context.Context, query, orgID string) (int, []byte, error) {
+	var opts []httpclient.RequestOption
+	if orgID != "" {
+		opts = append(opts, httpclient.WithHeader("X-Org-ID", orgID))
+	}
+	return c.listRequests(ctx, query, opts...)
+}
+
+func (c *Client) listRequests(ctx context.Context, query string, opts ...httpclient.RequestOption) (int, []byte, error) {
 	path := "/v1/requests"
 	if query != "" {
 		path += "?" + query
 	}
-	return c.caller.DoJSON(ctx, http.MethodGet, path, nil)
+	return c.caller.DoJSON(ctx, http.MethodGet, path, nil, opts...)
 }
 
 func (c *Client) SubmitProposal(ctx context.Context, body any) (int, []byte, error) {

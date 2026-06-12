@@ -7,11 +7,12 @@ import (
 	"time"
 
 	"github.com/devpablocristo/companion/internal/agents"
+	"github.com/devpablocristo/companion/internal/identityctx"
 )
 
 const (
-	CompanionPrincipal    = "companion.employee_ai"
-	DefaultProductSurface = "companion"
+	CompanionPrincipal    = identityctx.CompanionPrincipal
+	DefaultProductSurface = identityctx.DefaultSurface
 )
 
 type AutonomyLevel string
@@ -28,9 +29,16 @@ const (
 type IdentityChain struct {
 	InitiatingUser      string   `json:"initiating_user,omitempty"`
 	Tenant              string   `json:"tenant,omitempty"`
+	CustomerOrgID       string   `json:"customer_org_id,omitempty"`
+	HumanUserID         string   `json:"human_user_id,omitempty"`
+	ActorType           string   `json:"actor_type,omitempty"`
 	ProductSurface      string   `json:"product_surface,omitempty"`
+	TaskID              string   `json:"task_id,omitempty"`
+	AgentID             string   `json:"agent_id,omitempty"`
 	AuthScopes          []string `json:"auth_scopes,omitempty"`
 	CompanionPrincipal  string   `json:"companion_principal"`
+	OnBehalfOf          string   `json:"on_behalf_of,omitempty"`
+	ServicePrincipal    bool     `json:"service_principal,omitempty"`
 	CapabilityPrincipal string   `json:"capability_principal,omitempty"`
 	ApprovalActor       string   `json:"approval_actor,omitempty"`
 }
@@ -43,19 +51,32 @@ type RunTrace struct {
 	AutonomyLevel   AutonomyLevel    `json:"autonomy_level"`
 	PromptVersion   string           `json:"prompt_version,omitempty"`
 	Model           string           `json:"model,omitempty"`
+	Usage           RunUsage         `json:"usage,omitempty"`
 	GuardrailEvents []GuardrailEvent `json:"guardrail_events,omitempty"`
 	ToolCalls       []ToolTrace      `json:"tool_calls,omitempty"`
 	StartedAt       time.Time        `json:"started_at"`
 	CompletedAt     time.Time        `json:"completed_at,omitempty"`
 }
 
+type RunUsage struct {
+	LLMCalls              int `json:"llm_calls"`
+	InputChars            int `json:"input_chars"`
+	OutputChars           int `json:"output_chars"`
+	EstimatedInputTokens  int `json:"estimated_input_tokens"`
+	EstimatedOutputTokens int `json:"estimated_output_tokens"`
+	EstimatedTotalTokens  int `json:"estimated_total_tokens"`
+	ToolCalls             int `json:"tool_calls"`
+	ToolErrors            int `json:"tool_errors"`
+}
+
 type ToolTrace struct {
-	Name           string `json:"name"`
-	ToolCallID     string `json:"tool_call_id,omitempty"`
-	Allowed        bool   `json:"allowed"`
-	DecisionReason string `json:"decision_reason,omitempty"`
-	DurationMS     int64  `json:"duration_ms"`
-	Error          string `json:"error,omitempty"`
+	Name           string          `json:"name"`
+	ToolCallID     string          `json:"tool_call_id,omitempty"`
+	Allowed        bool            `json:"allowed"`
+	DecisionReason string          `json:"decision_reason,omitempty"`
+	DurationMS     int64           `json:"duration_ms"`
+	Error          string          `json:"error,omitempty"`
+	Result         json.RawMessage `json:"result,omitempty"`
 }
 
 type GuardrailEvent struct {
@@ -77,11 +98,14 @@ type AgentRoute struct {
 // introducir persistencia ni un registry pesado todavía.
 type AgentProfile struct {
 	ID                  string        `json:"id"`
+	AgentID             string        `json:"agent_id,omitempty"`
+	Role                string        `json:"role,omitempty"`
 	ProductSurface      string        `json:"product_surface"`
 	MaxAutonomy         AutonomyLevel `json:"max_autonomy"`
 	AllowedTools        []string      `json:"allowed_tools"`
 	AllowedCapabilities []string      `json:"allowed_capabilities,omitempty"`
 	MemoryPolicy        any           `json:"memory_policy,omitempty"`
+	MemoryScopeID       string        `json:"memory_scope_id,omitempty"`
 	RequiredScopes      []string      `json:"required_scopes,omitempty"`
 	Enabled             bool          `json:"enabled"`
 	Version             string        `json:"version"`
@@ -95,16 +119,42 @@ func BuildIdentityChain(userID, orgID, productSurface string, scopes ...string) 
 	return IdentityChain{
 		InitiatingUser:     strings.TrimSpace(userID),
 		Tenant:             strings.TrimSpace(orgID),
+		CustomerOrgID:      strings.TrimSpace(orgID),
+		HumanUserID:        strings.TrimSpace(userID),
 		ProductSurface:     productSurface,
 		AuthScopes:         cleanScopes(scopes),
 		CompanionPrincipal: CompanionPrincipal,
 	}
 }
 
+func BuildIdentityChainFromContext(id identityctx.IdentityContext) IdentityChain {
+	id = id.WithProductSurface(id.ProductSurface)
+	initiatingUser := id.EffectiveActorID()
+	return IdentityChain{
+		InitiatingUser:     initiatingUser,
+		Tenant:             id.CustomerOrgID,
+		CustomerOrgID:      id.CustomerOrgID,
+		HumanUserID:        id.HumanUserID,
+		ActorType:          id.ActorType,
+		ProductSurface:     id.ProductSurface,
+		AuthScopes:         cleanScopes(id.Scopes),
+		CompanionPrincipal: id.CompanionPrincipal,
+		OnBehalfOf:         id.OnBehalfOf,
+		ServicePrincipal:   id.ServicePrincipal,
+	}
+}
+
 // RouteAgent clasifica intent y devuelve la ruta del agente. defaultAutonomy
 // puede ser "" (vacío), en cuyo caso se asume A2.
 func RouteAgent(message, productSurface string, toolkit *ToolKit, identity IdentityChain, defaultAutonomy AutonomyLevel) AgentRoute {
-	intent := classifyIntent(message)
+	return RouteAgentWithContext(message, productSurface, "", nil, toolkit, identity, defaultAutonomy)
+}
+
+// RouteAgentWithContext clasifica intent usando, además del mensaje, pistas de
+// la pantalla de producto (route_hint/handoff). El ruteo sigue siendo
+// determinístico y las tools visibles se filtran después por perfil y scopes.
+func RouteAgentWithContext(message, productSurface, routeHint string, handoff json.RawMessage, toolkit *ToolKit, identity IdentityChain, defaultAutonomy AutonomyLevel) AgentRoute {
+	intent := classifyIntentWithContext(message, productSurface, routeHint, handoff)
 	autonomy := defaultAutonomy
 	if autonomy == "" {
 		autonomy = AutonomyA2
@@ -163,6 +213,10 @@ func cleanScopes(scopes []string) []string {
 }
 
 func classifyIntent(message string) string {
+	return classifyIntentWithContext(message, "", "", nil)
+}
+
+func classifyIntentWithContext(message, productSurface, routeHint string, handoff json.RawMessage) string {
 	text := strings.ToLower(message)
 	switch {
 	case strings.Contains(text, "aprobar"), strings.Contains(text, "rechazar"), strings.Contains(text, "approval"):
@@ -174,23 +228,20 @@ func classifyIntent(message string) string {
 	case strings.Contains(text, "política"), strings.Contains(text, "policy"):
 		return "nexus.policy"
 	default:
+		if intent := classifyPontiRouteIntent(productSurface, message, routeHint, handoff); intent != "" {
+			return intent
+		}
 		return "general.assist"
 	}
 }
 
 func CheckPromptInjection(input string) *GuardrailEvent {
-	normalized := strings.ToLower(input)
-	suspicious := []string{
-		"ignore previous instructions",
-		"ignora las instrucciones anteriores",
-		"olvida tus instrucciones",
-		"reveal system prompt",
-		"muestra el prompt",
-		"exfiltrate",
-	}
-	for _, token := range suspicious {
-		if strings.Contains(normalized, token) {
-			return &GuardrailEvent{Type: "prompt_injection", Target: "message", Reason: "input contains instruction override pattern"}
+	for _, finding := range DetectAdversarialContent(input) {
+		switch finding.Type {
+		case "prompt_injection":
+			return &GuardrailEvent{Type: "prompt_injection", Target: "message", Reason: finding.Reason}
+		case "data_exfiltration", "ssrf", "approval_bypass", "memory_poisoning", "secret_leakage", "tool_poisoning", "unsafe_compensation", "cross_org_leakage", "pii_leakage":
+			return &GuardrailEvent{Type: finding.Type, Target: "message", Reason: finding.Reason}
 		}
 	}
 	return nil
@@ -205,7 +256,7 @@ func ValidateToolPolicy(toolName string, args json.RawMessage, identity Identity
 		return &GuardrailEvent{Type: "tool_policy", Target: "tool:" + toolName, Reason: "tool is not allowed for the current agent route"}
 	}
 	if toolkit != nil && !toolkit.CanUseTool(toolName, identity) {
-		return &GuardrailEvent{Type: "tool_policy", Target: "tool:" + toolName, Reason: "tool requires tenant, user, or scopes not present in this request"}
+		return &GuardrailEvent{Type: "tool_policy", Target: "tool:" + toolName, Reason: "tool requires customer org, user, or scopes not present in this request"}
 	}
 	return nil
 }
@@ -216,26 +267,45 @@ func routeAllowsTool(route AgentRoute, toolName string) bool {
 		return false
 	}
 	for _, allowed := range route.AllowedTools {
-		if strings.TrimSpace(allowed) == toolName {
+		allowed = strings.TrimSpace(allowed)
+		if allowed == toolName {
+			return true
+		}
+		if strings.HasSuffix(allowed, "*") && strings.HasPrefix(toolName, strings.TrimSuffix(allowed, "*")) {
 			return true
 		}
 	}
 	return false
 }
 
+func filterSchemasForRoute(schemas []ToolSchema, route AgentRoute) []ToolSchema {
+	out := make([]ToolSchema, 0, len(schemas))
+	for _, schema := range schemas {
+		if routeAllowsTool(route, schema.Name) {
+			out = append(out, schema)
+		}
+	}
+	return out
+}
+
 func runtimeSummary(identity IdentityChain, route AgentRoute) string {
 	return fmt.Sprintf(`- Identidad: %s.
-- Tenant: %s.
+- Customer org: %s.
 - Usuario iniciador: %s.
+- On behalf of: %s.
 - Superficie: %s.
+- Task actual: %s.
 - Intención clasificada: %s.
 - Autonomía máxima efectiva: %s.
+- Si hay task actual y el trabajo requiere varios pasos, mantené actualizado el plan durable con las tools de planner.
 - Regla dura: podés decidir, recomendar y proponer; no ejecutes writes sensibles ni approvals como acción autónoma.
-- Toda tool debe respetar tenant, permisos, trazas y guardrails.`,
+- Toda tool debe respetar customer org, permisos, trazas y guardrails.`,
 		identity.CompanionPrincipal,
-		emptyAsUnknown(identity.Tenant),
+		emptyAsUnknown(identity.CustomerOrgID),
 		emptyAsUnknown(identity.InitiatingUser),
+		emptyAsUnknown(identity.OnBehalfOf),
 		route.Product,
+		emptyAsUnknown(identity.TaskID),
 		route.Intent,
 		route.Autonomy,
 	)

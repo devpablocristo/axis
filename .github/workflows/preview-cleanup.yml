@@ -1,0 +1,62 @@
+name: Preview Cleanup
+
+on:
+  workflow_call:
+    inputs:
+      pr_number:
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "PR number"
+        required: true
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: axis-preview-pr-${{ inputs.pr_number }}
+  cancel-in-progress: false
+
+env:
+  REGION: ${{ vars.GCP_REGION_STG || 'us-central1' }}
+  PROJECT_ID: ${{ vars.GCP_PROJECT_ID_STG || 'axis-stg-884236' }}
+  WIF_PROVIDER: ${{ vars.WIF_PROVIDER_STG || 'projects/322954730450/locations/global/workloadIdentityPools/github-actions-pool/providers/github-actions-provider' }}
+  WIF_SERVICE_ACCOUNT: ${{ vars.WIF_SERVICE_ACCOUNT_STG || 'axis-github-actions-stg@axis-stg-884236.iam.gserviceaccount.com' }}
+
+jobs:
+  cleanup:
+    name: Cleanup preview Cloud Run services
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve names
+        env:
+          PR_NUMBER: ${{ inputs.pr_number }}
+        run: |
+          for var_name in PROJECT_ID WIF_PROVIDER WIF_SERVICE_ACCOUNT; do
+            if [[ -z "${!var_name}" ]]; then
+              echo "::error::$var_name is required for preview cleanup"
+              exit 1
+            fi
+          done
+          [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]] || { echo "Invalid PR number: $PR_NUMBER" >&2; exit 1; }
+          echo "PR_NUMBER=$PR_NUMBER" >> "$GITHUB_ENV"
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.WIF_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v3
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+      - name: Delete preview services
+        run: |
+          set -euo pipefail
+          for service in axis-console-pr-${PR_NUMBER} axis-bff-pr-${PR_NUMBER} axis-companion-pr-${PR_NUMBER} axis-nexus-pr-${PR_NUMBER}; do
+            if gcloud run services describe "$service" --project="$PROJECT_ID" --region="$REGION" >/dev/null 2>&1; then
+              gcloud run services delete "$service" --project="$PROJECT_ID" --region="$REGION" --quiet
+            else
+              echo "Service not found, skipping: $service"
+            fi
+          done

@@ -5,8 +5,8 @@ CREATE TABLE companion_watchers (
     org_id          VARCHAR(255) NOT NULL,
     name            VARCHAR(255) NOT NULL,
     watcher_type    VARCHAR(64)  NOT NULL CHECK (watcher_type IN (
-        'stale_work_orders', 'unconfirmed_appointments', 'low_stock',
-        'inactive_customers', 'revenue_drop'
+        'capability', 'stale_work_orders', 'unconfirmed_appointments',
+        'low_stock', 'inactive_customers', 'revenue_drop'
     )),
     config          JSONB        NOT NULL DEFAULT '{}',
     enabled         BOOLEAN      NOT NULL DEFAULT true,

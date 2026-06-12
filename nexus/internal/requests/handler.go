@@ -10,8 +10,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/devpablocristo/platform/authn/go/identityhttp"
 	"github.com/devpablocristo/platform/http/go/httpjson"
 
+	"github.com/devpablocristo/nexus/internal/orgctx"
 	requestdto "github.com/devpablocristo/nexus/internal/requests/handler/dto"
 	requestdomain "github.com/devpablocristo/nexus/internal/requests/usecases/domain"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
@@ -91,6 +93,23 @@ func (h *Handler) simulate(w http.ResponseWriter, r *http.Request) {
 		Context:        body.Context,
 	})
 	if err != nil {
+		errMsg := err.Error()
+		if errors.Is(err, ErrIdempotencyConflict) || domainerr.IsConflict(err) || strings.Contains(errMsg, "idempotency key conflict") {
+			httpjson.WriteFlatError(w, http.StatusConflict, "CONFLICT", errMsg)
+			return
+		}
+		if strings.Contains(errMsg, "unknown action_type") ||
+			strings.Contains(errMsg, "is disabled") ||
+			strings.Contains(errMsg, "not delegated") {
+			httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", errMsg)
+			return
+		}
+		if strings.Contains(errMsg, "missing required param") ||
+			strings.Contains(errMsg, "action_type schema") ||
+			strings.Contains(errMsg, "action_binding") {
+			httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", errMsg)
+			return
+		}
 		slog.Error("simulate failed", "error", err)
 		httpjson.WriteFlatInternalError(w, err, "simulate request")
 		return
@@ -183,6 +202,10 @@ func (h *Handler) submit(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		errMsg := err.Error()
+		if errors.Is(err, ErrIdempotencyConflict) || domainerr.IsConflict(err) || strings.Contains(errMsg, "idempotency key conflict") {
+			httpjson.WriteFlatError(w, http.StatusConflict, "CONFLICT", errMsg)
+			return
+		}
 		if strings.Contains(errMsg, "unknown action_type") ||
 			strings.Contains(errMsg, "is disabled") ||
 			strings.Contains(errMsg, "not delegated") {
@@ -253,14 +276,15 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 // requestOrgScope extrae la regla de tenancy del request HTTP. Espeja la
 // semántica de canAccessRequestOrg pero la traduce a parámetros que el repo
 // pueda aplicar en SQL.
-//   - cross-org admin scope sin X-Org-ID → allowAll=true.
-//   - cross-org admin scope con X-Org-ID → orgID=&value, allowAll=false.
+//   - cross-org admin scope sin org solicitado/bound → allowAll=true.
+//   - cross-org admin scope con org solicitado (X-Org-ID inbound, preservado
+//     en orgctx) o bound al principal → orgID=&value, allowAll=false.
 //   - X-Org-ID presente → orgID=&value, allowAll=false.
 //   - sin auth context (dev/local) → allowAll=true para no romper smoke.
 //   - sino → fail closed.
 func requestOrgScope(r *http.Request) (*string, bool, bool) {
-	if requestHasScope(r, scopeNexusCrossOrg) {
-		if orgID := strings.TrimSpace(r.Header.Get("X-Org-ID")); orgID != "" {
+	if identityhttp.HasAnyScope(r, scopeNexusCrossOrg) {
+		if orgID := orgctx.Narrowed(r, r.Header.Get("X-Org-ID")); orgID != "" {
 			return &orgID, false, true
 		}
 		return nil, true, true
@@ -269,7 +293,7 @@ func requestOrgScope(r *http.Request) (*string, bool, bool) {
 	if orgID != "" {
 		return &orgID, false, true
 	}
-	if requestHasNoAuthContext(r) {
+	if identityhttp.HasNoAuthContext(r) {
 		return nil, true, true
 	}
 	return nil, false, false
@@ -348,6 +372,10 @@ func (h *Handler) reportResult(w http.ResponseWriter, r *http.Request) {
 		}
 		if domainerr.IsConflict(err) {
 			httpjson.WriteFlatError(w, http.StatusConflict, "CONFLICT", "request is not executable")
+			return
+		}
+		if domainerr.IsForbidden(err) {
+			httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "request org is not allowed for this principal")
 			return
 		}
 		httpjson.WriteFlatInternalError(w, err, "report result failed")
@@ -624,10 +652,10 @@ func toRequestResponse(req requestdomain.Request) requestdto.RequestResponse {
 func bindParamsToPrincipalOrg(r *http.Request, params map[string]any) (map[string]any, bool) {
 	orgID := strings.TrimSpace(r.Header.Get("X-Org-ID"))
 	if orgID == "" {
-		if requestHasNoAuthContext(r) {
+		if identityhttp.HasNoAuthContext(r) {
 			return params, true
 		}
-		if requestHasScope(r, scopeNexusCrossOrg) {
+		if identityhttp.HasAnyScope(r, scopeNexusCrossOrg) {
 			if raw, exists := params["org_id"]; exists && strings.TrimSpace(rawToString(raw)) != "" {
 				return params, true
 			}
@@ -649,7 +677,7 @@ func bindParamsToPrincipalOrg(r *http.Request, params map[string]any) (map[strin
 }
 
 func canAccessRequestOrg(r *http.Request, req requestdomain.Request) bool {
-	if requestHasScope(r, scopeNexusCrossOrg) {
+	if identityhttp.HasAnyScope(r, scopeNexusCrossOrg) {
 		return true
 	}
 	orgID := strings.TrimSpace(r.Header.Get("X-Org-ID"))
@@ -659,7 +687,7 @@ func canAccessRequestOrg(r *http.Request, req requestdomain.Request) bool {
 		}
 		return strings.TrimSpace(*req.OrgID) == orgID
 	}
-	if requestHasNoAuthContext(r) {
+	if identityhttp.HasNoAuthContext(r) {
 		return true
 	}
 	return false

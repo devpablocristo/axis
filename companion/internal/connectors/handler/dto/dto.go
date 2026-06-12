@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/devpablocristo/companion/internal/capabilities"
 	domain "github.com/devpablocristo/companion/internal/connectors/usecases/domain"
 )
 
@@ -47,6 +48,15 @@ type ExecuteRequest struct {
 	NexusRequestID string          `json:"nexus_request_id,omitempty"`
 }
 
+// ActionBindingRequest pide el contrato exacto que debe aprobar Nexus antes
+// de una ejecución gobernada. Intencionalmente comparte shape con execute.
+type ActionBindingRequest = ExecuteRequest
+
+type ActionBindingResponse struct {
+	ActionBinding map[string]any `json:"action_binding"`
+	BindingHash   string         `json:"binding_hash"`
+}
+
 // ExecutionResponse resultado de una ejecución.
 type ExecutionResponse struct {
 	ID             string          `json:"id"`
@@ -80,6 +90,10 @@ type CapabilityResponse struct {
 // CapabilitiesListResponse lista de capacidades.
 type CapabilitiesListResponse struct {
 	Connectors []CapabilityResponse `json:"connectors"`
+}
+
+type CapabilityManifestListResponse struct {
+	Capabilities []capabilities.Manifest `json:"capabilities"`
 }
 
 // SaveConnectorRequest petición para guardar un conector.
