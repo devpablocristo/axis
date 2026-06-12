@@ -1,7 +1,10 @@
 # Axis Ready For First Real Product
 
-Estado al 2026-06-07: Axis queda listo para iniciar la integracion del primer
-producto real solo si este checklist pasa antes de mergear a `main`.
+Estado al 2026-06-12: Axis mantiene un gate ejecutable para demostrar que puede
+conectar productos reales sin hardcode vertical en Companion, Nexus ni BFF. Este
+documento conserva el checklist para cualquier producto nuevo y para cambios que
+toquen runtime, products, capabilities, observability, memory, jobs o Nexus
+integration.
 
 ## Gate Ejecutable
 
@@ -14,6 +17,9 @@ El gate valida dos productos fake:
 
 - `reference`;
 - `shadow`.
+
+Los fixtures fake son obligatorios porque prueban que Axis no depende de
+defaults Ponti/Pymes/Medmory ni de conocimiento vertical de un producto real.
 
 Para validar contratos reales sin convertirlos en default del gate base:
 
@@ -29,7 +35,7 @@ surfaces reales.
 
 Cada producto tiene contract spec, installation activa, identity/JWT context,
 read capability, write/draft capability gobernada por Nexus metadata, expected
-errors y eval pack con tenant leakage max `0`.
+errors y eval pack con cross-org/product leakage max `0`.
 
 ## Criterios De Readiness
 
@@ -39,21 +45,31 @@ errors y eval pack con tenant leakage max `0`.
 - Read capabilities tienen evidence schema y scopes.
 - Writes o side effects requieren `nexus_action_type` y
   `approval_required=true`.
-- Evals incluyen routing, evidence, tenant leakage y action safety.
+- Evals incluyen routing, evidence, cross-org/product leakage y action safety.
 - Ops puede observar producto por metrics, alerts, SLOs, costs, traces y jobs.
 - MCP sigue siendo capa operativa sobre APIs Axis y pasa por runtime policy +
   Nexus.
+- Jobs, memory, observability y costs transportan `product_surface` como campo
+  operativo, no como metadata opcional.
 
-## No Hacer Antes Del Primer Producto Real
+## No Hacer En Onboarding
 
-- No agregar reglas Ponti/Pymes dentro de Companion.
+- No agregar logica vertical de ningun producto dentro de Companion o Nexus.
 - No saltar `Product Integration Contract v1`.
 - No crear writes sin Nexus.
 - No activar self-service onboarding externo.
 - No automatizar retention destructiva sin dry-run y aprobacion operativa.
+- No usar `tenant` como concepto nuevo en Companion; `org_id` representa la
+  customer org y `tenant` queda como compatibilidad historica en nombres ya
+  existentes.
 
-## Siguiente Paso
+## Uso Para Un Producto Nuevo
 
-El siguiente trabajo puede ser planear Ponti como consumidor, usando los mismos
-contratos fake ya validados. La integracion debe empezar read-only y con feature
-flag.
+1. Crear `scripts/onboarding/<product>-product-contract.json`.
+2. Crear `scripts/evals/<product>-golden.json`.
+3. Ejecutar `AXIS_REAL_PRODUCTS=<product> bash scripts/onboarding/check-axis-readiness.sh`.
+4. Empezar read-only con installation activa y feature flag.
+5. Agregar writes solo con metadata Nexus, evidence y approval policy.
+
+Ponti y Medmory son fixtures/consumidores reales de referencia. No son defaults
+del runtime compartido.

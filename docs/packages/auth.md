@@ -22,5 +22,5 @@ Claims del token: `iss` (issuer del producto), `aud` (servicio receptor:
 Los principals resultantes llevan `AuthMethod=product_jwt`. No equivalen a
 `api_key`: en Nexus, la delegacion de `decided_by` en approvals sigue
 restringida a service principals autenticados por API key. Contrato completo
-en `companion/docs/security.md` y
-`companion/docs/product-integration-contract-v1.md`.
+en `docs/companion/security.md` y
+`docs/companion/product-integration-contract-v1.md`.

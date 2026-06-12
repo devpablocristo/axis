@@ -106,4 +106,4 @@ por APIs, logs y métricas; la UI unificada vive fuera del servicio en
 
 El servicio requiere `DATABASE_URL`, `COMPANION_API_KEYS`,
 `NEXUS_BASE_URL` y `NEXUS_API_KEY`. Pymes, Ponti, OIDC y LLM real son
-opcionales. Ver `../../.env.example` en la raíz de Axis y `docs/operations.md`.
+opcionales. Ver `../../.env.example` en la raíz de Axis y `operations.md`.

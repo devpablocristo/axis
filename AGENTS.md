@@ -9,12 +9,12 @@ contenido anterior.
 1. Leer este archivo completo.
 2. Leer `PROJECT_CONTEXT.md`.
 3. Leer `README.md`.
-4. Leer el README y los docs del servicio que se vaya a tocar:
-   - `companion/README.md` y `companion/docs/`
-   - `nexus/README.md` y `nexus/docs/`
-   - `bff/README.md`
-   - `console/README.md`
-   - `packages/README.md`
+4. Leer el doc del servicio o paquete que se vaya a tocar:
+   - `docs/companion.md` y `docs/companion/`
+   - `docs/nexus.md` y `docs/nexus/`
+   - `docs/bff.md`
+   - `docs/console.md`
+   - `docs/packages.md` y `docs/packages/`
 
 ## Reglas de arquitectura
 
@@ -148,5 +148,5 @@ make test-console
   y `tenant` queda como compatibilidad historica.
 - Fuentes usadas: `README.md`, READMEs por servicio, `Makefile`,
   `docker-compose.yml`, `.env.example`, workflows de `.github/workflows/`,
-  `companion/docs/`, `nexus/docs/development.md` y docs compartidos en
+  `docs/companion/`, `docs/nexus/development.md` y docs compartidos en
   `packages/`.

@@ -501,4 +501,4 @@ por productos via `COMPANION_PRODUCT_JWT_KEYS` / `NEXUS_PRODUCT_JWT_KEYS`
 `org_id`, `product_surface`, `scopes`, `service_principal`, `on_behalf_of` y
 `exp` corto. Estos principals quedan con `AuthMethod=product_jwt`: NO pueden
 delegar decided_by en approvals de Nexus (ese gate sigue exigiendo
-`api_key`). Detalle en `companion/docs/security.md`.
+`api_key`). Detalle en `security.md`.

@@ -307,12 +307,12 @@ definitivos sin revisar el estado actual del repo:
 Fuentes usadas:
 
 - `README.md`
-- `companion/README.md` y `companion/docs/`
-- `nexus/README.md` y `nexus/docs/development.md`
-- `bff/README.md`
-- `console/README.md`
-- `packages/README.md`, `packages/auth/README.md`,
-  `packages/contracts/README.md`, `packages/ui/README.md`
+- `docs/companion.md` y `docs/companion/`
+- `docs/nexus.md` y `docs/nexus/development.md`
+- `docs/bff.md`
+- `docs/console.md`
+- `docs/packages.md`, `docs/packages/auth.md`,
+  `docs/packages/contracts.md`, `docs/packages/ui.md`
 - `Makefile`
 - `docker-compose.yml`
 - `.env.example`

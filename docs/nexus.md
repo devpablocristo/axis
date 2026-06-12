@@ -53,5 +53,6 @@ happy path completo se cubre con `make e2e-nexus-policy-promotion`.
 
 ## Documentación
 
-- `docs/development.md`
-- `openapi.yaml`
+- `nexus/development.md`
+- `nexus/enterprise-governance-hardening.md`
+- `../nexus/openapi.yaml`

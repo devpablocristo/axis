@@ -3,6 +3,9 @@
 Axis es un monorepo con deployables independientes. Un deploy de `Companion`,
 `Nexus`, `BFF` o `Console` no implica redeploy de los otros servicios.
 
+Este runbook describe los workflows actuales de GitHub Flow: PR contra `main`,
+deploy automatico a STG al pushear `main`, preview por PR y deploy PRD manual.
+
 ## CI Gates
 
 `Axis CI` corre en PR contra `main`, push a `main`, manual y nightly:
@@ -34,12 +37,16 @@ artefactos de diagnóstico si falla.
 Workflows:
 
 - `Deploy STG`: `.github/workflows/deploy-stg.yml`, automatico en push a
-  `main` y manual con `ref`/`product`. Usa los servicios actuales `axis-nexus`,
-  `axis-companion`, `axis-bff` y `axis-console`, por lo que conserva sus URLs.
+  `main` cuando cambian deployables o Docker/workflows, y manual con
+  `ref`/`product`. Usa los servicios actuales `axis-nexus`,
+  `axis-companion`, `axis-bff` y `axis-console`.
 - `Deploy PRD`: `.github/workflows/deploy-prd.yml`, manual con GitHub
   environment `prd`.
 - `Preview PR`: `.github/workflows/preview-pr.yml`, automatico para PRs a
-  `main`.
+  `main` desde el mismo repo cuando cambian deployables o workflows.
+- `Preview Deploy` y `Preview Cleanup`: workflows reutilizables para crear y
+  eliminar previews efimeras por PR.
+- `Preview Audit`: workflow de mantenimiento para revisar previews vivas.
 
 Para deployar un SHA o tag concreto:
 
@@ -47,6 +54,18 @@ Para deployar un SHA o tag concreto:
 2. Ejecutar `Run workflow`.
 3. Pasar `ref=<sha|tag|branch>` y `product=<all|nexus|companion|bff|console>`.
 4. Confirmar que el smoke check del workflow queda verde.
+
+Notas de entorno:
+
+- STG usa variables `*_STG` con defaults seguros para el proyecto Axis STG. La
+  base Cloud SQL puede apuntar a la instancia compartida existente definida por
+  `CLOUDSQL_INSTANCE_STG`; los workflows no crean instancias.
+- PRD no tiene defaults de proyecto/identidad: requiere variables `*_PRD` y el
+  environment `prd`.
+- `AXIS_BFF_AUTH_MODE_*` controla la autenticacion del BFF. Si el modo es
+  `oidc`, `AXIS_AUTH_ISSUER_URL_*` y `AXIS_AUTH_AUDIENCE_*` son obligatorios.
+- No registrar valores de secrets. Documentar nombres de Secret Manager o
+  variables, nunca valores reales.
 
 ## Rollback
 
@@ -68,17 +87,22 @@ auditable.
 `Companion`:
 
 - Requiere base de datos, Nexus base URL, API keys e internal JWT secret.
-- Para exponer Ponti como producto Axis, requiere `PONTI_BASE_URL` y la secret
-  `PONTI_API_KEY` con el mismo valor que `PONTI_AXIS_API_KEY` en Ponti.
+- Para productos externos, requiere una installation activa
+  `org_id + product_surface`, manifests conformes y referencias de secrets.
+- El conector Ponti existe como adapter especifico. Si se habilita, requiere
+  `PONTI_BASE_URL` y la secret `PONTI_API_KEY`; el valor real vive fuera del
+  repo.
 - Sus watchers pueden apagarse con intervalos `0` durante incidentes.
-- Si el conector Ponti queda sin manifest luego de un rollback o deploy, correr
-  `POST /v1/connectors/refresh` y luego el smoke Ponti read-only.
+- Si un conector queda sin manifest luego de un rollback o deploy, correr
+  `POST /v1/connectors/refresh` y luego el smoke/read-only del producto
+  afectado.
 - Validar `mcp-smoke` y `platform-nightly` si el cambio tocó MCP, runtime,
   observability, products, capabilities o Nexus integration.
 
 `Nexus`:
 
 - Es el plano determinístico de aprobación.
+- No debe incorporar runtime LLM, memoria IA ni agentes.
 - Rollback de policies productivas debe usar endpoints de policy promotion y no
   edición directa, salvo break-glass controlado.
 - Validar `smoke-nexus` antes de declarar sano un rollback.
@@ -87,7 +111,10 @@ auditable.
 
 - Depende de URLs de Companion/Nexus y audiencias JWT.
 - Si falla después de deploy, revisar primero las URLs resueltas de
-  Companion/Nexus y `AXIS_INTERNAL_JWT_SECRET`.
+  Companion/Nexus, `AXIS_INTERNAL_JWT_SECRET` y el modo
+  `AXIS_BFF_AUTH_MODE_*`.
+- Cuando el principal tiene scopes cross-org, puede seleccionar la organizacion
+  efectiva con `X-Axis-Org-ID` y firma un JWT interno acotado a esa org.
 
 `Console`:
 
@@ -104,3 +131,10 @@ Los jobs de smoke suben artefactos en fallo:
 
 Los artefactos incluyen `docker compose ps` y logs de Companion, Nexus y sus
 Postgres locales.
+
+## Limpieza De Preview
+
+Cuando una PR se cierra, `Preview Cleanup` debe eliminar servicios Cloud Run,
+imagenes o recursos efimeros asociados al numero de PR. Si una preview queda
+viva por una cancelacion manual o un fallo de GitHub Actions, ejecutar
+manualmente `Preview Audit` y luego `Preview Cleanup` para el PR afectado.

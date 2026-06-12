@@ -57,14 +57,14 @@ URL por defecto: `http://localhost:18085`.
 
 ## Documentación
 
-- `docs/architecture.md`
-- `docs/boundaries.md`
-- `docs/memory.md`
-- `docs/agents.md`
-- `docs/tools.md`
-- `docs/nexus-integration.md`
-- `docs/security.md`
-- `docs/testing.md`
-- `docs/operations.md`
-- `docs/product-integration-contract-v1.md`
-- `openapi.yaml`
+- `companion/architecture.md`
+- `companion/boundaries.md`
+- `companion/memory.md`
+- `companion/agents.md`
+- `companion/tools.md`
+- `companion/nexus-integration.md`
+- `companion/security.md`
+- `companion/testing.md`
+- `companion/operations.md`
+- `companion/product-integration-contract-v1.md`
+- `../companion/openapi.yaml`

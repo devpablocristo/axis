@@ -7,7 +7,7 @@ tmp_dir = "tmp"
   full_bin = "./tmp/nexus"
   include_dir = ["nexus"]
   include_ext = ["go", "sql", "yaml"]
-  exclude_dir = ["tmp", "nexus/docs", "nexus/tmp", "console/node_modules", "console/dist"]
+  exclude_dir = ["tmp", "docs", "nexus/tmp", "console/node_modules", "console/dist"]
   delay = 1000
 
 [log]
