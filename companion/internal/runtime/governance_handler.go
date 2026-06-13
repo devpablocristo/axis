@@ -196,8 +196,8 @@ func (h *RuntimeControlsHandler) requireRuntimeAdminOrg(w http.ResponseWriter, r
 		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "missing runtime admin scope")
 		return "", false
 	}
-	orgID := strings.TrimSpace(identityctx.PrincipalOrgID(r))
-	if orgID == "" {
+	orgID, ok := identityctx.EffectiveOrgID(r, r.URL.Query().Get("org_id"), scopeCompanionCrossOrg)
+	if !ok || strings.TrimSpace(orgID) == "" {
 		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "customer org context is required")
 		return "", false
 	}

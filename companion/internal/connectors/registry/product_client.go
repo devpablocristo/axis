@@ -27,9 +27,10 @@ const (
 	// de una product installation que habilita el connector genérico.
 	ProductConnectorModeEnvelopeV1 = "envelope.v1"
 
-	productConnectorModeConfigKey = "connector_mode"
-	productDiscoveryPathConfigKey = "discovery_path"
-	productExecutePathConfigKey   = "execute_path"
+	productConnectorModeConfigKey  = "connector_mode"
+	productDiscoveryPathConfigKey  = "discovery_path"
+	productExecutePathConfigKey    = "execute_path"
+	productRequiredScopesConfigKey = "required_scopes"
 
 	defaultProductDiscoveryPath = "/api/v1/capabilities"
 	defaultProductExecutePath   = "/api/v1/capability-executions"
@@ -125,6 +126,27 @@ func installationTenantID(installation products.Installation) string {
 	return installation.OrgID
 }
 
+func installationRequiredScopes(installation products.Installation) []string {
+	raw, ok := installation.Config[productRequiredScopesConfigKey]
+	if !ok {
+		return nil
+	}
+	switch value := raw.(type) {
+	case []string:
+		return cleanStringList(value)
+	case []any:
+		out := make([]string, 0, len(value))
+		for _, item := range value {
+			if s, ok := item.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return cleanStringList(out)
+	default:
+		return nil
+	}
+}
+
 // DiscoverManifest descubre el catálogo de capabilities del producto vía
 // GET {base_url}{config.discovery_path}. Igual que la metadata de Ponti, el
 // manifest no es tenant-scoped: usamos la primera instalación envelope
@@ -190,6 +212,9 @@ func (c *ProductClient) ExecuteEnvelope(ctx context.Context, orgID string, envel
 	if tenantID := installationTenantID(installation); tenantID != "" {
 		req.Header.Set("X-Tenant-Id", tenantID)
 	}
+	if scopes := installationRequiredScopes(installation); len(scopes) > 0 {
+		req.Header.Set("X-Axis-Scopes", strings.Join(scopes, " "))
+	}
 	if nexusRequestID := strings.TrimSpace(envelope.NexusRequestID); nexusRequestID != "" {
 		req.Header.Set("X-Nexus-Request-ID", nexusRequestID)
 	}
@@ -242,6 +267,23 @@ func (c *ProductClient) authorize(ctx context.Context, installation products.Ins
 	}
 	req.Header.Set("Authorization", "Bearer "+secret.Value())
 	return nil
+}
+
+func cleanStringList(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }
 
 func (c *ProductClient) doGet(ctx context.Context, installation products.Installation, path string, out any) error {

@@ -197,8 +197,8 @@ func agentRequestContext(w http.ResponseWriter, r *http.Request) (string, string
 		return "", "", "", false
 	}
 	id := identityctx.FromRequest(r)
-	orgID := strings.TrimSpace(id.CustomerOrgID)
-	if orgID == "" {
+	orgID, allowed := identityctx.EffectiveOrgID(r, r.URL.Query().Get("org_id"), scopeCrossOrg)
+	if !allowed || strings.TrimSpace(orgID) == "" {
 		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "customer org context is required")
 		return "", "", "", false
 	}

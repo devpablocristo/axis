@@ -38,6 +38,7 @@ type productRecordedCall struct {
 	Method       string
 	Path         string
 	TenantID     string
+	AxisScopes   string
 	AuthHdr      string
 	NexusReqHdr  string
 	Body         string
@@ -65,6 +66,7 @@ func newProductMock(t *testing.T) *productMock {
 			Method:      r.Method,
 			Path:        r.URL.Path,
 			TenantID:    r.Header.Get("X-Tenant-Id"),
+			AxisScopes:  r.Header.Get("X-Axis-Scopes"),
 			AuthHdr:     r.Header.Get("Authorization"),
 			NexusReqHdr: r.Header.Get("X-Nexus-Request-ID"),
 			Body:        string(body),
@@ -157,7 +159,10 @@ func newProductInstallationSource(baseURL string) *fakeInstallationSource {
 				AuthMode:         products.AuthModeAPIKeyRef,
 				SecretRef:        "env:AGRO_INSTALLATION_SECRET",
 				Enabled:          true,
-				Config:           map[string]any{"connector_mode": "envelope.v1"},
+				Config: map[string]any{
+					"connector_mode":  "envelope.v1",
+					"required_scopes": []any{"agro:fields:read", "agro:workorders:write", "agro:fields:read"},
+				},
 			},
 		},
 		envValues: map[string]string{"AGRO_INSTALLATION_SECRET": "agro-installation-secret"},
@@ -302,6 +307,9 @@ func TestProductConnector_Execute_PostsEnvelope(t *testing.T) {
 	}
 	if got.TenantID != "agro-tenant-789" {
 		t.Errorf("expected external tenant header, got %q", got.TenantID)
+	}
+	if got.AxisScopes != "agro:fields:read agro:workorders:write" {
+		t.Errorf("expected installation scopes propagated, got %q", got.AxisScopes)
 	}
 	if got.NexusReqHdr != nexusRequestID.String() {
 		t.Errorf("expected X-Nexus-Request-ID propagated, got %q", got.NexusReqHdr)

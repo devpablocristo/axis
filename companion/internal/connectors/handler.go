@@ -112,7 +112,8 @@ func (h *Handler) save(w http.ResponseWriter, r *http.Request) {
 	if !requireScope(w, r, scopeCompanionConnectorsAdmin) {
 		return
 	}
-	if !identityctx.HasNoAuthContext(r) && principalOrgID(r) == "" {
+	orgID, ok := effectiveConnectorOrgID(r, r.URL.Query().Get("org_id"))
+	if !ok || (!identityctx.HasNoAuthContext(r) && orgID == "") {
 		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "connector save requires org context")
 		return
 	}
@@ -130,7 +131,7 @@ func (h *Handler) save(w http.ResponseWriter, r *http.Request) {
 		configJSON = json.RawMessage(`{}`)
 	}
 	conn, err := h.uc.SaveConnector(r.Context(), domain.Connector{
-		OrgID:      principalOrgID(r),
+		OrgID:      orgID,
 		Name:       body.Name,
 		Kind:       body.Kind,
 		Enabled:    body.Enabled,
@@ -296,9 +297,14 @@ func (h *Handler) executionSpecFromRequest(w http.ResponseWriter, r *http.Reques
 		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "payload org is not allowed for this principal")
 		return domain.ExecutionSpec{}, false
 	}
+	orgID, ok := effectiveConnectorOrgID(r, connectorOrgIDFromPayload(payload))
+	if !ok {
+		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "connector execution org is not allowed for this principal")
+		return domain.ExecutionSpec{}, false
+	}
 	spec := domain.ExecutionSpec{
 		ConnectorID:        connID,
-		OrgID:              id.CustomerOrgID,
+		OrgID:              orgID,
 		ActorID:            id.EffectiveActorID(),
 		ActorType:          id.ActorType,
 		CompanionPrincipal: id.CompanionPrincipal,
@@ -323,6 +329,14 @@ func (h *Handler) executionSpecFromRequest(w http.ResponseWriter, r *http.Reques
 		}
 	}
 	return spec, true
+}
+
+func connectorOrgIDFromPayload(raw json.RawMessage) string {
+	var payload map[string]any
+	if len(raw) == 0 || json.Unmarshal(raw, &payload) != nil {
+		return ""
+	}
+	return strings.TrimSpace(rawToString(payload["org_id"]))
 }
 
 func (h *Handler) listExecutions(w http.ResponseWriter, r *http.Request) {

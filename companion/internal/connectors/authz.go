@@ -14,6 +14,7 @@ import (
 const (
 	scopeCompanionConnectorsExecute = "companion:connectors:execute"
 	scopeCompanionConnectorsAdmin   = "companion:connectors:admin"
+	scopeCompanionCrossOrg          = "companion:cross_org"
 )
 
 func requireScope(w http.ResponseWriter, r *http.Request, scopes ...string) bool {
@@ -28,33 +29,41 @@ func principalOrgID(r *http.Request) string { return identityctx.PrincipalOrgID(
 
 func principalActorID(r *http.Request) string { return identityctx.FromRequest(r).EffectiveActorID() }
 
+func effectiveConnectorOrgID(r *http.Request, requested string) (string, bool) {
+	return identityctx.EffectiveOrgID(r, requested, scopeCompanionCrossOrg)
+}
+
 func canAccessConnectorOrg(r *http.Request, connector domain.Connector) bool {
 	connectorOrg := strings.TrimSpace(connector.OrgID)
-	if identityctx.HasNoAuthContext(r) || connectorOrg == "" {
+	if connectorOrg == "" {
 		return true
 	}
-	orgID := principalOrgID(r)
-	if orgID == "" {
-		return false
-	}
-	return connectorOrg == orgID
+	return identityctx.CanAccessOrg(r, connectorOrg, scopeCompanionCrossOrg)
 }
 
 func canAccessExecutionOrg(r *http.Request, execution domain.ExecutionResult) bool {
 	executionOrg := strings.TrimSpace(execution.OrgID)
-	if identityctx.HasNoAuthContext(r) {
+	if executionOrg == "" {
 		return true
 	}
-	orgID := principalOrgID(r)
-	if orgID == "" || executionOrg == "" {
-		return false
-	}
-	return executionOrg == orgID
+	return identityctx.CanAccessOrg(r, executionOrg, scopeCompanionCrossOrg)
 }
 
 func bindPayloadToPrincipalOrg(r *http.Request, raw json.RawMessage) (json.RawMessage, bool) {
-	orgID := principalOrgID(r)
-	if orgID == "" {
+	requested := strings.TrimSpace(r.URL.Query().Get("org_id"))
+	var payload map[string]any
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			payload = nil
+		}
+	}
+	if payload != nil {
+		if value := strings.TrimSpace(rawToString(payload["org_id"])); value != "" {
+			requested = value
+		}
+	}
+	orgID, ok := effectiveConnectorOrgID(r, requested)
+	if !ok || orgID == "" {
 		if len(raw) == 0 {
 			return json.RawMessage(`{}`), true
 		}
@@ -63,19 +72,11 @@ func bindPayloadToPrincipalOrg(r *http.Request, raw json.RawMessage) (json.RawMe
 		}
 		return raw, true
 	}
-	var payload map[string]any
-	if len(raw) > 0 {
-		if err := json.Unmarshal(raw, &payload); err != nil {
-			return raw, true
-		}
+	if payload == nil && len(raw) > 0 {
+		return raw, true
 	}
 	if payload == nil {
 		payload = make(map[string]any)
-	}
-	if requested, ok := payload["org_id"]; ok {
-		if requestedOrg := strings.TrimSpace(rawToString(requested)); requestedOrg != "" && requestedOrg != orgID {
-			return nil, false
-		}
 	}
 	payload["org_id"] = orgID
 	out, err := json.Marshal(payload)
