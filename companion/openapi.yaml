@@ -1239,6 +1239,107 @@ paths:
                   data:
                     type: array
                     items: { $ref: "#/components/schemas/Agent" }
+  /v1/agent-profiles:
+    get:
+      summary: Lista perfiles globales de agentes
+      description: Requiere `companion:agent_profiles:read`, `companion:agent_profiles:admin` o `companion:runtime:admin`.
+      parameters:
+        - in: query
+          name: include_archived
+          schema: { type: boolean, default: false }
+      responses:
+        "200":
+          description: Agent profile list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  profiles:
+                    type: array
+                    items: { $ref: "#/components/schemas/AgentProfile" }
+  /v1/agent-profiles/{profile_id}:
+    get:
+      summary: Obtiene un perfil global de agente
+      description: Requiere scope de lectura de agent profiles.
+      parameters:
+        - in: path
+          name: profile_id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Agent profile
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentProfile" }
+        "404": { description: Agent profile not found }
+    put:
+      summary: Crea o actualiza un perfil global de agente
+      description: Requiere `companion:agent_profiles:admin` o `companion:runtime:admin`.
+      parameters:
+        - in: path
+          name: profile_id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AgentProfileInput" }
+      responses:
+        "200":
+          description: Agent profile saved
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentProfile" }
+  /v1/agent-profiles/{profile_id}/archive:
+    post:
+      summary: Archiva un perfil global de agente
+      description: Requiere scope admin de agent profiles.
+      parameters:
+        - in: path
+          name: profile_id
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Agent profile archived }
+        "404": { description: Agent profile not found }
+  /v1/agent-profiles/{profile_id}/restore:
+    post:
+      summary: Restaura un perfil global de agente
+      description: Requiere scope admin de agent profiles.
+      parameters:
+        - in: path
+          name: profile_id
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Agent profile restored }
+        "404": { description: Agent profile not found }
+  /v1/agent-profiles/{profile_id}/versions:
+    get:
+      summary: Lista snapshots anteriores de un perfil global de agente
+      description: Requiere scope de lectura de agent profiles.
+      parameters:
+        - in: path
+          name: profile_id
+          required: true
+          schema: { type: string }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        "200":
+          description: Agent profile versions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  versions:
+                    type: array
+                    items: { $ref: "#/components/schemas/AgentProfileVersion" }
   /v1/agents/assignments:
     post:
       summary: Asigna un empleado IA activo para un intent/capability
@@ -2345,6 +2446,44 @@ components:
         created_by: { type: string }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    AgentProfileInput:
+      type: object
+      required: [name, system_prompt]
+      properties:
+        family_id: { type: string }
+        version_label: { type: string }
+        name: { type: string }
+        description: { type: string }
+        system_prompt: { type: string }
+        max_autonomy: { type: string, enum: [A0, A1, A2, A3, A4, A5], default: A1 }
+        allowed_tools:
+          type: array
+          items: { type: string }
+        allowed_capabilities:
+          type: array
+          items: { type: string }
+        memory_policy: { type: object, additionalProperties: true }
+        llm_config: { type: object, additionalProperties: true }
+        enabled: { type: boolean, default: true }
+    AgentProfile:
+      allOf:
+        - $ref: "#/components/schemas/AgentProfileInput"
+        - type: object
+          properties:
+            id: { type: string, format: uuid }
+            profile_id: { type: string }
+            archived_at: { type: string, format: date-time }
+            created_at: { type: string, format: date-time }
+            updated_at: { type: string, format: date-time }
+    AgentProfileVersion:
+      allOf:
+        - $ref: "#/components/schemas/AgentProfile"
+        - type: object
+          properties:
+            agent_profile_id: { type: string, format: uuid }
+            original_created_at: { type: string, format: date-time }
+            original_updated_at: { type: string, format: date-time }
+            saved_at: { type: string, format: date-time }
     AgentHandoff:
       type: object
       properties:

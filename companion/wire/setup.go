@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/devpablocristo/companion/internal/agentfleet"
+	"github.com/devpablocristo/companion/internal/agentprofiles"
 	"github.com/devpablocristo/companion/internal/assist"
 	"github.com/devpablocristo/companion/internal/business"
 	"github.com/devpablocristo/companion/internal/capabilities"
@@ -62,6 +63,10 @@ type taskOrgGetter struct {
 
 type agentRuntimeResolver struct {
 	uc *agentfleet.Usecases
+}
+
+type agentProfileRuntimeResolver struct {
+	uc *agentprofiles.Usecases
 }
 
 type taskOwnershipAdapter struct {
@@ -176,6 +181,28 @@ func (r agentRuntimeResolver) ResolveRuntimeAgent(ctx context.Context, orgID, pr
 		Limits:              agent.Limits,
 		SLA:                 agent.SLA,
 		Version:             agent.Version,
+	}, nil
+}
+
+func (r agentProfileRuntimeResolver) ResolveRuntimeAgentProfile(ctx context.Context, profileID string) (runtime.RuntimeAgentProfileConfig, error) {
+	profile, err := r.uc.GetProfile(ctx, profileID)
+	if err != nil {
+		return runtime.RuntimeAgentProfileConfig{}, err
+	}
+	return runtime.RuntimeAgentProfileConfig{
+		ProfileID:           profile.ProfileID,
+		FamilyID:            profile.FamilyID,
+		VersionLabel:        profile.VersionLabel,
+		Name:                profile.Name,
+		Description:         profile.Description,
+		SystemPrompt:        profile.SystemPrompt,
+		MaxAutonomy:         runtime.AutonomyLevel(profile.MaxAutonomy),
+		AllowedTools:        append([]string(nil), profile.AllowedTools...),
+		AllowedCapabilities: append([]string(nil), profile.AllowedCapabilities...),
+		MemoryPolicy:        profile.MemoryPolicy,
+		Enabled:             profile.Enabled,
+		Archived:            profile.ArchivedAt != nil,
+		SnapshotID:          profile.ID.String(),
 	}, nil
 }
 
@@ -587,6 +614,9 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	agentRepo := agentfleet.NewPostgresRepository(db)
 	agentUC := agentfleet.NewUsecases(agentRepo).WithTaskOwnership(taskOwnershipAdapter{repo: repo})
 	agentHandler := agentfleet.NewHandler(agentUC)
+	agentProfileRepo := agentprofiles.NewPostgresRepository(db)
+	agentProfileUC := agentprofiles.NewUsecases(agentProfileRepo)
+	agentProfileHandler := agentprofiles.NewHandler(agentProfileUC)
 	uc.SetTaskMemory(taskMemoryAdapter{uc: memUC, repo: repo})
 
 	// Agent memory (conversation history durable per user). El repo de memory
@@ -670,6 +700,7 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	orchestrator.SetCostLedger(observabilityRepo)
 	orchestrator.SetRuntimeControls(runtimeControlsRepo)
 	orchestrator.SetAgentResolver(agentRuntimeResolver{uc: agentUC})
+	orchestrator.SetAgentProfileResolver(agentProfileRuntimeResolver{uc: agentProfileUC})
 	orchestrator.SetProductInstallationGuard(productGuard)
 	orchestrator.SetRateLimiter(productRateLimiter)
 	connUC.SetProductRuntimeController(connectorProductRuntimeController{controls: runtimeControlsRepo, costs: observabilityRepo})
@@ -749,6 +780,7 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	businessHandler.Register(mux)
 	productHandler.Register(mux)
 	agentHandler.Register(mux)
+	agentProfileHandler.Register(mux)
 	chatHandler.Register(mux)
 	connHandler.Register(mux)
 	capabilityHandler.Register(mux)

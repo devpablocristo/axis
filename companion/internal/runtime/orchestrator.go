@@ -28,6 +28,7 @@ type Orchestrator struct {
 	observer          ObservabilityRecorder
 	costs             CostLedger
 	agents            AgentResolver
+	agentProfiles     AgentProfileResolver
 	installationGuard ProductInstallationGuard
 	rateLimiter       productlimits.Limiter
 	defaultAutonomy   AutonomyLevel // "" → A2 (default conservador)
@@ -67,6 +68,10 @@ func (o *Orchestrator) SetCostLedger(ledger CostLedger) {
 
 func (o *Orchestrator) SetAgentResolver(resolver AgentResolver) {
 	o.agents = resolver
+}
+
+func (o *Orchestrator) SetAgentProfileResolver(resolver AgentProfileResolver) {
+	o.agentProfiles = resolver
 }
 
 func (o *Orchestrator) SetProductInstallationGuard(guard ProductInstallationGuard) {
@@ -162,6 +167,27 @@ func (o *Orchestrator) Run(ctx context.Context, in RunInput) (RunResult, error) 
 			trace.GuardrailEvents = []GuardrailEvent{*event}
 			return RunResult{Reply: "No puedo operar con ese empleado IA bajo la configuración actual.", Trace: trace}, nil
 		}
+		if strings.TrimSpace(agent.ProfileID) != "" {
+			if o.agentProfiles == nil {
+				trace := o.rejectedAgentTrace(ctx, in, identity, route, "agent profile resolver is not configured")
+				return RunResult{Reply: "No puedo operar con ese empleado IA porque su perfil no está configurado para este runtime.", Trace: trace}, nil
+			}
+			profile, err := o.agentProfiles.ResolveRuntimeAgentProfile(ctx, agent.ProfileID)
+			if err != nil {
+				trace := o.rejectedAgentTrace(ctx, in, identity, route, "agent profile not available: "+err.Error())
+				return RunResult{Reply: "No puedo operar con ese empleado IA porque su perfil no está disponible.", Trace: trace}, nil
+			}
+			route, event = applyRuntimeAgentProfile(route, profile)
+			if profile.MaxAutonomy != "" {
+				route.Autonomy = lowerAutonomy(route.Autonomy, profile.MaxAutonomy)
+				route.Profile.MaxAutonomy = route.Autonomy
+			}
+			if event != nil {
+				trace := o.rejectedAgentTrace(ctx, in, identity, route, event.Reason)
+				trace.GuardrailEvents = []GuardrailEvent{*event}
+				return RunResult{Reply: "No puedo operar con ese empleado IA bajo la configuración actual.", Trace: trace}, nil
+			}
+		}
 	}
 	modelName := firstNonEmpty(o.model, DefaultGeminiModel)
 	ctx, runSpan := startRunSpan(ctx, in.OrgID, productSurface, identity.AgentID, modelName)
@@ -224,19 +250,20 @@ func (o *Orchestrator) Run(ctx context.Context, in RunInput) (RunResult, error) 
 	decision := applyRuntimePolicy(policy, currentUsage, route, modelName)
 	route = decision.Route
 	runWorkspace := effectiveWorkspace(in)
+	promptVersion := effectivePromptVersion(route)
 	trace := RunTrace{
 		RunID:          uuid.NewString(),
 		IdentityChain:  identity,
 		Intent:         route.Intent,
 		ProductSurface: route.Product,
 		AutonomyLevel:  route.Autonomy,
-		PromptVersion:  SystemPromptVersion,
+		PromptVersion:  promptVersion,
 		Model:          modelName,
 		StartedAt:      time.Now().UTC(),
 	}
 	o.recordObservabilityEvent(ctx, trace, in, "run", "started", map[string]any{
 		"model":                  modelName,
-		"prompt_version":         SystemPromptVersion,
+		"prompt_version":         promptVersion,
 		"agent_profile":          route.Profile,
 		"agent_id":               identity.AgentID,
 		"allowed_tools":          route.AllowedTools,
@@ -288,6 +315,9 @@ func (o *Orchestrator) Run(ctx context.Context, in RunInput) (RunResult, error) 
 
 	// 2. Construir mensajes para el LLM
 	systemPrompt := SystemPrompt()
+	if profilePrompt := strings.TrimSpace(route.Profile.SystemPrompt); profilePrompt != "" {
+		systemPrompt += "\n\nAgent profile instructions:\n" + profilePrompt
+	}
 	systemPrompt += "\n\nRuntime control plane:\n" + runtimeSummary(trace.IdentityChain, route)
 	if assembled.Summary != "" {
 		systemPrompt += "\n\nContexto actual:\n" + assembled.Summary
@@ -452,6 +482,15 @@ func compactHandoffForPrompt(raw json.RawMessage) string {
 		return ""
 	}
 	return string(encoded)
+}
+
+func effectivePromptVersion(route AgentRoute) string {
+	profileID := strings.TrimSpace(route.Profile.ID)
+	version := strings.TrimSpace(route.Profile.Version)
+	if profileID == "" || version == "" || strings.TrimSpace(route.Profile.ProfileSnapshotID) == "" {
+		return SystemPromptVersion
+	}
+	return SystemPromptVersion + "+" + profileID + ":" + version
 }
 
 func compactToolResult(result string) json.RawMessage {

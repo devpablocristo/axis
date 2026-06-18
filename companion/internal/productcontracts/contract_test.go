@@ -1,6 +1,8 @@
 package productcontracts
 
 import (
+	"encoding/json"
+	"os"
 	"testing"
 
 	"github.com/devpablocristo/companion/internal/capabilities"
@@ -41,6 +43,63 @@ func TestRealProductContractsPass(t *testing.T) {
 			t.Parallel()
 			assertContractPasses(t, product)
 		})
+	}
+}
+
+func TestMedmoryContractUsesGenericBillingAgent(t *testing.T) {
+	t.Parallel()
+
+	contractPath, err := productevals.FindRepoFile("companion/scripts/onboarding/medmory-product-contract.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(contractPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var contract struct {
+		Agents []struct {
+			AgentID             string   `json:"agent_id"`
+			Role                string   `json:"role"`
+			ProfileID           string   `json:"profile_id"`
+			MaxAutonomy         string   `json:"max_autonomy"`
+			AllowedCapabilities []string `json:"allowed_capabilities"`
+		} `json:"agents"`
+	}
+	if err := json.Unmarshal(raw, &contract); err != nil {
+		t.Fatal(err)
+	}
+	var billingAgent *struct {
+		AgentID             string   `json:"agent_id"`
+		Role                string   `json:"role"`
+		ProfileID           string   `json:"profile_id"`
+		MaxAutonomy         string   `json:"max_autonomy"`
+		AllowedCapabilities []string `json:"allowed_capabilities"`
+	}
+	for i := range contract.Agents {
+		agent := &contract.Agents[i]
+		if agent.AgentID == "billing_ops_agent" {
+			t.Fatal("medmory contract must not expose deprecated billing_ops_agent")
+		}
+		if agent.AgentID == "billing_agent" {
+			billingAgent = agent
+		}
+	}
+	if billingAgent == nil {
+		t.Fatal("missing generic billing_agent in medmory product contract")
+	}
+	if billingAgent.Role != "billing" || billingAgent.ProfileID != "axis.ops.billing.v1" || billingAgent.MaxAutonomy != "A1" {
+		t.Fatalf("unexpected billing_agent metadata: %+v", billingAgent)
+	}
+	for _, forbidden := range []string{"medmory.summary.read", "medmory.timeline.read", "medmory.search.query", "medmory.asset.read"} {
+		if contains(forbidden, billingAgent.AllowedCapabilities) {
+			t.Fatalf("billing_agent must not include clinical capability %q: %+v", forbidden, billingAgent.AllowedCapabilities)
+		}
+	}
+	for _, required := range []string{"medmory.ops.billing_status.read", "medmory.ops.billing_metrics.read", "medmory.ops.plan_requests.read", "medmory.ops.subscription_status.read", "medmory.ops.billing_adjustment.propose"} {
+		if !contains(required, billingAgent.AllowedCapabilities) {
+			t.Fatalf("billing_agent missing required capability %q: %+v", required, billingAgent.AllowedCapabilities)
+		}
 	}
 }
 
@@ -190,6 +249,15 @@ func objectSchema(properties map[string]any) map[string]any {
 func hasFailure(report Report, id string) bool {
 	for _, failure := range report.BlockingFailures {
 		if failure == id {
+			return true
+		}
+	}
+	return false
+}
+
+func contains(value string, values []string) bool {
+	for _, item := range values {
+		if item == value {
 			return true
 		}
 	}

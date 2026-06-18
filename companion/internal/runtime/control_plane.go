@@ -109,6 +109,8 @@ type AgentProfile struct {
 	RequiredScopes      []string      `json:"required_scopes,omitempty"`
 	Enabled             bool          `json:"enabled"`
 	Version             string        `json:"version"`
+	ProfileSnapshotID   string        `json:"profile_snapshot_id,omitempty"`
+	SystemPrompt        string        `json:"-"`
 }
 
 func BuildIdentityChain(userID, orgID, productSurface string, scopes ...string) IdentityChain {

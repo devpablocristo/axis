@@ -1,0 +1,62 @@
+package agentprofiles
+
+import (
+	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/devpablocristo/companion/internal/identityctx"
+	authn "github.com/devpablocristo/platform/authn/go"
+	"github.com/devpablocristo/platform/authn/go/identityhttp"
+)
+
+func TestHandlerPutProfileDefaultsEnabled(t *testing.T) {
+	t.Parallel()
+
+	mux := http.NewServeMux()
+	NewHandler(NewUsecases(newFakeRepo())).Register(mux)
+	body := bytes.NewBufferString(`{"name":"Billing Agent","system_prompt":"Handle billing.","max_autonomy":"A1"}`)
+	req := httptest.NewRequest(http.MethodPut, "/v1/agent-profiles/axis.ops.billing.v1", body)
+	req = withProfilePrincipal(req, []string{"companion:agent_profiles:admin"})
+	res := httptest.NewRecorder()
+
+	mux.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", res.Code, res.Body.String())
+	}
+	var profile Profile
+	if err := json.Unmarshal(res.Body.Bytes(), &profile); err != nil {
+		t.Fatal(err)
+	}
+	if !profile.Enabled {
+		t.Fatalf("expected default enabled profile, got %+v", profile)
+	}
+	if profile.FamilyID != "axis.ops.billing" || profile.VersionLabel != "v1" {
+		t.Fatalf("expected derived family/version, got %+v", profile)
+	}
+}
+
+func TestHandlerRejectsMissingScope(t *testing.T) {
+	t.Parallel()
+
+	mux := http.NewServeMux()
+	NewHandler(NewUsecases(newFakeRepo())).Register(mux)
+	req := httptest.NewRequest(http.MethodGet, "/v1/agent-profiles", nil)
+	req = withProfilePrincipal(req, []string{"companion:tasks:read"})
+	res := httptest.NewRecorder()
+
+	mux.ServeHTTP(res, req)
+
+	if res.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d body=%s", res.Code, res.Body.String())
+	}
+}
+
+func withProfilePrincipal(req *http.Request, scopes []string) *http.Request {
+	principal := &authn.Principal{OrgID: "axis", Actor: "admin", Scopes: scopes, AuthMethod: "internal_jwt"}
+	req = identityhttp.WithPrincipal(req, principal, "internal_jwt")
+	return identityctx.WithPrincipal(req, principal)
+}

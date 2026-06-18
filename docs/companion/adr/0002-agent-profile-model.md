@@ -2,22 +2,27 @@
 
 ## Estado
 
-Propuesto para Sprint 0 de la migracion `pymes/ai` -> Companion.
+Implementado en v1 backend/API.
 
 ## Decision
 
-Companion carga perfiles versionados e inmutables. Un perfil define identidad,
-prompt, permisos de tools/capabilities, configuracion LLM y scope de memoria.
-Los productos publican capabilities; Companion arma perfiles que seleccionan un
-subconjunto permitido de esas capabilities.
+Companion carga perfiles globales versionados desde Postgres. Un perfil define
+prompt, autonomia maxima, permisos opcionales de tools/capabilities,
+configuracion LLM y politica de memoria. Los productos publican capabilities;
+Agent Fleet instala agentes por `org_id + product_surface` y referencia el
+perfil global mediante `profile_id`.
+
+V1 no tiene overrides por org/producto. El allowlist product-specific vive en
+`companion_agents.allowed_capabilities`; el perfil global puede acotar mas, pero
+no amplia permisos del agente instalado.
 
 ## Perfil canonico
 
 Campos requeridos:
 
-- `id`: estable, por ejemplo `pymes.bike_shop.operator`.
-- `version`: semver, immutable.
-- `product`: `pymes`, `nexus`, `ponti`, etc.
+- `profile_id`: estable, por ejemplo `axis.ops.billing.v1`.
+- `family_id`: familia versionable, por ejemplo `axis.ops.billing`.
+- `version_label`: etiqueta versionada, por ejemplo `v1`.
 - `system_prompt`: texto versionado con variables declaradas.
 - `allowed_tools`: tools internas de Companion.
 - `allowed_capabilities`: IDs publicados por productos.
@@ -27,21 +32,29 @@ Campos requeridos:
 
 ## Reglas
 
-- Una conversacion conserva la version de perfil con la que arranco.
-- Cambiar prompt/capabilities exige nueva version.
-- Si el perfil referencia una capability inexistente, Companion falla al boot o
-  marca el perfil unavailable; no degrada silenciosamente.
+- Cada update de perfil guarda snapshot previo en `agent_profile_versions`.
+- Si un agente referencia un perfil inexistente, disabled o archived, el runtime
+  falla cerrado antes de llamar al LLM.
+- `max_autonomy` del perfil solo puede reducir la autonomia efectiva.
 - Companion no autoriza negocio. Cada capability call vuelve al producto, y el
   producto reautoriza tenant, actor, rol y permisos.
 
-## Perfiles iniciales Pymes
+## Perfil inicial
 
-- `pymes.bike_shop.operator.v1`
-- `pymes.auto_repair.operator.v1`
-- `pymes.teachers.operator.v1`
+- `axis.ops.billing.v1`: agente agnostico de billing. Medmory lo usa mediante
+  `billing_agent`, pero el prompt no menciona Medmory ni datos clinicos como
+  flujo central.
+
+## Diferencia con Assist Packs
+
+- `assist_packs`: prompts de productos y casos de uso, por `org_id`,
+  `owner_system`, `product_surface` y `assist_type`.
+- `agent_profiles`: prompts de agentes Axis, globales, versionados y referidos
+  por `companion_agents.profile_id`.
 
 ## Fuera de alcance
 
 - Autoedicion de perfiles por LLM.
 - Tools genericas tipo SQL/HTTP arbitrary execution.
 - Un modo publico interno magico; el chat publico entra por gateway o BFF.
+- UI de edicion de perfiles y overrides por org/producto.

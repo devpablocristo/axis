@@ -13,7 +13,8 @@ Nexus decide decisiones sensibles; los productos exponen capacidades de dominio.
 | `wire` | Composición de dependencias, auth, clients y loops |
 | `internal/tasks` | Lifecycle de tasks, chat, propuestas a Nexus y ejecución |
 | `internal/agentfleet` | Empleados IA persistentes, límites, ownership y handoffs |
-| `internal/agents` | Perfiles seedables, autonomy y allowlists de tools |
+| `internal/agentprofiles` | Perfiles globales versionados, system prompts y policies de agentes |
+| `internal/agents` | Registry fallback/generic routing de perfiles seedables |
 | `internal/business` | Modelo empresarial persistente versionado por customer org |
 | `internal/products` | Registry de productos e installations `org_id + product_surface` |
 | `internal/capabilities` | Manifests versionados, validación estricta y registry canónico |
@@ -61,6 +62,9 @@ Nexus decide decisiones sensibles; los productos exponen capacidades de dominio.
 - Agent fleet: `/v1/chat` puede seleccionar `agent_id`; el runtime resuelve
   límites persistentes, recorta autonomía/tools/capabilities y registra
   ownership en traces y observability.
+- Agent profiles: si el agente tiene `profile_id`, el runtime carga el prompt
+  global versionado, aplica limites del perfil y falla cerrado si no existe o
+  esta archivado/disabled.
 
 ## Persistencia
 

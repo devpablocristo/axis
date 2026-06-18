@@ -10,6 +10,10 @@ type AgentResolver interface {
 	ResolveRuntimeAgent(ctx context.Context, orgID, productSurface, agentID string) (RuntimeAgentConfig, error)
 }
 
+type AgentProfileResolver interface {
+	ResolveRuntimeAgentProfile(ctx context.Context, profileID string) (RuntimeAgentProfileConfig, error)
+}
+
 type RuntimeAgentConfig struct {
 	AgentID             string         `json:"agent_id"`
 	ProfileID           string         `json:"profile_id,omitempty"`
@@ -24,6 +28,22 @@ type RuntimeAgentConfig struct {
 	Limits              map[string]any `json:"limits,omitempty"`
 	SLA                 map[string]any `json:"sla,omitempty"`
 	Version             int64          `json:"version,omitempty"`
+}
+
+type RuntimeAgentProfileConfig struct {
+	ProfileID           string         `json:"profile_id"`
+	FamilyID            string         `json:"family_id,omitempty"`
+	VersionLabel        string         `json:"version_label,omitempty"`
+	Name                string         `json:"name,omitempty"`
+	Description         string         `json:"description,omitempty"`
+	SystemPrompt        string         `json:"system_prompt,omitempty"`
+	MaxAutonomy         AutonomyLevel  `json:"max_autonomy,omitempty"`
+	AllowedTools        []string       `json:"allowed_tools,omitempty"`
+	AllowedCapabilities []string       `json:"allowed_capabilities,omitempty"`
+	MemoryPolicy        map[string]any `json:"memory_policy,omitempty"`
+	Enabled             bool           `json:"enabled"`
+	Archived            bool           `json:"archived,omitempty"`
+	SnapshotID          string         `json:"snapshot_id,omitempty"`
 }
 
 func applyRuntimeAgent(route AgentRoute, agent RuntimeAgentConfig) (AgentRoute, *GuardrailEvent) {
@@ -53,6 +73,43 @@ func applyRuntimeAgent(route AgentRoute, agent RuntimeAgentConfig) (AgentRoute, 
 	}
 	if len(agent.AllowedCapabilities) > 0 {
 		route.Profile.AllowedCapabilities = intersectRuntimePatterns(route.Profile.AllowedCapabilities, agent.AllowedCapabilities)
+	}
+	return route, nil
+}
+
+func applyRuntimeAgentProfile(route AgentRoute, profile RuntimeAgentProfileConfig) (AgentRoute, *GuardrailEvent) {
+	profile.ProfileID = strings.TrimSpace(profile.ProfileID)
+	if profile.ProfileID == "" {
+		return route, &GuardrailEvent{Type: "agent_profile", Target: "profile", Reason: "profile_id is required"}
+	}
+	if !profile.Enabled {
+		return route, &GuardrailEvent{Type: "agent_profile", Target: "profile:" + profile.ProfileID, Reason: "profile is disabled"}
+	}
+	if profile.Archived {
+		return route, &GuardrailEvent{Type: "agent_profile", Target: "profile:" + profile.ProfileID, Reason: "profile is archived"}
+	}
+	if strings.TrimSpace(profile.SystemPrompt) == "" {
+		return route, &GuardrailEvent{Type: "agent_profile", Target: "profile:" + profile.ProfileID, Reason: "profile system_prompt is required"}
+	}
+	route.Profile.ID = profile.ProfileID
+	route.Profile.SystemPrompt = strings.TrimSpace(profile.SystemPrompt)
+	route.Profile.ProfileSnapshotID = strings.TrimSpace(profile.SnapshotID)
+	if strings.TrimSpace(profile.VersionLabel) != "" {
+		route.Profile.Version = strings.TrimSpace(profile.VersionLabel)
+	}
+	if profile.MemoryPolicy != nil {
+		route.Profile.MemoryPolicy = profile.MemoryPolicy
+	}
+	if profile.MaxAutonomy != "" && autonomyRankRuntime(profile.MaxAutonomy) < autonomyRankRuntime(route.Autonomy) {
+		route.Autonomy = profile.MaxAutonomy
+		route.Profile.MaxAutonomy = profile.MaxAutonomy
+	}
+	if len(profile.AllowedTools) > 0 {
+		route.AllowedTools = intersectRuntimePatterns(route.AllowedTools, profile.AllowedTools)
+		route.Profile.AllowedTools = append([]string(nil), route.AllowedTools...)
+	}
+	if len(profile.AllowedCapabilities) > 0 {
+		route.Profile.AllowedCapabilities = intersectRuntimePatterns(route.Profile.AllowedCapabilities, profile.AllowedCapabilities)
 	}
 	return route, nil
 }

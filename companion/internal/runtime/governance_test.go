@@ -308,6 +308,14 @@ func TestOrchestrator_AgentFleetRestrictsToolsAndRecordsIdentity(t *testing.T) {
 			Version:      3,
 		}, nil
 	}})
+	orch.SetAgentProfileResolver(fakeAgentProfileResolver{profile: RuntimeAgentProfileConfig{
+		ProfileID:    "support-profile",
+		VersionLabel: "v1",
+		SystemPrompt: "Support profile.",
+		MaxAutonomy:  AutonomyA2,
+		Enabled:      true,
+		SnapshotID:   "profile-support",
+	}})
 	orch.SetDefaultAutonomy(AutonomyA3)
 
 	result, err := orch.Run(context.Background(), RunInput{

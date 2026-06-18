@@ -808,7 +808,7 @@
     {"agent_id": "prompt_quality_agent", "max_autonomy": "A1", "allowed_capabilities": ["medmory.ops.prompt_status.read", "medmory.ops.eval_status.read", "medmory.ops.prompt_rollout.propose"]},
     {"agent_id": "processing_failure_agent", "max_autonomy": "A1", "allowed_capabilities": ["medmory.ops.processing_status.read", "medmory.ops.processing_metrics.read", "medmory.ops.failed_assets.read", "medmory.ops.dlq_summary.read", "medmory.ops.reprocess.propose"]},
     {"agent_id": "care_circle_risk_agent", "max_autonomy": "A1", "allowed_capabilities": ["medmory.ops.care_circle_metrics.read", "medmory.ops.care_circle_risk.read", "medmory.ops.grant_activity_summary.read", "medmory.ops.grant_intervention.propose"]},
-    {"agent_id": "billing_ops_agent", "max_autonomy": "A1", "allowed_capabilities": ["medmory.ops.billing_status.read", "medmory.ops.billing_metrics.read", "medmory.ops.plan_requests.read", "medmory.ops.subscription_status.read", "medmory.ops.billing_adjustment.propose"]},
+    {"agent_id": "billing_agent", "display_name": "Billing Agent", "role": "billing", "profile_id": "axis.ops.billing.v1", "max_autonomy": "A1", "allowed_capabilities": ["medmory.ops.billing_status.read", "medmory.ops.billing_metrics.read", "medmory.ops.plan_requests.read", "medmory.ops.subscription_status.read", "medmory.ops.billing_adjustment.propose"]},
     {"agent_id": "incident_triage_agent", "max_autonomy": "A1", "allowed_capabilities": ["medmory.ops.axis_health.read", "medmory.ops.processing_metrics.read", "medmory.ops.dlq_summary.read", "medmory.ops.incident_escalate"]}
   ],
   "watchers": [
