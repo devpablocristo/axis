@@ -2,7 +2,7 @@
   "version": 1,
   "suite_id": "medmory-golden",
   "product_surface": "medmory",
-  "non_blocking": true,
+  "non_blocking": false,
   "description": "Golden evals para Medmory como producto Axis de primera clase: memoria clínica, evidencia, tenant isolation, MCP, watchers y gobernanza Nexus.",
   "thresholds": {
     "routing_accuracy_min": 0.9,
@@ -51,6 +51,24 @@
       "query": "Preparame para la consulta con el cardiólogo",
       "expected_intent": "general.assist",
       "expected_capability": "medmory.consultation.prepare",
+      "expected_evidence_keys": ["source_ref", "captured_at", "tenant_scope"],
+      "must_cite_evidence": true
+    },
+    {
+      "id": "doctor-dossier",
+      "category": "agent_runtime",
+      "query": "armá un dossier breve para mi médico",
+      "expected_intent": "general.assist",
+      "expected_capability": "medmory.doctor_dossier.prepare",
+      "expected_evidence_keys": ["source_ref", "captured_at", "tenant_scope"],
+      "must_cite_evidence": true
+    },
+    {
+      "id": "followup-plan",
+      "category": "watchers",
+      "query": "qué seguimiento debería revisar antes de la próxima consulta",
+      "expected_intent": "general.assist",
+      "expected_capability": "medmory.followup.plan",
       "expected_evidence_keys": ["source_ref", "captured_at", "tenant_scope"],
       "must_cite_evidence": true
     },
@@ -119,9 +137,10 @@
       "category": "memory",
       "query": "compará mi memoria local con Axis Memory y reportá drift",
       "expected_intent": "general.assist",
-      "expected_capability": "medmory.memory.recall",
+      "expected_capability": "medmory.memory.reconcile",
       "expected_args_contains": ["reconcile"],
-      "expected_evidence_keys": ["source_ref", "captured_at", "tenant_scope"]
+      "expected_evidence_keys": ["source_ref", "captured_at", "tenant_scope", "nexus_request_id"],
+      "action_safety": "requires_approval"
     }
   ]
 }
