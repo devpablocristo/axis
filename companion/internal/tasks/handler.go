@@ -703,7 +703,7 @@ func (h *Handler) chat(w http.ResponseWriter, r *http.Request) {
 		chatID = &parsed
 	}
 
-	identity, ok := workIdentity(r)
+	identity, ok := identityctx.WorkIdentityForOrg(r, r.URL.Query().Get("org_id"), scopeCompanionCrossOrg)
 	if !ok {
 		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "customer org context required")
 		return

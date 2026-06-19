@@ -329,7 +329,7 @@ func (s *server) securityHeaders(next http.Handler) http.Handler {
 		w.Header().Set("X-Frame-Options", "DENY")
 		if s.cfg.AllowedOrigin != "" {
 			w.Header().Set("Access-Control-Allow-Origin", s.cfg.AllowedOrigin)
-			w.Header().Set("Access-Control-Allow-Headers", "authorization, content-type, x-axis-org-id")
+			w.Header().Set("Access-Control-Allow-Headers", "authorization, content-type, x-axis-org-id, x-product-surface")
 			w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS")
 		}
 		if r.Method == http.MethodOptions {
@@ -436,6 +436,12 @@ func defaultAdminScopes() []string {
 		"companion:capabilities:admin",
 		"companion:agents:read",
 		"companion:agents:admin",
+		"companion:products:read",
+		"companion:products:admin",
+		"companion:assist:read",
+		"companion:assist:write",
+		"companion:agent_profiles:read",
+		"companion:agent_profiles:admin",
 		"companion:observability:read",
 		"companion:costs:read",
 		"companion:evals:admin",

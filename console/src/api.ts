@@ -11,6 +11,24 @@ export type ServiceHealth = {
   nexus: string
 }
 
+export type Product = {
+  product_surface: string
+  display_name: string
+  status: string
+  metadata?: Record<string, unknown>
+}
+
+export type ProductInstallation = {
+  id?: string
+  org_id: string
+  product_surface: string
+  external_tenant_id?: string
+  base_url?: string
+  auth_mode: string
+  enabled: boolean
+  config?: Record<string, unknown>
+}
+
 export type Approval = {
   id: string
   request_id: string
@@ -64,6 +82,7 @@ export type Delegation = {
 export type CompanionTask = {
   id: string
   org_id?: string
+  product_surface?: string
   title: string
   status: string
   priority?: string
@@ -111,6 +130,8 @@ export type RuntimePolicy = {
 }
 
 export type CompanionAgent = {
+  org_id?: string
+  product_surface?: string
   agent_id: string
   display_name?: string
   role?: string
@@ -127,6 +148,7 @@ export type CapabilityRecord = {
   source: string
   manifest: {
     capability_id: string
+    product_surface?: string
     version: string
     display_name: string
     connector: string
@@ -140,6 +162,7 @@ export type CapabilityRecord = {
 
 export type MemoryConflict = {
   id: string
+  product_surface?: string
   kind: string
   memory_type: string
   key: string
@@ -150,6 +173,7 @@ export type MemoryConflict = {
 
 export type MemorySummary = {
   id: string
+  product_surface?: string
   scope_type: string
   scope_id: string
   summary_type: string
@@ -160,6 +184,7 @@ export type MemorySummary = {
 
 export type MemoryReview = {
   id: string
+  product_surface?: string
   memory_id?: string
   review_type: string
   status: string
@@ -169,6 +194,7 @@ export type MemoryReview = {
 
 export type CompanionJob = {
   id: string
+  product_surface?: string
   kind: string
   status: string
   attempts: number
@@ -178,6 +204,7 @@ export type CompanionJob = {
 
 export type ObservabilityEvent = {
   id: string
+  product_surface?: string
   event_type: string
   event_name: string
   severity: string

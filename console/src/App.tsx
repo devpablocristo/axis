@@ -1,7 +1,8 @@
-import { Activity, Bot, CheckCircle2, DatabaseZap, FileClock, GitPullRequestArrow, KeyRound, Layers3, ListChecks, Play, Power, RefreshCw, ShieldCheck, Sparkles, UsersRound } from 'lucide-react'
+import { Activity, Bot, CheckCircle2, DatabaseZap, FileClock, FileText, GitPullRequestArrow, KeyRound, Layers3, ListChecks, Play, Power, RefreshCw, ShieldCheck, Sparkles, UsersRound } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ActionType, Approval, AxisSession, BusinessModel, CapabilityRecord, CompanionAgent, CompanionJob, CompanionTask, CostSummary, Delegation, MemoryConflict, MemoryReview, MemorySummary, NexusRequest, ObservabilityEvent, Policy, RunTrace, RuntimePolicy, SecurityEvalReport, ServiceHealth, axisFetch, getHealth, getSession } from './api'
+import { ActionType, Approval, AxisSession, BusinessModel, CapabilityRecord, CompanionAgent, CompanionJob, CompanionTask, CostSummary, Delegation, MemoryConflict, MemoryReview, MemorySummary, NexusRequest, ObservabilityEvent, Policy, Product, ProductInstallation, RunTrace, RuntimePolicy, SecurityEvalReport, ServiceHealth, axisFetch, getHealth, getSession } from './api'
+import { AgentProfilePromptsScreen, AssistPackPromptsScreen } from './PromptScreens'
 
 type LoadState<T> = {
   data: T
@@ -9,7 +10,7 @@ type LoadState<T> = {
   loading: boolean
 }
 
-type RouteArea = 'overview' | 'nexus' | 'companion' | 'operations' | 'access'
+type RouteArea = 'overview' | 'nexus' | 'companion' | 'prompts' | 'operations' | 'access'
 
 type Route = {
   area: RouteArea
@@ -18,11 +19,31 @@ type Route = {
 
 const empty = <T,>(data: T): LoadState<T> => ({ data, error: '', loading: false })
 
+const knownProducts = [
+  { productSurface: 'companion', label: 'Companion' },
+  { productSurface: 'medmory', label: 'Medmory' },
+  { productSurface: 'ponti', label: 'Ponti' },
+  { productSurface: 'pymes', label: 'Pymes' },
+  { productSurface: 'reference', label: 'Reference' },
+  { productSurface: 'shadow', label: 'Shadow' },
+  { productSurface: 'argos', label: 'Argos' },
+  { productSurface: 'agro', label: 'Agro' },
+]
+
+type ProductOption = {
+  productSurface: string
+  label: string
+  status: string
+}
+
 export function App() {
   const [orgId, setOrgId] = useState(localStorage.getItem('axis.org_id') || 'local-dev-org')
-  const [route, setRoute] = useState<Route>(() => parseRoute(window.location.hash))
+  const [productSurface, setProductSurface] = useState(localStorage.getItem('axis.product_surface') || 'medmory')
+  const [route, setRoute] = useState<Route>(() => parseCurrentRoute())
   const [session, setSession] = useState<LoadState<AxisSession | null>>(empty(null))
   const [health, setHealth] = useState<LoadState<ServiceHealth | null>>(empty(null))
+  const [products, setProducts] = useState<LoadState<Product[]>>(empty([]))
+  const [installations, setInstallations] = useState<LoadState<ProductInstallation[]>>(empty([]))
   const [approvals, setApprovals] = useState<LoadState<Approval[]>>(empty([]))
   const [requests, setRequests] = useState<LoadState<NexusRequest[]>>(empty([]))
   const [policies, setPolicies] = useState<LoadState<Policy[]>>(empty([]))
@@ -45,29 +66,33 @@ export function App() {
 
   const refresh = useCallback(async () => {
     localStorage.setItem('axis.org_id', orgId)
+    localStorage.setItem('axis.product_surface', productSurface)
+    const productInit = productHeaders(productSurface)
     await Promise.all([
       load(setSession, () => getSession(orgId), null),
       load(setHealth, () => getHealth(), null),
+      load(setProducts, async () => (await axisFetch<{ products: Product[] }>('/api/companion/v1/products', orgId, productInit)).products ?? [], []),
+      load(setInstallations, async () => (await axisFetch<{ installations: ProductInstallation[] }>(`/api/companion/v1/product-installations?org_id=${encodeURIComponent(orgId)}`, orgId, productInit)).installations ?? [], []),
       load(setApprovals, async () => (await axisFetch<{ data: Approval[] }>('/api/nexus/v1/approvals/pending', orgId)).data ?? [], []),
       load(setRequests, async () => (await axisFetch<{ data: NexusRequest[] }>('/api/nexus/v1/requests?limit=12', orgId)).data ?? [], []),
       load(setPolicies, async () => (await axisFetch<{ data: Policy[] }>('/api/nexus/v1/policies', orgId)).data ?? [], []),
       load(setActionTypes, async () => (await axisFetch<{ data: ActionType[] }>('/api/nexus/v1/action-types', orgId)).data ?? [], []),
       load(setDelegations, async () => (await axisFetch<{ data: Delegation[] }>('/api/nexus/v1/delegations', orgId)).data ?? [], []),
-      load(setTasks, async () => (await axisFetch<{ data: CompanionTask[] }>('/api/companion/v1/tasks?limit=12', orgId)).data ?? [], []),
-      load(setTraces, async () => (await axisFetch<{ traces: RunTrace[] }>('/api/companion/v1/run-traces?limit=12', orgId)).traces ?? [], []),
-      load(setRuntimePolicy, () => axisFetch<RuntimePolicy>('/api/companion/v1/runtime/policy', orgId), null),
-      load(setAgents, async () => (await axisFetch<{ data: CompanionAgent[] }>('/api/companion/v1/agents', orgId)).data ?? [], []),
-      load(setCapabilities, async () => (await axisFetch<{ capabilities: CapabilityRecord[] }>('/api/companion/v1/capabilities?limit=12', orgId)).capabilities ?? [], []),
-      load(setMemoryConflicts, async () => (await axisFetch<{ conflicts: MemoryConflict[] }>('/api/companion/v1/memory/conflicts?limit=12', orgId)).conflicts ?? [], []),
-      load(setMemoryReviews, async () => (await axisFetch<{ reviews: MemoryReview[] }>('/api/companion/v1/memory/reviews?limit=12', orgId)).reviews ?? [], []),
-      load(setMemorySummaries, async () => (await axisFetch<{ summaries: MemorySummary[] }>('/api/companion/v1/memory/summaries?limit=12', orgId)).summaries ?? [], []),
-      load(setJobs, async () => (await axisFetch<{ jobs: CompanionJob[] }>('/api/companion/v1/jobs?limit=12', orgId)).jobs ?? [], []),
-      load(setEvents, async () => (await axisFetch<{ events: ObservabilityEvent[] }>('/api/companion/v1/observability/events?limit=12', orgId)).events ?? [], []),
-      load(setCosts, () => axisFetch<CostSummary>('/api/companion/v1/runtime/costs', orgId), null),
-      load(setSecurityReports, async () => (await axisFetch<{ reports: SecurityEvalReport[] }>('/api/companion/v1/security-evals/reports?limit=12', orgId)).reports ?? [], []),
-      load(setBusinessModel, () => axisFetch<BusinessModel>('/api/companion/v1/business-model', orgId), null)
+      load(setTasks, async () => filterByProduct((await axisFetch<{ data: CompanionTask[] }>(withProduct('/api/companion/v1/tasks?limit=12', productSurface), orgId, productInit)).data ?? [], productSurface), []),
+      load(setTraces, async () => filterByProduct((await axisFetch<{ traces: RunTrace[] }>(withProduct('/api/companion/v1/run-traces?limit=12', productSurface), orgId, productInit)).traces ?? [], productSurface), []),
+      load(setRuntimePolicy, () => axisFetch<RuntimePolicy>('/api/companion/v1/runtime/policy', orgId, productInit), null),
+      load(setAgents, async () => filterByProduct((await axisFetch<{ data: CompanionAgent[] }>(withProduct('/api/companion/v1/agents', productSurface), orgId, productInit)).data ?? [], productSurface), []),
+      load(setCapabilities, async () => filterCapabilities((await axisFetch<{ capabilities: CapabilityRecord[] }>(withProduct('/api/companion/v1/capabilities?limit=100', productSurface), orgId, productInit)).capabilities ?? [], productSurface).slice(0, 12), []),
+      load(setMemoryConflicts, async () => filterByProduct((await axisFetch<{ conflicts: MemoryConflict[] }>(withProduct('/api/companion/v1/memory/conflicts?limit=12', productSurface), orgId, productInit)).conflicts ?? [], productSurface), []),
+      load(setMemoryReviews, async () => filterByProduct((await axisFetch<{ reviews: MemoryReview[] }>(withProduct('/api/companion/v1/memory/reviews?limit=12', productSurface), orgId, productInit)).reviews ?? [], productSurface), []),
+      load(setMemorySummaries, async () => filterByProduct((await axisFetch<{ summaries: MemorySummary[] }>(withProduct('/api/companion/v1/memory/summaries?limit=12', productSurface), orgId, productInit)).summaries ?? [], productSurface), []),
+      load(setJobs, async () => filterByProduct((await axisFetch<{ jobs: CompanionJob[] }>(withProduct('/api/companion/v1/jobs?limit=12', productSurface), orgId, productInit)).jobs ?? [], productSurface), []),
+      load(setEvents, async () => filterByProduct((await axisFetch<{ events: ObservabilityEvent[] }>(withProduct('/api/companion/v1/observability/events?limit=12', productSurface), orgId, productInit)).events ?? [], productSurface), []),
+      load(setCosts, () => axisFetch<CostSummary>(withProduct('/api/companion/v1/runtime/costs', productSurface), orgId, productInit), null),
+      load(setSecurityReports, async () => (await axisFetch<{ reports: SecurityEvalReport[] }>(withProduct('/api/companion/v1/security-evals/reports?limit=12', productSurface), orgId, productInit)).reports ?? [], []),
+      load(setBusinessModel, () => axisFetch<BusinessModel>('/api/companion/v1/business-model', orgId, productInit), null)
     ])
-  }, [orgId])
+  }, [orgId, productSurface])
 
   const runAction = useCallback(async (label: string, fn: () => Promise<unknown>) => {
     setActionMessage(`${label}: running`)
@@ -85,11 +110,9 @@ export function App() {
   }, [refresh])
 
   useEffect(() => {
-    const syncRoute = () => setRoute(parseRoute(window.location.hash))
-    window.addEventListener('hashchange', syncRoute)
+    const syncRoute = () => setRoute(parseCurrentRoute())
     window.addEventListener('popstate', syncRoute)
     return () => {
-      window.removeEventListener('hashchange', syncRoute)
       window.removeEventListener('popstate', syncRoute)
     }
   }, [])
@@ -102,9 +125,11 @@ export function App() {
     }, {})
   }, [requests.data])
 
+  const productOptions = useMemo(() => buildProductOptions(products.data, installations.data), [products.data, installations.data])
+  const selectedProductOption = productOptions.find((item) => item.productSurface === productSurface)
   const title = pageTitle(route)
   const navigate = useCallback((next: Route) => {
-    window.history.pushState(null, '', routeHash(next))
+    window.history.pushState(null, '', routePath(next))
     setRoute(next)
   }, [])
 
@@ -122,6 +147,7 @@ export function App() {
           <button type="button" className={route.area === 'overview' ? 'active' : ''} onClick={() => navigate({ area: 'overview', screen: 'summary' })}><Activity aria-hidden="true" />Overview</button>
           <button type="button" className={route.area === 'nexus' ? 'active' : ''} onClick={() => navigate({ area: 'nexus', screen: 'approvals' })}><GitPullRequestArrow aria-hidden="true" />Nexus</button>
           <button type="button" className={route.area === 'companion' ? 'active' : ''} onClick={() => navigate({ area: 'companion', screen: 'tasks' })}><Bot aria-hidden="true" />Companion</button>
+          <button type="button" className={route.area === 'prompts' ? 'active' : ''} onClick={() => navigate({ area: 'prompts', screen: 'assist-packs' })}><FileText aria-hidden="true" />Prompts</button>
           <button type="button" className={route.area === 'operations' ? 'active' : ''} onClick={() => navigate({ area: 'operations', screen: 'memory' })}><Activity aria-hidden="true" />Ops</button>
           <button type="button" className={route.area === 'access' ? 'active' : ''} onClick={() => navigate({ area: 'access', screen: 'action-types' })}><KeyRound aria-hidden="true" />Access</button>
         </nav>
@@ -138,6 +164,16 @@ export function App() {
               <span>Org</span>
               <input value={orgId} onChange={(event) => setOrgId(event.target.value)} />
             </label>
+            <label>
+              <span>Producto / Cliente</span>
+              <select value={productSurface} onChange={(event) => setProductSurface(event.target.value)}>
+                {productOptions.map((option) => (
+                  <option key={option.productSurface} value={option.productSurface}>
+                    {option.label} · {option.status}
+                  </option>
+                ))}
+              </select>
+            </label>
             <button type="button" onClick={() => void refresh()} aria-label="Refresh">
               <RefreshCw aria-hidden="true" />
             </button>
@@ -148,6 +184,7 @@ export function App() {
           <HealthPill label="BFF" value="ok" />
           <HealthPill label="Companion" value={health.data?.companion ?? health.error ?? 'loading'} />
           <HealthPill label="Nexus" value={health.data?.nexus ?? health.error ?? 'loading'} />
+          <span className="scope-pill"><b>Producto</b>{selectedProductOption ? `${selectedProductOption.label} · ${selectedProductOption.status}` : productSurface}</span>
           <span className="scope-pill">{session.data?.auth_method ?? 'dev'}</span>
           {actionMessage && <span className="scope-pill">{actionMessage}</span>}
         </section>
@@ -251,7 +288,7 @@ export function App() {
               <div className="screen-grid">
                 <Panel title="Control Plane" icon={<ShieldCheck />} state={runtimePolicy}>
                   <div className="panel-actions">
-                    <button type="button" onClick={() => void runAction('runtime kill switch', () => axisFetch('/api/companion/v1/runtime/policy', orgId, { method: 'PUT', body: JSON.stringify({ kill_switch: !runtimePolicy.data?.kill_switch }) }))}>
+                    <button type="button" onClick={() => void runAction('runtime kill switch', () => axisFetch('/api/companion/v1/runtime/policy', orgId, { method: 'PUT', headers: { 'X-Product-Surface': productSurface }, body: JSON.stringify({ kill_switch: !runtimePolicy.data?.kill_switch }) }))}>
                       <Power aria-hidden="true" />Kill switch
                     </button>
                   </div>
@@ -271,7 +308,7 @@ export function App() {
                   <div className="panel-actions">
                     <button type="button" disabled={!agents.data.some((item) => item.status === 'active')} onClick={() => {
                       const agent = agents.data.find((item) => item.status === 'active')
-                      if (agent) void runAction('disable agent', () => axisFetch(`/api/companion/v1/agents/${encodeURIComponent(agent.agent_id)}/disable`, orgId, { method: 'POST', body: '{}' }))
+                      if (agent) void runAction('disable agent', () => axisFetch(`/api/companion/v1/agents/${encodeURIComponent(agent.agent_id)}/disable`, orgId, { method: 'POST', headers: { 'X-Product-Surface': productSurface }, body: '{}' }))
                     }}>
                       <Power aria-hidden="true" />Disable active
                     </button>
@@ -286,7 +323,7 @@ export function App() {
                   <div className="panel-actions">
                     <button type="button" disabled={!capabilities.data.some((item) => item.status === 'draft')} onClick={() => {
                       const cap = capabilities.data.find((item) => item.status === 'draft')
-                      if (cap) void runAction('promote manifest', () => axisFetch(`/api/companion/v1/capabilities/${encodeURIComponent(cap.manifest.capability_id)}/versions/${encodeURIComponent(cap.manifest.version)}/promote`, orgId, { method: 'POST', body: '{}' }))
+                      if (cap) void runAction('promote manifest', () => axisFetch(`/api/companion/v1/capabilities/${encodeURIComponent(cap.manifest.capability_id)}/versions/${encodeURIComponent(cap.manifest.version)}/promote`, orgId, { method: 'POST', headers: { 'X-Product-Surface': productSurface }, body: '{}' }))
                     }}>
                       <CheckCircle2 aria-hidden="true" />Promote draft
                     </button>
@@ -317,6 +354,17 @@ export function App() {
           </section>
         )}
 
+        {route.area === 'prompts' && (
+          <section className="page-section">
+            <ScreenNav items={[
+              ['assist-packs', 'Assist Packs'],
+              ['agent-profiles', 'Agent Profiles']
+            ]} base="prompts" active={route.screen} onNavigate={navigate} />
+            {route.screen === 'assist-packs' && <AssistPackPromptsScreen orgId={orgId} productSurface={productSurface} />}
+            {route.screen === 'agent-profiles' && <AgentProfilePromptsScreen orgId={orgId} productSurface={productSurface} agents={agents.data} />}
+          </section>
+        )}
+
         {route.area === 'operations' && (
           <section className="page-section">
             <ScreenNav items={[
@@ -332,7 +380,7 @@ export function App() {
                   <div className="panel-actions">
                     <button type="button" disabled={!memoryReviews.data.length} onClick={() => {
                       const review = memoryReviews.data[0]
-                      if (review) void runAction('apply memory review', () => axisFetch(`/api/companion/v1/memory/reviews/${encodeURIComponent(review.id)}/apply`, orgId, { method: 'POST', body: '{}' }))
+                      if (review) void runAction('apply memory review', () => axisFetch(`/api/companion/v1/memory/reviews/${encodeURIComponent(review.id)}/apply`, orgId, { method: 'POST', headers: { 'X-Product-Surface': productSurface }, body: '{}' }))
                     }}>
                       <CheckCircle2 aria-hidden="true" />Apply review
                     </button>
@@ -375,7 +423,7 @@ export function App() {
               <div className="screen-grid">
                 <Panel title="Security Evals" icon={<ShieldCheck />} state={securityReports}>
                   <div className="panel-actions">
-                    <button type="button" onClick={() => void runAction('security eval', () => axisFetch('/api/companion/v1/security-evals/runs', orgId, { method: 'POST', body: JSON.stringify({ suite: 'security-adversarial' }) }))}>
+                    <button type="button" onClick={() => void runAction('security eval', () => axisFetch('/api/companion/v1/security-evals/runs', orgId, { method: 'POST', headers: { 'X-Product-Surface': productSurface }, body: JSON.stringify({ suite: 'security-adversarial', product_surface: productSurface }) }))}>
                       <Play aria-hidden="true" />Run suite
                     </button>
                   </div>
@@ -390,14 +438,27 @@ export function App() {
   )
 }
 
-function parseRoute(hash: string): Route {
-  const raw = hash.replace(/^#/, '').trim()
+function parseCurrentRoute(): Route {
+  if (window.location.hash.startsWith('#')) {
+    const fromHash = parseRoutePath(window.location.hash.replace(/^#\/?/, ''))
+    window.history.replaceState(null, '', routePath(fromHash))
+    return fromHash
+  }
+  return parseRoutePath(window.location.pathname)
+}
+
+function parseRoutePath(path: string): Route {
+  const raw = path.replace(/^\/+/, '').replace(/\/+$/, '').trim()
+  if (raw === '') {
+    return { area: 'prompts', screen: 'assist-packs' }
+  }
   const [areaRaw, screenRaw] = raw.split('/')
   const area = isRouteArea(areaRaw) ? areaRaw : 'overview'
   const screens: Record<RouteArea, string[]> = {
     overview: ['summary'],
     nexus: ['approvals', 'requests', 'policies', 'risk'],
     companion: ['tasks', 'control', 'agents', 'capabilities', 'traces', 'business'],
+    prompts: ['assist-packs', 'agent-profiles'],
     operations: ['memory', 'jobs', 'observability', 'cost', 'security'],
     access: ['action-types', 'delegations']
   }
@@ -406,14 +467,14 @@ function parseRoute(hash: string): Route {
 }
 
 function isRouteArea(value: string): value is RouteArea {
-  return value === 'overview' || value === 'nexus' || value === 'companion' || value === 'operations' || value === 'access'
+  return value === 'overview' || value === 'nexus' || value === 'companion' || value === 'prompts' || value === 'operations' || value === 'access'
 }
 
-function routeHash(route: Route) {
+function routePath(route: Route) {
   if (route.area === 'overview') {
-    return '#overview'
+    return '/overview'
   }
-  return `#${route.area}/${route.screen}`
+  return `/${route.area}/${route.screen}`
 }
 
 function pageTitle(route: Route) {
@@ -422,6 +483,8 @@ function pageTitle(route: Route) {
       return 'Nexus'
     case 'companion':
       return 'Companion'
+    case 'prompts':
+      return 'Prompts'
     case 'operations':
       return 'Operations'
     case 'access':
@@ -516,4 +579,50 @@ function date(value?: string) {
   const parsed = new Date(value)
   if (Number.isNaN(parsed.getTime())) return '-'
   return parsed.toLocaleString()
+}
+
+function productHeaders(productSurface: string): RequestInit {
+  return { headers: { 'X-Product-Surface': productSurface } }
+}
+
+function withProduct(path: string, productSurface: string) {
+  const separator = path.includes('?') ? '&' : '?'
+  return `${path}${separator}product_surface=${encodeURIComponent(productSurface)}`
+}
+
+function filterByProduct<T extends { product_surface?: string }>(items: T[], productSurface: string) {
+  return items.filter((item) => !item.product_surface || sameProduct(item.product_surface, productSurface))
+}
+
+function filterCapabilities(items: CapabilityRecord[], productSurface: string) {
+  return items.filter((item) => !item.manifest.product_surface || sameProduct(item.manifest.product_surface, productSurface))
+}
+
+function sameProduct(value: string | undefined, productSurface: string) {
+  return (value || '').trim().toLowerCase() === productSurface.trim().toLowerCase()
+}
+
+function buildProductOptions(products: Product[], installations: ProductInstallation[]): ProductOption[] {
+  const registered = new Map(products.map((product) => [product.product_surface, product]))
+  const installed = new Set(
+    installations
+      .filter((installation) => installation.enabled)
+      .map((installation) => installation.product_surface),
+  )
+  return knownProducts.map((known) => {
+    const product = registered.get(known.productSurface)
+    const isInstalled = installed.has(known.productSurface)
+    const status = isInstalled
+      ? 'Instalado'
+      : product
+        ? product.status === 'active'
+          ? 'Activo · no instalado'
+          : 'No instalado'
+        : 'No registrado'
+    return {
+      productSurface: known.productSurface,
+      label: product?.display_name || known.label,
+      status,
+    }
+  })
 }

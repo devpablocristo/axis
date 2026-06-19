@@ -67,6 +67,31 @@ func TestFromRequestFallsBackToCompatHeaders(t *testing.T) {
 	}
 }
 
+func TestWorkIdentityForOrgUsesRequestedOrgWithCrossOrgScope(t *testing.T) {
+	t.Parallel()
+
+	principal := &authn.Principal{
+		OrgID:  "org-a",
+		Actor:  "axis-admin",
+		Scopes: []string{"companion:cross_org"},
+		Claims: map[string]any{
+			"actor_type":        "service",
+			"service_principal": true,
+		},
+	}
+	req := httptest.NewRequest("GET", "/v1/chat?org_id=org-b", nil)
+	req = identityhttp.WithPrincipal(req, principal, "internal_jwt")
+	req = WithPrincipal(req, principal)
+
+	got, ok := WorkIdentityForOrg(req, req.URL.Query().Get("org_id"), "companion:cross_org")
+	if !ok {
+		t.Fatal("expected identity")
+	}
+	if got.CustomerOrgID != "org-b" {
+		t.Fatalf("expected requested org-b, got %+v", got)
+	}
+}
+
 func TestFromRequestReadsScopeClaimsWhenPrincipalScopesAreEmpty(t *testing.T) {
 	t.Parallel()
 

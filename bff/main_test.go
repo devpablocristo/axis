@@ -196,6 +196,26 @@ func TestSessionReturnsSelectedOrgForCrossOrgPrincipal(t *testing.T) {
 	}
 }
 
+func TestDefaultAdminScopesIncludePromptManagement(t *testing.T) {
+	scopes := make(map[string]bool)
+	for _, scope := range defaultAdminScopes() {
+		scopes[scope] = true
+	}
+
+	for _, scope := range []string{
+		"companion:assist:read",
+		"companion:assist:write",
+		"companion:agent_profiles:read",
+		"companion:agent_profiles:admin",
+		"companion:products:read",
+		"companion:products:admin",
+	} {
+		if !scopes[scope] {
+			t.Fatalf("expected default admin scope %q", scope)
+		}
+	}
+}
+
 func newTestServer(target string, scopes []string) (*server, error) {
 	return newServer(config{
 		AuthMode:          "dev",

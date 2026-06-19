@@ -56,6 +56,40 @@ func TestChatUsesCanonicalPrincipalIdentity(t *testing.T) {
 	}
 }
 
+func TestChatUsesRequestedOrgWithCrossOrgScope(t *testing.T) {
+	t.Parallel()
+
+	repo := &fakeRepo{}
+	uc := NewUsecases(repo, &stubNexus{})
+	mux := http.NewServeMux()
+	NewHandler(uc).Register(mux)
+
+	principal := &authn.Principal{
+		OrgID:      "org-a",
+		Actor:      "axis-admin",
+		Scopes:     []string{scopeCompanionTasksWrite, scopeCompanionCrossOrg},
+		AuthMethod: "internal_jwt",
+		Claims: map[string]any{
+			"actor_id":          "axis-admin",
+			"actor_type":        "service",
+			"service_principal": true,
+		},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat?org_id=org-b", strings.NewReader(`{"message":"hola","product_surface":"medmory"}`))
+	req = identityhttp.WithPrincipal(req, principal, "internal_jwt")
+	req = identityctx.WithPrincipal(req, principal)
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	task := onlyTask(t, repo)
+	if task.OrgID != "org-b" {
+		t.Fatalf("expected requested org-b, got %q", task.OrgID)
+	}
+}
+
 func TestChatAcceptsChatIDAndReturnsTaskID(t *testing.T) {
 	t.Parallel()
 
