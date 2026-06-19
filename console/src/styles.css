@@ -382,6 +382,44 @@ th {
   border-bottom: 1px solid #edf0f3;
 }
 
+.product-list {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+}
+
+.product-list button {
+  min-height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1px solid #dfe4ea;
+  border-radius: 8px;
+  background: #fff;
+  color: #17202a;
+  cursor: pointer;
+  padding: 12px 14px;
+  text-align: left;
+}
+
+.product-list button.active {
+  border-color: #56c2a4;
+  background: #eefaf6;
+}
+
+.product-list strong,
+.product-list small {
+  display: block;
+}
+
+.product-list small,
+.product-list em {
+  color: #667383;
+  font-size: 12px;
+  font-style: normal;
+}
+
 .axis-crud-host {
   --crud-border: #dfe4ea;
   --crud-card-bg: #fff;

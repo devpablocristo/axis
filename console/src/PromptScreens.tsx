@@ -4,7 +4,7 @@ import {
   type CrudPageProps,
 } from '@devpablocristo/platform-crud-ui'
 import {
-  FileUploadReview,
+  PromptEditorReview,
   ReadonlyContentViewer,
   downloadTextFile,
   downloadZipFile,
@@ -81,8 +81,8 @@ export function AssistPackPromptsScreen({ orgId, productSurface }: { orgId: stri
   return (
     <PromptCrudScreen
       orgId={orgId}
-      title="Assist Packs"
-      description="Runtime prompts used by Companion assist-runs."
+      title="Prompts del producto"
+      description="Prompts runtime usados por el producto seleccionado."
       downloadAllName="axis_assist_packs.zip"
       loadRows={async (view) => {
         const query = `product_surface=${encodeURIComponent(productSurface)}`
@@ -155,8 +155,8 @@ export function AgentProfilePromptsScreen({
   return (
     <PromptCrudScreen
       orgId={orgId}
-      title="Agent Profiles"
-      description="Global Axis agent prompts loaded by runtime through profile_id."
+      title="Prompts de agentes"
+      description="Prompts globales de Axis cargados por runtime desde profile_id."
       downloadAllName="axis_agent_profiles.zip"
       loadRows={async (view) => {
         const profileIDs = new Set(
@@ -254,8 +254,8 @@ function PromptCrudScreen({
   const upload = useTextFileUpload<AxisPromptRow>({
     extensions: ['.md'],
     accept: '.md,text/markdown',
-    emptyFileMessage: 'File is empty',
-    invalidFileMessage: 'Only .md files are supported',
+    emptyFileMessage: 'El archivo está vacío',
+    invalidFileMessage: 'Solo se soportan archivos .md',
     onLoad: ({ context, fileName, content }) => {
       if (!context) return
       setPendingUpload({
@@ -292,30 +292,33 @@ function PromptCrudScreen({
           title={viewedPrompt.name}
           subtitle={viewedPrompt.promptKey}
           metadata={[
-            { label: 'Type', value: viewedPrompt.kind },
-            { label: 'Product', value: viewedPrompt.scopeLabel || viewedPrompt.productSurface },
-            { label: 'Version', value: viewedPrompt.version || '-' },
-            { label: 'Enabled', value: viewedPrompt.enabled ? 'yes' : 'no' },
-            { label: 'Updated', value: formatDate(viewedPrompt.updatedAt) },
+            { label: 'Tipo', value: viewedPrompt.kind },
+            { label: 'Producto', value: viewedPrompt.scopeLabel || viewedPrompt.productSurface },
+            { label: 'Versión', value: viewedPrompt.version || '-' },
+            { label: 'Activo', value: viewedPrompt.enabled ? 'sí' : 'no' },
+            { label: 'Actualizado', value: formatDate(viewedPrompt.updatedAt) },
           ]}
           content={viewedPrompt.promptText}
-          emptyContent="No prompt content"
-          closeLabel="Close"
+          emptyContent="Sin contenido de prompt"
+          closeLabel="Cerrar"
           onClose={() => setViewedPrompt(null)}
         />
       ) : null}
       {pendingUpload ? (
-        <FileUploadReview
-          title="Review prompt upload"
+        <PromptEditorReview
+          title="Revisar carga de prompt"
           subtitle={`${pendingUpload.row.name} · ${pendingUpload.row.promptKey}`}
           metadata={[
-            { label: 'Current version', value: pendingUpload.row.version || '-' },
-            { label: 'New version', value: pendingUpload.nextVersion },
-            { label: 'File', value: pendingUpload.fileName },
+            { label: 'Versión actual', value: pendingUpload.row.version || '-' },
+            { label: 'Nueva versión', value: pendingUpload.nextVersion },
+            { label: 'Archivo', value: pendingUpload.fileName },
           ]}
           content={pendingUpload.content}
-          cancelLabel="Cancel"
-          confirmLabel="Upload"
+          onContentChange={(content) => {
+            setPendingUpload((current) => (current ? { ...current, content } : current))
+          }}
+          cancelLabel="Cancelar"
+          confirmLabel="Cargar"
           onCancel={() => setPendingUpload(null)}
           onConfirm={() => void confirmUpload()}
         />
@@ -345,21 +348,21 @@ function PromptCrudScreen({
               </div>
             ),
           },
-          { key: 'promptKey', header: 'Key' },
+          { key: 'promptKey', header: 'Clave' },
           {
             key: 'productSurface',
-            header: 'Product',
+            header: 'Producto',
             render: (_value, row) => row.scopeLabel || row.productSurface,
           },
-          { key: 'version', header: 'Version' },
+          { key: 'version', header: 'Versión' },
           {
             key: 'enabled',
-            header: 'Enabled',
-            render: (value) => (value ? 'yes' : 'no'),
+            header: 'Activo',
+            render: (value) => (value ? 'sí' : 'no'),
           },
           {
             key: 'updatedAt',
-            header: 'Updated',
+            header: 'Actualizado',
             render: (_value, row) => formatDate(row.updatedAt),
           },
         ]}
@@ -367,13 +370,13 @@ function PromptCrudScreen({
         searchText={(row) => [row.name, row.promptKey, row.version, row.description].join(' ')}
         toFormValues={() => ({})}
         isValid={() => true}
-        emptyState="No prompts"
-        archivedEmptyState="No archived prompts"
-        searchPlaceholder="Search prompts"
+        emptyState="Sin prompts para este producto"
+        archivedEmptyState="Sin prompts archivados"
+        searchPlaceholder="Buscar prompts"
         toolbarActions={[
           {
             id: 'download-all',
-            label: 'Download all',
+            label: 'Descargar todos',
             kind: 'secondary',
             onClick: (helpers) => {
               helpersRef.current = helpers
@@ -389,20 +392,20 @@ function PromptCrudScreen({
         rowActions={[
           {
             id: 'view',
-            label: 'View',
+            label: 'Ver',
             kind: 'secondary',
             onClick: (row) => setViewedPrompt(row),
           },
           {
             id: 'download',
-            label: 'Download',
+            label: 'Descargar',
             kind: 'secondary',
             isVisible: (row) => Boolean(row.promptText),
             onClick: (row) => downloadTextFile(`${safeFileName(row.promptKey)}.md`, row.promptText),
           },
           {
             id: 'upload',
-            label: 'Upload',
+            label: 'Cargar',
             kind: 'success',
             onClick: (row, helpers) => {
               helpersRef.current = helpers

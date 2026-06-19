@@ -13,7 +13,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@devpablocristo/platform-crud-ui": "^0.3.0",
+    "@devpablocristo/platform-chat-ui": "^0.1.2",
+    "@devpablocristo/platform-crud-ui": "^0.4.0",
     "@vitejs/plugin-react": "^6.0.1",
     "lucide-react": "^1.17.0",
     "react": "^19.0.0",

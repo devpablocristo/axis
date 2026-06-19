@@ -1,4 +1,6 @@
-import { Activity, Bot, CheckCircle2, DatabaseZap, FileClock, FileText, GitPullRequestArrow, KeyRound, Layers3, ListChecks, Play, Power, RefreshCw, ShieldCheck, Sparkles, UsersRound } from 'lucide-react'
+import { Activity, Bot, CheckCircle2, DatabaseZap, FileClock, FileText, GitPullRequestArrow, KeyRound, Layers3, ListChecks, MessageSquareText, Play, Power, RefreshCw, ShieldCheck, Sparkles, UsersRound } from 'lucide-react'
+import { ChatWorkspace, type ChatAdapter, type ChatConversationDetail, type ChatConversationSummary, type ChatRequest } from '@devpablocristo/platform-chat-ui'
+import '@devpablocristo/platform-chat-ui/styles.css'
 import type { ReactNode } from 'react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ActionType, AgentRun, Approval, AxisSession, BusinessModel, CapabilityRecord, CompanionAgent, CompanionJob, CompanionTask, CostSummary, Delegation, MemoryConflict, MemoryReview, MemorySummary, NexusRequest, ObservabilityEvent, Policy, Product, ProductInstallation, RunTrace, RuntimePolicy, SecurityEvalReport, ServiceHealth, axisFetch, getHealth, getSession } from './api'
@@ -10,7 +12,7 @@ type LoadState<T> = {
   loading: boolean
 }
 
-type RouteArea = 'overview' | 'nexus' | 'companion' | 'prompts' | 'operations' | 'access'
+type RouteArea = 'home' | 'products' | 'chat' | 'prompts' | 'agents' | 'operations' | 'nexus' | 'platform'
 
 type Route = {
   area: RouteArea
@@ -131,6 +133,7 @@ export function App() {
   const productOptions = useMemo(() => buildProductOptions(products.data, installations.data), [products.data, installations.data])
   const selectedProductOption = productOptions.find((item) => item.productSurface === productSurface)
   const title = pageTitle(route)
+  const chatAdapter = useMemo<ChatAdapter>(() => axisChatAdapter(orgId, productSurface), [orgId, productSurface])
   const navigate = useCallback((next: Route) => {
     window.history.pushState(null, '', routePath(next))
     setRoute(next)
@@ -147,12 +150,14 @@ export function App() {
           </div>
         </div>
         <nav className="nav">
-          <button type="button" className={route.area === 'overview' ? 'active' : ''} onClick={() => navigate({ area: 'overview', screen: 'summary' })}><Activity aria-hidden="true" />Overview</button>
+          <button type="button" className={route.area === 'home' ? 'active' : ''} onClick={() => navigate({ area: 'home', screen: 'summary' })}><Activity aria-hidden="true" />Inicio</button>
+          <button type="button" className={route.area === 'products' ? 'active' : ''} onClick={() => navigate({ area: 'products', screen: 'list' })}><Layers3 aria-hidden="true" />Productos</button>
+          <button type="button" className={route.area === 'chat' ? 'active' : ''} onClick={() => navigate({ area: 'chat', screen: 'workspace' })}><MessageSquareText aria-hidden="true" />Chat</button>
+          <button type="button" className={route.area === 'prompts' ? 'active' : ''} onClick={() => navigate({ area: 'prompts', screen: 'product' })}><FileText aria-hidden="true" />Prompts</button>
+          <button type="button" className={route.area === 'agents' ? 'active' : ''} onClick={() => navigate({ area: 'agents', screen: 'list' })}><Bot aria-hidden="true" />Agentes</button>
+          <button type="button" className={route.area === 'operations' ? 'active' : ''} onClick={() => navigate({ area: 'operations', screen: 'runs' })}><Activity aria-hidden="true" />Operación</button>
           <button type="button" className={route.area === 'nexus' ? 'active' : ''} onClick={() => navigate({ area: 'nexus', screen: 'approvals' })}><GitPullRequestArrow aria-hidden="true" />Nexus</button>
-          <button type="button" className={route.area === 'companion' ? 'active' : ''} onClick={() => navigate({ area: 'companion', screen: 'tasks' })}><Bot aria-hidden="true" />Companion</button>
-          <button type="button" className={route.area === 'prompts' ? 'active' : ''} onClick={() => navigate({ area: 'prompts', screen: 'assist-packs' })}><FileText aria-hidden="true" />Prompts</button>
-          <button type="button" className={route.area === 'operations' ? 'active' : ''} onClick={() => navigate({ area: 'operations', screen: 'billing-agent' })}><Activity aria-hidden="true" />Ops</button>
-          <button type="button" className={route.area === 'access' ? 'active' : ''} onClick={() => navigate({ area: 'access', screen: 'action-types' })}><KeyRound aria-hidden="true" />Access</button>
+          <button type="button" className={route.area === 'platform' ? 'active' : ''} onClick={() => navigate({ area: 'platform', screen: 'runtime' })}><KeyRound aria-hidden="true" />Plataforma</button>
         </nav>
       </aside>
 
@@ -185,20 +190,83 @@ export function App() {
 
         <section className="health-row">
           <HealthPill label="BFF" value="ok" />
-          <HealthPill label="Companion" value={health.data?.companion ?? health.error ?? 'loading'} />
+          <HealthPill label="Plataforma IA" value={health.data?.companion ?? health.error ?? 'loading'} />
           <HealthPill label="Nexus" value={health.data?.nexus ?? health.error ?? 'loading'} />
           <span className="scope-pill"><b>Producto</b>{selectedProductOption ? `${selectedProductOption.label} · ${selectedProductOption.status}` : productSurface}</span>
           <span className="scope-pill">{session.data?.auth_method ?? 'dev'}</span>
           {actionMessage && <span className="scope-pill">{actionMessage}</span>}
         </section>
 
-        {route.area === 'overview' && (
+        {route.area === 'home' && (
           <section className="page-section">
             <div className="metrics-grid">
-              <Metric icon={<CheckCircle2 />} label="Approvals" value={approvals.data.length} tone="green" />
+              <Metric icon={<CheckCircle2 />} label="Aprobaciones" value={approvals.data.length} tone="green" />
               <Metric icon={<FileClock />} label="Requests" value={requests.data.length} tone="blue" />
-              <Metric icon={<Sparkles />} label="Agents" value={agents.data.length} tone="violet" />
+              <Metric icon={<Sparkles />} label="Agentes" value={agents.data.length} tone="violet" />
               <Metric icon={<DatabaseZap />} label="Capabilities" value={capabilities.data.length} tone="amber" />
+            </div>
+            <div className="screen-grid two">
+              <Panel title="Producto seleccionado" icon={<Layers3 />} state={products}>
+                <Table columns={['campo', 'valor']} rows={[
+                  ['org', orgId],
+                  ['producto', selectedProductOption?.label ?? productSurface],
+                  ['product_surface', productSurface],
+                  ['estado', selectedProductOption?.status ?? '-'],
+                ]} />
+              </Panel>
+              <Panel title="Últimas corridas" icon={<Activity />} state={tasks}>
+                <Table columns={['tarea', 'estado', 'canal']} rows={tasks.data.slice(0, 6).map((item) => [item.title, item.status, item.channel ?? 'api'])} />
+              </Panel>
+            </div>
+            <div className="screen-grid">
+              <Panel title="Salud de plataforma" icon={<ShieldCheck />} state={health}>
+                <Table columns={['servicio', 'estado']} rows={[
+                  ['BFF', 'ok'],
+                  ['Plataforma IA', health.data?.companion ?? health.error ?? 'loading'],
+                  ['Nexus', health.data?.nexus ?? health.error ?? 'loading'],
+                ]} />
+              </Panel>
+            </div>
+          </section>
+        )}
+
+        {route.area === 'products' && (
+          <section className="page-section">
+            <div className="screen-grid">
+              <Panel title="Productos / Clientes" icon={<Layers3 />} state={products}>
+                <ProductList
+                  options={productOptions}
+                  selected={productSurface}
+                  onSelect={setProductSurface}
+                />
+              </Panel>
+            </div>
+          </section>
+        )}
+
+        {route.area === 'chat' && (
+          <section className="page-section">
+            <div className="screen-grid">
+              <Panel title="Chat con Axis" icon={<MessageSquareText />} state={empty(null)}>
+                <ChatWorkspace
+                  adapter={chatAdapter}
+                  baseRequest={{ productSurface, workspace: { org_id: orgId, product_surface: productSurface } }}
+                  labels={{
+                    title: `Axis · ${selectedProductOption?.label ?? productSurface}`,
+                    lead: 'Interactuá con el runtime de Axis para el producto seleccionado.',
+                    conversations: 'Conversaciones',
+                    emptyConversations: 'Sin conversaciones',
+                    emptyThread: 'Escribí una consulta para Axis.',
+                    inputPlaceholder: 'Mensaje para Axis',
+                    send: 'Enviar',
+                    sending: 'Enviando...',
+                    newConversation: 'Nueva',
+                    loadingHistory: 'Cargando historial...',
+                    confirmPending: 'Confirmar',
+                  }}
+                  nowLabel={() => new Date().toLocaleString()}
+                />
+              </Panel>
             </div>
           </section>
         )}
@@ -206,15 +274,17 @@ export function App() {
         {route.area === 'nexus' && (
           <section className="page-section">
             <ScreenNav items={[
-              ['approvals', 'Approvals'],
+              ['approvals', 'Aprobaciones'],
               ['requests', 'Requests'],
               ['policies', 'Policies'],
-              ['risk', 'Risk']
+              ['action-types', 'Action Types'],
+              ['delegations', 'Delegations'],
+              ['risk', 'Riesgo']
             ]} base="nexus" active={route.screen} onNavigate={navigate} />
 
             {route.screen === 'approvals' && (
               <div className="screen-grid">
-                <Panel title="Approvals" icon={<ListChecks />} state={approvals}>
+                <Panel title="Aprobaciones" icon={<ListChecks />} state={approvals}>
                   <Table columns={['status', 'request', 'expires']} rows={approvals.data.map((item) => [item.status, short(item.request_id), date(item.expires_at)])} />
                 </Panel>
               </div>
@@ -235,7 +305,7 @@ export function App() {
             )}
             {route.screen === 'risk' && (
               <div className="screen-grid">
-                <Panel title="Risk" icon={<Activity />} state={requests}>
+                <Panel title="Riesgo" icon={<Activity />} state={requests}>
                   <div className="risk-list">
                     {Object.entries(riskCounts).map(([risk, count]) => (
                       <span key={risk}><b>{risk}</b>{count}</span>
@@ -244,15 +314,6 @@ export function App() {
                 </Panel>
               </div>
             )}
-          </section>
-        )}
-
-        {route.area === 'access' && (
-          <section className="page-section">
-            <ScreenNav items={[
-              ['action-types', 'Action Types'],
-              ['delegations', 'Delegations']
-            ]} base="access" active={route.screen} onNavigate={navigate} />
             {route.screen === 'action-types' && (
               <div className="screen-grid">
                 <Panel title="Action Types" icon={<Layers3 />} state={actionTypes}>
@@ -270,26 +331,17 @@ export function App() {
           </section>
         )}
 
-        {route.area === 'companion' && (
+        {route.area === 'platform' && (
           <section className="page-section">
             <ScreenNav items={[
-              ['tasks', 'Tasks'],
-              ['control', 'Control Plane'],
-              ['agents', 'Agents'],
+              ['runtime', 'Política runtime'],
               ['capabilities', 'Capabilities'],
-              ['traces', 'Run Traces'],
-              ['business', 'Business Model']
-            ]} base="companion" active={route.screen} onNavigate={navigate} />
-            {route.screen === 'tasks' && (
+              ['business', 'Modelo del producto'],
+              ['health', 'Health']
+            ]} base="platform" active={route.screen} onNavigate={navigate} />
+            {route.screen === 'runtime' && (
               <div className="screen-grid">
-                <Panel title="Tasks" icon={<Bot />} state={tasks}>
-                  <Table columns={['title', 'status', 'channel']} rows={tasks.data.map((item) => [item.title, item.status, item.channel ?? 'api'])} />
-                </Panel>
-              </div>
-            )}
-            {route.screen === 'control' && (
-              <div className="screen-grid">
-                <Panel title="Control Plane" icon={<ShieldCheck />} state={runtimePolicy}>
+                <Panel title="Política runtime" icon={<ShieldCheck />} state={runtimePolicy}>
                   <div className="panel-actions">
                     <button type="button" onClick={() => void runAction('runtime kill switch', () => axisFetch('/api/companion/v1/runtime/policy', orgId, { method: 'PUT', headers: { 'X-Product-Surface': productSurface }, body: JSON.stringify({ kill_switch: !runtimePolicy.data?.kill_switch }) }))}>
                       <Power aria-hidden="true" />Kill switch
@@ -302,21 +354,6 @@ export function App() {
                     ['risk', runtimePolicy.data?.control_plane?.max_risk_class ?? '-'],
                     ['vector store', runtimePolicy.data?.control_plane?.embedding?.vector_store ?? '-']
                   ]} />
-                </Panel>
-              </div>
-            )}
-            {route.screen === 'agents' && (
-              <div className="screen-grid">
-                <Panel title="Agents" icon={<UsersRound />} state={agents}>
-                  <div className="panel-actions">
-                    <button type="button" disabled={!agents.data.some((item) => item.status === 'active')} onClick={() => {
-                      const agent = agents.data.find((item) => item.status === 'active')
-                      if (agent) void runAction('disable agent', () => axisFetch(`/api/companion/v1/agents/${encodeURIComponent(agent.agent_id)}/disable`, orgId, { method: 'POST', headers: { 'X-Product-Surface': productSurface }, body: '{}' }))
-                    }}>
-                      <Power aria-hidden="true" />Disable active
-                    </button>
-                  </div>
-                  <Table columns={['agent', 'role', 'status', 'autonomy']} rows={agents.data.map((item) => [item.display_name || item.agent_id, item.role ?? item.profile_id ?? '-', item.status, item.max_autonomy])} />
                 </Panel>
               </div>
             )}
@@ -335,16 +372,9 @@ export function App() {
                 </Panel>
               </div>
             )}
-            {route.screen === 'traces' && (
-              <div className="screen-grid">
-                <Panel title="Run Traces" icon={<Sparkles />} state={traces}>
-                  <Table columns={['surface', 'intent', 'status', 'started']} rows={traces.data.map((item) => [item.product_surface ?? '-', item.intent ?? '-', item.status ?? '-', date(item.started_at)])} />
-                </Panel>
-              </div>
-            )}
             {route.screen === 'business' && (
               <div className="screen-grid">
-                <Panel title="Business Model" icon={<DatabaseZap />} state={businessModel}>
+                <Panel title="Modelo del producto" icon={<DatabaseZap />} state={businessModel}>
                   <Table columns={['area', 'count']} rows={[
                     ['areas', countOf(businessModel.data?.areas)],
                     ['roles', countOf(businessModel.data?.roles)],
@@ -354,30 +384,47 @@ export function App() {
                 </Panel>
               </div>
             )}
+            {route.screen === 'health' && (
+              <div className="screen-grid">
+                <Panel title="Health" icon={<ShieldCheck />} state={health}>
+                  <Table columns={['servicio', 'estado']} rows={[
+                    ['BFF', 'ok'],
+                    ['Plataforma IA', health.data?.companion ?? health.error ?? 'loading'],
+                    ['Nexus', health.data?.nexus ?? health.error ?? 'loading'],
+                  ]} />
+                </Panel>
+              </div>
+            )}
           </section>
         )}
 
-        {route.area === 'prompts' && (
+        {route.area === 'agents' && (
           <section className="page-section">
             <ScreenNav items={[
-              ['assist-packs', 'Assist Packs'],
-              ['agent-profiles', 'Agent Profiles']
-            ]} base="prompts" active={route.screen} onNavigate={navigate} />
-            {route.screen === 'assist-packs' && <AssistPackPromptsScreen orgId={orgId} productSurface={productSurface} />}
-            {route.screen === 'agent-profiles' && <AgentProfilePromptsScreen orgId={orgId} productSurface={productSurface} agents={agents.data} />}
-          </section>
-        )}
-
-        {route.area === 'operations' && (
-          <section className="page-section">
-            <ScreenNav items={[
-              ['billing-agent', 'Billing Agent'],
-              ['memory', 'Memory'],
-              ['jobs', 'Jobs'],
-              ['observability', 'Observability'],
-              ['cost', 'Cost'],
-              ['security', 'Security Evals']
-            ]} base="operations" active={route.screen} onNavigate={navigate} />
+              ['list', 'Agentes'],
+              ['billing-agent', 'Billing Agent']
+            ]} base="agents" active={route.screen} onNavigate={navigate} />
+            {route.screen === 'list' && (
+              <div className="screen-grid">
+                <Panel title="Agentes del producto" icon={<UsersRound />} state={agents}>
+                  <div className="panel-actions">
+                    <button type="button" disabled={!agents.data.some((item) => item.status === 'active')} onClick={() => {
+                      const agent = agents.data.find((item) => item.status === 'active')
+                      if (agent) void runAction('disable agent', () => axisFetch(`/api/companion/v1/agents/${encodeURIComponent(agent.agent_id)}/disable`, orgId, { method: 'POST', headers: { 'X-Product-Surface': productSurface }, body: '{}' }))
+                    }}>
+                      <Power aria-hidden="true" />Deshabilitar activo
+                    </button>
+                  </div>
+                  <Table columns={['agente', 'perfil', 'estado', 'autonomía', 'capabilities']} rows={agents.data.map((item) => [
+                    item.display_name || item.agent_id,
+                    item.profile_id || item.role || '-',
+                    item.status,
+                    item.max_autonomy,
+                    item.allowed_capabilities?.length ?? 0,
+                  ])} />
+                </Panel>
+              </div>
+            )}
             {route.screen === 'billing-agent' && (
               <div className="screen-grid">
                 <Panel title="Billing Agent" icon={<Bot />} state={billingAgentRuns}>
@@ -413,7 +460,7 @@ export function App() {
                       <Bot aria-hidden="true" />Ejecutar agente
                     </button>
                   </div>
-                  <Table columns={['recommendation', 'run type', 'task', 'tools', 'nexus', 'updated']} rows={billingAgentRuns.data.map((item) => [
+                  <Table columns={['recomendación', 'run type', 'task', 'tools', 'nexus', 'actualizado']} rows={billingAgentRuns.data.map((item) => [
                     item.recommendation || '-',
                     item.run_type || item.task?.run_type || '-',
                     short(item.task_id || item.id),
@@ -424,9 +471,57 @@ export function App() {
                 </Panel>
               </div>
             )}
+          </section>
+        )}
+
+        {route.area === 'prompts' && (
+          <section className="page-section">
+            <ScreenNav items={[
+              ['product', 'Prompts del producto'],
+              ['agents', 'Prompts de agentes']
+            ]} base="prompts" active={route.screen} onNavigate={navigate} />
+            {route.screen === 'product' && <AssistPackPromptsScreen orgId={orgId} productSurface={productSurface} />}
+            {route.screen === 'agents' && <AgentProfilePromptsScreen orgId={orgId} productSurface={productSurface} agents={agents.data} />}
+          </section>
+        )}
+
+        {route.area === 'operations' && (
+          <section className="page-section">
+            <ScreenNav items={[
+              ['runs', 'Corridas'],
+              ['traces', 'Trazas'],
+              ['memory', 'Memoria'],
+              ['jobs', 'Jobs'],
+              ['observability', 'Observabilidad'],
+              ['cost', 'Costos'],
+              ['security', 'Evals de seguridad']
+            ]} base="operations" active={route.screen} onNavigate={navigate} />
+            {route.screen === 'runs' && (
+              <div className="screen-grid two">
+                <Panel title="Corridas / tareas" icon={<Bot />} state={tasks}>
+                  <Table columns={['título', 'estado', 'agente', 'canal']} rows={tasks.data.map((item) => [item.title, item.status, item.agent_id ?? '-', item.channel ?? 'api'])} />
+                </Panel>
+                <Panel title="Corridas de Billing Agent" icon={<Bot />} state={billingAgentRuns}>
+                  <Table columns={['recomendación', 'run type', 'task', 'tools', 'nexus']} rows={billingAgentRuns.data.map((item) => [
+                    item.recommendation || '-',
+                    item.run_type || item.task?.run_type || '-',
+                    short(item.task_id || item.id),
+                    item.tool_calls?.length ?? 0,
+                    item.nexus_request_id ? short(item.nexus_request_id) : '-',
+                  ])} />
+                </Panel>
+              </div>
+            )}
+            {route.screen === 'traces' && (
+              <div className="screen-grid">
+                <Panel title="Trazas" icon={<Sparkles />} state={traces}>
+                  <Table columns={['producto', 'intent', 'estado', 'inicio']} rows={traces.data.map((item) => [item.product_surface ?? '-', item.intent ?? '-', item.status ?? '-', date(item.started_at)])} />
+                </Panel>
+              </div>
+            )}
             {route.screen === 'memory' && (
               <div className="screen-grid two">
-                <Panel title="Memory Review" icon={<DatabaseZap />} state={memoryConflicts}>
+                <Panel title="Revisión de memoria" icon={<DatabaseZap />} state={memoryConflicts}>
                   <div className="panel-actions">
                     <button type="button" disabled={!memoryReviews.data.length} onClick={() => {
                       const review = memoryReviews.data[0]
@@ -437,7 +532,7 @@ export function App() {
                   </div>
                   <Table columns={['key', 'kind', 'confidence', 'updated']} rows={memoryConflicts.data.map((item) => [item.key, item.kind, item.confidence.toFixed(2), date(item.updated_at)])} />
                 </Panel>
-                <Panel title="Memory Summaries" icon={<FileClock />} state={memorySummaries}>
+                <Panel title="Resúmenes de memoria" icon={<FileClock />} state={memorySummaries}>
                   <Table columns={['scope', 'type', 'version', 'sources']} rows={memorySummaries.data.map((item) => [`${item.scope_type}:${short(item.scope_id)}`, item.summary_type, item.version, item.source_count])} />
                 </Panel>
               </div>
@@ -451,14 +546,14 @@ export function App() {
             )}
             {route.screen === 'observability' && (
               <div className="screen-grid">
-                <Panel title="Observability" icon={<ListChecks />} state={events}>
+                <Panel title="Observabilidad" icon={<ListChecks />} state={events}>
                   <Table columns={['type', 'name', 'severity', 'time']} rows={events.data.map((item) => [item.event_type, item.event_name, item.severity, date(item.occurred_at)])} />
                 </Panel>
               </div>
             )}
             {route.screen === 'cost' && (
               <div className="screen-grid">
-                <Panel title="Cost" icon={<DatabaseZap />} state={costs}>
+                <Panel title="Costos" icon={<DatabaseZap />} state={costs}>
                   <Table columns={['metric', 'value']} rows={[
                     ['period', costs.data?.period ?? '-'],
                     ['tokens', costs.data?.estimated_tokens ?? 0],
@@ -471,7 +566,7 @@ export function App() {
             )}
             {route.screen === 'security' && (
               <div className="screen-grid">
-                <Panel title="Security Evals" icon={<ShieldCheck />} state={securityReports}>
+                <Panel title="Evals de seguridad" icon={<ShieldCheck />} state={securityReports}>
                   <div className="panel-actions">
                     <button type="button" onClick={() => void runAction('security eval', () => axisFetch('/api/companion/v1/security-evals/runs', orgId, { method: 'POST', headers: { 'X-Product-Surface': productSurface }, body: JSON.stringify({ suite: 'security-adversarial', product_surface: productSurface }) }))}>
                       <Play aria-hidden="true" />Run suite
@@ -500,47 +595,79 @@ function parseCurrentRoute(): Route {
 function parseRoutePath(path: string): Route {
   const raw = path.replace(/^\/+/, '').replace(/\/+$/, '').trim()
   if (raw === '') {
-    return { area: 'prompts', screen: 'assist-packs' }
+    return { area: 'home', screen: 'summary' }
   }
   const [areaRaw, screenRaw] = raw.split('/')
-  const area = isRouteArea(areaRaw) ? areaRaw : 'overview'
+  const area = normalizeRouteArea(areaRaw)
   const screens: Record<RouteArea, string[]> = {
-    overview: ['summary'],
-    nexus: ['approvals', 'requests', 'policies', 'risk'],
-    companion: ['tasks', 'control', 'agents', 'capabilities', 'traces', 'business'],
-    prompts: ['assist-packs', 'agent-profiles'],
-    operations: ['billing-agent', 'memory', 'jobs', 'observability', 'cost', 'security'],
-    access: ['action-types', 'delegations']
+    home: ['summary'],
+    products: ['list'],
+    prompts: ['product', 'agents'],
+    chat: ['workspace'],
+    agents: ['list', 'billing-agent'],
+    operations: ['runs', 'traces', 'memory', 'jobs', 'observability', 'cost', 'security'],
+    nexus: ['approvals', 'requests', 'policies', 'action-types', 'delegations', 'risk'],
+    platform: ['runtime', 'capabilities', 'business', 'health']
   }
-  const screen = screens[area].includes(screenRaw) ? screenRaw : screens[area][0]
+  const normalizedScreen = normalizeRouteScreen(area, screenRaw)
+  const screen = screens[area].includes(normalizedScreen) ? normalizedScreen : screens[area][0]
   return { area, screen }
 }
 
-function isRouteArea(value: string): value is RouteArea {
-  return value === 'overview' || value === 'nexus' || value === 'companion' || value === 'prompts' || value === 'operations' || value === 'access'
+function normalizeRouteArea(value: string): RouteArea {
+  if (value === 'overview') return 'home'
+  if (value === 'companion') return 'platform'
+  if (value === 'access') return 'nexus'
+  if (value === 'home' || value === 'products' || value === 'chat' || value === 'prompts' || value === 'agents' || value === 'operations' || value === 'nexus' || value === 'platform') {
+    return value
+  }
+  return 'home'
+}
+
+function normalizeRouteScreen(area: RouteArea, value: string | undefined) {
+  if (!value) return ''
+  if (area === 'prompts' && value === 'assist-packs') return 'product'
+  if (area === 'prompts' && value === 'agent-profiles') return 'agents'
+  if (area === 'platform' && value === 'control') return 'runtime'
+  if (area === 'platform' && value === 'tasks') return 'runtime'
+  if (area === 'operations' && value === 'billing-agent') return 'runs'
+  if (area === 'agents' && value === 'billing_agent') return 'billing-agent'
+  return value
 }
 
 function routePath(route: Route) {
-  if (route.area === 'overview') {
-    return '/overview'
+  if (route.area === 'home') {
+    return '/home'
+  }
+  if (route.area === 'products') {
+    return '/products'
+  }
+  if (route.area === 'chat') {
+    return '/chat'
   }
   return `/${route.area}/${route.screen}`
 }
 
 function pageTitle(route: Route) {
   switch (route.area) {
+    case 'home':
+      return 'Inicio'
+    case 'products':
+      return 'Productos / Clientes'
+    case 'chat':
+      return 'Chat'
     case 'nexus':
       return 'Nexus'
-    case 'companion':
-      return 'Companion'
+    case 'agents':
+      return 'Agentes'
+    case 'platform':
+      return 'Plataforma IA'
     case 'prompts':
       return 'Prompts'
     case 'operations':
-      return 'Operations'
-    case 'access':
-      return 'Access'
+      return 'Operación'
     default:
-      return 'Axis Overview'
+      return 'Inicio'
   }
 }
 
@@ -596,7 +723,7 @@ function Panel<T>(props: { title: string; icon: ReactNode; state: LoadState<T>; 
 
 function Table(props: { columns: string[]; rows: Array<Array<string | number>> }) {
   if (props.rows.length === 0) {
-    return <div className="empty">No data</div>
+    return <div className="empty">Sin datos para este producto</div>
   }
   return (
     <div className="table-wrap">
@@ -612,6 +739,27 @@ function Table(props: { columns: string[]; rows: Array<Array<string | number>> }
           ))}
         </tbody>
       </table>
+    </div>
+  )
+}
+
+function ProductList(props: { options: ProductOption[]; selected: string; onSelect: (productSurface: string) => void }) {
+  return (
+    <div className="product-list">
+      {props.options.map((option) => (
+        <button
+          key={option.productSurface}
+          type="button"
+          className={option.productSurface === props.selected ? 'active' : ''}
+          onClick={() => props.onSelect(option.productSurface)}
+        >
+          <span>
+            <strong>{option.label}</strong>
+            <small>{option.productSurface}</small>
+          </span>
+          <em>{option.status}</em>
+        </button>
+      ))}
     </div>
   )
 }
@@ -675,4 +823,54 @@ function buildProductOptions(products: Product[], installations: ProductInstalla
       status,
     }
   })
+}
+
+function axisChatAdapter(orgId: string, productSurface: string): ChatAdapter {
+  return {
+    sendMessage: async (input: ChatRequest) => {
+      const payload = {
+        message: input.message,
+        chat_id: input.chatId ?? null,
+        task_id: input.taskId ?? null,
+        agent_id: input.agentId || undefined,
+        product_surface: productSurface,
+        route_hint: input.routeHint || undefined,
+        confirmed_actions: input.confirmedActions ?? [],
+        workspace: input.workspace ?? { org_id: orgId, product_surface: productSurface },
+      }
+      const response = await axisFetch<Record<string, unknown>>('/api/companion/v1/chat', orgId, {
+        method: 'POST',
+        headers: { 'X-Product-Surface': productSurface },
+        body: JSON.stringify(payload),
+      })
+      return {
+        chatId: stringField(response, 'chat_id') ?? stringField(response, 'chatId') ?? undefined,
+        taskId: stringField(response, 'task_id') ?? stringField(response, 'taskId') ?? undefined,
+        runId: stringField(response, 'run_id') ?? stringField(response, 'runId') ?? undefined,
+        agentId: stringField(response, 'agent_id') ?? stringField(response, 'agentId') ?? undefined,
+        reply: stringField(response, 'reply') ?? '',
+        blocks: arrayField(response, 'blocks'),
+        toolCalls: arrayField(response, 'tool_calls') ?? arrayField(response, 'toolCalls'),
+        pendingConfirmations: arrayField(response, 'pending_confirmations') ?? arrayField(response, 'pendingConfirmations'),
+      }
+    },
+    listConversations: async (limit = 30) => axisFetch<{ items: ChatConversationSummary[] }>(
+      withProduct(`/api/companion/v1/chat/conversations?limit=${encodeURIComponent(String(limit))}`, productSurface),
+      orgId,
+      productHeaders(productSurface),
+    ),
+    getConversation: async (id: string) => axisFetch<ChatConversationDetail>(
+      withProduct(`/api/companion/v1/chat/conversations/${encodeURIComponent(id)}`, productSurface),
+      orgId,
+      productHeaders(productSurface),
+    ),
+  }
+}
+
+function stringField(value: Record<string, unknown>, key: string) {
+  return typeof value[key] === 'string' ? value[key] as string : null
+}
+
+function arrayField(value: Record<string, unknown>, key: string) {
+  return Array.isArray(value[key]) ? value[key] as unknown[] : undefined
 }
