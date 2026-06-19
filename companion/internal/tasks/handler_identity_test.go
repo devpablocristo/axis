@@ -90,6 +90,84 @@ func TestChatUsesRequestedOrgWithCrossOrgScope(t *testing.T) {
 	}
 }
 
+func TestAgentRunCreatesOperationalTaskWithoutChatRoute(t *testing.T) {
+	t.Parallel()
+
+	repo := &fakeRepo{}
+	uc := NewUsecases(repo, &stubNexus{})
+	mux := http.NewServeMux()
+	NewHandler(uc).Register(mux)
+
+	req := authenticatedTaskRequest(http.MethodPost, "/v1/agent-runs?org_id=org-b", `{"agent_id":"billing_agent","product_surface":"medmory","run_type":"billing.plan_request.review","input":{"case_id":"billing_case_123"}}`, &authn.Principal{
+		OrgID:  "org-a",
+		Actor:  "axis-admin",
+		Scopes: []string{scopeCompanionTasksWrite, scopeCompanionCrossOrg},
+		Claims: map[string]any{
+			"actor_id":   "axis-admin",
+			"actor_type": "service",
+		},
+	})
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+	task := onlyStoredTask(t, repo)
+	if task.Channel != "agent_run" || task.OrgID != "org-b" {
+		t.Fatalf("unexpected agent run task: %#v", task)
+	}
+	if !strings.Contains(string(task.ContextJSON), `"agent_id":"billing_agent"`) || !strings.Contains(string(task.ContextJSON), `"product_surface":"medmory"`) || !strings.Contains(string(task.ContextJSON), `"run_type":"billing.plan_request.review"`) {
+		t.Fatalf("agent run context missing metadata: %s", task.ContextJSON)
+	}
+}
+
+func TestAgentRunListFiltersByAgentAndProduct(t *testing.T) {
+	t.Parallel()
+
+	runTaskID := uuid.New()
+	otherTaskID := uuid.New()
+	repo := &fakeRepo{tasks: map[uuid.UUID]domain.Task{
+		runTaskID: {
+			ID:          runTaskID,
+			OrgID:       "org-a",
+			Title:       "billing run",
+			Status:      domain.TaskStatusNew,
+			CreatedBy:   "axis-admin",
+			Channel:     "agent_run",
+			ContextJSON: json.RawMessage(`{"agent_id":"billing_agent","product_surface":"medmory","run_type":"billing.plan_requests.scan"}`),
+		},
+		otherTaskID: {
+			ID:          otherTaskID,
+			OrgID:       "org-a",
+			Title:       "other run",
+			Status:      domain.TaskStatusNew,
+			CreatedBy:   "axis-admin",
+			Channel:     "agent_run",
+			ContextJSON: json.RawMessage(`{"agent_id":"support_agent","product_surface":"ponti","run_type":"support.case.review"}`),
+		},
+	}}
+	mux := http.NewServeMux()
+	NewHandler(NewUsecases(repo, &stubNexus{})).Register(mux)
+
+	req := authenticatedTaskRequest(http.MethodGet, "/v1/agent-runs?agent_id=billing_agent&product_surface=medmory", "", &authn.Principal{
+		OrgID:  "org-a",
+		Actor:  "axis-admin",
+		Scopes: []string{scopeCompanionTasksRead},
+		Claims: map[string]any{
+			"actor_id":   "axis-admin",
+			"actor_type": "service",
+		},
+	})
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "billing.plan_requests.scan") || strings.Contains(rec.Body.String(), "support.case.review") {
+		t.Fatalf("unexpected agent run list: %s", rec.Body.String())
+	}
+}
+
 func TestChatAcceptsChatIDAndReturnsTaskID(t *testing.T) {
 	t.Parallel()
 
@@ -450,6 +528,12 @@ func authenticatedTaskRequest(method, target, body string, principal *authn.Prin
 
 func onlyTask(t *testing.T, repo *fakeRepo) domainTaskView {
 	t.Helper()
+	task := onlyStoredTask(t, repo)
+	return domainTaskView{OrgID: task.OrgID, CreatedBy: task.CreatedBy}
+}
+
+func onlyStoredTask(t *testing.T, repo *fakeRepo) domain.Task {
+	t.Helper()
 	if len(repo.tasks) != 1 {
 		t.Fatalf("expected one task, got %d", len(repo.tasks))
 	}
@@ -457,10 +541,10 @@ func onlyTask(t *testing.T, repo *fakeRepo) domainTaskView {
 		if task.ID == uuid.Nil {
 			t.Fatal("task id was not assigned")
 		}
-		return domainTaskView{OrgID: task.OrgID, CreatedBy: task.CreatedBy}
+		return task
 	}
 	t.Fatal("unreachable")
-	return domainTaskView{}
+	return domain.Task{}
 }
 
 type domainTaskView struct {

@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 DC := docker compose --project-directory $(CURDIR) -f $(CURDIR)/docker-compose.yml
 
-.PHONY: test test-companion test-nexus test-bff test-console \
+.PHONY: test test-companion test-nexus test-bff test-console billing-agent-scan \
 	qa qa-companion qa-nexus check-companion check-nexus hygiene \
 	smoke smoke-companion smoke-nexus e2e-nexus e2e-nexus-policy-promotion acceptance-nexus \
 	dev-apis dev-companion dev-nexus \
@@ -45,6 +45,9 @@ test-bff:
 
 test-console:
 	cd console && npm run typecheck && npm run build
+
+billing-agent-scan:
+	cd companion && bash scripts/ops/run-billing-agent-scan.sh
 
 smoke: smoke-nexus smoke-companion
 

@@ -1,7 +1,7 @@
 import { Activity, Bot, CheckCircle2, DatabaseZap, FileClock, FileText, GitPullRequestArrow, KeyRound, Layers3, ListChecks, Play, Power, RefreshCw, ShieldCheck, Sparkles, UsersRound } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ActionType, Approval, AxisSession, BusinessModel, CapabilityRecord, CompanionAgent, CompanionJob, CompanionTask, CostSummary, Delegation, MemoryConflict, MemoryReview, MemorySummary, NexusRequest, ObservabilityEvent, Policy, Product, ProductInstallation, RunTrace, RuntimePolicy, SecurityEvalReport, ServiceHealth, axisFetch, getHealth, getSession } from './api'
+import { ActionType, AgentRun, Approval, AxisSession, BusinessModel, CapabilityRecord, CompanionAgent, CompanionJob, CompanionTask, CostSummary, Delegation, MemoryConflict, MemoryReview, MemorySummary, NexusRequest, ObservabilityEvent, Policy, Product, ProductInstallation, RunTrace, RuntimePolicy, SecurityEvalReport, ServiceHealth, axisFetch, getHealth, getSession } from './api'
 import { AgentProfilePromptsScreen, AssistPackPromptsScreen } from './PromptScreens'
 
 type LoadState<T> = {
@@ -50,6 +50,7 @@ export function App() {
   const [actionTypes, setActionTypes] = useState<LoadState<ActionType[]>>(empty([]))
   const [delegations, setDelegations] = useState<LoadState<Delegation[]>>(empty([]))
   const [tasks, setTasks] = useState<LoadState<CompanionTask[]>>(empty([]))
+  const [billingAgentRuns, setBillingAgentRuns] = useState<LoadState<AgentRun[]>>(empty([]))
   const [traces, setTraces] = useState<LoadState<RunTrace[]>>(empty([]))
   const [runtimePolicy, setRuntimePolicy] = useState<LoadState<RuntimePolicy | null>>(empty(null))
   const [agents, setAgents] = useState<LoadState<CompanionAgent[]>>(empty([]))
@@ -63,6 +64,7 @@ export function App() {
   const [securityReports, setSecurityReports] = useState<LoadState<SecurityEvalReport[]>>(empty([]))
   const [businessModel, setBusinessModel] = useState<LoadState<BusinessModel | null>>(empty(null))
   const [actionMessage, setActionMessage] = useState('')
+  const [billingCaseId, setBillingCaseId] = useState('')
 
   const refresh = useCallback(async () => {
     localStorage.setItem('axis.org_id', orgId)
@@ -79,6 +81,7 @@ export function App() {
       load(setActionTypes, async () => (await axisFetch<{ data: ActionType[] }>('/api/nexus/v1/action-types', orgId)).data ?? [], []),
       load(setDelegations, async () => (await axisFetch<{ data: Delegation[] }>('/api/nexus/v1/delegations', orgId)).data ?? [], []),
       load(setTasks, async () => filterByProduct((await axisFetch<{ data: CompanionTask[] }>(withProduct('/api/companion/v1/tasks?limit=12', productSurface), orgId, productInit)).data ?? [], productSurface), []),
+      load(setBillingAgentRuns, async () => filterByProduct((await axisFetch<{ data: AgentRun[] }>(withProduct('/api/companion/v1/agent-runs?agent_id=billing_agent&limit=20', productSurface), orgId, productInit)).data ?? [], productSurface), []),
       load(setTraces, async () => filterByProduct((await axisFetch<{ traces: RunTrace[] }>(withProduct('/api/companion/v1/run-traces?limit=12', productSurface), orgId, productInit)).traces ?? [], productSurface), []),
       load(setRuntimePolicy, () => axisFetch<RuntimePolicy>('/api/companion/v1/runtime/policy', orgId, productInit), null),
       load(setAgents, async () => filterByProduct((await axisFetch<{ data: CompanionAgent[] }>(withProduct('/api/companion/v1/agents', productSurface), orgId, productInit)).data ?? [], productSurface), []),
@@ -148,7 +151,7 @@ export function App() {
           <button type="button" className={route.area === 'nexus' ? 'active' : ''} onClick={() => navigate({ area: 'nexus', screen: 'approvals' })}><GitPullRequestArrow aria-hidden="true" />Nexus</button>
           <button type="button" className={route.area === 'companion' ? 'active' : ''} onClick={() => navigate({ area: 'companion', screen: 'tasks' })}><Bot aria-hidden="true" />Companion</button>
           <button type="button" className={route.area === 'prompts' ? 'active' : ''} onClick={() => navigate({ area: 'prompts', screen: 'assist-packs' })}><FileText aria-hidden="true" />Prompts</button>
-          <button type="button" className={route.area === 'operations' ? 'active' : ''} onClick={() => navigate({ area: 'operations', screen: 'memory' })}><Activity aria-hidden="true" />Ops</button>
+          <button type="button" className={route.area === 'operations' ? 'active' : ''} onClick={() => navigate({ area: 'operations', screen: 'billing-agent' })}><Activity aria-hidden="true" />Ops</button>
           <button type="button" className={route.area === 'access' ? 'active' : ''} onClick={() => navigate({ area: 'access', screen: 'action-types' })}><KeyRound aria-hidden="true" />Access</button>
         </nav>
       </aside>
@@ -368,12 +371,59 @@ export function App() {
         {route.area === 'operations' && (
           <section className="page-section">
             <ScreenNav items={[
+              ['billing-agent', 'Billing Agent'],
               ['memory', 'Memory'],
               ['jobs', 'Jobs'],
               ['observability', 'Observability'],
               ['cost', 'Cost'],
               ['security', 'Security Evals']
             ]} base="operations" active={route.screen} onNavigate={navigate} />
+            {route.screen === 'billing-agent' && (
+              <div className="screen-grid">
+                <Panel title="Billing Agent" icon={<Bot />} state={billingAgentRuns}>
+                  <div className="panel-actions">
+                    <button type="button" onClick={() => void runAction('billing scan', () => axisFetch('/api/companion/v1/agent-runs', orgId, {
+                      method: 'POST',
+                      headers: { 'X-Product-Surface': productSurface },
+                      body: JSON.stringify({
+                        agent_id: 'billing_agent',
+                        product_surface: productSurface,
+                        run_type: 'billing.plan_requests.scan',
+                        input: {}
+                      })
+                    }))}>
+                      <Play aria-hidden="true" />Analizar pendientes
+                    </button>
+                    <input
+                      aria-label="Billing case id"
+                      placeholder="billing_case_..."
+                      value={billingCaseId}
+                      onChange={(event) => setBillingCaseId(event.target.value)}
+                    />
+                    <button type="button" disabled={!billingCaseId.trim()} onClick={() => void runAction('billing case', () => axisFetch('/api/companion/v1/agent-runs', orgId, {
+                      method: 'POST',
+                      headers: { 'X-Product-Surface': productSurface },
+                      body: JSON.stringify({
+                        agent_id: 'billing_agent',
+                        product_surface: productSurface,
+                        run_type: 'billing.plan_request.review',
+                        input: { case_id: billingCaseId.trim() }
+                      })
+                    }))}>
+                      <Bot aria-hidden="true" />Ejecutar agente
+                    </button>
+                  </div>
+                  <Table columns={['recommendation', 'run type', 'task', 'tools', 'nexus', 'updated']} rows={billingAgentRuns.data.map((item) => [
+                    item.recommendation || '-',
+                    item.run_type || item.task?.run_type || '-',
+                    short(item.task_id || item.id),
+                    item.tool_calls?.length ?? 0,
+                    item.nexus_request_id ? short(item.nexus_request_id) : '-',
+                    date(item.updated_at ?? item.task?.updated_at)
+                  ])} />
+                </Panel>
+              </div>
+            )}
             {route.screen === 'memory' && (
               <div className="screen-grid two">
                 <Panel title="Memory Review" icon={<DatabaseZap />} state={memoryConflicts}>
@@ -459,7 +509,7 @@ function parseRoutePath(path: string): Route {
     nexus: ['approvals', 'requests', 'policies', 'risk'],
     companion: ['tasks', 'control', 'agents', 'capabilities', 'traces', 'business'],
     prompts: ['assist-packs', 'agent-profiles'],
-    operations: ['memory', 'jobs', 'observability', 'cost', 'security'],
+    operations: ['billing-agent', 'memory', 'jobs', 'observability', 'cost', 'security'],
     access: ['action-types', 'delegations']
   }
   const screen = screens[area].includes(screenRaw) ? screenRaw : screens[area][0]

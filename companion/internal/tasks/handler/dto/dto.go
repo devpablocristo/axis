@@ -26,6 +26,9 @@ type CreateTaskRequest struct {
 type TaskResponse struct {
 	ID                 string          `json:"id"`
 	OrgID              string          `json:"org_id,omitempty"`
+	ProductSurface     string          `json:"product_surface,omitempty"`
+	AgentID            string          `json:"agent_id,omitempty"`
+	RunType            string          `json:"run_type,omitempty"`
 	Title              string          `json:"title"`
 	Goal               string          `json:"goal"`
 	Status             string          `json:"status"`
@@ -218,6 +221,33 @@ type PendingConfirmationResponse struct {
 	Message   string `json:"message,omitempty"`
 }
 
+type AgentRunRequest struct {
+	AgentID        string          `json:"agent_id"`
+	ProductSurface string          `json:"product_surface,omitempty"`
+	RunType        string          `json:"run_type"`
+	Input          json.RawMessage `json:"input,omitempty"`
+	Message        string          `json:"message,omitempty"`
+}
+
+type AgentRunResponse struct {
+	ID              string                 `json:"id"`
+	TaskID          string                 `json:"task_id"`
+	AxisRunID       string                 `json:"axis_run_id,omitempty"`
+	AgentID         string                 `json:"agent_id"`
+	ProductSurface  string                 `json:"product_surface,omitempty"`
+	RunType         string                 `json:"run_type,omitempty"`
+	Recommendation  string                 `json:"recommendation,omitempty"`
+	Summary         string                 `json:"summary,omitempty"`
+	Evidence        []map[string]any       `json:"evidence,omitempty"`
+	ProposedActions []map[string]any       `json:"proposed_actions,omitempty"`
+	NexusRequestID  string                 `json:"nexus_request_id,omitempty"`
+	Reply           string                 `json:"reply,omitempty"`
+	ToolCalls       []ChatToolCallResponse `json:"tool_calls,omitempty"`
+	Task            TaskResponse           `json:"task"`
+	CreatedAt       string                 `json:"created_at,omitempty"`
+	UpdatedAt       string                 `json:"updated_at,omitempty"`
+}
+
 type InvestigateRequest struct {
 	Note string `json:"note,omitempty"`
 }
@@ -335,6 +365,9 @@ func TaskToResponse(t domain.Task) TaskResponse {
 	return TaskResponse{
 		ID:                 t.ID.String(),
 		OrgID:              t.OrgID,
+		ProductSurface:     contextString(t.ContextJSON, "product_surface"),
+		AgentID:            contextString(t.ContextJSON, "agent_id"),
+		RunType:            contextString(t.ContextJSON, "run_type"),
 		Title:              t.Title,
 		Goal:               t.Goal,
 		Status:             t.Status,
@@ -409,6 +442,33 @@ func ChatResponseFromRuntimeResult(task domain.Task, messages []domain.TaskMessa
 	return resp
 }
 
+func AgentRunResponseFromRuntimeResult(task domain.Task, messages []domain.TaskMessage, runID, agentID string, toolCalls []ChatToolCallResponse) AgentRunResponse {
+	resp := AgentRunResponseFromTask(task)
+	resp.AxisRunID = strings.TrimSpace(runID)
+	if agentID = strings.TrimSpace(agentID); agentID != "" {
+		resp.AgentID = agentID
+	}
+	resp.ToolCalls = toolCalls
+	resp.Reply = lastAssistantReply(messages)
+	applyAgentRunParsedResult(&resp, resp.Reply, toolCalls)
+	return resp
+}
+
+func AgentRunResponseFromTask(task domain.Task) AgentRunResponse {
+	taskResp := TaskToResponse(task)
+	resp := AgentRunResponse{
+		ID:             task.ID.String(),
+		TaskID:         task.ID.String(),
+		AgentID:        taskResp.AgentID,
+		ProductSurface: taskResp.ProductSurface,
+		RunType:        taskResp.RunType,
+		Task:           taskResp,
+		CreatedAt:      task.CreatedAt.UTC().Format(time.RFC3339),
+		UpdatedAt:      task.UpdatedAt.UTC().Format(time.RFC3339),
+	}
+	return resp
+}
+
 func pendingConfirmationsFromToolCalls(toolCalls []ChatToolCallResponse) []PendingConfirmationResponse {
 	out := make([]PendingConfirmationResponse, 0)
 	for _, call := range toolCalls {
@@ -434,6 +494,75 @@ func pendingConfirmationsFromToolCalls(toolCalls []ChatToolCallResponse) []Pendi
 		})
 	}
 	return out
+}
+
+func applyAgentRunParsedResult(resp *AgentRunResponse, reply string, toolCalls []ChatToolCallResponse) {
+	reply = strings.TrimSpace(reply)
+	if reply != "" {
+		var parsed struct {
+			Recommendation  string           `json:"recommendation"`
+			Summary         string           `json:"summary"`
+			Evidence        []map[string]any `json:"evidence"`
+			ProposedActions []map[string]any `json:"proposedActions"`
+			NexusRequestID  string           `json:"nexusRequestId"`
+		}
+		if err := json.Unmarshal([]byte(reply), &parsed); err == nil {
+			resp.Recommendation = strings.TrimSpace(parsed.Recommendation)
+			resp.Summary = strings.TrimSpace(parsed.Summary)
+			resp.Evidence = parsed.Evidence
+			resp.ProposedActions = parsed.ProposedActions
+			resp.NexusRequestID = strings.TrimSpace(parsed.NexusRequestID)
+		}
+		if resp.Summary == "" {
+			resp.Summary = reply
+		}
+		for _, value := range []string{"payment_required", "paid_confirmed", "manual_review", "inconsistent_state"} {
+			if resp.Recommendation == "" && strings.Contains(strings.ToLower(reply), value) {
+				resp.Recommendation = value
+				break
+			}
+		}
+	}
+	if resp.NexusRequestID != "" {
+		return
+	}
+	for _, call := range toolCalls {
+		if len(call.Result) == 0 {
+			continue
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(call.Result, &payload); err != nil {
+			continue
+		}
+		for _, key := range []string{"nexus_request_id", "nexusRequestId", "request_id", "requestId"} {
+			if value, ok := payload[key].(string); ok && strings.TrimSpace(value) != "" {
+				resp.NexusRequestID = strings.TrimSpace(value)
+				return
+			}
+		}
+	}
+}
+
+func lastAssistantReply(messages []domain.TaskMessage) string {
+	for i := len(messages) - 1; i >= 0; i-- {
+		role := strings.TrimSpace(strings.ToLower(messages[i].AuthorType))
+		if role == "assistant" || role == "system" {
+			return messages[i].Body
+		}
+	}
+	return ""
+}
+
+func contextString(raw json.RawMessage, key string) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var holder map[string]any
+	if err := json.Unmarshal(raw, &holder); err != nil {
+		return ""
+	}
+	value, _ := holder[key].(string)
+	return strings.TrimSpace(value)
 }
 
 // extractChatID lee task.context_json.agent_conversation_id (poblado en

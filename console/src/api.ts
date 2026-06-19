@@ -83,10 +83,31 @@ export type CompanionTask = {
   id: string
   org_id?: string
   product_surface?: string
+  agent_id?: string
+  run_type?: string
   title: string
   status: string
   priority?: string
   channel?: string
+  updated_at?: string
+}
+
+export type AgentRun = {
+  id: string
+  task_id: string
+  axis_run_id?: string
+  agent_id: string
+  product_surface?: string
+  run_type?: string
+  recommendation?: string
+  summary?: string
+  evidence?: Array<Record<string, unknown>>
+  proposed_actions?: Array<Record<string, unknown>>
+  nexus_request_id?: string
+  reply?: string
+  tool_calls?: Array<{ name: string; status?: string; allowed?: boolean; error?: string }>
+  task?: CompanionTask
+  created_at?: string
   updated_at?: string
 }
 

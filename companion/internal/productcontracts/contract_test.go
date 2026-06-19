@@ -96,7 +96,7 @@ func TestMedmoryContractUsesGenericBillingAgent(t *testing.T) {
 			t.Fatalf("billing_agent must not include clinical capability %q: %+v", forbidden, billingAgent.AllowedCapabilities)
 		}
 	}
-	for _, required := range []string{"medmory.ops.billing_status.read", "medmory.ops.billing_metrics.read", "medmory.ops.plan_requests.read", "medmory.ops.subscription_status.read", "medmory.ops.billing_adjustment.propose"} {
+	for _, required := range []string{"medmory.ops.billing_status.read", "medmory.ops.billing_metrics.read", "medmory.ops.billing_cases.list", "medmory.ops.billing_case.read", "medmory.ops.plan_requests.read", "medmory.ops.subscription_status.read", "medmory.ops.billing_adjustment.propose"} {
 		if !contains(required, billingAgent.AllowedCapabilities) {
 			t.Fatalf("billing_agent missing required capability %q: %+v", required, billingAgent.AllowedCapabilities)
 		}

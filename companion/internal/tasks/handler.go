@@ -70,6 +70,8 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/tasks/{id}/retry", h.retry)
 	mux.HandleFunc("POST /v1/tasks/{id}/sync", h.syncNexus)
 	mux.HandleFunc("POST /v1/chat", h.chat)
+	mux.HandleFunc("POST /v1/agent-runs", h.createAgentRun)
+	mux.HandleFunc("GET /v1/agent-runs", h.listAgentRuns)
 	mux.HandleFunc("POST /v1/customer-messaging/inbound", h.customerMessagingInbound)
 }
 
@@ -743,6 +745,113 @@ func (h *Handler) chat(w http.ResponseWriter, r *http.Request) {
 	httpjson.WriteJSON(w, http.StatusOK, tasksdto.ChatResponseFromRuntimeResult(result.Task, result.Messages, result.RunID, result.AgentID, chatToolCallsToResponse(result.ToolCalls)))
 }
 
+func (h *Handler) createAgentRun(w http.ResponseWriter, r *http.Request) {
+	if !requireScope(w, r, scopeCompanionTasksWrite) {
+		return
+	}
+	var body tasksdto.AgentRunRequest
+	if err := httpjson.DecodeJSON(r, &body); err != nil {
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid json")
+		return
+	}
+	body.AgentID = strings.TrimSpace(body.AgentID)
+	body.ProductSurface = strings.TrimSpace(body.ProductSurface)
+	body.RunType = strings.TrimSpace(body.RunType)
+	if body.AgentID == "" {
+		body.AgentID = "billing_agent"
+	}
+	if body.ProductSurface == "" {
+		body.ProductSurface = strings.TrimSpace(r.URL.Query().Get("product_surface"))
+	}
+	if body.ProductSurface == "" {
+		body.ProductSurface = "medmory"
+	}
+	if body.RunType == "" {
+		body.RunType = "billing.plan_request.review"
+	}
+	if len(body.Input) == 0 || string(body.Input) == "null" {
+		body.Input = json.RawMessage(`{}`)
+	}
+	identity, ok := identityctx.WorkIdentityForOrg(r, r.URL.Query().Get("org_id"), scopeCompanionCrossOrg)
+	if !ok {
+		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "customer org context required")
+		return
+	}
+	identity = identity.WithProductSurface(body.ProductSurface)
+	message := strings.TrimSpace(body.Message)
+	if message == "" {
+		message = defaultAgentRunMessage(body)
+	}
+	workspace := marshalOrEmpty("agent_run_workspace", map[string]any{
+		"agent_run": map[string]any{
+			"agent_id":        body.AgentID,
+			"product_surface": body.ProductSurface,
+			"run_type":        body.RunType,
+			"input":           rawJSONToAny(body.Input),
+		},
+	})
+	result, err := h.uc.Chat(r.Context(), ChatInput{
+		UserID:         identity.EffectiveActorID(),
+		OrgID:          identity.CustomerOrgID,
+		AuthScopes:     identity.Scopes,
+		Message:        message,
+		RouteHint:      body.RunType,
+		Workspace:      workspace,
+		Channel:        "agent_run",
+		ProductSurface: identity.ProductSurface,
+		AgentID:        body.AgentID,
+		Identity:       identity,
+	})
+	if err != nil {
+		httpjson.WriteFlatInternalError(w, err, "agent run failed")
+		return
+	}
+	httpjson.WriteJSON(w, http.StatusCreated, tasksdto.AgentRunResponseFromRuntimeResult(result.Task, result.Messages, result.RunID, result.AgentID, chatToolCallsToResponse(result.ToolCalls)))
+}
+
+func (h *Handler) listAgentRuns(w http.ResponseWriter, r *http.Request) {
+	if !requireScope(w, r, scopeCompanionTasksRead) {
+		return
+	}
+	limit := queryLimit(r, defaultListLimit, maxListLimit)
+	agentID := strings.TrimSpace(r.URL.Query().Get("agent_id"))
+	productSurface := strings.TrimSpace(r.URL.Query().Get("product_surface"))
+	var (
+		list []domain.Task
+		err  error
+	)
+	switch {
+	case identityctx.HasNoAuthContext(r), identityctx.HasScope(r, scopeCompanionCrossOrg):
+		list, err = h.uc.ListAll(r.Context(), limit)
+	default:
+		orgID := tenant.FromString(principalOrgID(r))
+		if orgID.IsZero() {
+			httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "customer org context required")
+			return
+		}
+		list, err = h.uc.List(r.Context(), orgID, limit)
+	}
+	if err != nil {
+		httpjson.WriteFlatInternalError(w, err, "list agent runs failed")
+		return
+	}
+	out := make([]tasksdto.AgentRunResponse, 0, len(list))
+	for _, t := range list {
+		if !canAccessTaskOrg(r, t) || strings.TrimSpace(t.Channel) != "agent_run" {
+			continue
+		}
+		resp := tasksdto.AgentRunResponseFromTask(t)
+		if agentID != "" && resp.AgentID != agentID {
+			continue
+		}
+		if productSurface != "" && resp.ProductSurface != productSurface {
+			continue
+		}
+		out = append(out, resp)
+	}
+	httpjson.WriteJSON(w, http.StatusOK, map[string]any{"data": out})
+}
+
 func chatToolCallsToResponse(calls []OrchestratorToolCall) []tasksdto.ChatToolCallResponse {
 	out := make([]tasksdto.ChatToolCallResponse, 0, len(calls))
 	for _, call := range calls {
@@ -763,6 +872,24 @@ func chatToolCallsToResponse(calls []OrchestratorToolCall) []tasksdto.ChatToolCa
 			Status:         status,
 			Result:         call.Result,
 		})
+	}
+	return out
+}
+
+func defaultAgentRunMessage(body tasksdto.AgentRunRequest) string {
+	return "Run " + body.AgentID + " for " + body.RunType + ". Use only allowed billing operations capabilities. " +
+		"Return JSON with recommendation, summary, evidence and proposedActions. " +
+		"Never approve or apply plan changes; payment confirmed by Medmory is the only normal entitlement path. " +
+		"Input: " + string(body.Input)
+}
+
+func rawJSONToAny(raw json.RawMessage) any {
+	var out any
+	if len(raw) == 0 || json.Unmarshal(raw, &out) != nil {
+		return map[string]any{}
+	}
+	if out == nil {
+		return map[string]any{}
 	}
 	return out
 }

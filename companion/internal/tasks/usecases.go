@@ -441,6 +441,9 @@ func (u *Usecases) Chat(ctx context.Context, in ChatInput) (ChatResult, error) {
 				contextJSON = updated
 			}
 		}
+		if updated, ok := mergeTaskRuntimeContext(contextJSON, in.ProductSurface, in.RouteHint, channel); ok {
+			contextJSON = updated
+		}
 		t, err = u.repo.CreateTask(ctx, domain.Task{
 			Title:       title,
 			OrgID:       in.OrgID,
@@ -670,6 +673,37 @@ func mergeTaskAgentID(raw json.RawMessage, agentID string) (json.RawMessage, boo
 		}
 	}
 	holder[agentContextKey] = agentID
+	out, err := json.Marshal(holder)
+	if err != nil {
+		return nil, false
+	}
+	return out, true
+}
+
+func mergeTaskRuntimeContext(raw json.RawMessage, productSurface, routeHint, channel string) (json.RawMessage, bool) {
+	holder := map[string]any{}
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &holder); err != nil {
+			holder = map[string]any{}
+		}
+	}
+	changed := false
+	if value := strings.TrimSpace(productSurface); value != "" {
+		holder["product_surface"] = value
+		changed = true
+	}
+	if value := strings.TrimSpace(routeHint); value != "" {
+		holder["route_hint"] = value
+		holder["run_type"] = value
+		changed = true
+	}
+	if value := strings.TrimSpace(channel); value != "" {
+		holder["channel"] = value
+		changed = true
+	}
+	if !changed {
+		return raw, false
+	}
 	out, err := json.Marshal(holder)
 	if err != nil {
 		return nil, false
