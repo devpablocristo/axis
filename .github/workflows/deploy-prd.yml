@@ -65,7 +65,7 @@ jobs:
       bff: ${{ steps.resolve.outputs.bff }}
       console: ${{ steps.resolve.outputs.console }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref }}
       - id: resolve
@@ -115,7 +115,7 @@ jobs:
     needs: prepare
     if: needs.prepare.outputs.nexus == 'true'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.ref }}
       - uses: google-github-actions/auth@v3
@@ -153,7 +153,7 @@ jobs:
     needs: [prepare, nexus]
     if: always() && needs.prepare.outputs.companion == 'true' && (needs.nexus.result == 'success' || needs.nexus.result == 'skipped')
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.ref }}
       - uses: google-github-actions/auth@v3
@@ -196,7 +196,7 @@ jobs:
     needs: [prepare, nexus, companion]
     if: always() && needs.prepare.outputs.bff == 'true' && (needs.nexus.result == 'success' || needs.nexus.result == 'skipped') && (needs.companion.result == 'success' || needs.companion.result == 'skipped')
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.ref }}
       - uses: google-github-actions/auth@v3
@@ -241,7 +241,7 @@ jobs:
     needs: [prepare, bff]
     if: always() && needs.prepare.outputs.console == 'true' && (needs.bff.result == 'success' || needs.bff.result == 'skipped')
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.ref }}
       - uses: google-github-actions/auth@v3
