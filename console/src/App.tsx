@@ -3,7 +3,8 @@ import { ChatWorkspace, type ChatAdapter, type ChatConversationDetail, type Chat
 import '@devpablocristo/platform-chat-ui/styles.css'
 import type { ReactNode } from 'react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ActionType, AgentRun, Approval, AxisSession, BusinessModel, CapabilityRecord, CompanionAgent, CompanionJob, CompanionTask, CostSummary, Delegation, MemoryConflict, MemoryReview, MemorySummary, NexusRequest, ObservabilityEvent, Policy, Product, ProductInstallation, RunTrace, RuntimePolicy, SecurityEvalReport, ServiceHealth, axisFetch, getHealth, getSession } from './api'
+import { ActionType, AgentRun, Approval, AxisOrg, AxisSession, BusinessModel, CapabilityRecord, CompanionAgent, CompanionJob, CompanionTask, CostSummary, Delegation, MemoryConflict, MemoryReview, MemorySummary, NexusRequest, ObservabilityEvent, Policy, Product, ProductInstallation, RunTrace, RuntimePolicy, SecurityEvalReport, ServiceHealth, axisFetch, getHealth, getSession, listAxisOrgs } from './api'
+import { AgentControlCenter } from './AgentControlCenter'
 import { AgentProfilePromptsScreen, AssistPackPromptsScreen } from './PromptScreens'
 
 type LoadState<T> = {
@@ -12,7 +13,7 @@ type LoadState<T> = {
   loading: boolean
 }
 
-type RouteArea = 'home' | 'products' | 'chat' | 'prompts' | 'agents' | 'operations' | 'nexus' | 'platform'
+type RouteArea = 'home' | 'products' | 'chat' | 'prompts' | 'agents' | 'agent-control' | 'operations' | 'nexus' | 'platform'
 
 type Route = {
   area: RouteArea
@@ -38,11 +39,12 @@ type ProductOption = {
   status: string
 }
 
-export function App() {
+export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
   const [orgId, setOrgId] = useState(localStorage.getItem('axis.org_id') || 'local-dev-org')
   const [productSurface, setProductSurface] = useState(localStorage.getItem('axis.product_surface') || 'medmory')
   const [route, setRoute] = useState<Route>(() => parseCurrentRoute())
   const [session, setSession] = useState<LoadState<AxisSession | null>>(empty(null))
+  const [axisOrgs, setAxisOrgs] = useState<LoadState<AxisOrg[]>>(empty([]))
   const [health, setHealth] = useState<LoadState<ServiceHealth | null>>(empty(null))
   const [products, setProducts] = useState<LoadState<Product[]>>(empty([]))
   const [installations, setInstallations] = useState<LoadState<ProductInstallation[]>>(empty([]))
@@ -74,6 +76,7 @@ export function App() {
     const productInit = productHeaders(productSurface)
     await Promise.all([
       load(setSession, () => getSession(orgId), null),
+      load(setAxisOrgs, () => listAxisOrgs(orgId), []),
       load(setHealth, () => getHealth(), null),
       load(setProducts, async () => (await axisFetch<{ products: Product[] }>('/api/companion/v1/products', orgId, productInit)).products ?? [], []),
       load(setInstallations, async () => (await axisFetch<{ installations: ProductInstallation[] }>(`/api/companion/v1/product-installations?org_id=${encodeURIComponent(orgId)}`, orgId, productInit)).installations ?? [], []),
@@ -131,6 +134,11 @@ export function App() {
   }, [requests.data])
 
   const productOptions = useMemo(() => buildProductOptions(products.data, installations.data), [products.data, installations.data])
+  const orgOptions = useMemo(() => {
+    if (axisOrgs.data.length > 0) return axisOrgs.data
+    if (session.data?.orgs?.length) return session.data.orgs
+    return [{ id: orgId, name: orgId, slug: orgId, status: 'active', created_at: '', updated_at: '' }]
+  }, [axisOrgs.data, orgId, session.data?.orgs])
   const selectedProductOption = productOptions.find((item) => item.productSurface === productSurface)
   const title = pageTitle(route)
   const chatAdapter = useMemo<ChatAdapter>(() => axisChatAdapter(orgId, productSurface), [orgId, productSurface])
@@ -155,6 +163,7 @@ export function App() {
           <button type="button" className={route.area === 'chat' ? 'active' : ''} onClick={() => navigate({ area: 'chat', screen: 'workspace' })}><MessageSquareText aria-hidden="true" />Chat</button>
           <button type="button" className={route.area === 'prompts' ? 'active' : ''} onClick={() => navigate({ area: 'prompts', screen: 'product' })}><FileText aria-hidden="true" />Prompts</button>
           <button type="button" className={route.area === 'agents' ? 'active' : ''} onClick={() => navigate({ area: 'agents', screen: 'list' })}><Bot aria-hidden="true" />Agentes</button>
+          <button type="button" className={route.area === 'agent-control' ? 'active' : ''} onClick={() => navigate({ area: 'agent-control', screen: 'inventory' })}><UsersRound aria-hidden="true" />Control Agentes</button>
           <button type="button" className={route.area === 'operations' ? 'active' : ''} onClick={() => navigate({ area: 'operations', screen: 'runs' })}><Activity aria-hidden="true" />Operación</button>
           <button type="button" className={route.area === 'nexus' ? 'active' : ''} onClick={() => navigate({ area: 'nexus', screen: 'approvals' })}><GitPullRequestArrow aria-hidden="true" />Nexus</button>
           <button type="button" className={route.area === 'platform' ? 'active' : ''} onClick={() => navigate({ area: 'platform', screen: 'runtime' })}><KeyRound aria-hidden="true" />Plataforma</button>
@@ -170,7 +179,13 @@ export function App() {
           <div className="toolbar">
             <label>
               <span>Org</span>
-              <input value={orgId} onChange={(event) => setOrgId(event.target.value)} />
+              <select value={orgId} onChange={(event) => setOrgId(event.target.value)}>
+                {orgOptions.map((org) => (
+                  <option key={org.id} value={org.id}>
+                    {org.name || org.id} · {org.status}
+                  </option>
+                ))}
+              </select>
             </label>
             <label>
               <span>Producto / Cliente</span>
@@ -185,6 +200,7 @@ export function App() {
             <button type="button" onClick={() => void refresh()} aria-label="Refresh">
               <RefreshCw aria-hidden="true" />
             </button>
+            {authSlot && <div className="auth-slot">{authSlot}</div>}
           </div>
         </header>
 
@@ -474,6 +490,8 @@ export function App() {
           </section>
         )}
 
+        {route.area === 'agent-control' && <AgentControlCenter />}
+
         {route.area === 'prompts' && (
           <section className="page-section">
             <ScreenNav items={[
@@ -605,6 +623,7 @@ function parseRoutePath(path: string): Route {
     prompts: ['product', 'agents'],
     chat: ['workspace'],
     agents: ['list', 'billing-agent'],
+    'agent-control': ['inventory'],
     operations: ['runs', 'traces', 'memory', 'jobs', 'observability', 'cost', 'security'],
     nexus: ['approvals', 'requests', 'policies', 'action-types', 'delegations', 'risk'],
     platform: ['runtime', 'capabilities', 'business', 'health']
@@ -618,7 +637,7 @@ function normalizeRouteArea(value: string): RouteArea {
   if (value === 'overview') return 'home'
   if (value === 'companion') return 'platform'
   if (value === 'access') return 'nexus'
-  if (value === 'home' || value === 'products' || value === 'chat' || value === 'prompts' || value === 'agents' || value === 'operations' || value === 'nexus' || value === 'platform') {
+  if (value === 'home' || value === 'products' || value === 'chat' || value === 'prompts' || value === 'agents' || value === 'agent-control' || value === 'operations' || value === 'nexus' || value === 'platform') {
     return value
   }
   return 'home'
@@ -660,6 +679,8 @@ function pageTitle(route: Route) {
       return 'Nexus'
     case 'agents':
       return 'Agentes'
+    case 'agent-control':
+      return 'Control Agentes'
     case 'platform':
       return 'Plataforma IA'
     case 'prompts':

@@ -1,9 +1,22 @@
 export type AxisSession = {
   actor_id: string
   org_id: string
+  orgs?: AxisOrg[]
   role: string
   scopes: string[]
   auth_method: string
+}
+
+export type AxisOrg = {
+  id: string
+  external_id?: string
+  provider?: string
+  provider_org_id?: string
+  name: string
+  slug: string
+  status: string
+  created_at: string
+  updated_at: string
 }
 
 export type ServiceHealth = {
@@ -266,6 +279,14 @@ export type BusinessModel = {
   vocabulary?: Record<string, string>
 }
 
+type AxisAuthTokenGetter = () => string | null | undefined | Promise<string | null | undefined>
+
+let axisAuthTokenGetter: AxisAuthTokenGetter | null = null
+
+export function setAxisAuthTokenGetter(getter: AxisAuthTokenGetter | null) {
+  axisAuthTokenGetter = getter
+}
+
 export async function axisFetch<T>(path: string, orgId: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers)
   headers.set('Accept', 'application/json')
@@ -274,6 +295,10 @@ export async function axisFetch<T>(path: string, orgId: string, init: RequestIni
   }
   if (orgId) {
     headers.set('X-Axis-Org-ID', orgId)
+  }
+  const token = await resolveAxisAuthToken()
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`)
   }
   const response = await fetch(path, { ...init, headers })
   const text = await response.text()
@@ -285,8 +310,21 @@ export async function axisFetch<T>(path: string, orgId: string, init: RequestIni
   return payload as T
 }
 
+async function resolveAxisAuthToken(): Promise<string> {
+  if (!axisAuthTokenGetter) {
+    return ''
+  }
+  const token = await axisAuthTokenGetter()
+  return typeof token === 'string' ? token : ''
+}
+
 export async function getSession(orgId: string): Promise<AxisSession> {
   return axisFetch<AxisSession>('/api/session', orgId)
+}
+
+export async function listAxisOrgs(orgId: string): Promise<AxisOrg[]> {
+  const payload = await axisFetch<{ orgs: AxisOrg[] }>('/api/orgs', orgId)
+  return payload.orgs ?? []
 }
 
 export async function getHealth(): Promise<ServiceHealth> {

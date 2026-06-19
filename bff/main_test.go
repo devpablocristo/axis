@@ -1,10 +1,14 @@
 package main
 
 import (
+	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -196,6 +200,120 @@ func TestSessionReturnsSelectedOrgForCrossOrgPrincipal(t *testing.T) {
 	}
 }
 
+func TestControlPlaneListsDevOrg(t *testing.T) {
+	srv, err := newTestServer("http://127.0.0.1:1", defaultAdminScopes())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/orgs", nil)
+	rec := httptest.NewRecorder()
+	srv.routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Orgs []IAMOrg `json:"orgs"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Orgs) == 0 || body.Orgs[0].ID != "org-a" {
+		t.Fatalf("expected seeded dev org, got %#v", body.Orgs)
+	}
+}
+
+func TestControlPlaneCreatesOrgWithOwnerMembership(t *testing.T) {
+	srv, err := newTestServer("http://127.0.0.1:1", defaultAdminScopes())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/orgs", strings.NewReader(`{"name":"Acme Corp","slug":"acme"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var created struct {
+		Org IAMOrg `json:"org"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if created.Org.ID == "" || created.Org.Slug != "acme" {
+		t.Fatalf("expected created org with slug acme, got %#v", created.Org)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/orgs/"+created.Org.ID+"/members", nil)
+	rec = httptest.NewRecorder()
+	srv.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var members struct {
+		Members []IAMMember `json:"members"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &members); err != nil {
+		t.Fatal(err)
+	}
+	if len(members.Members) != 1 || members.Members[0].UserID != "user-a" || members.Members[0].Role != "owner" {
+		t.Fatalf("expected owner membership for user-a, got %#v", members.Members)
+	}
+}
+
+func TestClerkWebhookRequiresSecretInClerkMode(t *testing.T) {
+	srv, err := newTestServer("http://127.0.0.1:1", defaultAdminScopes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.cfg.AuthMode = "clerk"
+
+	req := httptest.NewRequest(http.MethodPost, "/api/webhooks/clerk", strings.NewReader(`{"type":"user.created","data":{}}`))
+	rec := httptest.NewRecorder()
+	srv.routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestClerkWebhookVerifiesSignatureAndCreatesUser(t *testing.T) {
+	srv, err := newTestServer("http://127.0.0.1:1", defaultAdminScopes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret := "whsec_" + base64.StdEncoding.EncodeToString([]byte("webhook-secret"))
+	srv.cfg.ClerkWebhookSecret = secret
+	body := []byte(`{"type":"user.created","data":{"id":"user_clerk","email_addresses":[{"email_address":"clerk@example.com"}]}}`)
+	msgID := "msg_123"
+	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/webhooks/clerk", strings.NewReader(string(body)))
+	req.Header.Set(clerkWebhookHeaderID, msgID)
+	req.Header.Set(clerkWebhookHeaderTimestamp, timestamp)
+	req.Header.Set(clerkWebhookHeaderSignature, signClerkWebhook(t, secret, msgID, timestamp, body))
+	rec := httptest.NewRecorder()
+	srv.routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	users, err := srv.iam.ListUsers(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, user := range users {
+		if user.ID == "user_clerk" && user.Email == "clerk@example.com" && user.Provider == "clerk" {
+			return
+		}
+	}
+	t.Fatalf("expected synced Clerk user, got %#v", users)
+}
+
 func TestDefaultAdminScopesIncludePromptManagement(t *testing.T) {
 	scopes := make(map[string]bool)
 	for _, scope := range defaultAdminScopes() {
@@ -247,4 +365,16 @@ func decodeClaims(t *testing.T, token string) map[string]any {
 		t.Fatal(err)
 	}
 	return claims
+}
+
+func signClerkWebhook(t *testing.T, secret, msgID, timestamp string, body []byte) string {
+	t.Helper()
+	key, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(secret, clerkWebhookSecretPrefix))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mac := hmac.New(sha256.New, key)
+	_, _ = mac.Write([]byte(msgID + "." + timestamp + "."))
+	_, _ = mac.Write(body)
+	return clerkWebhookSignatureScheme + "," + base64.StdEncoding.EncodeToString(mac.Sum(nil))
 }

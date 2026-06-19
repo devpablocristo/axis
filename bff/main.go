@@ -27,28 +27,31 @@ const (
 )
 
 type config struct {
-	Addr              string
-	AuthMode          string
-	AuthIssuerURL     string
-	AuthAudience      string
-	DevOrgID          string
-	DevUserID         string
-	DevScopes         []string
-	InternalJWTSecret string
-	InternalJWTIssuer string
-	CompanionBaseURL  string
-	CompanionAudience string
-	NexusBaseURL      string
-	NexusAudience     string
-	AllowedOrigin     string
-	DownstreamTimeout time.Duration
-	ReadHeaderTimeout time.Duration
+	Addr               string
+	AuthMode           string
+	AuthIssuerURL      string
+	AuthAudience       string
+	ClerkWebhookSecret string
+	ControlDatabaseURL string
+	DevOrgID           string
+	DevUserID          string
+	DevScopes          []string
+	InternalJWTSecret  string
+	InternalJWTIssuer  string
+	CompanionBaseURL   string
+	CompanionAudience  string
+	NexusBaseURL       string
+	NexusAudience      string
+	AllowedOrigin      string
+	DownstreamTimeout  time.Duration
+	ReadHeaderTimeout  time.Duration
 }
 
 type server struct {
 	cfg      config
 	oidcAuth authn.Authenticator
 	client   *http.Client
+	iam      IAMStore
 }
 
 func main() {
@@ -72,22 +75,24 @@ func loadConfig() config {
 		addr = ":" + addr
 	}
 	return config{
-		Addr:              addr,
-		AuthMode:          strings.ToLower(env("AXIS_BFF_AUTH_MODE", "dev")),
-		AuthIssuerURL:     env("AXIS_AUTH_ISSUER_URL", ""),
-		AuthAudience:      env("AXIS_AUTH_AUDIENCE", ""),
-		DevOrgID:          env("AXIS_DEV_ORG_ID", defaultDevOrgID),
-		DevUserID:         env("AXIS_DEV_USER_ID", defaultDevUserID),
-		DevScopes:         splitScopes(env("AXIS_DEV_SCOPES", strings.Join(defaultAdminScopes(), " "))),
-		InternalJWTSecret: env("AXIS_INTERNAL_JWT_SECRET", "axis-dev-internal-jwt-secret-change-me"),
-		InternalJWTIssuer: env("AXIS_INTERNAL_JWT_ISSUER", defaultInternalIssuer),
-		CompanionBaseURL:  env("COMPANION_BASE_URL", "http://localhost:18085"),
-		CompanionAudience: env("AXIS_COMPANION_AUDIENCE", "companion"),
-		NexusBaseURL:      env("NEXUS_BASE_URL", "http://localhost:18084"),
-		NexusAudience:     env("AXIS_NEXUS_AUDIENCE", "nexus"),
-		AllowedOrigin:     env("AXIS_ALLOWED_ORIGIN", ""),
-		DownstreamTimeout: durationEnv("AXIS_DOWNSTREAM_TIMEOUT", 10*time.Second),
-		ReadHeaderTimeout: durationEnv("AXIS_READ_HEADER_TIMEOUT", 5*time.Second),
+		Addr:               addr,
+		AuthMode:           strings.ToLower(env("AXIS_BFF_AUTH_MODE", "dev")),
+		AuthIssuerURL:      env("AXIS_AUTH_ISSUER_URL", ""),
+		AuthAudience:       env("AXIS_AUTH_AUDIENCE", ""),
+		ClerkWebhookSecret: env("AXIS_CLERK_WEBHOOK_SECRET", ""),
+		ControlDatabaseURL: env("AXIS_CONTROL_DATABASE_URL", ""),
+		DevOrgID:           env("AXIS_DEV_ORG_ID", defaultDevOrgID),
+		DevUserID:          env("AXIS_DEV_USER_ID", defaultDevUserID),
+		DevScopes:          splitScopes(env("AXIS_DEV_SCOPES", strings.Join(defaultAdminScopes(), " "))),
+		InternalJWTSecret:  env("AXIS_INTERNAL_JWT_SECRET", "axis-dev-internal-jwt-secret-change-me"),
+		InternalJWTIssuer:  env("AXIS_INTERNAL_JWT_ISSUER", defaultInternalIssuer),
+		CompanionBaseURL:   env("COMPANION_BASE_URL", "http://localhost:18085"),
+		CompanionAudience:  env("AXIS_COMPANION_AUDIENCE", "companion"),
+		NexusBaseURL:       env("NEXUS_BASE_URL", "http://localhost:18084"),
+		NexusAudience:      env("AXIS_NEXUS_AUDIENCE", "nexus"),
+		AllowedOrigin:      env("AXIS_ALLOWED_ORIGIN", ""),
+		DownstreamTimeout:  durationEnv("AXIS_DOWNSTREAM_TIMEOUT", 10*time.Second),
+		ReadHeaderTimeout:  durationEnv("AXIS_READ_HEADER_TIMEOUT", 5*time.Second),
 	}
 }
 
@@ -101,10 +106,15 @@ func newServer(cfg config) (*server, error) {
 			Timeout: cfg.DownstreamTimeout,
 		},
 	}
-	if cfg.AuthMode == "oidc" {
+	iam, err := newIAMStore(context.Background(), cfg)
+	if err != nil {
+		return nil, err
+	}
+	s.iam = iam
+	if cfg.AuthMode == "oidc" || cfg.AuthMode == "clerk" {
 		issuer := strings.TrimRight(strings.TrimSpace(cfg.AuthIssuerURL), "/")
 		if issuer == "" {
-			return nil, errors.New("AXIS_AUTH_ISSUER_URL is required when AXIS_BFF_AUTH_MODE=oidc")
+			return nil, errors.New("AXIS_AUTH_ISSUER_URL is required when AXIS_BFF_AUTH_MODE=oidc|clerk")
 		}
 		expectedAudience := strings.TrimSpace(cfg.AuthAudience)
 		s.oidcAuth = &authn.BearerJWTAuthenticator{
@@ -128,7 +138,7 @@ func newServer(cfg config) (*server, error) {
 					Role:       firstClaim(claims, "role"),
 					Scopes:     claimScopes(claims),
 					Claims:     claims,
-					AuthMethod: "oidc",
+					AuthMethod: cfg.AuthMode,
 				}, nil
 			},
 		}
@@ -144,6 +154,12 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("GET /readyz", s.ready)
 	mux.Handle("GET /api/session", s.withAuth(http.HandlerFunc(s.session)))
 	mux.Handle("GET /api/services", s.withAuth(http.HandlerFunc(s.services)))
+	mux.Handle("/api/orgs", s.withAuth(http.HandlerFunc(s.orgs)))
+	mux.Handle("/api/orgs/", s.withAuth(http.HandlerFunc(s.orgs)))
+	mux.Handle("/api/users", s.withAuth(http.HandlerFunc(s.users)))
+	mux.Handle("/api/users/", s.withAuth(http.HandlerFunc(s.users)))
+	mux.Handle("/api/org-invitations/", s.withAuth(http.HandlerFunc(s.orgInvitations)))
+	mux.HandleFunc("POST /api/webhooks/clerk", s.clerkWebhook)
 	mux.Handle("/api/companion/", s.withAuth(s.proxy("companion", "/api/companion", s.cfg.CompanionBaseURL, s.cfg.CompanionAudience)))
 	mux.Handle("/api/nexus/", s.withAuth(s.proxy("nexus", "/api/nexus", s.cfg.NexusBaseURL, s.cfg.NexusAudience)))
 	return s.securityHeaders(mux)
@@ -202,9 +218,11 @@ func (s *server) session(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "FORBIDDEN", err.Error())
 		return
 	}
+	orgs, _ := s.iam.ListOrgsForActor(r.Context(), p.Actor, hasScope(p.Scopes, "axis:cross_org"))
 	writeJSON(w, http.StatusOK, map[string]any{
 		"actor_id":    p.Actor,
 		"org_id":      orgID,
+		"orgs":        orgs,
 		"role":        p.Role,
 		"scopes":      p.Scopes,
 		"auth_method": p.AuthMethod,
@@ -280,6 +298,12 @@ func (s *server) proxy(name, prefix, target, audience string) http.Handler {
 func (s *server) selectedOrg(r *http.Request, p authn.Principal) (string, error) {
 	requested := strings.TrimSpace(r.Header.Get("X-Axis-Org-ID"))
 	principalOrg := strings.TrimSpace(p.OrgID)
+	if principalOrg == "" && requested == "" {
+		orgs, err := s.iam.ListOrgsForActor(r.Context(), p.Actor, hasScope(p.Scopes, "axis:cross_org"))
+		if err == nil && len(orgs) > 0 {
+			requested = orgs[0].ID
+		}
+	}
 	if requested == "" {
 		requested = principalOrg
 	}
@@ -290,6 +314,9 @@ func (s *server) selectedOrg(r *http.Request, p authn.Principal) (string, error)
 		return requested, nil
 	}
 	if hasScope(p.Scopes, "axis:cross_org", "nexus:cross_org", "companion:cross_org") {
+		return requested, nil
+	}
+	if ok, err := s.iam.ActorCanAccessOrg(r.Context(), p.Actor, requested); err == nil && ok {
 		return requested, nil
 	}
 	return "", errors.New("selected org is not allowed for this principal")
@@ -423,6 +450,12 @@ func requestID(r *http.Request) string {
 func defaultAdminScopes() []string {
 	return []string{
 		"axis:cross_org",
+		"axis:orgs:read",
+		"axis:orgs:write",
+		"axis:orgs:admin",
+		"axis:users:read",
+		"axis:users:write",
+		"axis:users:admin",
 		"companion:cross_org",
 		"companion:runtime:admin",
 		"companion:tasks:read",

@@ -6,6 +6,8 @@ COPY console/package*.json ./
 RUN npm ci
 
 COPY console/ ./
+ARG VITE_CLERK_PUBLISHABLE_KEY=
+ENV VITE_CLERK_PUBLISHABLE_KEY=${VITE_CLERK_PUBLISHABLE_KEY}
 RUN npm run build
 
 FROM nginx:1.31-alpine

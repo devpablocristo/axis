@@ -33,6 +33,23 @@ services:
       timeout: 3s
       retries: 30
 
+  axis-control-postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: axis_control
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "${AXIS_CONTROL_POSTGRES_PORT:-15436}:5432"
+    volumes:
+      - axis-control-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d axis_control"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
   nexus:
     build:
       context: .
@@ -150,6 +167,7 @@ services:
     environment:
       PORT: "8080"
       AXIS_BFF_AUTH_MODE: "${AXIS_BFF_AUTH_MODE:-dev}"
+      AXIS_CONTROL_DATABASE_URL: "postgres://postgres:postgres@axis-control-postgres:5432/axis_control?sslmode=disable"
       AXIS_DEV_ORG_ID: "${AXIS_DEV_ORG_ID:-local-dev-org}"
       AXIS_DEV_USER_ID: "${AXIS_DEV_USER_ID:-local-dev-admin}"
       AXIS_DEV_SCOPES: "${AXIS_DEV_SCOPES:-}"
@@ -157,6 +175,7 @@ services:
       AXIS_INTERNAL_JWT_ISSUER: "${AXIS_INTERNAL_JWT_ISSUER:-axis-bff}"
       AXIS_AUTH_ISSUER_URL: "${AXIS_AUTH_ISSUER_URL:-}"
       AXIS_AUTH_AUDIENCE: "${AXIS_AUTH_AUDIENCE:-}"
+      AXIS_CLERK_WEBHOOK_SECRET: "${AXIS_CLERK_WEBHOOK_SECRET:-}"
       AXIS_COMPANION_AUDIENCE: "${AXIS_COMPANION_AUDIENCE:-companion}"
       AXIS_NEXUS_AUDIENCE: "${AXIS_NEXUS_AUDIENCE:-nexus}"
       AXIS_ALLOWED_ORIGIN: "${AXIS_ALLOWED_ORIGIN:-}"
@@ -167,6 +186,8 @@ services:
     ports:
       - "${AXIS_BFF_PORT:-18080}:8080"
     depends_on:
+      axis-control-postgres:
+        condition: service_healthy
       companion:
         condition: service_healthy
       nexus:
@@ -176,6 +197,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.console
+      args:
+        VITE_CLERK_PUBLISHABLE_KEY: "${VITE_CLERK_PUBLISHABLE_KEY:-}"
     restart: unless-stopped
     environment:
       AXIS_BFF_BASE_URL: "http://bff:8080"
@@ -186,6 +209,7 @@ services:
         condition: service_started
 
 volumes:
+  axis-control-postgres-data:
   companion-postgres-data:
   nexus-postgres-data:
 
