@@ -108,6 +108,7 @@ type IAMAgent struct {
 	SourceStatus         string         `json:"source_status,omitempty"`
 	OriginKind           string         `json:"origin_kind,omitempty"`
 	ReviewStatus         string         `json:"review_status,omitempty"`
+	ValidationStatus     string         `json:"validation_status,omitempty"`
 	Metadata             map[string]any `json:"metadata,omitempty"`
 	LastSyncedAt         *time.Time     `json:"last_synced_at,omitempty"`
 	CreatedAt            time.Time      `json:"created_at"`

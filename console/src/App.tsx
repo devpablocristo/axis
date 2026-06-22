@@ -4,7 +4,6 @@ import '@devpablocristo/platform-chat-ui/styles.css'
 import type { ReactNode } from 'react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ActionType, AgentRun, Approval, AxisOrg, AxisSession, BusinessModel, CapabilityRecord, CompanionAgent, CompanionJob, CompanionTask, CostSummary, Delegation, MemoryConflict, MemoryReview, MemorySummary, NexusRequest, ObservabilityEvent, Policy, Product, ProductInstallation, RunTrace, RuntimePolicy, SecurityEvalReport, ServiceHealth, axisFetch, getHealth, getSession, listAxisOrgs } from './api'
-import { AgentControlCenter } from './AgentControlCenter'
 import { AgentsControlCenter } from './AgentsControlCenter'
 import { IAMControlCenter } from './IAMControlCenter'
 import { AgentProfilePromptsScreen, AssistPackPromptsScreen } from './PromptScreens'
@@ -15,7 +14,7 @@ type LoadState<T> = {
   loading: boolean
 }
 
-type RouteArea = 'home' | 'chat' | 'prompts' | 'agents' | 'agent-control' | 'iam' | 'operations' | 'nexus' | 'platform'
+type RouteArea = 'home' | 'chat' | 'prompts' | 'agents' | 'iam' | 'operations' | 'nexus' | 'platform'
 
 type Route = {
   area: RouteArea
@@ -221,7 +220,6 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
           <button type="button" className={route.area === 'chat' ? 'active' : ''} onClick={() => navigate({ area: 'chat', screen: 'workspace' })}><MessageSquareText aria-hidden="true" />Chat</button>
           <button type="button" className={route.area === 'prompts' ? 'active' : ''} onClick={() => navigate({ area: 'prompts', screen: 'product' })}><FileText aria-hidden="true" />Prompts</button>
           <button type="button" className={route.area === 'agents' ? 'active' : ''} onClick={() => navigate({ area: 'agents', screen: 'list' })}><Bot aria-hidden="true" />Agentes</button>
-          <button type="button" className={route.area === 'agent-control' ? 'active' : ''} onClick={() => navigate({ area: 'agent-control', screen: 'inventory' })}><UsersRound aria-hidden="true" />Control Agentes</button>
           {canViewIAM && <button type="button" className={route.area === 'iam' ? 'active' : ''} onClick={() => navigate({ area: 'iam', screen: 'internal' })}><KeyRound aria-hidden="true" />IAM</button>}
           <button type="button" className={route.area === 'operations' ? 'active' : ''} onClick={() => navigate({ area: 'operations', screen: 'runs' })}><Activity aria-hidden="true" />Operación</button>
           <button type="button" className={route.area === 'nexus' ? 'active' : ''} onClick={() => navigate({ area: 'nexus', screen: 'approvals' })}><GitPullRequestArrow aria-hidden="true" />Nexus</button>
@@ -486,8 +484,6 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
           <AgentsControlCenter orgId={orgId} />
         )}
 
-        {route.area === 'agent-control' && <AgentControlCenter />}
-
         {route.area === 'iam' && canViewIAM && (
           <IAMControlCenter
             orgId={orgId}
@@ -631,7 +627,6 @@ function parseRoutePath(path: string): Route {
     prompts: ['product', 'agents'],
     chat: ['workspace'],
     agents: ['list'],
-    'agent-control': ['inventory'],
     iam: ['internal', 'clients', 'users'],
     operations: ['runs', 'traces', 'memory', 'jobs', 'observability', 'cost', 'security'],
     nexus: ['approvals', 'requests', 'policies', 'action-types', 'delegations', 'risk'],
@@ -646,7 +641,7 @@ function normalizeRouteArea(value: string): RouteArea {
   if (value === 'overview') return 'home'
   if (value === 'companion') return 'platform'
   if (value === 'access') return 'nexus'
-  if (value === 'home' || value === 'chat' || value === 'prompts' || value === 'agents' || value === 'agent-control' || value === 'iam' || value === 'operations' || value === 'nexus' || value === 'platform') {
+  if (value === 'home' || value === 'chat' || value === 'prompts' || value === 'agents' || value === 'iam' || value === 'operations' || value === 'nexus' || value === 'platform') {
     return value
   }
   return 'home'
@@ -684,8 +679,6 @@ function pageTitle(route: Route) {
       return 'Nexus'
     case 'agents':
       return 'Agentes'
-    case 'agent-control':
-      return 'Control Agentes'
     case 'iam':
       return 'IAM'
     case 'platform':

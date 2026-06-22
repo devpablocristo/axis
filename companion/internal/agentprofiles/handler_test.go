@@ -17,7 +17,7 @@ func TestHandlerPutProfileDefaultsEnabled(t *testing.T) {
 
 	mux := http.NewServeMux()
 	NewHandler(NewUsecases(newFakeRepo())).Register(mux)
-	body := bytes.NewBufferString(`{"name":"Billing Agent","system_prompt":"Handle billing.","max_autonomy":"A1"}`)
+	body := bytes.NewBufferString(`{"family_id":"axis.ops.billing","version_label":"v1","name":"Billing Agent","system_prompt":"Handle billing.","max_autonomy":"A1"}`)
 	req := httptest.NewRequest(http.MethodPut, "/v1/agent-profiles/axis.ops.billing.v1", body)
 	req = withProfilePrincipal(req, []string{"companion:agent_profiles:admin"})
 	res := httptest.NewRecorder()
@@ -35,7 +35,7 @@ func TestHandlerPutProfileDefaultsEnabled(t *testing.T) {
 		t.Fatalf("expected default enabled profile, got %+v", profile)
 	}
 	if profile.FamilyID != "axis.ops.billing" || profile.VersionLabel != "v1" {
-		t.Fatalf("expected derived family/version, got %+v", profile)
+		t.Fatalf("expected family/version, got %+v", profile)
 	}
 }
 

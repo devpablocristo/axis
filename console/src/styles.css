@@ -1111,7 +1111,8 @@ tbody tr:hover {
   accent-color: var(--axis-primary);
 }
 
-.agent-review-cell {
+.agent-review-cell,
+.agent-validation-cell {
   align-items: flex-start;
   display: flex;
   flex-direction: column;
@@ -1119,13 +1120,15 @@ tbody tr:hover {
   min-width: 8.5rem;
 }
 
-.agent-review-cell__actions {
+.agent-review-cell__actions,
+.agent-validation-cell__actions {
   display: flex;
   flex-wrap: wrap;
   gap: 0.4rem;
 }
 
-.agent-review-cell button {
+.agent-review-cell button,
+.agent-validation-cell button {
   background: #ffffff;
   border: 1px solid var(--axis-border);
   border-radius: 6px;
@@ -1137,19 +1140,29 @@ tbody tr:hover {
   padding: 0.35rem 0.55rem;
 }
 
-.agent-review-cell button:hover:not(:disabled) {
+.agent-review-cell button:hover:not(:disabled),
+.agent-validation-cell button:hover:not(:disabled) {
   border-color: var(--axis-primary);
   color: var(--axis-primary);
 }
 
-.agent-review-cell button:disabled {
+.agent-review-cell button:disabled,
+.agent-validation-cell button:disabled {
   color: var(--axis-muted);
   cursor: not-allowed;
   opacity: 0.65;
 }
 
+.agent-validation-cell--muted {
+  color: var(--axis-muted);
+}
+
 .iam-control--external-lifecycle .crud-page-shell__header-actions > .actions-row > .actions-row > button:nth-child(4),
 .iam-control--external-lifecycle .crud-page-shell__header-actions > .actions-row > .actions-row > button:nth-last-child(-n + 2) {
+  display: none;
+}
+
+.agent-profiles-crud .crud-page-shell__header-actions > .actions-row > .actions-row > button:nth-last-child(-n + 3) {
   display: none;
 }
 

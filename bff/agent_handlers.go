@@ -109,7 +109,11 @@ func (s *server) agentsAPI(w http.ResponseWriter, r *http.Request) {
 			agentID = "agent"
 		}
 		agentID = agentID + "_" + randomHex(4)
-		payload := viewToCompanionAgent(input, routing.RuntimeOrgID, routing.ProductSurface, agentID, p.Actor)
+		input.Status = "active"
+		input.OriginKind = "manual"
+		input.ReviewStatus = "approved"
+		input.ValidationStatus = "approved"
+		payload := viewToCompanionAgent(input, routing.RuntimeOrgID, routing.ProductSurface, agentID, p.Actor, nil)
 		agent, err := s.putCompanionAgent(r, p, routing, agentID, payload)
 		if err != nil {
 			writeError(w, http.StatusBadGateway, "COMPANION_AGENTS_FAILED", err.Error())
@@ -145,7 +149,12 @@ func (s *server) agentsAPI(w http.ResponseWriter, r *http.Request) {
 			if routing.AxisOrgID == "" {
 				routing.AxisOrgID = key.OrgID
 			}
-			payload := viewToCompanionAgent(input, key.OrgID, key.ProductSurface, key.AgentID, p.Actor)
+			existing, err := s.getCompanionAgent(r, p, key)
+			if err != nil {
+				writeError(w, http.StatusBadGateway, "COMPANION_AGENTS_FAILED", err.Error())
+				return
+			}
+			payload := viewToCompanionAgent(input, key.OrgID, key.ProductSurface, key.AgentID, p.Actor, &existing)
 			agent, err := s.putCompanionAgent(r, p, routing, key.AgentID, payload)
 			if err != nil {
 				writeError(w, http.StatusBadGateway, "COMPANION_AGENTS_FAILED", err.Error())
@@ -319,6 +328,34 @@ func (s *server) putCompanionAgent(r *http.Request, p authn.Principal, routing a
 	return agent, nil
 }
 
+func (s *server) getCompanionAgent(r *http.Request, p authn.Principal, key agentRuntimeKey) (companionAgent, error) {
+	target, err := s.companionAgentURL("/v1/agents/" + url.PathEscape(key.AgentID))
+	if err != nil {
+		return companionAgent{}, err
+	}
+	q := target.Query()
+	q.Set("org_id", key.OrgID)
+	q.Set("product_surface", key.ProductSurface)
+	target.RawQuery = q.Encode()
+	req, err := s.companionAgentRequest(r, p, http.MethodGet, target, key.OrgID, key.ProductSurface, nil)
+	if err != nil {
+		return companionAgent{}, err
+	}
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return companionAgent{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return companionAgent{}, companionResponseError(resp)
+	}
+	var agent companionAgent
+	if err := json.NewDecoder(resp.Body).Decode(&agent); err != nil {
+		return companionAgent{}, err
+	}
+	return agent, nil
+}
+
 func (s *server) postCompanionAgentAction(r *http.Request, p authn.Principal, key agentRuntimeKey, action string) (companionAgent, error) {
 	target, err := s.companionAgentURL("/v1/agents/" + url.PathEscape(key.AgentID) + "/" + action)
 	if err != nil {
@@ -406,7 +443,7 @@ func companionResponseError(resp *http.Response) error {
 	return fmt.Errorf("companion status %d: %s", resp.StatusCode, message)
 }
 
-func viewToCompanionAgent(input IAMAgent, orgID string, productSurface string, agentID string, actor string) companionAgent {
+func viewToCompanionAgent(input IAMAgent, orgID string, productSurface string, agentID string, actor string, existing *companionAgent) companionAgent {
 	memoryScopeID := ""
 	if input.MemoryEnabled {
 		memoryScopeID = "shared"
@@ -415,6 +452,44 @@ func viewToCompanionAgent(input IAMAgent, orgID string, productSurface string, a
 	if profile == unprofiledAgentProfile {
 		profile = ""
 	}
+	status := "active"
+	lifecycleStatus := "active"
+	originKind := "manual"
+	reviewStatus := "approved"
+	if existing != nil {
+		status = firstNonEmpty(existing.Status, status)
+		lifecycleStatus = firstNonEmpty(existing.LifecycleStatus, lifecycleStatus)
+		originKind = firstNonEmpty(existing.OriginKind, originKind)
+		reviewStatus = firstNonEmpty(existing.ReviewStatus, reviewStatus)
+	}
+	if trimmed := strings.TrimSpace(input.Status); trimmed != "" {
+		lifecycleStatus = trimmed
+		if trimmed == "active" {
+			status = "active"
+		} else {
+			status = "disabled"
+		}
+	}
+	if trimmed := strings.TrimSpace(input.OriginKind); trimmed != "" {
+		originKind = trimmed
+	}
+	if trimmed := firstNonEmpty(input.ValidationStatus, input.ReviewStatus); trimmed != "" {
+		reviewStatus = trimmed
+	}
+	allowedConnectors := []string(nil)
+	sharedMemoryPolicy := map[string]any(nil)
+	limits := map[string]any(nil)
+	sla := map[string]any(nil)
+	metadata := input.Metadata
+	if existing != nil {
+		allowedConnectors = cleanStringList(existing.AllowedConnectors)
+		sharedMemoryPolicy = existing.SharedMemoryPolicy
+		limits = existing.Limits
+		sla = existing.SLA
+		if metadata == nil {
+			metadata = existing.Metadata
+		}
+	}
 	return companionAgent{
 		OrgID:               orgID,
 		ProductSurface:      productSurface,
@@ -422,15 +497,19 @@ func viewToCompanionAgent(input IAMAgent, orgID string, productSurface string, a
 		DisplayName:         firstNonEmpty(input.Name, agentID),
 		Role:                strings.TrimSpace(input.Description),
 		ProfileID:           profile,
-		Status:              "active",
-		LifecycleStatus:     firstNonEmpty(input.Status, "active"),
-		OriginKind:          firstNonEmpty(input.OriginKind, "manual"),
-		ReviewStatus:        firstNonEmpty(input.ReviewStatus, "approved"),
+		Status:              status,
+		LifecycleStatus:     lifecycleStatus,
+		OriginKind:          originKind,
+		ReviewStatus:        reviewStatus,
 		MaxAutonomy:         normalizeAutonomy(input.Autonomy),
 		AllowedTools:        cleanStringList(input.Tools),
 		AllowedCapabilities: cleanStringList(input.Capabilities),
+		AllowedConnectors:   allowedConnectors,
 		MemoryScopeID:       memoryScopeID,
-		Metadata:            input.Metadata,
+		SharedMemoryPolicy:  sharedMemoryPolicy,
+		Limits:              limits,
+		SLA:                 sla,
+		Metadata:            metadata,
 		CreatedBy:           actor,
 	}
 }
@@ -462,6 +541,7 @@ func companionAgentToView(agent companionAgent, axisOrgID string) IAMAgent {
 		SourceStatus:         agent.Status,
 		OriginKind:           firstNonEmpty(agent.OriginKind, "companion_fleet"),
 		ReviewStatus:         firstNonEmpty(agent.ReviewStatus, "approved"),
+		ValidationStatus:     firstNonEmpty(agent.ReviewStatus, "approved"),
 		Metadata:             agent.Metadata,
 		CreatedAt:            agent.CreatedAt,
 		UpdatedAt:            agent.UpdatedAt,

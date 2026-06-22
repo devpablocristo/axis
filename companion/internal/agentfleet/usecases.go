@@ -102,7 +102,7 @@ func (u *Usecases) ApproveAgent(ctx context.Context, orgID, productSurface, agen
 	if strings.TrimSpace(agent.ProfileID) == "" || agent.ProfileID == "legacy.unprofiled" {
 		return Agent{}, fmt.Errorf("%w: approved agents require a real profile_id", ErrValidation)
 	}
-	return u.repo.SetAgentLifecycle(ctx, orgID, productSurface, agentID, LifecycleActive, StatusActive, ReviewApproved, changedBy)
+	return u.repo.SetAgentLifecycle(ctx, orgID, productSurface, agentID, "", "", ReviewApproved, changedBy)
 }
 
 func (u *Usecases) IgnoreAgent(ctx context.Context, orgID, productSurface, agentID, changedBy string) (Agent, error) {

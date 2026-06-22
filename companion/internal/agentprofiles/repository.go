@@ -23,20 +23,28 @@ func NewPostgresRepository(db *sharedpostgres.DB) *PostgresRepository {
 const selectProfileSQL = `
 	SELECT id, profile_id, family_id, version_label, name, description, system_prompt,
 	       max_autonomy, allowed_tools, allowed_capabilities, memory_policy_json,
-	       llm_config_json, enabled, archived_at, created_at, updated_at
+	       llm_config_json, enabled, archived_at, trashed_at, created_at, updated_at
 	FROM agent_profiles`
 
 const selectVersionSQL = `
 	SELECT id, agent_profile_id, profile_id, family_id, version_label, name, description,
 	       system_prompt, max_autonomy, allowed_tools, allowed_capabilities,
-	       memory_policy_json, llm_config_json, enabled, archived_at,
+	       memory_policy_json, llm_config_json, enabled, archived_at, trashed_at,
 	       original_created_at, original_updated_at, saved_at
 	FROM agent_profile_versions`
 
-func (r *PostgresRepository) ListProfiles(ctx context.Context, includeArchived bool) ([]Profile, error) {
+func (r *PostgresRepository) ListProfiles(ctx context.Context, lifecycle LifecycleView) ([]Profile, error) {
 	query := selectProfileSQL
-	if !includeArchived {
-		query += ` WHERE archived_at IS NULL`
+	switch lifecycle {
+	case LifecycleArchived:
+		query += ` WHERE archived_at IS NOT NULL AND trashed_at IS NULL`
+	case LifecycleTrash:
+		query += ` WHERE trashed_at IS NOT NULL`
+	case LifecycleAll:
+	case LifecycleNonTrash:
+		query += ` WHERE trashed_at IS NULL`
+	default:
+		query += ` WHERE archived_at IS NULL AND trashed_at IS NULL`
 	}
 	query += ` ORDER BY profile_id`
 	rows, err := r.db.Pool().Query(ctx, query)
@@ -98,10 +106,11 @@ func (r *PostgresRepository) UpsertProfile(ctx context.Context, profile Profile)
 			llm_config_json = EXCLUDED.llm_config_json,
 			enabled = EXCLUDED.enabled,
 			archived_at = NULL,
+			trashed_at = NULL,
 			updated_at = EXCLUDED.updated_at
 		RETURNING id, profile_id, family_id, version_label, name, description, system_prompt,
 		          max_autonomy, allowed_tools, allowed_capabilities, memory_policy_json,
-		          llm_config_json, enabled, archived_at, created_at, updated_at
+		          llm_config_json, enabled, archived_at, trashed_at, created_at, updated_at
 	`, profile.ProfileID, profile.FamilyID, profile.VersionLabel, profile.Name, profile.Description,
 		profile.SystemPrompt, profile.MaxAutonomy, profile.AllowedTools, profile.AllowedCapabilities,
 		memoryPolicy, llmConfig, profile.Enabled)
@@ -114,11 +123,11 @@ func (r *PostgresRepository) UpsertProfile(ctx context.Context, profile Profile)
 
 func (r *PostgresRepository) ArchiveProfile(ctx context.Context, profileID string) (Profile, error) {
 	row := r.db.Pool().QueryRow(ctx, `
-		UPDATE agent_profiles SET archived_at = now(), updated_at = now()
-		WHERE profile_id = $1 AND archived_at IS NULL
+		UPDATE agent_profiles SET archived_at = now(), trashed_at = NULL, updated_at = now()
+		WHERE profile_id = $1 AND archived_at IS NULL AND trashed_at IS NULL
 		RETURNING id, profile_id, family_id, version_label, name, description, system_prompt,
 		          max_autonomy, allowed_tools, allowed_capabilities, memory_policy_json,
-		          llm_config_json, enabled, archived_at, created_at, updated_at
+		          llm_config_json, enabled, archived_at, trashed_at, created_at, updated_at
 	`, strings.TrimSpace(profileID))
 	profile, err := scanProfile(row)
 	if err != nil {
@@ -132,11 +141,11 @@ func (r *PostgresRepository) ArchiveProfile(ctx context.Context, profileID strin
 
 func (r *PostgresRepository) RestoreProfile(ctx context.Context, profileID string) (Profile, error) {
 	row := r.db.Pool().QueryRow(ctx, `
-		UPDATE agent_profiles SET archived_at = NULL, updated_at = now()
-		WHERE profile_id = $1 AND archived_at IS NOT NULL
+		UPDATE agent_profiles SET archived_at = NULL, trashed_at = NULL, updated_at = now()
+		WHERE profile_id = $1 AND (archived_at IS NOT NULL OR trashed_at IS NOT NULL)
 		RETURNING id, profile_id, family_id, version_label, name, description, system_prompt,
 		          max_autonomy, allowed_tools, allowed_capabilities, memory_policy_json,
-		          llm_config_json, enabled, archived_at, created_at, updated_at
+		          llm_config_json, enabled, archived_at, trashed_at, created_at, updated_at
 	`, strings.TrimSpace(profileID))
 	profile, err := scanProfile(row)
 	if err != nil {
@@ -146,6 +155,49 @@ func (r *PostgresRepository) RestoreProfile(ctx context.Context, profileID strin
 		return Profile{}, fmt.Errorf("restore agent profile: %w", err)
 	}
 	return profile, nil
+}
+
+func (r *PostgresRepository) TrashProfile(ctx context.Context, profileID string) (Profile, error) {
+	row := r.db.Pool().QueryRow(ctx, `
+		UPDATE agent_profiles SET archived_at = NULL, trashed_at = now(), updated_at = now()
+		WHERE profile_id = $1 AND trashed_at IS NULL
+		RETURNING id, profile_id, family_id, version_label, name, description, system_prompt,
+		          max_autonomy, allowed_tools, allowed_capabilities, memory_policy_json,
+		          llm_config_json, enabled, archived_at, trashed_at, created_at, updated_at
+	`, strings.TrimSpace(profileID))
+	profile, err := scanProfile(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Profile{}, ErrNotFound
+		}
+		return Profile{}, fmt.Errorf("trash agent profile: %w", err)
+	}
+	return profile, nil
+}
+
+func (r *PostgresRepository) PurgeProfile(ctx context.Context, profileID string) error {
+	profileID = strings.TrimSpace(profileID)
+	var activeAgents int
+	if err := r.db.Pool().QueryRow(ctx, `
+		SELECT count(*) FROM companion_agents
+		WHERE profile_id = $1
+		  AND status = 'active'
+		  AND COALESCE(lifecycle_status, 'active') = 'active'
+		  AND COALESCE(review_status, 'approved') = 'approved'
+	`, profileID).Scan(&activeAgents); err != nil {
+		return fmt.Errorf("check active agents for profile purge: %w", err)
+	}
+	if activeAgents > 0 {
+		return fmt.Errorf("%w: profile is used by active agents", ErrConflict)
+	}
+	tag, err := r.db.Pool().Exec(ctx, `DELETE FROM agent_profiles WHERE profile_id = $1 AND trashed_at IS NOT NULL`, profileID)
+	if err != nil {
+		return fmt.Errorf("purge agent profile: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (r *PostgresRepository) ListVersions(ctx context.Context, profileID string, limit int) ([]Version, error) {
@@ -180,7 +232,7 @@ func scanProfile(row rowScanner) (Profile, error) {
 		&profile.ID, &profile.ProfileID, &profile.FamilyID, &profile.VersionLabel,
 		&profile.Name, &profile.Description, &profile.SystemPrompt, &profile.MaxAutonomy,
 		&profile.AllowedTools, &profile.AllowedCapabilities, &memoryRaw, &llmRaw,
-		&profile.Enabled, &profile.ArchivedAt, &profile.CreatedAt, &profile.UpdatedAt,
+		&profile.Enabled, &profile.ArchivedAt, &profile.TrashedAt, &profile.CreatedAt, &profile.UpdatedAt,
 	)
 	if err != nil {
 		return Profile{}, err
@@ -205,7 +257,7 @@ func scanVersion(row rowScanner) (Version, error) {
 		&version.ID, &version.AgentProfileID, &version.ProfileID, &version.FamilyID,
 		&version.VersionLabel, &version.Name, &version.Description, &version.SystemPrompt,
 		&version.MaxAutonomy, &version.AllowedTools, &version.AllowedCapabilities,
-		&memoryRaw, &llmRaw, &version.Enabled, &version.ArchivedAt,
+		&memoryRaw, &llmRaw, &version.Enabled, &version.ArchivedAt, &version.TrashedAt,
 		&version.OriginalCreatedAt, &version.OriginalUpdatedAt, &version.SavedAt,
 	)
 	if err != nil {

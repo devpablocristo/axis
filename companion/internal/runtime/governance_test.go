@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	connectorsdomain "github.com/devpablocristo/companion/internal/connectors/usecases/domain"
@@ -351,6 +352,7 @@ func TestApplyRuntimeAgentCapsAutonomy(t *testing.T) {
 		},
 	}, RuntimeAgentConfig{
 		AgentID:      "support-agent",
+		ProfileID:    "support-profile",
 		Status:       "active",
 		MaxAutonomy:  AutonomyA1,
 		AllowedTools: []string{"remember"},
@@ -363,6 +365,18 @@ func TestApplyRuntimeAgentCapsAutonomy(t *testing.T) {
 	}
 	if len(route.AllowedTools) != 1 || route.AllowedTools[0] != "remember" {
 		t.Fatalf("expected tool restriction, got %+v", route.AllowedTools)
+	}
+}
+
+func TestApplyRuntimeAgentRejectsMissingProfile(t *testing.T) {
+	t.Parallel()
+
+	_, event := applyRuntimeAgent(AgentRoute{}, RuntimeAgentConfig{
+		AgentID: "support-agent",
+		Status:  "active",
+	})
+	if event == nil || event.Type != "agent_fleet" || !strings.Contains(event.Reason, "profile") {
+		t.Fatalf("expected missing profile guardrail, got %+v", event)
 	}
 }
 

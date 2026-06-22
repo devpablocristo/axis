@@ -159,8 +159,18 @@ func TestUsecases_ApproveRequiresRealProfile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if agentExecutable(agent) {
+		t.Fatalf("newly approved archived agent should not be executable before restore: %+v", agent)
+	}
+	if agent.LifecycleStatus != LifecycleArchived || agent.Status != StatusDisabled || agent.ReviewStatus != ReviewApproved {
+		t.Fatalf("approve should preserve lifecycle/status and only set review_status: %+v", agent)
+	}
+	agent, err = uc.RestoreAgent(context.Background(), "org-1", "companion", "inferred", "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !agentExecutable(agent) {
-		t.Fatalf("approved agent should be executable: %+v", agent)
+		t.Fatalf("restored approved agent should be executable: %+v", agent)
 	}
 }
 

@@ -203,7 +203,7 @@ func (r agentProfileRuntimeResolver) ResolveRuntimeAgentProfile(ctx context.Cont
 		AllowedCapabilities: append([]string(nil), profile.AllowedCapabilities...),
 		MemoryPolicy:        profile.MemoryPolicy,
 		Enabled:             profile.Enabled,
-		Archived:            profile.ArchivedAt != nil,
+		Archived:            profile.ArchivedAt != nil || profile.TrashedAt != nil,
 		SnapshotID:          profile.ID.String(),
 	}, nil
 }

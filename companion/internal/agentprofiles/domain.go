@@ -11,6 +11,17 @@ import (
 var (
 	ErrNotFound   = errors.New("agent profile not found")
 	ErrValidation = errors.New("agent profile validation failed")
+	ErrConflict   = errors.New("agent profile conflict")
+)
+
+type LifecycleView string
+
+const (
+	LifecycleActive   LifecycleView = "active"
+	LifecycleArchived LifecycleView = "archived"
+	LifecycleTrash    LifecycleView = "trash"
+	LifecycleAll      LifecycleView = "all"
+	LifecycleNonTrash LifecycleView = "non_trash"
 )
 
 type Profile struct {
@@ -28,6 +39,7 @@ type Profile struct {
 	LLMConfig           map[string]any `json:"llm_config,omitempty"`
 	Enabled             bool           `json:"enabled"`
 	ArchivedAt          *time.Time     `json:"archived_at,omitempty"`
+	TrashedAt           *time.Time     `json:"trashed_at,omitempty"`
 	CreatedAt           time.Time      `json:"created_at,omitempty"`
 	UpdatedAt           time.Time      `json:"updated_at,omitempty"`
 }
@@ -48,9 +60,28 @@ type Version struct {
 	LLMConfig           map[string]any `json:"llm_config,omitempty"`
 	Enabled             bool           `json:"enabled"`
 	ArchivedAt          *time.Time     `json:"archived_at,omitempty"`
+	TrashedAt           *time.Time     `json:"trashed_at,omitempty"`
 	OriginalCreatedAt   time.Time      `json:"original_created_at,omitempty"`
 	OriginalUpdatedAt   time.Time      `json:"original_updated_at,omitempty"`
 	SavedAt             time.Time      `json:"saved_at,omitempty"`
+}
+
+func normalizeLifecycleView(value string, includeArchived bool) LifecycleView {
+	switch LifecycleView(strings.ToLower(strings.TrimSpace(value))) {
+	case LifecycleArchived:
+		return LifecycleArchived
+	case LifecycleTrash:
+		return LifecycleTrash
+	case LifecycleAll:
+		return LifecycleAll
+	case LifecycleActive:
+		return LifecycleActive
+	default:
+		if includeArchived {
+			return LifecycleNonTrash
+		}
+		return LifecycleActive
+	}
 }
 
 func normalizeProfile(profile Profile) Profile {
@@ -64,15 +95,6 @@ func normalizeProfile(profile Profile) Profile {
 	if profile.MaxAutonomy == "" {
 		profile.MaxAutonomy = "A1"
 	}
-	if profile.FamilyID == "" || profile.VersionLabel == "" {
-		familyID, versionLabel := splitProfileID(profile.ProfileID)
-		if profile.FamilyID == "" {
-			profile.FamilyID = familyID
-		}
-		if profile.VersionLabel == "" {
-			profile.VersionLabel = versionLabel
-		}
-	}
 	profile.AllowedTools = normalizeList(profile.AllowedTools)
 	profile.AllowedCapabilities = normalizeList(profile.AllowedCapabilities)
 	if profile.MemoryPolicy == nil {
@@ -85,7 +107,7 @@ func normalizeProfile(profile Profile) Profile {
 }
 
 func validateProfile(profile Profile) error {
-	if profile.ProfileID == "" || profile.FamilyID == "" || profile.Name == "" || profile.SystemPrompt == "" {
+	if profile.ProfileID == "" || profile.FamilyID == "" || profile.VersionLabel == "" || profile.Name == "" || profile.SystemPrompt == "" {
 		return ErrValidation
 	}
 	switch profile.MaxAutonomy {
@@ -94,19 +116,6 @@ func validateProfile(profile Profile) error {
 		return ErrValidation
 	}
 	return nil
-}
-
-func splitProfileID(profileID string) (string, string) {
-	profileID = strings.TrimSpace(profileID)
-	parts := strings.Split(profileID, ".")
-	if len(parts) < 2 {
-		return profileID, ""
-	}
-	last := strings.TrimSpace(parts[len(parts)-1])
-	if len(last) >= 2 && strings.HasPrefix(strings.ToLower(last), "v") {
-		return strings.Join(parts[:len(parts)-1], "."), last
-	}
-	return profileID, ""
 }
 
 func normalizeList(values []string) []string {

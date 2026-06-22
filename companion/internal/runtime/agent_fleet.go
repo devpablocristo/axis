@@ -62,9 +62,11 @@ func applyRuntimeAgent(route AgentRoute, agent RuntimeAgentConfig) (AgentRoute, 
 	if review := strings.TrimSpace(agent.ReviewStatus); review != "" && !strings.EqualFold(review, "approved") {
 		return route, &GuardrailEvent{Type: "agent_fleet", Target: "agent:" + agent.AgentID, Reason: "agent is not approved"}
 	}
-	if strings.TrimSpace(agent.ProfileID) != "" {
-		route.Profile.ID = strings.TrimSpace(agent.ProfileID)
+	profileID := strings.TrimSpace(agent.ProfileID)
+	if profileID == "" || profileID == "legacy.unprofiled" {
+		return route, &GuardrailEvent{Type: "agent_fleet", Target: "agent:" + agent.AgentID, Reason: "agent profile is required"}
 	}
+	route.Profile.ID = profileID
 	route.Profile.AgentID = agent.AgentID
 	route.Profile.Role = strings.TrimSpace(agent.Role)
 	route.Profile.MemoryScopeID = strings.TrimSpace(agent.MemoryScopeID)

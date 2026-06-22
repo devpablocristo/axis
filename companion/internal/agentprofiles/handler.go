@@ -30,7 +30,9 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/agent-profiles/{profile_id}", h.getProfile)
 	mux.HandleFunc("PUT /v1/agent-profiles/{profile_id}", h.putProfile)
 	mux.HandleFunc("POST /v1/agent-profiles/{profile_id}/archive", h.archiveProfile)
+	mux.HandleFunc("POST /v1/agent-profiles/{profile_id}/trash", h.trashProfile)
 	mux.HandleFunc("POST /v1/agent-profiles/{profile_id}/restore", h.restoreProfile)
+	mux.HandleFunc("DELETE /v1/agent-profiles/{profile_id}/purge", h.purgeProfile)
 	mux.HandleFunc("GET /v1/agent-profiles/{profile_id}/versions", h.listVersions)
 }
 
@@ -39,7 +41,8 @@ func (h *Handler) listProfiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	includeArchived := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("include_archived")), "true")
-	profiles, err := h.uc.ListProfiles(r.Context(), includeArchived)
+	lifecycle := strings.TrimSpace(r.URL.Query().Get("lifecycle"))
+	profiles, err := h.uc.ListProfiles(r.Context(), lifecycle, includeArchived)
 	if err != nil {
 		httpjson.WriteFlatInternalError(w, err, "list agent profiles failed")
 		return
@@ -131,6 +134,29 @@ func (h *Handler) restoreProfile(w http.ResponseWriter, r *http.Request) {
 	httpjson.WriteJSON(w, http.StatusOK, profile)
 }
 
+func (h *Handler) trashProfile(w http.ResponseWriter, r *http.Request) {
+	if !requireScope(w, r, scopeAgentProfilesAdmin, scopeRuntimeAdmin) {
+		return
+	}
+	profile, err := h.uc.TrashProfile(r.Context(), r.PathValue("profile_id"))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	httpjson.WriteJSON(w, http.StatusOK, profile)
+}
+
+func (h *Handler) purgeProfile(w http.ResponseWriter, r *http.Request) {
+	if !requireScope(w, r, scopeAgentProfilesAdmin, scopeRuntimeAdmin) {
+		return
+	}
+	if err := h.uc.PurgeProfile(r.Context(), r.PathValue("profile_id")); err != nil {
+		writeError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (h *Handler) listVersions(w http.ResponseWriter, r *http.Request) {
 	if !requireScope(w, r, scopeAgentProfilesRead, scopeAgentProfilesAdmin, scopeRuntimeAdmin) {
 		return
@@ -170,6 +196,8 @@ func writeError(w http.ResponseWriter, err error) {
 		httpjson.WriteFlatError(w, http.StatusNotFound, "NOT_FOUND", "agent profile not found")
 	case errors.Is(err, ErrValidation):
 		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", err.Error())
+	case errors.Is(err, ErrConflict):
+		httpjson.WriteFlatError(w, http.StatusConflict, "CONFLICT", err.Error())
 	default:
 		httpjson.WriteFlatInternalError(w, err, "agent profile operation failed")
 	}

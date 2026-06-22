@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -223,6 +224,101 @@ func TestAgentProfilesEndpointReadsCompanionProfiles(t *testing.T) {
 	}
 	if len(body.Profiles) != 1 || body.Profiles[0].ProfileID != "axis.ops.billing.v1" {
 		t.Fatalf("unexpected profiles body: %s", rec.Body.String())
+	}
+}
+
+func TestAgentProfilesEndpointWritesCompanionProfiles(t *testing.T) {
+	var requests []string
+	var gotAuth string
+	var gotBody string
+	downstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.Method+" "+r.URL.String())
+		gotAuth = r.Header.Get("Authorization")
+		if r.Body != nil {
+			body, _ := io.ReadAll(r.Body)
+			gotBody = string(body)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPut && r.URL.Path == "/v1/agent-profiles/axis.ops.support.v1":
+			_, _ = w.Write([]byte(`{"profile_id":"axis.ops.support.v1","family_id":"axis.ops.support","version_label":"v1","name":"Support Agent","system_prompt":"Help users.","max_autonomy":"A1","enabled":true}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/agent-profiles/axis.ops.support.v1/archive":
+			_, _ = w.Write([]byte(`{"profile_id":"axis.ops.support.v1","family_id":"axis.ops.support","version_label":"v1","name":"Support Agent","system_prompt":"Help users.","max_autonomy":"A1","enabled":true,"archived_at":"2026-06-22T00:00:00Z"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/agent-profiles/axis.ops.support.v1/trash":
+			_, _ = w.Write([]byte(`{"profile_id":"axis.ops.support.v1","family_id":"axis.ops.support","version_label":"v1","name":"Support Agent","system_prompt":"Help users.","max_autonomy":"A1","enabled":true,"trashed_at":"2026-06-22T00:00:00Z"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/agent-profiles/axis.ops.support.v1/restore":
+			_, _ = w.Write([]byte(`{"profile_id":"axis.ops.support.v1","family_id":"axis.ops.support","version_label":"v1","name":"Support Agent","system_prompt":"Help users.","max_autonomy":"A1","enabled":true}`))
+		case r.Method == http.MethodDelete && r.URL.Path == "/v1/agent-profiles/axis.ops.support.v1/purge":
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer downstream.Close()
+
+	srv, err := newTestServer(downstream.URL, []string{"companion:agent_profiles:admin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPut, "/api/agent-profiles/axis.ops.support.v1", strings.NewReader(`{"family_id":"axis.ops.support","version_label":"v1","name":"Support Agent","system_prompt":"Help users.","max_autonomy":"A1"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected profile put 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if gotBody == "" || !strings.Contains(gotBody, `"system_prompt":"Help users."`) {
+		t.Fatalf("expected forwarded body, got %q", gotBody)
+	}
+	if !strings.HasPrefix(gotAuth, "Bearer ") {
+		t.Fatalf("expected bearer token, got %q", gotAuth)
+	}
+
+	for _, path := range []string{
+		"/api/agent-profiles/axis.ops.support.v1/archive",
+		"/api/agent-profiles/axis.ops.support.v1/trash",
+		"/api/agent-profiles/axis.ops.support.v1/restore",
+	} {
+		req = httptest.NewRequest(http.MethodPost, path, nil)
+		rec = httptest.NewRecorder()
+		srv.routes().ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected profile action 200 for %s, got %d body=%s", path, rec.Code, rec.Body.String())
+		}
+	}
+	req = httptest.NewRequest(http.MethodDelete, "/api/agent-profiles/axis.ops.support.v1/purge", nil)
+	rec = httptest.NewRecorder()
+	srv.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected profile purge 204, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	want := []string{
+		"PUT /v1/agent-profiles/axis.ops.support.v1",
+		"POST /v1/agent-profiles/axis.ops.support.v1/archive",
+		"POST /v1/agent-profiles/axis.ops.support.v1/trash",
+		"POST /v1/agent-profiles/axis.ops.support.v1/restore",
+		"DELETE /v1/agent-profiles/axis.ops.support.v1/purge",
+	}
+	if strings.Join(requests, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("unexpected downstream requests:\n%s", strings.Join(requests, "\n"))
+	}
+}
+
+func TestAgentProfilesEndpointRejectsMemberWrites(t *testing.T) {
+	srv, err := newTestServer("http://127.0.0.1:1", orgMemberScopes())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPut, "/api/agent-profiles/axis.ops.support.v1", strings.NewReader(`{"family_id":"axis.ops.support","version_label":"v1","name":"Support Agent","system_prompt":"Help users.","max_autonomy":"A1"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d body=%s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -667,6 +763,9 @@ func TestAgentsCRUDARByOrg(t *testing.T) {
 	if created.Item.ID == "" || created.Item.OrgID != "org-a" || created.Item.Autonomy != "A2" || !created.Item.MemoryEnabled {
 		t.Fatalf("unexpected created agent: %#v", created.Item)
 	}
+	if created.Item.OriginKind != "manual" || created.Item.ReviewStatus != "approved" || created.Item.ValidationStatus != "approved" || created.Item.Status != "active" {
+		t.Fatalf("expected manual approved active agent, got %#v", created.Item)
+	}
 
 	req = httptest.NewRequest(http.MethodPost, "/api/agents", strings.NewReader(`{"org_id":"org-b","name":"Other Agent","profile":"other.v1","autonomy":"A1"}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -690,6 +789,9 @@ func TestAgentsCRUDARByOrg(t *testing.T) {
 	}
 	if len(list.Items) != 1 || list.Items[0].ID != created.Item.ID {
 		t.Fatalf("expected only org-a agent, got %#v", list.Items)
+	}
+	if list.Items[0].ValidationStatus != "approved" {
+		t.Fatalf("expected validation_status alias, got %#v", list.Items[0])
 	}
 
 	req = httptest.NewRequest(http.MethodPatch, "/api/agents/"+created.Item.ID, strings.NewReader(`{"name":"Care Coordinator","profile":"care.v2","autonomy":"A3","memory_enabled":false,"description":"","capabilities":["care.write"],"tools":["care_write"]}`))
@@ -715,6 +817,7 @@ func TestAgentsCRUDARByOrg(t *testing.T) {
 		status string
 	}{
 		{http.MethodPost, "/api/agents/" + created.Item.ID + "/archive", "archived"},
+		{http.MethodPost, "/api/agents/" + created.Item.ID + "/approve", "archived"},
 		{http.MethodPost, "/api/agents/" + created.Item.ID + "/trash", "trash"},
 		{http.MethodPost, "/api/agents/" + created.Item.ID + "/restore", "active"},
 	} {
@@ -953,6 +1056,10 @@ func newFakeCompanionAgentsServer(t *testing.T) *httptest.Server {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
+		if len(parts) == 1 && r.Method == http.MethodGet {
+			writeJSON(w, http.StatusOK, agent)
+			return
+		}
 		if len(parts) == 1 && r.Method == http.MethodDelete {
 			delete(agents, key)
 			w.WriteHeader(http.StatusNoContent)
@@ -973,8 +1080,6 @@ func newFakeCompanionAgentsServer(t *testing.T) *httptest.Server {
 			agent.Status = "active"
 			agent.LifecycleStatus = "active"
 		case "approve":
-			agent.Status = "active"
-			agent.LifecycleStatus = "active"
 			agent.ReviewStatus = "approved"
 		case "ignore":
 			agent.Status = "disabled"

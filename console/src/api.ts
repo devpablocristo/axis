@@ -85,6 +85,7 @@ export type AxisAgentView = {
   source_status?: string
   origin_kind?: string
   review_status?: string
+  validation_status?: string
   metadata?: Record<string, unknown>
   last_synced_at?: string
   created_at?: string
@@ -106,6 +107,7 @@ export type AxisAgentProfileView = {
   llm_config?: Record<string, unknown>
   enabled: boolean
   archived_at?: string
+  trashed_at?: string
   created_at?: string
   updated_at?: string
 }
@@ -563,9 +565,55 @@ export async function listIAMTenants(orgId: string, view = 'active'): Promise<Ax
   return payload.items ?? []
 }
 
-export async function listAgentProfiles(orgId: string): Promise<AxisAgentProfileView[]> {
-  const payload = await axisFetch<{ profiles: AxisAgentProfileView[] }>('/api/agent-profiles', orgId)
+export type AgentProfileLifecycle = 'active' | 'archived' | 'trash' | 'all'
+
+export async function listAgentProfiles(
+  orgId: string,
+  lifecycleOrIncludeArchived: AgentProfileLifecycle | boolean = 'active',
+): Promise<AxisAgentProfileView[]> {
+  const suffix = typeof lifecycleOrIncludeArchived === 'boolean'
+    ? (lifecycleOrIncludeArchived ? '?include_archived=true' : '')
+    : `?lifecycle=${encodeURIComponent(lifecycleOrIncludeArchived)}`
+  const payload = await axisFetch<{ profiles: AxisAgentProfileView[] }>(`/api/agent-profiles${suffix}`, orgId)
   return payload.profiles ?? []
+}
+
+export async function upsertAgentProfile(
+  orgId: string,
+  profileId: string,
+  input: Partial<AxisAgentProfileView>,
+): Promise<AxisAgentProfileView> {
+  return axisFetch<AxisAgentProfileView>(`/api/agent-profiles/${encodeURIComponent(profileId)}`, orgId, {
+    method: 'PUT',
+    body: JSON.stringify(input),
+  })
+}
+
+export async function archiveAgentProfile(orgId: string, profileId: string): Promise<AxisAgentProfileView> {
+  return axisFetch<AxisAgentProfileView>(`/api/agent-profiles/${encodeURIComponent(profileId)}/archive`, orgId, {
+    method: 'POST',
+    body: '{}',
+  })
+}
+
+export async function trashAgentProfile(orgId: string, profileId: string): Promise<AxisAgentProfileView> {
+  return axisFetch<AxisAgentProfileView>(`/api/agent-profiles/${encodeURIComponent(profileId)}/trash`, orgId, {
+    method: 'POST',
+    body: '{}',
+  })
+}
+
+export async function restoreAgentProfile(orgId: string, profileId: string): Promise<AxisAgentProfileView> {
+  return axisFetch<AxisAgentProfileView>(`/api/agent-profiles/${encodeURIComponent(profileId)}/restore`, orgId, {
+    method: 'POST',
+    body: '{}',
+  })
+}
+
+export async function purgeAgentProfile(orgId: string, profileId: string): Promise<void> {
+  await axisFetch<void>(`/api/agent-profiles/${encodeURIComponent(profileId)}/purge`, orgId, {
+    method: 'DELETE',
+  })
 }
 
 export function axisCrudHttpClient(orgId: string) {
