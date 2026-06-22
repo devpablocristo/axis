@@ -10,6 +10,18 @@ const (
 	StatusActive   = "active"
 	StatusDisabled = "disabled"
 
+	LifecycleActive   = "active"
+	LifecycleArchived = "archived"
+	LifecycleTrash    = "trash"
+
+	OriginCompanionFleet  = "companion_fleet"
+	OriginRuntimeInferred = "runtime_inferred"
+	OriginManual          = "manual"
+
+	ReviewApproved    = "approved"
+	ReviewNeedsReview = "needs_review"
+	ReviewIgnored     = "ignored"
+
 	HandoffPending   = "pending"
 	HandoffAccepted  = "accepted"
 	HandoffRejected  = "rejected"
@@ -30,6 +42,9 @@ type Agent struct {
 	Role                string         `json:"role,omitempty"`
 	ProfileID           string         `json:"profile_id,omitempty"`
 	Status              string         `json:"status"`
+	LifecycleStatus     string         `json:"lifecycle_status"`
+	OriginKind          string         `json:"origin_kind,omitempty"`
+	ReviewStatus        string         `json:"review_status"`
 	MaxAutonomy         string         `json:"max_autonomy"`
 	AllowedTools        []string       `json:"allowed_tools,omitempty"`
 	AllowedCapabilities []string       `json:"allowed_capabilities,omitempty"`
@@ -73,6 +88,18 @@ func normalizeAgent(agent Agent) Agent {
 	agent.Status = strings.TrimSpace(agent.Status)
 	if agent.Status == "" {
 		agent.Status = StatusActive
+	}
+	agent.LifecycleStatus = strings.TrimSpace(agent.LifecycleStatus)
+	if agent.LifecycleStatus == "" {
+		agent.LifecycleStatus = LifecycleActive
+	}
+	agent.OriginKind = strings.TrimSpace(agent.OriginKind)
+	if agent.OriginKind == "" {
+		agent.OriginKind = OriginManual
+	}
+	agent.ReviewStatus = strings.TrimSpace(agent.ReviewStatus)
+	if agent.ReviewStatus == "" {
+		agent.ReviewStatus = ReviewApproved
 	}
 	agent.MaxAutonomy = strings.TrimSpace(agent.MaxAutonomy)
 	if agent.MaxAutonomy == "" {
@@ -126,6 +153,21 @@ func validateAgent(agent Agent) error {
 	}
 	switch agent.Status {
 	case StatusActive, StatusDisabled:
+	default:
+		return ErrValidation
+	}
+	switch agent.LifecycleStatus {
+	case LifecycleActive, LifecycleArchived, LifecycleTrash:
+	default:
+		return ErrValidation
+	}
+	switch agent.OriginKind {
+	case OriginCompanionFleet, OriginRuntimeInferred, OriginManual:
+	default:
+		return ErrValidation
+	}
+	switch agent.ReviewStatus {
+	case ReviewApproved, ReviewNeedsReview, ReviewIgnored:
 	default:
 		return ErrValidation
 	}

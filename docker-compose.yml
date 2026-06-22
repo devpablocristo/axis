@@ -175,6 +175,9 @@ services:
       AXIS_INTERNAL_JWT_ISSUER: "${AXIS_INTERNAL_JWT_ISSUER:-axis-bff}"
       AXIS_AUTH_ISSUER_URL: "${AXIS_AUTH_ISSUER_URL:-}"
       AXIS_AUTH_AUDIENCE: "${AXIS_AUTH_AUDIENCE:-}"
+      AXIS_IDENTITY_PROVIDER: "${AXIS_IDENTITY_PROVIDER:-}"
+      AXIS_CLERK_SECRET_KEY: "${AXIS_CLERK_SECRET_KEY:-}"
+      AXIS_CLERK_API_BASE_URL: "${AXIS_CLERK_API_BASE_URL:-https://api.clerk.com/v1}"
       AXIS_CLERK_WEBHOOK_SECRET: "${AXIS_CLERK_WEBHOOK_SECRET:-}"
       AXIS_COMPANION_AUDIENCE: "${AXIS_COMPANION_AUDIENCE:-companion}"
       AXIS_NEXUS_AUDIENCE: "${AXIS_NEXUS_AUDIENCE:-nexus}"
@@ -199,6 +202,7 @@ services:
       dockerfile: Dockerfile.console
       args:
         VITE_CLERK_PUBLISHABLE_KEY: "${VITE_CLERK_PUBLISHABLE_KEY:-}"
+        VITE_CLERK_JWT_TEMPLATE: "${VITE_CLERK_JWT_TEMPLATE:-axis-bff}"
     restart: unless-stopped
     environment:
       AXIS_BFF_BASE_URL: "http://bff:8080"

@@ -5,6 +5,8 @@ import type { ReactNode } from 'react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ActionType, AgentRun, Approval, AxisOrg, AxisSession, BusinessModel, CapabilityRecord, CompanionAgent, CompanionJob, CompanionTask, CostSummary, Delegation, MemoryConflict, MemoryReview, MemorySummary, NexusRequest, ObservabilityEvent, Policy, Product, ProductInstallation, RunTrace, RuntimePolicy, SecurityEvalReport, ServiceHealth, axisFetch, getHealth, getSession, listAxisOrgs } from './api'
 import { AgentControlCenter } from './AgentControlCenter'
+import { AgentsControlCenter } from './AgentsControlCenter'
+import { IAMControlCenter } from './IAMControlCenter'
 import { AgentProfilePromptsScreen, AssistPackPromptsScreen } from './PromptScreens'
 
 type LoadState<T> = {
@@ -13,7 +15,7 @@ type LoadState<T> = {
   loading: boolean
 }
 
-type RouteArea = 'home' | 'products' | 'chat' | 'prompts' | 'agents' | 'agent-control' | 'operations' | 'nexus' | 'platform'
+type RouteArea = 'home' | 'chat' | 'prompts' | 'agents' | 'agent-control' | 'iam' | 'operations' | 'nexus' | 'platform'
 
 type Route = {
   area: RouteArea
@@ -33,6 +35,36 @@ const knownProducts = [
   { productSurface: 'agro', label: 'Agro' },
 ]
 
+const knownProductTenants = [
+  {
+    accountName: 'Acme',
+    productSurface: 'pymes',
+    productLabel: 'Pymes',
+    tenantName: 'Bikeman',
+    externalTenantId: 'bikeman',
+    status: 'Activo',
+  },
+]
+
+const knownExternalUsers = [
+  {
+    accountName: 'Acme',
+    productLabel: 'Pymes',
+    tenantName: 'Bikeman',
+    email: 'admin@bikeman.local',
+    source: 'Pymes',
+    status: 'Activo',
+  },
+  {
+    accountName: 'Acme',
+    productLabel: 'Pymes',
+    tenantName: 'Bikeman',
+    email: 'usuario@bikeman.local',
+    source: 'Pymes',
+    status: 'Activo',
+  },
+]
+
 type ProductOption = {
   productSurface: string
   label: string
@@ -42,6 +74,7 @@ type ProductOption = {
 export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
   const [orgId, setOrgId] = useState(localStorage.getItem('axis.org_id') || 'local-dev-org')
   const [productSurface, setProductSurface] = useState(localStorage.getItem('axis.product_surface') || 'medmory')
+  const [externalTenantId, setExternalTenantId] = useState(localStorage.getItem('axis.external_tenant_id') || 'bikeman')
   const [route, setRoute] = useState<Route>(() => parseCurrentRoute())
   const [session, setSession] = useState<LoadState<AxisSession | null>>(empty(null))
   const [axisOrgs, setAxisOrgs] = useState<LoadState<AxisOrg[]>>(empty([]))
@@ -68,14 +101,14 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
   const [securityReports, setSecurityReports] = useState<LoadState<SecurityEvalReport[]>>(empty([]))
   const [businessModel, setBusinessModel] = useState<LoadState<BusinessModel | null>>(empty(null))
   const [actionMessage, setActionMessage] = useState('')
-  const [billingCaseId, setBillingCaseId] = useState('')
 
   const refresh = useCallback(async () => {
     localStorage.setItem('axis.org_id', orgId)
     localStorage.setItem('axis.product_surface', productSurface)
+    localStorage.setItem('axis.external_tenant_id', externalTenantId)
     const productInit = productHeaders(productSurface)
     await Promise.all([
-      load(setSession, () => getSession(orgId), null),
+      load(setSession, () => getSession(), null),
       load(setAxisOrgs, () => listAxisOrgs(orgId), []),
       load(setHealth, () => getHealth(), null),
       load(setProducts, async () => (await axisFetch<{ products: Product[] }>('/api/companion/v1/products', orgId, productInit)).products ?? [], []),
@@ -100,7 +133,7 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
       load(setSecurityReports, async () => (await axisFetch<{ reports: SecurityEvalReport[] }>(withProduct('/api/companion/v1/security-evals/reports?limit=12', productSurface), orgId, productInit)).reports ?? [], []),
       load(setBusinessModel, () => axisFetch<BusinessModel>('/api/companion/v1/business-model', orgId, productInit), null)
     ])
-  }, [orgId, productSurface])
+  }, [externalTenantId, orgId, productSurface])
 
   const runAction = useCallback(async (label: string, fn: () => Promise<unknown>) => {
     setActionMessage(`${label}: running`)
@@ -116,6 +149,27 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
   useEffect(() => {
     void refresh()
   }, [refresh])
+
+  useEffect(() => {
+    const sessionOrgId = session.data?.org_id
+    if (sessionOrgId && sessionOrgId !== orgId && !session.data?.scopes?.includes('axis:cross_org')) {
+      setOrgId(sessionOrgId)
+    }
+  }, [orgId, session.data?.org_id, session.data?.scopes])
+
+  useEffect(() => {
+    const availableOrgs = axisOrgs.data.length > 0 ? axisOrgs.data : session.data?.orgs ?? []
+    if (availableOrgs.length === 0) return
+    if (availableOrgs.some((org) => org.id === orgId)) return
+    setOrgId(availableOrgs[0].id)
+  }, [axisOrgs.data, orgId, session.data?.orgs])
+
+  const tenantOptions = useMemo(() => buildTenantOptions(productSurface), [productSurface])
+
+  useEffect(() => {
+    if (tenantOptions.some((tenant) => tenant.externalTenantId === externalTenantId)) return
+    setExternalTenantId(tenantOptions[0]?.externalTenantId ?? '')
+  }, [externalTenantId, tenantOptions])
 
   useEffect(() => {
     const syncRoute = () => setRoute(parseCurrentRoute())
@@ -139,7 +193,12 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
     if (session.data?.orgs?.length) return session.data.orgs
     return [{ id: orgId, name: orgId, slug: orgId, status: 'active', created_at: '', updated_at: '' }]
   }, [axisOrgs.data, orgId, session.data?.orgs])
+  const selectedOrgOption = orgOptions.find((item) => item.id === orgId)
   const selectedProductOption = productOptions.find((item) => item.productSurface === productSurface)
+  const selectedTenantOption = tenantOptions.find((item) => item.externalTenantId === externalTenantId)
+  const simpleAgentsHeader = route.area === 'agents'
+  const showGlobalContext = route.area !== 'iam' && !simpleAgentsHeader
+  const canViewIAM = Boolean(session.data?.scopes?.some((scope) => scope === 'axis:orgs:admin' || scope === 'axis:users:admin'))
   const title = pageTitle(route)
   const chatAdapter = useMemo<ChatAdapter>(() => axisChatAdapter(orgId, productSurface), [orgId, productSurface])
   const navigate = useCallback((next: Route) => {
@@ -159,11 +218,11 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
         </div>
         <nav className="nav">
           <button type="button" className={route.area === 'home' ? 'active' : ''} onClick={() => navigate({ area: 'home', screen: 'summary' })}><Activity aria-hidden="true" />Inicio</button>
-          <button type="button" className={route.area === 'products' ? 'active' : ''} onClick={() => navigate({ area: 'products', screen: 'list' })}><Layers3 aria-hidden="true" />Productos</button>
           <button type="button" className={route.area === 'chat' ? 'active' : ''} onClick={() => navigate({ area: 'chat', screen: 'workspace' })}><MessageSquareText aria-hidden="true" />Chat</button>
           <button type="button" className={route.area === 'prompts' ? 'active' : ''} onClick={() => navigate({ area: 'prompts', screen: 'product' })}><FileText aria-hidden="true" />Prompts</button>
           <button type="button" className={route.area === 'agents' ? 'active' : ''} onClick={() => navigate({ area: 'agents', screen: 'list' })}><Bot aria-hidden="true" />Agentes</button>
           <button type="button" className={route.area === 'agent-control' ? 'active' : ''} onClick={() => navigate({ area: 'agent-control', screen: 'inventory' })}><UsersRound aria-hidden="true" />Control Agentes</button>
+          {canViewIAM && <button type="button" className={route.area === 'iam' ? 'active' : ''} onClick={() => navigate({ area: 'iam', screen: 'internal' })}><KeyRound aria-hidden="true" />IAM</button>}
           <button type="button" className={route.area === 'operations' ? 'active' : ''} onClick={() => navigate({ area: 'operations', screen: 'runs' })}><Activity aria-hidden="true" />Operación</button>
           <button type="button" className={route.area === 'nexus' ? 'active' : ''} onClick={() => navigate({ area: 'nexus', screen: 'approvals' })}><GitPullRequestArrow aria-hidden="true" />Nexus</button>
           <button type="button" className={route.area === 'platform' ? 'active' : ''} onClick={() => navigate({ area: 'platform', screen: 'runtime' })}><KeyRound aria-hidden="true" />Plataforma</button>
@@ -174,44 +233,64 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
         <header className="topbar">
           <div>
             <h1>{title}</h1>
-            <p>{session.data?.actor_id ?? 'local-dev-admin'}</p>
+            {route.area !== 'iam' && !simpleAgentsHeader && <p>{session.data?.actor_id ?? 'local-dev-admin'}</p>}
           </div>
-          <div className="toolbar">
-            <label>
-              <span>Org</span>
-              <select value={orgId} onChange={(event) => setOrgId(event.target.value)}>
-                {orgOptions.map((org) => (
-                  <option key={org.id} value={org.id}>
-                    {org.name || org.id} · {org.status}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              <span>Producto / Cliente</span>
-              <select value={productSurface} onChange={(event) => setProductSurface(event.target.value)}>
-                {productOptions.map((option) => (
-                  <option key={option.productSurface} value={option.productSurface}>
-                    {option.label} · {option.status}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button type="button" onClick={() => void refresh()} aria-label="Refresh">
-              <RefreshCw aria-hidden="true" />
-            </button>
-            {authSlot && <div className="auth-slot">{authSlot}</div>}
-          </div>
+          {(showGlobalContext || authSlot) && (
+            <div className="toolbar">
+              {showGlobalContext && (
+                <>
+                  <label>
+                    <span>Cuenta Axis</span>
+                    <select value={orgId} onChange={(event) => setOrgId(event.target.value)}>
+                      {orgOptions.map((org) => (
+                        <option key={org.id} value={org.id}>
+                          {org.name || org.id} · {org.status}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    <span>Producto</span>
+                    <select value={productSurface} onChange={(event) => setProductSurface(event.target.value)}>
+                      {productOptions.map((option) => (
+                        <option key={option.productSurface} value={option.productSurface}>
+                          {option.label} · {option.status}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    <span>Tenant</span>
+                    <select value={externalTenantId} onChange={(event) => setExternalTenantId(event.target.value)}>
+                      {tenantOptions.map((tenant) => (
+                        <option key={tenant.externalTenantId} value={tenant.externalTenantId}>
+                          {tenant.tenantName} · {tenant.status}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </>
+              )}
+              {showGlobalContext && (
+                <button type="button" onClick={() => void refresh()} aria-label="Refresh">
+                  <RefreshCw aria-hidden="true" />
+                </button>
+              )}
+              {authSlot && <div className="auth-slot">{authSlot}</div>}
+            </div>
+          )}
         </header>
 
-        <section className="health-row">
-          <HealthPill label="BFF" value="ok" />
-          <HealthPill label="Plataforma IA" value={health.data?.companion ?? health.error ?? 'loading'} />
-          <HealthPill label="Nexus" value={health.data?.nexus ?? health.error ?? 'loading'} />
-          <span className="scope-pill"><b>Producto</b>{selectedProductOption ? `${selectedProductOption.label} · ${selectedProductOption.status}` : productSurface}</span>
-          <span className="scope-pill">{session.data?.auth_method ?? 'dev'}</span>
-          {actionMessage && <span className="scope-pill">{actionMessage}</span>}
-        </section>
+        {showGlobalContext && (
+          <section className="health-row">
+            <HealthPill label="BFF" value="ok" />
+            <HealthPill label="Plataforma IA" value={health.data?.companion ?? health.error ?? 'loading'} />
+            <HealthPill label="Nexus" value={health.data?.nexus ?? health.error ?? 'loading'} />
+            <span className="scope-pill"><b>Producto</b>{selectedProductOption ? `${selectedProductOption.label} · ${selectedProductOption.status}` : productSurface}</span>
+            <span className="scope-pill">{session.data?.auth_method ?? 'dev'}</span>
+            {actionMessage && <span className="scope-pill">{actionMessage}</span>}
+          </section>
+        )}
 
         {route.area === 'home' && (
           <section className="page-section">
@@ -224,9 +303,12 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
             <div className="screen-grid two">
               <Panel title="Producto seleccionado" icon={<Layers3 />} state={products}>
                 <Table columns={['campo', 'valor']} rows={[
-                  ['org', orgId],
+                  ['cuenta Axis', selectedOrgOption?.name ?? orgId],
+                  ['axis_account_id', orgId],
                   ['producto', selectedProductOption?.label ?? productSurface],
                   ['product_surface', productSurface],
+                  ['tenant', selectedTenantOption?.tenantName ?? externalTenantId],
+                  ['external_tenant_id', selectedTenantOption?.externalTenantId ?? '-'],
                   ['estado', selectedProductOption?.status ?? '-'],
                 ]} />
               </Panel>
@@ -241,20 +323,6 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
                   ['Plataforma IA', health.data?.companion ?? health.error ?? 'loading'],
                   ['Nexus', health.data?.nexus ?? health.error ?? 'loading'],
                 ]} />
-              </Panel>
-            </div>
-          </section>
-        )}
-
-        {route.area === 'products' && (
-          <section className="page-section">
-            <div className="screen-grid">
-              <Panel title="Productos / Clientes" icon={<Layers3 />} state={products}>
-                <ProductList
-                  options={productOptions}
-                  selected={productSurface}
-                  onSelect={setProductSurface}
-                />
               </Panel>
             </div>
           </section>
@@ -415,82 +483,23 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
         )}
 
         {route.area === 'agents' && (
-          <section className="page-section">
-            <ScreenNav items={[
-              ['list', 'Agentes'],
-              ['billing-agent', 'Billing Agent']
-            ]} base="agents" active={route.screen} onNavigate={navigate} />
-            {route.screen === 'list' && (
-              <div className="screen-grid">
-                <Panel title="Agentes del producto" icon={<UsersRound />} state={agents}>
-                  <div className="panel-actions">
-                    <button type="button" disabled={!agents.data.some((item) => item.status === 'active')} onClick={() => {
-                      const agent = agents.data.find((item) => item.status === 'active')
-                      if (agent) void runAction('disable agent', () => axisFetch(`/api/companion/v1/agents/${encodeURIComponent(agent.agent_id)}/disable`, orgId, { method: 'POST', headers: { 'X-Product-Surface': productSurface }, body: '{}' }))
-                    }}>
-                      <Power aria-hidden="true" />Deshabilitar activo
-                    </button>
-                  </div>
-                  <Table columns={['agente', 'perfil', 'estado', 'autonomía', 'capabilities']} rows={agents.data.map((item) => [
-                    item.display_name || item.agent_id,
-                    item.profile_id || item.role || '-',
-                    item.status,
-                    item.max_autonomy,
-                    item.allowed_capabilities?.length ?? 0,
-                  ])} />
-                </Panel>
-              </div>
-            )}
-            {route.screen === 'billing-agent' && (
-              <div className="screen-grid">
-                <Panel title="Billing Agent" icon={<Bot />} state={billingAgentRuns}>
-                  <div className="panel-actions">
-                    <button type="button" onClick={() => void runAction('billing scan', () => axisFetch('/api/companion/v1/agent-runs', orgId, {
-                      method: 'POST',
-                      headers: { 'X-Product-Surface': productSurface },
-                      body: JSON.stringify({
-                        agent_id: 'billing_agent',
-                        product_surface: productSurface,
-                        run_type: 'billing.plan_requests.scan',
-                        input: {}
-                      })
-                    }))}>
-                      <Play aria-hidden="true" />Analizar pendientes
-                    </button>
-                    <input
-                      aria-label="Billing case id"
-                      placeholder="billing_case_..."
-                      value={billingCaseId}
-                      onChange={(event) => setBillingCaseId(event.target.value)}
-                    />
-                    <button type="button" disabled={!billingCaseId.trim()} onClick={() => void runAction('billing case', () => axisFetch('/api/companion/v1/agent-runs', orgId, {
-                      method: 'POST',
-                      headers: { 'X-Product-Surface': productSurface },
-                      body: JSON.stringify({
-                        agent_id: 'billing_agent',
-                        product_surface: productSurface,
-                        run_type: 'billing.plan_request.review',
-                        input: { case_id: billingCaseId.trim() }
-                      })
-                    }))}>
-                      <Bot aria-hidden="true" />Ejecutar agente
-                    </button>
-                  </div>
-                  <Table columns={['recomendación', 'run type', 'task', 'tools', 'nexus', 'actualizado']} rows={billingAgentRuns.data.map((item) => [
-                    item.recommendation || '-',
-                    item.run_type || item.task?.run_type || '-',
-                    short(item.task_id || item.id),
-                    item.tool_calls?.length ?? 0,
-                    item.nexus_request_id ? short(item.nexus_request_id) : '-',
-                    date(item.updated_at ?? item.task?.updated_at)
-                  ])} />
-                </Panel>
-              </div>
-            )}
-          </section>
+          <AgentsControlCenter orgId={orgId} />
         )}
 
         {route.area === 'agent-control' && <AgentControlCenter />}
+
+        {route.area === 'iam' && canViewIAM && (
+          <IAMControlCenter
+            orgId={orgId}
+            orgs={orgOptions}
+            onOrgChange={setOrgId}
+            onRefreshShell={refresh}
+          />
+        )}
+
+        {route.area === 'iam' && !canViewIAM && (
+          <section className="empty-state">No tenés permisos para administrar IAM.</section>
+        )}
 
         {route.area === 'prompts' && (
           <section className="page-section">
@@ -619,11 +628,11 @@ function parseRoutePath(path: string): Route {
   const area = normalizeRouteArea(areaRaw)
   const screens: Record<RouteArea, string[]> = {
     home: ['summary'],
-    products: ['list'],
     prompts: ['product', 'agents'],
     chat: ['workspace'],
-    agents: ['list', 'billing-agent'],
+    agents: ['list'],
     'agent-control': ['inventory'],
+    iam: ['internal', 'clients', 'users'],
     operations: ['runs', 'traces', 'memory', 'jobs', 'observability', 'cost', 'security'],
     nexus: ['approvals', 'requests', 'policies', 'action-types', 'delegations', 'risk'],
     platform: ['runtime', 'capabilities', 'business', 'health']
@@ -637,7 +646,7 @@ function normalizeRouteArea(value: string): RouteArea {
   if (value === 'overview') return 'home'
   if (value === 'companion') return 'platform'
   if (value === 'access') return 'nexus'
-  if (value === 'home' || value === 'products' || value === 'chat' || value === 'prompts' || value === 'agents' || value === 'agent-control' || value === 'operations' || value === 'nexus' || value === 'platform') {
+  if (value === 'home' || value === 'chat' || value === 'prompts' || value === 'agents' || value === 'agent-control' || value === 'iam' || value === 'operations' || value === 'nexus' || value === 'platform') {
     return value
   }
   return 'home'
@@ -650,16 +659,14 @@ function normalizeRouteScreen(area: RouteArea, value: string | undefined) {
   if (area === 'platform' && value === 'control') return 'runtime'
   if (area === 'platform' && value === 'tasks') return 'runtime'
   if (area === 'operations' && value === 'billing-agent') return 'runs'
-  if (area === 'agents' && value === 'billing_agent') return 'billing-agent'
+  if (area === 'agents' && value === 'billing_agent') return 'list'
+  if (area === 'iam' && value === 'orgs') return 'internal'
   return value
 }
 
 function routePath(route: Route) {
   if (route.area === 'home') {
     return '/home'
-  }
-  if (route.area === 'products') {
-    return '/products'
   }
   if (route.area === 'chat') {
     return '/chat'
@@ -671,8 +678,6 @@ function pageTitle(route: Route) {
   switch (route.area) {
     case 'home':
       return 'Inicio'
-    case 'products':
-      return 'Productos / Clientes'
     case 'chat':
       return 'Chat'
     case 'nexus':
@@ -681,6 +686,8 @@ function pageTitle(route: Route) {
       return 'Agentes'
     case 'agent-control':
       return 'Control Agentes'
+    case 'iam':
+      return 'IAM'
     case 'platform':
       return 'Plataforma IA'
     case 'prompts':
@@ -844,6 +851,21 @@ function buildProductOptions(products: Product[], installations: ProductInstalla
       status,
     }
   })
+}
+
+function buildTenantOptions(productSurface: string) {
+  const tenants = knownProductTenants.filter((tenant) => tenant.productSurface === productSurface)
+  if (tenants.length > 0) return tenants
+  return [
+    {
+      accountName: '',
+      productSurface,
+      productLabel: productSurface,
+      tenantName: 'Sin tenant',
+      externalTenantId: 'none',
+      status: '-',
+    },
+  ]
 }
 
 function axisChatAdapter(orgId: string, productSurface: string): ChatAdapter {

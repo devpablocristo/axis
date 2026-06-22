@@ -23,15 +23,19 @@ func NewPostgresRepository(db *sharedpostgres.DB) *PostgresRepository {
 }
 
 func (r *PostgresRepository) ListAgents(ctx context.Context, orgID, productSurface string) ([]Agent, error) {
-	rows, err := r.db.Pool().Query(ctx, `
+	orgID = strings.TrimSpace(orgID)
+	productSurface = defaultSurface(productSurface)
+	query := `
 		SELECT org_id, product_surface, agent_id, display_name, role, profile_id, status,
+		       lifecycle_status, origin_kind, review_status,
 		       max_autonomy, allowed_tools, allowed_capabilities, allowed_connectors,
 		       memory_scope_id, shared_memory_policy, limits_json, sla_json, metadata_json,
 		       version, created_by, created_at, updated_at
 		FROM companion_agents
-		WHERE org_id = $1 AND product_surface = $2
+		WHERE product_surface = $2 AND ($1 = '*' OR org_id = $1)
 		ORDER BY agent_id
-	`, strings.TrimSpace(orgID), defaultSurface(productSurface))
+	`
+	rows, err := r.db.Pool().Query(ctx, query, orgID, productSurface)
 	if err != nil {
 		return nil, fmt.Errorf("list agents: %w", err)
 	}
@@ -53,6 +57,7 @@ func (r *PostgresRepository) ListAgents(ctx context.Context, orgID, productSurfa
 func (r *PostgresRepository) GetAgent(ctx context.Context, orgID, productSurface, agentID string) (Agent, error) {
 	row := r.db.Pool().QueryRow(ctx, `
 		SELECT org_id, product_surface, agent_id, display_name, role, profile_id, status,
+		       lifecycle_status, origin_kind, review_status,
 		       max_autonomy, allowed_tools, allowed_capabilities, allowed_connectors,
 		       memory_scope_id, shared_memory_policy, limits_json, sla_json, metadata_json,
 		       version, created_by, created_at, updated_at
@@ -92,16 +97,20 @@ func (r *PostgresRepository) SaveAgent(ctx context.Context, agent Agent) (Agent,
 	row := tx.QueryRow(ctx, `
 		INSERT INTO companion_agents
 			(org_id, product_surface, agent_id, display_name, role, profile_id, status,
+			 lifecycle_status, origin_kind, review_status,
 			 max_autonomy, allowed_tools, allowed_capabilities, allowed_connectors,
 			 memory_scope_id, shared_memory_policy, limits_json, sla_json, metadata_json,
 			 version, created_by, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,1,$17,$18,$18)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,1,$20,$21,$21)
 		ON CONFLICT (org_id, product_surface, agent_id)
 		DO UPDATE SET
 			display_name = EXCLUDED.display_name,
 			role = EXCLUDED.role,
 			profile_id = EXCLUDED.profile_id,
 			status = EXCLUDED.status,
+			lifecycle_status = EXCLUDED.lifecycle_status,
+			origin_kind = EXCLUDED.origin_kind,
+			review_status = EXCLUDED.review_status,
 			max_autonomy = EXCLUDED.max_autonomy,
 			allowed_tools = EXCLUDED.allowed_tools,
 			allowed_capabilities = EXCLUDED.allowed_capabilities,
@@ -114,11 +123,13 @@ func (r *PostgresRepository) SaveAgent(ctx context.Context, agent Agent) (Agent,
 			version = companion_agents.version + 1,
 			updated_at = EXCLUDED.updated_at
 		RETURNING org_id, product_surface, agent_id, display_name, role, profile_id, status,
+		          lifecycle_status, origin_kind, review_status,
 		          max_autonomy, allowed_tools, allowed_capabilities, allowed_connectors,
 		          memory_scope_id, shared_memory_policy, limits_json, sla_json, metadata_json,
 		          version, created_by, created_at, updated_at
 	`, agent.OrgID, agent.ProductSurface, agent.AgentID, agent.DisplayName, agent.Role, agent.ProfileID,
-		agent.Status, agent.MaxAutonomy, agent.AllowedTools, agent.AllowedCapabilities, agent.AllowedConnectors,
+		agent.Status, agent.LifecycleStatus, agent.OriginKind, agent.ReviewStatus,
+		agent.MaxAutonomy, agent.AllowedTools, agent.AllowedCapabilities, agent.AllowedConnectors,
 		agent.MemoryScopeID, sharedMemory, limits, sla, metadata, agent.CreatedBy, now)
 	saved, err := scanAgent(row)
 	if err != nil {
@@ -151,9 +162,10 @@ func (r *PostgresRepository) DisableAgent(ctx context.Context, orgID, productSur
 	}()
 	row := tx.QueryRow(ctx, `
 		UPDATE companion_agents
-		SET status = 'disabled', version = version + 1, updated_at = now()
+		SET status = 'disabled', lifecycle_status = 'archived', version = version + 1, updated_at = now()
 		WHERE org_id = $1 AND product_surface = $2 AND agent_id = $3
 		RETURNING org_id, product_surface, agent_id, display_name, role, profile_id, status,
+		          lifecycle_status, origin_kind, review_status,
 		          max_autonomy, allowed_tools, allowed_capabilities, allowed_connectors,
 		          memory_scope_id, shared_memory_policy, limits_json, sla_json, metadata_json,
 		          version, created_by, created_at, updated_at
@@ -174,6 +186,106 @@ func (r *PostgresRepository) DisableAgent(ctx context.Context, orgID, productSur
 	}
 	committed = true
 	return agent, nil
+}
+
+func (r *PostgresRepository) SetAgentLifecycle(ctx context.Context, orgID, productSurface, agentID, lifecycleStatus, status, reviewStatus, changedBy string) (Agent, error) {
+	tx, err := r.db.Pool().Begin(ctx)
+	if err != nil {
+		return Agent{}, fmt.Errorf("begin set agent lifecycle: %w", err)
+	}
+	committed := false
+	defer func() {
+		if committed {
+			return
+		}
+		if rollbackErr := tx.Rollback(ctx); rollbackErr != nil && !errors.Is(rollbackErr, pgx.ErrTxClosed) {
+			slog.Error("agent_lifecycle_rollback_failed", "error", rollbackErr)
+		}
+	}()
+	row := tx.QueryRow(ctx, `
+		UPDATE companion_agents
+		SET lifecycle_status = COALESCE(NULLIF($4, ''), lifecycle_status),
+		    status = COALESCE(NULLIF($5, ''), status),
+		    review_status = COALESCE(NULLIF($6, ''), review_status),
+		    version = version + 1,
+		    updated_at = now()
+		WHERE org_id = $1 AND product_surface = $2 AND agent_id = $3
+		RETURNING org_id, product_surface, agent_id, display_name, role, profile_id, status,
+		          lifecycle_status, origin_kind, review_status,
+		          max_autonomy, allowed_tools, allowed_capabilities, allowed_connectors,
+		          memory_scope_id, shared_memory_policy, limits_json, sla_json, metadata_json,
+		          version, created_by, created_at, updated_at
+	`, strings.TrimSpace(orgID), defaultSurface(productSurface), strings.TrimSpace(agentID), strings.TrimSpace(lifecycleStatus), strings.TrimSpace(status), strings.TrimSpace(reviewStatus))
+	agent, err := scanAgent(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Agent{}, ErrNotFound
+		}
+		return Agent{}, fmt.Errorf("set agent lifecycle: %w", err)
+	}
+	payload, _ := json.Marshal(agent)
+	action := "lifecycle_" + strings.TrimSpace(agent.LifecycleStatus)
+	if strings.TrimSpace(reviewStatus) != "" {
+		action = "review_" + strings.TrimSpace(agent.ReviewStatus)
+	}
+	if err := insertAgentAudit(ctx, tx, agent.OrgID, agent.ProductSurface, agent.AgentID, action, changedBy, payload); err != nil {
+		return Agent{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Agent{}, fmt.Errorf("commit set agent lifecycle: %w", err)
+	}
+	committed = true
+	return agent, nil
+}
+
+func (r *PostgresRepository) DeleteAgent(ctx context.Context, orgID, productSurface, agentID, changedBy string) error {
+	tx, err := r.db.Pool().Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin delete agent: %w", err)
+	}
+	committed := false
+	defer func() {
+		if committed {
+			return
+		}
+		if rollbackErr := tx.Rollback(ctx); rollbackErr != nil && !errors.Is(rollbackErr, pgx.ErrTxClosed) {
+			slog.Error("agent_delete_rollback_failed", "error", rollbackErr)
+		}
+	}()
+	agent, err := scanAgent(tx.QueryRow(ctx, `
+		SELECT org_id, product_surface, agent_id, display_name, role, profile_id, status,
+		       lifecycle_status, origin_kind, review_status,
+		       max_autonomy, allowed_tools, allowed_capabilities, allowed_connectors,
+		       memory_scope_id, shared_memory_policy, limits_json, sla_json, metadata_json,
+		       version, created_by, created_at, updated_at
+		FROM companion_agents
+		WHERE org_id = $1 AND product_surface = $2 AND agent_id = $3
+	`, strings.TrimSpace(orgID), defaultSurface(productSurface), strings.TrimSpace(agentID)))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		return fmt.Errorf("load agent for delete: %w", err)
+	}
+	payload, _ := json.Marshal(agent)
+	if err := insertAgentAudit(ctx, tx, agent.OrgID, agent.ProductSurface, agent.AgentID, "delete", changedBy, payload); err != nil {
+		return err
+	}
+	tag, err := tx.Exec(ctx, `
+		DELETE FROM companion_agents
+		WHERE org_id = $1 AND product_surface = $2 AND agent_id = $3
+	`, agent.OrgID, agent.ProductSurface, agent.AgentID)
+	if err != nil {
+		return fmt.Errorf("delete agent: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit delete agent: %w", err)
+	}
+	committed = true
+	return nil
 }
 
 func (r *PostgresRepository) CreateHandoff(ctx context.Context, handoff Handoff) (Handoff, error) {
@@ -298,7 +410,8 @@ func scanAgent(row scanRow) (Agent, error) {
 		allowedConnectors            []string
 	)
 	if err := row.Scan(&agent.OrgID, &agent.ProductSurface, &agent.AgentID, &agent.DisplayName, &agent.Role, &agent.ProfileID,
-		&agent.Status, &agent.MaxAutonomy, &allowedTools, &allowedCapabilities, &allowedConnectors,
+		&agent.Status, &agent.LifecycleStatus, &agent.OriginKind, &agent.ReviewStatus,
+		&agent.MaxAutonomy, &allowedTools, &allowedCapabilities, &allowedConnectors,
 		&agent.MemoryScopeID, &sharedRaw, &limitsRaw, &slaRaw, &metadataRaw, &agent.Version, &agent.CreatedBy,
 		&createdAt, &updatedAt); err != nil {
 		return Agent{}, err

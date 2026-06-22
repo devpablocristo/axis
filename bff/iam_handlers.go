@@ -39,34 +39,66 @@ func (s *server) orgs(w http.ResponseWriter, r *http.Request) {
 	if len(parts) == 1 {
 		switch r.Method {
 		case http.MethodGet:
+			if !requireScope(w, p, "axis:orgs:read", "axis:orgs:admin", "axis:cross_org") {
+				return
+			}
 			orgs, err := s.iam.ListOrgsForActor(r.Context(), p.Actor, hasScope(p.Scopes, "axis:cross_org", "axis:orgs:admin"))
 			writeStoreResult(w, map[string]any{"orgs": orgs}, err)
 		case http.MethodPost:
+			if !requireScope(w, p, "axis:orgs:write", "axis:orgs:admin") {
+				return
+			}
 			_ = s.ensureActorUser(r, p)
 			input, ok := decodeJSONBody[IAMOrg](w, r)
 			if !ok {
 				return
 			}
-			org, err := s.iam.CreateOrg(r.Context(), input, p.Actor)
+			org, err := s.createIAMOrg(r.Context(), p.Actor, input)
+			if err == nil {
+				s.auditIAM(r, p, org.ID, "org.created", "org", org.ID, map[string]any{"name": org.Name, "slug": org.Slug, "status": org.Status})
+			}
 			writeStoreCreated(w, map[string]any{"org": org}, err)
 		default:
 			w.WriteHeader(http.StatusMethodNotAllowed)
 		}
 		return
 	}
-	if len(parts) == 2 && r.Method == http.MethodPatch {
-		input, ok := decodeJSONBody[IAMOrg](w, r)
-		if !ok {
-			return
+	if len(parts) == 2 {
+		switch r.Method {
+		case http.MethodPatch:
+			if !requireScope(w, p, "axis:orgs:write", "axis:orgs:admin") {
+				return
+			}
+			input, ok := decodeJSONBody[IAMOrg](w, r)
+			if !ok {
+				return
+			}
+			org, err := s.updateIAMOrg(r.Context(), parts[1], input)
+			if err == nil {
+				s.auditIAM(r, p, parts[1], "org.updated", "org", parts[1], map[string]any{"name": input.Name, "slug": input.Slug, "status": input.Status})
+			}
+			writeStoreResult(w, map[string]any{"org": org}, err)
+		case http.MethodDelete:
+			if !requireScope(w, p, "axis:orgs:admin") {
+				return
+			}
+			err := s.deleteIAMOrg(r.Context(), parts[1])
+			if err == nil {
+				s.auditIAM(r, p, parts[1], "org.purged", "org", parts[1], nil)
+			}
+			writeStoreNoContent(w, err)
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
 		}
-		org, err := s.iam.UpdateOrg(r.Context(), parts[1], input)
-		writeStoreResult(w, map[string]any{"org": org}, err)
 		return
 	}
 	if len(parts) == 3 && parts[2] == "members" {
 		orgID := parts[1]
 		switch r.Method {
 		case http.MethodGet:
+			if !requireScope(w, p, "axis:orgs:read", "axis:orgs:admin") {
+				return
+			}
 			if !s.canAccessOrg(r, p, orgID) {
 				writeError(w, http.StatusForbidden, "FORBIDDEN", "selected org is not allowed for this principal")
 				return
@@ -74,71 +106,181 @@ func (s *server) orgs(w http.ResponseWriter, r *http.Request) {
 			members, err := s.iam.ListMembers(r.Context(), orgID)
 			writeStoreResult(w, map[string]any{"members": members}, err)
 		case http.MethodPost:
+			if !requireScope(w, p, "axis:orgs:write", "axis:orgs:admin", "axis:users:admin") {
+				return
+			}
 			input, ok := decodeJSONBody[IAMMember](w, r)
 			if !ok {
 				return
 			}
 			input.OrgID = orgID
-			member, err := s.iam.UpsertMember(r.Context(), input)
+			member, err := s.upsertIAMMember(r.Context(), input)
+			if err == nil {
+				s.auditIAM(r, p, orgID, "member.upserted", "member", input.UserID, map[string]any{"role": input.Role, "status": input.Status})
+			}
 			writeStoreCreated(w, map[string]any{"member": member}, err)
 		default:
 			w.WriteHeader(http.StatusMethodNotAllowed)
 		}
 		return
 	}
-	if len(parts) == 4 && parts[2] == "members" && r.Method == http.MethodPatch {
-		input, ok := decodeJSONBody[IAMMember](w, r)
-		if !ok {
-			return
+	if len(parts) == 4 && parts[2] == "members" {
+		switch r.Method {
+		case http.MethodPatch:
+			if !requireScope(w, p, "axis:orgs:write", "axis:orgs:admin", "axis:users:admin") {
+				return
+			}
+			input, ok := decodeJSONBody[IAMMember](w, r)
+			if !ok {
+				return
+			}
+			member, err := s.updateIAMMember(r.Context(), parts[1], parts[3], input)
+			if err == nil {
+				s.auditIAM(r, p, parts[1], "member.updated", "member", parts[3], map[string]any{"role": input.Role, "status": input.Status})
+			}
+			writeStoreResult(w, map[string]any{"member": member}, err)
+		case http.MethodDelete:
+			if !requireScope(w, p, "axis:orgs:admin", "axis:users:admin") {
+				return
+			}
+			err := s.deleteIAMMember(r.Context(), parts[1], parts[3])
+			if err == nil {
+				s.auditIAM(r, p, parts[1], "member.purged", "member", parts[3], nil)
+			}
+			writeStoreNoContent(w, err)
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
 		}
-		member, err := s.iam.UpdateMember(r.Context(), parts[1], parts[3], input)
-		writeStoreResult(w, map[string]any{"member": member}, err)
 		return
 	}
-	if len(parts) == 3 && parts[2] == "invitations" && r.Method == http.MethodPost {
-		input, ok := decodeJSONBody[IAMInvitation](w, r)
-		if !ok {
-			return
+	if len(parts) == 3 && parts[2] == "invitations" {
+		switch r.Method {
+		case http.MethodGet:
+			if !requireScope(w, p, "axis:orgs:read", "axis:orgs:admin") {
+				return
+			}
+			if !s.canAccessOrg(r, p, parts[1]) {
+				writeError(w, http.StatusForbidden, "FORBIDDEN", "selected org is not allowed for this principal")
+				return
+			}
+			invitations, err := s.iam.ListInvitations(r.Context(), parts[1])
+			writeStoreResult(w, map[string]any{"invitations": invitations}, err)
+		case http.MethodPost:
+			if !requireScope(w, p, "axis:orgs:write", "axis:orgs:admin", "axis:users:admin") {
+				return
+			}
+			input, ok := decodeJSONBody[IAMInvitation](w, r)
+			if !ok {
+				return
+			}
+			input.OrgID = parts[1]
+			input.InvitedBy = p.Actor
+			input.Provider = firstNonEmpty(input.Provider, "identity")
+			invite, err := s.createIAMInvitation(r.Context(), input)
+			if err == nil {
+				s.auditIAM(r, p, parts[1], "invitation.created", "invitation", invite.ID, map[string]any{"email": invite.Email, "role": invite.Role, "status": invite.Status})
+			}
+			writeStoreCreated(w, map[string]any{"invitation": invite}, err)
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
 		}
-		input.OrgID = parts[1]
-		input.InvitedBy = p.Actor
-		input.Provider = firstNonEmpty(input.Provider, "clerk")
-		invite, err := s.iam.CreateInvitation(r.Context(), input)
-		writeStoreCreated(w, map[string]any{"invitation": invite}, err)
 		return
 	}
 	http.NotFound(w, r)
 }
 
 func (s *server) users(w http.ResponseWriter, r *http.Request) {
+	p := principalFromContext(r.Context())
 	parts := routeParts(r.URL.Path)
 	if len(parts) == 1 {
 		switch r.Method {
 		case http.MethodGet:
-			users, err := s.iam.ListUsers(r.Context())
+			if !requireScope(w, p, "axis:users:read", "axis:users:admin") {
+				return
+			}
+			users, err := s.listVisibleUsers(r, p)
 			writeStoreResult(w, map[string]any{"users": users}, err)
 		case http.MethodPost:
+			if !requireScope(w, p, "axis:users:write", "axis:users:admin") {
+				return
+			}
+			orgID, err := s.selectedOrg(r, p)
+			if err != nil {
+				writeError(w, http.StatusForbidden, "FORBIDDEN", err.Error())
+				return
+			}
 			input, ok := decodeJSONBody[IAMUser](w, r)
 			if !ok {
 				return
 			}
-			user, err := s.iam.CreateUser(r.Context(), input)
+			user, err := s.createIAMUser(r.Context(), orgID, input)
+			if err == nil {
+				s.auditIAM(r, p, "", "user.created", "user", user.ID, map[string]any{"email": user.Email, "status": user.Status})
+			}
 			writeStoreCreated(w, map[string]any{"user": user}, err)
 		default:
 			w.WriteHeader(http.StatusMethodNotAllowed)
 		}
 		return
 	}
-	if len(parts) == 2 && r.Method == http.MethodPatch {
-		input, ok := decodeJSONBody[IAMUser](w, r)
-		if !ok {
-			return
+	if len(parts) == 2 {
+		switch r.Method {
+		case http.MethodPatch:
+			if !requireScope(w, p, "axis:users:write", "axis:users:admin") {
+				return
+			}
+			orgID, err := s.selectedOrg(r, p)
+			if err != nil {
+				writeError(w, http.StatusForbidden, "FORBIDDEN", err.Error())
+				return
+			}
+			input, ok := decodeJSONBody[IAMUser](w, r)
+			if !ok {
+				return
+			}
+			user, err := s.updateIAMUser(r.Context(), orgID, parts[1], input)
+			if err == nil {
+				s.auditIAM(r, p, "", "user.updated", "user", parts[1], map[string]any{"email": input.Email, "name": input.Name, "status": input.Status})
+			}
+			writeStoreResult(w, map[string]any{"user": user}, err)
+		case http.MethodDelete:
+			if !requireScope(w, p, "axis:users:admin") {
+				return
+			}
+			orgID, selectedErr := s.selectedOrg(r, p)
+			if selectedErr != nil {
+				writeError(w, http.StatusForbidden, "FORBIDDEN", selectedErr.Error())
+				return
+			}
+			err := s.deleteIAMUser(r.Context(), orgID, parts[1])
+			if err == nil {
+				s.auditIAM(r, p, "", "user.purged", "user", parts[1], nil)
+			}
+			writeStoreNoContent(w, err)
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
 		}
-		user, err := s.iam.UpdateUser(r.Context(), parts[1], input)
-		writeStoreResult(w, map[string]any{"user": user}, err)
 		return
 	}
 	http.NotFound(w, r)
+}
+
+func (s *server) iamAudit(w http.ResponseWriter, r *http.Request) {
+	p := principalFromContext(r.Context())
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	if !requireScope(w, p, "axis:orgs:read", "axis:orgs:admin", "axis:users:admin") {
+		return
+	}
+	orgID := strings.TrimSpace(r.URL.Query().Get("org_id"))
+	if orgID != "" && !s.canAccessOrg(r, p, orgID) {
+		writeError(w, http.StatusForbidden, "FORBIDDEN", "selected org is not allowed for this principal")
+		return
+	}
+	events, err := s.iam.ListAuditEvents(r.Context(), orgID)
+	writeStoreResult(w, map[string]any{"events": events}, err)
 }
 
 func (s *server) orgInvitations(w http.ResponseWriter, r *http.Request) {
@@ -160,7 +302,10 @@ func (s *server) orgInvitations(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	invite, err := s.iam.UpdateInvitationStatus(r.Context(), parts[1], status, p.Actor)
+	invite, err := s.updateIAMInvitationStatus(r.Context(), parts[1], status, p.Actor)
+	if err == nil {
+		s.auditIAM(r, p, invite.OrgID, "invitation."+status, "invitation", invite.ID, map[string]any{"email": invite.Email, "status": invite.Status})
+	}
 	writeStoreResult(w, map[string]any{"invitation": invite}, err)
 }
 
@@ -200,6 +345,14 @@ func (s *server) clerkWebhook(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "invalid JSON body")
 		return
 	}
+	if s.identity != nil {
+		if err := s.identity.HandleWebhook(r.Context(), event.Type, event.Data); err != nil {
+			writeStoreError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusAccepted, map[string]any{"status": "accepted"})
+		return
+	}
 	switch strings.TrimSpace(event.Type) {
 	case "user.created", "user.updated":
 		email := firstWebhookString(event.Data, "email", "email_address")
@@ -217,7 +370,7 @@ func (s *server) clerkWebhook(w http.ResponseWriter, r *http.Request) {
 		})
 	case "organization.created", "organization.updated":
 		_, _ = s.iam.CreateOrg(r.Context(), IAMOrg{
-			ID:            "axis_" + firstWebhookString(event.Data, "id"),
+			ID:            firstWebhookString(event.Data, "id"),
 			ExternalID:    firstWebhookString(event.Data, "id"),
 			Provider:      "clerk",
 			ProviderOrgID: firstWebhookString(event.Data, "id"),
@@ -271,6 +424,49 @@ func (s *server) canAccessOrg(r *http.Request, p authn.Principal, orgID string) 
 	return err == nil && ok
 }
 
+func requireScope(w http.ResponseWriter, p authn.Principal, scopes ...string) bool {
+	if hasScope(p.Scopes, scopes...) {
+		return true
+	}
+	writeError(w, http.StatusForbidden, "FORBIDDEN", "missing required scope")
+	return false
+}
+
+func (s *server) auditIAM(r *http.Request, p authn.Principal, orgID string, action string, target string, targetID string, payload map[string]any) {
+	if action == "" || target == "" {
+		return
+	}
+	event := IAMAuditEvent{
+		OrgID:    orgID,
+		Actor:    p.Actor,
+		Action:   action,
+		Target:   target,
+		TargetID: targetID,
+		Payload:  compactPayload(payload),
+	}
+	_ = s.iam.AppendAuditEvent(r.Context(), event)
+}
+
+func compactPayload(payload map[string]any) map[string]any {
+	if len(payload) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(payload))
+	for key, value := range payload {
+		switch typed := value.(type) {
+		case string:
+			if strings.TrimSpace(typed) != "" {
+				out[key] = typed
+			}
+		default:
+			if value != nil {
+				out[key] = value
+			}
+		}
+	}
+	return out
+}
+
 func (s *server) ensureActorUser(r *http.Request, p authn.Principal) error {
 	if strings.TrimSpace(p.Actor) == "" {
 		return nil
@@ -303,9 +499,21 @@ func writeStoreCreated(w http.ResponseWriter, payload any, err error) {
 	writeJSON(w, http.StatusCreated, payload)
 }
 
+func writeStoreNoContent(w http.ResponseWriter, err error) {
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func writeStoreError(w http.ResponseWriter, err error) {
 	if errors.Is(err, errNotFound) {
 		writeError(w, http.StatusNotFound, "NOT_FOUND", "resource not found")
+		return
+	}
+	if errors.Is(err, errIdentityProviderNotConfigured) {
+		writeError(w, http.StatusServiceUnavailable, "IDENTITY_PROVIDER_NOT_CONFIGURED", "identity provider is not configured")
 		return
 	}
 	writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "request failed")

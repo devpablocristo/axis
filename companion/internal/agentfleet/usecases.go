@@ -11,6 +11,8 @@ type Repository interface {
 	GetAgent(ctx context.Context, orgID, productSurface, agentID string) (Agent, error)
 	SaveAgent(ctx context.Context, agent Agent) (Agent, error)
 	DisableAgent(ctx context.Context, orgID, productSurface, agentID, changedBy string) (Agent, error)
+	SetAgentLifecycle(ctx context.Context, orgID, productSurface, agentID, lifecycleStatus, status, reviewStatus, changedBy string) (Agent, error)
+	DeleteAgent(ctx context.Context, orgID, productSurface, agentID, changedBy string) error
 	CreateHandoff(ctx context.Context, handoff Handoff) (Handoff, error)
 	ListHandoffs(ctx context.Context, orgID, productSurface string, limit int) ([]Handoff, error)
 	UpdateHandoffStatus(ctx context.Context, orgID, productSurface, handoffID, status, changedBy string) (Handoff, error)
@@ -73,6 +75,44 @@ func (u *Usecases) DisableAgent(ctx context.Context, orgID, productSurface, agen
 	return u.repo.DisableAgent(ctx, orgID, productSurface, agentID, changedBy)
 }
 
+func (u *Usecases) ArchiveAgent(ctx context.Context, orgID, productSurface, agentID, changedBy string) (Agent, error) {
+	return u.repo.SetAgentLifecycle(ctx, orgID, productSurface, agentID, LifecycleArchived, StatusDisabled, "", changedBy)
+}
+
+func (u *Usecases) TrashAgent(ctx context.Context, orgID, productSurface, agentID, changedBy string) (Agent, error) {
+	return u.repo.SetAgentLifecycle(ctx, orgID, productSurface, agentID, LifecycleTrash, StatusDisabled, "", changedBy)
+}
+
+func (u *Usecases) RestoreAgent(ctx context.Context, orgID, productSurface, agentID, changedBy string) (Agent, error) {
+	agent, err := u.repo.GetAgent(ctx, orgID, productSurface, agentID)
+	if err != nil {
+		return Agent{}, err
+	}
+	if agent.ReviewStatus != ReviewApproved {
+		return Agent{}, fmt.Errorf("%w: only approved agents can be restored", ErrValidation)
+	}
+	return u.repo.SetAgentLifecycle(ctx, orgID, productSurface, agentID, LifecycleActive, StatusActive, "", changedBy)
+}
+
+func (u *Usecases) ApproveAgent(ctx context.Context, orgID, productSurface, agentID, changedBy string) (Agent, error) {
+	agent, err := u.repo.GetAgent(ctx, orgID, productSurface, agentID)
+	if err != nil {
+		return Agent{}, err
+	}
+	if strings.TrimSpace(agent.ProfileID) == "" || agent.ProfileID == "legacy.unprofiled" {
+		return Agent{}, fmt.Errorf("%w: approved agents require a real profile_id", ErrValidation)
+	}
+	return u.repo.SetAgentLifecycle(ctx, orgID, productSurface, agentID, LifecycleActive, StatusActive, ReviewApproved, changedBy)
+}
+
+func (u *Usecases) IgnoreAgent(ctx context.Context, orgID, productSurface, agentID, changedBy string) (Agent, error) {
+	return u.repo.SetAgentLifecycle(ctx, orgID, productSurface, agentID, LifecycleArchived, StatusDisabled, ReviewIgnored, changedBy)
+}
+
+func (u *Usecases) DeleteAgent(ctx context.Context, orgID, productSurface, agentID, changedBy string) error {
+	return u.repo.DeleteAgent(ctx, orgID, productSurface, agentID, changedBy)
+}
+
 func (u *Usecases) CreateHandoff(ctx context.Context, handoff Handoff) (Handoff, error) {
 	handoff = normalizeHandoff(handoff)
 	if err := validateHandoff(handoff); err != nil {
@@ -82,15 +122,15 @@ func (u *Usecases) CreateHandoff(ctx context.Context, handoff Handoff) (Handoff,
 	if err != nil {
 		return Handoff{}, fmt.Errorf("source agent: %w", err)
 	}
-	if source.Status != StatusActive {
-		return Handoff{}, fmt.Errorf("%w: source agent is disabled", ErrValidation)
+	if !agentExecutable(source) {
+		return Handoff{}, fmt.Errorf("%w: source agent is not executable", ErrValidation)
 	}
 	target, err := u.repo.GetAgent(ctx, handoff.OrgID, handoff.ProductSurface, handoff.ToAgentID)
 	if err != nil {
 		return Handoff{}, fmt.Errorf("target agent: %w", err)
 	}
-	if target.Status != StatusActive {
-		return Handoff{}, fmt.Errorf("%w: target agent is disabled", ErrValidation)
+	if !agentExecutable(target) {
+		return Handoff{}, fmt.Errorf("%w: target agent is not executable", ErrValidation)
 	}
 	return u.repo.CreateHandoff(ctx, handoff)
 }
@@ -137,7 +177,7 @@ func (u *Usecases) AssignAgent(ctx context.Context, in AssignmentInput) (Assignm
 	var bestMatches []string
 	bestScore := -1
 	for _, agent := range agents {
-		if agent.Status != StatusActive {
+		if !agentExecutable(agent) {
 			continue
 		}
 		matches := agentAssignmentMatches(agent, in)
@@ -156,6 +196,12 @@ func (u *Usecases) AssignAgent(ctx context.Context, in AssignmentInput) (Assignm
 		reason = "capability_match"
 	}
 	return AssignmentResult{Agent: best, Reason: reason, Matches: bestMatches}, nil
+}
+
+func agentExecutable(agent Agent) bool {
+	return agent.Status == StatusActive &&
+		agent.LifecycleStatus == LifecycleActive &&
+		agent.ReviewStatus == ReviewApproved
 }
 
 func agentAssignmentScore(agent Agent, matches []string) int {

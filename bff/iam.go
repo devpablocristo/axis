@@ -35,6 +35,8 @@ type IAMUser struct {
 	ProviderUserID string    `json:"provider_user_id,omitempty"`
 	Email          string    `json:"email"`
 	Name           string    `json:"name"`
+	Role           string    `json:"role,omitempty"`
+	AxisRole       string    `json:"axis_role,omitempty"`
 	Status         string    `json:"status"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
@@ -65,19 +67,76 @@ type IAMInvitation struct {
 	UpdatedAt  time.Time `json:"updated_at"`
 }
 
+type IAMAuditEvent struct {
+	ID        string         `json:"id"`
+	OrgID     string         `json:"org_id,omitempty"`
+	Actor     string         `json:"actor,omitempty"`
+	Action    string         `json:"action"`
+	Target    string         `json:"target"`
+	TargetID  string         `json:"target_id,omitempty"`
+	Payload   map[string]any `json:"payload,omitempty"`
+	CreatedAt time.Time      `json:"created_at"`
+}
+
+type IAMProduct struct {
+	ID             string         `json:"id"`
+	TenantID       string         `json:"tenant_id"`
+	ProductSurface string         `json:"product_surface"`
+	Name           string         `json:"name"`
+	Status         string         `json:"status"`
+	Config         map[string]any `json:"config,omitempty"`
+	CreatedAt      time.Time      `json:"created_at"`
+	UpdatedAt      time.Time      `json:"updated_at"`
+}
+
+type IAMAgent struct {
+	ID                   string         `json:"id"`
+	OrgID                string         `json:"org_id"`
+	Name                 string         `json:"name"`
+	Profile              string         `json:"profile"`
+	Autonomy             string         `json:"autonomy"`
+	MemoryEnabled        bool           `json:"memory_enabled"`
+	Description          string         `json:"description"`
+	Capabilities         []string       `json:"capabilities"`
+	Tools                []string       `json:"tools"`
+	Status               string         `json:"status"`
+	SourceSystem         string         `json:"source_system,omitempty"`
+	SourceOrgID          string         `json:"source_org_id,omitempty"`
+	SourceProductSurface string         `json:"source_product_surface,omitempty"`
+	SourceAgentID        string         `json:"source_agent_id,omitempty"`
+	ExternalTenantID     string         `json:"external_tenant_id,omitempty"`
+	SourceStatus         string         `json:"source_status,omitempty"`
+	OriginKind           string         `json:"origin_kind,omitempty"`
+	ReviewStatus         string         `json:"review_status,omitempty"`
+	Metadata             map[string]any `json:"metadata,omitempty"`
+	LastSyncedAt         *time.Time     `json:"last_synced_at,omitempty"`
+	CreatedAt            time.Time      `json:"created_at"`
+	UpdatedAt            time.Time      `json:"updated_at"`
+}
+
 type IAMStore interface {
 	ListOrgsForActor(context.Context, string, bool) ([]IAMOrg, error)
 	ActorCanAccessOrg(context.Context, string, string) (bool, error)
 	CreateOrg(context.Context, IAMOrg, string) (IAMOrg, error)
 	UpdateOrg(context.Context, string, IAMOrg) (IAMOrg, error)
+	DeleteOrg(context.Context, string) error
 	ListUsers(context.Context) ([]IAMUser, error)
 	CreateUser(context.Context, IAMUser) (IAMUser, error)
 	UpdateUser(context.Context, string, IAMUser) (IAMUser, error)
+	DeleteUser(context.Context, string) error
+	ListProducts(context.Context, string, string) ([]IAMProduct, error)
+	CreateProduct(context.Context, IAMProduct) (IAMProduct, error)
+	UpdateProduct(context.Context, string, IAMProduct) (IAMProduct, error)
+	DeleteProduct(context.Context, string) error
 	ListMembers(context.Context, string) ([]IAMMember, error)
 	UpsertMember(context.Context, IAMMember) (IAMMember, error)
 	UpdateMember(context.Context, string, string, IAMMember) (IAMMember, error)
+	DeleteMember(context.Context, string, string) error
+	ListInvitations(context.Context, string) ([]IAMInvitation, error)
 	CreateInvitation(context.Context, IAMInvitation) (IAMInvitation, error)
 	UpdateInvitationStatus(context.Context, string, string, string) (IAMInvitation, error)
+	ListAuditEvents(context.Context, string) ([]IAMAuditEvent, error)
+	AppendAuditEvent(context.Context, IAMAuditEvent) error
 }
 
 func newIAMStore(ctx context.Context, cfg config) (IAMStore, error) {
@@ -105,8 +164,10 @@ type memoryIAMStore struct {
 	mu          sync.RWMutex
 	orgs        map[string]IAMOrg
 	users       map[string]IAMUser
+	products    map[string]IAMProduct
 	members     map[string]IAMMember
 	invitations map[string]IAMInvitation
+	audit       []IAMAuditEvent
 }
 
 func newMemoryIAMStore(cfg config) *memoryIAMStore {
@@ -114,13 +175,15 @@ func newMemoryIAMStore(cfg config) *memoryIAMStore {
 	orgID := firstNonEmpty(cfg.DevOrgID, defaultDevOrgID)
 	userID := firstNonEmpty(cfg.DevUserID, defaultDevUserID)
 	org := IAMOrg{ID: orgID, Name: "Local Dev Org", Slug: slugify(orgID), Status: "active", CreatedAt: now, UpdatedAt: now}
-	user := IAMUser{ID: userID, ExternalID: userID, Provider: "dev", ProviderUserID: userID, Email: userID, Name: userID, Status: "active", CreatedAt: now, UpdatedAt: now}
+	user := IAMUser{ID: userID, ExternalID: userID, Provider: "dev", ProviderUserID: userID, Email: userID, Name: userID, AxisRole: "owner", Status: "active", CreatedAt: now, UpdatedAt: now}
 	member := IAMMember{OrgID: org.ID, UserID: user.ID, Role: "owner", Status: "active", CreatedAt: now, UpdatedAt: now}
 	return &memoryIAMStore{
 		orgs:        map[string]IAMOrg{org.ID: org},
 		users:       map[string]IAMUser{user.ID: user},
+		products:    map[string]IAMProduct{},
 		members:     map[string]IAMMember{memberKey(member.OrgID, member.UserID): member},
 		invitations: map[string]IAMInvitation{},
+		audit:       []IAMAuditEvent{},
 	}
 }
 
@@ -192,6 +255,31 @@ func (s *memoryIAMStore) UpdateOrg(_ context.Context, orgID string, patch IAMOrg
 	return org, nil
 }
 
+func (s *memoryIAMStore) DeleteOrg(_ context.Context, orgID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.orgs[orgID]; !ok {
+		return errNotFound
+	}
+	delete(s.orgs, orgID)
+	for key, member := range s.members {
+		if member.OrgID == orgID {
+			delete(s.members, key)
+		}
+	}
+	for key, invite := range s.invitations {
+		if invite.OrgID == orgID {
+			delete(s.invitations, key)
+		}
+	}
+	for key, product := range s.products {
+		if product.TenantID == orgID {
+			delete(s.products, key)
+		}
+	}
+	return nil
+}
+
 func (s *memoryIAMStore) ListUsers(context.Context) ([]IAMUser, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -210,6 +298,7 @@ func (s *memoryIAMStore) CreateUser(_ context.Context, user IAMUser) (IAMUser, e
 	user.ExternalID = firstNonEmpty(user.ExternalID, user.ProviderUserID, user.Email, user.ID)
 	user.Email = strings.TrimSpace(user.Email)
 	user.Name = firstNonEmpty(user.Name, user.Email, user.ID)
+	user.AxisRole = normalizedRole(user.AxisRole)
 	user.Status = firstNonEmpty(user.Status, "active")
 	user.CreatedAt = now
 	user.UpdatedAt = now
@@ -230,12 +319,94 @@ func (s *memoryIAMStore) UpdateUser(_ context.Context, userID string, patch IAMU
 	if strings.TrimSpace(patch.Name) != "" {
 		user.Name = strings.TrimSpace(patch.Name)
 	}
+	if strings.TrimSpace(patch.AxisRole) != "" {
+		user.AxisRole = normalizedRole(patch.AxisRole)
+	}
 	if strings.TrimSpace(patch.Status) != "" {
 		user.Status = strings.TrimSpace(patch.Status)
 	}
 	user.UpdatedAt = time.Now().UTC()
 	s.users[user.ID] = user
 	return user, nil
+}
+
+func (s *memoryIAMStore) DeleteUser(_ context.Context, userID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.users[userID]; !ok {
+		return errNotFound
+	}
+	delete(s.users, userID)
+	for key, member := range s.members {
+		if member.UserID == userID {
+			delete(s.members, key)
+		}
+	}
+	return nil
+}
+
+func (s *memoryIAMStore) ListProducts(_ context.Context, tenantID string, status string) ([]IAMProduct, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := []IAMProduct{}
+	for _, product := range s.products {
+		if strings.TrimSpace(tenantID) != "" && product.TenantID != tenantID {
+			continue
+		}
+		if strings.TrimSpace(status) != "" && product.Status != status {
+			continue
+		}
+		out = append(out, product)
+	}
+	return out, nil
+}
+
+func (s *memoryIAMStore) CreateProduct(_ context.Context, product IAMProduct) (IAMProduct, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now().UTC()
+	product.ID = firstNonEmpty(product.ID, "product_"+randomHex(8))
+	product.Name = firstNonEmpty(product.Name, product.ProductSurface, product.ID)
+	product.ProductSurface = firstNonEmpty(product.ProductSurface, slugify(product.Name))
+	product.Status = firstNonEmpty(product.Status, "active")
+	product.CreatedAt = now
+	product.UpdatedAt = now
+	s.products[product.ID] = product
+	return product, nil
+}
+
+func (s *memoryIAMStore) UpdateProduct(_ context.Context, productID string, patch IAMProduct) (IAMProduct, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	product, ok := s.products[productID]
+	if !ok {
+		return IAMProduct{}, errNotFound
+	}
+	if strings.TrimSpace(patch.Name) != "" {
+		product.Name = strings.TrimSpace(patch.Name)
+	}
+	if strings.TrimSpace(patch.ProductSurface) != "" {
+		product.ProductSurface = slugify(patch.ProductSurface)
+	}
+	if strings.TrimSpace(patch.Status) != "" {
+		product.Status = strings.TrimSpace(patch.Status)
+	}
+	if patch.Config != nil {
+		product.Config = patch.Config
+	}
+	product.UpdatedAt = time.Now().UTC()
+	s.products[product.ID] = product
+	return product, nil
+}
+
+func (s *memoryIAMStore) DeleteProduct(_ context.Context, productID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.products[productID]; !ok {
+		return errNotFound
+	}
+	delete(s.products, productID)
+	return nil
 }
 
 func (s *memoryIAMStore) ListMembers(_ context.Context, orgID string) ([]IAMMember, error) {
@@ -283,6 +454,17 @@ func (s *memoryIAMStore) UpdateMember(_ context.Context, orgID string, userID st
 	return member, nil
 }
 
+func (s *memoryIAMStore) DeleteMember(_ context.Context, orgID string, userID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := memberKey(orgID, userID)
+	if _, ok := s.members[key]; !ok {
+		return errNotFound
+	}
+	delete(s.members, key)
+	return nil
+}
+
 func (s *memoryIAMStore) CreateInvitation(_ context.Context, invite IAMInvitation) (IAMInvitation, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -290,7 +472,7 @@ func (s *memoryIAMStore) CreateInvitation(_ context.Context, invite IAMInvitatio
 	invite.ID = firstNonEmpty(invite.ID, "inv_"+randomHex(8))
 	invite.Role = firstNonEmpty(invite.Role, "member")
 	invite.Status = firstNonEmpty(invite.Status, "pending")
-	invite.Provider = firstNonEmpty(invite.Provider, "clerk")
+	invite.Provider = firstNonEmpty(invite.Provider, "identity")
 	if invite.ExpiresAt.IsZero() {
 		invite.ExpiresAt = now.Add(7 * 24 * time.Hour)
 	}
@@ -298,6 +480,18 @@ func (s *memoryIAMStore) CreateInvitation(_ context.Context, invite IAMInvitatio
 	invite.UpdatedAt = now
 	s.invitations[invite.ID] = invite
 	return invite, nil
+}
+
+func (s *memoryIAMStore) ListInvitations(_ context.Context, orgID string) ([]IAMInvitation, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]IAMInvitation, 0, len(s.invitations))
+	for _, invite := range s.invitations {
+		if invite.OrgID == orgID {
+			out = append(out, invite)
+		}
+	}
+	return out, nil
 }
 
 func (s *memoryIAMStore) UpdateInvitationStatus(_ context.Context, id string, status string, actor string) (IAMInvitation, error) {
@@ -314,6 +508,33 @@ func (s *memoryIAMStore) UpdateInvitationStatus(_ context.Context, id string, st
 	}
 	s.invitations[id] = invite
 	return invite, nil
+}
+
+func (s *memoryIAMStore) ListAuditEvents(_ context.Context, orgID string) ([]IAMAuditEvent, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]IAMAuditEvent, 0, len(s.audit))
+	for i := len(s.audit) - 1; i >= 0; i-- {
+		event := s.audit[i]
+		if orgID == "" || event.OrgID == "" || event.OrgID == orgID {
+			out = append(out, event)
+		}
+		if len(out) >= 100 {
+			break
+		}
+	}
+	return out, nil
+}
+
+func (s *memoryIAMStore) AppendAuditEvent(_ context.Context, event IAMAuditEvent) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	event.ID = firstNonEmpty(event.ID, "audit_"+randomHex(8))
+	if event.CreatedAt.IsZero() {
+		event.CreatedAt = time.Now().UTC()
+	}
+	s.audit = append(s.audit, event)
+	return nil
 }
 
 func (s *memoryIAMStore) findUserLocked(actor string) (IAMUser, bool) {
@@ -349,9 +570,21 @@ CREATE TABLE IF NOT EXISTS axis_users (
 	provider_user_id text UNIQUE,
 	email text NOT NULL UNIQUE,
 	name text NOT NULL DEFAULT '',
+	axis_role text NOT NULL DEFAULT '',
 	status text NOT NULL DEFAULT 'active',
 	created_at timestamptz NOT NULL DEFAULT now(),
 	updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS axis_products (
+	id text PRIMARY KEY,
+	tenant_id text NOT NULL REFERENCES axis_orgs(id) ON DELETE CASCADE,
+	product_surface text NOT NULL,
+	name text NOT NULL,
+	status text NOT NULL DEFAULT 'active',
+	config_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+	created_at timestamptz NOT NULL DEFAULT now(),
+	updated_at timestamptz NOT NULL DEFAULT now(),
+	UNIQUE (tenant_id, product_surface)
 );
 CREATE TABLE IF NOT EXISTS axis_org_members (
 	org_id text NOT NULL REFERENCES axis_orgs(id) ON DELETE CASCADE,
@@ -368,7 +601,7 @@ CREATE TABLE IF NOT EXISTS axis_org_invitations (
 	email text NOT NULL,
 	role text NOT NULL DEFAULT 'member',
 	status text NOT NULL DEFAULT 'pending',
-	provider text NOT NULL DEFAULT 'clerk',
+	provider text NOT NULL DEFAULT 'identity',
 	provider_invitation_id text,
 	invited_by text,
 	accepted_by text,
@@ -376,8 +609,25 @@ CREATE TABLE IF NOT EXISTS axis_org_invitations (
 	created_at timestamptz NOT NULL DEFAULT now(),
 	updated_at timestamptz NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS axis_iam_audit_events (
+	id text PRIMARY KEY,
+	org_id text,
+	actor text,
+	action text NOT NULL,
+	target text NOT NULL,
+	target_id text,
+	payload_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+	created_at timestamptz NOT NULL DEFAULT now()
+);
 CREATE INDEX IF NOT EXISTS idx_axis_org_members_user ON axis_org_members(user_id);
+CREATE INDEX IF NOT EXISTS idx_axis_products_tenant ON axis_products(tenant_id, status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_axis_org_invitations_org ON axis_org_invitations(org_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_axis_iam_audit_events_org ON axis_iam_audit_events(org_id, created_at DESC);
+ALTER TABLE axis_orgs ADD COLUMN IF NOT EXISTS synced_at timestamptz;
+ALTER TABLE axis_users ADD COLUMN IF NOT EXISTS synced_at timestamptz;
+ALTER TABLE axis_users ADD COLUMN IF NOT EXISTS axis_role text NOT NULL DEFAULT '';
+ALTER TABLE axis_org_members ADD COLUMN IF NOT EXISTS provider_membership_id text;
+ALTER TABLE axis_org_members ADD COLUMN IF NOT EXISTS synced_at timestamptz;
 `)
 	if err != nil {
 		return fmt.Errorf("migrate axis control plane: %w", err)
@@ -386,9 +636,14 @@ CREATE INDEX IF NOT EXISTS idx_axis_org_invitations_org ON axis_org_invitations(
 }
 
 func (s *sqlIAMStore) seed(ctx context.Context, cfg config) error {
+	switch cfg.AuthMode {
+	case "dev", "preview", "stg", "":
+	default:
+		return nil
+	}
 	now := time.Now().UTC()
 	org := IAMOrg{ID: firstNonEmpty(cfg.DevOrgID, defaultDevOrgID), Name: "Local Dev Org", Slug: slugify(firstNonEmpty(cfg.DevOrgID, defaultDevOrgID)), Status: "active", CreatedAt: now, UpdatedAt: now}
-	user := IAMUser{ID: firstNonEmpty(cfg.DevUserID, defaultDevUserID), ExternalID: firstNonEmpty(cfg.DevUserID, defaultDevUserID), Provider: "dev", ProviderUserID: firstNonEmpty(cfg.DevUserID, defaultDevUserID), Email: firstNonEmpty(cfg.DevUserID, defaultDevUserID), Name: firstNonEmpty(cfg.DevUserID, defaultDevUserID), Status: "active", CreatedAt: now, UpdatedAt: now}
+	user := IAMUser{ID: firstNonEmpty(cfg.DevUserID, defaultDevUserID), ExternalID: firstNonEmpty(cfg.DevUserID, defaultDevUserID), Provider: "dev", ProviderUserID: firstNonEmpty(cfg.DevUserID, defaultDevUserID), Email: firstNonEmpty(cfg.DevUserID, defaultDevUserID), Name: firstNonEmpty(cfg.DevUserID, defaultDevUserID), AxisRole: "owner", Status: "active", CreatedAt: now, UpdatedAt: now}
 	if _, err := s.CreateOrg(ctx, org, ""); err != nil {
 		return err
 	}
@@ -478,8 +733,16 @@ func (s *sqlIAMStore) UpdateOrg(ctx context.Context, orgID string, patch IAMOrg)
 	return current, err
 }
 
+func (s *sqlIAMStore) DeleteOrg(ctx context.Context, orgID string) error {
+	result, err := s.db.ExecContext(ctx, `DELETE FROM axis_orgs WHERE id = $1`, orgID)
+	if err != nil {
+		return err
+	}
+	return ensureDeleted(result)
+}
+
 func (s *sqlIAMStore) ListUsers(ctx context.Context) ([]IAMUser, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, COALESCE(external_id, ''), provider, COALESCE(provider_user_id, ''), email, name, status, created_at, updated_at FROM axis_users ORDER BY created_at DESC`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, COALESCE(external_id, ''), provider, COALESCE(provider_user_id, ''), email, name, axis_role, status, created_at, updated_at FROM axis_users ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -487,7 +750,7 @@ func (s *sqlIAMStore) ListUsers(ctx context.Context) ([]IAMUser, error) {
 	var out []IAMUser
 	for rows.Next() {
 		var user IAMUser
-		if err := rows.Scan(&user.ID, &user.ExternalID, &user.Provider, &user.ProviderUserID, &user.Email, &user.Name, &user.Status, &user.CreatedAt, &user.UpdatedAt); err != nil {
+		if err := rows.Scan(&user.ID, &user.ExternalID, &user.Provider, &user.ProviderUserID, &user.Email, &user.Name, &user.AxisRole, &user.Status, &user.CreatedAt, &user.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, user)
@@ -501,13 +764,19 @@ func (s *sqlIAMStore) CreateUser(ctx context.Context, user IAMUser) (IAMUser, er
 	user.ExternalID = firstNonEmpty(user.ExternalID, user.ProviderUserID, user.Email, user.ID)
 	user.Email = firstNonEmpty(user.Email, user.ExternalID)
 	user.Name = firstNonEmpty(user.Name, user.Email, user.ID)
+	user.AxisRole = normalizedRole(user.AxisRole)
 	user.Status = firstNonEmpty(user.Status, "active")
 	err := s.db.QueryRowContext(ctx, `
-		INSERT INTO axis_users (id, external_id, provider, provider_user_id, email, name, status, created_at, updated_at)
-		VALUES ($1, nullif($2, ''), $3, nullif($4, ''), $5, $6, $7, $8, $8)
-		ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email, name = EXCLUDED.name, status = EXCLUDED.status, updated_at = EXCLUDED.updated_at
-		RETURNING id, COALESCE(external_id, ''), provider, COALESCE(provider_user_id, ''), email, name, status, created_at, updated_at
-	`, user.ID, user.ExternalID, user.Provider, user.ProviderUserID, user.Email, user.Name, user.Status, now).Scan(&user.ID, &user.ExternalID, &user.Provider, &user.ProviderUserID, &user.Email, &user.Name, &user.Status, &user.CreatedAt, &user.UpdatedAt)
+		INSERT INTO axis_users (id, external_id, provider, provider_user_id, email, name, axis_role, status, created_at, updated_at)
+		VALUES ($1, nullif($2, ''), $3, nullif($4, ''), $5, $6, $7, $8, $9, $9)
+		ON CONFLICT (id) DO UPDATE SET
+			email = EXCLUDED.email,
+			name = EXCLUDED.name,
+			axis_role = COALESCE(NULLIF(EXCLUDED.axis_role, ''), axis_users.axis_role),
+			status = EXCLUDED.status,
+			updated_at = EXCLUDED.updated_at
+		RETURNING id, COALESCE(external_id, ''), provider, COALESCE(provider_user_id, ''), email, name, axis_role, status, created_at, updated_at
+	`, user.ID, user.ExternalID, user.Provider, user.ProviderUserID, user.Email, user.Name, user.AxisRole, user.Status, now).Scan(&user.ID, &user.ExternalID, &user.Provider, &user.ProviderUserID, &user.Email, &user.Name, &user.AxisRole, &user.Status, &user.CreatedAt, &user.UpdatedAt)
 	return user, err
 }
 
@@ -517,21 +786,117 @@ func (s *sqlIAMStore) UpdateUser(ctx context.Context, userID string, patch IAMUs
 		UPDATE axis_users
 		SET email = COALESCE(NULLIF($2, ''), email),
 		    name = COALESCE(NULLIF($3, ''), name),
-		    status = COALESCE(NULLIF($4, ''), status),
+		    axis_role = COALESCE($4, axis_role),
+		    status = COALESCE(NULLIF($5, ''), status),
 		    updated_at = now()
 		WHERE id = $1
-		RETURNING id, COALESCE(external_id, ''), provider, COALESCE(provider_user_id, ''), email, name, status, created_at, updated_at
-	`, userID, patch.Email, patch.Name, patch.Status).Scan(&user.ID, &user.ExternalID, &user.Provider, &user.ProviderUserID, &user.Email, &user.Name, &user.Status, &user.CreatedAt, &user.UpdatedAt)
+		RETURNING id, COALESCE(external_id, ''), provider, COALESCE(provider_user_id, ''), email, name, axis_role, status, created_at, updated_at
+	`, userID, patch.Email, patch.Name, nullableRole(patch.AxisRole), patch.Status).Scan(&user.ID, &user.ExternalID, &user.Provider, &user.ProviderUserID, &user.Email, &user.Name, &user.AxisRole, &user.Status, &user.CreatedAt, &user.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return IAMUser{}, errNotFound
 	}
 	return user, err
 }
 
+func (s *sqlIAMStore) DeleteUser(ctx context.Context, userID string) error {
+	result, err := s.db.ExecContext(ctx, `DELETE FROM axis_users WHERE id = $1`, userID)
+	if err != nil {
+		return err
+	}
+	return ensureDeleted(result)
+}
+
+func (s *sqlIAMStore) ListProducts(ctx context.Context, tenantID string, status string) ([]IAMProduct, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, tenant_id, product_surface, name, status, config_json, created_at, updated_at
+		FROM axis_products
+		WHERE ($1 = '' OR tenant_id = $1)
+		  AND ($2 = '' OR status = $2)
+		ORDER BY created_at DESC
+	`, tenantID, status)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []IAMProduct
+	for rows.Next() {
+		var product IAMProduct
+		var config []byte
+		if err := rows.Scan(&product.ID, &product.TenantID, &product.ProductSurface, &product.Name, &product.Status, &config, &product.CreatedAt, &product.UpdatedAt); err != nil {
+			return nil, err
+		}
+		if len(config) > 0 {
+			_ = json.Unmarshal(config, &product.Config)
+		}
+		out = append(out, product)
+	}
+	return out, rows.Err()
+}
+
+func (s *sqlIAMStore) CreateProduct(ctx context.Context, product IAMProduct) (IAMProduct, error) {
+	now := time.Now().UTC()
+	product.ID = firstNonEmpty(product.ID, "product_"+randomHex(8))
+	product.Name = firstNonEmpty(product.Name, product.ProductSurface, product.ID)
+	product.ProductSurface = firstNonEmpty(product.ProductSurface, slugify(product.Name))
+	product.Status = firstNonEmpty(product.Status, "active")
+	config, err := jsonMap(product.Config)
+	if err != nil {
+		return IAMProduct{}, err
+	}
+	err = s.db.QueryRowContext(ctx, `
+		INSERT INTO axis_products (id, tenant_id, product_surface, name, status, config_json, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
+		ON CONFLICT (tenant_id, product_surface) DO UPDATE SET name = EXCLUDED.name, status = EXCLUDED.status, updated_at = EXCLUDED.updated_at
+		RETURNING id, tenant_id, product_surface, name, status, config_json, created_at, updated_at
+	`, product.ID, product.TenantID, product.ProductSurface, product.Name, product.Status, string(config), now).Scan(&product.ID, &product.TenantID, &product.ProductSurface, &product.Name, &product.Status, &config, &product.CreatedAt, &product.UpdatedAt)
+	if len(config) > 0 {
+		_ = json.Unmarshal(config, &product.Config)
+	}
+	return product, err
+}
+
+func (s *sqlIAMStore) UpdateProduct(ctx context.Context, productID string, patch IAMProduct) (IAMProduct, error) {
+	var product IAMProduct
+	var config []byte
+	configArg, err := jsonMap(patch.Config)
+	if err != nil {
+		return IAMProduct{}, err
+	}
+	productSurface := ""
+	if strings.TrimSpace(patch.ProductSurface) != "" {
+		productSurface = slugify(patch.ProductSurface)
+	}
+	err = s.db.QueryRowContext(ctx, `
+		UPDATE axis_products
+		SET product_surface = COALESCE(NULLIF($2, ''), product_surface),
+		    name = COALESCE(NULLIF($3, ''), name),
+		    status = COALESCE(NULLIF($4, ''), status),
+		    config_json = CASE WHEN $5::jsonb = '{}'::jsonb THEN config_json ELSE $5::jsonb END,
+		    updated_at = now()
+		WHERE id = $1
+		RETURNING id, tenant_id, product_surface, name, status, config_json, created_at, updated_at
+	`, productID, productSurface, patch.Name, patch.Status, string(configArg)).Scan(&product.ID, &product.TenantID, &product.ProductSurface, &product.Name, &product.Status, &config, &product.CreatedAt, &product.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return IAMProduct{}, errNotFound
+	}
+	if len(config) > 0 {
+		_ = json.Unmarshal(config, &product.Config)
+	}
+	return product, err
+}
+
+func (s *sqlIAMStore) DeleteProduct(ctx context.Context, productID string) error {
+	result, err := s.db.ExecContext(ctx, `DELETE FROM axis_products WHERE id = $1`, productID)
+	if err != nil {
+		return err
+	}
+	return ensureDeleted(result)
+}
+
 func (s *sqlIAMStore) ListMembers(ctx context.Context, orgID string) ([]IAMMember, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT m.org_id, m.user_id, m.role, m.status, m.created_at, m.updated_at,
-		       u.id, COALESCE(u.external_id, ''), u.provider, COALESCE(u.provider_user_id, ''), u.email, u.name, u.status, u.created_at, u.updated_at
+		       u.id, COALESCE(u.external_id, ''), u.provider, COALESCE(u.provider_user_id, ''), u.email, u.name, u.axis_role, u.status, u.created_at, u.updated_at
 		FROM axis_org_members m
 		JOIN axis_users u ON u.id = m.user_id
 		WHERE m.org_id = $1
@@ -545,7 +910,7 @@ func (s *sqlIAMStore) ListMembers(ctx context.Context, orgID string) ([]IAMMembe
 	for rows.Next() {
 		var member IAMMember
 		var user IAMUser
-		if err := rows.Scan(&member.OrgID, &member.UserID, &member.Role, &member.Status, &member.CreatedAt, &member.UpdatedAt, &user.ID, &user.ExternalID, &user.Provider, &user.ProviderUserID, &user.Email, &user.Name, &user.Status, &user.CreatedAt, &user.UpdatedAt); err != nil {
+		if err := rows.Scan(&member.OrgID, &member.UserID, &member.Role, &member.Status, &member.CreatedAt, &member.UpdatedAt, &user.ID, &user.ExternalID, &user.Provider, &user.ProviderUserID, &user.Email, &user.Name, &user.AxisRole, &user.Status, &user.CreatedAt, &user.UpdatedAt); err != nil {
 			return nil, err
 		}
 		member.User = &user
@@ -583,12 +948,20 @@ func (s *sqlIAMStore) UpdateMember(ctx context.Context, orgID string, userID str
 	return member, err
 }
 
+func (s *sqlIAMStore) DeleteMember(ctx context.Context, orgID string, userID string) error {
+	result, err := s.db.ExecContext(ctx, `DELETE FROM axis_org_members WHERE org_id = $1 AND user_id = $2`, orgID, userID)
+	if err != nil {
+		return err
+	}
+	return ensureDeleted(result)
+}
+
 func (s *sqlIAMStore) CreateInvitation(ctx context.Context, invite IAMInvitation) (IAMInvitation, error) {
 	now := time.Now().UTC()
 	invite.ID = firstNonEmpty(invite.ID, "inv_"+randomHex(8))
 	invite.Role = firstNonEmpty(invite.Role, "member")
 	invite.Status = firstNonEmpty(invite.Status, "pending")
-	invite.Provider = firstNonEmpty(invite.Provider, "clerk")
+	invite.Provider = firstNonEmpty(invite.Provider, "identity")
 	if invite.ExpiresAt.IsZero() {
 		invite.ExpiresAt = now.Add(7 * 24 * time.Hour)
 	}
@@ -598,6 +971,28 @@ func (s *sqlIAMStore) CreateInvitation(ctx context.Context, invite IAMInvitation
 		RETURNING id, org_id, email, role, status, provider, COALESCE(provider_invitation_id, ''), COALESCE(invited_by, ''), COALESCE(accepted_by, ''), expires_at, created_at, updated_at
 	`, invite.ID, invite.OrgID, invite.Email, invite.Role, invite.Status, invite.Provider, invite.ProviderID, invite.InvitedBy, invite.ExpiresAt, now).Scan(&invite.ID, &invite.OrgID, &invite.Email, &invite.Role, &invite.Status, &invite.Provider, &invite.ProviderID, &invite.InvitedBy, &invite.AcceptedBy, &invite.ExpiresAt, &invite.CreatedAt, &invite.UpdatedAt)
 	return invite, err
+}
+
+func (s *sqlIAMStore) ListInvitations(ctx context.Context, orgID string) ([]IAMInvitation, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, org_id, email, role, status, provider, COALESCE(provider_invitation_id, ''), COALESCE(invited_by, ''), COALESCE(accepted_by, ''), expires_at, created_at, updated_at
+		FROM axis_org_invitations
+		WHERE org_id = $1
+		ORDER BY created_at DESC
+	`, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []IAMInvitation
+	for rows.Next() {
+		var invite IAMInvitation
+		if err := rows.Scan(&invite.ID, &invite.OrgID, &invite.Email, &invite.Role, &invite.Status, &invite.Provider, &invite.ProviderID, &invite.InvitedBy, &invite.AcceptedBy, &invite.ExpiresAt, &invite.CreatedAt, &invite.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, invite)
+	}
+	return out, rows.Err()
 }
 
 func (s *sqlIAMStore) UpdateInvitationStatus(ctx context.Context, id string, status string, actor string) (IAMInvitation, error) {
@@ -616,14 +1011,57 @@ func (s *sqlIAMStore) UpdateInvitationStatus(ctx context.Context, id string, sta
 	return invite, err
 }
 
+func (s *sqlIAMStore) ListAuditEvents(ctx context.Context, orgID string) ([]IAMAuditEvent, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, COALESCE(org_id, ''), COALESCE(actor, ''), action, target, COALESCE(target_id, ''), payload_json, created_at
+		FROM axis_iam_audit_events
+		WHERE ($1 = '' OR org_id IS NULL OR org_id = $1)
+		ORDER BY created_at DESC
+		LIMIT 100
+	`, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []IAMAuditEvent
+	for rows.Next() {
+		var event IAMAuditEvent
+		var payload []byte
+		if err := rows.Scan(&event.ID, &event.OrgID, &event.Actor, &event.Action, &event.Target, &event.TargetID, &payload, &event.CreatedAt); err != nil {
+			return nil, err
+		}
+		if len(payload) > 0 {
+			_ = json.Unmarshal(payload, &event.Payload)
+		}
+		out = append(out, event)
+	}
+	return out, rows.Err()
+}
+
+func (s *sqlIAMStore) AppendAuditEvent(ctx context.Context, event IAMAuditEvent) error {
+	event.ID = firstNonEmpty(event.ID, "audit_"+randomHex(8))
+	if event.CreatedAt.IsZero() {
+		event.CreatedAt = time.Now().UTC()
+	}
+	payload, err := json.Marshal(event.Payload)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `
+		INSERT INTO axis_iam_audit_events (id, org_id, actor, action, target, target_id, payload_json, created_at)
+		VALUES ($1, nullif($2, ''), nullif($3, ''), $4, $5, nullif($6, ''), $7, $8)
+	`, event.ID, event.OrgID, event.Actor, event.Action, event.Target, event.TargetID, payload, event.CreatedAt)
+	return err
+}
+
 func (s *sqlIAMStore) findUser(ctx context.Context, actor string) (IAMUser, bool, error) {
 	var user IAMUser
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, COALESCE(external_id, ''), provider, COALESCE(provider_user_id, ''), email, name, status, created_at, updated_at
+		SELECT id, COALESCE(external_id, ''), provider, COALESCE(provider_user_id, ''), email, name, axis_role, status, created_at, updated_at
 		FROM axis_users
 		WHERE id = $1 OR email = $1 OR external_id = $1 OR provider_user_id = $1
 		LIMIT 1
-	`, actor).Scan(&user.ID, &user.ExternalID, &user.Provider, &user.ProviderUserID, &user.Email, &user.Name, &user.Status, &user.CreatedAt, &user.UpdatedAt)
+	`, actor).Scan(&user.ID, &user.ExternalID, &user.Provider, &user.ProviderUserID, &user.Email, &user.Name, &user.AxisRole, &user.Status, &user.CreatedAt, &user.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return IAMUser{}, false, nil
 	}
@@ -634,6 +1072,91 @@ func (s *sqlIAMStore) findUser(ctx context.Context, actor string) (IAMUser, bool
 }
 
 var errNotFound = errors.New("not found")
+
+func ensureDeleted(result sql.Result) error {
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		return errNotFound
+	}
+	return nil
+}
+
+func nullableRole(role string) any {
+	role = normalizedRole(role)
+	if role == "" {
+		return nil
+	}
+	return role
+}
+
+func jsonMap(value map[string]any) ([]byte, error) {
+	if len(value) == 0 {
+		return []byte("{}"), nil
+	}
+	return json.Marshal(compactPayload(value))
+}
+
+func jsonStringList(values []string) ([]byte, error) {
+	return json.Marshal(cleanStringList(values))
+}
+
+func parseMap(raw []byte) map[string]any {
+	var value map[string]any
+	if len(raw) > 0 {
+		_ = json.Unmarshal(raw, &value)
+	}
+	if value == nil {
+		return map[string]any{}
+	}
+	return value
+}
+
+func nullableJSON(raw []byte, original []string) any {
+	if original == nil {
+		return nil
+	}
+	return string(raw)
+}
+
+func parseStringList(raw []byte) []string {
+	var values []string
+	if len(raw) > 0 {
+		_ = json.Unmarshal(raw, &values)
+	}
+	return cleanStringList(values)
+}
+
+func cleanStringList(values []string) []string {
+	if values == nil {
+		return []string{}
+	}
+	out := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		item := strings.TrimSpace(value)
+		if item == "" {
+			continue
+		}
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		seen[item] = struct{}{}
+		out = append(out, item)
+	}
+	return out
+}
+
+func normalizeAutonomy(value string) string {
+	switch strings.ToUpper(strings.TrimSpace(value)) {
+	case "A1", "A2", "A3":
+		return strings.ToUpper(strings.TrimSpace(value))
+	default:
+		return "A1"
+	}
+}
 
 func memberKey(orgID, userID string) string {
 	return strings.TrimSpace(orgID) + "\x00" + strings.TrimSpace(userID)

@@ -172,6 +172,8 @@ func (r agentRuntimeResolver) ResolveRuntimeAgent(ctx context.Context, orgID, pr
 		ProfileID:           agent.ProfileID,
 		Role:                agent.Role,
 		Status:              agent.Status,
+		LifecycleStatus:     agent.LifecycleStatus,
+		ReviewStatus:        agent.ReviewStatus,
 		MaxAutonomy:         runtime.AutonomyLevel(agent.MaxAutonomy),
 		AllowedTools:        append([]string(nil), agent.AllowedTools...),
 		AllowedCapabilities: append([]string(nil), agent.AllowedCapabilities...),

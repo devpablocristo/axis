@@ -19,6 +19,8 @@ type RuntimeAgentConfig struct {
 	ProfileID           string         `json:"profile_id,omitempty"`
 	Role                string         `json:"role,omitempty"`
 	Status              string         `json:"status,omitempty"`
+	LifecycleStatus     string         `json:"lifecycle_status,omitempty"`
+	ReviewStatus        string         `json:"review_status,omitempty"`
 	MaxAutonomy         AutonomyLevel  `json:"max_autonomy,omitempty"`
 	AllowedTools        []string       `json:"allowed_tools,omitempty"`
 	AllowedCapabilities []string       `json:"allowed_capabilities,omitempty"`
@@ -53,6 +55,12 @@ func applyRuntimeAgent(route AgentRoute, agent RuntimeAgentConfig) (AgentRoute, 
 	}
 	if strings.EqualFold(strings.TrimSpace(agent.Status), "disabled") {
 		return route, &GuardrailEvent{Type: "agent_fleet", Target: "agent:" + agent.AgentID, Reason: "agent is disabled"}
+	}
+	if lifecycle := strings.TrimSpace(agent.LifecycleStatus); lifecycle != "" && !strings.EqualFold(lifecycle, "active") {
+		return route, &GuardrailEvent{Type: "agent_fleet", Target: "agent:" + agent.AgentID, Reason: "agent lifecycle is not active"}
+	}
+	if review := strings.TrimSpace(agent.ReviewStatus); review != "" && !strings.EqualFold(review, "approved") {
+		return route, &GuardrailEvent{Type: "agent_fleet", Target: "agent:" + agent.AgentID, Reason: "agent is not approved"}
 	}
 	if strings.TrimSpace(agent.ProfileID) != "" {
 		route.Profile.ID = strings.TrimSpace(agent.ProfileID)

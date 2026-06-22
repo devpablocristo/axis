@@ -32,6 +32,12 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/agents/{agent_id}", h.getAgent)
 	mux.HandleFunc("PUT /v1/agents/{agent_id}", h.putAgent)
 	mux.HandleFunc("POST /v1/agents/{agent_id}/disable", h.disableAgent)
+	mux.HandleFunc("POST /v1/agents/{agent_id}/archive", h.archiveAgent)
+	mux.HandleFunc("POST /v1/agents/{agent_id}/trash", h.trashAgent)
+	mux.HandleFunc("POST /v1/agents/{agent_id}/restore", h.restoreAgent)
+	mux.HandleFunc("POST /v1/agents/{agent_id}/approve", h.approveAgent)
+	mux.HandleFunc("POST /v1/agents/{agent_id}/ignore", h.ignoreAgent)
+	mux.HandleFunc("DELETE /v1/agents/{agent_id}", h.deleteAgent)
 	mux.HandleFunc("POST /v1/agents/assignments", h.assignAgent)
 	mux.HandleFunc("GET /v1/agents/handoffs", h.listHandoffs)
 	mux.HandleFunc("POST /v1/agents/handoffs", h.createHandoff)
@@ -69,6 +75,9 @@ func (h *Handler) putAgent(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !agentWriteAllowed(w, r) {
+		return
+	}
 	var agent Agent
 	if err := json.NewDecoder(r.Body).Decode(&agent); err != nil {
 		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid json body")
@@ -91,7 +100,85 @@ func (h *Handler) disableAgent(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !agentWriteAllowed(w, r) {
+		return
+	}
 	agent, err := h.uc.DisableAgent(r.Context(), orgID, surface, strings.TrimSpace(r.PathValue("agent_id")), actorID)
+	if err != nil {
+		writeAgentError(w, err)
+		return
+	}
+	httpjson.WriteJSON(w, http.StatusOK, agent)
+}
+
+func (h *Handler) archiveAgent(w http.ResponseWriter, r *http.Request) {
+	h.lifecycleAction(w, r, func(ctx actorContext) (Agent, error) {
+		return h.uc.ArchiveAgent(ctx.Request.Context(), ctx.OrgID, ctx.Surface, ctx.AgentID, ctx.ActorID)
+	})
+}
+
+func (h *Handler) trashAgent(w http.ResponseWriter, r *http.Request) {
+	h.lifecycleAction(w, r, func(ctx actorContext) (Agent, error) {
+		return h.uc.TrashAgent(ctx.Request.Context(), ctx.OrgID, ctx.Surface, ctx.AgentID, ctx.ActorID)
+	})
+}
+
+func (h *Handler) restoreAgent(w http.ResponseWriter, r *http.Request) {
+	h.lifecycleAction(w, r, func(ctx actorContext) (Agent, error) {
+		return h.uc.RestoreAgent(ctx.Request.Context(), ctx.OrgID, ctx.Surface, ctx.AgentID, ctx.ActorID)
+	})
+}
+
+func (h *Handler) approveAgent(w http.ResponseWriter, r *http.Request) {
+	h.lifecycleAction(w, r, func(ctx actorContext) (Agent, error) {
+		return h.uc.ApproveAgent(ctx.Request.Context(), ctx.OrgID, ctx.Surface, ctx.AgentID, ctx.ActorID)
+	})
+}
+
+func (h *Handler) ignoreAgent(w http.ResponseWriter, r *http.Request) {
+	h.lifecycleAction(w, r, func(ctx actorContext) (Agent, error) {
+		return h.uc.IgnoreAgent(ctx.Request.Context(), ctx.OrgID, ctx.Surface, ctx.AgentID, ctx.ActorID)
+	})
+}
+
+func (h *Handler) deleteAgent(w http.ResponseWriter, r *http.Request) {
+	orgID, surface, actorID, ok := agentRequestContext(w, r)
+	if !ok {
+		return
+	}
+	if !agentWriteAllowed(w, r) {
+		return
+	}
+	if err := h.uc.DeleteAgent(r.Context(), orgID, surface, strings.TrimSpace(r.PathValue("agent_id")), actorID); err != nil {
+		writeAgentError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+type actorContext struct {
+	Request *http.Request
+	OrgID   string
+	Surface string
+	AgentID string
+	ActorID string
+}
+
+func (h *Handler) lifecycleAction(w http.ResponseWriter, r *http.Request, action func(actorContext) (Agent, error)) {
+	orgID, surface, actorID, ok := agentRequestContext(w, r)
+	if !ok {
+		return
+	}
+	if !agentWriteAllowed(w, r) {
+		return
+	}
+	agent, err := action(actorContext{
+		Request: r,
+		OrgID:   orgID,
+		Surface: surface,
+		AgentID: strings.TrimSpace(r.PathValue("agent_id")),
+		ActorID: actorID,
+	})
 	if err != nil {
 		writeAgentError(w, err)
 		return
@@ -202,7 +289,19 @@ func agentRequestContext(w http.ResponseWriter, r *http.Request) (string, string
 		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "customer org context is required")
 		return "", "", "", false
 	}
-	return orgID, id.ProductSurface, id.EffectiveActorID(), true
+	surface := strings.TrimSpace(r.URL.Query().Get("product_surface"))
+	if surface == "" {
+		surface = id.ProductSurface
+	}
+	return orgID, surface, id.EffectiveActorID(), true
+}
+
+func agentWriteAllowed(w http.ResponseWriter, r *http.Request) bool {
+	if identityctx.HasAnyScope(r, scopeAgentAdmin, scopeAgentRuntimeAdmin) {
+		return true
+	}
+	httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "missing agent fleet write scope")
+	return false
 }
 
 func writeAgentError(w http.ResponseWriter, err error) {

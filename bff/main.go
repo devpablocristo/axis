@@ -31,6 +31,9 @@ type config struct {
 	AuthMode           string
 	AuthIssuerURL      string
 	AuthAudience       string
+	IdentityProvider   string
+	ClerkSecretKey     string
+	ClerkAPIBaseURL    string
 	ClerkWebhookSecret string
 	ControlDatabaseURL string
 	DevOrgID           string
@@ -52,6 +55,7 @@ type server struct {
 	oidcAuth authn.Authenticator
 	client   *http.Client
 	iam      IAMStore
+	identity HumanIdentityProvider
 }
 
 func main() {
@@ -79,6 +83,9 @@ func loadConfig() config {
 		AuthMode:           strings.ToLower(env("AXIS_BFF_AUTH_MODE", "dev")),
 		AuthIssuerURL:      env("AXIS_AUTH_ISSUER_URL", ""),
 		AuthAudience:       env("AXIS_AUTH_AUDIENCE", ""),
+		IdentityProvider:   strings.ToLower(env("AXIS_IDENTITY_PROVIDER", "")),
+		ClerkSecretKey:     firstNonEmpty(env("AXIS_CLERK_SECRET_KEY", ""), env("CLERK_SECRET_KEY", "")),
+		ClerkAPIBaseURL:    env("AXIS_CLERK_API_BASE_URL", "https://api.clerk.com/v1"),
 		ClerkWebhookSecret: env("AXIS_CLERK_WEBHOOK_SECRET", ""),
 		ControlDatabaseURL: env("AXIS_CONTROL_DATABASE_URL", ""),
 		DevOrgID:           env("AXIS_DEV_ORG_ID", defaultDevOrgID),
@@ -111,6 +118,10 @@ func newServer(cfg config) (*server, error) {
 		return nil, err
 	}
 	s.iam = iam
+	provider := firstNonEmpty(cfg.IdentityProvider, cfg.AuthMode)
+	if provider == "clerk" {
+		s.identity = newClerkIdentityAdapter(cfg.ClerkSecretKey, cfg.ClerkAPIBaseURL, s.client, iam)
+	}
 	if cfg.AuthMode == "oidc" || cfg.AuthMode == "clerk" {
 		issuer := strings.TrimRight(strings.TrimSpace(cfg.AuthIssuerURL), "/")
 		if issuer == "" {
@@ -134,8 +145,8 @@ func newServer(cfg config) (*server, error) {
 				}
 				return authn.Principal{
 					OrgID:      firstClaim(claims, "org_id", "tenant_id", "orgId"),
-					Actor:      firstClaim(claims, "email", "preferred_username", "username", "sub"),
-					Role:       firstClaim(claims, "role"),
+					Actor:      firstClaim(claims, "sub"),
+					Role:       firstNonEmpty(firstClaim(claims, "axis_role"), firstClaim(claims, "org_role"), firstClaim(claims, "role")),
 					Scopes:     claimScopes(claims),
 					Claims:     claims,
 					AuthMethod: cfg.AuthMode,
@@ -154,11 +165,16 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("GET /readyz", s.ready)
 	mux.Handle("GET /api/session", s.withAuth(http.HandlerFunc(s.session)))
 	mux.Handle("GET /api/services", s.withAuth(http.HandlerFunc(s.services)))
+	mux.Handle("/api/iam/", s.withAuth(http.HandlerFunc(s.iamAPI)))
+	mux.Handle("GET /api/agent-profiles", s.withAuth(http.HandlerFunc(s.agentProfilesAPI)))
+	mux.Handle("/api/agents", s.withAuth(http.HandlerFunc(s.agentsAPI)))
+	mux.Handle("/api/agents/", s.withAuth(http.HandlerFunc(s.agentsAPI)))
 	mux.Handle("/api/orgs", s.withAuth(http.HandlerFunc(s.orgs)))
 	mux.Handle("/api/orgs/", s.withAuth(http.HandlerFunc(s.orgs)))
 	mux.Handle("/api/users", s.withAuth(http.HandlerFunc(s.users)))
 	mux.Handle("/api/users/", s.withAuth(http.HandlerFunc(s.users)))
 	mux.Handle("/api/org-invitations/", s.withAuth(http.HandlerFunc(s.orgInvitations)))
+	mux.Handle("/api/iam-audit", s.withAuth(http.HandlerFunc(s.iamAudit)))
 	mux.HandleFunc("POST /api/webhooks/clerk", s.clerkWebhook)
 	mux.Handle("/api/companion/", s.withAuth(s.proxy("companion", "/api/companion", s.cfg.CompanionBaseURL, s.cfg.CompanionAudience)))
 	mux.Handle("/api/nexus/", s.withAuth(s.proxy("nexus", "/api/nexus", s.cfg.NexusBaseURL, s.cfg.NexusAudience)))
@@ -201,7 +217,18 @@ func (s *server) authenticate(r *http.Request) (authn.Principal, error) {
 	if p == nil {
 		return authn.Principal{}, errors.New("principal not resolved")
 	}
-	return *p, nil
+	principal := *p
+	if s.identity != nil {
+		next, err := s.identity.PrincipalFromClaims(r.Context(), principal)
+		if err != nil {
+			return authn.Principal{}, err
+		}
+		principal = next
+		if err := s.identity.SyncPrincipal(r.Context(), principal); err != nil {
+			return authn.Principal{}, err
+		}
+	}
+	return principal, nil
 }
 
 type principalContextKey struct{}
@@ -224,6 +251,8 @@ func (s *server) session(w http.ResponseWriter, r *http.Request) {
 		"org_id":      orgID,
 		"orgs":        orgs,
 		"role":        p.Role,
+		"axis_role":   claimRole(p.Claims, "axis_role"),
+		"org_role":    claimRole(p.Claims, "org_role"),
 		"scopes":      p.Scopes,
 		"auth_method": p.AuthMethod,
 	})
@@ -310,11 +339,14 @@ func (s *server) selectedOrg(r *http.Request, p authn.Principal) (string, error)
 	if requested == "" {
 		return "", errors.New("org_id is required")
 	}
-	if principalOrg != "" && requested == principalOrg {
-		return requested, nil
-	}
 	if hasScope(p.Scopes, "axis:cross_org", "nexus:cross_org", "companion:cross_org") {
 		return requested, nil
+	}
+	if requested != "" && principalOrg != "" && requested != principalOrg {
+		return "", errors.New("selected org is not allowed for this principal")
+	}
+	if principalOrg != "" {
+		return principalOrg, nil
 	}
 	if ok, err := s.iam.ActorCanAccessOrg(r.Context(), p.Actor, requested); err == nil && ok {
 		return requested, nil
@@ -453,9 +485,16 @@ func defaultAdminScopes() []string {
 		"axis:orgs:read",
 		"axis:orgs:write",
 		"axis:orgs:admin",
+		"axis:products:read",
+		"axis:products:write",
+		"axis:products:admin",
 		"axis:users:read",
 		"axis:users:write",
 		"axis:users:admin",
+		"axis:agents:read",
+		"axis:agents:write",
+		"axis:agents:admin",
+		"axis:iam:purge",
 		"companion:cross_org",
 		"companion:runtime:admin",
 		"companion:tasks:read",
