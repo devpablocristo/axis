@@ -168,6 +168,7 @@ func (s *server) routes() http.Handler {
 	mux.Handle("/api/iam/", s.withAuth(http.HandlerFunc(s.iamAPI)))
 	mux.Handle("/api/agent-profiles", s.withAuth(http.HandlerFunc(s.agentProfilesAPI)))
 	mux.Handle("/api/agent-profiles/", s.withAuth(http.HandlerFunc(s.agentProfilesAPI)))
+	mux.Handle("/api/prompts/", s.withAuth(http.HandlerFunc(s.promptsAPI)))
 	mux.Handle("/api/agents", s.withAuth(http.HandlerFunc(s.agentsAPI)))
 	mux.Handle("/api/agents/", s.withAuth(http.HandlerFunc(s.agentsAPI)))
 	mux.Handle("/api/orgs", s.withAuth(http.HandlerFunc(s.orgs)))

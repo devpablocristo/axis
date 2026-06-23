@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/devpablocristo/companion/internal/runtime"
+	"github.com/devpablocristo/platform/errors/go/domainerr"
 	"github.com/devpablocristo/platform/lifecycle/go/lifecycle"
 	"github.com/google/uuid"
 
@@ -53,6 +54,7 @@ type RunAssistInput struct {
 	SubjectType    string
 	SubjectID      string
 	Input          map[string]any
+	IdempotencyKey string
 }
 
 type ListPacksInput = PackFilter
@@ -65,10 +67,17 @@ type Usecases struct {
 	now       func() time.Time
 }
 
-func NewUsecases(repo Repository, provider runtime.LLMProvider) *Usecases {
+// NewUsecases builds the assist usecases. audit persists lifecycle
+// (archive/restore/hard-delete) events; pass nil to disable auditing (falls back
+// to a no-op). Returns an error instead of panicking so the caller controls
+// startup failure.
+func NewUsecases(repo Repository, provider runtime.LLMProvider, audit lifecycle.AuditPort) (*Usecases, error) {
+	if audit == nil {
+		audit = noopLifecycleAudit{}
+	}
 	lifecycleSvc, err := lifecycle.NewServiceWithRepos(
 		map[string]lifecycle.RepositoryPort{resourceAssistPack: repo},
-		noopLifecycleAudit{},
+		audit,
 		lifecycle.NewStaticPolicyRegistry(&lifecycle.ArchivePolicy{
 			ResourceType:    resourceAssistPack,
 			AllowArchive:    true,
@@ -76,15 +85,25 @@ func NewUsecases(repo Repository, provider runtime.LLMProvider) *Usecases {
 		}),
 	)
 	if err != nil {
-		panic(err)
+		return nil, fmt.Errorf("assist: build lifecycle service: %w", err)
 	}
-	return &Usecases{repo: repo, provider: provider, lifecycle: lifecycleSvc, now: func() time.Time { return time.Now().UTC() }}
+	return &Usecases{repo: repo, provider: provider, lifecycle: lifecycleSvc, now: func() time.Time { return time.Now().UTC() }}, nil
 }
 
 func (uc *Usecases) UpsertPack(ctx context.Context, in UpsertPackInput) (domain.AssistPack, error) {
 	pack, err := uc.packFromInput(in)
 	if err != nil {
 		return domain.AssistPack{}, err
+	}
+	// Refuse to silently un-archive: if the logical pack exists and is archived,
+	// the caller must Restore it deliberately. The repo upsert no longer resets
+	// archived_at, so this is the single guard against reviving retired packs.
+	existing, err := uc.repo.GetPackByTypeIncludingArchived(ctx, pack.OrgID, pack.OwnerSystem, pack.ProductSurface, pack.AssistType)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return domain.AssistPack{}, err
+	}
+	if err == nil && existing.ArchivedAt != nil {
+		return domain.AssistPack{}, domainerr.Conflict("assist pack is archived; restore it before upserting")
 	}
 	return uc.repo.UpsertPack(ctx, pack)
 }
@@ -160,17 +179,31 @@ func (uc *Usecases) RunAssist(ctx context.Context, in RunAssistInput) (domain.As
 	in.ProductSurface = strings.TrimSpace(in.ProductSurface)
 	in.AssistType = strings.TrimSpace(in.AssistType)
 	if in.OrgID == "" || in.OwnerSystem == "" || in.ProductSurface == "" || in.AssistType == "" {
-		return domain.AssistRun{}, errors.New("org_id, owner_system, product_surface and assist_type are required")
+		return domain.AssistRun{}, domainerr.Validation("org_id, owner_system, product_surface and assist_type are required")
 	}
 	if in.Input == nil {
 		in.Input = map[string]any{}
 	}
+	in.IdempotencyKey = strings.TrimSpace(in.IdempotencyKey)
+
+	// Idempotent replay: a run already created for this key is returned as-is,
+	// without re-invoking the LLM.
+	if in.IdempotencyKey != "" {
+		existing, err := uc.repo.GetRunByIdempotencyKey(ctx, in.OrgID, in.IdempotencyKey)
+		if err == nil {
+			return existing, nil
+		}
+		if !errors.Is(err, ErrNotFound) {
+			return domain.AssistRun{}, err
+		}
+	}
+
 	pack, err := uc.repo.GetPackByType(ctx, in.OrgID, in.OwnerSystem, in.ProductSurface, in.AssistType)
 	if err != nil {
 		return domain.AssistRun{}, err
 	}
 	if !pack.Enabled {
-		return domain.AssistRun{}, errors.New("assist pack is disabled")
+		return domain.AssistRun{}, domainerr.Validation("assist pack is disabled")
 	}
 
 	now := uc.now()
@@ -185,8 +218,35 @@ func (uc *Usecases) RunAssist(ctx context.Context, in RunAssistInput) (domain.As
 		SubjectID:      strings.TrimSpace(in.SubjectID),
 		Input:          in.Input,
 		Status:         "running",
+		IdempotencyKey: in.IdempotencyKey,
 		CreatedAt:      now,
 	}
+
+	if in.IdempotencyKey != "" {
+		// Reserve the run BEFORE calling the LLM so concurrent duplicates collide
+		// on the partial unique index rather than both invoking the model.
+		reserved, err := uc.repo.CreateRun(ctx, run)
+		if err != nil {
+			if domainerr.IsKind(err, domainerr.KindConflict) {
+				if existing, getErr := uc.repo.GetRunByIdempotencyKey(ctx, in.OrgID, in.IdempotencyKey); getErr == nil {
+					return existing, nil
+				}
+			}
+			return domain.AssistRun{}, err
+		}
+		output, llmErr := uc.runLLM(ctx, pack, in.Input)
+		completedAt := uc.now()
+		if llmErr != nil {
+			updated, updErr := uc.repo.UpdateRunResult(ctx, reserved.ID, "failed", map[string]any{}, llmErr.Error(), completedAt)
+			if updErr != nil {
+				return domain.AssistRun{}, updErr
+			}
+			return updated, llmErr
+		}
+		return uc.repo.UpdateRunResult(ctx, reserved.ID, "completed", output, "", completedAt)
+	}
+
+	// Keyless: run then persist the final row (no reservation).
 	output, err := uc.runLLM(ctx, pack, in.Input)
 	completedAt := uc.now()
 	run.CompletedAt = &completedAt
@@ -239,7 +299,7 @@ func (uc *Usecases) packFromInput(in UpsertPackInput) (domain.AssistPack, error)
 	if pack.ModelPolicy == nil {
 		pack.ModelPolicy = map[string]any{}
 	}
-	if err := validatePack(pack); err != nil {
+	if err := validatePackForCreate(pack); err != nil {
 		return domain.AssistPack{}, err
 	}
 	return pack, nil
@@ -290,7 +350,22 @@ func validatePack(pack domain.AssistPack) error {
 	if pack.OrgID == "" || pack.OwnerSystem == "" || pack.ProductSurface == "" ||
 		pack.AssistType == "" || pack.Name == "" || pack.InputContract == "" ||
 		pack.OutputContract == "" || pack.PromptTemplate == "" {
-		return errors.New("org_id, owner_system, product_surface, assist_type, name, input_contract, output_contract and prompt_template are required")
+		return domainerr.Validation("org_id, owner_system, product_surface, assist_type, name, input_contract, output_contract and prompt_template are required")
+	}
+	return nil
+}
+
+// validatePackForCreate adds the invariants that only apply when a pack is
+// first authored. The template must interpolate the structured input via the
+// {{input_json}} placeholder; otherwise runLLM silently appends it, which hides
+// authoring mistakes (the placeholder is required on create, not on update, so
+// legacy packs that runLLM still tolerates are not retroactively rejected).
+func validatePackForCreate(pack domain.AssistPack) error {
+	if err := validatePack(pack); err != nil {
+		return err
+	}
+	if !strings.Contains(pack.PromptTemplate, "{{input_json}}") {
+		return domainerr.Validation("prompt_template must contain the {{input_json}} placeholder")
 	}
 	return nil
 }

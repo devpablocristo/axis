@@ -11,6 +11,7 @@ import (
 	assistdto "github.com/devpablocristo/companion/internal/assist/handler/dto"
 	domain "github.com/devpablocristo/companion/internal/assist/usecases/domain"
 	"github.com/devpablocristo/companion/internal/identityctx"
+	"github.com/devpablocristo/platform/errors/go/domainerr"
 	"github.com/devpablocristo/platform/http/go/httpjson"
 	"github.com/google/uuid"
 )
@@ -77,7 +78,7 @@ func (h *Handler) upsertPack(w http.ResponseWriter, r *http.Request) {
 		Enabled:        body.Enabled,
 	})
 	if err != nil {
-		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", err.Error())
+		writeUsecaseError(w, err)
 		return
 	}
 	httpjson.WriteJSON(w, http.StatusCreated, packResponse(out))
@@ -190,7 +191,7 @@ func (h *Handler) updatePack(w http.ResponseWriter, r *http.Request) {
 		Enabled:        body.Enabled,
 	})
 	if err != nil {
-		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", err.Error())
+		writeUsecaseError(w, err)
 		return
 	}
 	httpjson.WriteJSON(w, http.StatusOK, packResponse(out))
@@ -253,13 +254,14 @@ func (h *Handler) runAssist(w http.ResponseWriter, r *http.Request) {
 		SubjectType:    body.SubjectType,
 		SubjectID:      body.SubjectID,
 		Input:          body.Input,
+		IdempotencyKey: r.Header.Get("Idempotency-Key"),
 	})
 	if err != nil {
 		if out.ID != uuid.Nil {
 			httpjson.WriteJSON(w, http.StatusBadGateway, runResponse(out))
 			return
 		}
-		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", err.Error())
+		writeUsecaseError(w, err)
 		return
 	}
 	httpjson.WriteJSON(w, http.StatusCreated, runResponse(out))
@@ -325,6 +327,20 @@ func parsePathUUID(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
 }
 
 func writeUsecaseError(w http.ResponseWriter, err error) {
+	var de domainerr.Error
+	if errors.As(err, &de) {
+		switch de.Kind() {
+		case domainerr.KindNotFound:
+			httpjson.WriteFlatError(w, http.StatusNotFound, "NOT_FOUND", de.Error())
+			return
+		case domainerr.KindConflict:
+			httpjson.WriteFlatError(w, http.StatusConflict, "CONFLICT", de.Error())
+			return
+		case domainerr.KindValidation:
+			httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", de.Error())
+			return
+		}
+	}
 	if errors.Is(err, ErrNotFound) {
 		httpjson.WriteFlatError(w, http.StatusNotFound, "NOT_FOUND", "not found")
 		return

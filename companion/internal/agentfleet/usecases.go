@@ -21,6 +21,7 @@ type Repository interface {
 type Usecases struct {
 	repo      Repository
 	ownership TaskOwnershipPort
+	profiles  ProfileChecker
 }
 
 type TaskOwnershipPort interface {
@@ -55,6 +56,11 @@ func (u *Usecases) WithTaskOwnership(port TaskOwnershipPort) *Usecases {
 	return u
 }
 
+func (u *Usecases) WithProfileChecker(pc ProfileChecker) *Usecases {
+	u.profiles = pc
+	return u
+}
+
 func (u *Usecases) ListAgents(ctx context.Context, orgID, productSurface string) ([]Agent, error) {
 	return u.repo.ListAgents(ctx, orgID, productSurface)
 }
@@ -67,6 +73,20 @@ func (u *Usecases) SaveAgent(ctx context.Context, agent Agent) (Agent, error) {
 	agent = normalizeAgent(agent)
 	if err := validateAgent(agent); err != nil {
 		return Agent{}, fmt.Errorf("%w: org_id, agent_id, status and max_autonomy are required", err)
+	}
+	// Referential integrity for profile_id (no physical FK exists). Skipped for
+	// the legacy sentinel and when no checker is wired.
+	if u.profiles != nil {
+		profileID := strings.TrimSpace(agent.ProfileID)
+		if profileID != "" && profileID != "legacy.unprofiled" {
+			exists, err := u.profiles.ProfileExists(ctx, profileID)
+			if err != nil {
+				return Agent{}, err
+			}
+			if !exists {
+				return Agent{}, fmt.Errorf("%w: profile_id %q does not exist", ErrValidation, profileID)
+			}
+		}
 	}
 	return u.repo.SaveAgent(ctx, agent)
 }

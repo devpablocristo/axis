@@ -75,6 +75,24 @@ func (r *PostgresRepository) GetProfile(ctx context.Context, profileID string) (
 	return profile, nil
 }
 
+// IsArchivedOrTrashed reports the lifecycle flags of a profile by its natural
+// key, so the usecase can refuse to silently revive a retired profile on
+// upsert. Returns ErrNotFound when the profile does not exist.
+func (r *PostgresRepository) IsArchivedOrTrashed(ctx context.Context, profileID string) (bool, bool, error) {
+	var archived, trashed bool
+	err := r.db.Pool().QueryRow(ctx, `
+		SELECT archived_at IS NOT NULL, trashed_at IS NOT NULL
+		FROM agent_profiles WHERE profile_id = $1
+	`, strings.TrimSpace(profileID)).Scan(&archived, &trashed)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, false, ErrNotFound
+		}
+		return false, false, fmt.Errorf("check agent profile lifecycle: %w", err)
+	}
+	return archived, trashed, nil
+}
+
 func (r *PostgresRepository) UpsertProfile(ctx context.Context, profile Profile) (Profile, error) {
 	profile = normalizeProfile(profile)
 	memoryPolicy, err := json.Marshal(nonNilMap(profile.MemoryPolicy))
@@ -105,8 +123,6 @@ func (r *PostgresRepository) UpsertProfile(ctx context.Context, profile Profile)
 			memory_policy_json = EXCLUDED.memory_policy_json,
 			llm_config_json = EXCLUDED.llm_config_json,
 			enabled = EXCLUDED.enabled,
-			archived_at = NULL,
-			trashed_at = NULL,
 			updated_at = EXCLUDED.updated_at
 		RETURNING id, profile_id, family_id, version_label, name, description, system_prompt,
 		          max_autonomy, allowed_tools, allowed_capabilities, memory_policy_json,
