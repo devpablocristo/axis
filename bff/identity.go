@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"net/http"
 	"strings"
 
 	authn "github.com/devpablocristo/platform/authn/go"
@@ -91,13 +90,6 @@ func (s *server) deleteIAMUser(ctx context.Context, orgID string, userID string)
 	return s.iam.DeleteUser(ctx, userID)
 }
 
-func (s *server) upsertIAMMember(ctx context.Context, input IAMMember) (IAMMember, error) {
-	if s.identity != nil {
-		return s.identity.UpsertMember(ctx, input)
-	}
-	return s.iam.UpsertMember(ctx, input)
-}
-
 func (s *server) updateIAMMember(ctx context.Context, orgID string, userID string, input IAMMember) (IAMMember, error) {
 	if s.identity != nil {
 		return s.identity.UpdateMember(ctx, orgID, userID, input)
@@ -124,39 +116,6 @@ func (s *server) updateIAMInvitationStatus(ctx context.Context, id string, statu
 		return s.identity.UpdateInvitationStatus(ctx, id, status, actor)
 	}
 	return s.iam.UpdateInvitationStatus(ctx, id, status, actor)
-}
-
-func (s *server) listVisibleUsers(r *http.Request, p authn.Principal) ([]IAMUser, error) {
-	orgID, selectedErr := s.selectedOrg(r, p)
-	if selectedErr != nil {
-		if hasScope(p.Scopes, "axis:cross_org") {
-			return s.iam.ListUsers(r.Context())
-		}
-		orgs, err := s.iam.ListOrgsForActor(r.Context(), p.Actor, false)
-		if err != nil {
-			return nil, err
-		}
-		if len(orgs) > 0 {
-			orgID = orgs[0].ID
-		}
-	}
-	if orgID == "" {
-		return nil, nil
-	}
-	members, err := s.iam.ListMembers(r.Context(), orgID)
-	if err != nil {
-		return nil, err
-	}
-	users := make([]IAMUser, 0, len(members))
-	for _, member := range members {
-		if member.User == nil {
-			continue
-		}
-		user := *member.User
-		user.Role = member.Role
-		users = append(users, user)
-	}
-	return users, nil
 }
 
 func axisPrincipalFromIdentity(p authn.Principal) authn.Principal {
