@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/devpablocristo/companion/internal/agentprofiles"
 )
 
 type AgentResolver interface {
@@ -72,7 +74,7 @@ func applyRuntimeAgent(route AgentRoute, agent RuntimeAgentConfig) (AgentRoute, 
 		return route, &GuardrailEvent{Type: "agent_fleet", Target: "agent:" + agent.AgentID, Reason: "agent is not approved"}
 	}
 	profileID := strings.TrimSpace(agent.ProfileID)
-	if profileID == "" || profileID == "legacy.unprofiled" {
+	if profileID == "" || profileID == agentprofiles.UnprofiledProfileID {
 		return route, &GuardrailEvent{Type: "agent_fleet", Target: "agent:" + agent.AgentID, Reason: "agent profile is required"}
 	}
 	route.Profile.ID = profileID
