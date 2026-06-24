@@ -33,93 +33,6 @@ var (
 	errClerkWebhookSignatureMismatch = errors.New("svix signature mismatch")
 )
 
-// orgInvitationsByOrg serves the legacy invitation surface under
-// /api/orgs/{id}/invitations. Org/user/member CRUD that previously lived here
-// was retired in favour of /api/iam/; invitations remain because /api/iam/ has
-// no equivalent yet. No live console consumers.
-func (s *server) orgInvitationsByOrg(w http.ResponseWriter, r *http.Request) {
-	p := principalFromContext(r.Context())
-	parts := routeParts(r.URL.Path)
-	if len(parts) == 3 && parts[2] == "invitations" {
-		switch r.Method {
-		case http.MethodGet:
-			if !requireScope(w, p, "axis:orgs:read", "axis:orgs:admin") {
-				return
-			}
-			if !s.canAccessOrg(r, p, parts[1]) {
-				writeError(w, http.StatusForbidden, "FORBIDDEN", "selected org is not allowed for this principal")
-				return
-			}
-			invitations, err := s.iam.ListInvitations(r.Context(), parts[1])
-			writeStoreResult(w, map[string]any{"invitations": invitations}, err)
-		case http.MethodPost:
-			if !requireScope(w, p, "axis:orgs:write", "axis:orgs:admin", "axis:users:admin") {
-				return
-			}
-			input, ok := decodeJSONBody[IAMInvitation](w, r)
-			if !ok {
-				return
-			}
-			input.OrgID = parts[1]
-			input.InvitedBy = p.Actor
-			input.Provider = firstNonEmpty(input.Provider, "identity")
-			invite, err := s.createIAMInvitation(r.Context(), input)
-			if err == nil {
-				s.auditIAM(r, p, parts[1], "invitation.created", "invitation", invite.ID, map[string]any{"email": invite.Email, "role": invite.Role, "status": invite.Status})
-			}
-			writeStoreCreated(w, map[string]any{"invitation": invite}, err)
-		default:
-			w.WriteHeader(http.StatusMethodNotAllowed)
-		}
-		return
-	}
-	http.NotFound(w, r)
-}
-
-func (s *server) iamAudit(w http.ResponseWriter, r *http.Request) {
-	p := principalFromContext(r.Context())
-	if r.Method != http.MethodGet {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
-	if !requireScope(w, p, "axis:orgs:read", "axis:orgs:admin", "axis:users:admin") {
-		return
-	}
-	orgID := strings.TrimSpace(r.URL.Query().Get("org_id"))
-	if orgID != "" && !s.canAccessOrg(r, p, orgID) {
-		writeError(w, http.StatusForbidden, "FORBIDDEN", "selected org is not allowed for this principal")
-		return
-	}
-	events, err := s.iam.ListAuditEvents(r.Context(), orgID)
-	writeStoreResult(w, map[string]any{"events": events}, err)
-}
-
-func (s *server) orgInvitations(w http.ResponseWriter, r *http.Request) {
-	p := principalFromContext(r.Context())
-	parts := routeParts(r.URL.Path)
-	if len(parts) != 3 || r.Method != http.MethodPost {
-		http.NotFound(w, r)
-		return
-	}
-	status := ""
-	switch parts[2] {
-	case "accept":
-		status = "accepted"
-	case "revoke":
-		status = "revoked"
-	case "resend":
-		status = "pending"
-	default:
-		http.NotFound(w, r)
-		return
-	}
-	invite, err := s.updateIAMInvitationStatus(r.Context(), parts[1], status, p.Actor)
-	if err == nil {
-		s.auditIAM(r, p, invite.OrgID, "invitation."+status, "invitation", invite.ID, map[string]any{"email": invite.Email, "status": invite.Status})
-	}
-	writeStoreResult(w, map[string]any{"invitation": invite}, err)
-}
-
 func (s *server) clerkWebhook(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, clerkWebhookMaxBodySize+1))
 	if err != nil {
@@ -328,22 +241,6 @@ func writeStoreError(w http.ResponseWriter, err error) {
 		return
 	}
 	writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "request failed")
-}
-
-func routeParts(path string) []string {
-	path = strings.TrimPrefix(path, "/api/")
-	path = strings.Trim(path, "/")
-	if path == "" {
-		return nil
-	}
-	parts := strings.Split(path, "/")
-	out := make([]string, 0, len(parts))
-	for _, part := range parts {
-		if trimmed := strings.TrimSpace(part); trimmed != "" {
-			out = append(out, trimmed)
-		}
-	}
-	return out
 }
 
 func firstWebhookString(data map[string]any, keys ...string) string {
