@@ -97,20 +97,21 @@ type AgentRoute struct {
 // Es deliberadamente chico: suficiente para auditar autonomía y tools sin
 // introducir persistencia ni un registry pesado todavía.
 type AgentProfile struct {
-	ID                  string        `json:"id"`
-	AgentID             string        `json:"agent_id,omitempty"`
-	Role                string        `json:"role,omitempty"`
-	ProductSurface      string        `json:"product_surface"`
-	MaxAutonomy         AutonomyLevel `json:"max_autonomy"`
-	AllowedTools        []string      `json:"allowed_tools"`
-	AllowedCapabilities []string      `json:"allowed_capabilities,omitempty"`
-	MemoryPolicy        any           `json:"memory_policy,omitempty"`
-	MemoryScopeID       string        `json:"memory_scope_id,omitempty"`
-	RequiredScopes      []string      `json:"required_scopes,omitempty"`
-	Enabled             bool          `json:"enabled"`
-	Version             string        `json:"version"`
-	ProfileSnapshotID   string        `json:"profile_snapshot_id,omitempty"`
-	SystemPrompt        string        `json:"-"`
+	ID                  string           `json:"id"`
+	AgentID             string           `json:"agent_id,omitempty"`
+	Role                string           `json:"role,omitempty"`
+	ProductSurface      string           `json:"product_surface"`
+	MaxAutonomy         AutonomyLevel    `json:"max_autonomy"`
+	AllowedTools        []string         `json:"allowed_tools"`
+	AllowedCapabilities []string         `json:"allowed_capabilities,omitempty"`
+	MemoryPolicy        any              `json:"memory_policy,omitempty"`
+	MemoryScopeID       string           `json:"memory_scope_id,omitempty"`
+	RequiredScopes      []string         `json:"required_scopes,omitempty"`
+	Enabled             bool             `json:"enabled"`
+	Version             string           `json:"version"`
+	ProfileSnapshotID   string           `json:"profile_snapshot_id,omitempty"`
+	LLM                 RuntimeLLMConfig `json:"llm,omitempty"`
+	SystemPrompt        string           `json:"-"`
 }
 
 func BuildIdentityChain(userID, orgID, productSurface string, scopes ...string) IdentityChain {

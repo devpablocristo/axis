@@ -18,6 +18,10 @@ import (
 
 const maxToolRounds = 5
 
+// defaultMaxTokens es el tope de tokens de salida por defecto cuando el perfil
+// del agente no fija uno propio en su LLMConfig.
+const defaultMaxTokens = 1024
+
 // Orchestrator coordina LLM + tools + context para producir la respuesta del compañero.
 type Orchestrator struct {
 	provider          LLMProvider
@@ -189,7 +193,10 @@ func (o *Orchestrator) Run(ctx context.Context, in RunInput) (RunResult, error) 
 			}
 		}
 	}
-	modelName := firstNonEmpty(o.model, DefaultGeminiModel)
+	// El perfil del agente puede fijar su propio modelo y tope de tokens en
+	// su LLMConfig; si los deja vacíos/cero caemos al default global del runtime.
+	modelName := firstNonEmpty(strings.TrimSpace(route.Profile.LLM.Model), o.model, DefaultGeminiModel)
+	maxTokens := effectiveMaxTokens(route.Profile.LLM.MaxTokens)
 	ctx, runSpan := startRunSpan(ctx, in.OrgID, productSurface, identity.AgentID, modelName)
 	defer runSpan.End()
 	policy := defaultRuntimePolicy(in.OrgID)
@@ -341,14 +348,14 @@ func (o *Orchestrator) Run(ctx context.Context, in RunInput) (RunResult, error) 
 			"round":        round,
 			"model":        modelName,
 			"tools_count":  len(allowedSchemas),
-			"max_tokens":   1024,
+			"max_tokens":   maxTokens,
 			"input_tokens": trace.Usage.EstimatedInputTokens,
 		})
 		resp, err := o.provider.Chat(ctx, ChatRequest{
 			SystemPrompt: systemPrompt,
 			Messages:     llmMessages,
 			Tools:        allowedSchemas,
-			MaxTokens:    1024,
+			MaxTokens:    maxTokens,
 		})
 		if err != nil {
 			slog.Error("llm_chat_failed", "round", round, "error", err)
@@ -482,6 +489,15 @@ func compactHandoffForPrompt(raw json.RawMessage) string {
 		return ""
 	}
 	return string(encoded)
+}
+
+// effectiveMaxTokens devuelve el tope de tokens del perfil cuando es positivo,
+// o el default del runtime cuando el perfil no lo configura.
+func effectiveMaxTokens(profileMaxTokens int) int {
+	if profileMaxTokens > 0 {
+		return profileMaxTokens
+	}
+	return defaultMaxTokens
 }
 
 func effectivePromptVersion(route AgentRoute) string {

@@ -33,19 +33,28 @@ type RuntimeAgentConfig struct {
 }
 
 type RuntimeAgentProfileConfig struct {
-	ProfileID           string         `json:"profile_id"`
-	FamilyID            string         `json:"family_id,omitempty"`
-	VersionLabel        string         `json:"version_label,omitempty"`
-	Name                string         `json:"name,omitempty"`
-	Description         string         `json:"description,omitempty"`
-	SystemPrompt        string         `json:"system_prompt,omitempty"`
-	MaxAutonomy         AutonomyLevel  `json:"max_autonomy,omitempty"`
-	AllowedTools        []string       `json:"allowed_tools,omitempty"`
-	AllowedCapabilities []string       `json:"allowed_capabilities,omitempty"`
-	MemoryPolicy        map[string]any `json:"memory_policy,omitempty"`
-	Enabled             bool           `json:"enabled"`
-	Archived            bool           `json:"archived,omitempty"`
-	SnapshotID          string         `json:"snapshot_id,omitempty"`
+	ProfileID           string           `json:"profile_id"`
+	FamilyID            string           `json:"family_id,omitempty"`
+	VersionLabel        string           `json:"version_label,omitempty"`
+	Name                string           `json:"name,omitempty"`
+	Description         string           `json:"description,omitempty"`
+	SystemPrompt        string           `json:"system_prompt,omitempty"`
+	MaxAutonomy         AutonomyLevel    `json:"max_autonomy,omitempty"`
+	AllowedTools        []string         `json:"allowed_tools,omitempty"`
+	AllowedCapabilities []string         `json:"allowed_capabilities,omitempty"`
+	MemoryPolicy        map[string]any   `json:"memory_policy,omitempty"`
+	LLM                 RuntimeLLMConfig `json:"llm,omitempty"`
+	Enabled             bool             `json:"enabled"`
+	Archived            bool             `json:"archived,omitempty"`
+	SnapshotID          string           `json:"snapshot_id,omitempty"`
+}
+
+// RuntimeLLMConfig son los parámetros del LLM resueltos desde el LLMConfig de un
+// perfil de agente. Los valores vacíos/cero indican "usar el default del runtime".
+type RuntimeLLMConfig struct {
+	Model       string  `json:"model,omitempty"`
+	MaxTokens   int     `json:"max_tokens,omitempty"`
+	Temperature float64 `json:"temperature,omitempty"`
 }
 
 func applyRuntimeAgent(route AgentRoute, agent RuntimeAgentConfig) (AgentRoute, *GuardrailEvent) {
@@ -104,6 +113,7 @@ func applyRuntimeAgentProfile(route AgentRoute, profile RuntimeAgentProfileConfi
 	route.Profile.ID = profile.ProfileID
 	route.Profile.SystemPrompt = strings.TrimSpace(profile.SystemPrompt)
 	route.Profile.ProfileSnapshotID = strings.TrimSpace(profile.SnapshotID)
+	route.Profile.LLM = profile.LLM
 	if strings.TrimSpace(profile.VersionLabel) != "" {
 		route.Profile.Version = strings.TrimSpace(profile.VersionLabel)
 	}

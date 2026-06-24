@@ -61,6 +61,85 @@ func TestOrchestrator_LoadsAgentProfilePrompt(t *testing.T) {
 	}
 }
 
+func TestOrchestrator_AppliesProfileLLMConfig(t *testing.T) {
+	t.Parallel()
+
+	provider := &fakeLLMProvider{responses: []ChatResponse{{Text: "ok"}}}
+	orch := NewOrchestrator(provider, &ToolKit{Handlers: map[string]ToolHandler{}}, ContextPorts{})
+	orch.SetModel("global-default-model")
+	orch.SetAgentResolver(fakeAgentResolver{agent: RuntimeAgentConfig{
+		AgentID:     "billing_agent",
+		ProfileID:   "axis.ops.billing.v1",
+		Status:      "active",
+		MaxAutonomy: AutonomyA2,
+	}})
+	orch.SetAgentProfileResolver(fakeAgentProfileResolver{profile: RuntimeAgentProfileConfig{
+		ProfileID:    "axis.ops.billing.v1",
+		VersionLabel: "v1",
+		SystemPrompt: "Explain billing only.",
+		MaxAutonomy:  AutonomyA1,
+		Enabled:      true,
+		SnapshotID:   "profile-row-1",
+		LLM: RuntimeLLMConfig{
+			Model:       "gemini-2.5-pro",
+			MaxTokens:   4096,
+			Temperature: 0.3,
+		},
+	}})
+
+	result, err := orch.Run(context.Background(), RunInput{
+		UserID: "user-1", OrgID: "org-1", AgentID: "billing_agent", Message: "explicá cuotas",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provider.callCount != 1 {
+		t.Fatalf("expected provider call, got %d", provider.callCount)
+	}
+	if got := provider.requests[0].MaxTokens; got != 4096 {
+		t.Fatalf("expected profile max_tokens 4096 in request, got %d", got)
+	}
+	if result.Trace.Model != "gemini-2.5-pro" {
+		t.Fatalf("expected profile model in trace, got %q", result.Trace.Model)
+	}
+}
+
+func TestOrchestrator_FallsBackToDefaultsWhenProfileLLMConfigEmpty(t *testing.T) {
+	t.Parallel()
+
+	provider := &fakeLLMProvider{responses: []ChatResponse{{Text: "ok"}}}
+	orch := NewOrchestrator(provider, &ToolKit{Handlers: map[string]ToolHandler{}}, ContextPorts{})
+	orch.SetModel("global-default-model")
+	orch.SetAgentResolver(fakeAgentResolver{agent: RuntimeAgentConfig{
+		AgentID:     "billing_agent",
+		ProfileID:   "axis.ops.billing.v1",
+		Status:      "active",
+		MaxAutonomy: AutonomyA2,
+	}})
+	orch.SetAgentProfileResolver(fakeAgentProfileResolver{profile: RuntimeAgentProfileConfig{
+		ProfileID:    "axis.ops.billing.v1",
+		VersionLabel: "v1",
+		SystemPrompt: "Explain billing only.",
+		MaxAutonomy:  AutonomyA1,
+		Enabled:      true,
+		SnapshotID:   "profile-row-1",
+		// LLM left zero: runtime must use its own defaults.
+	}})
+
+	result, err := orch.Run(context.Background(), RunInput{
+		UserID: "user-1", OrgID: "org-1", AgentID: "billing_agent", Message: "explicá cuotas",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := provider.requests[0].MaxTokens; got != defaultMaxTokens {
+		t.Fatalf("expected default max_tokens %d in request, got %d", defaultMaxTokens, got)
+	}
+	if result.Trace.Model != "global-default-model" {
+		t.Fatalf("expected global model fallback in trace, got %q", result.Trace.Model)
+	}
+}
+
 func TestOrchestrator_RejectsMissingAgentProfileResolver(t *testing.T) {
 	t.Parallel()
 
