@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"strings"
 	"time"
 
@@ -504,7 +503,7 @@ func (u *Usecases) ExecuteTaskPlanCompensation(ctx context.Context, taskID, step
 	if err != nil {
 		return out, fmt.Errorf("nexus get compensation request: %w", err)
 	}
-	if statusCode == http.StatusNotFound {
+	if statusCode == nexusHTTPStatusNotFound {
 		return out, fmt.Errorf("nexus compensation request not found")
 	}
 	nexusStatus := normalizeNexusStatus(sum.Status)

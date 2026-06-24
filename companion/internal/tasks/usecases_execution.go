@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"strings"
 	"time"
 
@@ -490,7 +489,7 @@ func (u *Usecases) reportExecutionToNexus(ctx context.Context, nexusRequestID *u
 		resultPayload["evidence"] = json.RawMessage(result.EvidenceJSON)
 	}
 	status, err := u.nexus.ReportResult(ctx, nexusRequestID.String(), success, resultPayload, result.DurationMS, result.ErrorMessage)
-	if err != nil || status >= http.StatusBadRequest {
+	if err != nil || status >= nexusHTTPStatusBadRequest {
 		slog.Warn("report execution to nexus failed",
 			"nexus_request_id", nexusRequestID.String(),
 			"status", status,
