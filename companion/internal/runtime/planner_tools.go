@@ -947,37 +947,6 @@ func evidenceValuePresent(value any) bool {
 	}
 }
 
-func compensationFromStepEvidence(raw json.RawMessage) (map[string]any, bool) {
-	var evidence map[string]any
-	if len(raw) == 0 || json.Unmarshal(raw, &evidence) != nil {
-		return map[string]any{"supported": false}, false
-	}
-	if compensation, ok := evidence["compensation"].(map[string]any); ok {
-		supported := boolFromAny(compensation["supported"])
-		return compensation, supported
-	}
-	if metadata, ok := evidence["tool_metadata"].(map[string]any); ok && boolFromAny(metadata["rollback_supported"]) {
-		compensation := map[string]any{
-			"supported":      true,
-			"capability_id":  strings.TrimSpace(fmt.Sprint(metadata["rollback_capability_id"])),
-			"requires_nexus": true,
-		}
-		return compensation, true
-	}
-	return map[string]any{"supported": false}, false
-}
-
-func boolFromAny(value any) bool {
-	switch typed := value.(type) {
-	case bool:
-		return typed
-	case string:
-		return strings.EqualFold(strings.TrimSpace(typed), "true")
-	default:
-		return false
-	}
-}
-
 func updatePlanStepBlocked(ctx context.Context, planner TaskPlanner, taskID uuid.UUID, step taskdomain.TaskPlanStep, reason string) (taskdomain.TaskPlan, error) {
 	checkpoint := taskPlanCheckpointJSON(map[string]any{
 		"source":  "execute_task_plan_step",

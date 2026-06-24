@@ -171,7 +171,6 @@ func (r *PostgresRepository) List(ctx context.Context, filters ListFilters) ([]p
 	if filters.EnabledOnly {
 		query += fmt.Sprintf(` AND enabled = $%d`, argN)
 		args = append(args, true)
-		argN++
 	}
 	query += ` ORDER BY priority ASC, created_at DESC`
 
@@ -785,21 +784,6 @@ func scanPolicy(row policyScanRow) (policydomain.Policy, error) {
 	return p, nil
 }
 
-func (r *PostgresRepository) recordPolicyVersion(ctx context.Context, p policydomain.Policy, action string) error {
-	tx, err := r.db.Pool().Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin policy lifecycle tx: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	if err := recordPolicyVersionTx(ctx, tx, p, action); err != nil {
-		return err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit policy lifecycle tx: %w", err)
-	}
-	return nil
-}
-
 func recordPolicyVersionTx(ctx context.Context, tx pgx.Tx, p policydomain.Policy, action string) error {
 	contentHash, err := policyContentHash(p)
 	if err != nil {
@@ -847,21 +831,6 @@ func recordPolicyVersionTx(ctx context.Context, tx pgx.Tx, p policydomain.Policy
 		VALUES ($1,$2,'legacy-api',$3,$4,$5)
 	`, artifactID, versionID, action, "Policy "+action+" via v1 API", map[string]any{"legacy_policy_id": p.ID.String(), "content_hash": contentHash}); err != nil {
 		return fmt.Errorf("insert policy changelog: %w", err)
-	}
-	return nil
-}
-
-func (r *PostgresRepository) recordPolicyLifecycleEvent(ctx context.Context, p policydomain.Policy, action, summary string) error {
-	tx, err := r.db.Pool().Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin policy lifecycle event tx: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	if err := recordPolicyLifecycleEventTx(ctx, tx, p, action, summary); err != nil {
-		return err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit policy lifecycle event tx: %w", err)
 	}
 	return nil
 }

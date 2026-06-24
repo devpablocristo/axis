@@ -39,8 +39,6 @@ func canAccessTaskOrg(r *http.Request, task domain.Task) bool {
 	return taskOrg == orgID
 }
 
-func principalScopes(r *http.Request) []string { return identityctx.FromRequest(r).Scopes }
-
 func workIdentity(r *http.Request) (identityctx.IdentityContext, bool) {
 	return identityctx.WorkIdentity(r)
 }

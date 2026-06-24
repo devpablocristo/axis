@@ -45,25 +45,6 @@ const knownProductTenants = [
   },
 ]
 
-const knownExternalUsers = [
-  {
-    accountName: 'Acme',
-    productLabel: 'Pymes',
-    tenantName: 'Bikeman',
-    email: 'admin@bikeman.local',
-    source: 'Pymes',
-    status: 'Activo',
-  },
-  {
-    accountName: 'Acme',
-    productLabel: 'Pymes',
-    tenantName: 'Bikeman',
-    email: 'usuario@bikeman.local',
-    source: 'Pymes',
-    status: 'Activo',
-  },
-]
-
 type ProductOption = {
   productSurface: string
   label: string
@@ -758,27 +739,6 @@ function Table(props: { columns: string[]; rows: Array<Array<string | number>> }
           ))}
         </tbody>
       </table>
-    </div>
-  )
-}
-
-function ProductList(props: { options: ProductOption[]; selected: string; onSelect: (productSurface: string) => void }) {
-  return (
-    <div className="product-list">
-      {props.options.map((option) => (
-        <button
-          key={option.productSurface}
-          type="button"
-          className={option.productSurface === props.selected ? 'active' : ''}
-          onClick={() => props.onSelect(option.productSurface)}
-        >
-          <span>
-            <strong>{option.label}</strong>
-            <small>{option.productSurface}</small>
-          </span>
-          <em>{option.status}</em>
-        </button>
-      ))}
     </div>
   )
 }

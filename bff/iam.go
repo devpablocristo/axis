@@ -1100,36 +1100,6 @@ func jsonMap(value map[string]any) ([]byte, error) {
 	return json.Marshal(compactPayload(value))
 }
 
-func jsonStringList(values []string) ([]byte, error) {
-	return json.Marshal(cleanStringList(values))
-}
-
-func parseMap(raw []byte) map[string]any {
-	var value map[string]any
-	if len(raw) > 0 {
-		_ = json.Unmarshal(raw, &value)
-	}
-	if value == nil {
-		return map[string]any{}
-	}
-	return value
-}
-
-func nullableJSON(raw []byte, original []string) any {
-	if original == nil {
-		return nil
-	}
-	return string(raw)
-}
-
-func parseStringList(raw []byte) []string {
-	var values []string
-	if len(raw) > 0 {
-		_ = json.Unmarshal(raw, &values)
-	}
-	return cleanStringList(values)
-}
-
 func cleanStringList(values []string) []string {
 	if values == nil {
 		return []string{}
