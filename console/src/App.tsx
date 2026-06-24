@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ActionType, AgentRun, Approval, AxisOrg, AxisSession, BusinessModel, CapabilityRecord, CompanionAgent, CompanionJob, CompanionTask, CostSummary, Delegation, MemoryConflict, MemoryReview, MemorySummary, NexusRequest, ObservabilityEvent, Policy, Product, ProductInstallation, RunTrace, RuntimePolicy, SecurityEvalReport, ServiceHealth, axisFetch, getHealth, getSession, listAxisOrgs } from './api'
 import { AgentsControlCenter } from './AgentsControlCenter'
 import { IAMControlCenter } from './IAMControlCenter'
-import { AgentProfilePromptsScreen, AssistPackPromptsScreen } from './PromptScreens'
+import { PromptsControlCenter } from './PromptScreens'
 
 type LoadState<T> = {
   data: T
@@ -195,8 +195,8 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
   const selectedOrgOption = orgOptions.find((item) => item.id === orgId)
   const selectedProductOption = productOptions.find((item) => item.productSurface === productSurface)
   const selectedTenantOption = tenantOptions.find((item) => item.externalTenantId === externalTenantId)
-  const simpleAgentsHeader = route.area === 'agents'
-  const showGlobalContext = route.area !== 'iam' && !simpleAgentsHeader
+  const simpleControlHeader = route.area === 'agents' || route.area === 'prompts'
+  const showGlobalContext = route.area !== 'iam' && !simpleControlHeader
   const canViewIAM = Boolean(session.data?.scopes?.some((scope) => scope === 'axis:orgs:admin' || scope === 'axis:users:admin'))
   const title = pageTitle(route)
   const chatAdapter = useMemo<ChatAdapter>(() => axisChatAdapter(orgId, productSurface), [orgId, productSurface])
@@ -231,7 +231,7 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
         <header className="topbar">
           <div>
             <h1>{title}</h1>
-            {route.area !== 'iam' && !simpleAgentsHeader && <p>{session.data?.actor_id ?? 'local-dev-admin'}</p>}
+            {route.area !== 'iam' && !simpleControlHeader && <p>{session.data?.actor_id ?? 'local-dev-admin'}</p>}
           </div>
           {(showGlobalContext || authSlot) && (
             <div className="toolbar">
@@ -498,14 +498,12 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
         )}
 
         {route.area === 'prompts' && (
-          <section className="page-section">
-            <ScreenNav items={[
-              ['product', 'Prompts del producto'],
-              ['agents', 'Prompts de agentes']
-            ]} base="prompts" active={route.screen} onNavigate={navigate} />
-            {route.screen === 'product' && <AssistPackPromptsScreen orgId={orgId} productSurface={productSurface} />}
-            {route.screen === 'agents' && <AgentProfilePromptsScreen orgId={orgId} productSurface={productSurface} agents={agents.data} />}
-          </section>
+          <PromptsControlCenter
+            orgId={orgId}
+            productSurface={productSurface}
+            agents={agents.data}
+            initialSection={route.screen === 'agents' ? 'agents' : 'product'}
+          />
         )}
 
         {route.area === 'operations' && (

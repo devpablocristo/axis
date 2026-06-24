@@ -322,6 +322,175 @@ func TestAgentProfilesEndpointRejectsMemberWrites(t *testing.T) {
 	}
 }
 
+func TestPromptsEndpointAdaptsAssistPacks(t *testing.T) {
+	var requests []string
+	var gotAuth string
+	downstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.Method+" "+r.URL.String())
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/assist-packs":
+			_, _ = w.Write([]byte(`[{"id":"pack-a","product_surface":"medmory","assist_type":"summary","name":"Summary","prompt_template":"old","enabled":true}]`))
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/assist-packs/archived":
+			_, _ = w.Write([]byte(`[]`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer downstream.Close()
+
+	srv, err := newTestServer(downstream.URL, []string{"axis:products:admin", "companion:assist:read"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/prompts/assist-packs?product_surface=medmory&lifecycle=active", nil)
+	rec := httptest.NewRecorder()
+	srv.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected assist pack list 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/prompts/assist-packs?product_surface=medmory&lifecycle=archived", nil)
+	rec = httptest.NewRecorder()
+	srv.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected archived assist pack list 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodPut, "/api/prompts/assist-packs/pack-a/content", strings.NewReader(`{"prompt_template":"new"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	srv.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected assist pack content update 403, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "assist pack prompts must be loaded from the owner product") {
+		t.Fatalf("expected owner product error, got %s", rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/prompts/assist-packs/pack-a/archive", nil)
+	rec = httptest.NewRecorder()
+	srv.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected assist pack archive 403, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "assist pack prompts are managed from the owner product") {
+		t.Fatalf("expected owner product lifecycle error, got %s", rec.Body.String())
+	}
+
+	if !strings.HasPrefix(gotAuth, "Bearer ") {
+		t.Fatalf("expected bearer token, got %q", gotAuth)
+	}
+	want := []string{
+		"GET /v1/assist-packs?product_surface=medmory",
+		"GET /v1/assist-packs/archived?product_surface=medmory",
+	}
+	if strings.Join(requests, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("unexpected downstream requests:\n%s", strings.Join(requests, "\n"))
+	}
+}
+
+func TestPromptsEndpointAdaptsAgentProfilePrompts(t *testing.T) {
+	var requests []string
+	var gotBody string
+	downstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.Method+" "+r.URL.String())
+		if r.Body != nil {
+			body, _ := io.ReadAll(r.Body)
+			gotBody = string(body)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/agent-profiles":
+			_, _ = w.Write([]byte(`{"profiles":[{"profile_id":"axis.ops.billing.v1","name":"Billing Agent","family_id":"axis.ops.billing","version_label":"v1","system_prompt":"old","max_autonomy":"A1","enabled":true}]}`))
+		case r.Method == http.MethodPut && r.URL.Path == "/v1/agent-profiles/axis.ops.billing.v1":
+			_, _ = w.Write([]byte(`{"profile_id":"axis.ops.billing.v1","name":"Billing Agent","family_id":"axis.ops.billing","version_label":"v2","system_prompt":"new","max_autonomy":"A1","enabled":true}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/agent-profiles/axis.ops.billing.v1/restore":
+			_, _ = w.Write([]byte(`{"profile_id":"axis.ops.billing.v1","name":"Billing Agent","family_id":"axis.ops.billing","version_label":"v2","system_prompt":"new","max_autonomy":"A1","enabled":true}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/agent-profiles/axis.ops.billing.v1/trash":
+			_, _ = w.Write([]byte(`{"profile_id":"axis.ops.billing.v1","name":"Billing Agent","family_id":"axis.ops.billing","version_label":"v2","system_prompt":"new","max_autonomy":"A1","enabled":true}`))
+		case r.Method == http.MethodDelete && r.URL.Path == "/v1/agent-profiles/axis.ops.billing.v1/purge":
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer downstream.Close()
+
+	srv, err := newTestServer(downstream.URL, []string{"axis:agents:admin", "companion:agent_profiles:read"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/prompts/agent-profiles?lifecycle=all", nil)
+	rec := httptest.NewRecorder()
+	srv.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected profile prompt list 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodPut, "/api/prompts/agent-profiles/axis.ops.billing.v1/system-prompt", strings.NewReader(`{"system_prompt":"new"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	srv.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected profile prompt update 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if gotBody != `{"system_prompt":"new"}` {
+		t.Fatalf("expected forwarded profile body, got %q", gotBody)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/prompts/agent-profiles/axis.ops.billing.v1/restore", nil)
+	rec = httptest.NewRecorder()
+	srv.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected profile prompt restore 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/prompts/agent-profiles/axis.ops.billing.v1/trash", nil)
+	rec = httptest.NewRecorder()
+	srv.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected profile prompt trash 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodDelete, "/api/prompts/agent-profiles/axis.ops.billing.v1/purge", nil)
+	rec = httptest.NewRecorder()
+	srv.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected profile prompt purge 204, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	want := []string{
+		"GET /v1/agent-profiles?lifecycle=all",
+		"PUT /v1/agent-profiles/axis.ops.billing.v1",
+		"POST /v1/agent-profiles/axis.ops.billing.v1/restore",
+		"POST /v1/agent-profiles/axis.ops.billing.v1/trash",
+		"DELETE /v1/agent-profiles/axis.ops.billing.v1/purge",
+	}
+	if strings.Join(requests, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("unexpected downstream requests:\n%s", strings.Join(requests, "\n"))
+	}
+}
+
+func TestPromptsEndpointRejectsMemberWrites(t *testing.T) {
+	srv, err := newTestServer("http://127.0.0.1:1", orgMemberScopes())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPut, "/api/prompts/assist-packs/pack-a/content", strings.NewReader(`{"prompt_template":"new"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestSessionReturnsSelectedOrgForCrossOrgPrincipal(t *testing.T) {
 	srv, err := newTestServer("http://127.0.0.1:1", []string{"axis:cross_org"})
 	if err != nil {
