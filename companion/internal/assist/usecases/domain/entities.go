@@ -37,6 +37,7 @@ type AssistRun struct {
 	Output         map[string]any `json:"output"`
 	Status         string         `json:"status"`
 	ErrorMessage   string         `json:"error_message"`
+	IdempotencyKey string         `json:"idempotency_key,omitempty"`
 	CreatedAt      time.Time      `json:"created_at"`
 	CompletedAt    *time.Time     `json:"completed_at,omitempty"`
 }

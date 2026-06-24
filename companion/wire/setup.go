@@ -73,6 +73,22 @@ type taskOwnershipAdapter struct {
 	repo tasks.Repository
 }
 
+// profileCheckerAdapter lets agentfleet validate profile_id references against
+// the agent_profiles store (no physical FK exists).
+type profileCheckerAdapter struct {
+	repo *agentprofiles.PostgresRepository
+}
+
+func (a profileCheckerAdapter) ProfileExists(ctx context.Context, profileID string) (bool, error) {
+	if _, err := a.repo.GetProfile(ctx, profileID); err != nil {
+		if errors.Is(err, agentprofiles.ErrNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
 type businessMemoryProjector struct {
 	uc *memory.Usecases
 }
@@ -614,11 +630,13 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	watcherUC.SetRateLimiter(productRateLimiter)
 	memUC.WithProductInstallationGuard(productGuard)
 	agentRepo := agentfleet.NewPostgresRepository(db)
-	agentUC := agentfleet.NewUsecases(agentRepo).WithTaskOwnership(taskOwnershipAdapter{repo: repo})
-	agentHandler := agentfleet.NewHandler(agentUC)
 	agentProfileRepo := agentprofiles.NewPostgresRepository(db)
 	agentProfileUC := agentprofiles.NewUsecases(agentProfileRepo)
 	agentProfileHandler := agentprofiles.NewHandler(agentProfileUC)
+	agentUC := agentfleet.NewUsecases(agentRepo).
+		WithTaskOwnership(taskOwnershipAdapter{repo: repo}).
+		WithProfileChecker(profileCheckerAdapter{repo: agentProfileRepo})
+	agentHandler := agentfleet.NewHandler(agentUC)
 	uc.SetTaskMemory(taskMemoryAdapter{uc: memUC, repo: repo})
 
 	// Agent memory (conversation history durable per user). El repo de memory
@@ -769,7 +787,10 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	})
 
 	assistRepo := assist.NewPostgresRepository(db)
-	assistUC := assist.NewUsecases(assistRepo, llmProvider)
+	assistUC, err := assist.NewUsecases(assistRepo, llmProvider, assist.NewPostgresLifecycleAudit(db))
+	if err != nil {
+		return nil, nil, fmt.Errorf("build assist usecases: %w", err)
+	}
 	assistHandler := assist.NewHandler(assistUC)
 
 	mux := http.NewServeMux()

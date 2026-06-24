@@ -50,6 +50,14 @@ func (f *fakeRepo) GetProfile(_ context.Context, profileID string) (Profile, err
 	return profile, nil
 }
 
+func (f *fakeRepo) IsArchivedOrTrashed(_ context.Context, profileID string) (bool, bool, error) {
+	profile, ok := f.profiles[profileID]
+	if !ok {
+		return false, false, ErrNotFound
+	}
+	return profile.ArchivedAt != nil, profile.TrashedAt != nil, nil
+}
+
 func (f *fakeRepo) UpsertProfile(_ context.Context, profile Profile) (Profile, error) {
 	f.profiles[profile.ProfileID] = profile
 	return profile, nil
