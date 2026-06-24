@@ -2,6 +2,7 @@ package agentfleet
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -70,9 +71,37 @@ func (u *Usecases) GetAgent(ctx context.Context, orgID, productSurface, agentID 
 }
 
 func (u *Usecases) SaveAgent(ctx context.Context, agent Agent) (Agent, error) {
+	// ¿El caller mandó explícitamente los campos de ciclo de vida? (pre-normalize)
+	providedStatus := strings.TrimSpace(agent.Status) != ""
+	providedReview := strings.TrimSpace(agent.ReviewStatus) != ""
+	providedLifecycle := strings.TrimSpace(agent.LifecycleStatus) != ""
+
 	agent = normalizeAgent(agent)
 	if err := validateAgent(agent); err != nil {
 		return Agent{}, fmt.Errorf("%w: org_id, agent_id, status and max_autonomy are required", err)
+	}
+
+	// Create-vs-update: SaveAgent es un upsert. En un UPDATE parcial (el caller no
+	// reenvía status/review/lifecycle) NO debemos pisar con los defaults seguros
+	// de normalizeAgent (disabled/needs_review) -> preservamos lo que ya estaba,
+	// para no desactivar/desaprobar un agente al editar otros campos. En un CREATE
+	// sin esos campos, quedan los defaults seguros (salvo opt-in explícito).
+	existing, err := u.repo.GetAgent(ctx, agent.OrgID, agent.ProductSurface, agent.AgentID)
+	switch {
+	case err == nil:
+		if !providedStatus {
+			agent.Status = existing.Status
+		}
+		if !providedReview {
+			agent.ReviewStatus = existing.ReviewStatus
+		}
+		if !providedLifecycle {
+			agent.LifecycleStatus = existing.LifecycleStatus
+		}
+	case errors.Is(err, ErrNotFound):
+		// create: quedan los defaults seguros de normalizeAgent.
+	default:
+		return Agent{}, err
 	}
 	// Referential integrity for profile_id (no physical FK exists). Skipped for
 	// the legacy sentinel and when no checker is wired.

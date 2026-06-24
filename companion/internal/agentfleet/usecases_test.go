@@ -113,14 +113,51 @@ func TestUsecases_SaveAgentNormalizesAndVersions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if agent.ProductSurface != "companion" || agent.Status != StatusActive || agent.MaxAutonomy != "A2" {
+	if agent.ProductSurface != "companion" || agent.Status != StatusDisabled || agent.MaxAutonomy != "A2" {
 		t.Fatalf("agent defaults not applied: %+v", agent)
 	}
-	if agent.LifecycleStatus != LifecycleActive || agent.ReviewStatus != ReviewApproved {
-		t.Fatalf("expected executable lifecycle defaults, got %+v", agent)
+	// Safe-by-default (F4.8): un create sin status/review explícitos NO queda
+	// ejecutable; debe pasar por activación/aprobación deliberada.
+	if agent.LifecycleStatus != LifecycleActive || agent.ReviewStatus != ReviewNeedsReview {
+		t.Fatalf("expected safe-by-default lifecycle (disabled/needs_review), got %+v", agent)
 	}
 	if len(agent.AllowedTools) != 1 || agent.AllowedTools[0] != "remember" {
 		t.Fatalf("expected normalized tools, got %+v", agent.AllowedTools)
+	}
+}
+
+func TestUsecases_SaveAgentSafeDefaultAndUpdatePreserve(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	repo := newFakeRepo()
+	uc := NewUsecases(repo)
+
+	// CREATE sin status/review explícitos -> safe default (disabled + needs_review).
+	bare, err := uc.SaveAgent(ctx, Agent{OrgID: "org-1", AgentID: "bare"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bare.Status != StatusDisabled || bare.ReviewStatus != ReviewNeedsReview {
+		t.Fatalf("create pelado debía quedar disabled/needs_review, got %+v", bare)
+	}
+
+	// CREATE con opt-in explícito -> active + approved.
+	explicit, err := uc.SaveAgent(ctx, Agent{OrgID: "org-1", AgentID: "explicit", ProfileID: "support.v1", Status: StatusActive, ReviewStatus: ReviewApproved})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if explicit.Status != StatusActive || explicit.ReviewStatus != ReviewApproved {
+		t.Fatalf("create explícito debía quedar active/approved, got %+v", explicit)
+	}
+
+	// UPDATE parcial del agente aprobado (sin reenviar status/review) -> preserva
+	// active/approved; editar otros campos no debe desactivar ni desaprobar.
+	updated, err := uc.SaveAgent(ctx, Agent{OrgID: "org-1", AgentID: "explicit", ProfileID: "support.v1", DisplayName: "Soporte 2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Status != StatusActive || updated.ReviewStatus != ReviewApproved {
+		t.Fatalf("update parcial debía preservar active/approved, got %+v", updated)
 	}
 }
 
@@ -129,7 +166,9 @@ func TestUsecases_LifecycleControlsExecutability(t *testing.T) {
 
 	repo := newFakeRepo()
 	uc := NewUsecases(repo)
-	_, _ = uc.SaveAgent(context.Background(), Agent{OrgID: "org-1", AgentID: "active", ProfileID: "support.v1"})
+	// "active" se crea con activación/aprobación explícitas (opt-in deliberado),
+	// porque el default seguro de F4.8 ya no las da gratis.
+	_, _ = uc.SaveAgent(context.Background(), Agent{OrgID: "org-1", AgentID: "active", ProfileID: "support.v1", Status: StatusActive, ReviewStatus: ReviewApproved})
 	_, _ = uc.SaveAgent(context.Background(), Agent{OrgID: "org-1", AgentID: "review", ReviewStatus: ReviewNeedsReview})
 
 	if _, err := uc.AssignAgent(context.Background(), AssignmentInput{OrgID: "org-1"}); err != nil {
@@ -193,7 +232,10 @@ func TestUsecases_CreateHandoffValidatesTargetAgent(t *testing.T) {
 
 	repo := newFakeRepo()
 	uc := NewUsecases(repo)
-	_, _ = uc.SaveAgent(context.Background(), Agent{OrgID: "org-1", AgentID: "source"})
+	// source y target con activación/aprobación explícitas (el default seguro de
+	// F4.8 ya no las da gratis); el test ejercita la validación de ejecutabilidad
+	// del target en el handoff.
+	_, _ = uc.SaveAgent(context.Background(), Agent{OrgID: "org-1", AgentID: "source", Status: StatusActive, ReviewStatus: ReviewApproved})
 	_, _ = uc.SaveAgent(context.Background(), Agent{OrgID: "org-1", AgentID: "target", Status: StatusDisabled})
 
 	_, err := uc.CreateHandoff(context.Background(), Handoff{
@@ -205,7 +247,7 @@ func TestUsecases_CreateHandoffValidatesTargetAgent(t *testing.T) {
 		t.Fatal("expected disabled target to fail")
 	}
 
-	_, _ = uc.SaveAgent(context.Background(), Agent{OrgID: "org-1", AgentID: "target", Status: StatusActive})
+	_, _ = uc.SaveAgent(context.Background(), Agent{OrgID: "org-1", AgentID: "target", Status: StatusActive, ReviewStatus: ReviewApproved})
 	handoff, err := uc.CreateHandoff(context.Background(), Handoff{
 		OrgID:       "org-1",
 		FromAgentID: "source",
