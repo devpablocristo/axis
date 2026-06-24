@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/devpablocristo/companion/internal/agentprofiles"
 )
 
 type Repository interface {
@@ -107,7 +109,7 @@ func (u *Usecases) SaveAgent(ctx context.Context, agent Agent) (Agent, error) {
 	// the legacy sentinel and when no checker is wired.
 	if u.profiles != nil {
 		profileID := strings.TrimSpace(agent.ProfileID)
-		if profileID != "" && profileID != "legacy.unprofiled" {
+		if profileID != "" && profileID != agentprofiles.UnprofiledProfileID {
 			exists, err := u.profiles.ProfileExists(ctx, profileID)
 			if err != nil {
 				return Agent{}, err
@@ -148,7 +150,7 @@ func (u *Usecases) ApproveAgent(ctx context.Context, orgID, productSurface, agen
 	if err != nil {
 		return Agent{}, err
 	}
-	if strings.TrimSpace(agent.ProfileID) == "" || agent.ProfileID == "legacy.unprofiled" {
+	if strings.TrimSpace(agent.ProfileID) == "" || agent.ProfileID == agentprofiles.UnprofiledProfileID {
 		return Agent{}, fmt.Errorf("%w: approved agents require a real profile_id", ErrValidation)
 	}
 	return u.repo.SetAgentLifecycle(ctx, orgID, productSurface, agentID, "", "", ReviewApproved, changedBy)

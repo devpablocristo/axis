@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-)
 
-const unprofiledProfileID = "legacy.unprofiled"
+	"github.com/devpablocristo/companion/internal/agentprofiles"
+)
 
 type RuntimeReference struct {
 	OrgID          string `json:"org_id"`
@@ -192,7 +192,7 @@ func insertInferredAgent(ctx context.Context, db *sql.DB, ref RuntimeReference) 
 		        'agent-reconcile', now(), now())
 		ON CONFLICT (org_id, product_surface, agent_id) DO NOTHING
 	`, strings.TrimSpace(ref.OrgID), defaultSurface(ref.ProductSurface), strings.TrimSpace(ref.AgentID),
-		"Agente inferido desde runtime histórico.", unprofiledProfileID, string(metadata))
+		"Agente inferido desde runtime histórico.", agentprofiles.UnprofiledProfileID, string(metadata))
 	if err != nil {
 		return fmt.Errorf("insert inferred agent: %w", err)
 	}

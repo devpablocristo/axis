@@ -14,6 +14,12 @@ var (
 	ErrConflict   = errors.New("agent profile conflict")
 )
 
+// UnprofiledProfileID is the sentinel ProfileID for agents that have no real
+// profile (legacy or runtime-inferred rows). It has no physical FK to a
+// profile; callers treat it the same as an empty ProfileID. Centralized here so
+// the fleet/runtime/reconcile packages share one source of truth.
+const UnprofiledProfileID = "legacy.unprofiled"
+
 type LifecycleView string
 
 const (
