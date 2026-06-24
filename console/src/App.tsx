@@ -3,7 +3,7 @@ import { ChatWorkspace, type ChatAdapter, type ChatConversationDetail, type Chat
 import '@devpablocristo/platform-chat-ui/styles.css'
 import type { ReactNode } from 'react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ActionType, AgentRun, Approval, AxisOrg, AxisSession, BusinessModel, CapabilityRecord, CompanionAgent, CompanionJob, CompanionTask, CostSummary, Delegation, MemoryConflict, MemoryReview, MemorySummary, NexusRequest, ObservabilityEvent, Policy, Product, ProductInstallation, RunTrace, RuntimePolicy, SecurityEvalReport, ServiceHealth, axisFetch, getHealth, getSession, listAxisOrgs } from './api'
+import { ActionType, AgentRun, Approval, AxisSession, AxisTenantView, BusinessModel, CapabilityRecord, CompanionAgent, CompanionJob, CompanionTask, CostSummary, Delegation, MemoryConflict, MemoryReview, MemorySummary, NexusRequest, ObservabilityEvent, Policy, Product, ProductInstallation, RunTrace, RuntimePolicy, SecurityEvalReport, ServiceHealth, axisFetch, getHealth, getSession, listIAMTenants } from './api'
 import { AgentsControlCenter } from './AgentsControlCenter'
 import { IAMControlCenter } from './IAMControlCenter'
 import { PromptsControlCenter } from './PromptScreens'
@@ -57,7 +57,7 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
   const [externalTenantId, setExternalTenantId] = useState(localStorage.getItem('axis.external_tenant_id') || 'bikeman')
   const [route, setRoute] = useState<Route>(() => parseCurrentRoute())
   const [session, setSession] = useState<LoadState<AxisSession | null>>(empty(null))
-  const [axisOrgs, setAxisOrgs] = useState<LoadState<AxisOrg[]>>(empty([]))
+  const [axisOrgs, setAxisOrgs] = useState<LoadState<AxisTenantView[]>>(empty([]))
   const [health, setHealth] = useState<LoadState<ServiceHealth | null>>(empty(null))
   const [products, setProducts] = useState<LoadState<Product[]>>(empty([]))
   const [installations, setInstallations] = useState<LoadState<ProductInstallation[]>>(empty([]))
@@ -89,7 +89,7 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
     const productInit = productHeaders(productSurface)
     await Promise.all([
       load(setSession, () => getSession(), null),
-      load(setAxisOrgs, () => listAxisOrgs(orgId), []),
+      load(setAxisOrgs, () => listIAMTenants(orgId), []),
       load(setHealth, () => getHealth(), null),
       load(setProducts, async () => (await axisFetch<{ products: Product[] }>('/api/companion/v1/products', orgId, productInit)).products ?? [], []),
       load(setInstallations, async () => (await axisFetch<{ installations: ProductInstallation[] }>(`/api/companion/v1/product-installations?org_id=${encodeURIComponent(orgId)}`, orgId, productInit)).installations ?? [], []),
@@ -168,10 +168,10 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
   }, [requests.data])
 
   const productOptions = useMemo(() => buildProductOptions(products.data, installations.data), [products.data, installations.data])
-  const orgOptions = useMemo(() => {
-    if (axisOrgs.data.length > 0) return axisOrgs.data
-    if (session.data?.orgs?.length) return session.data.orgs
-    return [{ id: orgId, name: orgId, slug: orgId, status: 'active', created_at: '', updated_at: '' }]
+  const orgOptions = useMemo<Array<{ id: string; name: string; status: string }>>(() => {
+    if (axisOrgs.data.length > 0) return axisOrgs.data.map((org) => ({ id: org.id, name: org.name, status: org.status }))
+    if (session.data?.orgs?.length) return session.data.orgs.map((org) => ({ id: org.id, name: org.name, status: org.status }))
+    return [{ id: orgId, name: orgId, status: 'active' }]
   }, [axisOrgs.data, orgId, session.data?.orgs])
   const selectedOrgOption = orgOptions.find((item) => item.id === orgId)
   const selectedProductOption = productOptions.find((item) => item.productSurface === productSurface)
