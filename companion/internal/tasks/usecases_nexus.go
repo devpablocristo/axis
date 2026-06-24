@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"strings"
 	"time"
 
@@ -18,6 +17,16 @@ import (
 	connectordomain "github.com/devpablocristo/companion/internal/connectors/usecases/domain"
 	"github.com/devpablocristo/companion/internal/nexusclient"
 	domain "github.com/devpablocristo/companion/internal/tasks/usecases/domain"
+)
+
+// HTTP status codes returned by the Nexus gateway that the task-sync logic
+// branches on. Declared here so the usecase interprets gateway results without
+// importing the net/http transport package (the gateway port returns a plain
+// int status; see usecases.go nexusGateway).
+const (
+	nexusHTTPStatusCreated    = 201
+	nexusHTTPStatusBadRequest = 400
+	nexusHTTPStatusNotFound   = 404
 )
 
 type InvestigateInput struct {
@@ -503,7 +512,7 @@ func (u *Usecases) syncTaskWithNexus(ctx context.Context, t domain.Task, origin 
 
 	nextState.LastNexusHTTPStatus = st
 
-	if st == http.StatusNotFound {
+	if st == nexusHTTPStatusNotFound {
 		nextState.LastError = "nexus request not found"
 		nextState.ConsecutiveFailures++
 		nextState.NextCheckAt = nextNexusSyncAt(now, u.nexusSyncIntervalOrDefault(), nextState.ConsecutiveFailures)
@@ -729,7 +738,7 @@ func (u *Usecases) Propose(ctx context.Context, taskID uuid.UUID, in ProposeInpu
 		TaskID:              taskID,
 		NexusRequestID:      reqUUID,
 		LastNexusStatus:     normalizeNexusStatus(submitOut.Status),
-		LastNexusHTTPStatus: http.StatusCreated,
+		LastNexusHTTPStatus: nexusHTTPStatusCreated,
 		LastCheckedAt:       now,
 		LastError:           "",
 		ConsecutiveFailures: 0,
