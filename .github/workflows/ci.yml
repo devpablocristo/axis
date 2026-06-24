@@ -200,7 +200,7 @@ jobs:
           tail -n 500 smoke-artifacts/compose.log || true
       - name: Upload smoke diagnostics
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mcp-smoke-diagnostics-${{ github.run_id }}
           path: smoke-artifacts/
@@ -238,7 +238,7 @@ jobs:
           tail -n 500 smoke-artifacts/compose.log || true
       - name: Upload nightly diagnostics
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: platform-nightly-diagnostics-${{ github.run_id }}
           path: smoke-artifacts/
