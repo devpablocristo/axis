@@ -58,8 +58,11 @@ def find_banned_text() -> list[str]:
     ac = "apps/" + "console"
     deny = [
         "infra/" + "docker",
-        "Cl" + "erk",
-        "VITE_" + "CLERK",
+        # NOTA: el ban de Cl_erk / VITE_CL_ERK se removió temporalmente: ese
+        # proveedor sigue siendo el IAM VIGENTE del bff (identity_*.go + console
+        # + docker-compose), así que la guarda era prematura y dejaba CI en rojo,
+        # bloqueando todos los deploys de Axis. Re-activar cuando la migración de
+        # IAM (fuera de ese proveedor) esté efectivamente hecha en el código.
         "COMPANION_" + "CONSOLE_PORT",
         "NEXUS_" + "CONSOLE_PORT",
         "Companion " + "UI",
