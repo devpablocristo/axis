@@ -87,7 +87,10 @@ func normalizeAgent(agent Agent) Agent {
 	agent.ProfileID = strings.TrimSpace(agent.ProfileID)
 	agent.Status = strings.TrimSpace(agent.Status)
 	if agent.Status == "" {
-		agent.Status = StatusActive
+		// Safe-by-default: un agente creado sin status explícito queda DISABLED.
+		// La activación es un opt-in deliberado (status=active explícito o
+		// ApproveAgent). En updates, SaveAgent preserva el status existente.
+		agent.Status = StatusDisabled
 	}
 	agent.LifecycleStatus = strings.TrimSpace(agent.LifecycleStatus)
 	if agent.LifecycleStatus == "" {
@@ -99,7 +102,11 @@ func normalizeAgent(agent Agent) Agent {
 	}
 	agent.ReviewStatus = strings.TrimSpace(agent.ReviewStatus)
 	if agent.ReviewStatus == "" {
-		agent.ReviewStatus = ReviewApproved
+		// Safe-by-default: sin review_status explícito el agente queda
+		// NEEDS_REVIEW (no ejecutable hasta aprobarse), evitando el auto-approve
+		// silencioso en la creación por API. En updates, SaveAgent preserva el
+		// review_status existente para no desaprobar agentes en updates parciales.
+		agent.ReviewStatus = ReviewNeedsReview
 	}
 	agent.MaxAutonomy = strings.TrimSpace(agent.MaxAutonomy)
 	if agent.MaxAutonomy == "" {
