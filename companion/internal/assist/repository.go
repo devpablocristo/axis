@@ -11,6 +11,7 @@ import (
 	"github.com/devpablocristo/platform/errors/go/domainerr"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	domain "github.com/devpablocristo/companion/internal/assist/usecases/domain"
 )
@@ -40,6 +41,7 @@ type Repository interface {
 	UpsertPack(ctx context.Context, pack domain.AssistPack) (domain.AssistPack, error)
 	GetPack(ctx context.Context, id uuid.UUID) (domain.AssistPack, error)
 	GetPackByType(ctx context.Context, orgID, ownerSystem, productSurface, assistType string) (domain.AssistPack, error)
+	GetPackByTypeIncludingArchived(ctx context.Context, orgID, ownerSystem, productSurface, assistType string) (domain.AssistPack, error)
 	ListPacks(ctx context.Context, filter PackFilter) ([]domain.AssistPack, error)
 	UpdatePack(ctx context.Context, pack domain.AssistPack) (domain.AssistPack, error)
 	SoftDelete(ctx context.Context, tenantID string, resourceID uuid.UUID, at time.Time) error
@@ -48,6 +50,8 @@ type Repository interface {
 	IsArchived(ctx context.Context, tenantID string, resourceID uuid.UUID) (bool, error)
 	CreateRun(ctx context.Context, run domain.AssistRun) (domain.AssistRun, error)
 	GetRun(ctx context.Context, id uuid.UUID) (domain.AssistRun, error)
+	GetRunByIdempotencyKey(ctx context.Context, orgID, idempotencyKey string) (domain.AssistRun, error)
+	UpdateRunResult(ctx context.Context, id uuid.UUID, status string, output map[string]any, errorMessage string, completedAt time.Time) (domain.AssistRun, error)
 	ListRuns(ctx context.Context, filter RunFilter) ([]domain.AssistRun, error)
 }
 
@@ -67,7 +71,8 @@ const selectPackSQL = `
 
 const selectRunSQL = `
 	SELECT id, org_id, pack_id, owner_system, product_surface, assist_type, subject_type,
-	       subject_id, input_json, output_json, status, error_message, created_at, completed_at
+	       subject_id, input_json, output_json, status, error_message, idempotency_key,
+	       created_at, completed_at
 	FROM assist_runs`
 
 func (r *PostgresRepository) UpsertPack(ctx context.Context, pack domain.AssistPack) (domain.AssistPack, error) {
@@ -100,7 +105,6 @@ func (r *PostgresRepository) UpsertPack(ctx context.Context, pack domain.AssistP
 			prompt_template = EXCLUDED.prompt_template,
 			model_policy_json = EXCLUDED.model_policy_json,
 			enabled = EXCLUDED.enabled,
-			archived_at = NULL,
 			updated_at = EXCLUDED.updated_at
 		RETURNING id, org_id, owner_system, product_surface, assist_type, name, description,
 		          input_contract, output_contract, prompt_template, model_policy_json, enabled,
@@ -126,6 +130,23 @@ func (r *PostgresRepository) GetPack(ctx context.Context, id uuid.UUID) (domain.
 func (r *PostgresRepository) GetPackByType(ctx context.Context, orgID, ownerSystem, productSurface, assistType string) (domain.AssistPack, error) {
 	row := r.db.Pool().QueryRow(ctx, selectPackSQL+`
 		WHERE org_id = $1 AND owner_system = $2 AND product_surface = $3 AND assist_type = $4 AND archived_at IS NULL
+	`, orgID, ownerSystem, productSurface, assistType)
+	pack, err := scanPack(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.AssistPack{}, ErrNotFound
+		}
+		return domain.AssistPack{}, err
+	}
+	return pack, nil
+}
+
+// GetPackByTypeIncludingArchived resolves a pack by its natural key WITHOUT the
+// archived_at IS NULL filter, so callers (e.g. upsert) can detect an archived
+// pack and refuse to silently un-archive it. Returns ErrNotFound if absent.
+func (r *PostgresRepository) GetPackByTypeIncludingArchived(ctx context.Context, orgID, ownerSystem, productSurface, assistType string) (domain.AssistPack, error) {
+	row := r.db.Pool().QueryRow(ctx, selectPackSQL+`
+		WHERE org_id = $1 AND owner_system = $2 AND product_surface = $3 AND assist_type = $4
 	`, orgID, ownerSystem, productSurface, assistType)
 	pack, err := scanPack(row)
 	if err != nil {
@@ -204,9 +225,19 @@ func (r *PostgresRepository) UpdatePack(ctx context.Context, pack domain.AssistP
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.AssistPack{}, ErrNotFound
 		}
+		if isUniqueViolation(err) {
+			return domain.AssistPack{}, domainerr.Conflict("assist pack with this owner_system/product_surface/assist_type already exists")
+		}
 		return domain.AssistPack{}, err
 	}
 	return updated, nil
+}
+
+// isUniqueViolation reports whether err is a Postgres unique-constraint
+// violation (SQLSTATE 23505). Mirrors connectors/repository.go.
+func isUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 
 func (r *PostgresRepository) SoftDelete(ctx context.Context, tenantID string, resourceID uuid.UUID, at time.Time) error {
@@ -281,14 +312,24 @@ func (r *PostgresRepository) CreateRun(ctx context.Context, run domain.AssistRun
 	row := r.db.Pool().QueryRow(ctx, `
 		INSERT INTO assist_runs (
 			id, org_id, pack_id, owner_system, product_surface, assist_type, subject_type,
-			subject_id, input_json, output_json, status, error_message, created_at, completed_at
+			subject_id, input_json, output_json, status, error_message, idempotency_key,
+			created_at, completed_at
 		)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
 		RETURNING id, org_id, pack_id, owner_system, product_surface, assist_type, subject_type,
-		          subject_id, input_json, output_json, status, error_message, created_at, completed_at
+		          subject_id, input_json, output_json, status, error_message, idempotency_key,
+		          created_at, completed_at
 	`, run.ID, run.OrgID, run.PackID, run.OwnerSystem, run.ProductSurface, run.AssistType, run.SubjectType,
-		run.SubjectID, inputJSON, outputJSON, run.Status, run.ErrorMessage, run.CreatedAt, run.CompletedAt)
-	return scanRun(row)
+		run.SubjectID, inputJSON, outputJSON, run.Status, run.ErrorMessage, run.IdempotencyKey,
+		run.CreatedAt, run.CompletedAt)
+	created, err := scanRun(row)
+	if err != nil {
+		if isUniqueViolation(err) {
+			return domain.AssistRun{}, domainerr.Conflict("assist run with this idempotency key already exists")
+		}
+		return domain.AssistRun{}, err
+	}
+	return created, nil
 }
 
 func (r *PostgresRepository) GetRun(ctx context.Context, id uuid.UUID) (domain.AssistRun, error) {
@@ -301,6 +342,50 @@ func (r *PostgresRepository) GetRun(ctx context.Context, id uuid.UUID) (domain.A
 		return domain.AssistRun{}, err
 	}
 	return run, nil
+}
+
+// GetRunByIdempotencyKey returns the run previously created with the given
+// idempotency key for the org, or ErrNotFound. The empty key never matches.
+func (r *PostgresRepository) GetRunByIdempotencyKey(ctx context.Context, orgID, idempotencyKey string) (domain.AssistRun, error) {
+	if idempotencyKey == "" {
+		return domain.AssistRun{}, ErrNotFound
+	}
+	row := r.db.Pool().QueryRow(ctx, selectRunSQL+`
+		WHERE org_id = $1 AND idempotency_key = $2
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, orgID, idempotencyKey)
+	run, err := scanRun(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.AssistRun{}, ErrNotFound
+		}
+		return domain.AssistRun{}, err
+	}
+	return run, nil
+}
+
+// UpdateRunResult finalizes a previously-reserved run with its outcome.
+func (r *PostgresRepository) UpdateRunResult(ctx context.Context, id uuid.UUID, status string, output map[string]any, errorMessage string, completedAt time.Time) (domain.AssistRun, error) {
+	outputJSON, err := json.Marshal(nonNilMap(output))
+	if err != nil {
+		return domain.AssistRun{}, fmt.Errorf("marshal assist output: %w", err)
+	}
+	row := r.db.Pool().QueryRow(ctx, `
+		UPDATE assist_runs SET output_json = $2, status = $3, error_message = $4, completed_at = $5
+		WHERE id = $1
+		RETURNING id, org_id, pack_id, owner_system, product_surface, assist_type, subject_type,
+		          subject_id, input_json, output_json, status, error_message, idempotency_key,
+		          created_at, completed_at
+	`, id, outputJSON, status, errorMessage, completedAt.UTC())
+	updated, err := scanRun(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.AssistRun{}, ErrNotFound
+		}
+		return domain.AssistRun{}, err
+	}
+	return updated, nil
 }
 
 func (r *PostgresRepository) ListRuns(ctx context.Context, filter RunFilter) ([]domain.AssistRun, error) {
@@ -378,7 +463,7 @@ func scanRun(row scanRow) (domain.AssistRun, error) {
 	if err := row.Scan(
 		&run.ID, &run.OrgID, &run.PackID, &run.OwnerSystem, &run.ProductSurface, &run.AssistType,
 		&run.SubjectType, &run.SubjectID, &inputJSON, &outputJSON, &run.Status, &run.ErrorMessage,
-		&run.CreatedAt, &run.CompletedAt,
+		&run.IdempotencyKey, &run.CreatedAt, &run.CompletedAt,
 	); err != nil {
 		return domain.AssistRun{}, err
 	}
