@@ -1166,6 +1166,16 @@ tbody tr:hover {
   display: none;
 }
 
+/* Oculta los toggles nativos «Ver archivados» / «Ver papelera»: los prompts usan
+   sus propios botones Activos/Archivados/Papelera en la toolbar. */
+.axis-prompts-crud .crud-page-shell__header-actions > .actions-row > .actions-row > button:nth-last-child(1) {
+  display: none;
+}
+
+.axis-prompts-crud--trash .crud-page-shell__header-actions > .actions-row > .actions-row > button:nth-last-child(-n + 2) {
+  display: none;
+}
+
 .iam-control__actions {
   align-items: end;
 }
