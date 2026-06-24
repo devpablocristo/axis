@@ -514,62 +514,6 @@ func TestSessionReturnsSelectedOrgForCrossOrgPrincipal(t *testing.T) {
 	}
 }
 
-func TestControlPlaneInvitationsAndAudit(t *testing.T) {
-	srv, err := newTestServer("http://127.0.0.1:1", defaultAdminScopes())
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	req := httptest.NewRequest(http.MethodPost, "/api/orgs/org-a/invitations", strings.NewReader(`{"email":"new@example.com","role":"admin"}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	srv.routes().ServeHTTP(rec, req)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("expected 201, got %d body=%s", rec.Code, rec.Body.String())
-	}
-	var created struct {
-		Invitation IAMInvitation `json:"invitation"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
-		t.Fatal(err)
-	}
-	if created.Invitation.ID == "" || created.Invitation.OrgID != "org-a" || created.Invitation.Email != "new@example.com" {
-		t.Fatalf("unexpected invitation: %#v", created.Invitation)
-	}
-
-	req = httptest.NewRequest(http.MethodGet, "/api/orgs/org-a/invitations", nil)
-	rec = httptest.NewRecorder()
-	srv.routes().ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
-	}
-	var listed struct {
-		Invitations []IAMInvitation `json:"invitations"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &listed); err != nil {
-		t.Fatal(err)
-	}
-	if len(listed.Invitations) != 1 || listed.Invitations[0].Email != "new@example.com" {
-		t.Fatalf("expected listed invitation, got %#v", listed.Invitations)
-	}
-
-	req = httptest.NewRequest(http.MethodGet, "/api/iam-audit?org_id=org-a", nil)
-	rec = httptest.NewRecorder()
-	srv.routes().ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
-	}
-	var audit struct {
-		Events []IAMAuditEvent `json:"events"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &audit); err != nil {
-		t.Fatal(err)
-	}
-	if len(audit.Events) == 0 || audit.Events[0].Action != "invitation.created" {
-		t.Fatalf("expected invitation audit event, got %#v", audit.Events)
-	}
-}
-
 func TestSimpleIAMTenantsProductsAndUsers(t *testing.T) {
 	srv, err := newTestServer("http://127.0.0.1:1", defaultAdminScopes())
 	if err != nil {

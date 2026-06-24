@@ -171,12 +171,6 @@ func (s *server) routes() http.Handler {
 	mux.Handle("/api/prompts/", s.withAuth(http.HandlerFunc(s.promptsAPI)))
 	mux.Handle("/api/agents", s.withAuth(http.HandlerFunc(s.agentsAPI)))
 	mux.Handle("/api/agents/", s.withAuth(http.HandlerFunc(s.agentsAPI)))
-	// Legacy IAM invitation/audit surface: retained because /api/iam/ has no
-	// equivalent yet (org/user/member CRUD migrated to /api/iam/, invitations
-	// and audit-event listing have no unified replacement). No live consumers.
-	mux.Handle("/api/orgs/", s.withAuth(http.HandlerFunc(s.orgInvitationsByOrg)))
-	mux.Handle("/api/org-invitations/", s.withAuth(http.HandlerFunc(s.orgInvitations)))
-	mux.Handle("/api/iam-audit", s.withAuth(http.HandlerFunc(s.iamAudit)))
 	mux.HandleFunc("POST /api/webhooks/clerk", s.clerkWebhook)
 	mux.Handle("/api/companion/", s.withAuth(s.proxy("companion", "/api/companion", s.cfg.CompanionBaseURL, s.cfg.CompanionAudience)))
 	mux.Handle("/api/nexus/", s.withAuth(s.proxy("nexus", "/api/nexus", s.cfg.NexusBaseURL, s.cfg.NexusAudience)))

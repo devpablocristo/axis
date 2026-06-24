@@ -104,20 +104,6 @@ func (s *server) deleteIAMMember(ctx context.Context, orgID string, userID strin
 	return s.iam.DeleteMember(ctx, orgID, userID)
 }
 
-func (s *server) createIAMInvitation(ctx context.Context, input IAMInvitation) (IAMInvitation, error) {
-	if s.identity != nil {
-		return s.identity.CreateInvitation(ctx, input)
-	}
-	return s.iam.CreateInvitation(ctx, input)
-}
-
-func (s *server) updateIAMInvitationStatus(ctx context.Context, id string, status string, actor string) (IAMInvitation, error) {
-	if s.identity != nil {
-		return s.identity.UpdateInvitationStatus(ctx, id, status, actor)
-	}
-	return s.iam.UpdateInvitationStatus(ctx, id, status, actor)
-}
-
 func axisPrincipalFromIdentity(p authn.Principal) authn.Principal {
 	axisRole := normalizedRole(claimRole(p.Claims, "axis_role"))
 	orgRole := normalizedRole(claimRole(p.Claims, "org_role"))
