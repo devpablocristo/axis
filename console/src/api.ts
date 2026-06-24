@@ -21,20 +21,6 @@ export type AxisOrg = {
   updated_at: string
 }
 
-export type AxisUser = {
-  id: string
-  external_id?: string
-  provider?: string
-  provider_user_id?: string
-  email: string
-  name: string
-  role?: string
-  axis_role?: string
-  status: string
-  created_at: string
-  updated_at: string
-}
-
 export type AxisTenantView = {
   id: string
   name: string
@@ -110,42 +96,6 @@ export type AxisAgentProfileView = {
   trashed_at?: string
   created_at?: string
   updated_at?: string
-}
-
-export type AxisMember = {
-  org_id: string
-  user_id: string
-  role: string
-  status: string
-  created_at: string
-  updated_at: string
-  user?: AxisUser
-}
-
-export type AxisInvitation = {
-  id: string
-  org_id: string
-  email: string
-  role: string
-  status: string
-  provider: string
-  provider_invitation_id?: string
-  invited_by?: string
-  accepted_by?: string
-  expires_at: string
-  created_at: string
-  updated_at: string
-}
-
-export type AxisAuditEvent = {
-  id: string
-  org_id?: string
-  actor?: string
-  action: string
-  target: string
-  target_id?: string
-  payload?: Record<string, unknown>
-  created_at: string
 }
 
 export type ServiceHealth = {
@@ -449,114 +399,6 @@ async function resolveAxisAuthToken(): Promise<string> {
 
 export async function getSession(): Promise<AxisSession> {
   return axisFetch<AxisSession>('/api/session', '')
-}
-
-export async function listAxisOrgs(orgId: string): Promise<AxisOrg[]> {
-  const payload = await axisFetch<{ orgs: AxisOrg[] }>('/api/orgs', orgId)
-  return payload.orgs ?? []
-}
-
-export async function createAxisOrg(orgId: string, input: Partial<AxisOrg>): Promise<AxisOrg> {
-  const payload = await axisFetch<{ org: AxisOrg }>('/api/orgs', orgId, {
-    method: 'POST',
-    body: JSON.stringify(input),
-  })
-  return payload.org
-}
-
-export async function updateAxisOrg(orgId: string, targetOrgId: string, input: Partial<AxisOrg>): Promise<AxisOrg> {
-  const payload = await axisFetch<{ org: AxisOrg }>(`/api/orgs/${encodeURIComponent(targetOrgId)}`, orgId, {
-    method: 'PATCH',
-    body: JSON.stringify(input),
-  })
-  return payload.org
-}
-
-export async function deleteAxisOrg(orgId: string, targetOrgId: string): Promise<void> {
-  await axisFetch<null>(`/api/orgs/${encodeURIComponent(targetOrgId)}`, orgId, {
-    method: 'DELETE',
-  })
-}
-
-export async function listAxisUsers(orgId: string): Promise<AxisUser[]> {
-  const payload = await axisFetch<{ users: AxisUser[] }>('/api/users', orgId)
-  return payload.users ?? []
-}
-
-export async function createAxisUser(orgId: string, input: Partial<AxisUser>): Promise<AxisUser> {
-  const payload = await axisFetch<{ user: AxisUser }>('/api/users', orgId, {
-    method: 'POST',
-    body: JSON.stringify(input),
-  })
-  return payload.user
-}
-
-export async function updateAxisUser(orgId: string, userId: string, input: Partial<AxisUser>): Promise<AxisUser> {
-  const payload = await axisFetch<{ user: AxisUser }>(`/api/users/${encodeURIComponent(userId)}`, orgId, {
-    method: 'PATCH',
-    body: JSON.stringify(input),
-  })
-  return payload.user
-}
-
-export async function deleteAxisUser(orgId: string, userId: string): Promise<void> {
-  await axisFetch<null>(`/api/users/${encodeURIComponent(userId)}`, orgId, {
-    method: 'DELETE',
-  })
-}
-
-export async function listAxisMembers(orgId: string, targetOrgId: string): Promise<AxisMember[]> {
-  const payload = await axisFetch<{ members: AxisMember[] }>(`/api/orgs/${encodeURIComponent(targetOrgId)}/members`, orgId)
-  return payload.members ?? []
-}
-
-export async function upsertAxisMember(orgId: string, targetOrgId: string, input: Partial<AxisMember>): Promise<AxisMember> {
-  const payload = await axisFetch<{ member: AxisMember }>(`/api/orgs/${encodeURIComponent(targetOrgId)}/members`, orgId, {
-    method: 'POST',
-    body: JSON.stringify(input),
-  })
-  return payload.member
-}
-
-export async function updateAxisMember(orgId: string, targetOrgId: string, userId: string, input: Partial<AxisMember>): Promise<AxisMember> {
-  const payload = await axisFetch<{ member: AxisMember }>(`/api/orgs/${encodeURIComponent(targetOrgId)}/members/${encodeURIComponent(userId)}`, orgId, {
-    method: 'PATCH',
-    body: JSON.stringify(input),
-  })
-  return payload.member
-}
-
-export async function deleteAxisMember(orgId: string, targetOrgId: string, userId: string): Promise<void> {
-  await axisFetch<null>(`/api/orgs/${encodeURIComponent(targetOrgId)}/members/${encodeURIComponent(userId)}`, orgId, {
-    method: 'DELETE',
-  })
-}
-
-export async function listAxisInvitations(orgId: string, targetOrgId: string): Promise<AxisInvitation[]> {
-  const payload = await axisFetch<{ invitations: AxisInvitation[] }>(`/api/orgs/${encodeURIComponent(targetOrgId)}/invitations`, orgId)
-  return payload.invitations ?? []
-}
-
-export async function createAxisInvitation(orgId: string, targetOrgId: string, input: Partial<AxisInvitation>): Promise<AxisInvitation> {
-  const payload = await axisFetch<{ invitation: AxisInvitation }>(`/api/orgs/${encodeURIComponent(targetOrgId)}/invitations`, orgId, {
-    method: 'POST',
-    body: JSON.stringify(input),
-  })
-  return payload.invitation
-}
-
-export async function updateAxisInvitationStatus(orgId: string, invitationId: string, action: 'accept' | 'revoke' | 'resend'): Promise<AxisInvitation> {
-  const payload = await axisFetch<{ invitation: AxisInvitation }>(`/api/org-invitations/${encodeURIComponent(invitationId)}/${action}`, orgId, {
-    method: 'POST',
-    body: '{}',
-  })
-  return payload.invitation
-}
-
-export async function listAxisAuditEvents(orgId: string, targetOrgId?: string): Promise<AxisAuditEvent[]> {
-  const query = targetOrgId ? `?org_id=${encodeURIComponent(targetOrgId)}` : ''
-  const payload = await axisFetch<{ events: AxisAuditEvent[] }>(`/api/iam-audit${query}`, orgId)
-  return payload.events ?? []
 }
 
 export async function listIAMTenants(orgId: string, view = 'active'): Promise<AxisTenantView[]> {
