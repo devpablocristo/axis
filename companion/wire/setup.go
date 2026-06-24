@@ -218,10 +218,56 @@ func (r agentProfileRuntimeResolver) ResolveRuntimeAgentProfile(ctx context.Cont
 		AllowedTools:        append([]string(nil), profile.AllowedTools...),
 		AllowedCapabilities: append([]string(nil), profile.AllowedCapabilities...),
 		MemoryPolicy:        profile.MemoryPolicy,
+		LLM:                 runtimeLLMConfigFromMap(profile.LLMConfig),
 		Enabled:             profile.Enabled,
 		Archived:            profile.ArchivedAt != nil || profile.TrashedAt != nil,
 		SnapshotID:          profile.ID.String(),
 	}, nil
+}
+
+// runtimeLLMConfigFromMap traduce el LLMConfig (map JSON libre) de un perfil de
+// agente a la config tipada que consume el runtime. Las claves siguen la
+// convención del seed/console: "model", "max_tokens", "temperature". Los números
+// JSON llegan como float64; valores ausentes o inválidos quedan en cero/empty,
+// lo que el runtime interpreta como "usar el default".
+func runtimeLLMConfigFromMap(cfg map[string]any) runtime.RuntimeLLMConfig {
+	out := runtime.RuntimeLLMConfig{}
+	if len(cfg) == 0 {
+		return out
+	}
+	if model, ok := cfg["model"].(string); ok {
+		out.Model = strings.TrimSpace(model)
+	}
+	if maxTokens, ok := numericConfigValue(cfg["max_tokens"]); ok && maxTokens > 0 {
+		out.MaxTokens = int(maxTokens)
+	}
+	if temperature, ok := numericConfigValue(cfg["temperature"]); ok {
+		out.Temperature = temperature
+	}
+	return out
+}
+
+// numericConfigValue normaliza valores numéricos de un map JSON deserializado,
+// que pueden llegar como float64 (lo habitual) o como int según el origen.
+func numericConfigValue(value any) (float64, bool) {
+	switch v := value.(type) {
+	case float64:
+		return v, true
+	case float32:
+		return float64(v), true
+	case int:
+		return float64(v), true
+	case int64:
+		return float64(v), true
+	case json.Number:
+		f, err := v.Float64()
+		if err != nil {
+			return 0, false
+		}
+		return f, true
+	default:
+		return 0, false
+	}
 }
 
 func (a taskOwnershipAdapter) TransferTaskOwnership(ctx context.Context, orgID, taskID, agentID string) error {
