@@ -13,7 +13,7 @@ require (
 	github.com/devpablocristo/platform/webhook/go v0.1.0
 	github.com/google/cel-go v0.28.1
 	github.com/google/uuid v1.6.0
-	github.com/jackc/pgx/v5 v5.9.2
+	github.com/jackc/pgx/v5 v5.10.0
 )
 
 require (
