@@ -22,10 +22,6 @@ func requireScope(w http.ResponseWriter, r *http.Request, scopes ...string) bool
 	return false
 }
 
-func principalOrgID(r *http.Request) string {
-	return identityhttp.PrincipalOrgID(r)
-}
-
 func canWriteOwner(r *http.Request, ownerSystem string) bool {
 	if identityhttp.HasNoAuthContext(r) || identityhttp.HasScope(r, scopeNexusCrossOrg) {
 		return true

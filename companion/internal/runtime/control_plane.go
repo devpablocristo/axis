@@ -215,10 +215,6 @@ func cleanScopes(scopes []string) []string {
 	return out
 }
 
-func classifyIntent(message string) string {
-	return classifyIntentWithContext(message, "", "", nil)
-}
-
 func classifyIntentWithContext(message, productSurface, routeHint string, handoff json.RawMessage) string {
 	text := strings.ToLower(message)
 	switch {

@@ -8,9 +8,9 @@ import (
 	learningdto "github.com/devpablocristo/nexus/internal/learning/handler/dto"
 	learningdomain "github.com/devpablocristo/nexus/internal/learning/usecases/domain"
 	"github.com/devpablocristo/nexus/internal/orgctx"
+	"github.com/devpablocristo/platform/authn/go/identityhttp"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
 	"github.com/devpablocristo/platform/http/go/httpjson"
-	"github.com/devpablocristo/platform/authn/go/identityhttp"
 	"github.com/google/uuid"
 )
 

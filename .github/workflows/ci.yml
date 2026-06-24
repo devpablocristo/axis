@@ -66,6 +66,15 @@ jobs:
         with:
           go-version-file: companion/go.mod
           cache-dependency-path: companion/go.sum
+      - name: gofmt
+        working-directory: companion
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt found unformatted files:"
+            echo "$unformatted"
+            exit 1
+          fi
       - run: go vet ./...
         working-directory: companion
       - run: go test ./...
@@ -89,6 +98,15 @@ jobs:
         with:
           go-version-file: nexus/go.mod
           cache-dependency-path: nexus/go.sum
+      - name: gofmt
+        working-directory: nexus
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt found unformatted files:"
+            echo "$unformatted"
+            exit 1
+          fi
       - run: go vet ./...
         working-directory: nexus
       - run: go test ./...
@@ -108,6 +126,15 @@ jobs:
         with:
           go-version-file: bff/go.mod
           cache-dependency-path: bff/go.sum
+      - name: gofmt
+        working-directory: bff
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt found unformatted files:"
+            echo "$unformatted"
+            exit 1
+          fi
       - run: go test ./...
         working-directory: bff
       - run: go build ./...

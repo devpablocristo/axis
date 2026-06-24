@@ -173,13 +173,6 @@ func setupLearningMux() (*http.ServeMux, *fakeProposalRepo) {
 	return mux, repo
 }
 
-func setupLearningMuxWithDeps(repo *fakeProposalRepo, creator *fakePolicyCreator) *http.ServeMux {
-	uc := NewUsecases(repo, creator)
-	mux := http.NewServeMux()
-	NewHandler(uc).Register(mux)
-	return mux
-}
-
 func seedProposal(t *testing.T, repo *fakeProposalRepo) uuid.UUID {
 	t.Helper()
 	p := learningdomain.PolicyProposal{

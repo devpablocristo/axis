@@ -73,7 +73,8 @@ func (s *server) updateIAMUser(ctx context.Context, orgID string, userID string,
 		return IAMUser{}, err
 	}
 	if orgID != "" && input.Role != "" {
-		if _, err := s.iam.UpdateMember(ctx, orgID, user.ID, IAMMember{Role: input.Role, Status: "active"}); errors.Is(err, errNotFound) {
+		_, err = s.iam.UpdateMember(ctx, orgID, user.ID, IAMMember{Role: input.Role, Status: "active"})
+		if errors.Is(err, errNotFound) {
 			_, err = s.iam.UpsertMember(ctx, IAMMember{OrgID: orgID, UserID: user.ID, Role: input.Role, Status: "active"})
 		}
 		if err != nil {

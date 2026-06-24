@@ -25,10 +25,6 @@ func requireScope(w http.ResponseWriter, r *http.Request, scopes ...string) bool
 	return false
 }
 
-func principalOrgID(r *http.Request) string { return identityctx.PrincipalOrgID(r) }
-
-func principalActorID(r *http.Request) string { return identityctx.FromRequest(r).EffectiveActorID() }
-
 func effectiveConnectorOrgID(r *http.Request, requested string) (string, bool) {
 	return identityctx.EffectiveOrgID(r, requested, scopeCompanionCrossOrg)
 }

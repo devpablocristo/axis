@@ -7,9 +7,9 @@ import (
 
 	dto "github.com/devpablocristo/nexus/internal/delegations/handler/dto"
 	domain "github.com/devpablocristo/nexus/internal/delegations/usecases/domain"
+	"github.com/devpablocristo/platform/authn/go/identityhttp"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
 	"github.com/devpablocristo/platform/http/go/httpjson"
-	"github.com/devpablocristo/platform/authn/go/identityhttp"
 	"github.com/google/uuid"
 )
 
