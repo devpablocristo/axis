@@ -9,9 +9,9 @@ import (
 
 	dto "github.com/devpablocristo/nexus/internal/rbac/handler/dto"
 	domain "github.com/devpablocristo/nexus/internal/rbac/usecases/domain"
+	"github.com/devpablocristo/platform/authn/go/identityhttp"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
 	"github.com/devpablocristo/platform/http/go/httpjson"
-	"github.com/devpablocristo/platform/authn/go/identityhttp"
 )
 
 type rbacUsecase interface {

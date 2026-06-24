@@ -71,7 +71,9 @@ func (f *fakeAssistRepo) UpdatePack(_ context.Context, pack domain.AssistPack) (
 func (f *fakeAssistRepo) SoftDelete(context.Context, string, uuid.UUID, time.Time) error { return nil }
 func (f *fakeAssistRepo) Restore(context.Context, string, uuid.UUID) error               { return nil }
 func (f *fakeAssistRepo) HardDelete(context.Context, string, uuid.UUID) error            { return nil }
-func (f *fakeAssistRepo) IsArchived(context.Context, string, uuid.UUID) (bool, error)    { return false, nil }
+func (f *fakeAssistRepo) IsArchived(context.Context, string, uuid.UUID) (bool, error) {
+	return false, nil
+}
 
 func (f *fakeAssistRepo) CreateRun(_ context.Context, run domain.AssistRun) (domain.AssistRun, error) {
 	if run.IdempotencyKey != "" && run.Status != "failed" {
