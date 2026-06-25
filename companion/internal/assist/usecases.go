@@ -348,9 +348,8 @@ func (uc *Usecases) runLLM(ctx context.Context, pack domain.AssistPack, input ma
 
 func validatePack(pack domain.AssistPack) error {
 	if pack.OrgID == "" || pack.OwnerSystem == "" || pack.ProductSurface == "" ||
-		pack.AssistType == "" || pack.Name == "" || pack.InputContract == "" ||
-		pack.OutputContract == "" || pack.PromptTemplate == "" {
-		return domainerr.Validation("org_id, owner_system, product_surface, assist_type, name, input_contract, output_contract and prompt_template are required")
+		pack.AssistType == "" || pack.Name == "" || pack.PromptTemplate == "" {
+		return domainerr.Validation("org_id, owner_system, product_surface, assist_type, name and prompt_template are required")
 	}
 	return nil
 }
