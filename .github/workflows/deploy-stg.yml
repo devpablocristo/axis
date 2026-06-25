@@ -56,6 +56,11 @@ env:
   COMPANION_DATABASE_SECRET: ${{ vars.COMPANION_DATABASE_URL_SECRET_NAME_STG || 'axis-companion-database-url-stg' }}
   COMPANION_API_KEYS_SECRET: ${{ vars.COMPANION_API_KEYS_SECRET_NAME_STG || 'axis-companion-api-keys-stg' }}
   COMPANION_NEXUS_API_KEY_SECRET: ${{ vars.COMPANION_NEXUS_API_KEY_SECRET_NAME_STG || 'axis-companion-nexus-api-key-stg' }}
+  # Key con la que el Companion autentica las llamadas de vuelta al producto Medmory
+  # (capabilities discovery + capability execution). Debe coincidir con el GitHub
+  # secret MEDMORY_AXIS_API_KEY del repo Medmory. El secret_ref de la installation
+  # es env:MEDMORY_AXIS_API_KEY, así que se inyecta como env del Companion.
+  MEDMORY_API_KEY_SECRET: ${{ vars.MEDMORY_AXIS_API_KEY_SECRET_NAME_STG || 'medmory-axis-api-key-stg' }}
   PONTI_BASE_URL: ${{ vars.PONTI_BASE_URL_STG || 'https://pymes-core-sir42f2ama-uc.a.run.app' }}
   AXIS_BFF_AUTH_MODE: ${{ vars.AXIS_BFF_AUTH_MODE_STG || 'stg' }}
   AXIS_AUTH_ISSUER_URL: ${{ vars.AXIS_AUTH_ISSUER_URL_STG }}
@@ -189,7 +194,7 @@ jobs:
             --service-account="$COMPANION_RUNTIME_SA" \
             --add-cloudsql-instances="$CLOUDSQL_INSTANCE" \
             --set-env-vars="^|^NEXUS_BASE_URL=${NEXUS_URL}|PONTI_BASE_URL=${PONTI_BASE_URL}|COMPANION_INTERNAL_JWT_ISSUER=axis-bff|COMPANION_INTERNAL_JWT_AUDIENCE=companion|COMPANION_LLM_PROVIDER=vertex|COMPANION_LLM_MODEL=gemini-2.5-flash-lite|COMPANION_LLM_VERTEX_PROJECT=${PROJECT_ID}|COMPANION_LLM_VERTEX_LOCATION=${REGION}|COMPANION_EMBEDDING_PROVIDER=vertex|COMPANION_EMBEDDING_MODEL=text-embedding-005|COMPANION_EMBEDDING_VERTEX_PROJECT=${PROJECT_ID}|COMPANION_EMBEDDING_VERTEX_LOCATION=${REGION}|COMPANION_EMBEDDING_DIMENSIONS=768|COMPANION_NEXUS_SYNC_INTERVAL_SEC=30|COMPANION_STRICT_NEXUS=true|COMPANION_DEFAULT_AUTONOMY_LEVEL=A2|COMPANION_WATCHER_INTERVAL_SEC=0|COMPANION_WATCHER_SYNC_INTERVAL_SEC=0" \
-            --set-secrets="DATABASE_URL=${COMPANION_DATABASE_SECRET}:latest,COMPANION_API_KEYS=${COMPANION_API_KEYS_SECRET}:latest,NEXUS_API_KEY=${COMPANION_NEXUS_API_KEY_SECRET}:latest,COMPANION_INTERNAL_JWT_SECRET=${INTERNAL_JWT_SECRET}:latest" \
+            --set-secrets="DATABASE_URL=${COMPANION_DATABASE_SECRET}:latest,COMPANION_API_KEYS=${COMPANION_API_KEYS_SECRET}:latest,NEXUS_API_KEY=${COMPANION_NEXUS_API_KEY_SECRET}:latest,COMPANION_INTERNAL_JWT_SECRET=${INTERNAL_JWT_SECRET}:latest,MEDMORY_AXIS_API_KEY=${MEDMORY_API_KEY_SECRET}:latest" \
             --allow-unauthenticated --ingress=all --port=8080 --min-instances=0 --max-instances=3
       - name: Smoke
         run: |
