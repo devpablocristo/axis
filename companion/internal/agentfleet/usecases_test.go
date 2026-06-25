@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"testing"
+
+	"github.com/devpablocristo/companion/internal/agentprofiles"
 )
 
 type fakeRepo struct {
@@ -123,6 +125,29 @@ func TestUsecases_SaveAgentNormalizesAndVersions(t *testing.T) {
 	}
 	if len(agent.AllowedTools) != 1 || agent.AllowedTools[0] != "remember" {
 		t.Fatalf("expected normalized tools, got %+v", agent.AllowedTools)
+	}
+}
+
+func TestUsecases_SaveAgentEmptyProfileIDMapsToSentinel(t *testing.T) {
+	t.Parallel()
+
+	repo := newFakeRepo()
+	uc := NewUsecases(repo)
+	// Un profile_id="" explícito (el seed lo manda así para agentes sin perfil)
+	// debe normalizarse al centinela legacy.unprofiled para satisfacer la FK
+	// companion_agents.profile_id (migración 0038), no quedar en "".
+	agent, err := uc.SaveAgent(context.Background(), Agent{
+		OrgID:        "org-1",
+		AgentID:      "clinical_archivist",
+		ProfileID:    "",
+		Status:       StatusActive,
+		ReviewStatus: ReviewApproved,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if agent.ProfileID != agentprofiles.UnprofiledProfileID {
+		t.Fatalf("expected empty profile_id to map to %q, got %q", agentprofiles.UnprofiledProfileID, agent.ProfileID)
 	}
 }
 

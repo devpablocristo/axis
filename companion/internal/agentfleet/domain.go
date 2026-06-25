@@ -4,6 +4,8 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	"github.com/devpablocristo/companion/internal/agentprofiles"
 )
 
 const (
@@ -85,6 +87,14 @@ func normalizeAgent(agent Agent) Agent {
 	agent.DisplayName = strings.TrimSpace(agent.DisplayName)
 	agent.Role = strings.TrimSpace(agent.Role)
 	agent.ProfileID = strings.TrimSpace(agent.ProfileID)
+	if agent.ProfileID == "" {
+		// Sin perfil real: mapeamos al centinela para satisfacer la FK
+		// companion_agents.profile_id -> agent_profiles (migración 0038). Un
+		// profile_id="" explícito pisa el DEFAULT de la columna y viola la FK;
+		// el runtime ya trata legacy.unprofiled como "sin perfil" y lo rechaza
+		// al ejecutar (applyRuntimeAgent), así que normalizar acá es seguro.
+		agent.ProfileID = agentprofiles.UnprofiledProfileID
+	}
 	agent.Status = strings.TrimSpace(agent.Status)
 	if agent.Status == "" {
 		// Safe-by-default: un agente creado sin status explícito queda DISABLED.
