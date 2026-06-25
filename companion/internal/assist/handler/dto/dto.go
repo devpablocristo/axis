@@ -6,8 +6,6 @@ type AssistPackRequest struct {
 	AssistType     string         `json:"assist_type"`
 	Name           string         `json:"name"`
 	Description    string         `json:"description"`
-	InputContract  string         `json:"input_contract"`
-	OutputContract string         `json:"output_contract"`
 	PromptTemplate string         `json:"prompt_template"`
 	ModelPolicy    map[string]any `json:"model_policy"`
 	Enabled        *bool          `json:"enabled,omitempty"`
@@ -30,8 +28,6 @@ type AssistPackResponse struct {
 	AssistType     string         `json:"assist_type"`
 	Name           string         `json:"name"`
 	Description    string         `json:"description"`
-	InputContract  string         `json:"input_contract"`
-	OutputContract string         `json:"output_contract"`
 	PromptTemplate string         `json:"prompt_template"`
 	ModelPolicy    map[string]any `json:"model_policy"`
 	Enabled        bool           `json:"enabled"`
