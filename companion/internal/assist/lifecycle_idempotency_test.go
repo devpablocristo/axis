@@ -143,7 +143,7 @@ func newTestUsecases(t *testing.T, repo Repository, provider runtime.LLMProvider
 func seedEnabledPack(repo *fakeAssistRepo) {
 	pack := domain.AssistPack{
 		ID: uuid.New(), OrgID: "org-1", OwnerSystem: "medmory", ProductSurface: "medmory",
-		AssistType: "clinical_summary", Name: "Summary", InputContract: "in", OutputContract: "out",
+		AssistType: "clinical_summary", Name: "Summary",
 		PromptTemplate: "Summarize {{input_json}}", ModelPolicy: map[string]any{}, Enabled: true,
 	}
 	repo.packs[pack.ID] = pack
@@ -159,7 +159,7 @@ func TestUpsertPackRejectsArchived(t *testing.T) {
 	uc := newTestUsecases(t, repo, &countingProvider{})
 	_, err := uc.UpsertPack(context.Background(), UpsertPackInput{
 		OrgID: "org-1", OwnerSystem: "medmory", ProductSurface: "medmory", AssistType: "clinical_summary",
-		Name: "Summary", InputContract: "in", OutputContract: "out", PromptTemplate: "Do {{input_json}}",
+		Name: "Summary", PromptTemplate: "Do {{input_json}}",
 	})
 	if !domainerr.IsKind(err, domainerr.KindConflict) {
 		t.Fatalf("expected Conflict for archived pack, got %v", err)
@@ -170,7 +170,7 @@ func TestUpsertPackRequiresInputPlaceholder(t *testing.T) {
 	uc := newTestUsecases(t, newFakeAssistRepo(), &countingProvider{})
 	_, err := uc.UpsertPack(context.Background(), UpsertPackInput{
 		OrgID: "org-1", OwnerSystem: "medmory", ProductSurface: "medmory", AssistType: "clinical_summary",
-		Name: "Summary", InputContract: "in", OutputContract: "out", PromptTemplate: "no placeholder here",
+		Name: "Summary", PromptTemplate: "no placeholder here",
 	})
 	if !domainerr.IsKind(err, domainerr.KindValidation) {
 		t.Fatalf("expected Validation without {{input_json}}, got %v", err)

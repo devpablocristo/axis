@@ -65,7 +65,7 @@ func NewPostgresRepository(db *sharedpostgres.DB) *PostgresRepository {
 
 const selectPackSQL = `
 	SELECT id, org_id, owner_system, product_surface, assist_type, name, description,
-	       input_contract, output_contract, prompt_template, model_policy_json, enabled,
+	       prompt_template, model_policy_json, enabled,
 	       archived_at, created_at, updated_at
 	FROM assist_packs`
 
@@ -91,26 +91,24 @@ func (r *PostgresRepository) UpsertPack(ctx context.Context, pack domain.AssistP
 	row := r.db.Pool().QueryRow(ctx, `
 		INSERT INTO assist_packs (
 			id, org_id, owner_system, product_surface, assist_type, name, description,
-			input_contract, output_contract, prompt_template, model_policy_json, enabled,
+			prompt_template, model_policy_json, enabled,
 			created_at, updated_at
 		)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
 		ON CONFLICT (org_id, owner_system, product_surface, assist_type)
 		DO UPDATE SET
 			product_surface = EXCLUDED.product_surface,
 			name = EXCLUDED.name,
 			description = EXCLUDED.description,
-			input_contract = EXCLUDED.input_contract,
-			output_contract = EXCLUDED.output_contract,
 			prompt_template = EXCLUDED.prompt_template,
 			model_policy_json = EXCLUDED.model_policy_json,
 			enabled = EXCLUDED.enabled,
 			updated_at = EXCLUDED.updated_at
 		RETURNING id, org_id, owner_system, product_surface, assist_type, name, description,
-		          input_contract, output_contract, prompt_template, model_policy_json, enabled,
+		          prompt_template, model_policy_json, enabled,
 		          archived_at, created_at, updated_at
 	`, pack.ID, pack.OrgID, pack.OwnerSystem, pack.ProductSurface, pack.AssistType, pack.Name, pack.Description,
-		pack.InputContract, pack.OutputContract, pack.PromptTemplate, modelPolicyJSON, pack.Enabled,
+		pack.PromptTemplate, modelPolicyJSON, pack.Enabled,
 		pack.CreatedAt, pack.UpdatedAt)
 	return scanPack(row)
 }
@@ -208,18 +206,16 @@ func (r *PostgresRepository) UpdatePack(ctx context.Context, pack domain.AssistP
 			assist_type = $4,
 			name = $5,
 			description = $6,
-			input_contract = $7,
-			output_contract = $8,
-			prompt_template = $9,
-			model_policy_json = $10,
-			enabled = $11,
-			updated_at = $12
+			prompt_template = $7,
+			model_policy_json = $8,
+			enabled = $9,
+			updated_at = $10
 		WHERE id = $1
 		RETURNING id, org_id, owner_system, product_surface, assist_type, name, description,
-		          input_contract, output_contract, prompt_template, model_policy_json, enabled,
+		          prompt_template, model_policy_json, enabled,
 		          archived_at, created_at, updated_at
 	`, pack.ID, pack.OwnerSystem, pack.ProductSurface, pack.AssistType, pack.Name, pack.Description,
-		pack.InputContract, pack.OutputContract, pack.PromptTemplate, modelPolicyJSON, pack.Enabled, pack.UpdatedAt)
+		pack.PromptTemplate, modelPolicyJSON, pack.Enabled, pack.UpdatedAt)
 	updated, err := scanPack(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -442,7 +438,7 @@ func scanPack(row scanRow) (domain.AssistPack, error) {
 	var modelPolicyJSON []byte
 	if err := row.Scan(
 		&pack.ID, &pack.OrgID, &pack.OwnerSystem, &pack.ProductSurface, &pack.AssistType,
-		&pack.Name, &pack.Description, &pack.InputContract, &pack.OutputContract, &pack.PromptTemplate,
+		&pack.Name, &pack.Description, &pack.PromptTemplate,
 		&modelPolicyJSON, &pack.Enabled, &pack.ArchivedAt, &pack.CreatedAt, &pack.UpdatedAt,
 	); err != nil {
 		return domain.AssistPack{}, err

@@ -25,8 +25,6 @@ type UpsertPackInput struct {
 	AssistType     string
 	Name           string
 	Description    string
-	InputContract  string
-	OutputContract string
 	PromptTemplate string
 	ModelPolicy    map[string]any
 	Enabled        *bool
@@ -39,8 +37,6 @@ type UpdatePackInput struct {
 	AssistType     string
 	Name           string
 	Description    string
-	InputContract  string
-	OutputContract string
 	PromptTemplate string
 	ModelPolicy    map[string]any
 	Enabled        *bool
@@ -130,8 +126,6 @@ func (uc *Usecases) UpdatePack(ctx context.Context, in UpdatePackInput) (domain.
 	current.AssistType = firstNonEmpty(in.AssistType, current.AssistType)
 	current.Name = firstNonEmpty(in.Name, current.Name)
 	current.Description = in.Description
-	current.InputContract = firstNonEmpty(in.InputContract, current.InputContract)
-	current.OutputContract = firstNonEmpty(in.OutputContract, current.OutputContract)
 	current.PromptTemplate = firstNonEmpty(in.PromptTemplate, current.PromptTemplate)
 	if in.ModelPolicy != nil {
 		current.ModelPolicy = in.ModelPolicy
@@ -290,8 +284,6 @@ func (uc *Usecases) packFromInput(in UpsertPackInput) (domain.AssistPack, error)
 		AssistType:     strings.TrimSpace(in.AssistType),
 		Name:           strings.TrimSpace(in.Name),
 		Description:    strings.TrimSpace(in.Description),
-		InputContract:  strings.TrimSpace(in.InputContract),
-		OutputContract: strings.TrimSpace(in.OutputContract),
 		PromptTemplate: strings.TrimSpace(in.PromptTemplate),
 		ModelPolicy:    in.ModelPolicy,
 		Enabled:        enabled,
