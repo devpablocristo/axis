@@ -21,28 +21,29 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  REGION: ${{ vars.GCP_REGION_STG || 'us-central1' }}
-  PROJECT_ID: ${{ vars.GCP_PROJECT_ID_STG || 'axis-stg-884236' }}
-  WIF_PROVIDER: ${{ vars.WIF_PROVIDER_STG || 'projects/322954730450/locations/global/workloadIdentityPools/github-actions-pool/providers/github-actions-provider' }}
-  WIF_SERVICE_ACCOUNT: ${{ vars.WIF_SERVICE_ACCOUNT_STG || 'axis-github-actions-stg@axis-stg-884236.iam.gserviceaccount.com' }}
+  REGION: us-central1
+  REGISTRY: us-central1-docker.pkg.dev
+  PROJECT_ID: new-ponti-dev
+  AR_REPOSITORY: axis-preview
+  WIF_PROVIDER: projects/1087442197188/locations/global/workloadIdentityPools/github-actions-pool/providers/github-axis
+  WIF_SERVICE_ACCOUNT: github-actions@new-ponti-dev.iam.gserviceaccount.com
+  CLOUDSQL_INSTANCE: new-ponti-dev:us-central1:new-ponti-db-dev
+  SQL_ADMIN_USER: axis_preview_admin
+  SQL_ADMIN_SECRET: axis-sql-admin-password-preview
 
 jobs:
   cleanup:
-    name: Cleanup preview Cloud Run services
+    name: Cleanup preview resources
     runs-on: ubuntu-latest
     steps:
       - name: Resolve names
         env:
           PR_NUMBER: ${{ inputs.pr_number }}
         run: |
-          for var_name in PROJECT_ID WIF_PROVIDER WIF_SERVICE_ACCOUNT; do
-            if [[ -z "${!var_name}" ]]; then
-              echo "::error::$var_name is required for preview cleanup"
-              exit 1
-            fi
-          done
           [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]] || { echo "Invalid PR number: $PR_NUMBER" >&2; exit 1; }
           echo "PR_NUMBER=$PR_NUMBER" >> "$GITHUB_ENV"
+          echo "NEXUS_DB=axis_nexus_preview_pr_${PR_NUMBER}" >> "$GITHUB_ENV"
+          echo "COMPANION_DB=axis_companion_preview_pr_${PR_NUMBER}" >> "$GITHUB_ENV"
       - uses: google-github-actions/auth@v3
         with:
           workload_identity_provider: ${{ env.WIF_PROVIDER }}
@@ -59,4 +60,40 @@ jobs:
             else
               echo "Service not found, skipping: $service"
             fi
+          done
+      - name: Delete preview databases
+        run: |
+          set -euo pipefail
+          for db in "$NEXUS_DB" "$COMPANION_DB"; do
+            [[ "$db" =~ ^axis_(nexus|companion)_preview_pr_[1-9][0-9]*$ ]] || { echo "Invalid db name: $db" >&2; exit 1; }
+          done
+          sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client
+          curl -fsSL -o /tmp/cloud-sql-proxy https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v2.18.3/cloud-sql-proxy.linux.amd64
+          chmod +x /tmp/cloud-sql-proxy
+          /tmp/cloud-sql-proxy --address 127.0.0.1 --port 15434 "$CLOUDSQL_INSTANCE" &
+          proxy_pid=$!; trap 'kill "$proxy_pid" 2>/dev/null || true' EXIT
+          admin_password="$(gcloud secrets versions access latest --secret="$SQL_ADMIN_SECRET" --project="$PROJECT_ID")"
+          export PGPASSWORD="$admin_password"
+          for _ in $(seq 1 30); do psql -h 127.0.0.1 -p 15434 -U "$SQL_ADMIN_USER" -d postgres -c 'select 1' >/dev/null 2>&1 && break; sleep 2; done
+          for db in "$NEXUS_DB" "$COMPANION_DB"; do
+            psql -h 127.0.0.1 -p 15434 -U "$SQL_ADMIN_USER" -d postgres -c "DROP DATABASE IF EXISTS \"$db\" WITH (FORCE);" >/dev/null 2>&1 || true
+          done
+      - name: Delete per-PR DB URL secrets
+        run: |
+          set -euo pipefail
+          for secret in "axis-nexus-database-url-pr-${PR_NUMBER}" "axis-companion-database-url-pr-${PR_NUMBER}"; do
+            gcloud secrets delete "$secret" --project="$PROJECT_ID" --quiet >/dev/null 2>&1 || true
+          done
+      - name: Delete preview Artifact Registry images
+        run: |
+          set -euo pipefail
+          [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]] || { echo "Invalid PR: $PR_NUMBER" >&2; exit 1; }
+          for package in axis-nexus axis-companion axis-bff axis-console; do
+            image_path="${REGISTRY}/${PROJECT_ID}/${AR_REPOSITORY}/${package}"
+            for tag in $(gcloud artifacts docker tags list "$image_path" --project="$PROJECT_ID" --format='value(tag)' 2>/dev/null || true); do
+              tag_name="${tag##*/}"
+              if [[ "$tag_name" =~ ^pr-${PR_NUMBER}-[0-9a-f]{40}$ ]]; then
+                gcloud artifacts docker images delete "${image_path}:${tag_name}" --project="$PROJECT_ID" --delete-tags --quiet >/dev/null 2>&1 || true
+              fi
+            done
           done

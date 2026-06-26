@@ -28,25 +28,27 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  REGION: ${{ vars.GCP_REGION_STG || 'us-central1' }}
-  REGISTRY: ${{ vars.GCP_REGION_STG || 'us-central1' }}-docker.pkg.dev
-  PROJECT_ID: ${{ vars.GCP_PROJECT_ID_STG || 'axis-stg-884236' }}
-  AR_REPOSITORY: ${{ vars.ARTIFACT_REGISTRY_STG || 'axis' }}
-  WIF_PROVIDER: ${{ vars.WIF_PROVIDER_STG || 'projects/322954730450/locations/global/workloadIdentityPools/github-actions-pool/providers/github-actions-provider' }}
-  WIF_SERVICE_ACCOUNT: ${{ vars.WIF_SERVICE_ACCOUNT_STG || 'axis-github-actions-stg@axis-stg-884236.iam.gserviceaccount.com' }}
-  CLOUDSQL_INSTANCE: ${{ vars.CLOUDSQL_INSTANCE_STG || 'pymes-dev-352318:us-central1:pymes-dev-db' }}
-  NEXUS_RUNTIME_SA: ${{ vars.NEXUS_CLOUD_RUN_SERVICE_ACCOUNT_STG || 'axis-nexus-runtime-stg@axis-stg-884236.iam.gserviceaccount.com' }}
-  COMPANION_RUNTIME_SA: ${{ vars.COMPANION_CLOUD_RUN_SERVICE_ACCOUNT_STG || 'axis-companion-runtime-stg@axis-stg-884236.iam.gserviceaccount.com' }}
-  BFF_RUNTIME_SA: ${{ vars.AXIS_BFF_CLOUD_RUN_SERVICE_ACCOUNT_STG || 'axis-bff-runtime-stg@axis-stg-884236.iam.gserviceaccount.com' }}
-  CONSOLE_RUNTIME_SA: ${{ vars.AXIS_CONSOLE_CLOUD_RUN_SERVICE_ACCOUNT_STG || 'axis-console-runtime-stg@axis-stg-884236.iam.gserviceaccount.com' }}
-  INTERNAL_JWT_SECRET: ${{ vars.AXIS_INTERNAL_JWT_SECRET_NAME_STG || 'axis-internal-jwt-secret-stg' }}
-  NEXUS_DATABASE_SECRET: ${{ vars.NEXUS_DATABASE_URL_SECRET_NAME_STG || 'axis-nexus-database-url-stg' }}
-  NEXUS_API_KEYS_SECRET: ${{ vars.NEXUS_API_KEYS_SECRET_NAME_STG || 'axis-nexus-api-keys-stg' }}
-  NEXUS_SIGNING_KEY_SECRET: ${{ vars.NEXUS_SIGNING_KEY_SECRET_NAME_STG || 'axis-nexus-signing-key-stg' }}
-  NEXUS_CALLBACK_TOKEN_SECRET: ${{ vars.NEXUS_CALLBACK_TOKEN_SECRET_NAME_STG || 'axis-nexus-callback-token-stg' }}
-  COMPANION_DATABASE_SECRET: ${{ vars.COMPANION_DATABASE_URL_SECRET_NAME_STG || 'axis-companion-database-url-stg' }}
-  COMPANION_API_KEYS_SECRET: ${{ vars.COMPANION_API_KEYS_SECRET_NAME_STG || 'axis-companion-api-keys-stg' }}
-  COMPANION_NEXUS_API_KEY_SECRET: ${{ vars.COMPANION_NEXUS_API_KEY_SECRET_NAME_STG || 'axis-companion-nexus-api-key-stg' }}
+  REGION: us-central1
+  REGISTRY: us-central1-docker.pkg.dev
+  PROJECT_ID: new-ponti-dev
+  AR_REPOSITORY: axis-preview
+  WIF_PROVIDER: projects/1087442197188/locations/global/workloadIdentityPools/github-actions-pool/providers/github-axis
+  WIF_SERVICE_ACCOUNT: github-actions@new-ponti-dev.iam.gserviceaccount.com
+  CLOUDSQL_INSTANCE: new-ponti-dev:us-central1:new-ponti-db-dev
+  NEXUS_RUNTIME_SA: cloudrun-sa@new-ponti-dev.iam.gserviceaccount.com
+  COMPANION_RUNTIME_SA: cloudrun-sa@new-ponti-dev.iam.gserviceaccount.com
+  BFF_RUNTIME_SA: cloudrun-sa@new-ponti-dev.iam.gserviceaccount.com
+  CONSOLE_RUNTIME_SA: cloudrun-sa@new-ponti-dev.iam.gserviceaccount.com
+  SQL_ADMIN_USER: axis_preview_admin
+  SQL_ADMIN_SECRET: axis-sql-admin-password-preview
+  PREVIEW_DB_USER: axis_preview_app
+  PREVIEW_DB_SECRET: axis-db-password-preview
+  INTERNAL_JWT_SECRET: axis-internal-jwt-secret-stg
+  NEXUS_API_KEYS_SECRET: axis-nexus-api-keys-stg
+  NEXUS_SIGNING_KEY_SECRET: axis-nexus-signing-key-stg
+  NEXUS_CALLBACK_TOKEN_SECRET: axis-nexus-callback-token-stg
+  COMPANION_API_KEYS_SECRET: axis-companion-api-keys-stg
+  COMPANION_NEXUS_API_KEY_SECRET: axis-companion-nexus-api-key-stg
   PONTI_BASE_URL: ${{ vars.PONTI_BASE_URL_STG || 'https://pymes-core-sir42f2ama-uc.a.run.app' }}
   AXIS_BFF_AUTH_MODE: ${{ vars.AXIS_BFF_AUTH_MODE_STG || 'preview' }}
   AXIS_AUTH_ISSUER_URL: ${{ vars.AXIS_AUTH_ISSUER_URL_STG }}
@@ -67,7 +69,7 @@ jobs:
         run: |
           set -euo pipefail
           missing=0
-          for var_name in PROJECT_ID WIF_PROVIDER WIF_SERVICE_ACCOUNT CLOUDSQL_INSTANCE NEXUS_RUNTIME_SA COMPANION_RUNTIME_SA BFF_RUNTIME_SA CONSOLE_RUNTIME_SA NEXUS_DATABASE_SECRET NEXUS_API_KEYS_SECRET NEXUS_SIGNING_KEY_SECRET NEXUS_CALLBACK_TOKEN_SECRET COMPANION_DATABASE_SECRET COMPANION_API_KEYS_SECRET COMPANION_NEXUS_API_KEY_SECRET PONTI_BASE_URL; do
+          for var_name in PROJECT_ID WIF_PROVIDER WIF_SERVICE_ACCOUNT CLOUDSQL_INSTANCE NEXUS_RUNTIME_SA COMPANION_RUNTIME_SA BFF_RUNTIME_SA CONSOLE_RUNTIME_SA SQL_ADMIN_USER SQL_ADMIN_SECRET PREVIEW_DB_USER PREVIEW_DB_SECRET NEXUS_API_KEYS_SECRET NEXUS_SIGNING_KEY_SECRET NEXUS_CALLBACK_TOKEN_SECRET COMPANION_API_KEYS_SECRET COMPANION_NEXUS_API_KEY_SECRET PONTI_BASE_URL; do
             if [[ -z "${!var_name}" ]]; then
               echo "::error::$var_name is required for preview"
               missing=1
@@ -90,6 +92,10 @@ jobs:
           echo "COMPANION_SERVICE=axis-companion-pr-${PR_NUMBER}" >> "$GITHUB_ENV"
           echo "BFF_SERVICE=axis-bff-pr-${PR_NUMBER}" >> "$GITHUB_ENV"
           echo "CONSOLE_SERVICE=axis-console-pr-${PR_NUMBER}" >> "$GITHUB_ENV"
+          echo "NEXUS_DB=axis_nexus_preview_pr_${PR_NUMBER}" >> "$GITHUB_ENV"
+          echo "COMPANION_DB=axis_companion_preview_pr_${PR_NUMBER}" >> "$GITHUB_ENV"
+          echo "NEXUS_DB_URL_SECRET=axis-nexus-database-url-pr-${PR_NUMBER}" >> "$GITHUB_ENV"
+          echo "COMPANION_DB_URL_SECRET=axis-companion-database-url-pr-${PR_NUMBER}" >> "$GITHUB_ENV"
       - uses: google-github-actions/auth@v3
         with:
           workload_identity_provider: ${{ env.WIF_PROVIDER }}
@@ -97,6 +103,55 @@ jobs:
       - uses: google-github-actions/setup-gcloud@v3
         with:
           project_id: ${{ env.PROJECT_ID }}
+      - name: Prepare preview databases
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+          curl -fsSL -o /tmp/cloud-sql-proxy https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v2.18.3/cloud-sql-proxy.linux.amd64
+          chmod +x /tmp/cloud-sql-proxy
+          /tmp/cloud-sql-proxy --address 127.0.0.1 --port 15434 "$CLOUDSQL_INSTANCE" &
+          proxy_pid=$!
+          cleanup() { kill "$proxy_pid" 2>/dev/null || true; wait "$proxy_pid" 2>/dev/null || true; }
+          trap cleanup EXIT
+          admin_password="$(gcloud secrets versions access latest --secret="$SQL_ADMIN_SECRET" --project="$PROJECT_ID")"
+          app_password="$(gcloud secrets versions access latest --secret="$PREVIEW_DB_SECRET" --project="$PROJECT_ID")"
+          app_password_enc="$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$app_password")"
+          export PGPASSWORD="$admin_password"
+          for _ in $(seq 1 30); do
+            psql -h 127.0.0.1 -p 15434 -U "$SQL_ADMIN_USER" -d postgres -c 'select 1' >/dev/null 2>&1 && break
+            sleep 2
+          done
+          grant_db() {
+            local db="$1"
+            psql -h 127.0.0.1 -p 15434 -U "$SQL_ADMIN_USER" -d "$db" -v ON_ERROR_STOP=1 \
+              -c "GRANT ALL PRIVILEGES ON DATABASE \"$db\" TO ${PREVIEW_DB_USER};" \
+              -c "GRANT USAGE, CREATE ON SCHEMA public TO ${PREVIEW_DB_USER};" \
+              -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ${PREVIEW_DB_USER};" \
+              -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO ${PREVIEW_DB_USER};"
+          }
+          create_db() {
+            local db="$1"
+            local exists
+            exists="$(psql -h 127.0.0.1 -p 15434 -U "$SQL_ADMIN_USER" -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='${db}'")"
+            if [[ "$exists" != "1" ]]; then
+              psql -h 127.0.0.1 -p 15434 -U "$SQL_ADMIN_USER" -d postgres -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"${db}\""
+            fi
+            grant_db "$db"
+          }
+          upsert_db_url_secret() {
+            local secret_name="$1" db="$2" db_url
+            db_url="postgres://${PREVIEW_DB_USER}:${app_password_enc}@/${db}?host=/cloudsql/${CLOUDSQL_INSTANCE}&sslmode=disable"
+            if gcloud secrets describe "$secret_name" --project="$PROJECT_ID" >/dev/null 2>&1; then
+              printf '%s' "$db_url" | gcloud secrets versions add "$secret_name" --data-file=- --project="$PROJECT_ID"
+            else
+              printf '%s' "$db_url" | gcloud secrets create "$secret_name" --replication-policy=automatic --data-file=- --project="$PROJECT_ID"
+            fi
+          }
+          create_db "$NEXUS_DB"
+          create_db "$COMPANION_DB"
+          upsert_db_url_secret "$NEXUS_DB_URL_SECRET" "$NEXUS_DB"
+          upsert_db_url_secret "$COMPANION_DB_URL_SECRET" "$COMPANION_DB"
       - run: gcloud auth configure-docker "${REGISTRY}" --quiet
       - name: Build and push images
         run: |
@@ -113,7 +168,7 @@ jobs:
             --service-account="$NEXUS_RUNTIME_SA" \
             --add-cloudsql-instances="$CLOUDSQL_INSTANCE" \
             --set-env-vars="^|^NEXUS_ENV=preview|NEXUS_INTERNAL_JWT_ISSUER=axis-bff|NEXUS_INTERNAL_JWT_AUDIENCE=nexus|APPROVAL_DEFAULT_TTL=3600|NEXUS_ATTESTATION_VERIFIER=none" \
-            --set-secrets="DATABASE_URL=${NEXUS_DATABASE_SECRET}:latest,NEXUS_API_KEYS=${NEXUS_API_KEYS_SECRET}:latest,NEXUS_SIGNING_KEY=${NEXUS_SIGNING_KEY_SECRET}:latest,NEXUS_CALLBACK_TOKEN=${NEXUS_CALLBACK_TOKEN_SECRET}:latest,NEXUS_INTERNAL_JWT_SECRET=${INTERNAL_JWT_SECRET}:latest" \
+            --set-secrets="DATABASE_URL=${NEXUS_DB_URL_SECRET}:latest,NEXUS_API_KEYS=${NEXUS_API_KEYS_SECRET}:latest,NEXUS_SIGNING_KEY=${NEXUS_SIGNING_KEY_SECRET}:latest,NEXUS_CALLBACK_TOKEN=${NEXUS_CALLBACK_TOKEN_SECRET}:latest,NEXUS_INTERNAL_JWT_SECRET=${INTERNAL_JWT_SECRET}:latest" \
             --allow-unauthenticated --ingress=all --port=8080 --min-instances=0 --max-instances=1 \
             --labels="axis-env=preview,axis-pr=${{ inputs.pr_number }},managed-by=axis-preview"
           echo "NEXUS_URL=$(gcloud run services describe "$NEXUS_SERVICE" --project="$PROJECT_ID" --region="$REGION" --format='value(status.url)')" >> "$GITHUB_ENV"
@@ -124,7 +179,7 @@ jobs:
             --service-account="$COMPANION_RUNTIME_SA" \
             --add-cloudsql-instances="$CLOUDSQL_INSTANCE" \
             --set-env-vars="^|^NEXUS_BASE_URL=${NEXUS_URL}|PONTI_BASE_URL=${PONTI_BASE_URL}|COMPANION_INTERNAL_JWT_ISSUER=axis-bff|COMPANION_INTERNAL_JWT_AUDIENCE=companion|COMPANION_LLM_PROVIDER=vertex|COMPANION_LLM_MODEL=gemini-2.5-flash-lite|COMPANION_LLM_VERTEX_PROJECT=${PROJECT_ID}|COMPANION_LLM_VERTEX_LOCATION=${REGION}|COMPANION_EMBEDDING_PROVIDER=vertex|COMPANION_EMBEDDING_MODEL=text-embedding-005|COMPANION_EMBEDDING_VERTEX_PROJECT=${PROJECT_ID}|COMPANION_EMBEDDING_VERTEX_LOCATION=${REGION}|COMPANION_EMBEDDING_DIMENSIONS=768|COMPANION_NEXUS_SYNC_INTERVAL_SEC=30|COMPANION_STRICT_NEXUS=true|COMPANION_DEFAULT_AUTONOMY_LEVEL=A2|COMPANION_WATCHER_INTERVAL_SEC=0|COMPANION_WATCHER_SYNC_INTERVAL_SEC=0" \
-            --set-secrets="DATABASE_URL=${COMPANION_DATABASE_SECRET}:latest,COMPANION_API_KEYS=${COMPANION_API_KEYS_SECRET}:latest,NEXUS_API_KEY=${COMPANION_NEXUS_API_KEY_SECRET}:latest,COMPANION_INTERNAL_JWT_SECRET=${INTERNAL_JWT_SECRET}:latest" \
+            --set-secrets="DATABASE_URL=${COMPANION_DB_URL_SECRET}:latest,COMPANION_API_KEYS=${COMPANION_API_KEYS_SECRET}:latest,NEXUS_API_KEY=${COMPANION_NEXUS_API_KEY_SECRET}:latest,COMPANION_INTERNAL_JWT_SECRET=${INTERNAL_JWT_SECRET}:latest" \
             --allow-unauthenticated --ingress=all --port=8080 --min-instances=0 --max-instances=1 \
             --labels="axis-env=preview,axis-pr=${{ inputs.pr_number }},managed-by=axis-preview"
           echo "COMPANION_URL=$(gcloud run services describe "$COMPANION_SERVICE" --project="$PROJECT_ID" --region="$REGION" --format='value(status.url)')" >> "$GITHUB_ENV"
