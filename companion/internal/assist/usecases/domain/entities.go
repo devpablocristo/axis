@@ -16,10 +16,14 @@ type AssistPack struct {
 	Description    string         `json:"description"`
 	PromptTemplate string         `json:"prompt_template"`
 	ModelPolicy    map[string]any `json:"model_policy"`
-	Enabled        bool           `json:"enabled"`
-	ArchivedAt     *time.Time     `json:"archived_at,omitempty"`
-	CreatedAt      time.Time      `json:"created_at"`
-	UpdatedAt      time.Time      `json:"updated_at"`
+	// OutputSchema es el JSON Schema (subset OpenAPI) que el producto publica
+	// para forzar la forma de la respuesta del LLM vía structured output. Vacío
+	// = el pack devuelve texto libre como antes (schema opcional por assist_type).
+	OutputSchema map[string]any `json:"output_schema"`
+	Enabled      bool           `json:"enabled"`
+	ArchivedAt   *time.Time     `json:"archived_at,omitempty"`
+	CreatedAt    time.Time      `json:"created_at"`
+	UpdatedAt    time.Time      `json:"updated_at"`
 }
 
 type AssistRun struct {

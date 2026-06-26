@@ -27,6 +27,7 @@ type UpsertPackInput struct {
 	Description    string
 	PromptTemplate string
 	ModelPolicy    map[string]any
+	OutputSchema   map[string]any
 	Enabled        *bool
 }
 
@@ -39,6 +40,7 @@ type UpdatePackInput struct {
 	Description    string
 	PromptTemplate string
 	ModelPolicy    map[string]any
+	OutputSchema   map[string]any
 	Enabled        *bool
 }
 
@@ -129,6 +131,9 @@ func (uc *Usecases) UpdatePack(ctx context.Context, in UpdatePackInput) (domain.
 	current.PromptTemplate = firstNonEmpty(in.PromptTemplate, current.PromptTemplate)
 	if in.ModelPolicy != nil {
 		current.ModelPolicy = in.ModelPolicy
+	}
+	if in.OutputSchema != nil {
+		current.OutputSchema = in.OutputSchema
 	}
 	if in.Enabled != nil {
 		current.Enabled = *in.Enabled
@@ -286,10 +291,14 @@ func (uc *Usecases) packFromInput(in UpsertPackInput) (domain.AssistPack, error)
 		Description:    strings.TrimSpace(in.Description),
 		PromptTemplate: strings.TrimSpace(in.PromptTemplate),
 		ModelPolicy:    in.ModelPolicy,
+		OutputSchema:   in.OutputSchema,
 		Enabled:        enabled,
 	}
 	if pack.ModelPolicy == nil {
 		pack.ModelPolicy = map[string]any{}
+	}
+	if pack.OutputSchema == nil {
+		pack.OutputSchema = map[string]any{}
 	}
 	if err := validatePackForCreate(pack); err != nil {
 		return domain.AssistPack{}, err
@@ -315,13 +324,19 @@ func (uc *Usecases) runLLM(ctx context.Context, pack domain.AssistPack, input ma
 	if raw, ok := pack.ModelPolicy["max_tokens"].(float64); ok && raw > 0 {
 		maxTokens = int(raw)
 	}
-	resp, err := uc.provider.Chat(ctx, runtime.ChatRequest{
+	chatReq := runtime.ChatRequest{
 		SystemPrompt: "You are Companion assist-packs. Explain the provided product-owned facts and findings. Do not create deterministic rules or decide policy outcomes.",
 		Messages: []runtime.LLMMessage{
 			{Role: "user", Content: prompt},
 		},
 		MaxTokens: maxTokens,
-	})
+	}
+	// Structured output: si el pack trae output_schema, forzamos al provider a
+	// devolver JSON conforme. Vacío → texto libre + parseo best-effort como antes.
+	if len(pack.OutputSchema) > 0 {
+		chatReq.ResponseSchema = pack.OutputSchema
+	}
+	resp, err := uc.provider.Chat(ctx, chatReq)
 	if err != nil {
 		return nil, err
 	}
