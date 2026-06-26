@@ -8,6 +8,7 @@ type AssistPackRequest struct {
 	Description    string         `json:"description"`
 	PromptTemplate string         `json:"prompt_template"`
 	ModelPolicy    map[string]any `json:"model_policy"`
+	OutputSchema   map[string]any `json:"output_schema,omitempty"`
 	Enabled        *bool          `json:"enabled,omitempty"`
 }
 
@@ -30,6 +31,7 @@ type AssistPackResponse struct {
 	Description    string         `json:"description"`
 	PromptTemplate string         `json:"prompt_template"`
 	ModelPolicy    map[string]any `json:"model_policy"`
+	OutputSchema   map[string]any `json:"output_schema"`
 	Enabled        bool           `json:"enabled"`
 	ArchivedAt     string         `json:"archived_at,omitempty"`
 	CreatedAt      string         `json:"created_at"`

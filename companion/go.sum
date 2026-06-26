@@ -33,8 +33,8 @@ github.com/devpablocristo/platform/errors/go v0.2.0 h1:I7WZlgEd7ic6c2IETYgzA3ULy
 github.com/devpablocristo/platform/errors/go v0.2.0/go.mod h1:1cHoflrIdeQrLDtVPgsl5GqjYH7AZKASNYCMSAcdjOA=
 github.com/devpablocristo/platform/http/go v0.1.0 h1:YQGApnAJx2+62HrLZ5G5Uf0Kq5phhV4JF6Be0IRZ//o=
 github.com/devpablocristo/platform/http/go v0.1.0/go.mod h1:qinUKdGJ51xbKMLYWF96bSGu8JSRAbWPsAqTusrg5tk=
-github.com/devpablocristo/platform/kernels/ai/go v0.1.0 h1:pp7w0fICDIcFp0NhYcWhZcHEHvcSzDbBdcYakKwOQ2M=
-github.com/devpablocristo/platform/kernels/ai/go v0.1.0/go.mod h1:ACh3XVzWoqiU963vxBi/ph+d3GkhHr87K36+cG+Lkgw=
+github.com/devpablocristo/platform/kernels/ai/go v0.2.0 h1:jinnJJvq6qZy3s2QQodWt1KkNDX9OQdHb4rl4AMqmOE=
+github.com/devpablocristo/platform/kernels/ai/go v0.2.0/go.mod h1:ACh3XVzWoqiU963vxBi/ph+d3GkhHr87K36+cG+Lkgw=
 github.com/devpablocristo/platform/lifecycle/go v0.2.0 h1:yPqGPfZSu0KaRvU72dtet8J0A1vV/hxsIBay7F7jGJI=
 github.com/devpablocristo/platform/lifecycle/go v0.2.0/go.mod h1:8XcEUg6JKgzL+Bg0widQ5kUenQ/ZbY2zWaTEkHJGg9Y=
 github.com/devpablocristo/platform/observability/go v0.2.1 h1:lu5nefAmX6NTHbjRs4lhx6WUyvG2ubE3Jw1vP7q0Oec=

@@ -65,7 +65,7 @@ func NewPostgresRepository(db *sharedpostgres.DB) *PostgresRepository {
 
 const selectPackSQL = `
 	SELECT id, org_id, owner_system, product_surface, assist_type, name, description,
-	       prompt_template, model_policy_json, enabled,
+	       prompt_template, model_policy_json, output_schema_json, enabled,
 	       archived_at, created_at, updated_at
 	FROM assist_packs`
 
@@ -88,13 +88,17 @@ func (r *PostgresRepository) UpsertPack(ctx context.Context, pack domain.AssistP
 	if err != nil {
 		return domain.AssistPack{}, fmt.Errorf("marshal model policy: %w", err)
 	}
+	outputSchemaJSON, err := json.Marshal(nonNilMap(pack.OutputSchema))
+	if err != nil {
+		return domain.AssistPack{}, fmt.Errorf("marshal output schema: %w", err)
+	}
 	row := r.db.Pool().QueryRow(ctx, `
 		INSERT INTO assist_packs (
 			id, org_id, owner_system, product_surface, assist_type, name, description,
-			prompt_template, model_policy_json, enabled,
+			prompt_template, model_policy_json, output_schema_json, enabled,
 			created_at, updated_at
 		)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
 		ON CONFLICT (org_id, owner_system, product_surface, assist_type)
 		DO UPDATE SET
 			product_surface = EXCLUDED.product_surface,
@@ -102,13 +106,14 @@ func (r *PostgresRepository) UpsertPack(ctx context.Context, pack domain.AssistP
 			description = EXCLUDED.description,
 			prompt_template = EXCLUDED.prompt_template,
 			model_policy_json = EXCLUDED.model_policy_json,
+			output_schema_json = EXCLUDED.output_schema_json,
 			enabled = EXCLUDED.enabled,
 			updated_at = EXCLUDED.updated_at
 		RETURNING id, org_id, owner_system, product_surface, assist_type, name, description,
-		          prompt_template, model_policy_json, enabled,
+		          prompt_template, model_policy_json, output_schema_json, enabled,
 		          archived_at, created_at, updated_at
 	`, pack.ID, pack.OrgID, pack.OwnerSystem, pack.ProductSurface, pack.AssistType, pack.Name, pack.Description,
-		pack.PromptTemplate, modelPolicyJSON, pack.Enabled,
+		pack.PromptTemplate, modelPolicyJSON, outputSchemaJSON, pack.Enabled,
 		pack.CreatedAt, pack.UpdatedAt)
 	return scanPack(row)
 }
@@ -199,6 +204,10 @@ func (r *PostgresRepository) UpdatePack(ctx context.Context, pack domain.AssistP
 	if err != nil {
 		return domain.AssistPack{}, fmt.Errorf("marshal model policy: %w", err)
 	}
+	outputSchemaJSON, err := json.Marshal(nonNilMap(pack.OutputSchema))
+	if err != nil {
+		return domain.AssistPack{}, fmt.Errorf("marshal output schema: %w", err)
+	}
 	row := r.db.Pool().QueryRow(ctx, `
 		UPDATE assist_packs SET
 			owner_system = $2,
@@ -208,14 +217,15 @@ func (r *PostgresRepository) UpdatePack(ctx context.Context, pack domain.AssistP
 			description = $6,
 			prompt_template = $7,
 			model_policy_json = $8,
-			enabled = $9,
-			updated_at = $10
+			output_schema_json = $9,
+			enabled = $10,
+			updated_at = $11
 		WHERE id = $1
 		RETURNING id, org_id, owner_system, product_surface, assist_type, name, description,
-		          prompt_template, model_policy_json, enabled,
+		          prompt_template, model_policy_json, output_schema_json, enabled,
 		          archived_at, created_at, updated_at
 	`, pack.ID, pack.OwnerSystem, pack.ProductSurface, pack.AssistType, pack.Name, pack.Description,
-		pack.PromptTemplate, modelPolicyJSON, pack.Enabled, pack.UpdatedAt)
+		pack.PromptTemplate, modelPolicyJSON, outputSchemaJSON, pack.Enabled, pack.UpdatedAt)
 	updated, err := scanPack(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -436,10 +446,11 @@ type scanRow interface {
 func scanPack(row scanRow) (domain.AssistPack, error) {
 	var pack domain.AssistPack
 	var modelPolicyJSON []byte
+	var outputSchemaJSON []byte
 	if err := row.Scan(
 		&pack.ID, &pack.OrgID, &pack.OwnerSystem, &pack.ProductSurface, &pack.AssistType,
 		&pack.Name, &pack.Description, &pack.PromptTemplate,
-		&modelPolicyJSON, &pack.Enabled, &pack.ArchivedAt, &pack.CreatedAt, &pack.UpdatedAt,
+		&modelPolicyJSON, &outputSchemaJSON, &pack.Enabled, &pack.ArchivedAt, &pack.CreatedAt, &pack.UpdatedAt,
 	); err != nil {
 		return domain.AssistPack{}, err
 	}
@@ -448,6 +459,14 @@ func scanPack(row scanRow) (domain.AssistPack, error) {
 	}
 	if pack.ModelPolicy == nil {
 		pack.ModelPolicy = map[string]any{}
+	}
+	if len(outputSchemaJSON) > 0 {
+		if err := json.Unmarshal(outputSchemaJSON, &pack.OutputSchema); err != nil {
+			return domain.AssistPack{}, err
+		}
+	}
+	if pack.OutputSchema == nil {
+		pack.OutputSchema = map[string]any{}
 	}
 	return pack, nil
 }

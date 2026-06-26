@@ -73,6 +73,7 @@ func (h *Handler) upsertPack(w http.ResponseWriter, r *http.Request) {
 		Description:    body.Description,
 		PromptTemplate: body.PromptTemplate,
 		ModelPolicy:    body.ModelPolicy,
+		OutputSchema:   body.OutputSchema,
 		Enabled:        body.Enabled,
 	})
 	if err != nil {
@@ -184,6 +185,7 @@ func (h *Handler) updatePack(w http.ResponseWriter, r *http.Request) {
 		Description:    body.Description,
 		PromptTemplate: body.PromptTemplate,
 		ModelPolicy:    body.ModelPolicy,
+		OutputSchema:   body.OutputSchema,
 		Enabled:        body.Enabled,
 	})
 	if err != nil {
@@ -355,6 +357,7 @@ func packResponse(pack domain.AssistPack) assistdto.AssistPackResponse {
 		Description:    pack.Description,
 		PromptTemplate: pack.PromptTemplate,
 		ModelPolicy:    pack.ModelPolicy,
+		OutputSchema:   pack.OutputSchema,
 		Enabled:        pack.Enabled,
 		CreatedAt:      pack.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:      pack.UpdatedAt.Format(time.RFC3339),
