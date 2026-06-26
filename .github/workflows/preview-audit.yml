@@ -9,10 +9,10 @@ permissions:
   id-token: write
 
 env:
-  REGION: ${{ vars.GCP_REGION_STG || 'us-central1' }}
-  PROJECT_ID: ${{ vars.GCP_PROJECT_ID_STG || 'axis-stg-884236' }}
-  WIF_PROVIDER: ${{ vars.WIF_PROVIDER_STG || 'projects/322954730450/locations/global/workloadIdentityPools/github-actions-pool/providers/github-actions-provider' }}
-  WIF_SERVICE_ACCOUNT: ${{ vars.WIF_SERVICE_ACCOUNT_STG || 'axis-github-actions-stg@axis-stg-884236.iam.gserviceaccount.com' }}
+  REGION: us-central1
+  PROJECT_ID: new-ponti-dev
+  WIF_PROVIDER: projects/1087442197188/locations/global/workloadIdentityPools/github-actions-pool/providers/github-axis
+  WIF_SERVICE_ACCOUNT: github-actions@new-ponti-dev.iam.gserviceaccount.com
 
 jobs:
   audit:
