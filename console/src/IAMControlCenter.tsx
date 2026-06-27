@@ -7,7 +7,7 @@ import {
 } from '@devpablocristo/platform-crud-ui'
 import type { ReactElement } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { axisCrudHttpClient, listIAMTenants } from './api'
+import { axisCrudHttpClient } from './api'
 
 type IAMCrudResource = 'tenants' | 'users'
 type CrudLifecycleView = 'active' | 'archived' | 'trash'
@@ -63,10 +63,7 @@ export function IAMControlCenter(props: IAMControlCenterProps) {
   const [createRequested, setCreateRequested] = useState<IAMCrudResource | null>(null)
   const [bulkBusy, setBulkBusy] = useState(false)
   const [reloadVersion, setReloadVersion] = useState(0)
-  const [axisTenants, setAxisTenants] = useState<AxisTenantView[]>([])
   const [selectedUserOrgId, setSelectedUserOrgId] = useState('axis')
-
-  const activeAxisTenants = useMemo(() => axisTenants.filter((tenant) => lifecycleBucket(tenant.status) === 'active'), [axisTenants])
 
   useEffect(() => {
     localStorage.setItem('axis.iam.tab', activeCrud)
@@ -84,10 +81,6 @@ export function IAMControlCenter(props: IAMControlCenterProps) {
   useEffect(() => {
     setReloadVersion((current) => current + 1)
   }, [props.productSurface])
-
-  useEffect(() => {
-    void loadTenantOptions(props.orgId, setAxisTenants)
-  }, [props.orgId, reloadVersion])
 
   useEffect(() => {
     setSelected((current) => ({ ...current, users: [] }))
@@ -442,20 +435,6 @@ async function applyLocalBulkAction(args: {
   }
 }
 
-async function loadTenantOptions(orgId: string, setAxisTenants: (rows: AxisTenantView[]) => void) {
-  try {
-    setAxisTenants(await listIAMTenants(orgId))
-  } catch {
-    setAxisTenants([])
-  }
-}
-
-function lifecycleBucket(status: string): CrudLifecycleView {
-  const normalized = status.trim().toLowerCase()
-  if (normalized === 'archived') return 'archived'
-  if (normalized === 'trash' || normalized === 'disabled' || normalized === 'removed' || normalized === 'inactive') return 'trash'
-  return 'active'
-}
 
 function formatStatus(status: string): string {
   switch (status.trim().toLowerCase()) {

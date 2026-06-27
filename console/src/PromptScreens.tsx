@@ -11,7 +11,7 @@ import {
   useTextFileUpload,
 } from '@devpablocristo/platform-crud-ui/prompt-files'
 import type { ReactElement } from 'react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { CompanionAgent } from './api'
 import { axisFetch } from './api'
 

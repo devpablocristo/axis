@@ -9,7 +9,7 @@ import { ControlPlane } from './ControlPlane'
 import { IAMControlCenter } from './IAMControlCenter'
 import { PromptsControlCenter } from './PromptScreens'
 import { type LoadState, empty, load } from './lib/load'
-import { deriveTenantId, workspaceOrgs as deriveWorkspaceOrgs, workspaceProducts as deriveWorkspaceProducts } from './lib/tenant'
+import { deriveTenantId, preferred, workspaceOrgs as deriveWorkspaceOrgs, workspaceProducts as deriveWorkspaceProducts } from './lib/tenant'
 
 type RouteArea = 'home' | 'chat' | 'prompts' | 'agents' | 'iam' | 'operations' | 'nexus' | 'platform' | 'control'
 
@@ -175,12 +175,14 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
 
   useEffect(() => {
     if (workspaceOrgs.length === 0 || workspaceOrgs.includes(orgId)) return
-    setOrgId(workspaceOrgs.includes('cristo.tech') ? 'cristo.tech' : workspaceOrgs[0])
+    const next = preferred(workspaceOrgs, 'cristo.tech')
+    if (next) setOrgId(next)
   }, [workspaceOrgs, orgId])
 
   useEffect(() => {
     if (workspaceProducts.length === 0 || workspaceProducts.includes(productSurface)) return
-    setProductSurface(workspaceProducts.includes('axis') ? 'axis' : workspaceProducts[0])
+    const next = preferred(workspaceProducts, 'axis')
+    if (next) setProductSurface(next)
   }, [workspaceProducts, productSurface])
 
   const tenantOptions = useMemo(() => buildTenantOptions(productSurface), [productSurface])
