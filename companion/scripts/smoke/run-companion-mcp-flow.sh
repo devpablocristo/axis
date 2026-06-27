@@ -129,7 +129,10 @@ else
 fi
 
 echo "Verifying MCP observability audit..."
-AUDIT_ORG_ID="${AXIS_DEV_ORG_ID:-local-dev-org}"
+# Default org must match docker-compose.yml's AXIS_DEV_ORG_ID default (now "axis").
+# The stack records observability events under this org; the audit query below
+# filters by it, so a stale default silently misses every event.
+AUDIT_ORG_ID="${AXIS_DEV_ORG_ID:-axis}"
 EVENTS=$(companion_get "/v1/observability/events?org_id=${AUDIT_ORG_ID}&product_surface=companion&event_type=mcp&event_name=mcp_tool_call&limit=50")
 if EVENTS_JSON="$EVENTS" python3 - "$ALLOW_REQ" "$EVAL_REQ" "$DENY_REQ" <<'PY'
 import json, os, sys
