@@ -41,9 +41,10 @@ type clerkIdentityAdapter struct {
 	baseURL   string
 	client    *http.Client
 	store     IAMStore
+	ownerOrg  string // Axis org id whose accounts may hold the global owner role
 }
 
-func newClerkIdentityAdapter(secretKey string, baseURL string, client *http.Client, store IAMStore) HumanIdentityProvider {
+func newClerkIdentityAdapter(secretKey string, baseURL string, client *http.Client, store IAMStore, ownerOrg string) HumanIdentityProvider {
 	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	if baseURL == "" {
 		baseURL = "https://api.clerk.com/v1"
@@ -53,7 +54,34 @@ func newClerkIdentityAdapter(secretKey string, baseURL string, client *http.Clie
 		baseURL:   baseURL,
 		client:    client,
 		store:     store,
+		ownerOrg:  strings.TrimSpace(ownerOrg),
 	}
+}
+
+// isOwnerOrg reports whether the principal's org (a Clerk org id from the claim)
+// resolves to the configured owner org (an Axis org id). The global owner role
+// (cross-org) is granted ONLY to accounts of the owner org; everyone else tops
+// out at single-org admin. Matches both the Axis id directly and via
+// provider_org_id (Axis stores orgs by business id, Clerk by org_xxx).
+func (a *clerkIdentityAdapter) isOwnerOrg(ctx context.Context, claimOrgID string) bool {
+	owner := strings.TrimSpace(a.ownerOrg)
+	claimOrgID = strings.TrimSpace(claimOrgID)
+	if owner == "" || claimOrgID == "" {
+		return false
+	}
+	if claimOrgID == owner {
+		return true
+	}
+	orgs, err := a.store.ListOrgsForActor(ctx, "", true)
+	if err != nil {
+		return false
+	}
+	for _, o := range orgs {
+		if o.ID == owner && strings.TrimSpace(o.ProviderOrgID) == claimOrgID {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *clerkIdentityAdapter) PrincipalFromClaims(_ context.Context, p authn.Principal) (authn.Principal, error) {
@@ -80,10 +108,12 @@ func (a *clerkIdentityAdapter) SyncPrincipal(ctx context.Context, p authn.Princi
 	}); err != nil {
 		return err
 	}
-	// Bridge: a Clerk axis_role=owner becomes a platform_admin role stored in
-	// Axis (the Control Plane source of truth). This is the migration path off
-	// Clerk metadata — once seeded, authz no longer depends on the Clerk claim.
-	if normalizedRole(claimRole(p.Claims, "axis_role")) == "owner" {
+	// Bridge: a Clerk axis_role=owner becomes a platform role stored in Axis (the
+	// Control Plane source of truth). Per the role model, the global owner role
+	// (cross-org) is granted ONLY to accounts of the owner org (AXIS_OWNER_ORG);
+	// an "owner" claim from any other org confers no platform role (they top out
+	// at single-org admin via their tenant membership).
+	if normalizedRole(claimRole(p.Claims, "axis_role")) == "owner" && a.isOwnerOrg(ctx, p.OrgID) {
 		if err := a.store.SetPlatformRole(ctx, p.Actor, "platform_admin"); err != nil {
 			return err
 		}
