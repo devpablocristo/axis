@@ -112,6 +112,23 @@ func (s *server) clerkWebhook(w http.ResponseWriter, r *http.Request) {
 			writeStoreError(w, err)
 			return
 		}
+	case "user.deleted":
+		// Clerk (IdP) removed the user → drop the orphaned Axis row.
+		if id := firstWebhookString(event.Data, "id"); id != "" {
+			if err := s.iam.DeleteUser(r.Context(), id); err != nil {
+				log.Printf("clerk webhook %q: delete user failed: %v", event.Type, err)
+				writeStoreError(w, err)
+				return
+			}
+		}
+	case "organization.deleted":
+		if id := firstWebhookString(event.Data, "id"); id != "" {
+			if err := s.iam.DeleteOrg(r.Context(), id); err != nil {
+				log.Printf("clerk webhook %q: delete org failed: %v", event.Type, err)
+				writeStoreError(w, err)
+				return
+			}
+		}
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{"status": "accepted"})
 }

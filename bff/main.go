@@ -224,6 +224,14 @@ func (s *server) authenticate(r *http.Request) (authn.Principal, error) {
 		if err := s.identity.SyncPrincipal(r.Context(), principal); err != nil {
 			return authn.Principal{}, err
 		}
+		// Authz off Clerk: a platform admin per Axis (Control Plane) gets the
+		// admin scope set from Axis, not from the Clerk claim. This only ever
+		// upgrades — non-platform users keep their claim-derived scopes as a
+		// migration fallback, and their effective per-tenant scopes are resolved
+		// later in resolveAppContext. So the cutover never locks anyone out.
+		if roles, rerr := s.iam.PlatformRolesForUser(r.Context(), principal.Actor); rerr == nil && isPlatformAdmin(roles) {
+			principal.Scopes = defaultAdminScopes()
+		}
 	}
 	return principal, nil
 }
@@ -366,7 +374,15 @@ func (s *server) resolveAppContext(r *http.Request, p authn.Principal) (orgID, p
 	if ps == "" {
 		ps = "axis-console"
 	}
-	return org, ps, "", p.Scopes, nil
+	// Authz source of truth is Axis (platform roles + org membership), NOT the
+	// Clerk token. Fall back to the claim-derived scopes only when Axis has no
+	// authz record for this user yet, so the migration off Clerk locks no one out.
+	scopes = s.scopesFromAxisOrg(r.Context(), p.Actor, org)
+	if scopes == nil {
+		log.Printf("authz: no Axis authz record for actor=%q org=%q; using claim-derived scopes (migration fallback)", p.Actor, org)
+		scopes = p.Scopes
+	}
+	return org, ps, "", scopes, nil
 }
 
 func (s *server) selectedOrg(r *http.Request, p authn.Principal) (string, error) {
