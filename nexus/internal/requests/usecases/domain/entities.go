@@ -68,6 +68,7 @@ type Attestation struct {
 type Request struct {
 	ID              uuid.UUID
 	OrgID           *string // tenant-owned requests require org_id outside dev/test fixtures.
+	ProductSurface  string  // product half of the tenant (org x product); "" => unscoped.
 	IdempotencyKey  *string
 	RequesterType   RequesterType
 	RequesterID     string

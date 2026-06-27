@@ -225,6 +225,9 @@ type SubmitInput struct {
 	Params         map[string]any
 	Reason         string
 	Context        string
+	// ProductSurface is the product half of the tenant (org x product), taken
+	// from the caller's verified JWT claim by the handler. "" => unscoped.
+	ProductSurface string
 }
 
 type SubmitOutput struct {
@@ -247,6 +250,7 @@ func (u *Usecases) Submit(ctx context.Context, in SubmitInput) (SubmitOutput, er
 	req := requestdomain.Request{
 		ID:             uuid.New(),
 		OrgID:          orgIDFromParams(in.Params),
+		ProductSurface: strings.TrimSpace(in.ProductSurface),
 		IdempotencyKey: in.IdempotencyKey,
 		RequesterType:  requestdomain.RequesterType(in.RequesterType),
 		RequesterID:    in.RequesterID,

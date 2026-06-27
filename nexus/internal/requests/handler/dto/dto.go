@@ -137,6 +137,7 @@ type ApprovalSimulateResponse struct {
 type RequestResponse struct {
 	ID             string         `json:"id"`
 	OrgID          string         `json:"org_id,omitempty"`
+	ProductSurface string         `json:"product_surface,omitempty"`
 	RequesterType  string         `json:"requester_type"`
 	RequesterID    string         `json:"requester_id"`
 	RequesterName  string         `json:"requester_name,omitempty"`
