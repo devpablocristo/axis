@@ -951,6 +951,39 @@ func TestIdentityPrincipalOwnerGetsCrossOrgScopes(t *testing.T) {
 	}
 }
 
+// TestIAMTenantsCreateProvisionsDefaultTenant: el POST /api/iam/tenants (que crea
+// un org) ahora también provisiona el tenant 'axis' del org + el creador como
+// owner, igual que el control plane → ningún org nace sin tenant.
+func TestIAMTenantsCreateProvisionsDefaultTenant(t *testing.T) {
+	srv, err := newTestServer("http://127.0.0.1:1", defaultAdminScopes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/iam/tenants", strings.NewReader(`{"name":"Pymes"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Item IAMTenantView `json:"item"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	tenants, err := srv.iam.ResolveTenantsForUser(context.Background(), srv.cfg.DevUserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tn := range tenants {
+		if tn.OrgID == body.Item.ID && tn.ProductSurface == defaultOrgProductSurface {
+			return
+		}
+	}
+	t.Fatalf("creator should resolve the org's %q tenant, got %#v", defaultOrgProductSurface, tenants)
+}
+
 // TestControlCreateOrgProvisionsDefaultTenant locks in the B#3 prerequisite: a
 // newly-created org is never tenantless — it gets a default 'axis' tenant and the
 // creator is a member of it, so the console can always resolve an X-Tenant-ID.

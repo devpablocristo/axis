@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -68,22 +69,29 @@ func (s *server) controlCreateOrg(w http.ResponseWriter, r *http.Request, p auth
 		writeStoreError(w, err)
 		return
 	}
-	// Auto-provision the org's default 'axis' workspace tenant + owner membership
-	// so the org is never tenantless: the console can always resolve a tenant
-	// (X-Tenant-ID), which is the prerequisite for retiring the legacy org-only
-	// path. Idempotent — CreateTenant is keyed on (org_id, product_surface).
-	tenant, terr := s.iam.CreateTenant(r.Context(), IAMTenant{OrgID: org.ID, ProductSurface: defaultOrgProductSurface, Name: org.Name, Status: "active"})
-	if terr != nil {
-		writeStoreError(w, terr)
+	if err := s.ensureOrgDefaultTenant(r.Context(), org, p.Actor); err != nil {
+		writeStoreError(w, err)
 		return
 	}
-	if actor := strings.TrimSpace(p.Actor); actor != "" {
-		if _, merr := s.iam.UpsertTenantMember(r.Context(), IAMTenantMember{TenantID: tenant.ID, UserID: actor, Role: "owner", Status: "active"}); merr != nil {
-			writeStoreError(w, merr)
-			return
+	writeJSON(w, http.StatusCreated, org)
+}
+
+// ensureOrgDefaultTenant provisiona el tenant de workspace por defecto del org
+// (product_surface='axis') y agrega a actor como su tenant-member owner, para que
+// ningún org quede sin tenant (la console siempre resuelve un X-Tenant-ID — el
+// prerequisito para retirar el path legacy por-org). Idempotente: CreateTenant
+// está keyado en (org_id, product_surface). actor "" → tenant sin membership.
+func (s *server) ensureOrgDefaultTenant(ctx context.Context, org IAMOrg, actor string) error {
+	tenant, err := s.iam.CreateTenant(ctx, IAMTenant{OrgID: org.ID, ProductSurface: defaultOrgProductSurface, Name: org.Name, Status: "active"})
+	if err != nil {
+		return err
+	}
+	if a := strings.TrimSpace(actor); a != "" {
+		if _, err := s.iam.UpsertTenantMember(ctx, IAMTenantMember{TenantID: tenant.ID, UserID: a, Role: "owner", Status: "active"}); err != nil {
+			return err
 		}
 	}
-	writeJSON(w, http.StatusCreated, org)
+	return nil
 }
 
 func (s *server) controlListTenants(w http.ResponseWriter, r *http.Request) {
