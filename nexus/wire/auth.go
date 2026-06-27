@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/devpablocristo/nexus/internal/orgctx"
+	"github.com/devpablocristo/nexus/internal/productctx"
 	authn "github.com/devpablocristo/platform/authn/go"
 	"github.com/devpablocristo/platform/authn/go/identityhttp"
 	"github.com/devpablocristo/platform/authn/go/internaljwt"
@@ -74,6 +75,9 @@ func newAuthMiddleware(apiKeys, issuerURL, audience string, internalJWT internal
 			// Los helpers de org-scope lo usan SOLO para acotar la vista de
 			// principals cross_org; sin cross_org se ignora.
 			r = r.WithContext(orgctx.WithRequested(r.Context(), r.Header.Get(identityhttp.HeaderOrgID)))
+			// Carry the principal's product surface (JWT claim) so governance
+			// scope-helpers can partition per product within an org.
+			r = r.WithContext(productctx.WithProduct(r.Context(), claimString(principal.Claims["product_surface"])))
 			req := identityhttp.WithPrincipal(r, principal, method)
 			next.ServeHTTP(w, req)
 		})
