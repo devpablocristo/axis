@@ -15,7 +15,7 @@ Fecha: 2026-06-27 · Método: workflow multi-agente (138 agentes, 14 revisores �
 
 **Gated (necesitan decisión/dependencia externa, NO aplicados a ciegas):**
 - **B#1 read-filter + otros dominios** (approvals/policies/ops/learning/dashboard): filtrar `List` por producto **ahora** ocultaría filas existentes (`product_surface=''`) a callers con producto → cambio de comportamiento. Requiere emisión de JWT de producto completa + decisión de backfill.
-- **B#3 borrar paths legacy por-org** (`userRefOrg`, dual-path): requiere confirmar que el console (build horneado) no depende.
+- **B#3 borrar paths legacy por-org** (`userRefOrg`, dual-path): **el console SÍ depende** — `console/src/api.ts:391-393` manda `X-Tenant-ID` solo si hay `axis.tenant_id` en localStorage; sin tenant seleccionado cae al path legacy (`listIAMUserViews`). Bloqueante: el console debe garantizar `X-Tenant-ID` siempre antes de remover el fallback.
 - **Oleada D (reuse → `platform`)**: consolidar los 3 helpers de error en un `WriteFlatErrorFrom` agnóstico + adoptar `security/go/tenant`/`lifecycle`. Cross-repo (toca `platform` con blast radius) → necesita release/bump de versión.
 
 ## 0. Guardrails (instalados + corridos)
