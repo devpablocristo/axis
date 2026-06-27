@@ -27,6 +27,7 @@ import { IAMControlCenter } from '../IAMControlCenter'
 
 const baseProps = {
   orgId: 'cristo.tech',
+  tenantId: 'tenant-axis',
   orgs: [],
   onOrgChange: () => {},
   onRefreshShell: async () => {},
@@ -45,13 +46,13 @@ describe('IAMControlCenter', () => {
     expect(localStorage.getItem('axis.iam.tab')).toBe('users')
   })
 
-  it('keeps the active tab and refetches when the product changes', () => {
+  it('keeps the active tab and refetches when the tenant changes', () => {
     localStorage.setItem('axis.iam.tab', 'users')
     const { rerender } = render(<IAMControlCenter {...baseProps} productSurface="axis" />)
     expect(screen.getByRole('button', { name: 'Usuarios' })).toHaveClass('active')
 
     const before = hoisted.mounts
-    rerender(<IAMControlCenter {...baseProps} productSurface="medmory" />)
+    rerender(<IAMControlCenter {...baseProps} tenantId="tenant-medmory" productSurface="medmory" />)
 
     // Tab must NOT bounce back to "Orgs"…
     expect(screen.getByRole('button', { name: 'Usuarios' })).toHaveClass('active')

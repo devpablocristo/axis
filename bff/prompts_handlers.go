@@ -26,12 +26,12 @@ func (s *server) promptsAPI(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "FORBIDDEN", route.forbiddenMessage)
 		return
 	}
-	if !requireScope(w, p, route.requiredScopes...) {
-		return
-	}
-	orgID, err := s.selectedOrg(r, p)
+	orgID, productSurface, tenantID, scopes, err := s.resolveAppContext(r, p)
 	if err != nil {
 		writeError(w, http.StatusForbidden, "FORBIDDEN", err.Error())
+		return
+	}
+	if !requireScope(w, authn.Principal{Scopes: scopes}, route.requiredScopes...) {
 		return
 	}
 	var body io.Reader
@@ -43,7 +43,7 @@ func (s *server) promptsAPI(w http.ResponseWriter, r *http.Request) {
 		}
 		body = bytes.NewReader(raw)
 	}
-	s.forwardPromptRequest(w, r, p, orgID, route.method, route.path, route.rawQuery, body)
+	s.forwardPromptRequest(w, r, p, orgID, productSurface, tenantID, scopes, route.method, route.path, route.rawQuery, body)
 }
 
 type promptRoute struct {
@@ -124,7 +124,7 @@ func promptRouteFromRequest(r *http.Request) (promptRoute, error) {
 	return promptRoute{}, nil
 }
 
-func (s *server) forwardPromptRequest(w http.ResponseWriter, r *http.Request, p authn.Principal, orgID string, method string, companionPath string, rawQuery string, body io.Reader) {
+func (s *server) forwardPromptRequest(w http.ResponseWriter, r *http.Request, p authn.Principal, orgID string, productSurface string, tenantID string, scopes []string, method string, companionPath string, rawQuery string, body io.Reader) {
 	target, err := url.Parse(s.cfg.CompanionBaseURL)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "COMPANION_URL_INVALID", err.Error())
@@ -132,7 +132,7 @@ func (s *server) forwardPromptRequest(w http.ResponseWriter, r *http.Request, p 
 	}
 	target.Path = companionPath
 	target.RawQuery = rawQuery
-	token, err := s.signDownstreamToken(p, orgID, s.cfg.CompanionAudience)
+	token, err := s.signDownstreamTokenForContext(p, orgID, productSurface, tenantID, scopes, s.cfg.CompanionAudience)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "TOKEN_SIGNING_FAILED", err.Error())
 		return
@@ -144,6 +144,8 @@ func (s *server) forwardPromptRequest(w http.ResponseWriter, r *http.Request, p 
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("X-Product-Surface", productSurface)
+	req.Header.Set("X-Tenant-ID", tenantID)
 	req.Header.Set("X-Request-ID", requestID(r))
 	req.Header.Set("X-Axis-Forwarded-By", "axis-bff")
 	if r.Header.Get("Content-Type") != "" {

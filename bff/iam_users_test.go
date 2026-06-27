@@ -315,6 +315,21 @@ func TestTenantUserAccessIsPerProduct(t *testing.T) {
 	}
 }
 
+// TestIAMUsersListRequiresTenant verifies the org-member fallback is gone:
+// normal org user listings must be scoped by X-Tenant-ID and cannot read
+// axis_org_members as if they were tenant members.
+func TestIAMUsersListRequiresTenant(t *testing.T) {
+	srv, err := newTestServer("http://127.0.0.1:1", defaultAdminScopes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedDevPrincipal(t, srv)
+	rec := doReq(t, srv, http.MethodGet, "/api/iam/users?org_id=org-a", "", nil)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("list users without tenant: want 400 got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 // TestTenantUserPurgeRequiresScope: purge needs axis:iam:purge.
 func TestTenantUserPurgeRequiresScope(t *testing.T) {
 	srv, err := newTestServer("http://127.0.0.1:1", withoutScopes(defaultAdminScopes(), "axis:iam:purge"))

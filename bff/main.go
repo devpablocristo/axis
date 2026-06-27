@@ -363,45 +363,32 @@ func (s *server) proxy(name, prefix, target, audience string) http.Handler {
 }
 
 // resolveAppContext resolves the application-plane scoping for a proxied request.
-// If X-Tenant-ID is present, the tenant (org x product) is the source of truth:
-// it yields the tenant's org_id + product_surface + tenant_id and scopes derived
-// from the user's tenant role (or platform role). Otherwise it falls back to the
-// legacy org-only path (no tenant) for back-compat while the console migrates.
+// X-Tenant-ID is the source of truth: it yields the tenant's org_id,
+// product_surface, tenant_id and scopes derived from the user's tenant role (or
+// platform role). The legacy org-only app-plane path has been removed.
 func (s *server) resolveAppContext(r *http.Request, p authn.Principal) (orgID, productSurface, tenantID string, scopes []string, err error) {
 	requestedTenant := strings.TrimSpace(r.Header.Get("X-Tenant-ID"))
-	if requestedTenant != "" {
-		tenant, terr := s.iam.TenantByID(r.Context(), requestedTenant)
-		if terr != nil {
-			return "", "", "", nil, errors.New("tenant not found")
+	if requestedTenant == "" {
+		return "", "", "", nil, errors.New("tenant_id is required")
+	}
+	tenant, terr := s.iam.TenantByID(r.Context(), requestedTenant)
+	if terr != nil {
+		return "", "", "", nil, errors.New("tenant not found")
+	}
+	platformRoles, _ := s.iam.PlatformRolesForUser(r.Context(), p.Actor)
+	role := ""
+	if !isPlatformAdmin(platformRoles) {
+		m, merr := s.iam.TenantMembership(r.Context(), tenant.ID, p.Actor)
+		if merr != nil {
+			return "", "", "", nil, errors.New("user is not a member of the requested tenant")
 		}
-		platformRoles, _ := s.iam.PlatformRolesForUser(r.Context(), p.Actor)
-		role := ""
-		if !isPlatformAdmin(platformRoles) {
-			m, merr := s.iam.TenantMembership(r.Context(), tenant.ID, p.Actor)
-			if merr != nil {
-				return "", "", "", nil, errors.New("user is not a member of the requested tenant")
-			}
-			role = m.Role
-		}
-		return tenant.OrgID, tenant.ProductSurface, tenant.ID, scopesForTenant(role, platformRoles), nil
+		role = m.Role
 	}
-	org, oerr := s.selectedOrg(r, p)
-	if oerr != nil {
-		return "", "", "", nil, oerr
-	}
-	ps := strings.TrimSpace(r.Header.Get("X-Product-Surface"))
-	if ps == "" {
-		ps = "axis-console"
-	}
-	// Authz source of truth is Axis (platform roles + org membership), NOT the
-	// Clerk token. Fall back to the claim-derived scopes only when Axis has no
-	// authz record for this user yet, so the migration off Clerk locks no one out.
-	scopes = s.scopesFromAxisOrg(r.Context(), p.Actor, org)
+	scopes = scopesForTenant(role, platformRoles)
 	if scopes == nil {
-		log.Printf("authz: no Axis authz record for actor=%q org=%q; using claim-derived scopes (migration fallback)", p.Actor, org)
-		scopes = p.Scopes
+		return "", "", "", nil, errors.New("user has no scopes for the requested tenant")
 	}
-	return org, ps, "", scopes, nil
+	return tenant.OrgID, tenant.ProductSurface, tenant.ID, scopes, nil
 }
 
 func (s *server) selectedOrg(r *http.Request, p authn.Principal) (string, error) {

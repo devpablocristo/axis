@@ -370,6 +370,7 @@ export type BusinessModel = {
 }
 
 type AxisAuthTokenGetter = () => string | null | undefined | Promise<string | null | undefined>
+export type AxisFetchInit = RequestInit & { tenantId?: string | null }
 
 let axisAuthTokenGetter: AxisAuthTokenGetter | null = null
 
@@ -377,10 +378,11 @@ export function setAxisAuthTokenGetter(getter: AxisAuthTokenGetter | null) {
   axisAuthTokenGetter = getter
 }
 
-export async function axisFetch<T>(path: string, orgId: string, init: RequestInit = {}): Promise<T> {
-  const headers = new Headers(init.headers)
+export async function axisFetch<T>(path: string, orgId: string, init: AxisFetchInit = {}): Promise<T> {
+  const { tenantId: explicitTenantId, ...fetchInit } = init
+  const headers = new Headers(fetchInit.headers)
   headers.set('Accept', 'application/json')
-  if (!(init.body instanceof FormData)) {
+  if (!(fetchInit.body instanceof FormData)) {
     headers.set('Content-Type', headers.get('Content-Type') ?? 'application/json')
   }
   if (orgId) {
@@ -388,7 +390,9 @@ export async function axisFetch<T>(path: string, orgId: string, init: RequestIni
   }
   // Active workspace = tenant (org x product). When set, the BFF treats it as the
   // source of truth (resolves org_id + product_surface + scopes from the tenant).
-  const tenantId = typeof localStorage !== 'undefined' ? localStorage.getItem('axis.tenant_id') : ''
+  const tenantId = explicitTenantId !== undefined
+    ? explicitTenantId
+    : (typeof localStorage !== 'undefined' ? localStorage.getItem('axis.tenant_id') : '')
   if (tenantId) {
     headers.set('X-Tenant-ID', tenantId)
   }
@@ -396,7 +400,7 @@ export async function axisFetch<T>(path: string, orgId: string, init: RequestIni
   if (token) {
     headers.set('Authorization', `Bearer ${token}`)
   }
-  const response = await fetch(path, { ...init, headers })
+  const response = await fetch(path, { ...fetchInit, headers })
   const text = await response.text()
   const payload = text ? JSON.parse(text) : null
   if (!response.ok) {
@@ -415,7 +419,7 @@ async function resolveAxisAuthToken(): Promise<string> {
 }
 
 export async function getSession(): Promise<AxisSession> {
-  return axisFetch<AxisSession>('/api/session', '')
+  return axisFetch<AxisSession>('/api/session', '', { tenantId: null })
 }
 
 // --- Control Plane (platform-admin) ---
@@ -424,39 +428,39 @@ export type ControlOrg = { id: string; name: string; slug: string; status: strin
 export type ControlProduct = { product_surface: string; name: string }
 
 export async function listControlOrgs(): Promise<ControlOrg[]> {
-  const payload = await axisFetch<{ data: ControlOrg[] }>('/api/control/organizations', '')
+  const payload = await axisFetch<{ data: ControlOrg[] }>('/api/control/organizations', '', { tenantId: null })
   return payload.data ?? []
 }
 
 export async function createControlOrg(name: string): Promise<ControlOrg> {
-  return axisFetch<ControlOrg>('/api/control/organizations', '', { method: 'POST', body: JSON.stringify({ name }) })
+  return axisFetch<ControlOrg>('/api/control/organizations', '', { method: 'POST', tenantId: null, body: JSON.stringify({ name }) })
 }
 
 export async function listControlTenants(): Promise<AxisTenant[]> {
-  const payload = await axisFetch<{ data: AxisTenant[] }>('/api/control/tenants', '')
+  const payload = await axisFetch<{ data: AxisTenant[] }>('/api/control/tenants', '', { tenantId: null })
   return payload.data ?? []
 }
 
 export async function listControlProducts(): Promise<ControlProduct[]> {
-  const payload = await axisFetch<{ data: ControlProduct[] }>('/api/control/products', '')
+  const payload = await axisFetch<{ data: ControlProduct[] }>('/api/control/products', '', { tenantId: null })
   return payload.data ?? []
 }
 
 export async function provisionTenant(input: { org_id: string; product_surface: string; name?: string; owner_user_id?: string }): Promise<AxisTenant> {
-  return axisFetch<AxisTenant>('/api/control/tenants', '', { method: 'POST', body: JSON.stringify(input) })
+  return axisFetch<AxisTenant>('/api/control/tenants', '', { method: 'POST', tenantId: null, body: JSON.stringify(input) })
 }
 
 export async function grantPlatformRole(userId: string, role = 'platform_admin'): Promise<void> {
-  await axisFetch<unknown>('/api/control/platform-roles', '', { method: 'POST', body: JSON.stringify({ user_id: userId, role }) })
+  await axisFetch<unknown>('/api/control/platform-roles', '', { method: 'POST', tenantId: null, body: JSON.stringify({ user_id: userId, role }) })
 }
 
 export async function addTenantMember(tenantId: string, userId: string, role = 'member'): Promise<void> {
-  await axisFetch<unknown>(`/api/control/tenants/${encodeURIComponent(tenantId)}/members`, '', { method: 'POST', body: JSON.stringify({ user_id: userId, role }) })
+  await axisFetch<unknown>(`/api/control/tenants/${encodeURIComponent(tenantId)}/members`, '', { method: 'POST', tenantId: null, body: JSON.stringify({ user_id: userId, role }) })
 }
 
-export async function listIAMTenants(orgId: string, view = 'active'): Promise<AxisTenantView[]> {
+export async function listIAMTenants(orgId: string, view = 'active', tenantId?: string): Promise<AxisTenantView[]> {
   const suffix = view === 'active' ? '' : `/${view}`
-  const payload = await axisFetch<{ items: AxisTenantView[] }>(`/api/iam/tenants${suffix}`, orgId)
+  const payload = await axisFetch<{ items: AxisTenantView[] }>(`/api/iam/tenants${suffix}`, orgId, { tenantId })
   return payload.items ?? []
 }
 
@@ -465,11 +469,12 @@ export type AgentProfileLifecycle = 'active' | 'archived' | 'trash' | 'all'
 export async function listAgentProfiles(
   orgId: string,
   lifecycleOrIncludeArchived: AgentProfileLifecycle | boolean = 'active',
+  tenantId?: string,
 ): Promise<AxisAgentProfileView[]> {
   const suffix = typeof lifecycleOrIncludeArchived === 'boolean'
     ? (lifecycleOrIncludeArchived ? '?include_archived=true' : '')
     : `?lifecycle=${encodeURIComponent(lifecycleOrIncludeArchived)}`
-  const payload = await axisFetch<{ profiles: AxisAgentProfileView[] }>(`/api/agent-profiles${suffix}`, orgId)
+  const payload = await axisFetch<{ profiles: AxisAgentProfileView[] }>(`/api/agent-profiles${suffix}`, orgId, { tenantId })
   return payload.profiles ?? []
 }
 
@@ -477,45 +482,52 @@ export async function upsertAgentProfile(
   orgId: string,
   profileId: string,
   input: Partial<AxisAgentProfileView>,
+  tenantId?: string,
 ): Promise<AxisAgentProfileView> {
   return axisFetch<AxisAgentProfileView>(`/api/agent-profiles/${encodeURIComponent(profileId)}`, orgId, {
     method: 'PUT',
+    tenantId,
     body: JSON.stringify(input),
   })
 }
 
-export async function archiveAgentProfile(orgId: string, profileId: string): Promise<AxisAgentProfileView> {
+export async function archiveAgentProfile(orgId: string, profileId: string, tenantId?: string): Promise<AxisAgentProfileView> {
   return axisFetch<AxisAgentProfileView>(`/api/agent-profiles/${encodeURIComponent(profileId)}/archive`, orgId, {
     method: 'POST',
+    tenantId,
     body: '{}',
   })
 }
 
-export async function trashAgentProfile(orgId: string, profileId: string): Promise<AxisAgentProfileView> {
+export async function trashAgentProfile(orgId: string, profileId: string, tenantId?: string): Promise<AxisAgentProfileView> {
   return axisFetch<AxisAgentProfileView>(`/api/agent-profiles/${encodeURIComponent(profileId)}/trash`, orgId, {
     method: 'POST',
+    tenantId,
     body: '{}',
   })
 }
 
-export async function restoreAgentProfile(orgId: string, profileId: string): Promise<AxisAgentProfileView> {
+export async function restoreAgentProfile(orgId: string, profileId: string, tenantId?: string): Promise<AxisAgentProfileView> {
   return axisFetch<AxisAgentProfileView>(`/api/agent-profiles/${encodeURIComponent(profileId)}/restore`, orgId, {
     method: 'POST',
+    tenantId,
     body: '{}',
   })
 }
 
-export async function purgeAgentProfile(orgId: string, profileId: string): Promise<void> {
+export async function purgeAgentProfile(orgId: string, profileId: string, tenantId?: string): Promise<void> {
   await axisFetch<void>(`/api/agent-profiles/${encodeURIComponent(profileId)}/purge`, orgId, {
     method: 'DELETE',
+    tenantId,
   })
 }
 
-export function axisCrudHttpClient(orgId: string) {
+export function axisCrudHttpClient(orgId: string, tenantId?: string) {
   return {
     async json<TResponse>(path: string, init?: { method?: string; body?: Record<string, unknown> }): Promise<TResponse> {
       return axisFetch<TResponse>(path, orgId, {
         method: init?.method ?? 'GET',
+        tenantId,
         body: init?.body ? JSON.stringify(init.body) : undefined,
       })
     },

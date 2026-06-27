@@ -12,7 +12,7 @@ import {
 } from '@devpablocristo/platform-crud-ui/prompt-files'
 import type { ReactElement } from 'react'
 import { useEffect, useMemo, useState } from 'react'
-import type { CompanionAgent } from './api'
+import type { AxisFetchInit, CompanionAgent } from './api'
 import { axisFetch } from './api'
 
 type PromptLifecycleView = 'active' | 'archived' | 'trash'
@@ -82,11 +82,13 @@ const CrudPage = PlatformCrudPage as unknown as <T extends { id: string }>(
 
 export function PromptsControlCenter({
   orgId,
+  tenantId,
   productSurface,
   agents,
   initialSection = 'product',
 }: {
   orgId: string
+  tenantId: string
   productSurface: string
   agents: CompanionAgent[]
   initialSection?: PromptSection
@@ -104,9 +106,9 @@ export function PromptsControlCenter({
         <button type="button" className={activeSection === 'agents' ? 'active' : ''} onClick={() => setActiveSection('agents')}>Perfiles</button>
       </div>
       {activeSection === 'product' ? (
-        <AssistPackPromptsScreen orgId={orgId} productSurface={productSurface} section={activeSection} />
+        <AssistPackPromptsScreen orgId={orgId} tenantId={tenantId} productSurface={productSurface} section={activeSection} />
       ) : (
-        <AgentProfilePromptsScreen orgId={orgId} productSurface={productSurface} agents={agents} section={activeSection} />
+        <AgentProfilePromptsScreen orgId={orgId} tenantId={tenantId} productSurface={productSurface} agents={agents} section={activeSection} />
       )}
     </section>
   )
@@ -114,10 +116,12 @@ export function PromptsControlCenter({
 
 function AssistPackPromptsScreen({
   orgId,
+  tenantId,
   productSurface,
   section,
 }: {
   orgId: string
+  tenantId: string
   productSurface: string
   section: PromptSection
 }) {
@@ -134,7 +138,7 @@ function AssistPackPromptsScreen({
         const packs = await axisFetch<AssistPack[]>(
           `/api/prompts/assist-packs?${query}`,
           orgId,
-          productHeaders(productSurface),
+          productHeaders(productSurface, tenantId),
         )
         return packs.map((pack) => ({
           id: pack.id,
@@ -155,6 +159,7 @@ function AssistPackPromptsScreen({
         const pack = row.original as AssistPack
         await axisFetch(`/api/prompts/assist-packs/${encodeURIComponent(pack.id)}/content`, orgId, {
           method: 'PUT',
+          tenantId,
           headers: { 'X-Product-Surface': productSurface },
           body: JSON.stringify({
             owner_system: pack.owner_system,
@@ -176,11 +181,13 @@ function AssistPackPromptsScreen({
 
 function AgentProfilePromptsScreen({
   orgId,
+  tenantId,
   productSurface,
   agents,
   section,
 }: {
   orgId: string
+  tenantId: string
   productSurface: string
   agents: CompanionAgent[]
   section: PromptSection
@@ -206,7 +213,7 @@ function AgentProfilePromptsScreen({
         const response = await axisFetch<{ profiles: AgentProfile[] }>(
           `/api/prompts/agent-profiles?lifecycle=${encodeURIComponent(view)}`,
           orgId,
-          productHeaders(productSurface),
+          productHeaders(productSurface, tenantId),
         )
         return response.profiles
           .filter((profile) => profileIDs.has(profile.profile_id))
@@ -230,6 +237,7 @@ function AgentProfilePromptsScreen({
         const profile = row.original as AgentProfile
         await axisFetch(`/api/prompts/agent-profiles/${encodeURIComponent(profile.profile_id)}/system-prompt`, orgId, {
           method: 'PUT',
+          tenantId,
           headers: { 'X-Product-Surface': productSurface },
           body: JSON.stringify({
             family_id: profile.family_id,
@@ -249,6 +257,7 @@ function AgentProfilePromptsScreen({
       archivePrompt={(row) =>
         axisFetch(`/api/prompts/agent-profiles/${encodeURIComponent(row.id)}/archive`, orgId, {
           method: 'POST',
+          tenantId,
           headers: { 'X-Product-Surface': productSurface },
           body: '{}',
         })
@@ -256,6 +265,7 @@ function AgentProfilePromptsScreen({
       restorePrompt={(row) =>
         axisFetch(`/api/prompts/agent-profiles/${encodeURIComponent(row.id)}/restore`, orgId, {
           method: 'POST',
+          tenantId,
           headers: { 'X-Product-Surface': productSurface },
           body: '{}',
         })
@@ -263,6 +273,7 @@ function AgentProfilePromptsScreen({
       trashPrompt={(row) =>
         axisFetch(`/api/prompts/agent-profiles/${encodeURIComponent(row.id)}/trash`, orgId, {
           method: 'POST',
+          tenantId,
           headers: { 'X-Product-Surface': productSurface },
           body: '{}',
         })
@@ -270,6 +281,7 @@ function AgentProfilePromptsScreen({
       purgePrompt={(row) =>
         axisFetch(`/api/prompts/agent-profiles/${encodeURIComponent(row.id)}/purge`, orgId, {
           method: 'DELETE',
+          tenantId,
           headers: { 'X-Product-Surface': productSurface },
         })
       }
@@ -602,8 +614,8 @@ function stringValue(value: unknown): string {
   return typeof value === 'string' && value.trim() ? value.trim() : ''
 }
 
-function productHeaders(productSurface: string): RequestInit {
-  return { headers: { 'X-Product-Surface': productSurface } }
+function productHeaders(productSurface: string, tenantId: string): AxisFetchInit {
+  return { tenantId, headers: { 'X-Product-Surface': productSurface } }
 }
 
 function sameProduct(value: string | undefined, productSurface: string) {

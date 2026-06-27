@@ -3,7 +3,7 @@ import { ChatWorkspace, type ChatAdapter, type ChatConversationDetail, type Chat
 import '@devpablocristo/platform-chat-ui/styles.css'
 import type { ReactNode } from 'react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ActionType, AgentRun, Approval, AxisSession, AxisTenantView, BusinessModel, CapabilityRecord, CompanionAgent, CompanionJob, CompanionTask, CostSummary, Delegation, MemoryConflict, MemoryReview, MemorySummary, NexusRequest, ObservabilityEvent, Policy, Product, ProductInstallation, RunTrace, RuntimePolicy, SecurityEvalReport, ServiceHealth, axisFetch, getHealth, getSession, listIAMTenants } from './api'
+import { ActionType, AgentRun, Approval, AxisSession, AxisTenantView, BusinessModel, CapabilityRecord, CompanionAgent, CompanionJob, CompanionTask, CostSummary, Delegation, MemoryConflict, MemoryReview, MemorySummary, NexusRequest, ObservabilityEvent, Policy, Product, ProductInstallation, RunTrace, RuntimePolicy, SecurityEvalReport, ServiceHealth, axisFetch, getHealth, getSession, listIAMTenants, type AxisFetchInit } from './api'
 import { AgentsControlCenter } from './AgentsControlCenter'
 import { ControlPlane } from './ControlPlane'
 import { IAMControlCenter } from './IAMControlCenter'
@@ -89,39 +89,72 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
   )
 
   const refresh = useCallback(async () => {
-    localStorage.setItem('axis.org_id', orgId)
-    localStorage.setItem('axis.tenant_id', tenantId)
-    localStorage.setItem('axis.product_surface', productSurface)
+    setSession((prev) => ({ data: prev?.data ?? null, error: '', loading: true }))
+    let nextSession: AxisSession | null = null
+    try {
+      nextSession = await getSession()
+      setSession({ data: nextSession, error: '', loading: false })
+    } catch (error) {
+      setSession((prev) => ({
+        data: prev?.data ?? null,
+        error: error instanceof Error ? error.message : 'error',
+        loading: false,
+      }))
+      await Promise.all([
+        load(setHealth, () => getHealth(), null),
+      ])
+      return
+    }
+
+    const sessionTenants = nextSession.tenants ?? []
+    const availableOrgs = deriveWorkspaceOrgs(sessionTenants)
+    let effectiveOrgId = orgId
+    if (availableOrgs.length > 0 && !availableOrgs.includes(effectiveOrgId)) {
+      effectiveOrgId = preferred(availableOrgs, 'cristo.tech') ?? effectiveOrgId
+      setOrgId(effectiveOrgId)
+    }
+    const availableProducts = deriveWorkspaceProducts(sessionTenants, effectiveOrgId)
+    let effectiveProductSurface = productSurface
+    if (availableProducts.length > 0 && !availableProducts.includes(effectiveProductSurface)) {
+      effectiveProductSurface = preferred(availableProducts, 'axis') ?? effectiveProductSurface
+      setProductSurface(effectiveProductSurface)
+    }
+    const effectiveTenantId = deriveTenantId(sessionTenants, effectiveOrgId, effectiveProductSurface)
+
+    localStorage.setItem('axis.org_id', effectiveOrgId)
+    localStorage.setItem('axis.tenant_id', effectiveTenantId)
+    localStorage.setItem('axis.product_surface', effectiveProductSurface)
     localStorage.setItem('axis.external_tenant_id', externalTenantId)
-    const productInit = productHeaders(productSurface)
+    const productInit = productHeaders(effectiveProductSurface, effectiveTenantId)
+    const tenantInit: AxisFetchInit = { tenantId: effectiveTenantId }
+    const scopedLoads = effectiveTenantId ? [
+      load(setProducts, async () => (await axisFetch<{ products: Product[] }>('/api/companion/v1/products', effectiveOrgId, productInit)).products ?? [], []),
+      load(setInstallations, async () => (await axisFetch<{ installations: ProductInstallation[] }>(`/api/companion/v1/product-installations?org_id=${encodeURIComponent(effectiveOrgId)}`, effectiveOrgId, productInit)).installations ?? [], []),
+      load(setApprovals, async () => (await axisFetch<{ data: Approval[] }>('/api/nexus/v1/approvals/pending', effectiveOrgId, tenantInit)).data ?? [], []),
+      load(setRequests, async () => (await axisFetch<{ data: NexusRequest[] }>('/api/nexus/v1/requests?limit=12', effectiveOrgId, tenantInit)).data ?? [], []),
+      load(setPolicies, async () => (await axisFetch<{ data: Policy[] }>('/api/nexus/v1/policies', effectiveOrgId, tenantInit)).data ?? [], []),
+      load(setActionTypes, async () => (await axisFetch<{ data: ActionType[] }>('/api/nexus/v1/action-types', effectiveOrgId, tenantInit)).data ?? [], []),
+      load(setDelegations, async () => (await axisFetch<{ data: Delegation[] }>('/api/nexus/v1/delegations', effectiveOrgId, tenantInit)).data ?? [], []),
+      load(setTasks, async () => filterByProduct((await axisFetch<{ data: CompanionTask[] }>(withProduct('/api/companion/v1/tasks?limit=12', effectiveProductSurface), effectiveOrgId, productInit)).data ?? [], effectiveProductSurface), []),
+      load(setBillingAgentRuns, async () => filterByProduct((await axisFetch<{ data: AgentRun[] }>(withProduct('/api/companion/v1/agent-runs?agent_id=billing_agent&limit=20', effectiveProductSurface), effectiveOrgId, productInit)).data ?? [], effectiveProductSurface), []),
+      load(setTraces, async () => filterByProduct((await axisFetch<{ traces: RunTrace[] }>(withProduct('/api/companion/v1/run-traces?limit=12', effectiveProductSurface), effectiveOrgId, productInit)).traces ?? [], effectiveProductSurface), []),
+      load(setRuntimePolicy, () => axisFetch<RuntimePolicy>('/api/companion/v1/runtime/policy', effectiveOrgId, productInit), null),
+      load(setAgents, async () => filterByProduct((await axisFetch<{ data: CompanionAgent[] }>(withProduct('/api/companion/v1/agents', effectiveProductSurface), effectiveOrgId, productInit)).data ?? [], effectiveProductSurface), []),
+      load(setCapabilities, async () => filterCapabilities((await axisFetch<{ capabilities: CapabilityRecord[] }>(withProduct('/api/companion/v1/capabilities?limit=100', effectiveProductSurface), effectiveOrgId, productInit)).capabilities ?? [], effectiveProductSurface).slice(0, 12), []),
+      load(setMemoryConflicts, async () => filterByProduct((await axisFetch<{ conflicts: MemoryConflict[] }>(withProduct('/api/companion/v1/memory/conflicts?limit=12', effectiveProductSurface), effectiveOrgId, productInit)).conflicts ?? [], effectiveProductSurface), []),
+      load(setMemoryReviews, async () => filterByProduct((await axisFetch<{ reviews: MemoryReview[] }>(withProduct('/api/companion/v1/memory/reviews?limit=12', effectiveProductSurface), effectiveOrgId, productInit)).reviews ?? [], effectiveProductSurface), []),
+      load(setMemorySummaries, async () => filterByProduct((await axisFetch<{ summaries: MemorySummary[] }>(withProduct('/api/companion/v1/memory/summaries?limit=12', effectiveProductSurface), effectiveOrgId, productInit)).summaries ?? [], effectiveProductSurface), []),
+      load(setJobs, async () => filterByProduct((await axisFetch<{ jobs: CompanionJob[] }>(withProduct('/api/companion/v1/jobs?limit=12', effectiveProductSurface), effectiveOrgId, productInit)).jobs ?? [], effectiveProductSurface), []),
+      load(setEvents, async () => filterByProduct((await axisFetch<{ events: ObservabilityEvent[] }>(withProduct('/api/companion/v1/observability/events?limit=12', effectiveProductSurface), effectiveOrgId, productInit)).events ?? [], effectiveProductSurface), []),
+      load(setCosts, () => axisFetch<CostSummary>(withProduct('/api/companion/v1/runtime/costs', effectiveProductSurface), effectiveOrgId, productInit), null),
+      load(setSecurityReports, async () => (await axisFetch<{ reports: SecurityEvalReport[] }>(withProduct('/api/companion/v1/security-evals/reports?limit=12', effectiveProductSurface), effectiveOrgId, productInit)).reports ?? [], []),
+      load(setBusinessModel, () => axisFetch<BusinessModel>('/api/companion/v1/business-model', effectiveOrgId, productInit), null),
+    ] : []
     await Promise.all([
-      load(setSession, () => getSession(), null),
-      load(setAxisOrgs, () => listIAMTenants(orgId), []),
+      load(setAxisOrgs, () => listIAMTenants(effectiveOrgId, 'active', effectiveTenantId), []),
       load(setHealth, () => getHealth(), null),
-      load(setProducts, async () => (await axisFetch<{ products: Product[] }>('/api/companion/v1/products', orgId, productInit)).products ?? [], []),
-      load(setInstallations, async () => (await axisFetch<{ installations: ProductInstallation[] }>(`/api/companion/v1/product-installations?org_id=${encodeURIComponent(orgId)}`, orgId, productInit)).installations ?? [], []),
-      load(setApprovals, async () => (await axisFetch<{ data: Approval[] }>('/api/nexus/v1/approvals/pending', orgId)).data ?? [], []),
-      load(setRequests, async () => (await axisFetch<{ data: NexusRequest[] }>('/api/nexus/v1/requests?limit=12', orgId)).data ?? [], []),
-      load(setPolicies, async () => (await axisFetch<{ data: Policy[] }>('/api/nexus/v1/policies', orgId)).data ?? [], []),
-      load(setActionTypes, async () => (await axisFetch<{ data: ActionType[] }>('/api/nexus/v1/action-types', orgId)).data ?? [], []),
-      load(setDelegations, async () => (await axisFetch<{ data: Delegation[] }>('/api/nexus/v1/delegations', orgId)).data ?? [], []),
-      load(setTasks, async () => filterByProduct((await axisFetch<{ data: CompanionTask[] }>(withProduct('/api/companion/v1/tasks?limit=12', productSurface), orgId, productInit)).data ?? [], productSurface), []),
-      load(setBillingAgentRuns, async () => filterByProduct((await axisFetch<{ data: AgentRun[] }>(withProduct('/api/companion/v1/agent-runs?agent_id=billing_agent&limit=20', productSurface), orgId, productInit)).data ?? [], productSurface), []),
-      load(setTraces, async () => filterByProduct((await axisFetch<{ traces: RunTrace[] }>(withProduct('/api/companion/v1/run-traces?limit=12', productSurface), orgId, productInit)).traces ?? [], productSurface), []),
-      load(setRuntimePolicy, () => axisFetch<RuntimePolicy>('/api/companion/v1/runtime/policy', orgId, productInit), null),
-      load(setAgents, async () => filterByProduct((await axisFetch<{ data: CompanionAgent[] }>(withProduct('/api/companion/v1/agents', productSurface), orgId, productInit)).data ?? [], productSurface), []),
-      load(setCapabilities, async () => filterCapabilities((await axisFetch<{ capabilities: CapabilityRecord[] }>(withProduct('/api/companion/v1/capabilities?limit=100', productSurface), orgId, productInit)).capabilities ?? [], productSurface).slice(0, 12), []),
-      load(setMemoryConflicts, async () => filterByProduct((await axisFetch<{ conflicts: MemoryConflict[] }>(withProduct('/api/companion/v1/memory/conflicts?limit=12', productSurface), orgId, productInit)).conflicts ?? [], productSurface), []),
-      load(setMemoryReviews, async () => filterByProduct((await axisFetch<{ reviews: MemoryReview[] }>(withProduct('/api/companion/v1/memory/reviews?limit=12', productSurface), orgId, productInit)).reviews ?? [], productSurface), []),
-      load(setMemorySummaries, async () => filterByProduct((await axisFetch<{ summaries: MemorySummary[] }>(withProduct('/api/companion/v1/memory/summaries?limit=12', productSurface), orgId, productInit)).summaries ?? [], productSurface), []),
-      load(setJobs, async () => filterByProduct((await axisFetch<{ jobs: CompanionJob[] }>(withProduct('/api/companion/v1/jobs?limit=12', productSurface), orgId, productInit)).jobs ?? [], productSurface), []),
-      load(setEvents, async () => filterByProduct((await axisFetch<{ events: ObservabilityEvent[] }>(withProduct('/api/companion/v1/observability/events?limit=12', productSurface), orgId, productInit)).events ?? [], productSurface), []),
-      load(setCosts, () => axisFetch<CostSummary>(withProduct('/api/companion/v1/runtime/costs', productSurface), orgId, productInit), null),
-      load(setSecurityReports, async () => (await axisFetch<{ reports: SecurityEvalReport[] }>(withProduct('/api/companion/v1/security-evals/reports?limit=12', productSurface), orgId, productInit)).reports ?? [], []),
-      load(setBusinessModel, () => axisFetch<BusinessModel>('/api/companion/v1/business-model', orgId, productInit), null)
+      ...scopedLoads,
     ])
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- tenantId is derived
-    // from orgId+productSurface (a refresh dep); adding it loops (see useMemo above).
   }, [externalTenantId, orgId, productSurface])
 
   const runAction = useCallback(async (label: string, fn: () => Promise<unknown>) => {
@@ -222,7 +255,7 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
   const canViewIAM = Boolean(session.data?.scopes?.some((scope) => scope === 'axis:orgs:admin' || scope === 'axis:users:admin'))
   const canViewControl = Boolean(session.data?.platform_roles?.some((role) => role === 'platform_admin' || role === 'owner'))
   const title = pageTitle(route)
-  const chatAdapter = useMemo<ChatAdapter>(() => axisChatAdapter(orgId, productSurface), [orgId, productSurface])
+  const chatAdapter = useMemo<ChatAdapter>(() => axisChatAdapter(orgId, productSurface, tenantId), [orgId, productSurface, tenantId])
   const navigate = useCallback((next: Route) => {
     window.history.pushState(null, '', routePath(next))
     setRoute(next)
@@ -445,7 +478,7 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
               <div className="screen-grid">
                 <Panel title="Política runtime" icon={<ShieldCheck />} state={runtimePolicy}>
                   <div className="panel-actions">
-                    <button type="button" onClick={() => void runAction('runtime kill switch', () => axisFetch('/api/companion/v1/runtime/policy', orgId, { method: 'PUT', headers: { 'X-Product-Surface': productSurface }, body: JSON.stringify({ kill_switch: !runtimePolicy.data?.kill_switch }) }))}>
+                    <button type="button" onClick={() => void runAction('runtime kill switch', () => axisFetch('/api/companion/v1/runtime/policy', orgId, { method: 'PUT', tenantId, headers: { 'X-Product-Surface': productSurface }, body: JSON.stringify({ kill_switch: !runtimePolicy.data?.kill_switch }) }))}>
                       <Power aria-hidden="true" />Kill switch
                     </button>
                   </div>
@@ -465,7 +498,7 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
                   <div className="panel-actions">
                     <button type="button" disabled={!capabilities.data.some((item) => item.status === 'draft')} onClick={() => {
                       const cap = capabilities.data.find((item) => item.status === 'draft')
-                      if (cap) void runAction('promote manifest', () => axisFetch(`/api/companion/v1/capabilities/${encodeURIComponent(cap.manifest.capability_id)}/versions/${encodeURIComponent(cap.manifest.version)}/promote`, orgId, { method: 'POST', headers: { 'X-Product-Surface': productSurface }, body: '{}' }))
+                      if (cap) void runAction('promote manifest', () => axisFetch(`/api/companion/v1/capabilities/${encodeURIComponent(cap.manifest.capability_id)}/versions/${encodeURIComponent(cap.manifest.version)}/promote`, orgId, { method: 'POST', tenantId, headers: { 'X-Product-Surface': productSurface }, body: '{}' }))
                     }}>
                       <CheckCircle2 aria-hidden="true" />Promote draft
                     </button>
@@ -501,7 +534,7 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
         )}
 
         {route.area === 'agents' && (
-          <AgentsControlCenter orgId={orgId} />
+          <AgentsControlCenter orgId={orgId} tenantId={tenantId} />
         )}
 
         {route.area === 'control' && canViewControl && (
@@ -511,6 +544,7 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
         {route.area === 'iam' && canViewIAM && (
           <IAMControlCenter
             orgId={orgId}
+            tenantId={tenantId}
             productSurface={productSurface}
             orgs={orgOptions}
             onOrgChange={setOrgId}
@@ -525,6 +559,7 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
         {route.area === 'prompts' && (
           <PromptsControlCenter
             orgId={orgId}
+            tenantId={tenantId}
             productSurface={productSurface}
             agents={agents.data}
             initialSection={route.screen === 'agents' ? 'agents' : 'product'}
@@ -571,7 +606,7 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
                   <div className="panel-actions">
                     <button type="button" disabled={!memoryReviews.data.length} onClick={() => {
                       const review = memoryReviews.data[0]
-                      if (review) void runAction('apply memory review', () => axisFetch(`/api/companion/v1/memory/reviews/${encodeURIComponent(review.id)}/apply`, orgId, { method: 'POST', headers: { 'X-Product-Surface': productSurface }, body: '{}' }))
+                      if (review) void runAction('apply memory review', () => axisFetch(`/api/companion/v1/memory/reviews/${encodeURIComponent(review.id)}/apply`, orgId, { method: 'POST', tenantId, headers: { 'X-Product-Surface': productSurface }, body: '{}' }))
                     }}>
                       <CheckCircle2 aria-hidden="true" />Apply review
                     </button>
@@ -614,7 +649,7 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
               <div className="screen-grid">
                 <Panel title="Evals de seguridad" icon={<ShieldCheck />} state={securityReports}>
                   <div className="panel-actions">
-                    <button type="button" onClick={() => void runAction('security eval', () => axisFetch('/api/companion/v1/security-evals/runs', orgId, { method: 'POST', headers: { 'X-Product-Surface': productSurface }, body: JSON.stringify({ suite: 'security-adversarial', product_surface: productSurface }) }))}>
+                    <button type="button" onClick={() => void runAction('security eval', () => axisFetch('/api/companion/v1/security-evals/runs', orgId, { method: 'POST', tenantId, headers: { 'X-Product-Surface': productSurface }, body: JSON.stringify({ suite: 'security-adversarial', product_surface: productSurface }) }))}>
                       <Play aria-hidden="true" />Run suite
                     </button>
                   </div>
@@ -808,8 +843,8 @@ function date(value?: string) {
   return parsed.toLocaleString()
 }
 
-function productHeaders(productSurface: string): RequestInit {
-  return { headers: { 'X-Product-Surface': productSurface } }
+function productHeaders(productSurface: string, tenantId?: string): AxisFetchInit {
+  return { tenantId, headers: { 'X-Product-Surface': productSurface } }
 }
 
 function withProduct(path: string, productSurface: string) {
@@ -869,7 +904,7 @@ function buildTenantOptions(productSurface: string) {
   ]
 }
 
-function axisChatAdapter(orgId: string, productSurface: string): ChatAdapter {
+function axisChatAdapter(orgId: string, productSurface: string, tenantId: string): ChatAdapter {
   return {
     sendMessage: async (input: ChatRequest) => {
       const payload = {
@@ -884,6 +919,7 @@ function axisChatAdapter(orgId: string, productSurface: string): ChatAdapter {
       }
       const response = await axisFetch<Record<string, unknown>>('/api/companion/v1/chat', orgId, {
         method: 'POST',
+        tenantId,
         headers: { 'X-Product-Surface': productSurface },
         body: JSON.stringify(payload),
       })
@@ -901,12 +937,12 @@ function axisChatAdapter(orgId: string, productSurface: string): ChatAdapter {
     listConversations: async (limit = 30) => axisFetch<{ items: ChatConversationSummary[] }>(
       withProduct(`/api/companion/v1/chat/conversations?limit=${encodeURIComponent(String(limit))}`, productSurface),
       orgId,
-      productHeaders(productSurface),
+      productHeaders(productSurface, tenantId),
     ),
     getConversation: async (id: string) => axisFetch<ChatConversationDetail>(
       withProduct(`/api/companion/v1/chat/conversations/${encodeURIComponent(id)}`, productSurface),
       orgId,
-      productHeaders(productSurface),
+      productHeaders(productSurface, tenantId),
     ),
   }
 }

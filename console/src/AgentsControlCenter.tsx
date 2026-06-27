@@ -45,7 +45,7 @@ const PROFILE_AUTONOMY_OPTIONS = [
   { label: 'A5', value: 'A5' },
 ]
 
-export function AgentsControlCenter({ orgId }: { orgId: string }) {
+export function AgentsControlCenter({ orgId, tenantId }: { orgId: string; tenantId: string }) {
   const rootRef = useRef<HTMLElement | null>(null)
   const [activeSection, setActiveSection] = useState<AgentSection>('agents')
   const [lifecycleView, setLifecycleView] = useState<CrudLifecycleView>('active')
@@ -67,17 +67,17 @@ export function AgentsControlCenter({ orgId }: { orgId: string }) {
     label: `${profile.name} · ${profile.profile_id}`,
     value: profile.profile_id,
   })), [activeProfiles])
-  const crudClient = useMemo(() => axisCrudHttpClient(orgId), [orgId])
+  const crudClient = useMemo(() => axisCrudHttpClient(orgId, tenantId), [orgId, tenantId])
   const isActive = selectedOrgId.length > 0 && profileOptions.length > 0
   const refreshProfiles = () => setReloadVersion((current) => current + 1)
 
   useEffect(() => {
-    void loadOrgOptions(orgId, setAxisOrgs)
-  }, [orgId, reloadVersion])
+    void loadOrgOptions(orgId, tenantId, setAxisOrgs)
+  }, [orgId, tenantId, reloadVersion])
 
   useEffect(() => {
-    void loadProfileOptions(orgId, setAgentProfiles, setProfilesError)
-  }, [orgId, reloadVersion, activeSection])
+    void loadProfileOptions(orgId, tenantId, setAgentProfiles, setProfilesError)
+  }, [orgId, tenantId, reloadVersion, activeSection])
 
   // El org lo gobierna el selector global (izquierda del avatar): seguimos al
   // orgId global en vez de tener un selector propio.
@@ -239,13 +239,13 @@ export function AgentsControlCenter({ orgId }: { orgId: string }) {
           featureFlags={{ csvToolbar: false }}
         />
       ) : (
-        <AgentProfilesCrud orgId={orgId} onChanged={refreshProfiles} />
+        <AgentProfilesCrud orgId={orgId} tenantId={tenantId} onChanged={refreshProfiles} />
       )}
     </section>
   )
 }
 
-function AgentProfilesCrud({ orgId, onChanged }: { orgId: string; onChanged: () => void }) {
+function AgentProfilesCrud({ orgId, tenantId, onChanged }: { orgId: string; tenantId: string; onChanged: () => void }) {
   const rootRef = useRef<HTMLDivElement | null>(null)
   const [profileView, setProfileView] = useState<CrudLifecycleView>('active')
   const [selectedProfileIds, setSelectedProfileIds] = useState<string[]>([])
@@ -253,36 +253,36 @@ function AgentProfilesCrud({ orgId, onChanged }: { orgId: string; onChanged: () 
   const [profileBulkBusy, setProfileBulkBusy] = useState(false)
   const dataSource: NonNullable<CrudPageProps<ProfileCrudRow>['dataSource']> = {
     async list({ view }) {
-      const profiles = await listAgentProfiles(orgId, view)
+      const profiles = await listAgentProfiles(orgId, view, tenantId)
       return profiles.map(profileToRow)
     },
     async create(values) {
       const profileId = stringValue(values.profile_id)
-      await upsertAgentProfile(orgId, profileId, profilePayload(values, true))
+      await upsertAgentProfile(orgId, profileId, profilePayload(values, true), tenantId)
       onChanged()
     },
     async update(row, values) {
-      await upsertAgentProfile(orgId, row.profile_id, profilePayload(values, row.enabled))
+      await upsertAgentProfile(orgId, row.profile_id, profilePayload(values, row.enabled), tenantId)
       onChanged()
     },
     async archive(row) {
-      await archiveAgentProfile(orgId, row.profile_id)
+      await archiveAgentProfile(orgId, row.profile_id, tenantId)
       onChanged()
     },
     async trash(row) {
-      await trashAgentProfile(orgId, row.profile_id)
+      await trashAgentProfile(orgId, row.profile_id, tenantId)
       onChanged()
     },
     async unarchive(row) {
-      await restoreAgentProfile(orgId, row.profile_id)
+      await restoreAgentProfile(orgId, row.profile_id, tenantId)
       onChanged()
     },
     async restore(row) {
-      await restoreAgentProfile(orgId, row.profile_id)
+      await restoreAgentProfile(orgId, row.profile_id, tenantId)
       onChanged()
     },
     async purge(row) {
-      await purgeAgentProfile(orgId, row.profile_id)
+      await purgeAgentProfile(orgId, row.profile_id, tenantId)
       onChanged()
     },
   }
@@ -313,13 +313,13 @@ function AgentProfilesCrud({ orgId, onChanged }: { orgId: string; onChanged: () 
     try {
       for (const profileId of selectedProfileIds) {
         if (action === 'archive') {
-          await archiveAgentProfile(orgId, profileId)
+          await archiveAgentProfile(orgId, profileId, tenantId)
         } else if (action === 'trash') {
-          await trashAgentProfile(orgId, profileId)
+          await trashAgentProfile(orgId, profileId, tenantId)
         } else if (action === 'restore') {
-          await restoreAgentProfile(orgId, profileId)
+          await restoreAgentProfile(orgId, profileId, tenantId)
         } else {
-          await purgeAgentProfile(orgId, profileId)
+          await purgeAgentProfile(orgId, profileId, tenantId)
         }
       }
       clearSelectedProfiles()
@@ -629,9 +629,9 @@ function lifecycleToolbarActions(view: CrudLifecycleView, onChange: (view: CrudL
   ]
 }
 
-async function loadOrgOptions(orgId: string, setAxisOrgs: (rows: AxisTenantView[]) => void) {
+async function loadOrgOptions(orgId: string, tenantId: string, setAxisOrgs: (rows: AxisTenantView[]) => void) {
   try {
-    setAxisOrgs(await listIAMTenants(orgId))
+    setAxisOrgs(await listIAMTenants(orgId, 'active', tenantId))
   } catch {
     setAxisOrgs([])
   }
@@ -639,11 +639,12 @@ async function loadOrgOptions(orgId: string, setAxisOrgs: (rows: AxisTenantView[
 
 async function loadProfileOptions(
   orgId: string,
+  tenantId: string,
   setAgentProfiles: (rows: AxisAgentProfileView[]) => void,
   setProfilesError: (message: string) => void,
 ) {
   try {
-    const profiles = await listAgentProfiles(orgId)
+    const profiles = await listAgentProfiles(orgId, 'active', tenantId)
     setAgentProfiles(profiles)
     setProfilesError('')
   } catch (err) {
