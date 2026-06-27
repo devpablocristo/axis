@@ -44,7 +44,7 @@ func (s *server) controlAPI(w http.ResponseWriter, r *http.Request) {
 func (s *server) controlListOrgs(w http.ResponseWriter, r *http.Request) {
 	orgs, err := s.iam.ListOrgsForActor(r.Context(), "", true) // cross=true -> all companies
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "INTERNAL", err.Error())
+		writeStoreError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": orgs})
@@ -61,7 +61,7 @@ func (s *server) controlCreateOrg(w http.ResponseWriter, r *http.Request, p auth
 	}
 	org, err := s.iam.CreateOrg(r.Context(), IAMOrg{Name: strings.TrimSpace(body.Name), Slug: slugify(firstNonEmpty(body.Slug, body.Name)), Status: "active"}, p.Actor)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "INTERNAL", err.Error())
+		writeStoreError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, org)
@@ -70,7 +70,7 @@ func (s *server) controlCreateOrg(w http.ResponseWriter, r *http.Request, p auth
 func (s *server) controlListTenants(w http.ResponseWriter, r *http.Request) {
 	tenants, err := s.iam.ListTenants(r.Context(), strings.TrimSpace(r.URL.Query().Get("org_id")))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "INTERNAL", err.Error())
+		writeStoreError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": tenants})
@@ -100,12 +100,12 @@ func (s *server) controlProvisionTenant(w http.ResponseWriter, r *http.Request) 
 		Status:         "active",
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "INTERNAL", err.Error())
+		writeStoreError(w, err)
 		return
 	}
 	if owner := strings.TrimSpace(body.OwnerUserID); owner != "" {
 		if _, err := s.iam.UpsertTenantMember(r.Context(), IAMTenantMember{TenantID: tenant.ID, UserID: owner, Role: "owner", Status: "active"}); err != nil {
-			writeError(w, http.StatusInternalServerError, "INTERNAL", err.Error())
+			writeStoreError(w, err)
 			return
 		}
 	}
@@ -139,7 +139,7 @@ func (s *server) controlGrantPlatformRole(w http.ResponseWriter, r *http.Request
 	}
 	role := firstNonEmpty(strings.TrimSpace(body.Role), "platform_admin")
 	if err := s.iam.SetPlatformRole(r.Context(), strings.TrimSpace(body.UserID), role); err != nil {
-		writeError(w, http.StatusInternalServerError, "INTERNAL", err.Error())
+		writeStoreError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"user_id": body.UserID, "role": role})
@@ -161,7 +161,7 @@ func (s *server) controlAddTenantMember(w http.ResponseWriter, r *http.Request, 
 		Status:   "active",
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "INTERNAL", err.Error())
+		writeStoreError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, member)

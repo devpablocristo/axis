@@ -1033,6 +1033,29 @@ func TestClerkWebhookUserDeletedRemovesAxisUser(t *testing.T) {
 	}
 }
 
+// sessionStoreErrStore makes the first session() store read fail, to prove the
+// handler surfaces a store outage instead of rendering an empty session.
+type sessionStoreErrStore struct {
+	IAMStore
+}
+
+func (sessionStoreErrStore) ListOrgsForActor(context.Context, string, bool) ([]IAMOrg, error) {
+	return nil, fmt.Errorf("store down")
+}
+
+func TestSessionSurfacesStoreError(t *testing.T) {
+	srv := &server{iam: sessionStoreErrStore{}}
+	req := httptest.NewRequest(http.MethodGet, "/v1/session", nil)
+	req = req.WithContext(context.WithValue(req.Context(), principalContextKey{}, authn.Principal{Actor: "user-a", OrgID: "org-a"}))
+	rec := httptest.NewRecorder()
+
+	srv.session(rec, req)
+
+	if rec.Code == http.StatusOK {
+		t.Fatalf("expected store outage to surface as non-200, got 200 body=%s", rec.Body.String())
+	}
+}
+
 func newTestServer(target string, scopes []string) (*server, error) {
 	return newServer(config{
 		AuthMode:          "dev",
