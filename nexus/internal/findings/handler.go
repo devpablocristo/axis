@@ -11,7 +11,6 @@ import (
 	findingdto "github.com/devpablocristo/nexus/internal/findings/handler/dto"
 	domain "github.com/devpablocristo/nexus/internal/findings/usecases/domain"
 	"github.com/devpablocristo/platform/authn/go/identityhttp"
-	"github.com/devpablocristo/platform/errors/go/domainerr"
 	"github.com/devpablocristo/platform/http/go/httpjson"
 	"github.com/google/uuid"
 )
@@ -394,18 +393,13 @@ func parsePathUUID(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
 // (incl. read-path DB failures) is logged + 500 generic, instead of the old
 // blanket 400-VALIDATION that leaked raw internal error text.
 func writeUsecaseError(w http.ResponseWriter, err error) {
-	switch {
-	case errors.Is(err, ErrNotFound) || domainerr.IsNotFound(err):
+	// Local sentinel maps to the same NOT_FOUND; everything else delegates to the
+	// shared platform classifier (domainerr kind -> status + flat error).
+	if errors.Is(err, ErrNotFound) {
 		httpjson.WriteFlatError(w, http.StatusNotFound, "NOT_FOUND", "not found")
-	case domainerr.IsValidation(err):
-		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", err.Error())
-	case domainerr.IsForbidden(err):
-		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", err.Error())
-	case domainerr.IsConflict(err):
-		httpjson.WriteFlatError(w, http.StatusConflict, "CONFLICT", err.Error())
-	default:
-		httpjson.WriteFlatInternalError(w, err, "findings request failed")
+		return
 	}
+	httpjson.WriteFlatErrorFrom(w, err, "findings request failed")
 }
 
 func ruleResponse(rule domain.FindingRule) findingdto.FindingRuleResponse {
