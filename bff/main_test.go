@@ -584,8 +584,14 @@ func TestSimpleIAMTenantsProductsAndUsers(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &userBody); err != nil {
 		t.Fatal(err)
 	}
-	if userBody.Item.TenantID != tenantBody.Item.ID || userBody.Item.Role != "admin" {
-		t.Fatalf("expected tenant admin user, got %#v", userBody.Item)
+	// Modelo nuevo: crear user con tenant_id=<org> lo agrega al tenant 'axis' del
+	// org (no a un legacy org-member). OrgID = el org; TenantID = su tenant 'axis'
+	// (≠ org id); Scope = tenant; Role = admin.
+	if userBody.Item.OrgID != tenantBody.Item.ID || userBody.Item.Role != "admin" || userBody.Item.Scope != "tenant" {
+		t.Fatalf("expected tenant admin user in org's 'axis' tenant, got %#v", userBody.Item)
+	}
+	if userBody.Item.TenantID == "" || userBody.Item.TenantID == tenantBody.Item.ID {
+		t.Fatalf("expected a real 'axis' tenant id (≠ org id), got %q", userBody.Item.TenantID)
 	}
 
 	req = httptest.NewRequest(http.MethodPost, "/api/iam/users", strings.NewReader(fmt.Sprintf(`{"org_id":%q,"email":"ops@pymes.local","role":"member"}`, tenantBody.Item.ID)))

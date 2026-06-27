@@ -263,6 +263,10 @@ func writeStoreError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusNotFound, "NOT_FOUND", "resource not found")
 		return
 	}
+	if errors.Is(err, errValidation) {
+		writeError(w, http.StatusBadRequest, "VALIDATION", err.Error())
+		return
+	}
 	if errors.Is(err, errIdentityProviderNotConfigured) {
 		writeError(w, http.StatusServiceUnavailable, "IDENTITY_PROVIDER_NOT_CONFIGURED", "identity provider is not configured")
 		return
