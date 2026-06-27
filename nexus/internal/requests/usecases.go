@@ -301,7 +301,12 @@ func (u *Usecases) Submit(ctx context.Context, in SubmitInput) (SubmitOutput, er
 	if u.actionTypes != nil {
 		atInfo, atErr := u.actionTypes.GetByName(ctx, req.ActionType, req.OrgID)
 		if atErr != nil {
-			return SubmitOutput{}, fmt.Errorf("unknown action_type: %s", req.ActionType)
+			if domainerr.IsNotFound(atErr) {
+				return SubmitOutput{}, fmt.Errorf("unknown action_type: %s", req.ActionType)
+			}
+			// Una falla de infra (DB caída, etc.) NO debe enmascararse como
+			// "unknown action_type" (que el handler mapea a 403): propagarla → 500.
+			return SubmitOutput{}, fmt.Errorf("validate action_type %q: %w", req.ActionType, atErr)
 		}
 		if !atInfo.Enabled {
 			return SubmitOutput{}, fmt.Errorf("action_type %s is disabled", req.ActionType)
@@ -952,7 +957,10 @@ func (u *Usecases) Simulate(ctx context.Context, in SubmitInput) (SimulateOutput
 	if u.actionTypes != nil {
 		atInfo, atErr := u.actionTypes.GetByName(ctx, req.ActionType, req.OrgID)
 		if atErr != nil {
-			return SimulateOutput{}, fmt.Errorf("unknown action_type: %s", req.ActionType)
+			if domainerr.IsNotFound(atErr) {
+				return SimulateOutput{}, fmt.Errorf("unknown action_type: %s", req.ActionType)
+			}
+			return SimulateOutput{}, fmt.Errorf("validate action_type %q: %w", req.ActionType, atErr)
 		}
 		if !atInfo.Enabled {
 			return SimulateOutput{}, fmt.Errorf("action_type %s is disabled", req.ActionType)
