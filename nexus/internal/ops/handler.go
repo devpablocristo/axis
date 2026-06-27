@@ -8,27 +8,16 @@ import (
 
 	"github.com/devpablocristo/nexus/internal/orgctx"
 	"github.com/devpablocristo/platform/authn/go/identityhttp"
-	"github.com/devpablocristo/platform/errors/go/domainerr"
 	"github.com/devpablocristo/platform/http/go/httpjson"
 	"github.com/google/uuid"
 )
 
 // writeOpsError maps a usecase error to its proper HTTP status (NotFound→404,
 // Validation→400, Forbidden→403, Conflict→409) instead of masking everything as
-// 500; unexpected errors are logged + 500 generic via WriteFlatInternalError.
+// 500; unexpected errors are logged + 500 generic. Delegates to the shared
+// platform classifier so the kind→status mapping lives in one place.
 func writeOpsError(w http.ResponseWriter, err error, op string) {
-	switch {
-	case domainerr.IsNotFound(err):
-		httpjson.WriteFlatError(w, http.StatusNotFound, "NOT_FOUND", "not found")
-	case domainerr.IsValidation(err):
-		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", err.Error())
-	case domainerr.IsForbidden(err):
-		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", err.Error())
-	case domainerr.IsConflict(err):
-		httpjson.WriteFlatError(w, http.StatusConflict, "CONFLICT", err.Error())
-	default:
-		httpjson.WriteFlatInternalError(w, err, op)
-	}
+	httpjson.WriteFlatErrorFrom(w, err, op)
 }
 
 type summaryUsecase interface {
