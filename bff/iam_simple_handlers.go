@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"strings"
@@ -459,69 +460,87 @@ func (s *server) createIAMUserView(r *http.Request, p authn.Principal, input IAM
 	if role == "" {
 		role = "member"
 	}
-	orgID := iamUserInputOrgID(input)
-	// Tenant-aware create: when the active tenant (X-Tenant-ID) belongs to the
-	// selected org, the new user becomes a TENANT member (axis_tenant_members)
-	// with its tenant role. We create the identity WITHOUT a Clerk org membership
-	// (org id here is an Axis company, not a Clerk org → that call would 404).
-	if tid := strings.TrimSpace(r.Header.Get("X-Tenant-ID")); tid != "" && orgID != "" && orgID != "axis" {
-		if tenant, terr := s.iam.TenantByID(r.Context(), tid); terr == nil && tenant.OrgID == orgID {
-			if !s.canAccessOrg(r, p, orgID) {
-				return IAMUserView{}, errNotFound
-			}
-			// 1) Identity lives in Clerk + membership in the Clerk ORG (company).
-			// 'owner' is a global role, not a Clerk org role → join the company as
-			// admin. Find-or-create the identity, then ensure the org membership.
-			companyRole := role
-			if companyRole == "owner" {
-				companyRole = "admin"
-			}
-			user, found, ferr := s.findIAMUserByEmail(r.Context(), input.Email)
-			if ferr != nil {
-				return IAMUserView{}, ferr
-			}
-			if found {
-				if err := s.upsertIAMMember(r.Context(), orgID, user.ID, companyRole); err != nil {
-					return IAMUserView{}, err
-				}
-			} else {
-				created, cerr := s.createIAMUser(r.Context(), orgID, IAMUser{Email: input.Email, Name: input.Email, Role: companyRole, Status: "active"})
-				if cerr != nil {
-					return IAMUserView{}, cerr
-				}
-				user = created
-			}
-			// 2+3) Per-product access (axis_tenant_members) + the global owner
-			// platform role applied atomically. On create we never demote a global
-			// owner, so non-owner roles keep platform roles untouched.
-			op := platformRoleKeep
-			if role == "owner" {
-				op = platformRoleGrantOwner
-			}
-			if err := s.iam.SetTenantMembership(r.Context(), tenant.ID, user.ID, role, "active", op); err != nil {
-				return IAMUserView{}, err
-			}
-			return IAMUserView{ID: tenantUserRowID(tenant.ID, user.ID), UserID: user.ID, Email: user.Email, Role: role, OrgID: tenant.OrgID, TenantID: tenant.ID, Scope: "tenant", Status: "active", CreatedAt: user.CreatedAt, UpdatedAt: user.UpdatedAt}, nil
+	// Un user SIEMPRE se crea DENTRO de un tenant (org × product). El tenant
+	// objetivo viene del header X-Tenant-ID o del body (tenant_id / org_id): un
+	// tenant id real se usa directo; un org id resuelve al tenant 'axis' (workspace
+	// de admin) por defecto de ese org (todo org tiene uno — ver
+	// ensureOrgDefaultTenant). El caso global/plataforma (org "axis"/vacío) se
+	// maneja abajo. El path legacy org-member (axis_org_members como authz) se retiró.
+	ref := firstNonEmpty(strings.TrimSpace(r.Header.Get("X-Tenant-ID")), strings.TrimSpace(input.TenantID), strings.TrimSpace(input.OrgID))
+	if ref != "" && !strings.EqualFold(ref, "axis") {
+		tenant, ok := s.resolveTargetTenant(r.Context(), ref)
+		if !ok {
+			return IAMUserView{}, fmt.Errorf("%w: no resuelve ningún tenant para %q (un user se crea dentro de un tenant)", errValidation, ref)
 		}
-	}
-	if orgID == "" || orgID == "axis" {
-		if !hasScope(p.Scopes, "axis:cross_org", "axis:users:admin") {
+		if !s.canAccessOrg(r, p, tenant.OrgID) {
 			return IAMUserView{}, errNotFound
 		}
-		user, err := s.createIAMUser(r.Context(), "", IAMUser{Email: input.Email, Name: input.Email, Role: role, AxisRole: role, Status: "active"})
-		if err != nil {
+		// Identidad en Clerk + membership en el ORG de Clerk (company). 'owner' es
+		// rol global, no rol de org de Clerk → entra a la company como admin.
+		companyRole := role
+		if companyRole == "owner" {
+			companyRole = "admin"
+		}
+		user, found, ferr := s.findIAMUserByEmail(r.Context(), input.Email)
+		if ferr != nil {
+			return IAMUserView{}, ferr
+		}
+		if found {
+			if err := s.upsertIAMMember(r.Context(), tenant.OrgID, user.ID, companyRole); err != nil {
+				return IAMUserView{}, err
+			}
+		} else {
+			created, cerr := s.createIAMUser(r.Context(), tenant.OrgID, IAMUser{Email: input.Email, Name: input.Email, Role: companyRole, Status: "active"})
+			if cerr != nil {
+				return IAMUserView{}, cerr
+			}
+			user = created
+		}
+		// Acceso per-product (axis_tenant_members) + rol owner de plataforma,
+		// aplicados atómicamente. En create nunca degradamos a un owner global.
+		op := platformRoleKeep
+		if role == "owner" {
+			op = platformRoleGrantOwner
+		}
+		if err := s.iam.SetTenantMembership(r.Context(), tenant.ID, user.ID, role, "active", op); err != nil {
 			return IAMUserView{}, err
 		}
-		return globalUserView(user), nil
+		return IAMUserView{ID: tenantUserRowID(tenant.ID, user.ID), UserID: user.ID, Email: user.Email, Role: role, OrgID: tenant.OrgID, TenantID: tenant.ID, Scope: "tenant", Status: "active", CreatedAt: user.CreatedAt, UpdatedAt: user.UpdatedAt}, nil
 	}
-	if !s.canAccessOrg(r, p, orgID) {
+	// User global / de plataforma (org "axis" o sin especificar): sin membership de
+	// tenant. Requiere scope cross-org / users:admin.
+	if !hasScope(p.Scopes, "axis:cross_org", "axis:users:admin") {
 		return IAMUserView{}, errNotFound
 	}
-	user, err := s.createIAMUser(r.Context(), orgID, IAMUser{Email: input.Email, Name: input.Email, Role: role, Status: "active"})
+	user, err := s.createIAMUser(r.Context(), "", IAMUser{Email: input.Email, Name: input.Email, Role: role, AxisRole: role, Status: "active"})
 	if err != nil {
 		return IAMUserView{}, err
 	}
-	return IAMUserView{ID: tenantUserRowID(orgID, user.ID), UserID: user.ID, Email: user.Email, Role: role, OrgID: orgID, TenantID: orgID, Scope: "tenant", Status: "active", CreatedAt: user.CreatedAt, UpdatedAt: user.UpdatedAt}, nil
+	return globalUserView(user), nil
+}
+
+// resolveTargetTenant mapea un ref (un tenant id, o un org id) al tenant donde el
+// user debe entrar: un tenant id real se devuelve tal cual; un org id resuelve al
+// tenant 'axis' (workspace por defecto) de ese org.
+func (s *server) resolveTargetTenant(ctx context.Context, ref string) (IAMTenant, bool) {
+	if t, err := s.iam.TenantByID(ctx, ref); err == nil {
+		return t, true
+	}
+	return s.orgDefaultTenant(ctx, ref)
+}
+
+// orgDefaultTenant devuelve el tenant 'axis' (workspace por defecto) del org.
+func (s *server) orgDefaultTenant(ctx context.Context, orgID string) (IAMTenant, bool) {
+	tenants, err := s.iam.ListTenants(ctx, orgID)
+	if err != nil {
+		return IAMTenant{}, false
+	}
+	for _, t := range tenants {
+		if t.ProductSurface == defaultOrgProductSurface {
+			return t, true
+		}
+	}
+	return IAMTenant{}, false
 }
 
 func (s *server) updateIAMUserView(r *http.Request, p authn.Principal, ref string, input IAMUserView) (IAMUserView, error) {
@@ -817,17 +836,6 @@ func iamUsersOrgFilter(r *http.Request) string {
 	orgID := strings.TrimSpace(r.URL.Query().Get("org_id"))
 	if orgID == "" {
 		orgID = strings.TrimSpace(r.URL.Query().Get("tenant_id"))
-	}
-	if strings.EqualFold(orgID, "axis") {
-		return "axis"
-	}
-	return orgID
-}
-
-func iamUserInputOrgID(input IAMUserView) string {
-	orgID := strings.TrimSpace(input.OrgID)
-	if orgID == "" {
-		orgID = strings.TrimSpace(input.TenantID)
 	}
 	if strings.EqualFold(orgID, "axis") {
 		return "axis"

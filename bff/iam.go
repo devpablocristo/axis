@@ -1144,6 +1144,10 @@ func (s *sqlIAMStore) findUser(ctx context.Context, actor string) (IAMUser, bool
 
 var errNotFound = errors.New("not found")
 
+// errValidation marca una falla de validación del cliente; writeStoreError la
+// mapea a HTTP 400 (en vez del 500 por defecto de errores sin clasificar).
+var errValidation = errors.New("validation")
+
 func ensureDeleted(result sql.Result) error {
 	count, err := result.RowsAffected()
 	if err != nil {
