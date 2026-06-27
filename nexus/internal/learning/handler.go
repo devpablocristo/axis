@@ -247,7 +247,8 @@ func writeLearningUsecaseError(w http.ResponseWriter, err error) {
 		httpjson.WriteFlatError(w, http.StatusNotFound, "NOT_FOUND", "proposal not found")
 		return
 	}
-	httpjson.WriteFlatInternalError(w, err, "learning operation failed")
+	// Resto: clasificar con el helper de platform en vez de enmascarar como 500.
+	httpjson.WriteFlatErrorFrom(w, err, "learning operation failed")
 }
 
 func decisionActorID(r *http.Request, explicit string) string {
