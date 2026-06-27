@@ -93,7 +93,7 @@ func (s *server) iamTenants(w http.ResponseWriter, r *http.Request, parts []stri
 		}
 		org, err := s.createIAMOrg(r.Context(), p.Actor, IAMOrg{Name: input.Name, Status: firstNonEmpty(input.Status, "active")})
 		if err == nil {
-			s.auditIAM(r, p, org.ID, "tenant.created", "tenant", org.ID, map[string]any{"name": org.Name, "status": org.Status})
+			s.auditIAM(r, p, org.ID, "org.created", "org", org.ID, map[string]any{"name": org.Name, "status": org.Status})
 		}
 		writeStoreCreated(w, map[string]any{"item": tenantView(org)}, err)
 		return
@@ -104,13 +104,17 @@ func (s *server) iamTenants(w http.ResponseWriter, r *http.Request, parts []stri
 			if !requireScope(w, p, "axis:orgs:write", "axis:orgs:admin") {
 				return
 			}
+			if !s.canAccessOrg(r, p, tenantID) {
+				writeError(w, http.StatusForbidden, "FORBIDDEN", "selected org is not allowed for this principal")
+				return
+			}
 			input, ok := decodeJSONBody[IAMTenantView](w, r)
 			if !ok {
 				return
 			}
 			org, err := s.updateIAMOrg(r.Context(), tenantID, IAMOrg{Name: input.Name, Status: input.Status})
 			if err == nil {
-				s.auditIAM(r, p, tenantID, "tenant.updated", "tenant", tenantID, map[string]any{"name": input.Name, "status": input.Status})
+				s.auditIAM(r, p, tenantID, "org.updated", "org", tenantID, map[string]any{"name": input.Name, "status": input.Status})
 			}
 			writeStoreResult(w, map[string]any{"item": tenantView(org)}, err)
 			return
@@ -132,9 +136,13 @@ func (s *server) iamTenantLifecycle(w http.ResponseWriter, r *http.Request, p au
 		if !requireScope(w, p, "axis:iam:purge") {
 			return
 		}
+		if !s.canAccessOrg(r, p, tenantID) {
+			writeError(w, http.StatusForbidden, "FORBIDDEN", "selected org is not allowed for this principal")
+			return
+		}
 		err := s.deleteIAMOrg(r.Context(), tenantID)
 		if err == nil {
-			s.auditIAM(r, p, tenantID, "tenant.purged", "tenant", tenantID, nil)
+			s.auditIAM(r, p, tenantID, "org.purged", "org", tenantID, nil)
 		}
 		writeStoreNoContent(w, err)
 		return
@@ -146,6 +154,10 @@ func (s *server) iamTenantLifecycle(w http.ResponseWriter, r *http.Request, p au
 	if !requireScope(w, p, "axis:orgs:write", "axis:orgs:admin") {
 		return
 	}
+	if !s.canAccessOrg(r, p, tenantID) {
+		writeError(w, http.StatusForbidden, "FORBIDDEN", "selected org is not allowed for this principal")
+		return
+	}
 	status := statusForIAMAction(action)
 	if status == "" {
 		http.NotFound(w, r)
@@ -153,7 +165,7 @@ func (s *server) iamTenantLifecycle(w http.ResponseWriter, r *http.Request, p au
 	}
 	org, err := s.updateIAMOrg(r.Context(), tenantID, IAMOrg{Status: status})
 	if err == nil {
-		s.auditIAM(r, p, tenantID, "tenant."+action, "tenant", tenantID, map[string]any{"status": status})
+		s.auditIAM(r, p, tenantID, "org."+action, "org", tenantID, map[string]any{"status": status})
 	}
 	writeStoreResult(w, map[string]any{"item": tenantView(org)}, err)
 }
@@ -471,14 +483,14 @@ func (s *server) createIAMUserView(r *http.Request, p authn.Principal, input IAM
 				}
 				user = created
 			}
-			// 2) 'owner' grants global access to everything (platform role).
+			// 2+3) Per-product access (axis_tenant_members) + the global owner
+			// platform role applied atomically. On create we never demote a global
+			// owner, so non-owner roles keep platform roles untouched.
+			op := platformRoleKeep
 			if role == "owner" {
-				if err := s.iam.SetPlatformRole(r.Context(), user.ID, "owner"); err != nil {
-					return IAMUserView{}, err
-				}
+				op = platformRoleGrantOwner
 			}
-			// 3) Per-product access = membership in this tenant (org x product).
-			if _, err := s.iam.UpsertTenantMember(r.Context(), IAMTenantMember{TenantID: tenant.ID, UserID: user.ID, Role: role, Status: "active"}); err != nil {
+			if err := s.iam.SetTenantMembership(r.Context(), tenant.ID, user.ID, role, "active", op); err != nil {
 				return IAMUserView{}, err
 			}
 			return IAMUserView{ID: tenantUserRowID(tenant.ID, user.ID), UserID: user.ID, Email: user.Email, Role: role, OrgID: tenant.OrgID, TenantID: tenant.ID, Scope: "tenant", Status: "active", CreatedAt: user.CreatedAt, UpdatedAt: user.UpdatedAt}, nil
@@ -534,18 +546,14 @@ func (s *server) updateIAMUserView(r *http.Request, p authn.Principal, ref strin
 				return IAMUserView{}, err
 			}
 		}
+		// Tenant role + global owner transition applied atomically: on edit a
+		// non-owner role REVOKES the global owner platform role (demotion), an
+		// owner role GRANTS it — and the tenant-member row commits in the same tx.
+		op := platformRoleRevokeOwner
 		if newRole == "owner" {
-			if err := s.iam.SetPlatformRole(r.Context(), ref0.userID, "owner"); err != nil {
-				return IAMUserView{}, err
-			}
-		} else {
-			// Demotion: drop the global owner platform role (idempotent no-op if
-			// the user never had it) so an ex-owner loses super-admin access.
-			if err := s.iam.RemovePlatformRole(r.Context(), ref0.userID, "owner"); err != nil {
-				return IAMUserView{}, err
-			}
+			op = platformRoleGrantOwner
 		}
-		if _, err := s.iam.UpsertTenantMember(r.Context(), IAMTenantMember{TenantID: ref0.tenant.ID, UserID: ref0.userID, Role: newRole, Status: status}); err != nil {
+		if err := s.iam.SetTenantMembership(r.Context(), ref0.tenant.ID, ref0.userID, newRole, status, op); err != nil {
 			return IAMUserView{}, err
 		}
 		if view, ok := s.tenantUserView(r.Context(), ref0.tenant, ref0.userID); ok {

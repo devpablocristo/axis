@@ -184,6 +184,21 @@ func (s *memoryIAMStore) RemovePlatformRole(_ context.Context, userID string, ro
 	return nil
 }
 
+// SetTenantMembership: the memory store is single-process, so sequential writes
+// are equivalent to the sql transaction (used only in dev/tests).
+func (s *memoryIAMStore) SetTenantMembership(ctx context.Context, tenantID, userID, role, status string, op platformRoleOp) error {
+	if _, err := s.UpsertTenantMember(ctx, IAMTenantMember{TenantID: tenantID, UserID: userID, Role: role, Status: firstNonEmpty(status, "active")}); err != nil {
+		return err
+	}
+	switch op {
+	case platformRoleGrantOwner:
+		return s.SetPlatformRole(ctx, userID, "owner")
+	case platformRoleRevokeOwner:
+		return s.RemovePlatformRole(ctx, userID, "owner")
+	}
+	return nil
+}
+
 // --- sqlIAMStore ---
 
 const tenantColumns = `id, org_id, product_surface, name, status, plan, created_at, updated_at`
@@ -360,4 +375,33 @@ func (s *sqlIAMStore) SetPlatformRole(ctx context.Context, userID string, role s
 func (s *sqlIAMStore) RemovePlatformRole(ctx context.Context, userID string, role string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM axis_platform_roles WHERE user_id = $1 AND role = $2`, userID, role)
 	return err
+}
+
+func (s *sqlIAMStore) SetTenantMembership(ctx context.Context, tenantID, userID, role, status string, op platformRoleOp) error {
+	role = firstNonEmpty(role, "member")
+	status = firstNonEmpty(status, "active")
+	now := time.Now().UTC()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO axis_tenant_members (tenant_id, user_id, role, status, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $5)
+		ON CONFLICT (tenant_id, user_id) DO UPDATE SET role = EXCLUDED.role, status = EXCLUDED.status, updated_at = EXCLUDED.updated_at
+	`, tenantID, userID, role, status, now); err != nil {
+		return err
+	}
+	switch op {
+	case platformRoleGrantOwner:
+		if _, err := tx.ExecContext(ctx, `INSERT INTO axis_platform_roles (user_id, role) VALUES ($1, 'owner') ON CONFLICT (user_id, role) DO NOTHING`, userID); err != nil {
+			return err
+		}
+	case platformRoleRevokeOwner:
+		if _, err := tx.ExecContext(ctx, `DELETE FROM axis_platform_roles WHERE user_id = $1 AND role = 'owner'`, userID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }

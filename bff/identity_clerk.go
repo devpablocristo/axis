@@ -412,6 +412,15 @@ func (a *clerkIdentityAdapter) HandleWebhook(ctx context.Context, eventType stri
 	case "organization.created", "organization.updated":
 		_, err := a.store.CreateOrg(ctx, clerkOrg(data, IAMOrg{Status: "active"}), "")
 		return err
+	case "user.deleted":
+		// Keep Axis in sync when a user is removed in Clerk (the IdP). Without
+		// this the axis_users row would orphan: Clerk is the source of truth for
+		// identity existence, while Axis owns authz (memberships/roles).
+		id := clerkString(data, "id")
+		if id == "" {
+			return nil
+		}
+		return a.store.DeleteUser(ctx, id)
 	case "organization.deleted":
 		id := clerkString(data, "id")
 		if id == "" {

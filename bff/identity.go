@@ -106,13 +106,6 @@ func (s *server) updateIAMMember(ctx context.Context, orgID string, userID strin
 	return s.iam.UpdateMember(ctx, orgID, userID, input)
 }
 
-func (s *server) deleteIAMMember(ctx context.Context, orgID string, userID string) error {
-	if s.identity != nil {
-		return s.identity.DeleteMember(ctx, orgID, userID)
-	}
-	return s.iam.DeleteMember(ctx, orgID, userID)
-}
-
 func axisPrincipalFromIdentity(p authn.Principal) authn.Principal {
 	axisRole := normalizedRole(claimRole(p.Claims, "axis_role"))
 	orgRole := normalizedRole(claimRole(p.Claims, "org_role"))
@@ -155,6 +148,35 @@ func isPlatformAdmin(platformRoles []string) bool {
 		}
 	}
 	return false
+}
+
+// scopesFromAxisOrg derives a principal's scopes from Axis's OWN authz data —
+// platform roles (Control Plane) plus the user's membership role in the given
+// org — instead of the Clerk token claims. Returns nil when Axis has no authz
+// record for the user yet, letting the caller apply a migration-safe fallback
+// so the cutover off Clerk-derived scopes locks no one out.
+func (s *server) scopesFromAxisOrg(ctx context.Context, actor, orgID string) []string {
+	platformRoles, _ := s.iam.PlatformRolesForUser(ctx, actor)
+	role := s.orgMemberRole(ctx, orgID, actor)
+	return scopesForTenant(role, platformRoles)
+}
+
+// orgMemberRole returns the actor's role in the org per Axis membership, or ""
+// when the actor is not a recorded member (or the lookup fails).
+func (s *server) orgMemberRole(ctx context.Context, orgID, actor string) string {
+	if strings.TrimSpace(orgID) == "" || strings.TrimSpace(actor) == "" {
+		return ""
+	}
+	members, err := s.iam.ListMembers(ctx, orgID)
+	if err != nil {
+		return ""
+	}
+	for _, m := range members {
+		if m.UserID == actor {
+			return m.Role
+		}
+	}
+	return ""
 }
 
 // scopesForTenant derives scopes from the user's role IN THE ACTIVE TENANT plus

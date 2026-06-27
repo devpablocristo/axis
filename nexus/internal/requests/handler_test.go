@@ -19,6 +19,7 @@ import (
 	auditdomain "github.com/devpablocristo/nexus/internal/audit/usecases/domain"
 	"github.com/devpablocristo/nexus/internal/callbacks"
 	"github.com/devpablocristo/nexus/internal/orgctx"
+	"github.com/devpablocristo/nexus/internal/productctx"
 	"github.com/devpablocristo/nexus/internal/requests"
 	requestdto "github.com/devpablocristo/nexus/internal/requests/handler/dto"
 	requestdomain "github.com/devpablocristo/nexus/internal/requests/usecases/domain"
@@ -344,6 +345,35 @@ func TestSubmitRequestAllowed(t *testing.T) {
 	}
 	if resp.Status != "allowed" {
 		t.Fatalf("esperaba status allowed, obtuvo %s", resp.Status)
+	}
+}
+
+// TestSubmitTagsProductSurfaceFromContext locks in the product-aware write
+// path: the product surface carried in the request context (set by the auth
+// middleware from the verified JWT claim) is persisted on the request, so a
+// tenant = org x product can be partitioned per product.
+func TestSubmitTagsProductSurfaceFromContext(t *testing.T) {
+	t.Parallel()
+	mux, repo := setupRequestMuxWithRepo(nil)
+
+	body := `{"requester_type":"agent","requester_id":"ops-bot","action_type":"alert.escalate"}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/requests", strings.NewReader(body))
+	req = req.WithContext(productctx.WithProduct(req.Context(), "companion"))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	stored, err := repo.List(context.Background(), "", "", 0, nil, true)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(stored) != 1 {
+		t.Fatalf("expected 1 stored request, got %d", len(stored))
+	}
+	if stored[0].ProductSurface != "companion" {
+		t.Fatalf("expected persisted product_surface=companion, got %q", stored[0].ProductSurface)
 	}
 }
 

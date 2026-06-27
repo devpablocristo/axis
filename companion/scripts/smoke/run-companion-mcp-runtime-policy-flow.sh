@@ -7,7 +7,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/../lib/common.sh"
 
 AXIS_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
-AUDIT_ORG_ID="${AXIS_DEV_ORG_ID:-local-dev-org}"
+# Default org must match docker-compose.yml's AXIS_DEV_ORG_ID default (now "axis").
+AUDIT_ORG_ID="${AXIS_DEV_ORG_ID:-axis}"
 
 echo "=== Smoke: Companion MCP runtime policy enforcement ==="
 

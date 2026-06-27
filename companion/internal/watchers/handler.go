@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/devpablocristo/companion/internal/identityctx"
@@ -78,7 +79,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		Enabled:     req.Enabled,
 	})
 	if err != nil {
-		httpjson.WriteFlatError(w, http.StatusInternalServerError, "internal_error", "could not create watcher")
+		writeWatcherError(w, r, err, "could not create watcher")
 		return
 	}
 
@@ -101,7 +102,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 
 	watchers, err := h.uc.List(r.Context(), orgID)
 	if err != nil {
-		httpjson.WriteFlatError(w, http.StatusInternalServerError, "internal_error", "could not list watchers")
+		writeWatcherError(w, r, err, "could not list watchers")
 		return
 	}
 
@@ -128,7 +129,7 @@ func (h *Handler) getByID(w http.ResponseWriter, r *http.Request) {
 			httpjson.WriteFlatError(w, http.StatusNotFound, "not_found", "watcher not found")
 			return
 		}
-		httpjson.WriteFlatError(w, http.StatusInternalServerError, "internal_error", "could not get watcher")
+		writeWatcherError(w, r, err, "could not get watcher")
 		return
 	}
 	if !canAccessWatcherOrg(r, watcher) {
@@ -160,7 +161,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 			httpjson.WriteFlatError(w, http.StatusNotFound, "not_found", "watcher not found")
 			return
 		}
-		httpjson.WriteFlatError(w, http.StatusInternalServerError, "internal_error", "could not get watcher")
+		writeWatcherError(w, r, err, "could not get watcher")
 		return
 	}
 	if !canAccessWatcherOrg(r, watcher) {
@@ -182,7 +183,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 			httpjson.WriteFlatError(w, http.StatusNotFound, "not_found", "watcher not found")
 			return
 		}
-		httpjson.WriteFlatError(w, http.StatusInternalServerError, "internal_error", "could not update watcher")
+		writeWatcherError(w, r, err, "could not update watcher")
 		return
 	}
 
@@ -204,7 +205,7 @@ func (h *Handler) remove(w http.ResponseWriter, r *http.Request) {
 			httpjson.WriteFlatError(w, http.StatusNotFound, "not_found", "watcher not found")
 			return
 		}
-		httpjson.WriteFlatError(w, http.StatusInternalServerError, "internal_error", "could not get watcher")
+		writeWatcherError(w, r, err, "could not get watcher")
 		return
 	}
 	if !canAccessWatcherOrg(r, watcher) {
@@ -217,7 +218,7 @@ func (h *Handler) remove(w http.ResponseWriter, r *http.Request) {
 			httpjson.WriteFlatError(w, http.StatusNotFound, "not_found", "watcher not found")
 			return
 		}
-		httpjson.WriteFlatError(w, http.StatusInternalServerError, "internal_error", "could not delete watcher")
+		writeWatcherError(w, r, err, "could not delete watcher")
 		return
 	}
 
@@ -239,7 +240,7 @@ func (h *Handler) run(w http.ResponseWriter, r *http.Request) {
 			httpjson.WriteFlatError(w, http.StatusNotFound, "not_found", "watcher not found")
 			return
 		}
-		httpjson.WriteFlatError(w, http.StatusInternalServerError, "internal_error", "could not get watcher")
+		writeWatcherError(w, r, err, "could not get watcher")
 		return
 	}
 	if !canAccessWatcherOrg(r, watcher) {
@@ -269,7 +270,7 @@ func (h *Handler) run(w http.ResponseWriter, r *http.Request) {
 			httpjson.WriteFlatError(w, http.StatusTooManyRequests, "rate_limited", err.Error())
 			return
 		}
-		httpjson.WriteFlatError(w, http.StatusInternalServerError, "internal_error", "could not run watcher")
+		writeWatcherError(w, r, err, "could not run watcher")
 		return
 	}
 
@@ -295,7 +296,7 @@ func (h *Handler) listProposals(w http.ResponseWriter, r *http.Request) {
 			httpjson.WriteFlatError(w, http.StatusNotFound, "not_found", "watcher not found")
 			return
 		}
-		httpjson.WriteFlatError(w, http.StatusInternalServerError, "internal_error", "could not get watcher")
+		writeWatcherError(w, r, err, "could not get watcher")
 		return
 	}
 	if !canAccessWatcherOrg(r, watcher) {
@@ -305,7 +306,7 @@ func (h *Handler) listProposals(w http.ResponseWriter, r *http.Request) {
 
 	proposals, err := h.uc.ListProposals(r.Context(), id, 50)
 	if err != nil {
-		httpjson.WriteFlatError(w, http.StatusInternalServerError, "internal_error", "could not list proposals")
+		writeWatcherError(w, r, err, "could not list proposals")
 		return
 	}
 
@@ -314,6 +315,25 @@ func (h *Handler) listProposals(w http.ResponseWriter, r *http.Request) {
 		items = append(items, dto.ProposalToResponse(p))
 	}
 	httpjson.WriteJSON(w, http.StatusOK, dto.ProposalListResponse{Proposals: items})
+}
+
+// writeWatcherError maps a usecase error to its proper HTTP status instead of
+// masking everything as 500, and logs genuinely-unexpected (5xx) errors so the
+// cause isn't lost. 4xx domain errors expose their (safe) message; 5xx stays generic.
+func writeWatcherError(w http.ResponseWriter, r *http.Request, err error, msg string) {
+	switch {
+	case domainerr.IsNotFound(err):
+		httpjson.WriteFlatError(w, http.StatusNotFound, "not_found", err.Error())
+	case domainerr.IsValidation(err):
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "validation", err.Error())
+	case domainerr.IsForbidden(err):
+		httpjson.WriteFlatError(w, http.StatusForbidden, "forbidden", err.Error())
+	case domainerr.IsConflict(err):
+		httpjson.WriteFlatError(w, http.StatusConflict, "conflict", err.Error())
+	default:
+		slog.ErrorContext(r.Context(), "watcher request failed", "op", msg, "error", err)
+		httpjson.WriteFlatError(w, http.StatusInternalServerError, "internal_error", msg)
+	}
 }
 
 func effectiveWatcherOrgID(r *http.Request, requested string) (string, bool) {

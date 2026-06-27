@@ -181,7 +181,7 @@ func (p *Proposer) buildCandidate(ctx context.Context, orgID string, pat pattern
 
 func (p *Proposer) askGemini(ctx context.Context, pat pattern) (llmFields, error) {
 	if p.llm == nil {
-		return llmFields{}, fmt.Errorf("Gemini provider is required")
+		return llmFields{}, fmt.Errorf("gemini provider is required")
 	}
 	userMsg := fmt.Sprintf(
 		"Patrón detectado:\n- action_type: %s\n- aprobadas: %d de %d (%.1f%%)\n\nGenerá una propuesta de política CEL.",
@@ -194,17 +194,17 @@ func (p *Proposer) askGemini(ctx context.Context, pat pattern) (llmFields, error
 	})
 	if err != nil || resp.Text == "" {
 		if err != nil {
-			return llmFields{}, fmt.Errorf("Gemini proposer: %w", err)
+			return llmFields{}, fmt.Errorf("gemini proposer: %w", err)
 		}
-		return llmFields{}, fmt.Errorf("Gemini proposer returned empty response")
+		return llmFields{}, fmt.Errorf("gemini proposer returned empty response")
 	}
 	var fields llmFields
 	if err := json.Unmarshal([]byte(resp.Text), &fields); err != nil {
 		slog.Warn("nexus-assist proposer: Gemini returned non-JSON", "err", err)
-		return llmFields{}, fmt.Errorf("Gemini proposer returned non-JSON: %w", err)
+		return llmFields{}, fmt.Errorf("gemini proposer returned non-JSON: %w", err)
 	}
 	if fields.Name == "" || fields.Description == "" || fields.Expression == "" || fields.Effect == "" || fields.Summary == "" {
-		return llmFields{}, fmt.Errorf("Gemini proposer returned incomplete policy proposal")
+		return llmFields{}, fmt.Errorf("gemini proposer returned incomplete policy proposal")
 	}
 	return fields, nil
 }

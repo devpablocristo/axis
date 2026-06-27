@@ -951,6 +951,88 @@ func TestIdentityPrincipalOwnerGetsCrossOrgScopes(t *testing.T) {
 	}
 }
 
+// TestResolveAppContextDerivesScopesFromAxisMembership locks in the authz cutover
+// off Clerk: on the org path (no X-Tenant-ID) the proxied scopes must come from
+// the user's Axis org-membership role, NOT from the principal's claim scopes.
+func TestResolveAppContextDerivesScopesFromAxisMembership(t *testing.T) {
+	srv, err := newTestServer("http://127.0.0.1:1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.iam.UpsertMember(context.Background(), IAMMember{OrgID: "org-a", UserID: "user-a", Role: "admin", Status: "active"}); err != nil {
+		t.Fatal(err)
+	}
+	// Principal carries only minimal (member) claim scopes — Axis says admin.
+	p := authn.Principal{Actor: "user-a", OrgID: "org-a", Scopes: orgMemberScopes()}
+	req := httptest.NewRequest(http.MethodGet, "/api/nexus/x", nil)
+
+	_, _, _, scopes, err := srv.resolveAppContext(req, p)
+	if err != nil {
+		t.Fatalf("resolveAppContext: %v", err)
+	}
+	if !hasScope(scopes, "axis:users:admin") {
+		t.Fatalf("expected Axis-derived admin scopes, got %#v", scopes)
+	}
+}
+
+// TestResolveAppContextFallsBackToClaimScopes verifies the migration safety net:
+// when Axis has no authz record for the user (no membership, no platform role),
+// the org path falls back to the claim-derived scopes so no one is locked out.
+func TestResolveAppContextFallsBackToClaimScopes(t *testing.T) {
+	srv, err := newTestServer("http://127.0.0.1:1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sentinel := []string{"companion:tasks:read"}
+	p := authn.Principal{Actor: "ghost", OrgID: "org-a", Scopes: sentinel}
+	req := httptest.NewRequest(http.MethodGet, "/api/nexus/x", nil)
+
+	_, _, _, scopes, err := srv.resolveAppContext(req, p)
+	if err != nil {
+		t.Fatalf("resolveAppContext: %v", err)
+	}
+	if len(scopes) != 1 || scopes[0] != "companion:tasks:read" {
+		t.Fatalf("expected claim-scope fallback %v, got %#v", sentinel, scopes)
+	}
+}
+
+// TestClerkWebhookUserDeletedRemovesAxisUser verifies the Clerk->Axis sync drops
+// the orphaned axis_users row when a user is deleted in the IdP.
+func TestClerkWebhookUserDeletedRemovesAxisUser(t *testing.T) {
+	srv, err := newTestServer("http://127.0.0.1:1", defaultAdminScopes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.iam.CreateUser(context.Background(), IAMUser{ID: "user_gone", Provider: "clerk", Email: "gone@example.com", Status: "active"}); err != nil {
+		t.Fatal(err)
+	}
+	secret := "whsec_" + base64.StdEncoding.EncodeToString([]byte("webhook-secret"))
+	srv.cfg.ClerkWebhookSecret = secret
+	body := []byte(`{"type":"user.deleted","data":{"id":"user_gone"}}`)
+	msgID := "msg_del"
+	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/webhooks/clerk", strings.NewReader(string(body)))
+	req.Header.Set(clerkWebhookHeaderID, msgID)
+	req.Header.Set(clerkWebhookHeaderTimestamp, timestamp)
+	req.Header.Set(clerkWebhookHeaderSignature, signClerkWebhook(t, secret, msgID, timestamp, body))
+	rec := httptest.NewRecorder()
+	srv.routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	users, err := srv.iam.ListUsers(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, user := range users {
+		if user.ID == "user_gone" {
+			t.Fatalf("expected user_gone removed after user.deleted, still present: %#v", users)
+		}
+	}
+}
+
 func newTestServer(target string, scopes []string) (*server, error) {
 	return newServer(config{
 		AuthMode:          "dev",
