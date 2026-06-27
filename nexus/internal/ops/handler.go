@@ -8,9 +8,28 @@ import (
 
 	"github.com/devpablocristo/nexus/internal/orgctx"
 	"github.com/devpablocristo/platform/authn/go/identityhttp"
+	"github.com/devpablocristo/platform/errors/go/domainerr"
 	"github.com/devpablocristo/platform/http/go/httpjson"
 	"github.com/google/uuid"
 )
+
+// writeOpsError maps a usecase error to its proper HTTP status (NotFound→404,
+// Validation→400, Forbidden→403, Conflict→409) instead of masking everything as
+// 500; unexpected errors are logged + 500 generic via WriteFlatInternalError.
+func writeOpsError(w http.ResponseWriter, err error, op string) {
+	switch {
+	case domainerr.IsNotFound(err):
+		httpjson.WriteFlatError(w, http.StatusNotFound, "NOT_FOUND", "not found")
+	case domainerr.IsValidation(err):
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", err.Error())
+	case domainerr.IsForbidden(err):
+		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", err.Error())
+	case domainerr.IsConflict(err):
+		httpjson.WriteFlatError(w, http.StatusConflict, "CONFLICT", err.Error())
+	default:
+		httpjson.WriteFlatInternalError(w, err, op)
+	}
+}
 
 type summaryUsecase interface {
 	Summary(ctx context.Context) (Summary, error)
@@ -48,7 +67,7 @@ func (h *Handler) summary(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := h.uc.Summary(r.Context())
 	if err != nil {
-		httpjson.WriteFlatInternalError(w, err, "load governance ops summary")
+		writeOpsError(w, err, "load governance ops summary")
 		return
 	}
 	httpjson.WriteJSON(w, http.StatusOK, out)
@@ -61,7 +80,7 @@ func (h *Handler) listCallbackDeliveries(w http.ResponseWriter, r *http.Request)
 	orgID, allowAll := opsOrgScope(r)
 	list, err := h.uc.ListCallbackDeliveries(r.Context(), r.URL.Query().Get("status"), queryLimit(r, 100), orgID, allowAll)
 	if err != nil {
-		httpjson.WriteFlatInternalError(w, err, "list callback deliveries")
+		writeOpsError(w, err, "list callback deliveries")
 		return
 	}
 	httpjson.WriteJSON(w, http.StatusOK, map[string]any{"data": list})
@@ -78,7 +97,7 @@ func (h *Handler) retryCallbackDelivery(w http.ResponseWriter, r *http.Request) 
 	}
 	orgID, allowAll := opsOrgScope(r)
 	if err := h.uc.RetryCallbackDelivery(r.Context(), id, opsActorID(r), orgID, allowAll); err != nil {
-		httpjson.WriteFlatInternalError(w, err, "retry callback delivery")
+		writeOpsError(w, err, "retry callback delivery")
 		return
 	}
 	httpjson.WriteJSON(w, http.StatusOK, map[string]string{"status": "queued"})
@@ -114,7 +133,7 @@ func (h *Handler) createLegalHold(w http.ResponseWriter, r *http.Request) {
 		Reason: body.Reason, CreatedBy: opsActorID(r),
 	})
 	if err != nil {
-		httpjson.WriteFlatInternalError(w, err, "create legal hold")
+		writeOpsError(w, err, "create legal hold")
 		return
 	}
 	httpjson.WriteJSON(w, http.StatusCreated, hold)
@@ -127,7 +146,7 @@ func (h *Handler) listLegalHolds(w http.ResponseWriter, r *http.Request) {
 	orgID, allowAll := opsOrgScope(r)
 	list, err := h.uc.ListLegalHolds(r.Context(), orgID, allowAll)
 	if err != nil {
-		httpjson.WriteFlatInternalError(w, err, "list legal holds")
+		writeOpsError(w, err, "list legal holds")
 		return
 	}
 	httpjson.WriteJSON(w, http.StatusOK, map[string]any{"data": list})
@@ -164,7 +183,7 @@ func (h *Handler) createExport(w http.ResponseWriter, r *http.Request) {
 		SubjectID: body.SubjectID, RequestedBy: opsActorID(r), Manifest: body.Manifest,
 	})
 	if err != nil {
-		httpjson.WriteFlatInternalError(w, err, "create governance export")
+		writeOpsError(w, err, "create governance export")
 		return
 	}
 	httpjson.WriteJSON(w, http.StatusCreated, job)
@@ -177,7 +196,7 @@ func (h *Handler) listExports(w http.ResponseWriter, r *http.Request) {
 	orgID, allowAll := opsOrgScope(r)
 	list, err := h.uc.ListExportJobs(r.Context(), orgID, allowAll)
 	if err != nil {
-		httpjson.WriteFlatInternalError(w, err, "list governance exports")
+		writeOpsError(w, err, "list governance exports")
 		return
 	}
 	httpjson.WriteJSON(w, http.StatusOK, map[string]any{"data": list})
@@ -193,7 +212,7 @@ func (h *Handler) runReconciliation(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := h.uc.RunReconciliation(r.Context(), orgID, opsActorID(r))
 	if err != nil {
-		httpjson.WriteFlatInternalError(w, err, "run governance reconciliation")
+		writeOpsError(w, err, "run governance reconciliation")
 		return
 	}
 	httpjson.WriteJSON(w, http.StatusCreated, out)
