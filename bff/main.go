@@ -250,9 +250,23 @@ func (s *server) session(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "FORBIDDEN", err.Error())
 		return
 	}
-	orgs, _ := s.iam.ListOrgsForActor(r.Context(), p.Actor, hasScope(p.Scopes, "axis:cross_org"))
-	tenants, _ := s.iam.ResolveTenantsForUser(r.Context(), p.Actor)
-	platformRoles, _ := s.iam.PlatformRolesForUser(r.Context(), p.Actor)
+	// Surface store failures as 5xx instead of rendering an empty session, which
+	// the console can't distinguish from legitimately-revoked access.
+	orgs, err := s.iam.ListOrgsForActor(r.Context(), p.Actor, hasScope(p.Scopes, "axis:cross_org"))
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	tenants, err := s.iam.ResolveTenantsForUser(r.Context(), p.Actor)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	platformRoles, err := s.iam.PlatformRolesForUser(r.Context(), p.Actor)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"actor_id":       p.Actor,
 		"org_id":         orgID,
