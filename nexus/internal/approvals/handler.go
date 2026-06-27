@@ -224,7 +224,8 @@ func writeApprovalUsecaseError(w http.ResponseWriter, err error) {
 		httpjson.WriteFlatError(w, http.StatusNotFound, "NOT_FOUND", "approval not found")
 		return
 	}
-	httpjson.WriteFlatInternalError(w, err, "approval operation failed")
+	// Resto: clasificar con el helper de platform en vez de enmascarar como 500.
+	httpjson.WriteFlatErrorFrom(w, err, "approval operation failed")
 }
 
 // decisionActorID resuelve el actor de la decisión de approve/reject.

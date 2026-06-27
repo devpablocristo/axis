@@ -247,5 +247,7 @@ func writeError(w http.ResponseWriter, err error) {
 		httpjson.WriteFlatError(w, http.StatusNotFound, "NOT_FOUND", "action type not found")
 		return
 	}
-	httpjson.WriteFlatInternalError(w, err, "action type operation failed")
+	// Resto: clasificar con el helper de platform (validation/forbidden/conflict
+	// dejan de enmascararse como 500; unclassified sigue siendo 500 logueado).
+	httpjson.WriteFlatErrorFrom(w, err, "action type operation failed")
 }
