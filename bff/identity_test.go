@@ -20,10 +20,10 @@ func TestIsOwnerOrg(t *testing.T) {
 		claimOrg string
 		want     bool
 	}{
-		{"cristo.tech", true},   // direct Axis id match
-		{"org_clerk123", true},  // Clerk org id → resolved via provider_org_id
-		{"org_other", false},    // a different org
-		{"", false},             // no org
+		{"cristo.tech", true},  // direct Axis id match
+		{"org_clerk123", true}, // Clerk org id → resolved via provider_org_id
+		{"org_other", false},   // a different org
+		{"", false},            // no org
 	}
 	for _, c := range cases {
 		if got := a.isOwnerOrg(context.Background(), c.claimOrg); got != c.want {
