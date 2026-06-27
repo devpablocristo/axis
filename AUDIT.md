@@ -1,5 +1,73 @@
 # AUDIT.md — Auditoría de calidad del proyecto Axis
 
+## Segunda pasada — 2026-06-27
+
+Alcance: revalidacion post-saneamiento y post-cutover B#3. No se confia ciegamente en hallazgos viejos: se releyeron BFF tenancy/authz, IAM simple, console bootstrap, boundaries Companion/Nexus y adopcion de `platform`.
+
+### Estado actual
+
+- B#3 verificado: `resolveAppContext` exige `X-Tenant-ID`; deriva `org_id`, `product_surface`, `tenant_id` y scopes desde `axis_tenants` + `axis_tenant_members` o platform role.
+- B#3 verificado: `userRefOrg`, `scopesFromAxisOrg`, `listIAMUserViews` y `memberUserView` ya no aparecen en `bff`.
+- B#3 verificado: `/api/iam/users` para org normal requiere tenant real y lista/muta `axis_tenant_members`; `axis_org_members` queda como bridge Clerk/org picker.
+- Guardrail: `make hygiene` OK.
+- Guardrail inicial: `make lint` fallo por `console/src/App.tsx:93` (`no-useless-assignment`). Estado: **corregido en working tree** cambiando `nextSession` a asignacion definida antes de uso.
+- Guardrail final: `make lint` OK (mantiene 16 warnings calibrados de console).
+- Console: `npm run typecheck && npm run test && npm run build` OK.
+
+### Hallazgos vigentes
+
+#### HIGH-2P-01 — Guardrail de lint roto en console
+
+Estado: **corregido en working tree**.
+
+Evidencia: `make lint` fallaba en `console/src/App.tsx:93` por `no-useless-assignment`.
+
+Riesgo: main no podia pasar el guardrail de calidad aunque el bug fuera chico.
+
+Fix: `let nextSession: AxisSession` en lugar de inicializar a `null` y reasignar antes de leer.
+
+#### MED-2P-01 — `tenantUserView` conflata error de store con not-found
+
+Estado: abierto.
+
+Evidencia: `bff/iam_simple_handlers.go` hace `ListTenantMembers`; si falla devuelve `(empty,false)` y los lifecycle handlers pueden renderizar la mutacion como si el user no existiera.
+
+Riesgo: en outage parcial de DB, errores 5xx se convierten en estados 404/no-op y dificultan soporte.
+
+Fix recomendado: cambiar firma a `(IAMUserView, bool, error)` y propagar `writeStoreError`.
+
+#### MED-2P-02 — `controlProvisionTenant` sigue sin atomicidad tenant+owner
+
+Estado: abierto.
+
+Evidencia: `bff/control_handlers.go` crea tenant con `CreateTenant` y luego, opcionalmente, `UpsertTenantMember` para owner.
+
+Riesgo: si el segundo write falla queda tenant sin owner inicial.
+
+Fix recomendado: agregar `CreateTenantWithOwner` transaccional en `IAMStore`/`sqlIAMStore` y usarlo desde control plane.
+
+#### MED-2P-03 — Algunos proxies BFF devuelven `err.Error()` al cliente
+
+Estado: abierto.
+
+Evidencia: `bff/prompts_handlers.go`, `bff/agent_profiles_handlers.go` y `bff/agent_handlers.go` aun escriben errores crudos en respuestas para fallas internas/downstream.
+
+Riesgo: exposicion de detalles de infraestructura o contratos downstream; inconsistencia con los helpers `WriteFlatErrorFrom` ya adoptados en Nexus.
+
+Fix recomendado: mapear errores internos a mensajes estables, loguear el error real y reutilizar helper de `platform/http/go/httpjson` donde aplique.
+
+#### LOW-2P-01 — Deadcode pendiente es mayormente soporte test/dev
+
+Estado: abierto, no borrar a ciegas.
+
+Evidencia: `deadcode` marca `productevals`, `MemoryRepository`, `SignAttestationForTest`, publishers directos y helpers de runtime que estan usados por tests, comandos o superficies de soporte.
+
+Fix recomendado: mover helpers test-only a `_test.go` cuando sea barato; mantener APIs exportadas que son tooling/evals hasta decision de producto.
+
+### Relacion con Platform
+
+Axis ya consume `platform/http/go/httpjson` para normalizar errores en varios dominios Nexus. Los siguientes candidatos reales son atomicos y deben salir como PRs chicos: helper transaccional IAM en BFF si se decide extraer patron, y consolidacion de error mapping de proxies BFF. No conviene mover tenancy BFF a kernels SaaS hasta terminar los pendientes de B#3 y estabilizar nombres `org` vs `tenant`.
+
 Fecha: 2026-06-27 · Método: workflow multi-agente (138 agentes, 14 revisores × dimensión/módulo + verificación adversarial). **106 hallazgos confirmados** (25 HIGH / 43 MED / 38 LOW), 19 descartados (by-design/falso-positivo).
 
 > Cada hallazgo fue **verificado leyendo el código**; los descartados (apéndice) eran by-design o falsos positivos (ej. dead-code que es test-only).
