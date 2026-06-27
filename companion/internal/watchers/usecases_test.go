@@ -121,44 +121,6 @@ func (f *fakeWatcherRepo) PendingProposals(_ context.Context, _ string) ([]domai
 	return out, nil
 }
 
-// --- pymes fake ---
-
-type fakePymes struct {
-	staleItems []domain.PymesItem
-	sendErr    error
-	sendCalls  int
-}
-
-func (f *fakePymes) GetStaleWorkOrders(_ context.Context, _ string, _ int) ([]domain.PymesItem, error) {
-	return f.staleItems, nil
-}
-
-func (f *fakePymes) GetUnconfirmedAppointments(_ context.Context, _ string, _ int) ([]domain.PymesItem, error) {
-	return nil, nil
-}
-
-func (f *fakePymes) GetLowStockItems(_ context.Context, _ string, _ int) ([]domain.PymesItem, error) {
-	return nil, nil
-}
-
-func (f *fakePymes) GetInactiveCustomers(_ context.Context, _ string, _ int) ([]domain.PymesItem, error) {
-	return nil, nil
-}
-
-func (f *fakePymes) GetRevenueComparison(_ context.Context, _ string) (*domain.RevenueComparison, error) {
-	return &domain.RevenueComparison{CurrentMonth: 100, PreviousMonth: 100, DropPercent: 0}, nil
-}
-
-func (f *fakePymes) SendWhatsAppTemplate(_ context.Context, _, _, _ string, _ map[string]string) error {
-	f.sendCalls++
-	return f.sendErr
-}
-
-func (f *fakePymes) SendWhatsAppText(_ context.Context, _, _, _ string) error {
-	f.sendCalls++
-	return f.sendErr
-}
-
 // --- nexus fake ---
 
 type fakeNexus struct {

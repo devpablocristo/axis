@@ -136,20 +136,6 @@ func NewRegistry(manifests []Manifest) (*Registry, error) {
 	return reg, nil
 }
 
-func FromConnectorCapabilities(connectors map[string][]connectordomain.Capability) (*Registry, error) {
-	manifests := make([]Manifest, 0)
-	for connector, caps := range connectors {
-		for _, cap := range caps {
-			manifest, err := FromConnectorCapability(connector, connector, cap)
-			if err != nil {
-				return nil, err
-			}
-			manifests = append(manifests, manifest)
-		}
-	}
-	return NewRegistry(manifests)
-}
-
 func LoadFS(fsys fs.FS, root string) (*Registry, error) {
 	root = strings.Trim(strings.TrimSpace(root), "/")
 	if root == "" {

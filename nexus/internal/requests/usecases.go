@@ -188,10 +188,6 @@ func WithContractValidator(v ContractValidator) Option {
 	return func(u *Usecases) { u.contracts = v }
 }
 
-func WithPendingApprovalCreator(c pendingApprovalCreator) Option {
-	return func(u *Usecases) { u.pendingCreator = c }
-}
-
 // NewUsecases crea Usecases con los 3 repos obligatorios + evaluator, y opciones para el resto.
 func NewUsecases(
 	reqRepo Repository,
