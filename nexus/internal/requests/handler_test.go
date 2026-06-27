@@ -377,6 +377,30 @@ func TestSubmitTagsProductSurfaceFromContext(t *testing.T) {
 	}
 }
 
+type infraFailActionTypes struct{}
+
+func (infraFailActionTypes) GetByName(context.Context, string, *string) (requests.ActionTypeInfo, error) {
+	return requests.ActionTypeInfo{}, fmt.Errorf("db connection refused")
+}
+
+// TestSubmitActionTypeInfraErrorIsNot403 locks in that an infra/store failure in
+// the action-type lookup surfaces as 5xx, not a client-side 403 "unknown
+// action_type" (which would mask the outage as a caller error).
+func TestSubmitActionTypeInfraErrorIsNot403(t *testing.T) {
+	t.Parallel()
+	uc := requests.NewUsecases(newFakeRequestRepo(), &fakePolicyLister{}, newFakeApprovalRepo(), requests.NewPolicyEvaluator(),
+		requests.WithIdempotencyStore(newFakeIdemStore()),
+		requests.WithActionTypeChecker(infraFailActionTypes{}),
+	)
+	mux := http.NewServeMux()
+	requests.NewHandler(uc).Register(mux)
+
+	rec := doReq(t, mux, http.MethodPost, "/v1/requests", `{"requester_type":"agent","requester_id":"ops-bot","action_type":"alert.escalate"}`)
+	if rec.Code < 500 {
+		t.Fatalf("infra error must surface as 5xx (not 403/4xx), got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestSubmitRequestRequireApproval(t *testing.T) {
 	t.Parallel()
 	mux := setupRequestMux()
