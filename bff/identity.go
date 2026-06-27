@@ -90,6 +90,15 @@ func (s *server) deleteIAMUser(ctx context.Context, orgID string, userID string)
 	return s.iam.DeleteUser(ctx, userID)
 }
 
+func (s *server) upsertIAMMember(ctx context.Context, orgID string, userID string, role string) error {
+	if s.identity != nil {
+		_, err := s.identity.UpsertMember(ctx, IAMMember{OrgID: orgID, UserID: userID, Role: role, Status: "active"})
+		return err
+	}
+	_, err := s.iam.UpsertMember(ctx, IAMMember{OrgID: orgID, UserID: userID, Role: role, Status: "active"})
+	return err
+}
+
 func (s *server) updateIAMMember(ctx context.Context, orgID string, userID string, input IAMMember) (IAMMember, error) {
 	if s.identity != nil {
 		return s.identity.UpdateMember(ctx, orgID, userID, input)
@@ -124,6 +133,39 @@ func scopesForIdentityRoles(axisRole string, orgRole string) []string {
 		return withoutScopes(defaultAdminScopes(), "axis:iam:purge")
 	}
 	switch orgRole {
+	case "owner", "admin":
+		return orgAdminScopes()
+	case "member":
+		return orgMemberScopes()
+	default:
+		return nil
+	}
+}
+
+// isPlatformAdmin reports whether any of the user's platform roles grants
+// Control Plane / super-admin access (orthogonal to the active tenant).
+func isPlatformAdmin(platformRoles []string) bool {
+	// Platform roles are a distinct vocabulary from tenant roles, so we must NOT
+	// run them through normalizedRole (which only recognizes owner/admin/member
+	// and would erase "platform_admin" to ""). Compare the raw role directly.
+	for _, r := range platformRoles {
+		switch strings.TrimSpace(strings.ToLower(r)) {
+		case "platform_admin", "super_admin", "owner":
+			return true
+		}
+	}
+	return false
+}
+
+// scopesForTenant derives scopes from the user's role IN THE ACTIVE TENANT plus
+// their platform roles — the authz source of truth is Axis, NOT Clerk metadata.
+// A platform admin gets full cross-org admin (control plane). Otherwise the
+// tenant role maps to per-tenant admin/member scopes.
+func scopesForTenant(tenantRole string, platformRoles []string) []string {
+	if isPlatformAdmin(platformRoles) {
+		return defaultAdminScopes()
+	}
+	switch normalizedRole(tenantRole) {
 	case "owner", "admin":
 		return orgAdminScopes()
 	case "member":

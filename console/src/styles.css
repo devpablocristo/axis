@@ -1524,7 +1524,13 @@ tbody tr:hover {
   gap: 12px;
 }
 
-.m-chat-workspace__header,
+/* El header del workspace de chat (title/lead + botón "Nueva" de la derecha) se
+   oculta: el título ya está en el topbar y "Nueva" vive en el panel de
+   conversaciones. */
+.m-chat-workspace__header {
+  display: none;
+}
+
 .m-chat-conversations__header {
   gap: 12px;
 }

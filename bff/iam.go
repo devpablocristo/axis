@@ -138,11 +138,24 @@ type IAMStore interface {
 	UpdateInvitationStatus(context.Context, string, string, string) (IAMInvitation, error)
 	ListAuditEvents(context.Context, string) ([]IAMAuditEvent, error)
 	AppendAuditEvent(context.Context, IAMAuditEvent) error
+	// Control Plane tenancy (tenant = org x product).
+	ListTenants(context.Context, string) ([]IAMTenant, error)
+	TenantByID(context.Context, string) (IAMTenant, error)
+	CreateTenant(context.Context, IAMTenant) (IAMTenant, error)
+	ResolveTenantsForUser(context.Context, string) ([]IAMTenant, error)
+	UserInTenant(context.Context, string, string) (bool, error)
+	TenantMembership(context.Context, string, string) (IAMTenantMember, error)
+	ListTenantMembers(context.Context, string) ([]IAMTenantMember, error)
+	UpsertTenantMember(context.Context, IAMTenantMember) (IAMTenantMember, error)
+	RemoveTenantMember(context.Context, string, string) error
+	PlatformRolesForUser(context.Context, string) ([]string, error)
+	SetPlatformRole(context.Context, string, string) error
+	RemovePlatformRole(context.Context, string, string) error
 }
 
 func newIAMStore(ctx context.Context, cfg config) (IAMStore, error) {
 	if strings.TrimSpace(cfg.ControlDatabaseURL) == "" {
-		return newMemoryIAMStore(cfg), nil
+		return newMemoryIAMStore(), nil
 	}
 	db, err := sql.Open("pgx", cfg.ControlDatabaseURL)
 	if err != nil {
@@ -155,36 +168,35 @@ func newIAMStore(ctx context.Context, cfg config) (IAMStore, error) {
 	if err := store.migrate(ctx); err != nil {
 		return nil, err
 	}
-	if err := store.seed(ctx, cfg); err != nil {
-		return nil, err
-	}
 	return store, nil
 }
 
 type memoryIAMStore struct {
-	mu          sync.RWMutex
-	orgs        map[string]IAMOrg
-	users       map[string]IAMUser
-	products    map[string]IAMProduct
-	members     map[string]IAMMember
-	invitations map[string]IAMInvitation
-	audit       []IAMAuditEvent
+	mu            sync.RWMutex
+	orgs          map[string]IAMOrg
+	users         map[string]IAMUser
+	products      map[string]IAMProduct
+	members       map[string]IAMMember
+	invitations   map[string]IAMInvitation
+	audit         []IAMAuditEvent
+	tenants       map[string]IAMTenant       // by tenant id
+	tenantMembers map[string]IAMTenantMember // by tenantMemberKey(tenantID, userID)
+	platformRoles map[string][]string        // userID -> roles
 }
 
-func newMemoryIAMStore(cfg config) *memoryIAMStore {
-	now := time.Now().UTC()
-	orgID := firstNonEmpty(cfg.DevOrgID, defaultDevOrgID)
-	userID := firstNonEmpty(cfg.DevUserID, defaultDevUserID)
-	org := IAMOrg{ID: orgID, Name: "Local Dev Org", Slug: slugify(orgID), Status: "active", CreatedAt: now, UpdatedAt: now}
-	user := IAMUser{ID: userID, ExternalID: userID, Provider: "dev", ProviderUserID: userID, Email: userID, Name: userID, AxisRole: "owner", Status: "active", CreatedAt: now, UpdatedAt: now}
-	member := IAMMember{OrgID: org.ID, UserID: user.ID, Role: "owner", Status: "active", CreatedAt: now, UpdatedAt: now}
+func newMemoryIAMStore() *memoryIAMStore {
+	// Starts empty — no seeded org/user/tenant/platform-role. All data comes from
+	// the Control Plane (provisioning) or real identity sync, never from a seed.
 	return &memoryIAMStore{
-		orgs:        map[string]IAMOrg{org.ID: org},
-		users:       map[string]IAMUser{user.ID: user},
-		products:    map[string]IAMProduct{},
-		members:     map[string]IAMMember{memberKey(member.OrgID, member.UserID): member},
-		invitations: map[string]IAMInvitation{},
-		audit:       []IAMAuditEvent{},
+		orgs:          map[string]IAMOrg{},
+		users:         map[string]IAMUser{},
+		products:      map[string]IAMProduct{},
+		members:       map[string]IAMMember{},
+		invitations:   map[string]IAMInvitation{},
+		audit:         []IAMAuditEvent{},
+		tenants:       map[string]IAMTenant{},
+		tenantMembers: map[string]IAMTenantMember{},
+		platformRoles: map[string][]string{},
 	}
 }
 
@@ -343,6 +355,13 @@ func (s *memoryIAMStore) DeleteUser(_ context.Context, userID string) error {
 			delete(s.members, key)
 		}
 	}
+	// Mirror the SQL FK ON DELETE CASCADE: drop tenant memberships + platform roles.
+	for key, member := range s.tenantMembers {
+		if member.UserID == userID {
+			delete(s.tenantMembers, key)
+		}
+	}
+	delete(s.platformRoles, userID)
 	return nil
 }
 
@@ -629,30 +648,45 @@ ALTER TABLE axis_users ADD COLUMN IF NOT EXISTS synced_at timestamptz;
 ALTER TABLE axis_users ADD COLUMN IF NOT EXISTS axis_role text NOT NULL DEFAULT '';
 ALTER TABLE axis_org_members ADD COLUMN IF NOT EXISTS provider_membership_id text;
 ALTER TABLE axis_org_members ADD COLUMN IF NOT EXISTS synced_at timestamptz;
+
+-- Control Plane tenancy model: a tenant is (organization x product). It is the
+-- first-class unit that scopes all application-plane data; the BFF resolves a
+-- tenant_id to (org_id, product_surface) when minting the internal JWT.
+CREATE TABLE IF NOT EXISTS axis_tenants (
+	id text PRIMARY KEY,
+	org_id text NOT NULL REFERENCES axis_orgs(id) ON DELETE CASCADE,
+	product_surface text NOT NULL,
+	name text NOT NULL DEFAULT '',
+	status text NOT NULL DEFAULT 'active',
+	plan text NOT NULL DEFAULT '',
+	created_at timestamptz NOT NULL DEFAULT now(),
+	updated_at timestamptz NOT NULL DEFAULT now(),
+	UNIQUE (org_id, product_surface)
+);
+CREATE TABLE IF NOT EXISTS axis_tenant_members (
+	tenant_id text NOT NULL REFERENCES axis_tenants(id) ON DELETE CASCADE,
+	user_id text NOT NULL REFERENCES axis_users(id) ON DELETE CASCADE,
+	role text NOT NULL DEFAULT 'member',
+	status text NOT NULL DEFAULT 'active',
+	created_at timestamptz NOT NULL DEFAULT now(),
+	updated_at timestamptz NOT NULL DEFAULT now(),
+	PRIMARY KEY (tenant_id, user_id)
+);
+-- Platform roles are orthogonal to the active tenant: they grant Control Plane
+-- access (super-admin), stored in Axis, never derived from Clerk metadata.
+CREATE TABLE IF NOT EXISTS axis_platform_roles (
+	user_id text NOT NULL REFERENCES axis_users(id) ON DELETE CASCADE,
+	role text NOT NULL,
+	created_at timestamptz NOT NULL DEFAULT now(),
+	PRIMARY KEY (user_id, role)
+);
+CREATE INDEX IF NOT EXISTS idx_axis_tenant_members_user ON axis_tenant_members(user_id, status);
+CREATE INDEX IF NOT EXISTS idx_axis_tenants_org ON axis_tenants(org_id, status);
 `)
 	if err != nil {
 		return fmt.Errorf("migrate axis control plane: %w", err)
 	}
 	return nil
-}
-
-func (s *sqlIAMStore) seed(ctx context.Context, cfg config) error {
-	switch cfg.AuthMode {
-	case "dev", "preview", "stg", "":
-	default:
-		return nil
-	}
-	now := time.Now().UTC()
-	org := IAMOrg{ID: firstNonEmpty(cfg.DevOrgID, defaultDevOrgID), Name: "Local Dev Org", Slug: slugify(firstNonEmpty(cfg.DevOrgID, defaultDevOrgID)), Status: "active", CreatedAt: now, UpdatedAt: now}
-	user := IAMUser{ID: firstNonEmpty(cfg.DevUserID, defaultDevUserID), ExternalID: firstNonEmpty(cfg.DevUserID, defaultDevUserID), Provider: "dev", ProviderUserID: firstNonEmpty(cfg.DevUserID, defaultDevUserID), Email: firstNonEmpty(cfg.DevUserID, defaultDevUserID), Name: firstNonEmpty(cfg.DevUserID, defaultDevUserID), AxisRole: "owner", Status: "active", CreatedAt: now, UpdatedAt: now}
-	if _, err := s.CreateOrg(ctx, org, ""); err != nil {
-		return err
-	}
-	if _, err := s.CreateUser(ctx, user); err != nil {
-		return err
-	}
-	_, err := s.UpsertMember(ctx, IAMMember{OrgID: org.ID, UserID: user.ID, Role: "owner", Status: "active"})
-	return err
 }
 
 func (s *sqlIAMStore) ListOrgsForActor(ctx context.Context, actor string, cross bool) ([]IAMOrg, error) {

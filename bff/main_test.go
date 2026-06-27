@@ -662,14 +662,12 @@ func TestSimpleIAMTenantsProductsAndUsers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	foundUser := false
+	// Purge is a hard delete to the IdP (Clerk DELETE /users/{id}): the identity
+	// is removed. Soft "remove access" is archive/trash, not purge.
 	for _, user := range users {
 		if user.Email == "admin@pymes.local" {
-			foundUser = true
+			t.Fatal("expected user identity to be deleted on purge")
 		}
-	}
-	if !foundUser {
-		t.Fatal("expected tenant user record to remain after membership purge")
 	}
 }
 
@@ -692,6 +690,7 @@ func TestSimpleIAMOrgAdminCannotListAxisUsers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	seedDevPrincipal(t, srv)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/iam/users?org_id=axis", nil)
 	rec := httptest.NewRecorder()
@@ -819,6 +818,7 @@ func TestAgentsOrgAdminAndMemberPermissions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	seedDevPrincipal(t, adminSrv)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/agents", strings.NewReader(`{"org_id":"org-a","name":"Ops Agent","profile":"ops.v1","autonomy":"A1"}`))
 	req.Header.Set("Content-Type", "application/json")

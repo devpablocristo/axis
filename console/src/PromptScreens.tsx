@@ -100,7 +100,7 @@ export function PromptsControlCenter({
   return (
     <section className="page-section iam-control axis-crud-host">
       <div className="screen-nav agents-section-tabs">
-        <button type="button" className={activeSection === 'product' ? 'active' : ''} onClick={() => setActiveSection('product')}>Producto</button>
+        <button type="button" className={activeSection === 'product' ? 'active' : ''} onClick={() => setActiveSection('product')}>Assist packs</button>
         <button type="button" className={activeSection === 'agents' ? 'active' : ''} onClick={() => setActiveSection('agents')}>Perfiles</button>
       </div>
       {activeSection === 'product' ? (
@@ -124,7 +124,7 @@ function AssistPackPromptsScreen({
   return (
     <PromptCrudScreen
       orgId={orgId}
-      title="Producto"
+      title="Assist packs"
       section={section}
       allowUpload={false}
       allowLifecycleManagement={false}

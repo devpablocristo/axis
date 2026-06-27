@@ -3,7 +3,7 @@ DC := docker compose --project-directory $(CURDIR) -f $(CURDIR)/docker-compose.y
 
 .PHONY: test test-companion test-nexus test-bff test-console billing-agent-scan \
 	qa qa-companion qa-nexus check-companion check-nexus hygiene \
-	smoke smoke-companion smoke-nexus e2e-nexus e2e-nexus-policy-promotion acceptance-nexus \
+	smoke smoke-companion smoke-nexus e2e-nexus e2e-nexus-policy-promotion acceptance-nexus e2e-users \
 	dev-apis dev-companion dev-nexus \
 	network up down build logs compose-services
 
@@ -44,7 +44,11 @@ test-bff:
 	cd bff && go test ./...
 
 test-console:
-	cd console && npm run typecheck && npm run build
+	cd console && npm run typecheck && npm run test && npm run build
+
+e2e-users:
+	$(DC) up -d axis-control-postgres
+	cd bff && bash scripts/e2e/run-users-flow.sh
 
 billing-agent-scan:
 	cd companion && bash scripts/ops/run-billing-agent-scan.sh
