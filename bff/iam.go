@@ -743,23 +743,46 @@ func (s *sqlIAMStore) CreateOrg(ctx context.Context, org IAMOrg, actor string) (
 	org.Name = firstNonEmpty(org.Name, org.ID)
 	org.Slug = firstNonEmpty(org.Slug, slugify(org.Name))
 	org.Status = firstNonEmpty(org.Status, "active")
-	err := s.db.QueryRowContext(ctx, `
+
+	// Resolve the owner (read) before the tx; the org is created whether or not
+	// the actor resolves to a known user.
+	ownerID := ""
+	if strings.TrimSpace(actor) != "" {
+		user, ok, err := s.findUser(ctx, actor)
+		if err != nil {
+			return IAMOrg{}, err
+		}
+		if ok {
+			ownerID = user.ID
+		}
+	}
+
+	// Atomic: the org row and its owner membership must not half-apply (an org
+	// without its owner, or vice versa). Wrap both writes in one transaction.
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return IAMOrg{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := tx.QueryRowContext(ctx, `
 		INSERT INTO axis_orgs (id, external_id, provider, provider_org_id, name, slug, status, created_at, updated_at)
 		VALUES ($1, nullif($2, ''), $3, nullif($4, ''), $5, $6, $7, $8, $8)
 		ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, slug = EXCLUDED.slug, status = EXCLUDED.status, updated_at = EXCLUDED.updated_at
 		RETURNING id, COALESCE(external_id, ''), provider, COALESCE(provider_org_id, ''), name, slug, status, created_at, updated_at
-	`, org.ID, org.ExternalID, org.Provider, org.ProviderOrgID, org.Name, org.Slug, org.Status, now).Scan(&org.ID, &org.ExternalID, &org.Provider, &org.ProviderOrgID, &org.Name, &org.Slug, &org.Status, &org.CreatedAt, &org.UpdatedAt)
-	if err != nil {
+	`, org.ID, org.ExternalID, org.Provider, org.ProviderOrgID, org.Name, org.Slug, org.Status, now).Scan(&org.ID, &org.ExternalID, &org.Provider, &org.ProviderOrgID, &org.Name, &org.Slug, &org.Status, &org.CreatedAt, &org.UpdatedAt); err != nil {
 		return IAMOrg{}, err
 	}
-	if strings.TrimSpace(actor) != "" {
-		if user, ok, err := s.findUser(ctx, actor); err != nil {
+	if ownerID != "" {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO axis_org_members (org_id, user_id, role, status, created_at, updated_at)
+			VALUES ($1, $2, 'owner', 'active', $3, $3)
+			ON CONFLICT (org_id, user_id) DO UPDATE SET role = EXCLUDED.role, status = EXCLUDED.status, updated_at = EXCLUDED.updated_at
+		`, org.ID, ownerID, now); err != nil {
 			return IAMOrg{}, err
-		} else if ok {
-			if _, err := s.UpsertMember(ctx, IAMMember{OrgID: org.ID, UserID: user.ID, Role: "owner", Status: "active"}); err != nil {
-				return IAMOrg{}, err
-			}
 		}
+	}
+	if err := tx.Commit(); err != nil {
+		return IAMOrg{}, err
 	}
 	return org, nil
 }
