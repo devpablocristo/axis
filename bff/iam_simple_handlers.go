@@ -104,6 +104,10 @@ func (s *server) iamTenants(w http.ResponseWriter, r *http.Request, parts []stri
 			if !requireScope(w, p, "axis:orgs:write", "axis:orgs:admin") {
 				return
 			}
+			if !s.canAccessOrg(r, p, tenantID) {
+				writeError(w, http.StatusForbidden, "FORBIDDEN", "selected org is not allowed for this principal")
+				return
+			}
 			input, ok := decodeJSONBody[IAMTenantView](w, r)
 			if !ok {
 				return
@@ -132,6 +136,10 @@ func (s *server) iamTenantLifecycle(w http.ResponseWriter, r *http.Request, p au
 		if !requireScope(w, p, "axis:iam:purge") {
 			return
 		}
+		if !s.canAccessOrg(r, p, tenantID) {
+			writeError(w, http.StatusForbidden, "FORBIDDEN", "selected org is not allowed for this principal")
+			return
+		}
 		err := s.deleteIAMOrg(r.Context(), tenantID)
 		if err == nil {
 			s.auditIAM(r, p, tenantID, "tenant.purged", "tenant", tenantID, nil)
@@ -144,6 +152,10 @@ func (s *server) iamTenantLifecycle(w http.ResponseWriter, r *http.Request, p au
 		return
 	}
 	if !requireScope(w, p, "axis:orgs:write", "axis:orgs:admin") {
+		return
+	}
+	if !s.canAccessOrg(r, p, tenantID) {
+		writeError(w, http.StatusForbidden, "FORBIDDEN", "selected org is not allowed for this principal")
 		return
 	}
 	status := statusForIAMAction(action)

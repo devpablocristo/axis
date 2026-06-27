@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -83,7 +84,7 @@ func (s *server) clerkWebhook(w http.ResponseWriter, r *http.Request) {
 		if email == "" {
 			email = firstClerkEmail(event.Data)
 		}
-		_, _ = s.iam.CreateUser(r.Context(), IAMUser{
+		if _, err := s.iam.CreateUser(r.Context(), IAMUser{
 			ID:             firstWebhookString(event.Data, "id"),
 			ExternalID:     firstWebhookString(event.Data, "id"),
 			Provider:       "clerk",
@@ -91,9 +92,14 @@ func (s *server) clerkWebhook(w http.ResponseWriter, r *http.Request) {
 			Email:          email,
 			Name:           firstWebhookString(event.Data, "name", "username"),
 			Status:         "active",
-		})
+		}); err != nil {
+			// Don't swallow: surface 5xx so Clerk retries the webhook.
+			log.Printf("clerk webhook %q: create user failed: %v", event.Type, err)
+			writeStoreError(w, err)
+			return
+		}
 	case "organization.created", "organization.updated":
-		_, _ = s.iam.CreateOrg(r.Context(), IAMOrg{
+		if _, err := s.iam.CreateOrg(r.Context(), IAMOrg{
 			ID:            firstWebhookString(event.Data, "id"),
 			ExternalID:    firstWebhookString(event.Data, "id"),
 			Provider:      "clerk",
@@ -101,7 +107,11 @@ func (s *server) clerkWebhook(w http.ResponseWriter, r *http.Request) {
 			Name:          firstWebhookString(event.Data, "name"),
 			Slug:          firstWebhookString(event.Data, "slug"),
 			Status:        "active",
-		}, "")
+		}, ""); err != nil {
+			log.Printf("clerk webhook %q: create org failed: %v", event.Type, err)
+			writeStoreError(w, err)
+			return
+		}
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{"status": "accepted"})
 }
@@ -240,6 +250,20 @@ func writeStoreError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusServiceUnavailable, "IDENTITY_PROVIDER_NOT_CONFIGURED", "identity provider is not configured")
 		return
 	}
+	// Preserve an upstream (Clerk) 4xx instead of masking it as a generic 500.
+	switch code := clerkStatus(err); {
+	case code == http.StatusConflict:
+		writeError(w, http.StatusConflict, "CONFLICT", err.Error())
+		return
+	case code == http.StatusUnprocessableEntity || code == http.StatusBadRequest:
+		writeError(w, http.StatusBadRequest, "VALIDATION", err.Error())
+		return
+	case code >= 400 && code < 500:
+		writeError(w, code, "UPSTREAM", err.Error())
+		return
+	}
+	// Genuinely unexpected: log the cause (it's hidden from the client otherwise).
+	log.Printf("iam: unexpected store error: %v", err)
 	writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "request failed")
 }
 
