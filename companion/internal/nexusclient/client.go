@@ -95,6 +95,7 @@ type SubmitResponse struct {
 
 type RequestSummary struct {
 	ID             string `json:"id"`
+	OrgID          string `json:"org_id"`
 	RequesterType  string `json:"requester_type"`
 	RequesterID    string `json:"requester_id"`
 	ActionType     string `json:"action_type"`

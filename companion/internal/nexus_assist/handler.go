@@ -2,6 +2,7 @@ package nexus_assist
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -18,7 +19,7 @@ type proposerSurface interface {
 
 // contextualizerSurface es la superficie del Contextualizer expuesta al handler.
 type contextualizerSurface interface {
-	Explain(ctx context.Context, requestID string) (summary string, degraded bool, err error)
+	Explain(ctx context.Context, requestID, callerOrgID string, allowCrossOrg bool) (summary string, degraded bool, err error)
 }
 
 // Handler expone /companion/v1/nexus-assist/* sobre Proposer + Contextualizer.
@@ -30,6 +31,7 @@ type Handler struct {
 const (
 	scopeCompanionNexusAssistRead  = "companion:nexus-assist:read"
 	scopeCompanionNexusAssistAdmin = "companion:nexus-assist:admin"
+	scopeCompanionCrossOrg         = "companion:cross_org"
 )
 
 func NewHandler(p proposerSurface, c contextualizerSurface) *Handler {
@@ -79,8 +81,18 @@ func (h *Handler) explain(w http.ResponseWriter, r *http.Request) {
 		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "request_id is required")
 		return
 	}
-	summary, degraded, err := h.contextualizer.Explain(r.Context(), requestID)
+	// Fail-closed: el Contextualizer llama a Nexus con una key cross_org, así que
+	// la pertenencia del request al org del caller se hace cumplir acá. Se permite
+	// cross-org solo a callers con scope cross_org o sin auth context (dev).
+	callerOrgID := identityctx.PrincipalOrgID(r)
+	allowCrossOrg := identityctx.HasNoAuthContext(r) || identityctx.HasAnyScope(r, scopeCompanionCrossOrg)
+	summary, degraded, err := h.contextualizer.Explain(r.Context(), requestID, callerOrgID, allowCrossOrg)
 	if err != nil {
+		// No revelar la existencia de un request de otro org: 404, no 403.
+		if errors.Is(err, ErrRequestForbidden) {
+			httpjson.WriteFlatError(w, http.StatusNotFound, "NOT_FOUND", "request not found")
+			return
+		}
 		httpjson.WriteFlatInternalError(w, err, "explain request failed")
 		return
 	}
