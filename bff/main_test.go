@@ -951,6 +951,39 @@ func TestIdentityPrincipalOwnerGetsCrossOrgScopes(t *testing.T) {
 	}
 }
 
+// TestControlCreateOrgProvisionsDefaultTenant locks in the B#3 prerequisite: a
+// newly-created org is never tenantless — it gets a default 'axis' tenant and the
+// creator is a member of it, so the console can always resolve an X-Tenant-ID.
+func TestControlCreateOrgProvisionsDefaultTenant(t *testing.T) {
+	srv, err := newTestServer("http://127.0.0.1:1", defaultAdminScopes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := authn.Principal{Actor: "admin-user"}
+	req := httptest.NewRequest(http.MethodPost, "/api/control/organizations", strings.NewReader(`{"name":"Acme"}`))
+	rec := httptest.NewRecorder()
+
+	srv.controlCreateOrg(rec, req, p)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var org IAMOrg
+	if err := json.Unmarshal(rec.Body.Bytes(), &org); err != nil {
+		t.Fatal(err)
+	}
+	tenants, err := srv.iam.ResolveTenantsForUser(context.Background(), "admin-user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tn := range tenants {
+		if tn.OrgID == org.ID && tn.ProductSurface == defaultOrgProductSurface {
+			return
+		}
+	}
+	t.Fatalf("creator should resolve the org's default %q tenant, got %#v", defaultOrgProductSurface, tenants)
+}
+
 // TestResolveAppContextDerivesScopesFromAxisMembership locks in the authz cutover
 // off Clerk: on the org path (no X-Tenant-ID) the proxied scopes must come from
 // the user's Axis org-membership role, NOT from the principal's claim scopes.
