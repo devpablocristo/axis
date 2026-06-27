@@ -93,7 +93,7 @@ func (s *server) iamTenants(w http.ResponseWriter, r *http.Request, parts []stri
 		}
 		org, err := s.createIAMOrg(r.Context(), p.Actor, IAMOrg{Name: input.Name, Status: firstNonEmpty(input.Status, "active")})
 		if err == nil {
-			s.auditIAM(r, p, org.ID, "tenant.created", "tenant", org.ID, map[string]any{"name": org.Name, "status": org.Status})
+			s.auditIAM(r, p, org.ID, "org.created", "org", org.ID, map[string]any{"name": org.Name, "status": org.Status})
 		}
 		writeStoreCreated(w, map[string]any{"item": tenantView(org)}, err)
 		return
@@ -114,7 +114,7 @@ func (s *server) iamTenants(w http.ResponseWriter, r *http.Request, parts []stri
 			}
 			org, err := s.updateIAMOrg(r.Context(), tenantID, IAMOrg{Name: input.Name, Status: input.Status})
 			if err == nil {
-				s.auditIAM(r, p, tenantID, "tenant.updated", "tenant", tenantID, map[string]any{"name": input.Name, "status": input.Status})
+				s.auditIAM(r, p, tenantID, "org.updated", "org", tenantID, map[string]any{"name": input.Name, "status": input.Status})
 			}
 			writeStoreResult(w, map[string]any{"item": tenantView(org)}, err)
 			return
@@ -142,7 +142,7 @@ func (s *server) iamTenantLifecycle(w http.ResponseWriter, r *http.Request, p au
 		}
 		err := s.deleteIAMOrg(r.Context(), tenantID)
 		if err == nil {
-			s.auditIAM(r, p, tenantID, "tenant.purged", "tenant", tenantID, nil)
+			s.auditIAM(r, p, tenantID, "org.purged", "org", tenantID, nil)
 		}
 		writeStoreNoContent(w, err)
 		return
@@ -165,7 +165,7 @@ func (s *server) iamTenantLifecycle(w http.ResponseWriter, r *http.Request, p au
 	}
 	org, err := s.updateIAMOrg(r.Context(), tenantID, IAMOrg{Status: status})
 	if err == nil {
-		s.auditIAM(r, p, tenantID, "tenant."+action, "tenant", tenantID, map[string]any{"status": status})
+		s.auditIAM(r, p, tenantID, "org."+action, "org", tenantID, map[string]any{"status": status})
 	}
 	writeStoreResult(w, map[string]any{"item": tenantView(org)}, err)
 }
