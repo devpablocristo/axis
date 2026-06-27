@@ -483,14 +483,14 @@ func (s *server) createIAMUserView(r *http.Request, p authn.Principal, input IAM
 				}
 				user = created
 			}
-			// 2) 'owner' grants global access to everything (platform role).
+			// 2+3) Per-product access (axis_tenant_members) + the global owner
+			// platform role applied atomically. On create we never demote a global
+			// owner, so non-owner roles keep platform roles untouched.
+			op := platformRoleKeep
 			if role == "owner" {
-				if err := s.iam.SetPlatformRole(r.Context(), user.ID, "owner"); err != nil {
-					return IAMUserView{}, err
-				}
+				op = platformRoleGrantOwner
 			}
-			// 3) Per-product access = membership in this tenant (org x product).
-			if _, err := s.iam.UpsertTenantMember(r.Context(), IAMTenantMember{TenantID: tenant.ID, UserID: user.ID, Role: role, Status: "active"}); err != nil {
+			if err := s.iam.SetTenantMembership(r.Context(), tenant.ID, user.ID, role, "active", op); err != nil {
 				return IAMUserView{}, err
 			}
 			return IAMUserView{ID: tenantUserRowID(tenant.ID, user.ID), UserID: user.ID, Email: user.Email, Role: role, OrgID: tenant.OrgID, TenantID: tenant.ID, Scope: "tenant", Status: "active", CreatedAt: user.CreatedAt, UpdatedAt: user.UpdatedAt}, nil
@@ -546,18 +546,14 @@ func (s *server) updateIAMUserView(r *http.Request, p authn.Principal, ref strin
 				return IAMUserView{}, err
 			}
 		}
+		// Tenant role + global owner transition applied atomically: on edit a
+		// non-owner role REVOKES the global owner platform role (demotion), an
+		// owner role GRANTS it — and the tenant-member row commits in the same tx.
+		op := platformRoleRevokeOwner
 		if newRole == "owner" {
-			if err := s.iam.SetPlatformRole(r.Context(), ref0.userID, "owner"); err != nil {
-				return IAMUserView{}, err
-			}
-		} else {
-			// Demotion: drop the global owner platform role (idempotent no-op if
-			// the user never had it) so an ex-owner loses super-admin access.
-			if err := s.iam.RemovePlatformRole(r.Context(), ref0.userID, "owner"); err != nil {
-				return IAMUserView{}, err
-			}
+			op = platformRoleGrantOwner
 		}
-		if _, err := s.iam.UpsertTenantMember(r.Context(), IAMTenantMember{TenantID: ref0.tenant.ID, UserID: ref0.userID, Role: newRole, Status: status}); err != nil {
+		if err := s.iam.SetTenantMembership(r.Context(), ref0.tenant.ID, ref0.userID, newRole, status, op); err != nil {
 			return IAMUserView{}, err
 		}
 		if view, ok := s.tenantUserView(r.Context(), ref0.tenant, ref0.userID); ok {

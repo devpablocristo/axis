@@ -151,7 +151,20 @@ type IAMStore interface {
 	PlatformRolesForUser(context.Context, string) ([]string, error)
 	SetPlatformRole(context.Context, string, string) error
 	RemovePlatformRole(context.Context, string, string) error
+	// SetTenantMembership atomically upserts the tenant role and applies the
+	// platform-owner op in a single transaction, so an owner promotion/demotion
+	// can never half-apply (e.g. global owner granted but tenant member missing).
+	SetTenantMembership(ctx context.Context, tenantID, userID, role, status string, op platformRoleOp) error
 }
+
+// platformRoleOp controls the global owner platform role within SetTenantMembership.
+type platformRoleOp int
+
+const (
+	platformRoleKeep        platformRoleOp = iota // leave platform roles untouched
+	platformRoleGrantOwner                        // ensure the global owner role
+	platformRoleRevokeOwner                       // drop the global owner role
+)
 
 func newIAMStore(ctx context.Context, cfg config) (IAMStore, error) {
 	if strings.TrimSpace(cfg.ControlDatabaseURL) == "" {

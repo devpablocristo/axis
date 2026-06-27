@@ -106,13 +106,6 @@ func (s *server) updateIAMMember(ctx context.Context, orgID string, userID strin
 	return s.iam.UpdateMember(ctx, orgID, userID, input)
 }
 
-func (s *server) deleteIAMMember(ctx context.Context, orgID string, userID string) error {
-	if s.identity != nil {
-		return s.identity.DeleteMember(ctx, orgID, userID)
-	}
-	return s.iam.DeleteMember(ctx, orgID, userID)
-}
-
 func axisPrincipalFromIdentity(p authn.Principal) authn.Principal {
 	axisRole := normalizedRole(claimRole(p.Claims, "axis_role"))
 	orgRole := normalizedRole(claimRole(p.Claims, "org_role"))
