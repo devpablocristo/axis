@@ -2,9 +2,7 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -312,25 +310,37 @@ func (s *server) iamUsers(w http.ResponseWriter, r *http.Request, parts []string
 			writeError(w, http.StatusForbidden, "FORBIDDEN", "selected org is not allowed for this principal")
 			return
 		}
-		if orgID != "" && orgID != "axis" && !s.canAccessOrg(r, p, orgID) {
+		if orgID == "axis" {
+			items, err := s.listGlobalIAMUserViews(r.Context(), p, listStatus(parts))
+			if err != nil {
+				writeStoreError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"items": items})
+			return
+		}
+		tenantID := strings.TrimSpace(r.Header.Get("X-Tenant-ID"))
+		if tenantID == "" {
+			writeStoreError(w, fmt.Errorf("%w: tenant_id is required", errValidation))
+			return
+		}
+		tenant, terr := s.iam.TenantByID(r.Context(), tenantID)
+		if terr != nil {
+			writeStoreError(w, terr)
+			return
+		}
+		if orgID == "" {
+			orgID = tenant.OrgID
+		}
+		if tenant.OrgID != orgID {
+			writeError(w, http.StatusForbidden, "FORBIDDEN", "selected tenant is not allowed for this org")
+			return
+		}
+		if !s.canAccessOrg(r, p, tenant.OrgID) {
 			writeError(w, http.StatusForbidden, "FORBIDDEN", "selected org is not allowed for this principal")
 			return
 		}
-		// Tenant-scoped listing: in the tenancy model users belong to a tenant
-		// (org x product), not the org. When the active tenant (X-Tenant-ID)
-		// belongs to the selected org, list its members from axis_tenant_members.
-		if tenantID := strings.TrimSpace(r.Header.Get("X-Tenant-ID")); tenantID != "" && orgID != "" && orgID != "axis" {
-			if tenant, terr := s.iam.TenantByID(r.Context(), tenantID); terr == nil && tenant.OrgID == orgID {
-				items, err := s.listTenantUserViews(r.Context(), tenant, listStatus(parts))
-				if err != nil {
-					writeStoreError(w, err)
-					return
-				}
-				writeJSON(w, http.StatusOK, map[string]any{"items": items})
-				return
-			}
-		}
-		items, err := s.listIAMUserViews(r.Context(), p, listStatus(parts), orgID)
+		items, err := s.listTenantUserViews(r.Context(), tenant, listStatus(parts))
 		if err != nil {
 			writeStoreError(w, err)
 			return
@@ -444,10 +454,6 @@ func (s *server) iamUserLifecycle(w http.ResponseWriter, r *http.Request, p auth
 		var user IAMUser
 		user, err = s.updateIAMUser(r.Context(), "", ref0.userID, IAMUser{Status: status})
 		view = globalUserView(user)
-	default:
-		var member IAMMember
-		member, err = s.updateIAMMember(r.Context(), ref0.orgID, ref0.userID, IAMMember{Status: status})
-		view, _ = s.memberUserView(r.Context(), member)
 	}
 	if err == nil {
 		s.auditIAM(r, p, ref0.orgID, "user."+action, "user", ref0.userID, map[string]any{"status": status})
@@ -466,7 +472,11 @@ func (s *server) createIAMUserView(r *http.Request, p authn.Principal, input IAM
 	// de admin) por defecto de ese org (todo org tiene uno — ver
 	// ensureOrgDefaultTenant). El caso global/plataforma (org "axis"/vacío) se
 	// maneja abajo. El path legacy org-member (axis_org_members como authz) se retiró.
-	ref := firstNonEmpty(strings.TrimSpace(r.Header.Get("X-Tenant-ID")), strings.TrimSpace(input.TenantID), strings.TrimSpace(input.OrgID))
+	inputOrgID := strings.TrimSpace(input.OrgID)
+	ref := firstNonEmpty(strings.TrimSpace(r.Header.Get("X-Tenant-ID")), strings.TrimSpace(input.TenantID), inputOrgID)
+	if strings.EqualFold(inputOrgID, "axis") {
+		ref = "axis"
+	}
 	if ref != "" && !strings.EqualFold(ref, "axis") {
 		tenant, ok := s.resolveTargetTenant(r.Context(), ref)
 		if !ok {
@@ -588,11 +598,7 @@ func (s *server) updateIAMUserView(r *http.Request, p authn.Principal, ref strin
 		}
 		return IAMUserView{}, errNotFound
 	}
-	user, err := s.updateIAMUser(r.Context(), ref0.orgID, ref0.userID, IAMUser{Email: input.Email, Name: input.Email, Role: role, Status: input.Status})
-	if err != nil {
-		return IAMUserView{}, err
-	}
-	return IAMUserView{ID: tenantUserRowID(ref0.orgID, user.ID), UserID: user.ID, Email: user.Email, Role: firstNonEmpty(role, input.Role), OrgID: ref0.orgID, TenantID: ref0.orgID, Scope: "tenant", Status: firstNonEmpty(input.Status, user.Status), CreatedAt: user.CreatedAt, UpdatedAt: user.UpdatedAt}, nil
+	return IAMUserView{}, errNotFound
 }
 
 // findIAMUserByEmail looks up an existing identity by email (case-insensitive).
@@ -676,7 +682,6 @@ type userRefKind int
 const (
 	userRefGlobal userRefKind = iota
 	userRefTenant
-	userRefOrg
 )
 
 type resolvedUserRef struct {
@@ -686,10 +691,10 @@ type resolvedUserRef struct {
 	userID string
 }
 
-// resolveUserRef decodes a user row id and classifies it. A "tenant__<id>__<user>"
-// ref whose first segment resolves via TenantByID is tenant-scoped (per-product
-// access, axis_tenant_members) and its authz org is tenant.OrgID — NOT the tenant
-// id. Anything else falls back to the legacy org-scoped path.
+// resolveUserRef decodes a user row id and classifies it. A
+// "tenant__<id>__<user>" ref must resolve via TenantByID and is tenant-scoped
+// (per-product access, axis_tenant_members); its authz org is tenant.OrgID —
+// NOT the tenant id.
 func (s *server) resolveUserRef(ctx context.Context, ref string) (resolvedUserRef, error) {
 	scope, userID, global := parseUserRef(ref)
 	if global {
@@ -699,105 +704,25 @@ func (s *server) resolveUserRef(ctx context.Context, ref string) (resolvedUserRe
 	if err == nil {
 		return resolvedUserRef{kind: userRefTenant, orgID: tenant.OrgID, tenant: tenant, userID: userID}, nil
 	}
-	// Only a genuine "no such tenant" means this is a legacy org-scoped ref.
-	// A transient/other store error must NOT be reclassified as an org (that
-	// would run authz + writes against the tenant id as if it were an org id).
-	if !errors.Is(err, errNotFound) {
-		return resolvedUserRef{}, err
-	}
-	return resolvedUserRef{kind: userRefOrg, orgID: scope, userID: userID}, nil
+	return resolvedUserRef{}, err
 }
 
-func (s *server) listIAMUserViews(ctx context.Context, p authn.Principal, status string, orgFilter string) ([]IAMUserView, error) {
+func (s *server) listGlobalIAMUserViews(ctx context.Context, p authn.Principal, status string) ([]IAMUserView, error) {
 	users, err := s.iam.ListUsers(ctx)
 	if err != nil {
 		return nil, err
 	}
 	items := []IAMUserView{}
-	if (orgFilter == "" || orgFilter == "axis") && hasScope(p.Scopes, "axis:cross_org") {
-		for _, user := range users {
-			if normalizedRole(user.AxisRole) == "" || lifecycleBucket(user.Status) != status {
-				continue
-			}
-			items = append(items, globalUserView(user))
-		}
-	}
-	if orgFilter == "axis" {
+	if !hasScope(p.Scopes, "axis:cross_org") {
 		return items, nil
 	}
-	if orgFilter != "" {
-		if orgFilter != "axis" {
-			// Clerk membership sync is best-effort enrichment. A non-Clerk org id
-			// (e.g. an Axis company org_id like "cristo.tech" that is not a Clerk
-			// org) or a transient Clerk failure must NOT 500 the listing — fall
-			// back to the members already stored locally.
-			if err := s.syncIAMOrgMembers(ctx, orgFilter); err != nil {
-				log.Printf("iam: clerk sync for org %q failed, serving local members: %v", orgFilter, err)
-			}
+	for _, user := range users {
+		if normalizedRole(user.AxisRole) == "" || lifecycleBucket(user.Status) != status {
+			continue
 		}
-		members, err := s.iam.ListMembers(ctx, orgFilter)
-		if err != nil {
-			return nil, err
-		}
-		for _, member := range members {
-			if lifecycleBucket(member.Status) != status || member.User == nil {
-				continue
-			}
-			view, ok := s.memberUserView(ctx, member)
-			if ok {
-				items = append(items, view)
-			}
-		}
-		return items, nil
-	}
-	orgs, err := s.iam.ListOrgsForActor(ctx, p.Actor, hasScope(p.Scopes, "axis:cross_org", "axis:users:admin"))
-	if err != nil {
-		return nil, err
-	}
-	for _, org := range orgs {
-		members, err := s.iam.ListMembers(ctx, org.ID)
-		if err != nil {
-			return nil, err
-		}
-		for _, member := range members {
-			if lifecycleBucket(member.Status) != status || member.User == nil {
-				continue
-			}
-			if normalizedRole(member.User.AxisRole) != "" {
-				continue
-			}
-			view, ok := s.memberUserView(ctx, member)
-			if ok {
-				items = append(items, view)
-			}
-		}
+		items = append(items, globalUserView(user))
 	}
 	return items, nil
-}
-
-func (s *server) syncIAMOrgMembers(ctx context.Context, orgID string) error {
-	if s.identity == nil {
-		return nil
-	}
-	return s.identity.SyncOrgMembers(ctx, orgID)
-}
-
-func (s *server) memberUserView(_ context.Context, member IAMMember) (IAMUserView, bool) {
-	if member.User == nil {
-		return IAMUserView{}, false
-	}
-	return IAMUserView{
-		ID:        tenantUserRowID(member.OrgID, member.User.ID),
-		UserID:    member.User.ID,
-		Email:     member.User.Email,
-		Role:      member.Role,
-		OrgID:     member.OrgID,
-		TenantID:  member.OrgID,
-		Scope:     "tenant",
-		Status:    member.Status,
-		CreatedAt: member.CreatedAt,
-		UpdatedAt: member.UpdatedAt,
-	}, true
 }
 
 func (s *server) productForAccess(w http.ResponseWriter, r *http.Request, p authn.Principal, productID string) (IAMProduct, bool) {

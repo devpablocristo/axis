@@ -33,8 +33,10 @@ func TestDevProxyInjectsInternalJWTAndOrg(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	tenantID := seedTenantForActor(t, srv, "org-a", "axis", "admin")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/companion/v1/tasks", nil)
+	req.Header.Set("X-Tenant-ID", tenantID)
 	rec := httptest.NewRecorder()
 	srv.routes().ServeHTTP(rec, req)
 
@@ -50,6 +52,9 @@ func TestDevProxyInjectsInternalJWTAndOrg(t *testing.T) {
 	claims := decodeClaims(t, strings.TrimPrefix(gotAuth, "Bearer "))
 	if claims["org_id"] != "org-a" {
 		t.Fatalf("expected org claim org-a, got %#v", claims["org_id"])
+	}
+	if claims["tenant_id"] != tenantID || claims["product_surface"] != "axis" {
+		t.Fatalf("expected tenant-scoped claims, got tenant=%#v product=%#v", claims["tenant_id"], claims["product_surface"])
 	}
 	if claims["aud"] != "companion" {
 		t.Fatalf("expected companion audience, got %#v", claims["aud"])
@@ -73,11 +78,13 @@ func TestDevProxyStripsOnBehalfOfHeader(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	tenantID := seedTenantForActor(t, srv, "org-a", "axis", "admin")
 
 	// A browser must not be able to smuggle identity delegation downstream:
 	// nexus honors X-On-Behalf-Of for api-key service principals, and a
 	// forwarded header would let a console human forge decided_by.
 	req := httptest.NewRequest(http.MethodGet, "/api/nexus/v1/approvals/pending", nil)
+	req.Header.Set("X-Tenant-ID", tenantID)
 	req.Header.Set("X-On-Behalf-Of", "forged-approver")
 	req.Header.Set("Cookie", "session=abc")
 	req.Header.Set("X-API-Key", "leaked-key")
@@ -101,7 +108,7 @@ func TestDevProxyStripsOnBehalfOfHeader(t *testing.T) {
 	}
 }
 
-func TestDevRejectsUnauthorizedOrgSelection(t *testing.T) {
+func TestDevRejectsUnauthorizedTenantSelection(t *testing.T) {
 	downstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("downstream should not be called")
 	}))
@@ -111,9 +118,10 @@ func TestDevRejectsUnauthorizedOrgSelection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	tenantID := seedTenant(t, srv, "org-b", "axis")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/companion/v1/tasks", nil)
-	req.Header.Set("X-Axis-Org-ID", "org-b")
+	req.Header.Set("X-Tenant-ID", tenantID)
 	rec := httptest.NewRecorder()
 	srv.routes().ServeHTTP(rec, req)
 
@@ -135,9 +143,10 @@ func TestDevProxyCrossOrgEmitsScopedInternalJWT(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	tenantID := seedTenantForActor(t, srv, "org-b", "axis", "admin")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/companion/v1/tasks", nil)
-	req.Header.Set("X-Axis-Org-ID", "org-b")
+	req.Header.Set("X-Tenant-ID", tenantID)
 	rec := httptest.NewRecorder()
 	srv.routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -168,9 +177,10 @@ func TestDevProxyCompanionCrossOrgScopeIsAccepted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	tenantID := seedTenantForActor(t, srv, "org-b", "axis", "admin")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/companion/v1/runtime/policy", nil)
-	req.Header.Set("X-Axis-Org-ID", "org-b")
+	req.Header.Set("X-Tenant-ID", tenantID)
 	rec := httptest.NewRecorder()
 	srv.routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -196,8 +206,10 @@ func TestAgentProfilesEndpointReadsCompanionProfiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	tenantID := seedTenantForActor(t, srv, "org-a", "axis", "admin")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agent-profiles?include_archived=false", nil)
+	req.Header.Set("X-Tenant-ID", tenantID)
 	rec := httptest.NewRecorder()
 	srv.routes().ServeHTTP(rec, req)
 
@@ -260,9 +272,14 @@ func TestAgentProfilesEndpointWritesCompanionProfiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	tenantID := seedTenantForActor(t, srv, "org-a", "axis", "admin")
+	if err := srv.iam.SetPlatformRole(context.Background(), srv.cfg.DevUserID, "platform_admin"); err != nil {
+		t.Fatal(err)
+	}
 
 	req := httptest.NewRequest(http.MethodPut, "/api/agent-profiles/axis.ops.support.v1", strings.NewReader(`{"family_id":"axis.ops.support","version_label":"v1","name":"Support Agent","system_prompt":"Help users.","max_autonomy":"A1"}`))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Tenant-ID", tenantID)
 	rec := httptest.NewRecorder()
 	srv.routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -281,6 +298,7 @@ func TestAgentProfilesEndpointWritesCompanionProfiles(t *testing.T) {
 		"/api/agent-profiles/axis.ops.support.v1/restore",
 	} {
 		req = httptest.NewRequest(http.MethodPost, path, nil)
+		req.Header.Set("X-Tenant-ID", tenantID)
 		rec = httptest.NewRecorder()
 		srv.routes().ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK {
@@ -288,6 +306,7 @@ func TestAgentProfilesEndpointWritesCompanionProfiles(t *testing.T) {
 		}
 	}
 	req = httptest.NewRequest(http.MethodDelete, "/api/agent-profiles/axis.ops.support.v1/purge", nil)
+	req.Header.Set("X-Tenant-ID", tenantID)
 	rec = httptest.NewRecorder()
 	srv.routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusNoContent {
@@ -344,8 +363,10 @@ func TestPromptsEndpointAdaptsAssistPacks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	tenantID := seedTenantForActor(t, srv, "org-a", "medmory", "admin")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/prompts/assist-packs?product_surface=medmory&lifecycle=active", nil)
+	req.Header.Set("X-Tenant-ID", tenantID)
 	rec := httptest.NewRecorder()
 	srv.routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -353,6 +374,7 @@ func TestPromptsEndpointAdaptsAssistPacks(t *testing.T) {
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/api/prompts/assist-packs?product_surface=medmory&lifecycle=archived", nil)
+	req.Header.Set("X-Tenant-ID", tenantID)
 	rec = httptest.NewRecorder()
 	srv.routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -423,8 +445,13 @@ func TestPromptsEndpointAdaptsAgentProfilePrompts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	tenantID := seedTenantForActor(t, srv, "org-a", "axis", "admin")
+	if err := srv.iam.SetPlatformRole(context.Background(), srv.cfg.DevUserID, "platform_admin"); err != nil {
+		t.Fatal(err)
+	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/prompts/agent-profiles?lifecycle=all", nil)
+	req.Header.Set("X-Tenant-ID", tenantID)
 	rec := httptest.NewRecorder()
 	srv.routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -433,6 +460,7 @@ func TestPromptsEndpointAdaptsAgentProfilePrompts(t *testing.T) {
 
 	req = httptest.NewRequest(http.MethodPut, "/api/prompts/agent-profiles/axis.ops.billing.v1/system-prompt", strings.NewReader(`{"system_prompt":"new"}`))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Tenant-ID", tenantID)
 	rec = httptest.NewRecorder()
 	srv.routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -443,6 +471,7 @@ func TestPromptsEndpointAdaptsAgentProfilePrompts(t *testing.T) {
 	}
 
 	req = httptest.NewRequest(http.MethodPost, "/api/prompts/agent-profiles/axis.ops.billing.v1/restore", nil)
+	req.Header.Set("X-Tenant-ID", tenantID)
 	rec = httptest.NewRecorder()
 	srv.routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -450,6 +479,7 @@ func TestPromptsEndpointAdaptsAgentProfilePrompts(t *testing.T) {
 	}
 
 	req = httptest.NewRequest(http.MethodPost, "/api/prompts/agent-profiles/axis.ops.billing.v1/trash", nil)
+	req.Header.Set("X-Tenant-ID", tenantID)
 	rec = httptest.NewRecorder()
 	srv.routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -457,6 +487,7 @@ func TestPromptsEndpointAdaptsAgentProfilePrompts(t *testing.T) {
 	}
 
 	req = httptest.NewRequest(http.MethodDelete, "/api/prompts/agent-profiles/axis.ops.billing.v1/purge", nil)
+	req.Header.Set("X-Tenant-ID", tenantID)
 	rec = httptest.NewRecorder()
 	srv.routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusNoContent {
@@ -633,6 +664,7 @@ func TestSimpleIAMTenantsProductsAndUsers(t *testing.T) {
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/api/iam/users?org_id="+tenantBody.Item.ID, nil)
+	req.Header.Set("X-Tenant-ID", userBody.Item.TenantID)
 	rec = httptest.NewRecorder()
 	srv.routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -659,6 +691,7 @@ func TestSimpleIAMTenantsProductsAndUsers(t *testing.T) {
 	}
 
 	req = httptest.NewRequest(http.MethodDelete, "/api/iam/users/"+userBody.Item.ID+"/purge", nil)
+	req.Header.Set("X-Tenant-ID", userBody.Item.TenantID)
 	rec = httptest.NewRecorder()
 	srv.routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusNoContent {
@@ -697,6 +730,13 @@ func TestSimpleIAMOrgAdminCannotListAxisUsers(t *testing.T) {
 		t.Fatal(err)
 	}
 	seedDevPrincipal(t, srv)
+	tenant, err := srv.iam.CreateTenant(context.Background(), IAMTenant{OrgID: "org-a", ProductSurface: "axis", Name: "org-a / axis", Status: "active"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.iam.UpsertTenantMember(context.Background(), IAMTenantMember{TenantID: tenant.ID, UserID: "user-a", Role: "admin", Status: "active"}); err != nil {
+		t.Fatal(err)
+	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/iam/users?org_id=axis", nil)
 	rec := httptest.NewRecorder()
@@ -706,6 +746,7 @@ func TestSimpleIAMOrgAdminCannotListAxisUsers(t *testing.T) {
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/api/iam/users?org_id=org-a", nil)
+	req.Header.Set("X-Tenant-ID", tenant.ID)
 	rec = httptest.NewRecorder()
 	srv.routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -1023,34 +1064,41 @@ func TestControlCreateOrgProvisionsDefaultTenant(t *testing.T) {
 	t.Fatalf("creator should resolve the org's default %q tenant, got %#v", defaultOrgProductSurface, tenants)
 }
 
-// TestResolveAppContextDerivesScopesFromAxisMembership locks in the authz cutover
-// off Clerk: on the org path (no X-Tenant-ID) the proxied scopes must come from
-// the user's Axis org-membership role, NOT from the principal's claim scopes.
-func TestResolveAppContextDerivesScopesFromAxisMembership(t *testing.T) {
+// TestResolveAppContextDerivesScopesFromTenantMembership locks in the tenancy
+// cutover: proxied app-plane requests must resolve org/product/scopes from the
+// active tenant, not from org-only membership or Clerk claim scopes.
+func TestResolveAppContextDerivesScopesFromTenantMembership(t *testing.T) {
 	srv, err := newTestServer("http://127.0.0.1:1", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := srv.iam.UpsertMember(context.Background(), IAMMember{OrgID: "org-a", UserID: "user-a", Role: "admin", Status: "active"}); err != nil {
+	tenantID := seedTenant(t, srv, "org-a", "axis")
+	if _, err := srv.iam.CreateUser(context.Background(), IAMUser{ID: "user-a", ExternalID: "user-a", Email: "user-a@example.com", Status: "active"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.iam.UpsertTenantMember(context.Background(), IAMTenantMember{TenantID: tenantID, UserID: "user-a", Role: "admin", Status: "active"}); err != nil {
 		t.Fatal(err)
 	}
 	// Principal carries only minimal (member) claim scopes — Axis says admin.
 	p := authn.Principal{Actor: "user-a", OrgID: "org-a", Scopes: orgMemberScopes()}
 	req := httptest.NewRequest(http.MethodGet, "/api/nexus/x", nil)
+	req.Header.Set("X-Tenant-ID", tenantID)
 
-	_, _, _, scopes, err := srv.resolveAppContext(req, p)
+	orgID, productSurface, resolvedTenant, scopes, err := srv.resolveAppContext(req, p)
 	if err != nil {
 		t.Fatalf("resolveAppContext: %v", err)
+	}
+	if orgID != "org-a" || productSurface != "axis" || resolvedTenant != tenantID {
+		t.Fatalf("expected org/product/tenant from tenant, got org=%q product=%q tenant=%q", orgID, productSurface, resolvedTenant)
 	}
 	if !hasScope(scopes, "axis:users:admin") {
 		t.Fatalf("expected Axis-derived admin scopes, got %#v", scopes)
 	}
 }
 
-// TestResolveAppContextFallsBackToClaimScopes verifies the migration safety net:
-// when Axis has no authz record for the user (no membership, no platform role),
-// the org path falls back to the claim-derived scopes so no one is locked out.
-func TestResolveAppContextFallsBackToClaimScopes(t *testing.T) {
+// TestResolveAppContextRequiresTenant verifies the legacy app-plane org path has
+// been removed: no X-Tenant-ID means no proxied Companion/Nexus request.
+func TestResolveAppContextRequiresTenant(t *testing.T) {
 	srv, err := newTestServer("http://127.0.0.1:1", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -1059,12 +1107,9 @@ func TestResolveAppContextFallsBackToClaimScopes(t *testing.T) {
 	p := authn.Principal{Actor: "ghost", OrgID: "org-a", Scopes: sentinel}
 	req := httptest.NewRequest(http.MethodGet, "/api/nexus/x", nil)
 
-	_, _, _, scopes, err := srv.resolveAppContext(req, p)
-	if err != nil {
-		t.Fatalf("resolveAppContext: %v", err)
-	}
-	if len(scopes) != 1 || scopes[0] != "companion:tasks:read" {
-		t.Fatalf("expected claim-scope fallback %v, got %#v", sentinel, scopes)
+	_, _, _, _, err = srv.resolveAppContext(req, p)
+	if err == nil || !strings.Contains(err.Error(), "tenant_id is required") {
+		t.Fatalf("expected tenant required error, got %v", err)
 	}
 }
 
@@ -1142,6 +1187,32 @@ func newTestServer(target string, scopes []string) (*server, error) {
 		NexusAudience:     "nexus",
 		DownstreamTimeout: time.Second,
 	})
+}
+
+func seedTenantForActor(t *testing.T, srv *server, orgID, productSurface, role string) string {
+	t.Helper()
+	ctx := context.Background()
+	tenantID := seedTenant(t, srv, orgID, productSurface)
+	users, err := srv.iam.ListUsers(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, user := range users {
+		if user.ID == srv.cfg.DevUserID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		if _, err := srv.iam.CreateUser(ctx, IAMUser{ID: srv.cfg.DevUserID, ExternalID: srv.cfg.DevUserID, Email: srv.cfg.DevUserID + "@example.com", Status: "active"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := srv.iam.UpsertTenantMember(ctx, IAMTenantMember{TenantID: tenantID, UserID: srv.cfg.DevUserID, Role: role, Status: "active"}); err != nil {
+		t.Fatal(err)
+	}
+	return tenantID
 }
 
 func newFakeCompanionAgentsServer(t *testing.T) *httptest.Server {

@@ -36,6 +36,7 @@ type TenantRow = AxisTenantView
 
 type IAMControlCenterProps = {
   orgId: string
+  tenantId: string
   productSurface: string
   orgs: Array<{ id: string; name?: string; status?: string }>
   onOrgChange: (orgId: string) => void
@@ -75,12 +76,12 @@ export function IAMControlCenter(props: IAMControlCenterProps) {
     setSelectedUserOrgId(props.orgId)
   }, [props.orgId])
 
-  // El producto activo (tenant) no entra en la query ni en el orgId, pero sí en
-  // el X-Tenant-ID que manda axisFetch. Al cambiar producto, forzar refetch para
-  // re-listar los items del nuevo tenant (sin tocar la tab activa).
+  // El tenant activo no entra en la query ni en el orgId, pero sí en el
+  // X-Tenant-ID que manda axisFetch. Al cambiar, forzar refetch para re-listar
+  // los items del nuevo tenant (sin tocar la tab activa).
   useEffect(() => {
     setReloadVersion((current) => current + 1)
-  }, [props.productSurface])
+  }, [props.productSurface, props.tenantId])
 
   useEffect(() => {
     setSelected((current) => ({ ...current, users: [] }))
@@ -103,7 +104,7 @@ export function IAMControlCenter(props: IAMControlCenterProps) {
   const tenantsTitle = 'Orgs'
   const usersTitle = 'Usuarios'
 
-  const crudClient = useMemo(() => axisCrudHttpClient(props.orgId), [props.orgId])
+  const crudClient = useMemo(() => axisCrudHttpClient(props.orgId, props.tenantId), [props.orgId, props.tenantId])
 
   const toggleSelected = (resource: IAMCrudResource, id: string, checked: boolean) => {
     setSelected((current) => {
@@ -132,6 +133,7 @@ export function IAMControlCenter(props: IAMControlCenterProps) {
         action,
         ids,
         orgId: props.orgId,
+        tenantId: props.tenantId,
       })
       clearSelected(resource)
       setReloadVersion((current) => current + 1)
@@ -427,8 +429,9 @@ async function applyLocalBulkAction(args: {
   action: BulkAction
   ids: string[]
   orgId: string
+  tenantId: string
 }) {
-  const client = axisCrudHttpClient(args.orgId)
+  const client = axisCrudHttpClient(args.orgId, args.tenantId)
   for (const id of args.ids) {
     const method = args.action === 'purge' ? 'DELETE' : 'POST'
     await client.json(`/api/iam/${args.resource}/${id}/${args.action}`, { method, body: {} })

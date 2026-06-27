@@ -24,12 +24,12 @@ func (s *server) agentProfilesAPI(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	if !requireScope(w, p, requiredScopes...) {
-		return
-	}
-	orgID, err := s.selectedOrg(r, p)
+	orgID, productSurface, tenantID, scopes, err := s.resolveAppContext(r, p)
 	if err != nil {
 		writeError(w, http.StatusForbidden, "FORBIDDEN", err.Error())
+		return
+	}
+	if !requireScope(w, authn.Principal{Scopes: scopes}, requiredScopes...) {
 		return
 	}
 	var body io.Reader
@@ -41,10 +41,10 @@ func (s *server) agentProfilesAPI(w http.ResponseWriter, r *http.Request) {
 		}
 		body = bytes.NewReader(raw)
 	}
-	s.forwardAgentProfileRequest(w, r, p, orgID, companionMethod, companionPath, body)
+	s.forwardAgentProfileRequest(w, r, p, orgID, productSurface, tenantID, scopes, companionMethod, companionPath, body)
 }
 
-func (s *server) forwardAgentProfileRequest(w http.ResponseWriter, r *http.Request, p authn.Principal, orgID string, method string, companionPath string, body io.Reader) {
+func (s *server) forwardAgentProfileRequest(w http.ResponseWriter, r *http.Request, p authn.Principal, orgID string, productSurface string, tenantID string, scopes []string, method string, companionPath string, body io.Reader) {
 	target, err := url.Parse(s.cfg.CompanionBaseURL)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "COMPANION_URL_INVALID", err.Error())
@@ -52,7 +52,7 @@ func (s *server) forwardAgentProfileRequest(w http.ResponseWriter, r *http.Reque
 	}
 	target.Path = companionPath
 	target.RawQuery = r.URL.RawQuery
-	token, err := s.signDownstreamToken(p, orgID, s.cfg.CompanionAudience)
+	token, err := s.signDownstreamTokenForContext(p, orgID, productSurface, tenantID, scopes, s.cfg.CompanionAudience)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "TOKEN_SIGNING_FAILED", err.Error())
 		return
@@ -64,6 +64,8 @@ func (s *server) forwardAgentProfileRequest(w http.ResponseWriter, r *http.Reque
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("X-Product-Surface", productSurface)
+	req.Header.Set("X-Tenant-ID", tenantID)
 	if r.Header.Get("Content-Type") != "" {
 		req.Header.Set("Content-Type", r.Header.Get("Content-Type"))
 	}
@@ -131,6 +133,10 @@ func agentProfileRouteParts(path string) ([]string, error) {
 }
 
 func (s *server) signDownstreamToken(p authn.Principal, orgID string, audience string) (string, error) {
+	return s.signDownstreamTokenForContext(p, orgID, "axis-console", "", p.Scopes, audience)
+}
+
+func (s *server) signDownstreamTokenForContext(p authn.Principal, orgID string, productSurface string, tenantID string, scopes []string, audience string) (string, error) {
 	now := time.Now().UTC()
 	return signInternalJWT(s.cfg.InternalJWTSecret, internalJWTClaims{
 		Issuer:         s.cfg.InternalJWTIssuer,
@@ -139,8 +145,9 @@ func (s *server) signDownstreamToken(p authn.Principal, orgID string, audience s
 		ActorID:        p.Actor,
 		ActorType:      "human",
 		OrgID:          orgID,
-		ProductSurface: "axis-console",
-		Scopes:         p.Scopes,
+		TenantID:       tenantID,
+		ProductSurface: productSurface,
+		Scopes:         scopes,
 		Service:        "axis-bff",
 		OnBehalfOf:     p.Actor,
 		ExpiresAt:      now.Add(5 * time.Minute),
