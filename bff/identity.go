@@ -90,18 +90,20 @@ func (s *server) deleteIAMUser(ctx context.Context, orgID string, userID string)
 	return s.iam.DeleteUser(ctx, userID)
 }
 
+func (s *server) upsertIAMMember(ctx context.Context, orgID string, userID string, role string) error {
+	if s.identity != nil {
+		_, err := s.identity.UpsertMember(ctx, IAMMember{OrgID: orgID, UserID: userID, Role: role, Status: "active"})
+		return err
+	}
+	_, err := s.iam.UpsertMember(ctx, IAMMember{OrgID: orgID, UserID: userID, Role: role, Status: "active"})
+	return err
+}
+
 func (s *server) updateIAMMember(ctx context.Context, orgID string, userID string, input IAMMember) (IAMMember, error) {
 	if s.identity != nil {
 		return s.identity.UpdateMember(ctx, orgID, userID, input)
 	}
 	return s.iam.UpdateMember(ctx, orgID, userID, input)
-}
-
-func (s *server) deleteIAMMember(ctx context.Context, orgID string, userID string) error {
-	if s.identity != nil {
-		return s.identity.DeleteMember(ctx, orgID, userID)
-	}
-	return s.iam.DeleteMember(ctx, orgID, userID)
 }
 
 func axisPrincipalFromIdentity(p authn.Principal) authn.Principal {
@@ -124,6 +126,68 @@ func scopesForIdentityRoles(axisRole string, orgRole string) []string {
 		return withoutScopes(defaultAdminScopes(), "axis:iam:purge")
 	}
 	switch orgRole {
+	case "owner", "admin":
+		return orgAdminScopes()
+	case "member":
+		return orgMemberScopes()
+	default:
+		return nil
+	}
+}
+
+// isPlatformAdmin reports whether any of the user's platform roles grants
+// Control Plane / super-admin access (orthogonal to the active tenant).
+func isPlatformAdmin(platformRoles []string) bool {
+	// Platform roles are a distinct vocabulary from tenant roles, so we must NOT
+	// run them through normalizedRole (which only recognizes owner/admin/member
+	// and would erase "platform_admin" to ""). Compare the raw role directly.
+	for _, r := range platformRoles {
+		switch strings.TrimSpace(strings.ToLower(r)) {
+		case "platform_admin", "super_admin", "owner":
+			return true
+		}
+	}
+	return false
+}
+
+// scopesFromAxisOrg derives a principal's scopes from Axis's OWN authz data —
+// platform roles (Control Plane) plus the user's membership role in the given
+// org — instead of the Clerk token claims. Returns nil when Axis has no authz
+// record for the user yet, letting the caller apply a migration-safe fallback
+// so the cutover off Clerk-derived scopes locks no one out.
+func (s *server) scopesFromAxisOrg(ctx context.Context, actor, orgID string) []string {
+	platformRoles, _ := s.iam.PlatformRolesForUser(ctx, actor)
+	role := s.orgMemberRole(ctx, orgID, actor)
+	return scopesForTenant(role, platformRoles)
+}
+
+// orgMemberRole returns the actor's role in the org per Axis membership, or ""
+// when the actor is not a recorded member (or the lookup fails).
+func (s *server) orgMemberRole(ctx context.Context, orgID, actor string) string {
+	if strings.TrimSpace(orgID) == "" || strings.TrimSpace(actor) == "" {
+		return ""
+	}
+	members, err := s.iam.ListMembers(ctx, orgID)
+	if err != nil {
+		return ""
+	}
+	for _, m := range members {
+		if m.UserID == actor {
+			return m.Role
+		}
+	}
+	return ""
+}
+
+// scopesForTenant derives scopes from the user's role IN THE ACTIVE TENANT plus
+// their platform roles — the authz source of truth is Axis, NOT Clerk metadata.
+// A platform admin gets full cross-org admin (control plane). Otherwise the
+// tenant role maps to per-tenant admin/member scopes.
+func scopesForTenant(tenantRole string, platformRoles []string) []string {
+	if isPlatformAdmin(platformRoles) {
+		return defaultAdminScopes()
+	}
+	switch normalizedRole(tenantRole) {
 	case "owner", "admin":
 		return orgAdminScopes()
 	case "member":

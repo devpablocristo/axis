@@ -14,6 +14,7 @@ import (
 	"github.com/devpablocristo/platform/http/go/httpjson"
 
 	"github.com/devpablocristo/nexus/internal/orgctx"
+	"github.com/devpablocristo/nexus/internal/productctx"
 	requestdto "github.com/devpablocristo/nexus/internal/requests/handler/dto"
 	requestdomain "github.com/devpablocristo/nexus/internal/requests/usecases/domain"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
@@ -91,6 +92,7 @@ func (h *Handler) simulate(w http.ResponseWriter, r *http.Request) {
 		Params:         params,
 		Reason:         body.Reason,
 		Context:        body.Context,
+		ProductSurface: productctx.FromRequest(r),
 	})
 	if err != nil {
 		errMsg := err.Error()
@@ -199,6 +201,7 @@ func (h *Handler) submit(w http.ResponseWriter, r *http.Request) {
 		Params:         params,
 		Reason:         body.Reason,
 		Context:        body.Context,
+		ProductSurface: productctx.FromRequest(r),
 	})
 	if err != nil {
 		errMsg := err.Error()
@@ -509,6 +512,7 @@ func (h *Handler) batchSimulate(w http.ResponseWriter, r *http.Request) {
 			Params:         params,
 			Reason:         req.Reason,
 			Context:        req.Context,
+			ProductSurface: productctx.FromRequest(r),
 		})
 	}
 
@@ -646,6 +650,7 @@ func toRequestResponse(req requestdomain.Request) requestdto.RequestResponse {
 	if req.OrgID != nil {
 		resp.OrgID = strings.TrimSpace(*req.OrgID)
 	}
+	resp.ProductSurface = req.ProductSurface
 	return resp
 }
 

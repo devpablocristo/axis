@@ -166,14 +166,21 @@ func TestUpsertPackRejectsArchived(t *testing.T) {
 	}
 }
 
-func TestUpsertPackRequiresInputPlaceholder(t *testing.T) {
+func TestUpsertPackAllowsMissingInputPlaceholder(t *testing.T) {
+	// The {{input_json}} placeholder is intentionally NOT required on create:
+	// the prompt is pure natural language and runLLM injects the structured
+	// input autonomously (appending it when the placeholder is absent). See
+	// validatePackForCreate. A prompt without the placeholder must be accepted.
 	uc := newTestUsecases(t, newFakeAssistRepo(), &countingProvider{})
-	_, err := uc.UpsertPack(context.Background(), UpsertPackInput{
+	pack, err := uc.UpsertPack(context.Background(), UpsertPackInput{
 		OrgID: "org-1", OwnerSystem: "medmory", ProductSurface: "medmory", AssistType: "clinical_summary",
 		Name: "Summary", PromptTemplate: "no placeholder here",
 	})
-	if !domainerr.IsKind(err, domainerr.KindValidation) {
-		t.Fatalf("expected Validation without {{input_json}}, got %v", err)
+	if err != nil {
+		t.Fatalf("expected no error without {{input_json}}, got %v", err)
+	}
+	if pack.PromptTemplate != "no placeholder here" {
+		t.Fatalf("expected prompt template preserved, got %q", pack.PromptTemplate)
 	}
 }
 

@@ -7,7 +7,7 @@ import {
 } from '@devpablocristo/platform-crud-ui'
 import type { ReactElement } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { axisCrudHttpClient, listIAMTenants } from './api'
+import { axisCrudHttpClient } from './api'
 
 type IAMCrudResource = 'tenants' | 'users'
 type CrudLifecycleView = 'active' | 'archived' | 'trash'
@@ -36,6 +36,7 @@ type TenantRow = AxisTenantView
 
 type IAMControlCenterProps = {
   orgId: string
+  productSurface: string
   orgs: Array<{ id: string; name?: string; status?: string }>
   onOrgChange: (orgId: string) => void
   onRefreshShell: () => Promise<void>
@@ -53,26 +54,33 @@ const ROLE_OPTIONS = [
 
 export function IAMControlCenter(props: IAMControlCenterProps) {
   const rootRef = useRef<HTMLElement | null>(null)
-  const [activeCrud, setActiveCrud] = useState<IAMCrudResource>('tenants')
+  // Persist the active tab so changing org/product never bounces it back to Orgs.
+  const [activeCrud, setActiveCrud] = useState<IAMCrudResource>(
+    () => (localStorage.getItem('axis.iam.tab') as IAMCrudResource) || 'tenants',
+  )
   const [lifecycleViews, setLifecycleViews] = useState<LifecycleViews>({ tenants: 'active', users: 'active' })
   const [selected, setSelected] = useState<SelectedRows>({ tenants: [], users: [] })
   const [createRequested, setCreateRequested] = useState<IAMCrudResource | null>(null)
   const [bulkBusy, setBulkBusy] = useState(false)
   const [reloadVersion, setReloadVersion] = useState(0)
-  const [axisTenants, setAxisTenants] = useState<AxisTenantView[]>([])
   const [selectedUserOrgId, setSelectedUserOrgId] = useState('axis')
 
-  const activeAxisTenants = useMemo(() => axisTenants.filter((tenant) => lifecycleBucket(tenant.status) === 'active'), [axisTenants])
-
   useEffect(() => {
-    if (selectedUserOrgId !== 'axis' && !activeAxisTenants.some((tenant) => tenant.id === selectedUserOrgId)) {
-      setSelectedUserOrgId('axis')
-    }
-  }, [activeAxisTenants, selectedUserOrgId])
+    localStorage.setItem('axis.iam.tab', activeCrud)
+  }, [activeCrud])
 
+  // El org lo gobierna el selector global (izquierda del avatar): el CRUD de
+  // usuarios sigue al orgId global en vez de tener su propio selector.
   useEffect(() => {
-    void loadTenantOptions(props.orgId, setAxisTenants)
-  }, [props.orgId, reloadVersion])
+    setSelectedUserOrgId(props.orgId)
+  }, [props.orgId])
+
+  // El producto activo (tenant) no entra en la query ni en el orgId, pero sí en
+  // el X-Tenant-ID que manda axisFetch. Al cambiar producto, forzar refetch para
+  // re-listar los items del nuevo tenant (sin tocar la tab activa).
+  useEffect(() => {
+    setReloadVersion((current) => current + 1)
+  }, [props.productSurface])
 
   useEffect(() => {
     setSelected((current) => ({ ...current, users: [] }))
@@ -131,20 +139,6 @@ export function IAMControlCenter(props: IAMControlCenterProps) {
       setBulkBusy(false)
     }
   }
-
-  const userOrgSelector = (
-    <div className="iam-control__below-actions">
-      <label>
-        <span>Org</span>
-        <select value={selectedUserOrgId} onChange={(event) => setSelectedUserOrgId(event.target.value)}>
-          <option value="axis">Axis</option>
-          {activeAxisTenants.map((tenant) => (
-            <option key={tenant.id} value={tenant.id}>{tenant.name}</option>
-          ))}
-        </select>
-      </label>
-    </div>
-  )
 
   return (
     <section ref={rootRef} className="page-section iam-control iam-control--external-lifecycle axis-crud-host">
@@ -221,7 +215,6 @@ export function IAMControlCenter(props: IAMControlCenterProps) {
             archivedEmptyState="Sin usuarios archivados"
             trashEmptyState="Sin usuarios en papelera"
             searchPlaceholder="Buscar usuarios"
-            belowActionsSlot={userOrgSelector}
             onCreate={() => setCreateRequested('users')}
             onClear={() => clearSelected('users')}
             onBulkAction={(action) => void applyBulkAction('users', action, usersActive)}
@@ -356,7 +349,13 @@ function userFormFields(selectedUserOrgId: string): CrudPageProps<IAMUserView>['
       label: 'Rol',
       type: 'select' as const,
       required: true,
-      options: selectedUserOrgId === 'axis' ? ROLE_OPTIONS.filter((option) => option.value !== 'member') : ROLE_OPTIONS,
+      // 'owner' is a GLOBAL platform role (access to everything), not a per-tenant
+      // role — assign it from the axis/global scope, never from a company tenant.
+      // Per tenant: admin/member. Global (axis): owner/admin.
+      options:
+        selectedUserOrgId === 'axis'
+          ? ROLE_OPTIONS.filter((option) => option.value !== 'member')
+          : ROLE_OPTIONS.filter((option) => option.value !== 'owner'),
     },
   ]
 }
@@ -436,20 +435,6 @@ async function applyLocalBulkAction(args: {
   }
 }
 
-async function loadTenantOptions(orgId: string, setAxisTenants: (rows: AxisTenantView[]) => void) {
-  try {
-    setAxisTenants(await listIAMTenants(orgId))
-  } catch {
-    setAxisTenants([])
-  }
-}
-
-function lifecycleBucket(status: string): CrudLifecycleView {
-  const normalized = status.trim().toLowerCase()
-  if (normalized === 'archived') return 'archived'
-  if (normalized === 'trash' || normalized === 'disabled' || normalized === 'removed' || normalized === 'inactive') return 'trash'
-  return 'active'
-}
 
 function formatStatus(status: string): string {
   switch (status.trim().toLowerCase()) {

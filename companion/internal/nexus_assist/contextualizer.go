@@ -31,7 +31,7 @@ func (c *Contextualizer) Explain(ctx context.Context, requestID string) (summary
 		return "", false, fmt.Errorf("request_id is required")
 	}
 	if c.llm == nil {
-		return "", false, fmt.Errorf("Gemini provider is required")
+		return "", false, fmt.Errorf("gemini provider is required")
 	}
 	req, st, err := c.nexus.GetRequest(ctx, requestID)
 	if err != nil {
@@ -46,10 +46,10 @@ func (c *Contextualizer) Explain(ctx context.Context, requestID string) (summary
 		MaxTokens:    300,
 	})
 	if err != nil {
-		return "", false, fmt.Errorf("Gemini contextualizer: %w", err)
+		return "", false, fmt.Errorf("gemini contextualizer: %w", err)
 	}
 	if resp.Text == "" {
-		return "", false, fmt.Errorf("Gemini contextualizer returned empty summary")
+		return "", false, fmt.Errorf("gemini contextualizer returned empty summary")
 	}
 	return resp.Text, false, nil
 }

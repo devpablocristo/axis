@@ -214,8 +214,9 @@ func insertRequest(ctx context.Context, execer pgExecer, req requestdomain.Reque
 			risk_level, decision, decision_reason, policy_id,
 			status, approval_id, execution_result, error_message,
 			ai_summary, ai_degraded,
-			evaluated_at, decided_at, executed_at, expires_at, created_at, updated_at
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30)
+			evaluated_at, decided_at, executed_at, expires_at, created_at, updated_at,
+			product_surface
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31)
 	`,
 		req.ID, req.OrgID, req.IdempotencyKey, req.RequesterType, req.RequesterID, req.RequesterName,
 		req.ActionType, req.TargetSystem, req.TargetResource, req.ActionBinding, req.BindingHash, req.Params, req.Reason, req.Context,
@@ -223,6 +224,7 @@ func insertRequest(ctx context.Context, execer pgExecer, req requestdomain.Reque
 		req.Status, req.ApprovalID, req.ExecutionResult, req.ErrorMessage,
 		req.AISummary, req.AIDegraded,
 		req.EvaluatedAt, req.DecidedAt, req.ExecutedAt, req.ExpiresAt, req.CreatedAt, req.UpdatedAt,
+		req.ProductSurface,
 	)
 	if err != nil {
 		if isUniqueViolation(err) && req.IdempotencyKey != nil && *req.IdempotencyKey != "" {
@@ -488,7 +490,8 @@ const selectRequestSQL = `
 	       risk_level, decision, decision_reason, policy_id,
 	       status, approval_id, execution_result, error_message,
 	       ai_summary, ai_degraded,
-	       evaluated_at, decided_at, executed_at, expires_at, created_at, updated_at
+	       evaluated_at, decided_at, executed_at, expires_at, created_at, updated_at,
+	       product_surface
 	FROM requests`
 
 type requestScanRow interface {
@@ -504,6 +507,7 @@ func scanRequest(row requestScanRow) (requestdomain.Request, error) {
 		&req.Status, &req.ApprovalID, &req.ExecutionResult, &req.ErrorMessage,
 		&req.AISummary, &req.AIDegraded,
 		&req.EvaluatedAt, &req.DecidedAt, &req.ExecutedAt, &req.ExpiresAt, &req.CreatedAt, &req.UpdatedAt,
+		&req.ProductSurface,
 	); err != nil {
 		return requestdomain.Request{}, fmt.Errorf("scan request: %w", err)
 	}

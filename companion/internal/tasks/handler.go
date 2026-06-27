@@ -738,10 +738,6 @@ func (h *Handler) chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	msgs := make([]tasksdto.MessageResponse, 0, len(result.Messages))
-	for _, m := range result.Messages {
-		msgs = append(msgs, tasksdto.MessageToResponse(m))
-	}
 	httpjson.WriteJSON(w, http.StatusOK, tasksdto.ChatResponseFromRuntimeResult(result.Task, result.Messages, result.RunID, result.AgentID, chatToolCallsToResponse(result.ToolCalls)))
 }
 

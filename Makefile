@@ -3,7 +3,8 @@ DC := docker compose --project-directory $(CURDIR) -f $(CURDIR)/docker-compose.y
 
 .PHONY: test test-companion test-nexus test-bff test-console billing-agent-scan \
 	qa qa-companion qa-nexus check-companion check-nexus hygiene \
-	smoke smoke-companion smoke-nexus e2e-nexus e2e-nexus-policy-promotion acceptance-nexus \
+	smoke smoke-companion smoke-nexus e2e-nexus e2e-nexus-policy-promotion acceptance-nexus e2e-users \
+	lint lint-go lint-console coverage \
 	dev-apis dev-companion dev-nexus \
 	network up down build logs compose-services
 
@@ -44,7 +45,26 @@ test-bff:
 	cd bff && go test ./...
 
 test-console:
-	cd console && npm run typecheck && npm run build
+	cd console && npm run typecheck && npm run test && npm run build
+
+e2e-users:
+	$(DC) up -d axis-control-postgres
+	cd bff && bash scripts/e2e/run-users-flow.sh
+
+STATICCHECK := go run honnef.co/go/tools/cmd/staticcheck@2026.1
+DEADCODE := go run golang.org/x/tools/cmd/deadcode@latest
+
+lint: lint-go lint-console
+
+lint-go:
+	for m in bff companion nexus; do echo "== staticcheck $$m =="; (cd $$m && $(STATICCHECK) ./...); done
+	for m in bff companion nexus; do echo "== deadcode $$m (NB: test-only code shows as unreachable) =="; (cd $$m && $(DEADCODE) ./... || true); done
+
+lint-console:
+	cd console && npm run lint
+
+coverage:
+	for m in bff companion nexus; do echo "== coverage $$m =="; (cd $$m && go test ./... -cover 2>/dev/null | tail -20); done
 
 billing-agent-scan:
 	cd companion && bash scripts/ops/run-billing-agent-scan.sh

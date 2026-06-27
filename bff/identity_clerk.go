@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +14,27 @@ import (
 
 	authn "github.com/devpablocristo/platform/authn/go"
 )
+
+// clerkAPIError carries the HTTP status of a failed Clerk Backend API call so
+// callers can tolerate specific outcomes (e.g. a 404 when an Axis-only org id
+// is not a Clerk org).
+type clerkAPIError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *clerkAPIError) Error() string {
+	return fmt.Sprintf("identity provider request failed: status %d", e.StatusCode)
+}
+
+// clerkStatus returns the HTTP status code of a clerkAPIError, or 0 otherwise.
+func clerkStatus(err error) int {
+	var e *clerkAPIError
+	if errors.As(err, &e) {
+		return e.StatusCode
+	}
+	return 0
+}
 
 type clerkIdentityAdapter struct {
 	secretKey string
@@ -58,6 +80,14 @@ func (a *clerkIdentityAdapter) SyncPrincipal(ctx context.Context, p authn.Princi
 	}); err != nil {
 		return err
 	}
+	// Bridge: a Clerk axis_role=owner becomes a platform_admin role stored in
+	// Axis (the Control Plane source of truth). This is the migration path off
+	// Clerk metadata — once seeded, authz no longer depends on the Clerk claim.
+	if normalizedRole(claimRole(p.Claims, "axis_role")) == "owner" {
+		if err := a.store.SetPlatformRole(ctx, p.Actor, "platform_admin"); err != nil {
+			return err
+		}
+	}
 	if strings.TrimSpace(p.OrgID) == "" {
 		return nil
 	}
@@ -81,6 +111,26 @@ func (a *clerkIdentityAdapter) SyncPrincipal(ctx context.Context, p authn.Princi
 	return err
 }
 
+// clerkOrgID resolves an Axis org id to its Clerk organization id. Axis stores
+// orgs by a business id (e.g. "cristo.tech"); Clerk addresses orgs by their own
+// id (e.g. "org_3Fh0a1..."), kept in provider_org_id. Every Clerk org-scoped
+// call MUST use this, never the Axis id, or Clerk returns 404.
+func (a *clerkIdentityAdapter) clerkOrgID(ctx context.Context, axisOrgID string) string {
+	axisOrgID = strings.TrimSpace(axisOrgID)
+	if axisOrgID == "" || strings.HasPrefix(axisOrgID, "org_") {
+		return axisOrgID
+	}
+	orgs, err := a.store.ListOrgsForActor(ctx, "", true)
+	if err == nil {
+		for _, o := range orgs {
+			if o.ID == axisOrgID && strings.TrimSpace(o.ProviderOrgID) != "" {
+				return o.ProviderOrgID
+			}
+		}
+	}
+	return axisOrgID
+}
+
 func (a *clerkIdentityAdapter) SyncOrgMembers(ctx context.Context, orgID string) error {
 	if err := a.ensureRemote(); err != nil {
 		return err
@@ -89,20 +139,21 @@ func (a *clerkIdentityAdapter) SyncOrgMembers(ctx context.Context, orgID string)
 	if orgID == "" {
 		return nil
 	}
+	clerkOrg := a.clerkOrgID(ctx, orgID)
 	const limit = 100
 	for offset := 0; ; offset += limit {
 		var payload map[string]any
-		path := fmt.Sprintf("/organizations/%s/memberships?limit=%d&offset=%d", url.PathEscape(orgID), limit, offset)
+		path := fmt.Sprintf("/organizations/%s/memberships?limit=%d&offset=%d", url.PathEscape(clerkOrg), limit, offset)
 		if err := a.json(ctx, http.MethodGet, path, nil, &payload); err != nil {
 			return err
 		}
 		items := clerkDataItems(payload)
 		for _, item := range items {
 			member := clerkMembership(item)
-			if member.OrgID == "" {
-				member.OrgID = orgID
-			}
-			if member.OrgID != orgID || member.UserID == "" {
+			// Store under the Axis org id (the Clerk response carries the Clerk
+			// org id in member.OrgID); skip rows without a user.
+			member.OrgID = orgID
+			if member.UserID == "" {
 				continue
 			}
 			user := clerkMembershipUser(item)
@@ -154,7 +205,7 @@ func (a *clerkIdentityAdapter) UpdateOrg(ctx context.Context, orgID string, inpu
 		if strings.TrimSpace(input.Slug) != "" {
 			body["slug"] = strings.TrimSpace(input.Slug)
 		}
-		if err := a.json(ctx, http.MethodPatch, "/organizations/"+url.PathEscape(orgID), body, &payload); err != nil {
+		if err := a.json(ctx, http.MethodPatch, "/organizations/"+url.PathEscape(a.clerkOrgID(ctx, orgID)), body, &payload); err != nil {
 			return IAMOrg{}, err
 		}
 		remote := clerkOrg(payload, input)
@@ -170,8 +221,13 @@ func (a *clerkIdentityAdapter) DeleteOrg(ctx context.Context, orgID string) erro
 	if err := a.ensureRemote(); err != nil {
 		return err
 	}
-	if err := a.json(ctx, http.MethodDelete, "/organizations/"+url.PathEscape(orgID), nil, nil); err != nil {
-		return err
+	if err := a.json(ctx, http.MethodDelete, "/organizations/"+url.PathEscape(a.clerkOrgID(ctx, orgID)), nil, nil); err != nil {
+		// The org may not exist in Clerk (e.g. an Axis-only org id like
+		// "local-dev-org"). Axis is the source of truth for tenancy, so a Clerk
+		// 404 must not block removing the local record.
+		if clerkStatus(err) != http.StatusNotFound {
+			return err
+		}
 	}
 	return a.store.DeleteOrg(ctx, orgID)
 }
@@ -259,7 +315,11 @@ func (a *clerkIdentityAdapter) DeleteUser(ctx context.Context, orgID string, use
 		return err
 	}
 	if err := a.json(ctx, http.MethodDelete, "/users/"+url.PathEscape(userID), nil, nil); err != nil {
-		return err
+		// Already gone from Clerk (drift / prior delete): still remove locally so
+		// a purge isn't blocked. Axis is the source of truth for the membership.
+		if clerkStatus(err) != http.StatusNotFound {
+			return err
+		}
 	}
 	return a.store.DeleteUser(ctx, userID)
 }
@@ -273,7 +333,7 @@ func (a *clerkIdentityAdapter) UpsertMember(ctx context.Context, member IAMMembe
 		return a.UpdateMember(ctx, member.OrgID, member.UserID, IAMMember{Role: normalizedRole(role), Status: firstNonEmpty(member.Status, "active")})
 	}
 	var payload map[string]any
-	if err := a.json(ctx, http.MethodPost, "/organizations/"+url.PathEscape(member.OrgID)+"/memberships", map[string]any{
+	if err := a.json(ctx, http.MethodPost, "/organizations/"+url.PathEscape(a.clerkOrgID(ctx, member.OrgID))+"/memberships", map[string]any{
 		"user_id": member.UserID,
 		"role":    role,
 	}, &payload); err != nil {
@@ -302,7 +362,7 @@ func (a *clerkIdentityAdapter) UpdateMember(ctx context.Context, orgID string, u
 	role := clerkRole(member.Role)
 	if role != "" {
 		var payload map[string]any
-		if err := a.json(ctx, http.MethodPatch, "/organizations/"+url.PathEscape(orgID)+"/memberships/"+url.PathEscape(userID), map[string]any{"role": role}, &payload); err != nil {
+		if err := a.json(ctx, http.MethodPatch, "/organizations/"+url.PathEscape(a.clerkOrgID(ctx, orgID))+"/memberships/"+url.PathEscape(userID), map[string]any{"role": role}, &payload); err != nil {
 			return IAMMember{}, err
 		}
 	}
@@ -313,8 +373,11 @@ func (a *clerkIdentityAdapter) DeleteMember(ctx context.Context, orgID string, u
 	if err := a.ensureRemote(); err != nil {
 		return err
 	}
-	if err := a.json(ctx, http.MethodDelete, "/organizations/"+url.PathEscape(orgID)+"/memberships/"+url.PathEscape(userID), nil, nil); err != nil {
-		return err
+	if err := a.json(ctx, http.MethodDelete, "/organizations/"+url.PathEscape(a.clerkOrgID(ctx, orgID))+"/memberships/"+url.PathEscape(userID), nil, nil); err != nil {
+		// Membership already gone from Clerk: still remove the local row.
+		if clerkStatus(err) != http.StatusNotFound {
+			return err
+		}
 	}
 	return a.store.DeleteMember(ctx, orgID, userID)
 }
@@ -324,7 +387,7 @@ func (a *clerkIdentityAdapter) CreateInvitation(ctx context.Context, invite IAMI
 		return IAMInvitation{}, err
 	}
 	var payload map[string]any
-	if err := a.json(ctx, http.MethodPost, "/organizations/"+url.PathEscape(invite.OrgID)+"/invitations", map[string]any{
+	if err := a.json(ctx, http.MethodPost, "/organizations/"+url.PathEscape(a.clerkOrgID(ctx, invite.OrgID))+"/invitations", map[string]any{
 		"email_address": invite.Email,
 		"role":          clerkRole(invite.Role),
 	}, &payload); err != nil {
@@ -349,6 +412,15 @@ func (a *clerkIdentityAdapter) HandleWebhook(ctx context.Context, eventType stri
 	case "organization.created", "organization.updated":
 		_, err := a.store.CreateOrg(ctx, clerkOrg(data, IAMOrg{Status: "active"}), "")
 		return err
+	case "user.deleted":
+		// Keep Axis in sync when a user is removed in Clerk (the IdP). Without
+		// this the axis_users row would orphan: Clerk is the source of truth for
+		// identity existence, while Axis owns authz (memberships/roles).
+		id := clerkString(data, "id")
+		if id == "" {
+			return nil
+		}
+		return a.store.DeleteUser(ctx, id)
 	case "organization.deleted":
 		id := clerkString(data, "id")
 		if id == "" {
@@ -411,7 +483,7 @@ func (a *clerkIdentityAdapter) json(ctx context.Context, method string, path str
 		return err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("identity provider request failed: status %d", resp.StatusCode)
+		return &clerkAPIError{StatusCode: resp.StatusCode, Body: string(raw)}
 	}
 	if out == nil || len(raw) == 0 {
 		return nil

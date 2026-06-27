@@ -166,6 +166,7 @@ func (s *server) routes() http.Handler {
 	mux.Handle("GET /api/session", s.withAuth(http.HandlerFunc(s.session)))
 	mux.Handle("GET /api/services", s.withAuth(http.HandlerFunc(s.services)))
 	mux.Handle("/api/iam/", s.withAuth(http.HandlerFunc(s.iamAPI)))
+	mux.Handle("/api/control/", s.withAuth(http.HandlerFunc(s.controlAPI)))
 	mux.Handle("/api/agent-profiles", s.withAuth(http.HandlerFunc(s.agentProfilesAPI)))
 	mux.Handle("/api/agent-profiles/", s.withAuth(http.HandlerFunc(s.agentProfilesAPI)))
 	mux.Handle("/api/prompts/", s.withAuth(http.HandlerFunc(s.promptsAPI)))
@@ -223,6 +224,14 @@ func (s *server) authenticate(r *http.Request) (authn.Principal, error) {
 		if err := s.identity.SyncPrincipal(r.Context(), principal); err != nil {
 			return authn.Principal{}, err
 		}
+		// Authz off Clerk: a platform admin per Axis (Control Plane) gets the
+		// admin scope set from Axis, not from the Clerk claim. This only ever
+		// upgrades — non-platform users keep their claim-derived scopes as a
+		// migration fallback, and their effective per-tenant scopes are resolved
+		// later in resolveAppContext. So the cutover never locks anyone out.
+		if roles, rerr := s.iam.PlatformRolesForUser(r.Context(), principal.Actor); rerr == nil && isPlatformAdmin(roles) {
+			principal.Scopes = defaultAdminScopes()
+		}
 	}
 	return principal, nil
 }
@@ -242,15 +251,19 @@ func (s *server) session(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	orgs, _ := s.iam.ListOrgsForActor(r.Context(), p.Actor, hasScope(p.Scopes, "axis:cross_org"))
+	tenants, _ := s.iam.ResolveTenantsForUser(r.Context(), p.Actor)
+	platformRoles, _ := s.iam.PlatformRolesForUser(r.Context(), p.Actor)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"actor_id":    p.Actor,
-		"org_id":      orgID,
-		"orgs":        orgs,
-		"role":        p.Role,
-		"axis_role":   claimRole(p.Claims, "axis_role"),
-		"org_role":    claimRole(p.Claims, "org_role"),
-		"scopes":      p.Scopes,
-		"auth_method": p.AuthMethod,
+		"actor_id":       p.Actor,
+		"org_id":         orgID,
+		"orgs":           orgs,
+		"tenants":        tenants,
+		"platform_roles": platformRoles,
+		"role":           p.Role,
+		"axis_role":      claimRole(p.Claims, "axis_role"),
+		"org_role":       claimRole(p.Claims, "org_role"),
+		"scopes":         p.Scopes,
+		"auth_method":    p.AuthMethod,
 	})
 }
 
@@ -274,7 +287,7 @@ func (s *server) proxy(name, prefix, target, audience string) http.Handler {
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := principalFromContext(r.Context())
-		orgID, err := s.selectedOrg(r, p)
+		orgID, productSurface, tenantID, scopes, err := s.resolveAppContext(r, p)
 		if err != nil {
 			writeError(w, http.StatusForbidden, "FORBIDDEN", err.Error())
 			return
@@ -287,8 +300,9 @@ func (s *server) proxy(name, prefix, target, audience string) http.Handler {
 			ActorID:        p.Actor,
 			ActorType:      "human",
 			OrgID:          orgID,
-			ProductSurface: "axis-console",
-			Scopes:         p.Scopes,
+			TenantID:       tenantID,
+			ProductSurface: productSurface,
+			Scopes:         scopes,
 			Service:        "axis-bff",
 			OnBehalfOf:     p.Actor,
 			ExpiresAt:      now.Add(5 * time.Minute),
@@ -316,8 +330,59 @@ func (s *server) proxy(name, prefix, target, audience string) http.Handler {
 		r2.Header.Set("Authorization", "Bearer "+token)
 		r2.Header.Set("X-Request-ID", requestID(r))
 		r2.Header.Set("X-Axis-Forwarded-By", "axis-bff")
+		// El product_surface (y tenant) resuelto por el BFF es autoritativo: lo
+		// fijamos en los headers para que el browser no pueda pisarlo con un
+		// X-Product-Surface arbitrario y el app plane quede scopeado al tenant.
+		if productSurface != "" {
+			r2.Header.Set("X-Product-Surface", productSurface)
+		}
+		if tenantID != "" {
+			r2.Header.Set("X-Tenant-ID", tenantID)
+		}
 		proxy.ServeHTTP(w, r2)
 	})
+}
+
+// resolveAppContext resolves the application-plane scoping for a proxied request.
+// If X-Tenant-ID is present, the tenant (org x product) is the source of truth:
+// it yields the tenant's org_id + product_surface + tenant_id and scopes derived
+// from the user's tenant role (or platform role). Otherwise it falls back to the
+// legacy org-only path (no tenant) for back-compat while the console migrates.
+func (s *server) resolveAppContext(r *http.Request, p authn.Principal) (orgID, productSurface, tenantID string, scopes []string, err error) {
+	requestedTenant := strings.TrimSpace(r.Header.Get("X-Tenant-ID"))
+	if requestedTenant != "" {
+		tenant, terr := s.iam.TenantByID(r.Context(), requestedTenant)
+		if terr != nil {
+			return "", "", "", nil, errors.New("tenant not found")
+		}
+		platformRoles, _ := s.iam.PlatformRolesForUser(r.Context(), p.Actor)
+		role := ""
+		if !isPlatformAdmin(platformRoles) {
+			m, merr := s.iam.TenantMembership(r.Context(), tenant.ID, p.Actor)
+			if merr != nil {
+				return "", "", "", nil, errors.New("user is not a member of the requested tenant")
+			}
+			role = m.Role
+		}
+		return tenant.OrgID, tenant.ProductSurface, tenant.ID, scopesForTenant(role, platformRoles), nil
+	}
+	org, oerr := s.selectedOrg(r, p)
+	if oerr != nil {
+		return "", "", "", nil, oerr
+	}
+	ps := strings.TrimSpace(r.Header.Get("X-Product-Surface"))
+	if ps == "" {
+		ps = "axis-console"
+	}
+	// Authz source of truth is Axis (platform roles + org membership), NOT the
+	// Clerk token. Fall back to the claim-derived scopes only when Axis has no
+	// authz record for this user yet, so the migration off Clerk locks no one out.
+	scopes = s.scopesFromAxisOrg(r.Context(), p.Actor, org)
+	if scopes == nil {
+		log.Printf("authz: no Axis authz record for actor=%q org=%q; using claim-derived scopes (migration fallback)", p.Actor, org)
+		scopes = p.Scopes
+	}
+	return org, ps, "", scopes, nil
 }
 
 func (s *server) selectedOrg(r *http.Request, p authn.Principal) (string, error) {
@@ -402,6 +467,7 @@ type internalJWTClaims struct {
 	ActorID        string
 	ActorType      string
 	OrgID          string
+	TenantID       string
 	ProductSurface string
 	Scopes         []string
 	Service        string
@@ -422,6 +488,7 @@ func signInternalJWT(secret string, c internalJWTClaims) (string, error) {
 		"actor_id":          c.ActorID,
 		"actor_type":        c.ActorType,
 		"org_id":            c.OrgID,
+		"tenant_id":         c.TenantID,
 		"product_surface":   c.ProductSurface,
 		"scope":             strings.Join(c.Scopes, " "),
 		"scp":               c.Scopes,

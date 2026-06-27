@@ -362,18 +362,13 @@ func validatePack(pack domain.AssistPack) error {
 }
 
 // validatePackForCreate adds the invariants that only apply when a pack is
-// first authored. The template must interpolate the structured input via the
-// {{input_json}} placeholder; otherwise runLLM silently appends it, which hides
-// authoring mistakes (the placeholder is required on create, not on update, so
-// legacy packs that runLLM still tolerates are not retroactively rejected).
+// first authored. The prompt is pure natural language: the input injection is a
+// technical concern the author should not deal with, so the {{input_json}}
+// placeholder is NOT required. runLLM injects the structured input autonomously
+// (interpolating the placeholder if the author opted to place it, otherwise
+// appending it), so authors paste prompt text only.
 func validatePackForCreate(pack domain.AssistPack) error {
-	if err := validatePack(pack); err != nil {
-		return err
-	}
-	if !strings.Contains(pack.PromptTemplate, "{{input_json}}") {
-		return domainerr.Validation("prompt_template must contain the {{input_json}} placeholder")
-	}
-	return nil
+	return validatePack(pack)
 }
 
 func parseLLMOutput(text string) (map[string]any, bool) {

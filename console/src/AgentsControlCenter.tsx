@@ -79,15 +79,11 @@ export function AgentsControlCenter({ orgId }: { orgId: string }) {
     void loadProfileOptions(orgId, setAgentProfiles, setProfilesError)
   }, [orgId, reloadVersion, activeSection])
 
+  // El org lo gobierna el selector global (izquierda del avatar): seguimos al
+  // orgId global en vez de tener un selector propio.
   useEffect(() => {
-    if (activeOrgs.length === 0) {
-      setSelectedOrgId('')
-      return
-    }
-    if (selectedOrgId && activeOrgs.some((org) => org.id === selectedOrgId)) return
-    const preferred = activeOrgs.find((org) => org.id === orgId)
-    setSelectedOrgId(preferred?.id ?? activeOrgs[0].id)
-  }, [activeOrgs, orgId, selectedOrgId])
+    setSelectedOrgId(orgId)
+  }, [orgId])
 
   useEffect(() => {
     setSelectedIds([])
@@ -137,14 +133,6 @@ export function AgentsControlCenter({ orgId }: { orgId: string }) {
 
   const orgSelector = (
     <div className="iam-control__below-actions">
-      <label>
-        <span>Org</span>
-        <select value={selectedOrgId} onChange={(event) => setSelectedOrgId(event.target.value)}>
-          {activeOrgs.map((org) => (
-            <option key={org.id} value={org.id}>{org.name}</option>
-          ))}
-        </select>
-      </label>
       <label>
         <span>Validación</span>
         <select value={validationFilter} onChange={(event) => setValidationFilter(event.target.value as ValidationFilter)}>

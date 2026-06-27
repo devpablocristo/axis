@@ -11,6 +11,7 @@ import (
 	findingdto "github.com/devpablocristo/nexus/internal/findings/handler/dto"
 	domain "github.com/devpablocristo/nexus/internal/findings/usecases/domain"
 	"github.com/devpablocristo/platform/authn/go/identityhttp"
+	"github.com/devpablocristo/platform/errors/go/domainerr"
 	"github.com/devpablocristo/platform/http/go/httpjson"
 	"github.com/google/uuid"
 )
@@ -85,7 +86,7 @@ func (h *Handler) upsertRule(w http.ResponseWriter, r *http.Request) {
 		Priority:       body.Priority,
 	})
 	if err != nil {
-		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", err.Error())
+		writeUsecaseError(w, err)
 		return
 	}
 	httpjson.WriteJSON(w, http.StatusCreated, ruleResponse(out))
@@ -102,7 +103,7 @@ func (h *Handler) listRules(w http.ResponseWriter, r *http.Request) {
 		FactType:     r.URL.Query().Get("fact_type"),
 	})
 	if err != nil {
-		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", err.Error())
+		writeUsecaseError(w, err)
 		return
 	}
 	resp := make([]findingdto.FindingRuleResponse, 0, len(out))
@@ -124,7 +125,7 @@ func (h *Handler) listArchivedRules(w http.ResponseWriter, r *http.Request) {
 		ArchivedOnly: true,
 	})
 	if err != nil {
-		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", err.Error())
+		writeUsecaseError(w, err)
 		return
 	}
 	resp := make([]findingdto.FindingRuleResponse, 0, len(out))
@@ -202,7 +203,7 @@ func (h *Handler) updateRule(w http.ResponseWriter, r *http.Request) {
 		Priority:       body.Priority,
 	})
 	if err != nil {
-		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", err.Error())
+		writeUsecaseError(w, err)
 		return
 	}
 	httpjson.WriteJSON(w, http.StatusOK, ruleResponse(out))
@@ -268,7 +269,7 @@ func (h *Handler) submitFacts(w http.ResponseWriter, r *http.Request) {
 		Facts:         body.Facts,
 	})
 	if err != nil {
-		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", err.Error())
+		writeUsecaseError(w, err)
 		return
 	}
 	resp := findingdto.SubmitFactsResponse{
@@ -314,7 +315,7 @@ func (h *Handler) listFindings(w http.ResponseWriter, r *http.Request) {
 		Limit:         limit,
 	})
 	if err != nil {
-		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", err.Error())
+		writeUsecaseError(w, err)
 		return
 	}
 	httpjson.WriteJSON(w, http.StatusOK, findingsResponse(out))
@@ -364,7 +365,7 @@ func (h *Handler) updateFinding(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := h.uc.UpdateFindingStatus(r.Context(), id, domain.FindingStatus(body.Status), body.ResolutionNote)
 	if err != nil {
-		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", err.Error())
+		writeUsecaseError(w, err)
 		return
 	}
 	httpjson.WriteJSON(w, http.StatusOK, findingResponse(out))
@@ -388,12 +389,23 @@ func parsePathUUID(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
 	return id, true
 }
 
+// writeUsecaseError maps a usecase error to its proper HTTP status. Only genuine
+// domain errors surface as 4xx (with their safe message); anything unexpected
+// (incl. read-path DB failures) is logged + 500 generic, instead of the old
+// blanket 400-VALIDATION that leaked raw internal error text.
 func writeUsecaseError(w http.ResponseWriter, err error) {
-	if errors.Is(err, ErrNotFound) {
+	switch {
+	case errors.Is(err, ErrNotFound) || domainerr.IsNotFound(err):
 		httpjson.WriteFlatError(w, http.StatusNotFound, "NOT_FOUND", "not found")
-		return
+	case domainerr.IsValidation(err):
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", err.Error())
+	case domainerr.IsForbidden(err):
+		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", err.Error())
+	case domainerr.IsConflict(err):
+		httpjson.WriteFlatError(w, http.StatusConflict, "CONFLICT", err.Error())
+	default:
+		httpjson.WriteFlatInternalError(w, err, "findings request failed")
 	}
-	httpjson.WriteFlatInternalError(w, err, "findings request failed")
 }
 
 func ruleResponse(rule domain.FindingRule) findingdto.FindingRuleResponse {

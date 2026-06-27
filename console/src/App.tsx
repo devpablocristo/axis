@@ -5,23 +5,19 @@ import type { ReactNode } from 'react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ActionType, AgentRun, Approval, AxisSession, AxisTenantView, BusinessModel, CapabilityRecord, CompanionAgent, CompanionJob, CompanionTask, CostSummary, Delegation, MemoryConflict, MemoryReview, MemorySummary, NexusRequest, ObservabilityEvent, Policy, Product, ProductInstallation, RunTrace, RuntimePolicy, SecurityEvalReport, ServiceHealth, axisFetch, getHealth, getSession, listIAMTenants } from './api'
 import { AgentsControlCenter } from './AgentsControlCenter'
+import { ControlPlane } from './ControlPlane'
 import { IAMControlCenter } from './IAMControlCenter'
 import { PromptsControlCenter } from './PromptScreens'
+import { type LoadState, empty, load } from './lib/load'
+import { deriveTenantId, preferred, workspaceOrgs as deriveWorkspaceOrgs, workspaceProducts as deriveWorkspaceProducts } from './lib/tenant'
 
-type LoadState<T> = {
-  data: T
-  error: string
-  loading: boolean
-}
-
-type RouteArea = 'home' | 'chat' | 'prompts' | 'agents' | 'iam' | 'operations' | 'nexus' | 'platform'
+type RouteArea = 'home' | 'chat' | 'prompts' | 'agents' | 'iam' | 'operations' | 'nexus' | 'platform' | 'control'
 
 type Route = {
   area: RouteArea
   screen: string
 }
 
-const empty = <T,>(data: T): LoadState<T> => ({ data, error: '', loading: false })
 
 const knownProducts = [
   { productSurface: 'companion', label: 'Companion' },
@@ -52,8 +48,8 @@ type ProductOption = {
 }
 
 export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
-  const [orgId, setOrgId] = useState(localStorage.getItem('axis.org_id') || 'local-dev-org')
-  const [productSurface, setProductSurface] = useState(localStorage.getItem('axis.product_surface') || 'medmory')
+  const [orgId, setOrgId] = useState(localStorage.getItem('axis.org_id') || 'cristo.tech')
+  const [productSurface, setProductSurface] = useState(localStorage.getItem('axis.product_surface') || 'axis')
   const [externalTenantId, setExternalTenantId] = useState(localStorage.getItem('axis.external_tenant_id') || 'bikeman')
   const [route, setRoute] = useState<Route>(() => parseCurrentRoute())
   const [session, setSession] = useState<LoadState<AxisSession | null>>(empty(null))
@@ -82,8 +78,19 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
   const [businessModel, setBusinessModel] = useState<LoadState<BusinessModel | null>>(empty(null))
   const [actionMessage, setActionMessage] = useState('')
 
+  // Active tenant = the (org, product) pair resolved against the user's tenants.
+  // Derived synchronously (NOT useState) so it's always current in the same
+  // render as an org/product change. It MUST NOT be a refresh() dep: refresh
+  // transiently clears session.data (loading=true) which would recompute this
+  // to '' and re-trigger refresh → infinite fetch loop (ERR_INSUFFICIENT_RESOURCES).
+  const tenantId = useMemo(
+    () => deriveTenantId(session.data?.tenants, orgId, productSurface),
+    [session.data?.tenants, orgId, productSurface],
+  )
+
   const refresh = useCallback(async () => {
     localStorage.setItem('axis.org_id', orgId)
+    localStorage.setItem('axis.tenant_id', tenantId)
     localStorage.setItem('axis.product_surface', productSurface)
     localStorage.setItem('axis.external_tenant_id', externalTenantId)
     const productInit = productHeaders(productSurface)
@@ -113,6 +120,8 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
       load(setSecurityReports, async () => (await axisFetch<{ reports: SecurityEvalReport[] }>(withProduct('/api/companion/v1/security-evals/reports?limit=12', productSurface), orgId, productInit)).reports ?? [], []),
       load(setBusinessModel, () => axisFetch<BusinessModel>('/api/companion/v1/business-model', orgId, productInit), null)
     ])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- tenantId is derived
+    // from orgId+productSurface (a refresh dep); adding it loops (see useMemo above).
   }, [externalTenantId, orgId, productSurface])
 
   const runAction = useCallback(async (label: string, fn: () => Promise<unknown>) => {
@@ -130,19 +139,51 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
     void refresh()
   }, [refresh])
 
+  // Legacy org auto-select (pre-tenancy model). Only applies when the user has
+  // NO tenants — otherwise the Workspace selectors below are the single source
+  // of truth for orgId, and these would fight them into an infinite re-render.
   useEffect(() => {
+    if ((session.data?.tenants?.length ?? 0) > 0) return
     const sessionOrgId = session.data?.org_id
     if (sessionOrgId && sessionOrgId !== orgId && !session.data?.scopes?.includes('axis:cross_org')) {
       setOrgId(sessionOrgId)
     }
-  }, [orgId, session.data?.org_id, session.data?.scopes])
+  }, [orgId, session.data?.org_id, session.data?.scopes, session.data?.tenants])
 
   useEffect(() => {
+    if ((session.data?.tenants?.length ?? 0) > 0) return
     const availableOrgs = axisOrgs.data.length > 0 ? axisOrgs.data : session.data?.orgs ?? []
     if (availableOrgs.length === 0) return
     if (availableOrgs.some((org) => org.id === orgId)) return
     setOrgId(availableOrgs[0].id)
-  }, [axisOrgs.data, orgId, session.data?.orgs])
+  }, [axisOrgs.data, orgId, session.data?.orgs, session.data?.tenants])
+
+  // Active workspace = tenant (org x product). Persist + auto-select the first
+  // tenant the user belongs to. axisFetch sends it as X-Tenant-ID.
+  useEffect(() => {
+    localStorage.setItem('axis.tenant_id', tenantId)
+  }, [tenantId])
+
+  // Workspace = two cascading selectors: Org (company) + Producto. The Org
+  // determines the available products; the (org, product) pair derives the
+  // active tenant (X-Tenant-ID). Default preference: cristo.tech + axis.
+  const workspaceOrgs = useMemo(() => deriveWorkspaceOrgs(session.data?.tenants), [session.data?.tenants])
+  const workspaceProducts = useMemo(
+    () => deriveWorkspaceProducts(session.data?.tenants, orgId),
+    [session.data?.tenants, orgId],
+  )
+
+  useEffect(() => {
+    if (workspaceOrgs.length === 0 || workspaceOrgs.includes(orgId)) return
+    const next = preferred(workspaceOrgs, 'cristo.tech')
+    if (next) setOrgId(next)
+  }, [workspaceOrgs, orgId])
+
+  useEffect(() => {
+    if (workspaceProducts.length === 0 || workspaceProducts.includes(productSurface)) return
+    const next = preferred(workspaceProducts, 'axis')
+    if (next) setProductSurface(next)
+  }, [workspaceProducts, productSurface])
 
   const tenantOptions = useMemo(() => buildTenantOptions(productSurface), [productSurface])
 
@@ -176,9 +217,10 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
   const selectedOrgOption = orgOptions.find((item) => item.id === orgId)
   const selectedProductOption = productOptions.find((item) => item.productSurface === productSurface)
   const selectedTenantOption = tenantOptions.find((item) => item.externalTenantId === externalTenantId)
-  const simpleControlHeader = route.area === 'agents' || route.area === 'prompts'
+  const simpleControlHeader = route.area === 'agents' || route.area === 'chat' || route.area === 'prompts' || route.area === 'control'
   const showGlobalContext = route.area !== 'iam' && !simpleControlHeader
   const canViewIAM = Boolean(session.data?.scopes?.some((scope) => scope === 'axis:orgs:admin' || scope === 'axis:users:admin'))
+  const canViewControl = Boolean(session.data?.platform_roles?.some((role) => role === 'platform_admin' || role === 'owner'))
   const title = pageTitle(route)
   const chatAdapter = useMemo<ChatAdapter>(() => axisChatAdapter(orgId, productSurface), [orgId, productSurface])
   const navigate = useCallback((next: Route) => {
@@ -205,6 +247,7 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
           <button type="button" className={route.area === 'operations' ? 'active' : ''} onClick={() => navigate({ area: 'operations', screen: 'runs' })}><Activity aria-hidden="true" />Operación</button>
           <button type="button" className={route.area === 'nexus' ? 'active' : ''} onClick={() => navigate({ area: 'nexus', screen: 'approvals' })}><GitPullRequestArrow aria-hidden="true" />Nexus</button>
           <button type="button" className={route.area === 'platform' ? 'active' : ''} onClick={() => navigate({ area: 'platform', screen: 'runtime' })}><KeyRound aria-hidden="true" />Plataforma</button>
+          {canViewControl && <button type="button" className={route.area === 'control' ? 'active' : ''} onClick={() => navigate({ area: 'control', screen: 'home' })}><Layers3 aria-hidden="true" />Control Plane</button>}
         </nav>
       </aside>
 
@@ -218,26 +261,6 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
             <div className="toolbar">
               {showGlobalContext && (
                 <>
-                  <label>
-                    <span>Cuenta Axis</span>
-                    <select value={orgId} onChange={(event) => setOrgId(event.target.value)}>
-                      {orgOptions.map((org) => (
-                        <option key={org.id} value={org.id}>
-                          {org.name || org.id} · {org.status}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    <span>Producto</span>
-                    <select value={productSurface} onChange={(event) => setProductSurface(event.target.value)}>
-                      {productOptions.map((option) => (
-                        <option key={option.productSurface} value={option.productSurface}>
-                          {option.label} · {option.status}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
                   <label>
                     <span>Tenant</span>
                     <select value={externalTenantId} onChange={(event) => setExternalTenantId(event.target.value)}>
@@ -254,6 +277,26 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
                 <button type="button" onClick={() => void refresh()} aria-label="Refresh">
                   <RefreshCw aria-hidden="true" />
                 </button>
+              )}
+              {(session.data?.tenants?.length ?? 0) > 0 && (
+                <>
+                  <label className="topbar-org">
+                    <span>Org</span>
+                    <select value={orgId} onChange={(event) => setOrgId(event.target.value)}>
+                      {workspaceOrgs.map((o) => (
+                        <option key={o} value={o}>{o}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="topbar-org">
+                    <span>Producto</span>
+                    <select value={productSurface} onChange={(event) => setProductSurface(event.target.value)}>
+                      {workspaceProducts.map((p) => (
+                        <option key={p} value={p}>{p}</option>
+                      ))}
+                    </select>
+                  </label>
+                </>
               )}
               {authSlot && <div className="auth-slot">{authSlot}</div>}
             </div>
@@ -309,28 +352,24 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
 
         {route.area === 'chat' && (
           <section className="page-section">
-            <div className="screen-grid">
-              <Panel title="Chat con Axis" icon={<MessageSquareText />} state={empty(null)}>
-                <ChatWorkspace
-                  adapter={chatAdapter}
-                  baseRequest={{ productSurface, workspace: { org_id: orgId, product_surface: productSurface } }}
-                  labels={{
-                    title: `Axis · ${selectedProductOption?.label ?? productSurface}`,
-                    lead: 'Interactuá con el runtime de Axis para el producto seleccionado.',
-                    conversations: 'Conversaciones',
-                    emptyConversations: 'Sin conversaciones',
-                    emptyThread: 'Escribí una consulta para Axis.',
-                    inputPlaceholder: 'Mensaje para Axis',
-                    send: 'Enviar',
-                    sending: 'Enviando...',
-                    newConversation: 'Nueva',
-                    loadingHistory: 'Cargando historial...',
-                    confirmPending: 'Confirmar',
-                  }}
-                  nowLabel={() => new Date().toLocaleString()}
-                />
-              </Panel>
-            </div>
+            <ChatWorkspace
+              adapter={chatAdapter}
+              baseRequest={{ productSurface, workspace: { org_id: orgId, product_surface: productSurface } }}
+              labels={{
+                title: '',
+                lead: '',
+                conversations: 'Conversaciones',
+                emptyConversations: 'Sin conversaciones',
+                emptyThread: 'Escribí una consulta para Axis.',
+                inputPlaceholder: 'Mensaje para Axis',
+                send: 'Enviar',
+                sending: 'Enviando...',
+                newConversation: 'Nueva',
+                loadingHistory: 'Cargando historial...',
+                confirmPending: 'Confirmar',
+              }}
+              nowLabel={() => new Date().toLocaleString()}
+            />
           </section>
         )}
 
@@ -465,9 +504,14 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
           <AgentsControlCenter orgId={orgId} />
         )}
 
+        {route.area === 'control' && canViewControl && (
+          <ControlPlane />
+        )}
+
         {route.area === 'iam' && canViewIAM && (
           <IAMControlCenter
             orgId={orgId}
+            productSurface={productSurface}
             orgs={orgOptions}
             onOrgChange={setOrgId}
             onRefreshShell={refresh}
@@ -609,7 +653,8 @@ function parseRoutePath(path: string): Route {
     iam: ['internal', 'clients', 'users'],
     operations: ['runs', 'traces', 'memory', 'jobs', 'observability', 'cost', 'security'],
     nexus: ['approvals', 'requests', 'policies', 'action-types', 'delegations', 'risk'],
-    platform: ['runtime', 'capabilities', 'business', 'health']
+    platform: ['runtime', 'capabilities', 'business', 'health'],
+    control: ['home']
   }
   const normalizedScreen = normalizeRouteScreen(area, screenRaw)
   const screen = screens[area].includes(normalizedScreen) ? normalizedScreen : screens[area][0]
@@ -620,7 +665,7 @@ function normalizeRouteArea(value: string): RouteArea {
   if (value === 'overview') return 'home'
   if (value === 'companion') return 'platform'
   if (value === 'access') return 'nexus'
-  if (value === 'home' || value === 'chat' || value === 'prompts' || value === 'agents' || value === 'iam' || value === 'operations' || value === 'nexus' || value === 'platform') {
+  if (value === 'home' || value === 'chat' || value === 'prompts' || value === 'agents' || value === 'iam' || value === 'operations' || value === 'nexus' || value === 'platform' || value === 'control') {
     return value
   }
   return 'home'
@@ -644,6 +689,20 @@ function routePath(route: Route) {
   }
   if (route.area === 'chat') {
     return '/chat'
+  }
+  // URLs bare: estas secciones viven en /area pelado SIEMPRE; los tabs cambian
+  // el contenido in-page sin ensuciar la URL.
+  if (route.area === 'prompts') {
+    return '/prompts'
+  }
+  if (route.area === 'agents') {
+    return '/agents'
+  }
+  if (route.area === 'iam') {
+    return '/iam'
+  }
+  if (route.area === 'control') {
+    return '/control'
   }
   return `/${route.area}/${route.screen}`
 }
@@ -683,15 +742,6 @@ function ScreenNav(props: { base: RouteArea; active: string; items: Array<[strin
   )
 }
 
-async function load<T>(setState: (value: LoadState<T>) => void, fn: () => Promise<T>, fallback: T) {
-  setState({ data: fallback, error: '', loading: true })
-  try {
-    const data = await fn()
-    setState({ data, error: '', loading: false })
-  } catch (error) {
-    setState({ data: fallback, error: error instanceof Error ? error.message : 'error', loading: false })
-  }
-}
 
 function Metric(props: { icon: ReactNode; label: string; value: number; tone: string }) {
   return (

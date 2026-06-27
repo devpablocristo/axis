@@ -1,7 +1,18 @@
+export type AxisTenant = {
+  id: string
+  org_id: string
+  product_surface: string
+  name: string
+  status: string
+  plan?: string
+}
+
 export type AxisSession = {
   actor_id: string
   org_id: string
   orgs?: AxisOrg[]
+  tenants?: AxisTenant[]
+  platform_roles?: string[]
   role: string
   axis_role?: string
   org_role?: string
@@ -375,6 +386,12 @@ export async function axisFetch<T>(path: string, orgId: string, init: RequestIni
   if (orgId) {
     headers.set('X-Axis-Org-ID', orgId)
   }
+  // Active workspace = tenant (org x product). When set, the BFF treats it as the
+  // source of truth (resolves org_id + product_surface + scopes from the tenant).
+  const tenantId = typeof localStorage !== 'undefined' ? localStorage.getItem('axis.tenant_id') : ''
+  if (tenantId) {
+    headers.set('X-Tenant-ID', tenantId)
+  }
   const token = await resolveAxisAuthToken()
   if (token) {
     headers.set('Authorization', `Bearer ${token}`)
@@ -399,6 +416,42 @@ async function resolveAxisAuthToken(): Promise<string> {
 
 export async function getSession(): Promise<AxisSession> {
   return axisFetch<AxisSession>('/api/session', '')
+}
+
+// --- Control Plane (platform-admin) ---
+
+export type ControlOrg = { id: string; name: string; slug: string; status: string }
+export type ControlProduct = { product_surface: string; name: string }
+
+export async function listControlOrgs(): Promise<ControlOrg[]> {
+  const payload = await axisFetch<{ data: ControlOrg[] }>('/api/control/organizations', '')
+  return payload.data ?? []
+}
+
+export async function createControlOrg(name: string): Promise<ControlOrg> {
+  return axisFetch<ControlOrg>('/api/control/organizations', '', { method: 'POST', body: JSON.stringify({ name }) })
+}
+
+export async function listControlTenants(): Promise<AxisTenant[]> {
+  const payload = await axisFetch<{ data: AxisTenant[] }>('/api/control/tenants', '')
+  return payload.data ?? []
+}
+
+export async function listControlProducts(): Promise<ControlProduct[]> {
+  const payload = await axisFetch<{ data: ControlProduct[] }>('/api/control/products', '')
+  return payload.data ?? []
+}
+
+export async function provisionTenant(input: { org_id: string; product_surface: string; name?: string; owner_user_id?: string }): Promise<AxisTenant> {
+  return axisFetch<AxisTenant>('/api/control/tenants', '', { method: 'POST', body: JSON.stringify(input) })
+}
+
+export async function grantPlatformRole(userId: string, role = 'platform_admin'): Promise<void> {
+  await axisFetch<unknown>('/api/control/platform-roles', '', { method: 'POST', body: JSON.stringify({ user_id: userId, role }) })
+}
+
+export async function addTenantMember(tenantId: string, userId: string, role = 'member'): Promise<void> {
+  await axisFetch<unknown>(`/api/control/tenants/${encodeURIComponent(tenantId)}/members`, '', { method: 'POST', body: JSON.stringify({ user_id: userId, role }) })
 }
 
 export async function listIAMTenants(orgId: string, view = 'active'): Promise<AxisTenantView[]> {
