@@ -92,10 +92,18 @@ func (s *server) iamTenants(w http.ResponseWriter, r *http.Request, parts []stri
 			return
 		}
 		org, err := s.createIAMOrg(r.Context(), p.Actor, IAMOrg{Name: input.Name, Status: firstNonEmpty(input.Status, "active")})
-		if err == nil {
-			s.auditIAM(r, p, org.ID, "org.created", "org", org.ID, map[string]any{"name": org.Name, "status": org.Status})
+		if err != nil {
+			writeStoreError(w, err)
+			return
 		}
-		writeStoreCreated(w, map[string]any{"item": tenantView(org)}, err)
+		// Mismo invariante que el control plane: todo org nace con su tenant 'axis'
+		// + el creador como owner, así ningún org queda sin tenant.
+		if terr := s.ensureOrgDefaultTenant(r.Context(), org, p.Actor); terr != nil {
+			writeStoreError(w, terr)
+			return
+		}
+		s.auditIAM(r, p, org.ID, "org.created", "org", org.ID, map[string]any{"name": org.Name, "status": org.Status})
+		writeStoreCreated(w, map[string]any{"item": tenantView(org)}, nil)
 		return
 	}
 	if len(parts) >= 1 {
