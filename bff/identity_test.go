@@ -4,7 +4,52 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	authn "github.com/devpablocristo/platform/authn/go"
 )
+
+// TestClerkWebhookOrgCreatedProvisionsAxisTenant: un org creado por webhook de
+// Clerk nace con su tenant 'axis' (sin owner — el webhook no tiene actor).
+func TestClerkWebhookOrgCreatedProvisionsAxisTenant(t *testing.T) {
+	store := newMemoryIAMStore()
+	a := &clerkIdentityAdapter{store: store}
+
+	if err := a.HandleWebhook(context.Background(), "organization.created", map[string]any{"id": "org_x", "name": "X"}); err != nil {
+		t.Fatal(err)
+	}
+	tenants, err := store.ListTenants(context.Background(), "org_x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tn := range tenants {
+		if tn.ProductSurface == defaultOrgProductSurface {
+			return
+		}
+	}
+	t.Fatalf("org should have its %q tenant, got %#v", defaultOrgProductSurface, tenants)
+}
+
+// TestClerkSyncPrincipalProvisionsAxisTenant: al loguear, el user resuelve el
+// tenant 'axis' de su org (lo agrega como tenant-member con su org_role).
+func TestClerkSyncPrincipalProvisionsAxisTenant(t *testing.T) {
+	store := newMemoryIAMStore()
+	a := &clerkIdentityAdapter{store: store}
+	p := authn.Principal{Actor: "user_x", OrgID: "org_y", Claims: map[string]any{"email": "x@y.com", "org_role": "member"}}
+
+	if err := a.SyncPrincipal(context.Background(), p); err != nil {
+		t.Fatal(err)
+	}
+	tenants, err := store.ResolveTenantsForUser(context.Background(), "user_x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tn := range tenants {
+		if tn.OrgID == "org_y" && tn.ProductSurface == defaultOrgProductSurface {
+			return
+		}
+	}
+	t.Fatalf("logged-in user should resolve org's %q tenant, got %#v", defaultOrgProductSurface, tenants)
+}
 
 // TestIsOwnerOrg locks in the role-model decision: the global owner role is
 // granted only to accounts of AXIS_OWNER_ORG, matched by Axis id directly or via

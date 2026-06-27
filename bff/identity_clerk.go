@@ -134,10 +134,46 @@ func (a *clerkIdentityAdapter) SyncPrincipal(ctx context.Context, p authn.Princi
 		return err
 	}
 	role := claimRole(p.Claims, "org_role")
+	// Modelo: un user SIEMPRE vive dentro de un tenant. Provisionar el tenant
+	// 'axis' (workspace por defecto) del org + la membership del user logueado, así
+	// resuelve un X-Tenant-ID. owner es rol global → en el tenant queda como admin.
+	if err := a.ensureAxisTenant(ctx, p.OrgID, org.Name, p.Actor, role); err != nil {
+		return err
+	}
 	if role == "" {
 		return nil
 	}
+	// axis_org_members queda como bridge Clerk (qué orgs conoce el user).
 	_, err := a.store.UpsertMember(ctx, IAMMember{OrgID: p.OrgID, UserID: p.Actor, Role: role, Status: "active"})
+	return err
+}
+
+// ensureAxisTenant provisiona el tenant 'axis' (workspace por defecto) del org —
+// así ningún org de Clerk (webhook/login) queda sin tenant. Si actor != "", lo
+// agrega como tenant-member; owner se mapea a admin (owner es rol global de
+// plataforma, no per-tenant). Idempotente: CreateTenant keyado en (org,product),
+// UpsertTenantMember en (tenant,user).
+func (a *clerkIdentityAdapter) ensureAxisTenant(ctx context.Context, orgID, name, actor, role string) error {
+	orgID = strings.TrimSpace(orgID)
+	if orgID == "" {
+		return nil
+	}
+	tenant, err := a.store.CreateTenant(ctx, IAMTenant{OrgID: orgID, ProductSurface: defaultOrgProductSurface, Name: firstNonEmpty(name, orgID), Status: "active"})
+	if err != nil {
+		return err
+	}
+	actor = strings.TrimSpace(actor)
+	if actor == "" {
+		return nil
+	}
+	tenantRole := normalizedRole(role)
+	switch tenantRole {
+	case "owner":
+		tenantRole = "admin" // owner es global (axis_platform_roles), no per-tenant
+	case "":
+		tenantRole = "member"
+	}
+	_, err = a.store.UpsertTenantMember(ctx, IAMTenantMember{TenantID: tenant.ID, UserID: actor, Role: tenantRole, Status: "active"})
 	return err
 }
 
@@ -440,8 +476,13 @@ func (a *clerkIdentityAdapter) HandleWebhook(ctx context.Context, eventType stri
 		_, err := a.store.CreateUser(ctx, clerkUser(data, IAMUser{Status: "active"}))
 		return err
 	case "organization.created", "organization.updated":
-		_, err := a.store.CreateOrg(ctx, clerkOrg(data, IAMOrg{Status: "active"}), "")
-		return err
+		org, err := a.store.CreateOrg(ctx, clerkOrg(data, IAMOrg{Status: "active"}), "")
+		if err != nil {
+			return err
+		}
+		// El org de Clerk también nace con su tenant 'axis' (sin owner — el webhook
+		// no tiene actor). Cierra el gap de orgs tenantless.
+		return a.ensureAxisTenant(ctx, org.ID, org.Name, "", "")
 	case "user.deleted":
 		// Keep Axis in sync when a user is removed in Clerk (the IdP). Without
 		// this the axis_users row would orphan: Clerk is the source of truth for
