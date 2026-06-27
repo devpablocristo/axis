@@ -6,6 +6,38 @@ import (
 	"testing"
 )
 
+// TestIsOwnerOrg locks in the role-model decision: the global owner role is
+// granted only to accounts of AXIS_OWNER_ORG, matched by Axis id directly or via
+// provider_org_id (the Clerk org id that arrives in the JWT claim).
+func TestIsOwnerOrg(t *testing.T) {
+	store := newMemoryIAMStore()
+	if _, err := store.CreateOrg(context.Background(), IAMOrg{ID: "cristo.tech", ProviderOrgID: "org_clerk123", Name: "Cristo", Status: "active"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	a := &clerkIdentityAdapter{store: store, ownerOrg: "cristo.tech"}
+
+	cases := []struct {
+		claimOrg string
+		want     bool
+	}{
+		{"cristo.tech", true},   // direct Axis id match
+		{"org_clerk123", true},  // Clerk org id → resolved via provider_org_id
+		{"org_other", false},    // a different org
+		{"", false},             // no org
+	}
+	for _, c := range cases {
+		if got := a.isOwnerOrg(context.Background(), c.claimOrg); got != c.want {
+			t.Fatalf("isOwnerOrg(%q) = %v, want %v", c.claimOrg, got, c.want)
+		}
+	}
+
+	// Owner org not configured → never an owner.
+	none := &clerkIdentityAdapter{store: store, ownerOrg: ""}
+	if none.isOwnerOrg(context.Background(), "cristo.tech") {
+		t.Fatal("empty ownerOrg must never qualify")
+	}
+}
+
 // updateMemberFailingIAMStore exercises the local IAM fallback path of
 // updateIAMUser: UpdateMember reports the member is missing (errNotFound), so
 // the code must fall back to UpsertMember. Here UpsertMember fails, and the

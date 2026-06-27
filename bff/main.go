@@ -24,6 +24,9 @@ const (
 	defaultInternalIssuer = "axis-bff"
 	defaultDevOrgID       = "local-dev-org"
 	defaultDevUserID      = "local-dev-admin"
+	// defaultOwnerOrgID: el org "owner" cuyo tenant 'axis' es el único que puede
+	// tener cuentas owner (rol global cross-org). Configurable vía AXIS_OWNER_ORG.
+	defaultOwnerOrgID = "cristo.tech"
 )
 
 type config struct {
@@ -36,6 +39,7 @@ type config struct {
 	ClerkAPIBaseURL    string
 	ClerkWebhookSecret string
 	ControlDatabaseURL string
+	OwnerOrgID         string
 	DevOrgID           string
 	DevUserID          string
 	DevScopes          []string
@@ -88,6 +92,7 @@ func loadConfig() config {
 		ClerkAPIBaseURL:    env("AXIS_CLERK_API_BASE_URL", "https://api.clerk.com/v1"),
 		ClerkWebhookSecret: env("AXIS_CLERK_WEBHOOK_SECRET", ""),
 		ControlDatabaseURL: env("AXIS_CONTROL_DATABASE_URL", ""),
+		OwnerOrgID:         env("AXIS_OWNER_ORG", defaultOwnerOrgID),
 		DevOrgID:           env("AXIS_DEV_ORG_ID", defaultDevOrgID),
 		DevUserID:          env("AXIS_DEV_USER_ID", defaultDevUserID),
 		DevScopes:          splitScopes(env("AXIS_DEV_SCOPES", strings.Join(defaultAdminScopes(), " "))),
@@ -120,7 +125,7 @@ func newServer(cfg config) (*server, error) {
 	s.iam = iam
 	provider := firstNonEmpty(cfg.IdentityProvider, cfg.AuthMode)
 	if provider == "clerk" {
-		s.identity = newClerkIdentityAdapter(cfg.ClerkSecretKey, cfg.ClerkAPIBaseURL, s.client, iam)
+		s.identity = newClerkIdentityAdapter(cfg.ClerkSecretKey, cfg.ClerkAPIBaseURL, s.client, iam, cfg.OwnerOrgID)
 	}
 	if cfg.AuthMode == "oidc" || cfg.AuthMode == "clerk" {
 		issuer := strings.TrimRight(strings.TrimSpace(cfg.AuthIssuerURL), "/")
