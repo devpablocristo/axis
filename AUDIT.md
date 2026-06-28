@@ -28,13 +28,13 @@ Fix: `let nextSession: AxisSession` en lugar de inicializar a `null` y reasignar
 
 #### MED-2P-01 — `tenantUserView` conflata error de store con not-found
 
-Estado: abierto.
+Estado: **corregido en working tree**.
 
 Evidencia: `bff/iam_simple_handlers.go` hace `ListTenantMembers`; si falla devuelve `(empty,false)` y los lifecycle handlers pueden renderizar la mutacion como si el user no existiera.
 
 Riesgo: en outage parcial de DB, errores 5xx se convierten en estados 404/no-op y dificultan soporte.
 
-Fix recomendado: cambiar firma a `(IAMUserView, bool, error)` y propagar `writeStoreError`.
+Fix: `tenantUserView` ahora devuelve `(IAMUserView, error)`; update/lifecycle propagan fallas de relectura como 5xx. Tests de regresion cubren update y archive cuando `ListTenantMembers` falla.
 
 #### MED-2P-02 — `controlProvisionTenant` sigue sin atomicidad tenant+owner
 

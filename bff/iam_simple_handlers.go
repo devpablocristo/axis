@@ -448,7 +448,7 @@ func (s *server) iamUserLifecycle(w http.ResponseWriter, r *http.Request, p auth
 			return
 		}
 		if _, err = s.iam.UpsertTenantMember(r.Context(), IAMTenantMember{TenantID: ref0.tenant.ID, UserID: ref0.userID, Role: current.Role, Status: status}); err == nil {
-			view, _ = s.tenantUserView(r.Context(), ref0.tenant, ref0.userID)
+			view, err = s.tenantUserView(r.Context(), ref0.tenant, ref0.userID)
 		}
 	case userRefGlobal:
 		var user IAMUser
@@ -593,10 +593,7 @@ func (s *server) updateIAMUserView(r *http.Request, p authn.Principal, ref strin
 		if err := s.iam.SetTenantMembership(r.Context(), ref0.tenant.ID, ref0.userID, newRole, status, op); err != nil {
 			return IAMUserView{}, err
 		}
-		if view, ok := s.tenantUserView(r.Context(), ref0.tenant, ref0.userID); ok {
-			return view, nil
-		}
-		return IAMUserView{}, errNotFound
+		return s.tenantUserView(r.Context(), ref0.tenant, ref0.userID)
 	}
 	return IAMUserView{}, errNotFound
 }
@@ -664,17 +661,17 @@ func tenantMemberToView(tenant IAMTenant, m IAMTenantMember) IAMUserView {
 // tenantUserView fetches the current tenant membership of userID and renders it
 // (with the user's email via the join). Used to build the response after a
 // lifecycle/role mutation.
-func (s *server) tenantUserView(ctx context.Context, tenant IAMTenant, userID string) (IAMUserView, bool) {
+func (s *server) tenantUserView(ctx context.Context, tenant IAMTenant, userID string) (IAMUserView, error) {
 	members, err := s.iam.ListTenantMembers(ctx, tenant.ID)
 	if err != nil {
-		return IAMUserView{}, false
+		return IAMUserView{}, err
 	}
 	for _, m := range members {
 		if m.UserID == userID {
-			return tenantMemberToView(tenant, m), true
+			return tenantMemberToView(tenant, m), nil
 		}
 	}
-	return IAMUserView{}, false
+	return IAMUserView{}, errNotFound
 }
 
 type userRefKind int

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -17,6 +18,15 @@ type userListResp struct {
 }
 type userItemResp struct {
 	Item IAMUserView `json:"item"`
+}
+
+type listTenantMembersFailingStore struct {
+	IAMStore
+	err error
+}
+
+func (s listTenantMembersFailingStore) ListTenantMembers(context.Context, string) ([]IAMTenantMember, error) {
+	return nil, s.err
 }
 
 func doReq(t *testing.T, srv *server, method, path, body string, headers map[string]string) *httptest.ResponseRecorder {
@@ -94,6 +104,21 @@ func hasEmail(items []IAMUserView, email string) *IAMUserView {
 		}
 	}
 	return nil
+}
+
+func createTenantUser(t *testing.T, srv *server, orgID, tenantID, email, role string) IAMUserView {
+	t.Helper()
+	rec := doReq(t, srv, http.MethodPost, "/api/iam/users",
+		fmt.Sprintf(`{"email":%q,"role":%q,"org_id":%q}`, email, role, orgID),
+		map[string]string{"X-Tenant-ID": tenantID})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create user: want 201 got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var out userItemResp
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("create user decode: %v", err)
+	}
+	return out.Item
 }
 
 // --- tests -----------------------------------------------------------------
@@ -327,6 +352,43 @@ func TestIAMUsersListRequiresTenant(t *testing.T) {
 	rec := doReq(t, srv, http.MethodGet, "/api/iam/users?org_id=org-a", "", nil)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("list users without tenant: want 400 got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestTenantUserUpdateSurfacesViewStoreError(t *testing.T) {
+	srv, err := newTestServer("http://127.0.0.1:1", defaultAdminScopes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tenantID := seedTenant(t, srv, "co-a", "axis")
+	user := createTenantUser(t, srv, "co-a", tenantID, "view-error@co-a.com", "member")
+	srv.iam = listTenantMembersFailingStore{
+		IAMStore: srv.iam,
+		err:      errors.New("tenant members unavailable"),
+	}
+
+	rec := doReq(t, srv, http.MethodPut, "/api/iam/users/"+user.ID,
+		`{"role":"admin","org_id":"co-a"}`, map[string]string{"X-Tenant-ID": tenantID})
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("update with view store error: want 500 got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestTenantUserLifecycleSurfacesViewStoreError(t *testing.T) {
+	srv, err := newTestServer("http://127.0.0.1:1", defaultAdminScopes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tenantID := seedTenant(t, srv, "co-a", "axis")
+	user := createTenantUser(t, srv, "co-a", tenantID, "lifecycle-error@co-a.com", "member")
+	srv.iam = listTenantMembersFailingStore{
+		IAMStore: srv.iam,
+		err:      errors.New("tenant members unavailable"),
+	}
+
+	rec := doReq(t, srv, http.MethodPost, "/api/iam/users/"+user.ID+"/archive", "", map[string]string{"X-Tenant-ID": tenantID})
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("lifecycle with view store error: want 500 got %d body=%s", rec.Code, rec.Body.String())
 	}
 }
 
