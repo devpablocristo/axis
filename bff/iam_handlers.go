@@ -167,12 +167,52 @@ func verifyClerkWebhookSignature(secret, msgID, timestamp, signatureHeader strin
 	return errClerkWebhookSignatureMismatch
 }
 
-func (s *server) canAccessOrg(r *http.Request, p authn.Principal, orgID string) bool {
+type orgAccessError struct {
+	cause error
+}
+
+func (e *orgAccessError) Error() string {
+	if e.cause != nil {
+		return e.cause.Error()
+	}
+	return "org access lookup failed"
+}
+
+func (e *orgAccessError) Unwrap() error {
+	return e.cause
+}
+
+func writeOrgAccessError(w http.ResponseWriter, err error, forbiddenMessage string) {
+	var accessErr *orgAccessError
+	if errors.As(err, &accessErr) {
+		writeLoggedError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "request failed", err)
+		return
+	}
+	writeError(w, http.StatusForbidden, "FORBIDDEN", forbiddenMessage)
+}
+
+func (s *server) canAccessOrg(r *http.Request, p authn.Principal, orgID string) (bool, error) {
 	if hasScope(p.Scopes, "axis:cross_org", "axis:orgs:admin") {
-		return true
+		return true, nil
 	}
 	ok, err := s.iam.ActorCanAccessOrg(r.Context(), p.Actor, orgID)
-	return err == nil && ok
+	if err != nil {
+		return false, &orgAccessError{cause: fmt.Errorf("org access lookup failed: %w", err)}
+	}
+	return ok, nil
+}
+
+func (s *server) requireOrgAccess(w http.ResponseWriter, r *http.Request, p authn.Principal, orgID string, forbiddenMessage string) bool {
+	ok, err := s.canAccessOrg(r, p, orgID)
+	if err != nil {
+		writeOrgAccessError(w, err, forbiddenMessage)
+		return false
+	}
+	if !ok {
+		writeError(w, http.StatusForbidden, "FORBIDDEN", forbiddenMessage)
+		return false
+	}
+	return true
 }
 
 func requireScope(w http.ResponseWriter, p authn.Principal, scopes ...string) bool {

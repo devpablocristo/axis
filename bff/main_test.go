@@ -1287,6 +1287,14 @@ func (platformRolesErrStore) PlatformRolesForUser(context.Context, string) ([]st
 	return nil, fmt.Errorf("platform roles store down")
 }
 
+type actorAccessErrStore struct {
+	IAMStore
+}
+
+func (actorAccessErrStore) ActorCanAccessOrg(context.Context, string, string) (bool, error) {
+	return false, fmt.Errorf("org access store down")
+}
+
 type fakeAuthenticator struct {
 	principal authn.Principal
 	err       error
@@ -1321,6 +1329,43 @@ func TestSessionSurfacesStoreError(t *testing.T) {
 
 	if rec.Code == http.StatusOK {
 		t.Fatalf("expected store outage to surface as non-200, got 200 body=%s", rec.Body.String())
+	}
+}
+
+func TestSessionSurfacesSelectedOrgStoreErrorAsStable500(t *testing.T) {
+	srv := &server{iam: sessionStoreErrStore{}}
+	req := httptest.NewRequest(http.MethodGet, "/v1/session", nil)
+	req = req.WithContext(context.WithValue(req.Context(), principalContextKey{}, authn.Principal{Actor: "user-a"}))
+	rec := httptest.NewRecorder()
+
+	srv.session(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "store down") || strings.Contains(rec.Body.String(), "org access lookup failed") {
+		t.Fatalf("response leaked selected org store error: %s", rec.Body.String())
+	}
+}
+
+func TestIAMTenantUpdateSurfacesOrgAccessStoreErrorAsStable500(t *testing.T) {
+	srv, err := newTestServer("http://127.0.0.1:1", []string{"axis:orgs:write"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.iam = actorAccessErrStore{IAMStore: srv.iam}
+
+	req := httptest.NewRequest(http.MethodPut, "/api/iam/tenants/org-a", strings.NewReader(`{"name":"Org A"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	srv.routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "org access store down") || strings.Contains(rec.Body.String(), "org access lookup failed") {
+		t.Fatalf("response leaked org access store error: %s", rec.Body.String())
 	}
 }
 
