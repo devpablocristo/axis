@@ -38,13 +38,13 @@ Fix: `tenantUserView` ahora devuelve `(IAMUserView, error)`; update/lifecycle pr
 
 #### MED-2P-02 — `controlProvisionTenant` sigue sin atomicidad tenant+owner
 
-Estado: abierto.
+Estado: **corregido en working tree**.
 
 Evidencia: `bff/control_handlers.go` crea tenant con `CreateTenant` y luego, opcionalmente, `UpsertTenantMember` para owner.
 
 Riesgo: si el segundo write falla queda tenant sin owner inicial.
 
-Fix recomendado: agregar `CreateTenantWithOwner` transaccional en `IAMStore`/`sqlIAMStore` y usarlo desde control plane.
+Fix: agregado `CreateTenantWithOwner` a `IAMStore`; `sqlIAMStore` lo ejecuta en una transaccion y `controlProvisionTenant`/`ensureOrgDefaultTenant` usan esa primitiva. Test de contrato evita volver al par de writes sueltos.
 
 #### MED-2P-03 — Algunos proxies BFF devuelven `err.Error()` al cliente
 

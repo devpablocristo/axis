@@ -142,6 +142,7 @@ type IAMStore interface {
 	ListTenants(context.Context, string) ([]IAMTenant, error)
 	TenantByID(context.Context, string) (IAMTenant, error)
 	CreateTenant(context.Context, IAMTenant) (IAMTenant, error)
+	CreateTenantWithOwner(context.Context, IAMTenant, string) (IAMTenant, error)
 	ResolveTenantsForUser(context.Context, string) ([]IAMTenant, error)
 	UserInTenant(context.Context, string, string) (bool, error)
 	TenantMembership(context.Context, string, string) (IAMTenantMember, error)
