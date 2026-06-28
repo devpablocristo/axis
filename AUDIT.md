@@ -70,6 +70,10 @@ Decision: no borrar APIs internas exportadas solo porque `deadcode` no sigue tes
 
 Axis ya consume `platform/http/go/httpjson` para normalizar errores en varios dominios Nexus. En esta segunda pasada se corrigieron localmente la atomicidad IAM BFF y el error mapping de proxies BFF; no ameritan extraccion a `platform` todavia. No conviene mover tenancy BFF a kernels SaaS hasta estabilizar nombres `org` vs `tenant` en los consumidores.
 
+### Follow-up — 2026-06-28
+
+- **BFF platform-role lookup fail-closed**: `resolveAppContext` y `controlAPI` ya no tratan un error de `PlatformRolesForUser` como ausencia de rol. App-plane devuelve error interno y Control Plane responde 500 estable/logueado, evitando falsos 403 en outage de store.
+
 Fecha: 2026-06-27 · Método: workflow multi-agente (138 agentes, 14 revisores × dimensión/módulo + verificación adversarial). **106 hallazgos confirmados** (25 HIGH / 43 MED / 38 LOW), 19 descartados (by-design/falso-positivo).
 
 > Cada hallazgo fue **verificado leyendo el código**; los descartados (apéndice) eran by-design o falsos positivos (ej. dead-code que es test-only).

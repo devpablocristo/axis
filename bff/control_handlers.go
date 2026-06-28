@@ -15,7 +15,11 @@ import (
 // NOT by X-Tenant-ID nor Clerk metadata. Mounted at /api/control/.
 func (s *server) controlAPI(w http.ResponseWriter, r *http.Request) {
 	p := principalFromContext(r.Context())
-	platformRoles, _ := s.iam.PlatformRolesForUser(r.Context(), p.Actor)
+	platformRoles, err := s.iam.PlatformRolesForUser(r.Context(), p.Actor)
+	if err != nil {
+		writeLoggedError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "control plane request failed", err)
+		return
+	}
 	if !isPlatformAdmin(platformRoles) {
 		writeError(w, http.StatusForbidden, "FORBIDDEN", "platform admin required")
 		return
