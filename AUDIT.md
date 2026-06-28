@@ -48,13 +48,13 @@ Fix: agregado `CreateTenantWithOwner` a `IAMStore`; `sqlIAMStore` lo ejecuta en 
 
 #### MED-2P-03 — Algunos proxies BFF devuelven `err.Error()` al cliente
 
-Estado: abierto.
+Estado: **corregido en working tree**.
 
 Evidencia: `bff/prompts_handlers.go`, `bff/agent_profiles_handlers.go` y `bff/agent_handlers.go` aun escriben errores crudos en respuestas para fallas internas/downstream.
 
 Riesgo: exposicion de detalles de infraestructura o contratos downstream; inconsistencia con los helpers `WriteFlatErrorFrom` ya adoptados en Nexus.
 
-Fix recomendado: mapear errores internos a mensajes estables, loguear el error real y reutilizar helper de `platform/http/go/httpjson` donde aplique.
+Fix: agregado `writeLoggedError`; forwarders de prompts, agent-profiles, agents y proxy generico devuelven mensajes estables y loguean la causa server-side. Tests cubren que transport errors no filtren host/`connect` en el body.
 
 #### LOW-2P-01 — Deadcode pendiente es mayormente soporte test/dev
 

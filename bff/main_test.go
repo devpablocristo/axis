@@ -414,6 +414,30 @@ func TestPromptsEndpointAdaptsAssistPacks(t *testing.T) {
 	}
 }
 
+func TestPromptsEndpointSanitizesTransportError(t *testing.T) {
+	srv, err := newTestServer("http://127.0.0.1:1", []string{"axis:products:admin", "companion:assist:read"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tenantID := seedTenantForActor(t, srv, "org-a", "medmory", "admin")
+	req := httptest.NewRequest(http.MethodGet, "/api/prompts/assist-packs", nil)
+	req.Header.Set("X-Tenant-ID", tenantID)
+	rec := httptest.NewRecorder()
+
+	srv.routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "downstream request failed") {
+		t.Fatalf("expected sanitized downstream error, got %s", body)
+	}
+	if strings.Contains(body, "127.0.0.1") || strings.Contains(body, "connect") {
+		t.Fatalf("transport details leaked in body: %s", body)
+	}
+}
+
 func TestPromptsEndpointAdaptsAgentProfilePrompts(t *testing.T) {
 	var requests []string
 	var gotBody string
@@ -503,6 +527,52 @@ func TestPromptsEndpointAdaptsAgentProfilePrompts(t *testing.T) {
 	}
 	if strings.Join(requests, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("unexpected downstream requests:\n%s", strings.Join(requests, "\n"))
+	}
+}
+
+func TestAgentProfilesEndpointSanitizesTransportError(t *testing.T) {
+	srv, err := newTestServer("http://127.0.0.1:1", []string{"companion:agent_profiles:read"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tenantID := seedTenantForActor(t, srv, "org-a", "axis", "admin")
+	req := httptest.NewRequest(http.MethodGet, "/api/agent-profiles", nil)
+	req.Header.Set("X-Tenant-ID", tenantID)
+	rec := httptest.NewRecorder()
+
+	srv.routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "downstream request failed") {
+		t.Fatalf("expected sanitized downstream error, got %s", body)
+	}
+	if strings.Contains(body, "127.0.0.1") || strings.Contains(body, "connect") {
+		t.Fatalf("transport details leaked in body: %s", body)
+	}
+}
+
+func TestAgentsEndpointSanitizesCompanionError(t *testing.T) {
+	srv, err := newTestServer("http://127.0.0.1:1", defaultAdminScopes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/agents?org_id=org-a", nil)
+	rec := httptest.NewRecorder()
+
+	srv.routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "companion agents request failed") {
+		t.Fatalf("expected sanitized companion agents error, got %s", body)
+	}
+	if strings.Contains(body, "127.0.0.1") || strings.Contains(body, "connect") {
+		t.Fatalf("transport details leaked in body: %s", body)
 	}
 }
 

@@ -47,19 +47,19 @@ func (s *server) agentProfilesAPI(w http.ResponseWriter, r *http.Request) {
 func (s *server) forwardAgentProfileRequest(w http.ResponseWriter, r *http.Request, p authn.Principal, orgID string, productSurface string, tenantID string, scopes []string, method string, companionPath string, body io.Reader) {
 	target, err := url.Parse(s.cfg.CompanionBaseURL)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "COMPANION_URL_INVALID", err.Error())
+		writeLoggedError(w, http.StatusInternalServerError, "COMPANION_URL_INVALID", "companion URL is invalid", err)
 		return
 	}
 	target.Path = companionPath
 	target.RawQuery = r.URL.RawQuery
 	token, err := s.signDownstreamTokenForContext(p, orgID, productSurface, tenantID, scopes, s.cfg.CompanionAudience)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "TOKEN_SIGNING_FAILED", err.Error())
+		writeLoggedError(w, http.StatusInternalServerError, "TOKEN_SIGNING_FAILED", "token signing failed", err)
 		return
 	}
 	req, err := http.NewRequestWithContext(r.Context(), method, target.String(), body)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "REQUEST_BUILD_FAILED", err.Error())
+		writeLoggedError(w, http.StatusInternalServerError, "REQUEST_BUILD_FAILED", "request build failed", err)
 		return
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -73,7 +73,7 @@ func (s *server) forwardAgentProfileRequest(w http.ResponseWriter, r *http.Reque
 	req.Header.Set("X-Axis-Forwarded-By", "axis-bff")
 	resp, err := s.client.Do(req)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "DOWNSTREAM_UNAVAILABLE", err.Error())
+		writeLoggedError(w, http.StatusBadGateway, "DOWNSTREAM_UNAVAILABLE", "downstream request failed", err)
 		return
 	}
 	defer resp.Body.Close()

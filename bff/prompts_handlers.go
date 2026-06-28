@@ -127,19 +127,19 @@ func promptRouteFromRequest(r *http.Request) (promptRoute, error) {
 func (s *server) forwardPromptRequest(w http.ResponseWriter, r *http.Request, p authn.Principal, orgID string, productSurface string, tenantID string, scopes []string, method string, companionPath string, rawQuery string, body io.Reader) {
 	target, err := url.Parse(s.cfg.CompanionBaseURL)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "COMPANION_URL_INVALID", err.Error())
+		writeLoggedError(w, http.StatusInternalServerError, "COMPANION_URL_INVALID", "companion URL is invalid", err)
 		return
 	}
 	target.Path = companionPath
 	target.RawQuery = rawQuery
 	token, err := s.signDownstreamTokenForContext(p, orgID, productSurface, tenantID, scopes, s.cfg.CompanionAudience)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "TOKEN_SIGNING_FAILED", err.Error())
+		writeLoggedError(w, http.StatusInternalServerError, "TOKEN_SIGNING_FAILED", "token signing failed", err)
 		return
 	}
 	req, err := http.NewRequestWithContext(r.Context(), method, target.String(), body)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "REQUEST_BUILD_FAILED", err.Error())
+		writeLoggedError(w, http.StatusInternalServerError, "REQUEST_BUILD_FAILED", "request build failed", err)
 		return
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -156,7 +156,7 @@ func (s *server) forwardPromptRequest(w http.ResponseWriter, r *http.Request, p 
 	}
 	resp, err := s.client.Do(req)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "DOWNSTREAM_UNAVAILABLE", err.Error())
+		writeLoggedError(w, http.StatusBadGateway, "DOWNSTREAM_UNAVAILABLE", "downstream request failed", err)
 		return
 	}
 	defer resp.Body.Close()
