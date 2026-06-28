@@ -187,7 +187,7 @@ func (s *server) withAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		principal, err := s.authenticate(r)
 		if err != nil {
-			writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", err.Error())
+			writeAuthError(w, err)
 			return
 		}
 		ctx := context.WithValue(r.Context(), principalContextKey{}, principal)
@@ -234,7 +234,16 @@ func (s *server) authenticate(r *http.Request) (authn.Principal, error) {
 		// upgrades — non-platform users keep their claim-derived scopes as a
 		// migration fallback, and their effective per-tenant scopes are resolved
 		// later in resolveAppContext. So the cutover never locks anyone out.
-		if roles, rerr := s.iam.PlatformRolesForUser(r.Context(), principal.Actor); rerr == nil && isPlatformAdmin(roles) {
+		roles, rerr := s.iam.PlatformRolesForUser(r.Context(), principal.Actor)
+		if rerr != nil {
+			return authn.Principal{}, &authError{
+				status:  http.StatusInternalServerError,
+				code:    "INTERNAL_ERROR",
+				message: "authentication failed",
+				cause:   fmt.Errorf("platform roles lookup failed: %w", rerr),
+			}
+		}
+		if isPlatformAdmin(roles) {
 			principal.Scopes = defaultAdminScopes()
 		}
 	}
@@ -246,6 +255,37 @@ type principalContextKey struct{}
 func principalFromContext(ctx context.Context) authn.Principal {
 	p, _ := ctx.Value(principalContextKey{}).(authn.Principal)
 	return p
+}
+
+type authError struct {
+	status  int
+	code    string
+	message string
+	cause   error
+}
+
+func (e *authError) Error() string {
+	if e.cause != nil {
+		return e.cause.Error()
+	}
+	return e.message
+}
+
+func (e *authError) Unwrap() error {
+	return e.cause
+}
+
+func writeAuthError(w http.ResponseWriter, err error) {
+	var authErr *authError
+	if errors.As(err, &authErr) {
+		if authErr.status >= http.StatusInternalServerError {
+			writeLoggedError(w, authErr.status, authErr.code, authErr.message, err)
+			return
+		}
+		writeError(w, authErr.status, authErr.code, authErr.message)
+		return
+	}
+	writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", err.Error())
 }
 
 type appContextError struct {
