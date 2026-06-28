@@ -1287,6 +1287,30 @@ func (platformRolesErrStore) PlatformRolesForUser(context.Context, string) ([]st
 	return nil, fmt.Errorf("platform roles store down")
 }
 
+type fakeAuthenticator struct {
+	principal authn.Principal
+	err       error
+}
+
+func (f fakeAuthenticator) Authenticate(context.Context, authn.Credential) (*authn.Principal, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return &f.principal, nil
+}
+
+type noopIdentity struct {
+	HumanIdentityProvider
+}
+
+func (noopIdentity) PrincipalFromClaims(_ context.Context, p authn.Principal) (authn.Principal, error) {
+	return p, nil
+}
+
+func (noopIdentity) SyncPrincipal(context.Context, authn.Principal) error {
+	return nil
+}
+
 func TestSessionSurfacesStoreError(t *testing.T) {
 	srv := &server{iam: sessionStoreErrStore{}}
 	req := httptest.NewRequest(http.MethodGet, "/v1/session", nil)
@@ -1297,6 +1321,37 @@ func TestSessionSurfacesStoreError(t *testing.T) {
 
 	if rec.Code == http.StatusOK {
 		t.Fatalf("expected store outage to surface as non-200, got 200 body=%s", rec.Body.String())
+	}
+}
+
+func TestAuthenticateSurfacesPlatformRoleStoreErrorAsStable500(t *testing.T) {
+	srv := &server{
+		cfg: config{
+			AuthMode:          "clerk",
+			InternalJWTSecret: "secret",
+			CompanionBaseURL:  "http://127.0.0.1:1",
+			NexusBaseURL:      "http://127.0.0.1:1",
+		},
+		oidcAuth: fakeAuthenticator{principal: authn.Principal{
+			Actor:  "user-a",
+			OrgID:  "org-a",
+			Claims: map[string]any{"sub": "user-a", "org_id": "org-a"},
+		}},
+		identity: noopIdentity{},
+		iam:      platformRolesErrStore{IAMStore: newMemoryIAMStore()},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/session", nil)
+	req.Header.Set("Authorization", "Bearer test-token")
+	rec := httptest.NewRecorder()
+
+	srv.routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "platform roles store down") || strings.Contains(rec.Body.String(), "platform roles lookup failed") {
+		t.Fatalf("response leaked auth store error: %s", rec.Body.String())
 	}
 }
 
