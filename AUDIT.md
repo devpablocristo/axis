@@ -1,5 +1,75 @@
 # AUDIT.md — Auditoría de calidad del proyecto Axis
 
+## Segunda pasada — 2026-06-27
+
+Alcance: revalidacion post-saneamiento y post-cutover B#3. No se confia ciegamente en hallazgos viejos: se releyeron BFF tenancy/authz, IAM simple, console bootstrap, boundaries Companion/Nexus y adopcion de `platform`.
+
+### Estado actual
+
+- B#3 verificado: `resolveAppContext` exige `X-Tenant-ID`; deriva `org_id`, `product_surface`, `tenant_id` y scopes desde `axis_tenants` + `axis_tenant_members` o platform role.
+- B#3 verificado: `userRefOrg`, `scopesFromAxisOrg`, `listIAMUserViews` y `memberUserView` ya no aparecen en `bff`.
+- B#3 verificado: `/api/iam/users` para org normal requiere tenant real y lista/muta `axis_tenant_members`; `axis_org_members` queda como bridge Clerk/org picker.
+- Guardrail: `make hygiene` OK.
+- Guardrail inicial: `make lint` fallo por `console/src/App.tsx:93` (`no-useless-assignment`). Estado: **corregido en working tree** cambiando `nextSession` a asignacion definida antes de uso.
+- Guardrail final: `make lint` OK (mantiene 16 warnings calibrados de console).
+- Console: `npm run typecheck && npm run test && npm run build` OK.
+
+### Hallazgos vigentes
+
+#### HIGH-2P-01 — Guardrail de lint roto en console
+
+Estado: **corregido en working tree**.
+
+Evidencia: `make lint` fallaba en `console/src/App.tsx:93` por `no-useless-assignment`.
+
+Riesgo: main no podia pasar el guardrail de calidad aunque el bug fuera chico.
+
+Fix: `let nextSession: AxisSession` en lugar de inicializar a `null` y reasignar antes de leer.
+
+#### MED-2P-01 — `tenantUserView` conflata error de store con not-found
+
+Estado: **corregido en working tree**.
+
+Evidencia: `bff/iam_simple_handlers.go` hace `ListTenantMembers`; si falla devuelve `(empty,false)` y los lifecycle handlers pueden renderizar la mutacion como si el user no existiera.
+
+Riesgo: en outage parcial de DB, errores 5xx se convierten en estados 404/no-op y dificultan soporte.
+
+Fix: `tenantUserView` ahora devuelve `(IAMUserView, error)`; update/lifecycle propagan fallas de relectura como 5xx. Tests de regresion cubren update y archive cuando `ListTenantMembers` falla.
+
+#### MED-2P-02 — `controlProvisionTenant` sigue sin atomicidad tenant+owner
+
+Estado: **corregido en working tree**.
+
+Evidencia: `bff/control_handlers.go` crea tenant con `CreateTenant` y luego, opcionalmente, `UpsertTenantMember` para owner.
+
+Riesgo: si el segundo write falla queda tenant sin owner inicial.
+
+Fix: agregado `CreateTenantWithOwner` a `IAMStore`; `sqlIAMStore` lo ejecuta en una transaccion y `controlProvisionTenant`/`ensureOrgDefaultTenant` usan esa primitiva. Test de contrato evita volver al par de writes sueltos.
+
+#### MED-2P-03 — Algunos proxies BFF devuelven `err.Error()` al cliente
+
+Estado: **corregido en working tree**.
+
+Evidencia: `bff/prompts_handlers.go`, `bff/agent_profiles_handlers.go` y `bff/agent_handlers.go` aun escriben errores crudos en respuestas para fallas internas/downstream.
+
+Riesgo: exposicion de detalles de infraestructura o contratos downstream; inconsistencia con los helpers `WriteFlatErrorFrom` ya adoptados en Nexus.
+
+Fix: agregado `writeLoggedError`; forwarders de prompts, agent-profiles, agents y proxy generico devuelven mensajes estables y loguean la causa server-side. Tests cubren que transport errors no filtren host/`connect` en el body.
+
+#### LOW-2P-01 — Deadcode pendiente es mayormente soporte test/dev
+
+Estado: **verificado, sin borrado en esta pasada**.
+
+Evidencia: `deadcode` marca `productevals`, `MemoryRepository`, `SignAttestationForTest`, publishers directos y helpers de runtime que estan usados por tests, comandos o superficies de soporte.
+
+Verificacion: `deadcode` actual marca BFF limpio; en Companion/Nexus los principales hits tienen referencias reales en tests/tooling (`productevals` en onboarding/contracts/evals, `MemoryRepository` en tests/watchers, `SignAttestationForTest` en attestation verifier test). Los candidatos baratos del audit viejo (`deleteIAMMember`, `fakePymes`, `preferred`) ya no aplican o ya estan usados.
+
+Decision: no borrar APIs internas exportadas solo porque `deadcode` no sigue test/tooling entrypoints. Mantener como deuda documental; si se quiere reducir ruido, mover helpers test-only a `_test.go` en PR dedicado y con cobertura local.
+
+### Relacion con Platform
+
+Axis ya consume `platform/http/go/httpjson` para normalizar errores en varios dominios Nexus. En esta segunda pasada se corrigieron localmente la atomicidad IAM BFF y el error mapping de proxies BFF; no ameritan extraccion a `platform` todavia. No conviene mover tenancy BFF a kernels SaaS hasta estabilizar nombres `org` vs `tenant` en los consumidores.
+
 Fecha: 2026-06-27 · Método: workflow multi-agente (138 agentes, 14 revisores × dimensión/módulo + verificación adversarial). **106 hallazgos confirmados** (25 HIGH / 43 MED / 38 LOW), 19 descartados (by-design/falso-positivo).
 
 > Cada hallazgo fue **verificado leyendo el código**; los descartados (apéndice) eran by-design o falsos positivos (ej. dead-code que es test-only).

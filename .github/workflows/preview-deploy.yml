@@ -22,6 +22,7 @@ on:
 permissions:
   contents: read
   id-token: write
+  pull-requests: read
 
 concurrency:
   group: axis-preview-pr-${{ inputs.pr_number }}
@@ -63,7 +64,26 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref }}
+      - name: Validate PR is still deployable
+        id: pr-state
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]] || { echo "Invalid PR number: $PR_NUMBER" >&2; exit 1; }
+          read -r state draft < <(gh api "repos/${REPOSITORY}/pulls/${PR_NUMBER}" --jq '[.state, (.draft|tostring)] | @tsv')
+          should_deploy=false
+          if [[ "$state" == "open" && "$draft" != "true" ]]; then
+            should_deploy=true
+          fi
+          echo "should_deploy=$should_deploy" >> "$GITHUB_OUTPUT"
+          if [[ "$should_deploy" != "true" ]]; then
+            echo "Skipping preview deploy for PR ${PR_NUMBER}: state=${state}, draft=${draft}"
+          fi
       - name: Resolve names
+        if: steps.pr-state.outputs.should_deploy == 'true'
         env:
           PR_NUMBER: ${{ inputs.pr_number }}
         run: |
@@ -97,13 +117,16 @@ jobs:
           echo "NEXUS_DB_URL_SECRET=axis-nexus-database-url-pr-${PR_NUMBER}" >> "$GITHUB_ENV"
           echo "COMPANION_DB_URL_SECRET=axis-companion-database-url-pr-${PR_NUMBER}" >> "$GITHUB_ENV"
       - uses: google-github-actions/auth@v3
+        if: steps.pr-state.outputs.should_deploy == 'true'
         with:
           workload_identity_provider: ${{ env.WIF_PROVIDER }}
           service_account: ${{ env.WIF_SERVICE_ACCOUNT }}
       - uses: google-github-actions/setup-gcloud@v3
+        if: steps.pr-state.outputs.should_deploy == 'true'
         with:
           project_id: ${{ env.PROJECT_ID }}
       - name: Prepare preview databases
+        if: steps.pr-state.outputs.should_deploy == 'true'
         run: |
           set -euo pipefail
           sudo apt-get update
@@ -153,7 +176,9 @@ jobs:
           upsert_db_url_secret "$NEXUS_DB_URL_SECRET" "$NEXUS_DB"
           upsert_db_url_secret "$COMPANION_DB_URL_SECRET" "$COMPANION_DB"
       - run: gcloud auth configure-docker "${REGISTRY}" --quiet
+        if: steps.pr-state.outputs.should_deploy == 'true'
       - name: Build and push images
+        if: steps.pr-state.outputs.should_deploy == 'true'
         run: |
           for item in nexus companion bff console; do
             image_uri="${REGISTRY}/${PROJECT_ID}/${AR_REPOSITORY}/axis-${item}:${IMAGE_TAG}"
@@ -162,6 +187,7 @@ jobs:
             echo "${item^^}_IMAGE=$image_uri" >> "$GITHUB_ENV"
           done
       - name: Deploy Nexus
+        if: steps.pr-state.outputs.should_deploy == 'true'
         run: |
           gcloud run deploy "$NEXUS_SERVICE" \
             --project="$PROJECT_ID" --region="$REGION" --image="$NEXUS_IMAGE" \
@@ -173,6 +199,7 @@ jobs:
             --labels="axis-env=preview,axis-pr=${{ inputs.pr_number }},managed-by=axis-preview"
           echo "NEXUS_URL=$(gcloud run services describe "$NEXUS_SERVICE" --project="$PROJECT_ID" --region="$REGION" --format='value(status.url)')" >> "$GITHUB_ENV"
       - name: Deploy Companion
+        if: steps.pr-state.outputs.should_deploy == 'true'
         run: |
           gcloud run deploy "$COMPANION_SERVICE" \
             --project="$PROJECT_ID" --region="$REGION" --image="$COMPANION_IMAGE" \
@@ -184,6 +211,7 @@ jobs:
             --labels="axis-env=preview,axis-pr=${{ inputs.pr_number }},managed-by=axis-preview"
           echo "COMPANION_URL=$(gcloud run services describe "$COMPANION_SERVICE" --project="$PROJECT_ID" --region="$REGION" --format='value(status.url)')" >> "$GITHUB_ENV"
       - name: Deploy BFF
+        if: steps.pr-state.outputs.should_deploy == 'true'
         run: |
           gcloud run deploy "$BFF_SERVICE" \
             --project="$PROJECT_ID" --region="$REGION" --image="$BFF_IMAGE" \
@@ -194,6 +222,7 @@ jobs:
             --labels="axis-env=preview,axis-pr=${{ inputs.pr_number }},managed-by=axis-preview"
           echo "BFF_URL=$(gcloud run services describe "$BFF_SERVICE" --project="$PROJECT_ID" --region="$REGION" --format='value(status.url)')" >> "$GITHUB_ENV"
       - name: Deploy Console
+        if: steps.pr-state.outputs.should_deploy == 'true'
         run: |
           gcloud run deploy "$CONSOLE_SERVICE" \
             --project="$PROJECT_ID" --region="$REGION" --image="$CONSOLE_IMAGE" \
@@ -203,6 +232,7 @@ jobs:
             --labels="axis-env=preview,axis-pr=${{ inputs.pr_number }},managed-by=axis-preview"
           echo "CONSOLE_URL=$(gcloud run services describe "$CONSOLE_SERVICE" --project="$PROJECT_ID" --region="$REGION" --format='value(status.url)')" >> "$GITHUB_ENV"
       - name: Smoke preview
+        if: steps.pr-state.outputs.should_deploy == 'true'
         run: |
           curl -fsS "$NEXUS_URL/readyz"
           curl -fsS "$COMPANION_URL/readyz"

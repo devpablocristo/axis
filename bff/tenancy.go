@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"time"
 )
 
@@ -63,9 +64,33 @@ func (s *memoryIAMStore) TenantByID(_ context.Context, tenantID string) (IAMTena
 func (s *memoryIAMStore) CreateTenant(_ context.Context, tenant IAMTenant) (IAMTenant, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.createTenantLocked(tenant), nil
+}
+
+func (s *memoryIAMStore) CreateTenantWithOwner(_ context.Context, tenant IAMTenant, ownerUserID string) (IAMTenant, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	tenant = s.createTenantLocked(tenant)
+	ownerUserID = strings.TrimSpace(ownerUserID)
+	if ownerUserID == "" {
+		return tenant, nil
+	}
+	now := time.Now().UTC()
+	member := IAMTenantMember{TenantID: tenant.ID, UserID: ownerUserID, Role: "owner", Status: "active", UpdatedAt: now}
+	key := tenantMemberKey(member.TenantID, member.UserID)
+	if existing, ok := s.tenantMembers[key]; ok {
+		member.CreatedAt = existing.CreatedAt
+	} else {
+		member.CreatedAt = now
+	}
+	s.tenantMembers[key] = member
+	return tenant, nil
+}
+
+func (s *memoryIAMStore) createTenantLocked(tenant IAMTenant) IAMTenant {
 	for _, t := range s.tenants {
 		if t.OrgID == tenant.OrgID && t.ProductSurface == tenant.ProductSurface {
-			return t, nil // idempotent: tenant for this (org, product) already exists
+			return t // idempotent: tenant for this (org, product) already exists
 		}
 	}
 	now := time.Now().UTC()
@@ -73,7 +98,7 @@ func (s *memoryIAMStore) CreateTenant(_ context.Context, tenant IAMTenant) (IAMT
 	tenant.Status = firstNonEmpty(tenant.Status, "active")
 	tenant.CreatedAt, tenant.UpdatedAt = now, now
 	s.tenants[tenant.ID] = tenant
-	return tenant, nil
+	return tenant
 }
 
 func (s *memoryIAMStore) ResolveTenantsForUser(_ context.Context, userID string) ([]IAMTenant, error) {
@@ -256,6 +281,44 @@ func (s *sqlIAMStore) CreateTenant(ctx context.Context, tenant IAMTenant) (IAMTe
 		RETURNING `+tenantColumns,
 		tenant.ID, tenant.OrgID, tenant.ProductSurface, tenant.Name, tenant.Status, tenant.Plan, now))
 	return out, err
+}
+
+func (s *sqlIAMStore) CreateTenantWithOwner(ctx context.Context, tenant IAMTenant, ownerUserID string) (IAMTenant, error) {
+	now := time.Now().UTC()
+	tenant.ID = firstNonEmpty(tenant.ID, "tenant_"+randomHex(8))
+	tenant.Status = firstNonEmpty(tenant.Status, "active")
+	ownerUserID = strings.TrimSpace(ownerUserID)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return IAMTenant{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	out, err := scanTenant(tx.QueryRowContext(ctx, `
+		INSERT INTO axis_tenants (id, org_id, product_surface, name, status, plan, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
+		ON CONFLICT (org_id, product_surface) DO UPDATE SET
+			name = COALESCE(NULLIF(EXCLUDED.name, ''), axis_tenants.name),
+			status = EXCLUDED.status,
+			plan = COALESCE(NULLIF(EXCLUDED.plan, ''), axis_tenants.plan),
+			updated_at = EXCLUDED.updated_at
+		RETURNING `+tenantColumns,
+		tenant.ID, tenant.OrgID, tenant.ProductSurface, tenant.Name, tenant.Status, tenant.Plan, now))
+	if err != nil {
+		return IAMTenant{}, err
+	}
+	if ownerUserID != "" {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO axis_tenant_members (tenant_id, user_id, role, status, created_at, updated_at)
+			VALUES ($1, $2, 'owner', 'active', $3, $3)
+			ON CONFLICT (tenant_id, user_id) DO UPDATE SET role = EXCLUDED.role, status = EXCLUDED.status, updated_at = EXCLUDED.updated_at
+		`, out.ID, ownerUserID, now); err != nil {
+			return IAMTenant{}, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return IAMTenant{}, err
+	}
+	return out, nil
 }
 
 func (s *sqlIAMStore) ResolveTenantsForUser(ctx context.Context, userID string) ([]IAMTenant, error) {

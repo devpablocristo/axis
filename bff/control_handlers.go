@@ -82,14 +82,9 @@ func (s *server) controlCreateOrg(w http.ResponseWriter, r *http.Request, p auth
 // prerequisito para retirar el path legacy por-org). Idempotente: CreateTenant
 // está keyado en (org_id, product_surface). actor "" → tenant sin membership.
 func (s *server) ensureOrgDefaultTenant(ctx context.Context, org IAMOrg, actor string) error {
-	tenant, err := s.iam.CreateTenant(ctx, IAMTenant{OrgID: org.ID, ProductSurface: defaultOrgProductSurface, Name: org.Name, Status: "active"})
+	_, err := s.iam.CreateTenantWithOwner(ctx, IAMTenant{OrgID: org.ID, ProductSurface: defaultOrgProductSurface, Name: org.Name, Status: "active"}, strings.TrimSpace(actor))
 	if err != nil {
 		return err
-	}
-	if a := strings.TrimSpace(actor); a != "" {
-		if _, err := s.iam.UpsertTenantMember(ctx, IAMTenantMember{TenantID: tenant.ID, UserID: a, Role: "owner", Status: "active"}); err != nil {
-			return err
-		}
 	}
 	return nil
 }
@@ -120,21 +115,15 @@ func (s *server) controlProvisionTenant(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "VALIDATION", "org_id and product_surface are required")
 		return
 	}
-	tenant, err := s.iam.CreateTenant(r.Context(), IAMTenant{
+	tenant, err := s.iam.CreateTenantWithOwner(r.Context(), IAMTenant{
 		OrgID:          strings.TrimSpace(body.OrgID),
 		ProductSurface: strings.TrimSpace(body.ProductSurface),
 		Name:           strings.TrimSpace(body.Name),
 		Status:         "active",
-	})
+	}, strings.TrimSpace(body.OwnerUserID))
 	if err != nil {
 		writeStoreError(w, err)
 		return
-	}
-	if owner := strings.TrimSpace(body.OwnerUserID); owner != "" {
-		if _, err := s.iam.UpsertTenantMember(r.Context(), IAMTenantMember{TenantID: tenant.ID, UserID: owner, Role: "owner", Status: "active"}); err != nil {
-			writeStoreError(w, err)
-			return
-		}
 	}
 	writeJSON(w, http.StatusCreated, tenant)
 }

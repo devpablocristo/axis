@@ -90,7 +90,7 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
 
   const refresh = useCallback(async () => {
     setSession((prev) => ({ data: prev?.data ?? null, error: '', loading: true }))
-    let nextSession: AxisSession | null = null
+    let nextSession: AxisSession
     try {
       nextSession = await getSession()
       setSession({ data: nextSession, error: '', loading: false })

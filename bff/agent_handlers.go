@@ -71,7 +71,7 @@ func (s *server) agentsAPI(w http.ResponseWriter, r *http.Request) {
 		}
 		agents, err := s.listCompanionAgents(r, p, routing)
 		if err != nil {
-			writeError(w, http.StatusBadGateway, "COMPANION_AGENTS_FAILED", err.Error())
+			writeLoggedError(w, http.StatusBadGateway, "COMPANION_AGENTS_FAILED", "companion agents request failed", err)
 			return
 		}
 		items := make([]IAMAgent, 0, len(agents))
@@ -116,7 +116,7 @@ func (s *server) agentsAPI(w http.ResponseWriter, r *http.Request) {
 		payload := viewToCompanionAgent(input, routing.RuntimeOrgID, routing.ProductSurface, agentID, p.Actor, nil)
 		agent, err := s.putCompanionAgent(r, p, routing, agentID, payload)
 		if err != nil {
-			writeError(w, http.StatusBadGateway, "COMPANION_AGENTS_FAILED", err.Error())
+			writeLoggedError(w, http.StatusBadGateway, "COMPANION_AGENTS_FAILED", "companion agents request failed", err)
 			return
 		}
 		s.auditIAM(r, p, routing.AxisOrgID, "agent.created", "agent", agentID, map[string]any{"name": input.Name, "profile": input.Profile, "source": "companion"})
@@ -151,13 +151,13 @@ func (s *server) agentsAPI(w http.ResponseWriter, r *http.Request) {
 			}
 			existing, err := s.getCompanionAgent(r, p, key)
 			if err != nil {
-				writeError(w, http.StatusBadGateway, "COMPANION_AGENTS_FAILED", err.Error())
+				writeLoggedError(w, http.StatusBadGateway, "COMPANION_AGENTS_FAILED", "companion agents request failed", err)
 				return
 			}
 			payload := viewToCompanionAgent(input, key.OrgID, key.ProductSurface, key.AgentID, p.Actor, &existing)
 			agent, err := s.putCompanionAgent(r, p, routing, key.AgentID, payload)
 			if err != nil {
-				writeError(w, http.StatusBadGateway, "COMPANION_AGENTS_FAILED", err.Error())
+				writeLoggedError(w, http.StatusBadGateway, "COMPANION_AGENTS_FAILED", "companion agents request failed", err)
 				return
 			}
 			s.auditIAM(r, p, routing.AxisOrgID, "agent.updated", "agent", key.AgentID, map[string]any{"name": input.Name, "profile": input.Profile, "source": "companion"})
@@ -186,7 +186,7 @@ func (s *server) agentLifecycle(w http.ResponseWriter, r *http.Request, p authn.
 			return
 		}
 		if err := s.deleteCompanionAgent(r, p, key); err != nil {
-			writeError(w, http.StatusBadGateway, "COMPANION_AGENTS_FAILED", err.Error())
+			writeLoggedError(w, http.StatusBadGateway, "COMPANION_AGENTS_FAILED", "companion agents request failed", err)
 			return
 		}
 		s.auditIAM(r, p, key.OrgID, "agent.purged", "agent", key.AgentID, map[string]any{"source": "companion", "product_surface": key.ProductSurface})
@@ -210,7 +210,7 @@ func (s *server) agentLifecycle(w http.ResponseWriter, r *http.Request, p authn.
 	}
 	agent, err := s.postCompanionAgentAction(r, p, key, action)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "COMPANION_AGENTS_FAILED", err.Error())
+		writeLoggedError(w, http.StatusBadGateway, "COMPANION_AGENTS_FAILED", "companion agents request failed", err)
 		return
 	}
 	s.auditIAM(r, p, key.OrgID, "agent."+action, "agent", key.AgentID, map[string]any{"source": "companion", "product_surface": key.ProductSurface})

@@ -302,7 +302,7 @@ func (s *server) proxy(name, prefix, target, audience string) http.Handler {
 	}
 	proxy := httputil.NewSingleHostReverseProxy(targetURL)
 	proxy.ErrorHandler = func(w http.ResponseWriter, _ *http.Request, err error) {
-		writeError(w, http.StatusBadGateway, "DOWNSTREAM_UNAVAILABLE", err.Error())
+		writeLoggedError(w, http.StatusBadGateway, "DOWNSTREAM_UNAVAILABLE", "downstream request failed", err)
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := principalFromContext(r.Context())
@@ -328,7 +328,7 @@ func (s *server) proxy(name, prefix, target, audience string) http.Handler {
 			IssuedAt:       now,
 		})
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "TOKEN_SIGNING_FAILED", err.Error())
+			writeLoggedError(w, http.StatusInternalServerError, "TOKEN_SIGNING_FAILED", "token signing failed", err)
 			return
 		}
 
@@ -521,6 +521,13 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 
 func writeError(w http.ResponseWriter, status int, code, message string) {
 	writeJSON(w, status, map[string]any{"error": map[string]string{"code": code, "message": message}})
+}
+
+func writeLoggedError(w http.ResponseWriter, status int, code, message string, err error) {
+	if err != nil {
+		log.Printf("bff: %s: %v", code, err)
+	}
+	writeError(w, status, code, message)
 }
 
 func env(key, fallback string) string {
