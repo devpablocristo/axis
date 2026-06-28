@@ -58,15 +58,17 @@ Fix: agregado `writeLoggedError`; forwarders de prompts, agent-profiles, agents 
 
 #### LOW-2P-01 — Deadcode pendiente es mayormente soporte test/dev
 
-Estado: abierto, no borrar a ciegas.
+Estado: **verificado, sin borrado en esta pasada**.
 
 Evidencia: `deadcode` marca `productevals`, `MemoryRepository`, `SignAttestationForTest`, publishers directos y helpers de runtime que estan usados por tests, comandos o superficies de soporte.
 
-Fix recomendado: mover helpers test-only a `_test.go` cuando sea barato; mantener APIs exportadas que son tooling/evals hasta decision de producto.
+Verificacion: `deadcode` actual marca BFF limpio; en Companion/Nexus los principales hits tienen referencias reales en tests/tooling (`productevals` en onboarding/contracts/evals, `MemoryRepository` en tests/watchers, `SignAttestationForTest` en attestation verifier test). Los candidatos baratos del audit viejo (`deleteIAMMember`, `fakePymes`, `preferred`) ya no aplican o ya estan usados.
+
+Decision: no borrar APIs internas exportadas solo porque `deadcode` no sigue test/tooling entrypoints. Mantener como deuda documental; si se quiere reducir ruido, mover helpers test-only a `_test.go` en PR dedicado y con cobertura local.
 
 ### Relacion con Platform
 
-Axis ya consume `platform/http/go/httpjson` para normalizar errores en varios dominios Nexus. Los siguientes candidatos reales son atomicos y deben salir como PRs chicos: helper transaccional IAM en BFF si se decide extraer patron, y consolidacion de error mapping de proxies BFF. No conviene mover tenancy BFF a kernels SaaS hasta terminar los pendientes de B#3 y estabilizar nombres `org` vs `tenant`.
+Axis ya consume `platform/http/go/httpjson` para normalizar errores en varios dominios Nexus. En esta segunda pasada se corrigieron localmente la atomicidad IAM BFF y el error mapping de proxies BFF; no ameritan extraccion a `platform` todavia. No conviene mover tenancy BFF a kernels SaaS hasta estabilizar nombres `org` vs `tenant` en los consumidores.
 
 Fecha: 2026-06-27 · Método: workflow multi-agente (138 agentes, 14 revisores × dimensión/módulo + verificación adversarial). **106 hallazgos confirmados** (25 HIGH / 43 MED / 38 LOW), 19 descartados (by-design/falso-positivo).
 
