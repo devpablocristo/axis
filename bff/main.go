@@ -323,7 +323,7 @@ func (s *server) session(w http.ResponseWriter, r *http.Request) {
 	p := principalFromContext(r.Context())
 	orgID, err := s.selectedOrg(r, p)
 	if err != nil {
-		writeError(w, http.StatusForbidden, "FORBIDDEN", err.Error())
+		writeOrgAccessError(w, err, err.Error())
 		return
 	}
 	// Surface store failures as 5xx instead of rendering an empty session, which
@@ -475,7 +475,10 @@ func (s *server) selectedOrg(r *http.Request, p authn.Principal) (string, error)
 	principalOrg := strings.TrimSpace(p.OrgID)
 	if principalOrg == "" && requested == "" {
 		orgs, err := s.iam.ListOrgsForActor(r.Context(), p.Actor, hasScope(p.Scopes, "axis:cross_org"))
-		if err == nil && len(orgs) > 0 {
+		if err != nil {
+			return "", &orgAccessError{cause: fmt.Errorf("org access lookup failed: %w", err)}
+		}
+		if len(orgs) > 0 {
 			requested = orgs[0].ID
 		}
 	}
@@ -494,7 +497,11 @@ func (s *server) selectedOrg(r *http.Request, p authn.Principal) (string, error)
 	if principalOrg != "" {
 		return principalOrg, nil
 	}
-	if ok, err := s.iam.ActorCanAccessOrg(r.Context(), p.Actor, requested); err == nil && ok {
+	ok, err := s.iam.ActorCanAccessOrg(r.Context(), p.Actor, requested)
+	if err != nil {
+		return "", &orgAccessError{cause: fmt.Errorf("org access lookup failed: %w", err)}
+	}
+	if ok {
 		return requested, nil
 	}
 	return "", errors.New("selected org is not allowed for this principal")

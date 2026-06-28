@@ -133,7 +133,12 @@ func (s *server) agentsAPI(w http.ResponseWriter, r *http.Request) {
 			if !requireScope(w, p, "axis:agents:write", "axis:agents:admin") {
 				return
 			}
-			if !s.canAccessCompanionAgent(r, p, key) {
+			ok, accessErr := s.canAccessCompanionAgent(r, p, key)
+			if accessErr != nil {
+				writeOrgAccessError(w, accessErr, "selected agent is not allowed for this principal")
+				return
+			}
+			if !ok {
 				writeError(w, http.StatusForbidden, "FORBIDDEN", "selected agent is not allowed for this principal")
 				return
 			}
@@ -181,7 +186,12 @@ func (s *server) agentLifecycle(w http.ResponseWriter, r *http.Request, p authn.
 		if !requireScope(w, p, "axis:iam:purge") {
 			return
 		}
-		if !s.canAccessCompanionAgent(r, p, key) {
+		ok, accessErr := s.canAccessCompanionAgent(r, p, key)
+		if accessErr != nil {
+			writeOrgAccessError(w, accessErr, "selected agent is not allowed for this principal")
+			return
+		}
+		if !ok {
 			writeError(w, http.StatusForbidden, "FORBIDDEN", "selected agent is not allowed for this principal")
 			return
 		}
@@ -200,7 +210,12 @@ func (s *server) agentLifecycle(w http.ResponseWriter, r *http.Request, p authn.
 	if !requireScope(w, p, "axis:agents:write", "axis:agents:admin") {
 		return
 	}
-	if !s.canAccessCompanionAgent(r, p, key) {
+	ok, accessErr := s.canAccessCompanionAgent(r, p, key)
+	if accessErr != nil {
+		writeOrgAccessError(w, accessErr, "selected agent is not allowed for this principal")
+		return
+	}
+	if !ok {
 		writeError(w, http.StatusForbidden, "FORBIDDEN", "selected agent is not allowed for this principal")
 		return
 	}
@@ -227,7 +242,12 @@ func (s *server) agentAxisOrgFromRequest(w http.ResponseWriter, r *http.Request,
 			return "", false
 		}
 	}
-	if !s.canAccessOrg(r, p, orgID) {
+	ok, err := s.canAccessOrg(r, p, orgID)
+	if err != nil {
+		writeOrgAccessError(w, err, "")
+		return "", false
+	}
+	if !ok {
 		writeError(w, http.StatusForbidden, "FORBIDDEN", "selected org is not allowed for this principal")
 		return "", false
 	}
@@ -235,7 +255,12 @@ func (s *server) agentAxisOrgFromRequest(w http.ResponseWriter, r *http.Request,
 }
 
 func (s *server) agentRoutingForAxisOrg(w http.ResponseWriter, r *http.Request, p authn.Principal, axisOrgID string, list bool) (agentRoutingContext, bool) {
-	if !s.canAccessOrg(r, p, axisOrgID) {
+	ok, err := s.canAccessOrg(r, p, axisOrgID)
+	if err != nil {
+		writeOrgAccessError(w, err, "")
+		return agentRoutingContext{}, false
+	}
+	if !ok {
 		writeError(w, http.StatusForbidden, "FORBIDDEN", "selected org is not allowed for this principal")
 		return agentRoutingContext{}, false
 	}
@@ -258,9 +283,9 @@ func (s *server) agentRoutingForAxisOrg(w http.ResponseWriter, r *http.Request, 
 	return routing, true
 }
 
-func (s *server) canAccessCompanionAgent(r *http.Request, p authn.Principal, key agentRuntimeKey) bool {
+func (s *server) canAccessCompanionAgent(r *http.Request, p authn.Principal, key agentRuntimeKey) (bool, error) {
 	if hasScope(p.Scopes, "axis:cross_org", "companion:cross_org") {
-		return true
+		return true, nil
 	}
 	return s.canAccessOrg(r, p, key.OrgID)
 }

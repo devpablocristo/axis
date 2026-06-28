@@ -111,8 +111,7 @@ func (s *server) iamTenants(w http.ResponseWriter, r *http.Request, parts []stri
 			if !requireScope(w, p, "axis:orgs:write", "axis:orgs:admin") {
 				return
 			}
-			if !s.canAccessOrg(r, p, tenantID) {
-				writeError(w, http.StatusForbidden, "FORBIDDEN", "selected org is not allowed for this principal")
+			if !s.requireOrgAccess(w, r, p, tenantID, "selected org is not allowed for this principal") {
 				return
 			}
 			input, ok := decodeJSONBody[IAMTenantView](w, r)
@@ -143,8 +142,7 @@ func (s *server) iamTenantLifecycle(w http.ResponseWriter, r *http.Request, p au
 		if !requireScope(w, p, "axis:iam:purge") {
 			return
 		}
-		if !s.canAccessOrg(r, p, tenantID) {
-			writeError(w, http.StatusForbidden, "FORBIDDEN", "selected org is not allowed for this principal")
+		if !s.requireOrgAccess(w, r, p, tenantID, "selected org is not allowed for this principal") {
 			return
 		}
 		err := s.deleteIAMOrg(r.Context(), tenantID)
@@ -161,8 +159,7 @@ func (s *server) iamTenantLifecycle(w http.ResponseWriter, r *http.Request, p au
 	if !requireScope(w, p, "axis:orgs:write", "axis:orgs:admin") {
 		return
 	}
-	if !s.canAccessOrg(r, p, tenantID) {
-		writeError(w, http.StatusForbidden, "FORBIDDEN", "selected org is not allowed for this principal")
+	if !s.requireOrgAccess(w, r, p, tenantID, "selected org is not allowed for this principal") {
 		return
 	}
 	status := statusForIAMAction(action)
@@ -188,15 +185,16 @@ func (s *server) iamProducts(w http.ResponseWriter, r *http.Request, parts []str
 			writeJSON(w, http.StatusOK, map[string]any{"items": []IAMProductView{}})
 			return
 		}
-		if tenantID != "" && !s.canAccessOrg(r, p, tenantID) {
-			writeError(w, http.StatusForbidden, "FORBIDDEN", "selected tenant is not allowed for this principal")
-			return
+		if tenantID != "" {
+			if !s.requireOrgAccess(w, r, p, tenantID, "selected tenant is not allowed for this principal") {
+				return
+			}
 		}
 		if tenantID == "" && !hasScope(p.Scopes, "axis:cross_org", "axis:products:admin") {
 			var err error
 			tenantID, err = s.selectedOrg(r, p)
 			if err != nil {
-				writeError(w, http.StatusForbidden, "FORBIDDEN", err.Error())
+				writeOrgAccessError(w, err, err.Error())
 				return
 			}
 		}
@@ -220,8 +218,11 @@ func (s *server) iamProducts(w http.ResponseWriter, r *http.Request, parts []str
 		if !ok {
 			return
 		}
-		if strings.TrimSpace(input.TenantID) == "" || !s.canAccessOrg(r, p, input.TenantID) {
+		if strings.TrimSpace(input.TenantID) == "" {
 			writeError(w, http.StatusForbidden, "FORBIDDEN", "selected tenant is not allowed for this principal")
+			return
+		}
+		if !s.requireOrgAccess(w, r, p, input.TenantID, "selected tenant is not allowed for this principal") {
 			return
 		}
 		product, err := s.iam.CreateProduct(r.Context(), IAMProduct{TenantID: input.TenantID, ProductSurface: input.ProductSurface, Name: input.Name, Status: firstNonEmpty(input.Status, "active")})
@@ -336,8 +337,7 @@ func (s *server) iamUsers(w http.ResponseWriter, r *http.Request, parts []string
 			writeError(w, http.StatusForbidden, "FORBIDDEN", "selected tenant is not allowed for this org")
 			return
 		}
-		if !s.canAccessOrg(r, p, tenant.OrgID) {
-			writeError(w, http.StatusForbidden, "FORBIDDEN", "selected org is not allowed for this principal")
+		if !s.requireOrgAccess(w, r, p, tenant.OrgID, "selected org is not allowed for this principal") {
 			return
 		}
 		items, err := s.listTenantUserViews(r.Context(), tenant, listStatus(parts))
@@ -406,9 +406,10 @@ func (s *server) iamUserLifecycle(w http.ResponseWriter, r *http.Request, p auth
 		if !requireScope(w, p, "axis:iam:purge") {
 			return
 		}
-		if ref0.kind != userRefGlobal && !s.canAccessOrg(r, p, ref0.orgID) {
-			writeError(w, http.StatusForbidden, "FORBIDDEN", "selected tenant is not allowed for this principal")
-			return
+		if ref0.kind != userRefGlobal {
+			if !s.requireOrgAccess(w, r, p, ref0.orgID, "selected tenant is not allowed for this principal") {
+				return
+			}
 		}
 		// Purge = delete the user from the IdP (Clerk DELETE /users/{id}). Clerk is
 		// the source of truth for identities, so a hard delete removes it there;
@@ -432,9 +433,10 @@ func (s *server) iamUserLifecycle(w http.ResponseWriter, r *http.Request, p auth
 		http.NotFound(w, r)
 		return
 	}
-	if ref0.kind != userRefGlobal && !s.canAccessOrg(r, p, ref0.orgID) {
-		writeError(w, http.StatusForbidden, "FORBIDDEN", "selected tenant is not allowed for this principal")
-		return
+	if ref0.kind != userRefGlobal {
+		if !s.requireOrgAccess(w, r, p, ref0.orgID, "selected tenant is not allowed for this principal") {
+			return
+		}
 	}
 	var view IAMUserView
 	var err error
@@ -482,7 +484,11 @@ func (s *server) createIAMUserView(r *http.Request, p authn.Principal, input IAM
 		if !ok {
 			return IAMUserView{}, fmt.Errorf("%w: no resuelve ningún tenant para %q (un user se crea dentro de un tenant)", errValidation, ref)
 		}
-		if !s.canAccessOrg(r, p, tenant.OrgID) {
+		ok, accessErr := s.canAccessOrg(r, p, tenant.OrgID)
+		if accessErr != nil {
+			return IAMUserView{}, accessErr
+		}
+		if !ok {
 			return IAMUserView{}, errNotFound
 		}
 		// Identidad en Clerk + membership en el ORG de Clerk (company). 'owner' es
@@ -566,7 +572,11 @@ func (s *server) updateIAMUserView(r *http.Request, p authn.Principal, ref strin
 		}
 		return globalUserView(user), nil
 	}
-	if !s.canAccessOrg(r, p, ref0.orgID) {
+	ok, accessErr := s.canAccessOrg(r, p, ref0.orgID)
+	if accessErr != nil {
+		return IAMUserView{}, accessErr
+	}
+	if !ok {
 		return IAMUserView{}, errNotFound
 	}
 	if ref0.kind == userRefTenant {
@@ -732,8 +742,7 @@ func (s *server) productForAccess(w http.ResponseWriter, r *http.Request, p auth
 		if product.ID != productID {
 			continue
 		}
-		if !s.canAccessOrg(r, p, product.TenantID) {
-			writeError(w, http.StatusForbidden, "FORBIDDEN", "selected tenant is not allowed for this principal")
+		if !s.requireOrgAccess(w, r, p, product.TenantID, "selected tenant is not allowed for this principal") {
 			return IAMProduct{}, false
 		}
 		return product, true

@@ -74,6 +74,7 @@ Axis ya consume `platform/http/go/httpjson` para normalizar errores en varios do
 
 - **BFF platform-role lookup fail-closed**: `resolveAppContext` y `controlAPI` ya no tratan un error de `PlatformRolesForUser` como ausencia de rol. El proxy app-plane clasifica ese fallo como 500 estable/logueado, y Control Plane tambien responde 500 estable, evitando falsos 403 y filtrado de detalles en outage de store.
 - **BFF auth platform-role lookup fail-closed**: el upgrade de scopes en `authenticate` ya no ignora errores de `PlatformRolesForUser`; responde 500 estable/logueado y evita degradar permisos silenciosamente cuando falla el store.
+- **BFF org-access lookup fail-closed**: `selectedOrg`, `canAccessOrg` y agent/IAM callers ya no convierten errores de `ActorCanAccessOrg`/`ListOrgsForActor` en 403/not-found; responden 500 estable/logueado sin filtrar el error del store.
 
 Fecha: 2026-06-27 · Método: workflow multi-agente (138 agentes, 14 revisores × dimensión/módulo + verificación adversarial). **106 hallazgos confirmados** (25 HIGH / 43 MED / 38 LOW), 19 descartados (by-design/falso-positivo).
 
