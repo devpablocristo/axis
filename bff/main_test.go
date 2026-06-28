@@ -1232,6 +1232,37 @@ func TestProxySurfacesAppContextStoreErrorAsStable500(t *testing.T) {
 	}
 }
 
+func TestManualAppContextHandlersSurfaceStoreErrorAsStable500(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		path string
+	}{
+		{name: "prompts", path: "/api/prompts/assist-packs"},
+		{name: "agent profiles", path: "/api/agent-profiles"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, err := newTestServer("http://127.0.0.1:1", defaultAdminScopes())
+			if err != nil {
+				t.Fatal(err)
+			}
+			tenantID := seedTenantForActor(t, srv, "org-a", "axis", "admin")
+			srv.iam = platformRolesErrStore{IAMStore: srv.iam}
+
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			req.Header.Set("X-Tenant-ID", tenantID)
+			rec := httptest.NewRecorder()
+			srv.routes().ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusInternalServerError {
+				t.Fatalf("expected 500, got %d body=%s", rec.Code, rec.Body.String())
+			}
+			if strings.Contains(rec.Body.String(), "platform roles store down") || strings.Contains(rec.Body.String(), "platform roles lookup failed") {
+				t.Fatalf("response leaked app context store error: %s", rec.Body.String())
+			}
+		})
+	}
+}
+
 // TestClerkWebhookUserDeletedRemovesAxisUser verifies the Clerk->Axis sync drops
 // the orphaned axis_users row when a user is deleted in the IdP.
 func TestClerkWebhookUserDeletedRemovesAxisUser(t *testing.T) {

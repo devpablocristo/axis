@@ -28,7 +28,7 @@ func (s *server) promptsAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	orgID, productSurface, tenantID, scopes, err := s.resolveAppContext(r, p)
 	if err != nil {
-		writeError(w, http.StatusForbidden, "FORBIDDEN", err.Error())
+		writeAppContextError(w, err)
 		return
 	}
 	if !requireScope(w, authn.Principal{Scopes: scopes}, route.requiredScopes...) {

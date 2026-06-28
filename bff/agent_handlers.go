@@ -238,7 +238,7 @@ func (s *server) agentAxisOrgFromRequest(w http.ResponseWriter, r *http.Request,
 		var err error
 		orgID, err = s.selectedOrg(r, p)
 		if err != nil {
-			writeError(w, http.StatusForbidden, "FORBIDDEN", err.Error())
+			writeOrgAccessError(w, err, err.Error())
 			return "", false
 		}
 	}
