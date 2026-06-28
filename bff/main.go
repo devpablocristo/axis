@@ -248,6 +248,37 @@ func principalFromContext(ctx context.Context) authn.Principal {
 	return p
 }
 
+type appContextError struct {
+	status  int
+	code    string
+	message string
+	cause   error
+}
+
+func (e *appContextError) Error() string {
+	if e.cause != nil {
+		return e.cause.Error()
+	}
+	return e.message
+}
+
+func (e *appContextError) Unwrap() error {
+	return e.cause
+}
+
+func writeAppContextError(w http.ResponseWriter, err error) {
+	var appErr *appContextError
+	if errors.As(err, &appErr) {
+		if appErr.status >= http.StatusInternalServerError {
+			writeLoggedError(w, appErr.status, appErr.code, appErr.message, err)
+			return
+		}
+		writeError(w, appErr.status, appErr.code, appErr.message)
+		return
+	}
+	writeError(w, http.StatusForbidden, "FORBIDDEN", err.Error())
+}
+
 func (s *server) session(w http.ResponseWriter, r *http.Request) {
 	p := principalFromContext(r.Context())
 	orgID, err := s.selectedOrg(r, p)
@@ -308,7 +339,7 @@ func (s *server) proxy(name, prefix, target, audience string) http.Handler {
 		p := principalFromContext(r.Context())
 		orgID, productSurface, tenantID, scopes, err := s.resolveAppContext(r, p)
 		if err != nil {
-			writeError(w, http.StatusForbidden, "FORBIDDEN", err.Error())
+			writeAppContextError(w, err)
 			return
 		}
 		now := time.Now().UTC()
@@ -377,7 +408,12 @@ func (s *server) resolveAppContext(r *http.Request, p authn.Principal) (orgID, p
 	}
 	platformRoles, perr := s.iam.PlatformRolesForUser(r.Context(), p.Actor)
 	if perr != nil {
-		return "", "", "", nil, fmt.Errorf("platform roles lookup failed: %w", perr)
+		return "", "", "", nil, &appContextError{
+			status:  http.StatusInternalServerError,
+			code:    "INTERNAL_ERROR",
+			message: "request failed",
+			cause:   fmt.Errorf("platform roles lookup failed: %w", perr),
+		}
 	}
 	role := ""
 	if !isPlatformAdmin(platformRoles) {
