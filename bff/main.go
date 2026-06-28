@@ -375,7 +375,10 @@ func (s *server) resolveAppContext(r *http.Request, p authn.Principal) (orgID, p
 	if terr != nil {
 		return "", "", "", nil, errors.New("tenant not found")
 	}
-	platformRoles, _ := s.iam.PlatformRolesForUser(r.Context(), p.Actor)
+	platformRoles, perr := s.iam.PlatformRolesForUser(r.Context(), p.Actor)
+	if perr != nil {
+		return "", "", "", nil, fmt.Errorf("platform roles lookup failed: %w", perr)
+	}
 	role := ""
 	if !isPlatformAdmin(platformRoles) {
 		m, merr := s.iam.TenantMembership(r.Context(), tenant.ID, p.Actor)

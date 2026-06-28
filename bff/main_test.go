@@ -1183,6 +1183,24 @@ func TestResolveAppContextRequiresTenant(t *testing.T) {
 	}
 }
 
+func TestResolveAppContextSurfacesPlatformRoleStoreError(t *testing.T) {
+	srv, err := newTestServer("http://127.0.0.1:1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tenantID := seedTenant(t, srv, "org-a", "axis")
+	srv.iam = platformRolesErrStore{IAMStore: srv.iam}
+
+	p := authn.Principal{Actor: "user-a", OrgID: "org-a", Scopes: defaultAdminScopes()}
+	req := httptest.NewRequest(http.MethodGet, "/api/nexus/x", nil)
+	req.Header.Set("X-Tenant-ID", tenantID)
+
+	_, _, _, _, err = srv.resolveAppContext(req, p)
+	if err == nil || !strings.Contains(err.Error(), "platform roles lookup failed") {
+		t.Fatalf("expected platform role lookup error, got %v", err)
+	}
+}
+
 // TestClerkWebhookUserDeletedRemovesAxisUser verifies the Clerk->Axis sync drops
 // the orphaned axis_users row when a user is deleted in the IdP.
 func TestClerkWebhookUserDeletedRemovesAxisUser(t *testing.T) {
@@ -1228,6 +1246,14 @@ type sessionStoreErrStore struct {
 
 func (sessionStoreErrStore) ListOrgsForActor(context.Context, string, bool) ([]IAMOrg, error) {
 	return nil, fmt.Errorf("store down")
+}
+
+type platformRolesErrStore struct {
+	IAMStore
+}
+
+func (platformRolesErrStore) PlatformRolesForUser(context.Context, string) ([]string, error) {
+	return nil, fmt.Errorf("platform roles store down")
 }
 
 func TestSessionSurfacesStoreError(t *testing.T) {

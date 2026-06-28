@@ -71,3 +71,22 @@ func TestControlProvisionTenantUsesAtomicStorePrimitive(t *testing.T) {
 		t.Fatalf("response should be the created tenant, got %#v", tenant)
 	}
 }
+
+func TestControlAPISurfacesPlatformRoleStoreError(t *testing.T) {
+	srv, err := newTestServer("http://127.0.0.1:1", defaultAdminScopes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.iam = platformRolesErrStore{IAMStore: srv.iam}
+	req := httptest.NewRequest(http.MethodGet, "/api/control/organizations", nil)
+	rec := httptest.NewRecorder()
+
+	srv.routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "platform roles store down") {
+		t.Fatalf("response leaked store error: %s", rec.Body.String())
+	}
+}
