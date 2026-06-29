@@ -54,7 +54,7 @@ export function AgentsControlCenter({ orgId, tenantId }: { orgId: string; tenant
   const [bulkBusy, setBulkBusy] = useState(false)
   const [reloadVersion, setReloadVersion] = useState(0)
   const [axisOrgs, setAxisOrgs] = useState<AxisTenantView[]>([])
-  const [selectedOrgId, setSelectedOrgId] = useState('')
+  const selectedOrgId = orgId
   const [validationFilter, setValidationFilter] = useState<ValidationFilter>('all')
   const [validationBusyId, setValidationBusyId] = useState('')
   const [agentProfiles, setAgentProfiles] = useState<AxisAgentProfileView[]>([])
@@ -79,15 +79,9 @@ export function AgentsControlCenter({ orgId, tenantId }: { orgId: string; tenant
     void loadProfileOptions(orgId, tenantId, setAgentProfiles, setProfilesError)
   }, [orgId, tenantId, reloadVersion, activeSection])
 
-  // El org lo gobierna el selector global (izquierda del avatar): seguimos al
-  // orgId global en vez de tener un selector propio.
-  useEffect(() => {
-    setSelectedOrgId(orgId)
-  }, [orgId])
-
   useEffect(() => {
     setSelectedIds([])
-  }, [selectedOrgId])
+  }, [orgId])
 
   useEffect(() => {
     if (!createRequested) return
