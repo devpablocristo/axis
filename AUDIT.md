@@ -11,7 +11,7 @@ Alcance: revalidacion post-saneamiento y post-cutover B#3. No se confia ciegamen
 - B#3 verificado: `/api/iam/users` para org normal requiere tenant real y lista/muta `axis_tenant_members`; `axis_org_members` queda como bridge Clerk/org picker.
 - Guardrail: `make hygiene` OK.
 - Guardrail inicial: `make lint` fallo por `console/src/App.tsx:93` (`no-useless-assignment`). Estado: **corregido en PR #54** cambiando `nextSession` a asignacion definida antes de uso.
-- Guardrail final: `make lint` OK (mantiene 9 warnings calibrados de console).
+- Guardrail final: `make lint` OK (mantiene 8 warnings calibrados de console).
 - Console: `npm run typecheck && npm run test && npm run build` OK.
 
 ### Hallazgos vigentes
@@ -90,6 +90,7 @@ Axis ya consume `platform/http/go/httpjson` para normalizar errores en varios do
 - **Agents console elimina resets de seleccion en effects**: la seleccion de agentes queda scoped por org y los cambios de lifecycle limpian seleccion desde el handler, no desde `useEffect`; perfiles aplica el mismo patron para `profileView`. `npm run lint` baja de 14 a 12 warnings sin cambiar requests ni filtros.
 - **Agents console muestra errores de review/bulk actions**: approve/ignore y bulk archive/trash/restore/purge ya no dejan promesas rechazadas sin feedback; muestran error inline scoped al org activo y limpian el mensaje al reintentar/cambiar lifecycle.
 - **Prompts console elimina resets/correcciones de vista en effects**: `initialSection`, seleccion de prompts y vista `trash` no soportada ahora se resuelven por estado scoped/vista efectiva y handlers; `npm run lint` baja de 12 a 9 warnings.
+- **ControlPlane separa fetch/aplicacion de estado**: la carga inicial usa un fetch puro con cancelacion y aplica defaults de selects con updates funcionales; `npm run lint` baja de 9 a 8 warnings.
 
 Fecha: 2026-06-27 · Método: workflow multi-agente (138 agentes, 14 revisores × dimensión/módulo + verificación adversarial). **106 hallazgos confirmados** (25 HIGH / 43 MED / 38 LOW), 19 descartados (by-design/falso-positivo).
 
