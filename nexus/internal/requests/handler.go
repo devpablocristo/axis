@@ -655,7 +655,7 @@ func toRequestResponse(req requestdomain.Request) requestdto.RequestResponse {
 }
 
 func bindParamsToPrincipalOrg(r *http.Request, params map[string]any) (map[string]any, bool) {
-	orgID := strings.TrimSpace(r.Header.Get("X-Org-ID"))
+	orgID := requestOrgForBinding(r)
 	if orgID == "" {
 		if identityhttp.HasNoAuthContext(r) {
 			return params, true
@@ -679,6 +679,14 @@ func bindParamsToPrincipalOrg(r *http.Request, params map[string]any) (map[strin
 	}
 	out["org_id"] = orgID
 	return out, true
+}
+
+func requestOrgForBinding(r *http.Request) string {
+	principalOrg := strings.TrimSpace(r.Header.Get("X-Org-ID"))
+	if identityhttp.HasAnyScope(r, scopeNexusCrossOrg) {
+		return orgctx.Narrowed(r, principalOrg)
+	}
+	return principalOrg
 }
 
 func canAccessRequestOrg(r *http.Request, req requestdomain.Request) bool {

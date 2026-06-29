@@ -377,6 +377,45 @@ func TestSubmitTagsProductSurfaceFromContext(t *testing.T) {
 	}
 }
 
+func TestSubmitCrossOrgPrincipalUsesRequestedOrg(t *testing.T) {
+	t.Parallel()
+	mux, repo := setupRequestMuxWithRepo(nil)
+
+	body := `{
+		"requester_type":"human",
+		"requester_id":"medmory-user",
+		"action_type":"medmory.care_grant.create",
+		"target_system":"medmory",
+		"target_resource":"care-grant:abc",
+		"params":{"org_id":"cristo.tech","role":"family"}
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/requests", strings.NewReader(body))
+	req = req.WithContext(orgctx.WithRequested(req.Context(), "cristo.tech"))
+	req = identityhttp.WithPrincipal(req, &authn.Principal{
+		OrgID:      "axis",
+		Actor:      "nexus-admin",
+		Scopes:     []string{"nexus:requests:write", "nexus:cross_org"},
+		Claims:     map[string]any{"service_principal": true},
+		AuthMethod: "api_key",
+	}, "api_key")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	stored, err := repo.List(context.Background(), "", "", 0, nil, true)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(stored) != 1 {
+		t.Fatalf("expected 1 stored request, got %d", len(stored))
+	}
+	if stored[0].OrgID == nil || *stored[0].OrgID != "cristo.tech" {
+		t.Fatalf("expected request org cristo.tech, got %#v", stored[0].OrgID)
+	}
+}
+
 type infraFailActionTypes struct{}
 
 func (infraFailActionTypes) GetByName(context.Context, string, *string) (requests.ActionTypeInfo, error) {
