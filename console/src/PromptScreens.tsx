@@ -11,13 +11,15 @@ import {
   useTextFileUpload,
 } from '@devpablocristo/platform-crud-ui/prompt-files'
 import type { ReactElement } from 'react'
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { AxisFetchInit, CompanionAgent } from './api'
 import { axisFetch } from './api'
 
 type PromptLifecycleView = 'active' | 'archived' | 'trash'
 type PromptSection = 'product' | 'agents'
 type PromptBulkAction = 'archive' | 'trash' | 'restore' | 'purge'
+type PromptSelection = { scope: string; ids: string[] }
+type PromptSectionState = { initialSection: PromptSection; activeSection: PromptSection }
 
 type AssistPack = {
   id: string
@@ -93,17 +95,18 @@ export function PromptsControlCenter({
   agents: CompanionAgent[]
   initialSection?: PromptSection
 }) {
-  const [activeSection, setActiveSection] = useState<PromptSection>(initialSection)
+  const [sectionState, setSectionState] = useState<PromptSectionState>({ initialSection, activeSection: initialSection })
+  const activeSection = sectionState.initialSection === initialSection ? sectionState.activeSection : initialSection
 
-  useEffect(() => {
-    setActiveSection(initialSection)
-  }, [initialSection])
+  const selectSection = (section: PromptSection) => {
+    setSectionState({ initialSection, activeSection: section })
+  }
 
   return (
     <section className="page-section iam-control axis-crud-host">
       <div className="screen-nav agents-section-tabs">
-        <button type="button" className={activeSection === 'product' ? 'active' : ''} onClick={() => setActiveSection('product')}>Assist packs</button>
-        <button type="button" className={activeSection === 'agents' ? 'active' : ''} onClick={() => setActiveSection('agents')}>Perfiles</button>
+        <button type="button" className={activeSection === 'product' ? 'active' : ''} onClick={() => selectSection('product')}>Assist packs</button>
+        <button type="button" className={activeSection === 'agents' ? 'active' : ''} onClick={() => selectSection('agents')}>Perfiles</button>
       </div>
       {activeSection === 'product' ? (
         <AssistPackPromptsScreen orgId={orgId} tenantId={tenantId} productSurface={productSurface} section={activeSection} />
@@ -316,7 +319,10 @@ function PromptCrudScreen({
   purgePrompt?: (row: AxisPromptRow) => Promise<unknown>
 }) {
   const [promptView, setPromptView] = useState<PromptLifecycleView>('active')
-  const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const effectivePromptView = supportsTrash || promptView !== 'trash' ? promptView : 'active'
+  const selectionScope = `${section}:${effectivePromptView}`
+  const [selection, setSelection] = useState<PromptSelection>({ scope: selectionScope, ids: [] })
+  const selectedIds = selection.scope === selectionScope ? selection.ids : []
   const [bulkBusy, setBulkBusy] = useState(false)
   const [reloadVersion, setReloadVersion] = useState(0)
   const [crudError, setCrudError] = useState('')
@@ -350,21 +356,21 @@ function PromptCrudScreen({
     [allowLifecycleManagement, archivePrompt, loadRows, purgePrompt, restorePrompt, trashPrompt],
   )
 
-  useEffect(() => {
-    setSelectedIds([])
-  }, [section, promptView])
-
-  useEffect(() => {
-    if (!supportsTrash && promptView === 'trash') {
-      setPromptView('active')
-    }
-  }, [promptView, supportsTrash])
-
   const toggleSelected = (id: string, checked: boolean) => {
-    setSelectedIds((current) => checked ? Array.from(new Set([...current, id])) : current.filter((item) => item !== id))
+    setSelection((current) => {
+      const currentIds = current.scope === selectionScope ? current.ids : []
+      const nextIds = checked ? Array.from(new Set([...currentIds, id])) : currentIds.filter((item) => item !== id)
+      return { scope: selectionScope, ids: nextIds }
+    })
   }
 
-  const clearSelected = () => setSelectedIds([])
+  const clearSelected = () => setSelection({ scope: selectionScope, ids: [] })
+
+  const setLifecycleView = (view: PromptLifecycleView) => {
+    const nextView = supportsTrash || view !== 'trash' ? view : 'active'
+    setPromptView(nextView)
+    setSelection({ scope: `${section}:${nextView}`, ids: [] })
+  }
 
   const applyBulkAction = async (action: PromptBulkAction, items: AxisPromptRow[]) => {
     if (!allowLifecycleManagement || selectedIds.length === 0 || bulkBusy) return
@@ -447,13 +453,13 @@ function PromptCrudScreen({
         />
       ) : null}
       <CrudPage<AxisPromptRow>
-        key={`${section}-${promptView}-${reloadVersion}`}
+        key={`${section}-${effectivePromptView}-${reloadVersion}`}
         label="prompt"
         labelPlural="prompts"
         labelPluralCap={title}
         stringsBase={crudStringsEs}
         strings={{ actionUnarchive: 'Restaurar' }}
-        initialView={promptView}
+        initialView={effectivePromptView}
         supportsArchived
         supportsTrash={supportsTrash}
         allowCreate={false}
@@ -505,7 +511,7 @@ function PromptCrudScreen({
           allowLifecycleManagement ? (
             <PromptBulkActions
               selectedCount={selectedIds.length}
-              view={promptView}
+              view={effectivePromptView}
               busy={bulkBusy}
               supportsTrash={supportsTrash}
               onCreate={() => setCrudError('Para crear un prompt de perfil, primero creá el perfil en Agentes > Perfiles.')}
@@ -515,10 +521,10 @@ function PromptCrudScreen({
           ) : null
         )}
         toolbarActions={[
-          { id: 'active', label: 'Activos', kind: promptView === 'active' ? 'primary' as const : 'secondary' as const, onClick: () => setPromptView('active') },
-          { id: 'archived', label: 'Archivados', kind: promptView === 'archived' ? 'primary' as const : 'secondary' as const, onClick: () => setPromptView('archived') },
+          { id: 'active', label: 'Activos', kind: effectivePromptView === 'active' ? 'primary' as const : 'secondary' as const, onClick: () => setLifecycleView('active') },
+          { id: 'archived', label: 'Archivados', kind: effectivePromptView === 'archived' ? 'primary' as const : 'secondary' as const, onClick: () => setLifecycleView('archived') },
           ...(supportsTrash ? [
-            { id: 'trash', label: 'Papelera', kind: promptView === 'trash' ? 'primary' as const : 'secondary' as const, onClick: () => setPromptView('trash') },
+            { id: 'trash', label: 'Papelera', kind: effectivePromptView === 'trash' ? 'primary' as const : 'secondary' as const, onClick: () => setLifecycleView('trash') },
           ] : []),
         ]}
         rowActions={[
