@@ -1431,6 +1431,73 @@ func TestAuthenticateSurfacesPlatformRoleStoreErrorAsStable500(t *testing.T) {
 	}
 }
 
+func TestStgAndPreviewAuthModesDoNotTrustDevHeaders(t *testing.T) {
+	for _, mode := range []string{"stg", "preview"} {
+		t.Run(mode, func(t *testing.T) {
+			srv := &server{
+				cfg: config{AuthMode: mode},
+				oidcAuth: fakeAuthenticator{principal: authn.Principal{
+					Actor:      "oidc-user",
+					OrgID:      "oidc-org",
+					AuthMethod: mode,
+				}},
+			}
+
+			req := httptest.NewRequest(http.MethodGet, "/api/session", nil)
+			req.Header.Set("X-Dev-User-ID", "attacker")
+			req.Header.Set("X-Dev-Org-ID", "attacker-org")
+			if _, err := srv.authenticate(req); err == nil || !strings.Contains(err.Error(), "bearer token required") {
+				t.Fatalf("expected bearer token requirement, got %v", err)
+			}
+
+			req.Header.Set("Authorization", "Bearer oidc-token")
+			p, err := srv.authenticate(req)
+			if err != nil {
+				t.Fatalf("authenticate: %v", err)
+			}
+			if p.Actor != "oidc-user" || p.OrgID != "oidc-org" {
+				t.Fatalf("expected OIDC principal, got actor=%q org=%q", p.Actor, p.OrgID)
+			}
+		})
+	}
+}
+
+func TestDevAuthModeStillTrustsDevHeaders(t *testing.T) {
+	srv := &server{cfg: config{AuthMode: "dev", DevOrgID: "default-org", DevUserID: "default-user"}}
+	req := httptest.NewRequest(http.MethodGet, "/api/session", nil)
+	req.Header.Set("X-Dev-User-ID", "dev-user")
+	req.Header.Set("X-Dev-Org-ID", "dev-org")
+	req.Header.Set("X-Dev-Scopes", "axis:admin nexus:read")
+
+	p, err := srv.authenticate(req)
+	if err != nil {
+		t.Fatalf("authenticate: %v", err)
+	}
+	if p.Actor != "dev-user" || p.OrgID != "dev-org" || p.AuthMethod != "dev" {
+		t.Fatalf("expected dev principal from headers, got %#v", p)
+	}
+	if !hasScope(p.Scopes, "axis:admin") || !hasScope(p.Scopes, "nexus:read") {
+		t.Fatalf("expected dev scopes from headers, got %#v", p.Scopes)
+	}
+}
+
+func TestNewServerRequiresIssuerForDeployedAuthModes(t *testing.T) {
+	for _, mode := range []string{"stg", "preview", "oidc", "clerk"} {
+		t.Run(mode, func(t *testing.T) {
+			_, err := newServer(config{
+				AuthMode:          mode,
+				InternalJWTSecret: "secret",
+				CompanionBaseURL:  "http://127.0.0.1:1",
+				NexusBaseURL:      "http://127.0.0.1:1",
+				DownstreamTimeout: time.Second,
+			})
+			if err == nil || !strings.Contains(err.Error(), "AXIS_AUTH_ISSUER_URL is required") {
+				t.Fatalf("expected issuer requirement, got %v", err)
+			}
+		})
+	}
+}
+
 func newTestServer(target string, scopes []string) (*server, error) {
 	return newServer(config{
 		AuthMode:          "dev",

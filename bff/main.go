@@ -127,10 +127,10 @@ func newServer(cfg config) (*server, error) {
 	if provider == "clerk" {
 		s.identity = newClerkIdentityAdapter(cfg.ClerkSecretKey, cfg.ClerkAPIBaseURL, s.client, iam, cfg.OwnerOrgID)
 	}
-	if cfg.AuthMode == "oidc" || cfg.AuthMode == "clerk" {
+	if authModeRequiresOIDC(cfg.AuthMode) {
 		issuer := strings.TrimRight(strings.TrimSpace(cfg.AuthIssuerURL), "/")
 		if issuer == "" {
-			return nil, errors.New("AXIS_AUTH_ISSUER_URL is required when AXIS_BFF_AUTH_MODE=oidc|clerk")
+			return nil, fmt.Errorf("AXIS_AUTH_ISSUER_URL is required when AXIS_BFF_AUTH_MODE=%s", cfg.AuthMode)
 		}
 		expectedAudience := strings.TrimSpace(cfg.AuthAudience)
 		s.oidcAuth = &authn.BearerJWTAuthenticator{
@@ -196,7 +196,7 @@ func (s *server) withAuth(next http.Handler) http.Handler {
 }
 
 func (s *server) authenticate(r *http.Request) (authn.Principal, error) {
-	if s.cfg.AuthMode == "dev" || s.cfg.AuthMode == "preview" || s.cfg.AuthMode == "stg" {
+	if isDevAuthMode(s.cfg.AuthMode) {
 		return authn.Principal{
 			OrgID:      firstNonEmpty(r.Header.Get("X-Dev-Org-ID"), s.cfg.DevOrgID),
 			Actor:      firstNonEmpty(r.Header.Get("X-Dev-User-ID"), s.cfg.DevUserID),
@@ -248,6 +248,19 @@ func (s *server) authenticate(r *http.Request) (authn.Principal, error) {
 		}
 	}
 	return principal, nil
+}
+
+func isDevAuthMode(mode string) bool {
+	return strings.EqualFold(mode, "dev")
+}
+
+func authModeRequiresOIDC(mode string) bool {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "oidc", "clerk", "stg", "preview":
+		return true
+	default:
+		return false
+	}
 }
 
 type principalContextKey struct{}
