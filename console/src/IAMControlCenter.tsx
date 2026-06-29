@@ -64,17 +64,11 @@ export function IAMControlCenter(props: IAMControlCenterProps) {
   const [createRequested, setCreateRequested] = useState<IAMCrudResource | null>(null)
   const [bulkBusy, setBulkBusy] = useState(false)
   const [reloadVersion, setReloadVersion] = useState(0)
-  const [selectedUserOrgId, setSelectedUserOrgId] = useState('axis')
+  const selectedUserOrgId = props.orgId
 
   useEffect(() => {
     localStorage.setItem('axis.iam.tab', activeCrud)
   }, [activeCrud])
-
-  // El org lo gobierna el selector global (izquierda del avatar): el CRUD de
-  // usuarios sigue al orgId global en vez de tener su propio selector.
-  useEffect(() => {
-    setSelectedUserOrgId(props.orgId)
-  }, [props.orgId])
 
   // El tenant activo no entra en la query ni en el orgId, pero sí en el
   // X-Tenant-ID que manda axisFetch. Al cambiar, forzar refetch para re-listar
@@ -85,7 +79,7 @@ export function IAMControlCenter(props: IAMControlCenterProps) {
 
   useEffect(() => {
     setSelected((current) => ({ ...current, users: [] }))
-  }, [selectedUserOrgId])
+  }, [props.orgId])
 
   useEffect(() => {
     if (!createRequested) return
