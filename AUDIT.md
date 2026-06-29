@@ -11,7 +11,7 @@ Alcance: revalidacion post-saneamiento y post-cutover B#3. No se confia ciegamen
 - B#3 verificado: `/api/iam/users` para org normal requiere tenant real y lista/muta `axis_tenant_members`; `axis_org_members` queda como bridge Clerk/org picker.
 - Guardrail: `make hygiene` OK.
 - Guardrail inicial: `make lint` fallo por `console/src/App.tsx:93` (`no-useless-assignment`). Estado: **corregido en PR #54** cambiando `nextSession` a asignacion definida antes de uso.
-- Guardrail final: `make lint` OK (mantiene 2 warnings calibrados de console, ambos en `PromptScreens` por la API actual de upload de `platform-crud-ui`).
+- Guardrail final: `make lint` OK (0 warnings de console).
 - Console: `npm run typecheck && npm run test && npm run build` OK.
 
 ### Hallazgos vigentes
@@ -93,6 +93,7 @@ Axis ya consume `platform/http/go/httpjson` para normalizar errores en varios do
 - **ControlPlane separa fetch/aplicacion de estado**: la carga inicial usa un fetch puro con cancelacion y aplica defaults de selects con updates funcionales; `npm run lint` baja de 9 a 8 warnings.
 - **IAM console elimina effects de reload/seleccion por contexto**: el refetch por tenant/product pasa al `key` del CRUD y la seleccion/error quedan scoped por org; mantiene tab activa y refetch al cambiar tenant. Test: `IAMControlCenter keeps the active tab and refetches when the tenant changes`. `npm run lint` baja de 8 a 6 warnings.
 - **Console root separa bootstrap/auth de entrypoint**: `main.tsx` queda como entrypoint puro, los componentes viven en `ConsoleRoot.tsx` y el token de Clerk se registra con `useLayoutEffect` antes de los effects de `App`; `npm run lint` baja de 6 a 2 warnings.
+- **Prompts consume `platform-crud-ui@0.4.2` para upload encapsulado**: `TextFileUploadInput` reemplaza el render manual de `inputRef/inputProps`, cerrando los ultimos warnings `react-hooks/refs`; `npm run lint` queda en 0 warnings.
 
 Fecha: 2026-06-27 · Método: workflow multi-agente (138 agentes, 14 revisores × dimensión/módulo + verificación adversarial). **106 hallazgos confirmados** (25 HIGH / 43 MED / 38 LOW), 19 descartados (by-design/falso-positivo).
 
