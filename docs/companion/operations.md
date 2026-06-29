@@ -113,6 +113,19 @@ confirmar la alerta derivada en `GET /v1/ops/alerts`.
 
 ## Agent Fleet
 
+Para operacion de producto nueva, usar Virtual Employees como superficie
+publica:
+
+- `GET /v1/virtual-employees`: lista Virtual Employees de la customer org.
+- `PUT /v1/virtual-employees/{employee_id}`: crea o actualiza limites de un
+  Virtual Employee.
+- `POST /v1/virtual-employees/{employee_id}/disable`: kill switch por Virtual
+  Employee.
+- `POST /v1/virtual-employees/handoffs`: registra handoff entre Virtual
+  Employees.
+
+Los endpoints de agents quedan como compatibilidad tecnica:
+
 - `GET /v1/agents`: lista empleados IA de la customer org.
 - `PUT /v1/agents/{agent_id}`: crea o actualiza límites de un empleado IA.
 - `POST /v1/agents/{agent_id}/disable`: kill switch por agente.

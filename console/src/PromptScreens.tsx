@@ -515,7 +515,7 @@ function PromptCrudScreen({
               view={effectivePromptView}
               busy={bulkBusy}
               supportsTrash={supportsTrash}
-              onCreate={() => setCrudError('Para crear un prompt de perfil, primero creá el perfil en Agentes > Perfiles.')}
+              onCreate={() => setCrudError('Para crear un prompt de perfil, primero creá el perfil en Virtual Employees > Perfiles.')}
               onClear={clearSelected}
               onBulkAction={(action) => void applyBulkAction(action, items)}
             />

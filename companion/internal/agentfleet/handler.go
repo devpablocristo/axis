@@ -42,6 +42,21 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/agents/handoffs", h.listHandoffs)
 	mux.HandleFunc("POST /v1/agents/handoffs", h.createHandoff)
 	mux.HandleFunc("PATCH /v1/agents/handoffs/{id}", h.updateHandoff)
+
+	mux.HandleFunc("GET /v1/virtual-employees", h.listAgents)
+	mux.HandleFunc("GET /v1/virtual-employees/{employee_id}", h.getAgent)
+	mux.HandleFunc("PUT /v1/virtual-employees/{employee_id}", h.putAgent)
+	mux.HandleFunc("POST /v1/virtual-employees/{employee_id}/disable", h.disableAgent)
+	mux.HandleFunc("POST /v1/virtual-employees/{employee_id}/archive", h.archiveAgent)
+	mux.HandleFunc("POST /v1/virtual-employees/{employee_id}/trash", h.trashAgent)
+	mux.HandleFunc("POST /v1/virtual-employees/{employee_id}/restore", h.restoreAgent)
+	mux.HandleFunc("POST /v1/virtual-employees/{employee_id}/approve", h.approveAgent)
+	mux.HandleFunc("POST /v1/virtual-employees/{employee_id}/ignore", h.ignoreAgent)
+	mux.HandleFunc("DELETE /v1/virtual-employees/{employee_id}", h.deleteAgent)
+	mux.HandleFunc("POST /v1/virtual-employees/assignments", h.assignAgent)
+	mux.HandleFunc("GET /v1/virtual-employees/handoffs", h.listHandoffs)
+	mux.HandleFunc("POST /v1/virtual-employees/handoffs", h.createHandoff)
+	mux.HandleFunc("PATCH /v1/virtual-employees/handoffs/{id}", h.updateHandoff)
 }
 
 func (h *Handler) listAgents(w http.ResponseWriter, r *http.Request) {
@@ -62,7 +77,7 @@ func (h *Handler) getAgent(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	agent, err := h.uc.GetAgent(r.Context(), orgID, surface, strings.TrimSpace(r.PathValue("agent_id")))
+	agent, err := h.uc.GetAgent(r.Context(), orgID, surface, agentPathID(r))
 	if err != nil {
 		writeAgentError(w, err)
 		return
@@ -85,7 +100,7 @@ func (h *Handler) putAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	agent.OrgID = orgID
 	agent.ProductSurface = surface
-	agent.AgentID = strings.TrimSpace(r.PathValue("agent_id"))
+	agent.AgentID = agentPathID(r)
 	agent.CreatedBy = actorID
 	saved, err := h.uc.SaveAgent(r.Context(), agent)
 	if err != nil {
@@ -103,7 +118,7 @@ func (h *Handler) disableAgent(w http.ResponseWriter, r *http.Request) {
 	if !agentWriteAllowed(w, r) {
 		return
 	}
-	agent, err := h.uc.DisableAgent(r.Context(), orgID, surface, strings.TrimSpace(r.PathValue("agent_id")), actorID)
+	agent, err := h.uc.DisableAgent(r.Context(), orgID, surface, agentPathID(r), actorID)
 	if err != nil {
 		writeAgentError(w, err)
 		return
@@ -149,7 +164,7 @@ func (h *Handler) deleteAgent(w http.ResponseWriter, r *http.Request) {
 	if !agentWriteAllowed(w, r) {
 		return
 	}
-	if err := h.uc.DeleteAgent(r.Context(), orgID, surface, strings.TrimSpace(r.PathValue("agent_id")), actorID); err != nil {
+	if err := h.uc.DeleteAgent(r.Context(), orgID, surface, agentPathID(r), actorID); err != nil {
 		writeAgentError(w, err)
 		return
 	}
@@ -176,7 +191,7 @@ func (h *Handler) lifecycleAction(w http.ResponseWriter, r *http.Request, action
 		Request: r,
 		OrgID:   orgID,
 		Surface: surface,
-		AgentID: strings.TrimSpace(r.PathValue("agent_id")),
+		AgentID: agentPathID(r),
 		ActorID: actorID,
 	})
 	if err != nil {
@@ -294,6 +309,13 @@ func agentRequestContext(w http.ResponseWriter, r *http.Request) (string, string
 		surface = id.ProductSurface
 	}
 	return orgID, surface, id.EffectiveActorID(), true
+}
+
+func agentPathID(r *http.Request) string {
+	if value := strings.TrimSpace(r.PathValue("agent_id")); value != "" {
+		return value
+	}
+	return strings.TrimSpace(r.PathValue("employee_id"))
 }
 
 func agentWriteAllowed(w http.ResponseWriter, r *http.Request) bool {

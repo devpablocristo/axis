@@ -12,7 +12,7 @@ Nexus decide decisiones sensibles; los productos exponen capacidades de dominio.
 | `cmd/api` | Bootstrap HTTP, config, migraciones, middleware y shutdown |
 | `wire` | Composición de dependencias, auth, clients y loops |
 | `internal/tasks` | Lifecycle de tasks, chat, propuestas a Nexus y ejecución |
-| `internal/agentfleet` | Empleados IA persistentes, límites, ownership y handoffs |
+| `internal/agentfleet` | Implementacion interna v1 de Virtual Employees: identidad persistente, limites, ownership y handoffs |
 | `internal/agentprofiles` | Perfiles globales versionados, system prompts y policies de agentes |
 | `internal/agents` | Registry fallback/generic routing de perfiles seedables |
 | `internal/business` | Modelo empresarial persistente versionado por customer org |
@@ -59,9 +59,10 @@ Nexus decide decisiones sensibles; los productos exponen capacidades de dominio.
 - Product installation guard: `companion` es superficie interna; cualquier
   superficie externa requiere instalacion activa antes de runtime runs,
   capability tools, connector execution, watchers y memory writes.
-- Agent fleet: `/v1/chat` puede seleccionar `agent_id`; el runtime resuelve
-  límites persistentes, recorta autonomía/tools/capabilities y registra
-  ownership en traces y observability.
+- Virtual Employees / Agent fleet: producto y Console usan Virtual Employees
+  como concepto publico; v1 mapea 1:1 a Agent Fleet. `/v1/chat` todavia puede
+  seleccionar `agent_id`; el runtime resuelve limites persistentes, recorta
+  autonomia/tools/capabilities y registra ownership en traces y observability.
 - Agent profiles: si el agente tiene `profile_id`, el runtime carga el prompt
   global versionado, aplica limites del perfil y falla cerrado si no existe o
   esta archivado/disabled.
@@ -74,7 +75,8 @@ y run traces. `companion_jobs` y `companion_job_events` guardan ejecución
 durable de trabajos operativos. `companion_observability_events` guarda el
 ledger redacted para replay. `companion_business_models` guarda el modelo
 empresarial activo y sus versiones. `companion_agents` y
-`companion_agent_handoffs` guardan flota, ownership y coordinación.
+`companion_agent_handoffs` guardan flota, ownership y coordinacion. En v1,
+VirtualEmployee no tiene tabla propia: mapea a `companion_agents`.
 `companion_run_traces` incluye `prompt_version` y `model` para auditar runtime IA.
 `companion_products` y `companion_product_installations` guardan el plano de
 control multi-producto. `companion_jobs` transporta `product_surface` como

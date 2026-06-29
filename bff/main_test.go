@@ -576,6 +576,31 @@ func TestAgentsEndpointSanitizesCompanionError(t *testing.T) {
 	}
 }
 
+func TestVirtualEmployeesEndpointSanitizesCompanionError(t *testing.T) {
+	srv, err := newTestServer("http://127.0.0.1:1", defaultAdminScopes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/virtual-employees?org_id=org-a", nil)
+	rec := httptest.NewRecorder()
+
+	srv.routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "COMPANION_VIRTUAL_EMPLOYEES_FAILED") {
+		t.Fatalf("expected virtual employees error code, got %s", body)
+	}
+	if !strings.Contains(body, "companion virtual employees request failed") {
+		t.Fatalf("expected sanitized companion virtual employees error, got %s", body)
+	}
+	if strings.Contains(body, "127.0.0.1") || strings.Contains(body, "connect") {
+		t.Fatalf("transport details leaked in body: %s", body)
+	}
+}
+
 func TestPromptsEndpointRejectsMemberWrites(t *testing.T) {
 	srv, err := newTestServer("http://127.0.0.1:1", orgMemberScopes())
 	if err != nil {
@@ -928,6 +953,180 @@ func TestAgentsCRUDARByOrg(t *testing.T) {
 	}
 }
 
+func TestVirtualEmployeesCRUDARByOrg(t *testing.T) {
+	requests := []string{}
+	companion := newFakeCompanionAgentsServerWithRecorder(t, &requests)
+	defer companion.Close()
+	srv, err := newTestServer(companion.URL, defaultAdminScopes())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/virtual-employees", strings.NewReader(`{"org_id":"org-a","name":"Billing Employee","profile":"billing.v1","autonomy":"A2","memory_enabled":true,"description":"Invoices","capabilities":["billing.read"],"tools":["billing_read"]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected virtual employee create 201, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var created struct {
+		Item VirtualEmployeeView `json:"item"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if created.Item.ID == "" || created.Item.OrgID != "org-a" || created.Item.Autonomy != "A2" || !created.Item.MemoryEnabled {
+		t.Fatalf("unexpected created virtual employee: %#v", created.Item)
+	}
+	if created.Item.OriginKind != "manual" || created.Item.ReviewStatus != "approved" || created.Item.ValidationStatus != "approved" || created.Item.Status != "active" {
+		t.Fatalf("expected manual approved active virtual employee, got %#v", created.Item)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/virtual-employees?org_id=org-a&product_surface=billing", nil)
+	rec = httptest.NewRecorder()
+	srv.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected virtual employees list 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !containsRequest(requests, "GET /v1/virtual-employees?org_id=org-a&product_surface=billing") {
+		t.Fatalf("expected BFF to forward org_id/product_surface to virtual employees endpoint, got\n%s", strings.Join(requests, "\n"))
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/virtual-employees?org_id=org-a", nil)
+	rec = httptest.NewRecorder()
+	srv.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected virtual employees list 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var list struct {
+		Items []VirtualEmployeeView `json:"items"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Items) != 1 || list.Items[0].ID != created.Item.ID {
+		t.Fatalf("expected only org-a virtual employee, got %#v", list.Items)
+	}
+
+	req = httptest.NewRequest(http.MethodPatch, "/api/virtual-employees/"+created.Item.ID, strings.NewReader(`{"org_id":"org-a","name":"Billing Lead","profile":"billing.v2","autonomy":"A3","memory_enabled":false,"description":"","capabilities":["billing.write"],"tools":["billing_write"]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	srv.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected virtual employee update 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var updated struct {
+		Item VirtualEmployeeView `json:"item"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &updated); err != nil {
+		t.Fatal(err)
+	}
+	if updated.Item.Name != "Billing Lead" || updated.Item.Profile != "billing.v2" || updated.Item.Autonomy != "A3" || updated.Item.MemoryEnabled {
+		t.Fatalf("unexpected updated virtual employee: %#v", updated.Item)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/virtual-employees/"+created.Item.ID+"/archive", nil)
+	rec = httptest.NewRecorder()
+	srv.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected virtual employee archive 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &updated); err != nil {
+		t.Fatal(err)
+	}
+	if updated.Item.Status != "archived" {
+		t.Fatalf("expected archived virtual employee, got %#v", updated.Item)
+	}
+
+	req = httptest.NewRequest(http.MethodDelete, "/api/virtual-employees/"+created.Item.ID+"/purge", nil)
+	rec = httptest.NewRecorder()
+	srv.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected virtual employee purge 204, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !allCompanionAgentRequestsUsePrefix(requests, "/v1/virtual-employees") {
+		t.Fatalf("expected virtual employees API to use Companion /v1/virtual-employees, got\n%s", strings.Join(requests, "\n"))
+	}
+}
+
+func TestVirtualEmployeesMetadataRoundTripAndPreserve(t *testing.T) {
+	companion := newFakeCompanionAgentsServer(t)
+	defer companion.Close()
+	srv, err := newTestServer(companion.URL, defaultAdminScopes())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/virtual-employees", strings.NewReader(`{
+		"org_id":"org-a",
+		"name":"Finance Employee",
+		"profile":"finance.v1",
+		"autonomy":"A2",
+		"metadata":{
+			"job_title":"Finance Coordinator",
+			"mission":"Close monthly billing",
+			"responsibilities":["review invoices","escalate blockers"],
+			"owner_user_id":"user-123",
+			"contact_channels":["slack:#finance"],
+			"escalation_rules":["manager after 2 days"]
+		}
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected virtual employee create 201, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var created struct {
+		Item VirtualEmployeeView `json:"item"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	assertVirtualEmployeeMetadata(t, created.Item.Metadata)
+
+	req = httptest.NewRequest(http.MethodGet, "/api/virtual-employees?org_id=org-a", nil)
+	rec = httptest.NewRecorder()
+	srv.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected virtual employees list 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var list struct {
+		Items []VirtualEmployeeView `json:"items"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Items) != 1 {
+		t.Fatalf("expected one virtual employee, got %#v", list.Items)
+	}
+	assertVirtualEmployeeMetadata(t, list.Items[0].Metadata)
+
+	req = httptest.NewRequest(http.MethodPatch, "/api/virtual-employees/"+created.Item.ID, strings.NewReader(`{
+		"org_id":"org-a",
+		"name":"Finance Lead",
+		"profile":"finance.v2",
+		"autonomy":"A3",
+		"description":"Updated normal fields only"
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	srv.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected virtual employee update 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var updated struct {
+		Item VirtualEmployeeView `json:"item"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &updated); err != nil {
+		t.Fatal(err)
+	}
+	if updated.Item.Name != "Finance Lead" || updated.Item.Profile != "finance.v2" || updated.Item.Autonomy != "A3" {
+		t.Fatalf("expected normal fields to update, got %#v", updated.Item)
+	}
+	assertVirtualEmployeeMetadata(t, updated.Item.Metadata)
+}
+
 func TestAgentsOrgAdminAndMemberPermissions(t *testing.T) {
 	companion := newFakeCompanionAgentsServer(t)
 	defer companion.Close()
@@ -961,6 +1160,42 @@ func TestAgentsOrgAdminAndMemberPermissions(t *testing.T) {
 	memberSrv.routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("expected member agents 403, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestVirtualEmployeesOrgAdminAndMemberPermissions(t *testing.T) {
+	companion := newFakeCompanionAgentsServer(t)
+	defer companion.Close()
+	adminSrv, err := newTestServer(companion.URL, orgAdminScopes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedDevPrincipal(t, adminSrv)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/virtual-employees", strings.NewReader(`{"org_id":"org-a","name":"Ops Employee","profile":"ops.v1","autonomy":"A1"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	adminSrv.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected org admin create own org 201, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/virtual-employees?org_id=org-b", nil)
+	rec = httptest.NewRecorder()
+	adminSrv.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected org admin cross-org 403, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	memberSrv, err := newTestServer("http://127.0.0.1:1", orgMemberScopes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	req = httptest.NewRequest(http.MethodGet, "/api/virtual-employees?org_id=org-a", nil)
+	rec = httptest.NewRecorder()
+	memberSrv.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected member virtual employees 403, got %d body=%s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -1566,10 +1801,22 @@ func seedTenantForActor(t *testing.T, srv *server, orgID, productSurface, role s
 }
 
 func newFakeCompanionAgentsServer(t *testing.T) *httptest.Server {
+	return newFakeCompanionAgentsServerWithRecorder(t, nil)
+}
+
+func newFakeCompanionAgentsServerWithRecorder(t *testing.T, requests *[]string) *httptest.Server {
 	t.Helper()
 	agents := map[string]companionAgent{}
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/v1/agents" && r.Method == http.MethodGet {
+		if requests != nil {
+			*requests = append(*requests, r.Method+" "+r.URL.RequestURI())
+		}
+		prefix, ok := companionAgentsTestPrefix(r.URL.Path)
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		if r.URL.Path == prefix && r.Method == http.MethodGet {
 			orgID := strings.TrimSpace(r.URL.Query().Get("org_id"))
 			productSurface := firstNonEmpty(r.URL.Query().Get("product_surface"), "companion")
 			out := []companionAgent{}
@@ -1581,11 +1828,11 @@ func newFakeCompanionAgentsServer(t *testing.T) *httptest.Server {
 			writeJSON(w, http.StatusOK, map[string]any{"data": out})
 			return
 		}
-		if !strings.HasPrefix(r.URL.Path, "/v1/agents/") {
+		if !strings.HasPrefix(r.URL.Path, prefix+"/") {
 			http.NotFound(w, r)
 			return
 		}
-		rest := strings.TrimPrefix(r.URL.Path, "/v1/agents/")
+		rest := strings.TrimPrefix(r.URL.Path, prefix+"/")
 		parts := strings.Split(rest, "/")
 		agentID, err := url.PathUnescape(parts[0])
 		if err != nil {
@@ -1660,6 +1907,81 @@ func newFakeCompanionAgentsServer(t *testing.T) *httptest.Server {
 		agents[key] = agent
 		writeJSON(w, http.StatusOK, agent)
 	}))
+}
+
+func companionAgentsTestPrefix(path string) (string, bool) {
+	for _, prefix := range []string{"/v1/agents", "/v1/virtual-employees"} {
+		if path == prefix || strings.HasPrefix(path, prefix+"/") {
+			return prefix, true
+		}
+	}
+	return "", false
+}
+
+func containsRequest(requests []string, want string) bool {
+	for _, request := range requests {
+		if request == want {
+			return true
+		}
+	}
+	return false
+}
+
+func allCompanionAgentRequestsUsePrefix(requests []string, prefix string) bool {
+	for _, request := range requests {
+		parts := strings.SplitN(request, " ", 2)
+		if len(parts) != 2 || !strings.HasPrefix(parts[1], prefix) {
+			return false
+		}
+	}
+	return true
+}
+
+func assertVirtualEmployeeMetadata(t *testing.T, metadata map[string]any) {
+	t.Helper()
+	if metadataString(metadata, "job_title") != "Finance Coordinator" {
+		t.Fatalf("expected job_title metadata, got %#v", metadata)
+	}
+	if metadataString(metadata, "mission") != "Close monthly billing" {
+		t.Fatalf("expected mission metadata, got %#v", metadata)
+	}
+	if metadataString(metadata, "owner_user_id") != "user-123" {
+		t.Fatalf("expected owner_user_id metadata, got %#v", metadata)
+	}
+	if got := metadataStringList(metadata, "responsibilities"); strings.Join(got, ",") != "review invoices,escalate blockers" {
+		t.Fatalf("expected responsibilities metadata, got %#v", metadata)
+	}
+	if got := metadataStringList(metadata, "contact_channels"); strings.Join(got, ",") != "slack:#finance" {
+		t.Fatalf("expected contact_channels metadata, got %#v", metadata)
+	}
+	if got := metadataStringList(metadata, "escalation_rules"); strings.Join(got, ",") != "manager after 2 days" {
+		t.Fatalf("expected escalation_rules metadata, got %#v", metadata)
+	}
+}
+
+func metadataString(metadata map[string]any, key string) string {
+	if metadata == nil {
+		return ""
+	}
+	value, _ := metadata[key].(string)
+	return value
+}
+
+func metadataStringList(metadata map[string]any, key string) []string {
+	if metadata == nil {
+		return nil
+	}
+	raw, ok := metadata[key].([]any)
+	if !ok {
+		return nil
+	}
+	values := make([]string, 0, len(raw))
+	for _, value := range raw {
+		if text := strings.TrimSpace(fmt.Sprint(value)); text != "" {
+			values = append(values, text)
+		}
+	}
+	return values
 }
 
 func decodeClaims(t *testing.T, token string) map[string]any {

@@ -1226,8 +1226,8 @@ paths:
         "404": { description: Product installation not found }
   /v1/agents:
     get:
-      summary: Lista empleados IA de la customer org
-      description: Requiere `companion:runtime:admin` o `companion:cross_org`.
+      summary: Lista Agents de compatibilidad tecnica
+      description: Endpoint legacy/tecnico de Agent Fleet. Para producto y Console usar `/v1/virtual-employees`. Requiere `companion:runtime:admin` o `companion:cross_org`.
       responses:
         "200":
           description: Agent list
@@ -1239,6 +1239,21 @@ paths:
                   data:
                     type: array
                     items: { $ref: "#/components/schemas/Agent" }
+  /v1/virtual-employees:
+    get:
+      summary: Lista Virtual Employees de la customer org
+      description: API publica recomendada para trabajadores digitales persistentes. V1 reutiliza Agent Fleet; `tenant = org_id + product_surface`.
+      responses:
+        "200":
+          description: Virtual Employee list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/VirtualEmployee" }
   /v1/agent-profiles:
     get:
       summary: Lista perfiles globales de agentes
@@ -1342,14 +1357,20 @@ paths:
                     items: { $ref: "#/components/schemas/AgentProfileVersion" }
   /v1/agents/assignments:
     post:
-      summary: Asigna un empleado IA activo para un intent/capability
-      description: Requiere `companion:runtime:admin` o `companion:cross_org`.
+      summary: Asigna un Agent activo por compatibilidad tecnica
+      description: Endpoint tecnico/legacy. Para contratos nuevos usar `/v1/virtual-employees/assignments`. Requiere `companion:runtime:admin` o `companion:cross_org`.
       responses:
         "200": { description: Agent assignment }
+  /v1/virtual-employees/assignments:
+    post:
+      summary: Asigna un Virtual Employee activo para un intent/capability
+      description: Superficie publica recomendada. Internamente reutiliza assignment de Agent Fleet.
+      responses:
+        "200": { description: Virtual Employee assignment }
   /v1/agents/{agent_id}:
     get:
-      summary: Obtiene un empleado IA
-      description: Requiere `companion:runtime:admin` o `companion:cross_org`.
+      summary: Obtiene un Agent de compatibilidad tecnica
+      description: Endpoint legacy/tecnico. Para producto y Console usar `/v1/virtual-employees/{employee_id}`. Requiere `companion:runtime:admin` o `companion:cross_org`.
       parameters:
         - in: path
           name: agent_id
@@ -1362,8 +1383,8 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Agent" }
     put:
-      summary: Crea o actualiza un empleado IA
-      description: Requiere `companion:runtime:admin` o `companion:cross_org`.
+      summary: Crea o actualiza un Agent de compatibilidad tecnica
+      description: Endpoint legacy/tecnico de Agent Fleet. Para producto y Console usar `/v1/virtual-employees/{employee_id}`. Requiere `companion:runtime:admin` o `companion:cross_org`.
       parameters:
         - in: path
           name: agent_id
@@ -1380,10 +1401,54 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Agent" }
+  /v1/virtual-employees/{employee_id}:
+    get:
+      summary: Obtiene un Virtual Employee
+      description: API publica recomendada. `employee_id` es el identificador publico y mapea directamente a `agent_id`.
+      parameters:
+        - in: path
+          name: employee_id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Virtual Employee
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VirtualEmployee" }
+    put:
+      summary: Crea o actualiza un Virtual Employee
+      description: API publica recomendada. V1 es un wrapper de Agent Fleet; no crea persistencia separada.
+      parameters:
+        - in: path
+          name: employee_id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/VirtualEmployee" }
+      responses:
+        "200":
+          description: Virtual Employee
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VirtualEmployee" }
+    delete:
+      summary: Elimina un Virtual Employee
+      description: Elimina el Agent interno asociado al `employee_id`.
+      parameters:
+        - in: path
+          name: employee_id
+          required: true
+          schema: { type: string }
+      responses:
+        "204": { description: Virtual Employee deleted }
   /v1/agents/{agent_id}/disable:
     post:
-      summary: Deshabilita un empleado IA
-      description: Requiere `companion:runtime:admin` o `companion:cross_org`.
+      summary: Deshabilita un Agent de compatibilidad tecnica
+      description: Endpoint legacy/tecnico. Para producto y Console usar `/v1/virtual-employees/{employee_id}/disable`. Requiere `companion:runtime:admin` o `companion:cross_org`.
       parameters:
         - in: path
           name: agent_id
@@ -1395,10 +1460,100 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Agent" }
+  /v1/virtual-employees/{employee_id}/disable:
+    post:
+      summary: Deshabilita un Virtual Employee
+      description: API publica recomendada. Wrapper de Agent Fleet; `employee_id` mapea a `agent_id`.
+      parameters:
+        - in: path
+          name: employee_id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Virtual Employee
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VirtualEmployee" }
+  /v1/virtual-employees/{employee_id}/archive:
+    post:
+      summary: Archiva un Virtual Employee
+      description: API publica recomendada. Wrapper de lifecycle de Agent Fleet.
+      parameters:
+        - in: path
+          name: employee_id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Virtual Employee
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VirtualEmployee" }
+  /v1/virtual-employees/{employee_id}/trash:
+    post:
+      summary: Mueve un Virtual Employee a trash
+      description: API publica recomendada. Wrapper de lifecycle de Agent Fleet.
+      parameters:
+        - in: path
+          name: employee_id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Virtual Employee
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VirtualEmployee" }
+  /v1/virtual-employees/{employee_id}/restore:
+    post:
+      summary: Restaura un Virtual Employee
+      description: API publica recomendada. Wrapper de lifecycle de Agent Fleet.
+      parameters:
+        - in: path
+          name: employee_id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Virtual Employee
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VirtualEmployee" }
+  /v1/virtual-employees/{employee_id}/approve:
+    post:
+      summary: Aprueba un Virtual Employee
+      description: API publica recomendada. Wrapper de review de Agent Fleet.
+      parameters:
+        - in: path
+          name: employee_id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Virtual Employee
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VirtualEmployee" }
+  /v1/virtual-employees/{employee_id}/ignore:
+    post:
+      summary: Ignora review de un Virtual Employee
+      description: API publica recomendada. Wrapper de review de Agent Fleet.
+      parameters:
+        - in: path
+          name: employee_id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Virtual Employee
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VirtualEmployee" }
   /v1/agents/handoffs:
     get:
-      summary: Lista handoffs entre empleados IA
-      description: Requiere `companion:runtime:admin` o `companion:cross_org`.
+      summary: Lista handoffs entre Agents por compatibilidad tecnica
+      description: Endpoint legacy/tecnico. Para contratos nuevos usar `/v1/virtual-employees/handoffs`. Requiere `companion:runtime:admin` o `companion:cross_org`.
       parameters:
         - in: query
           name: limit
@@ -1415,8 +1570,41 @@ paths:
                     type: array
                     items: { $ref: "#/components/schemas/AgentHandoff" }
     post:
-      summary: Crea un handoff entre empleados IA
-      description: Requiere `companion:runtime:admin` o `companion:cross_org`.
+      summary: Crea un handoff entre Agents por compatibilidad tecnica
+      description: Endpoint legacy/tecnico. Para contratos nuevos usar `/v1/virtual-employees/handoffs`. Requiere `companion:runtime:admin` o `companion:cross_org`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AgentHandoff" }
+      responses:
+        "201":
+          description: Handoff
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentHandoff" }
+  /v1/virtual-employees/handoffs:
+    get:
+      summary: Lista handoffs entre Virtual Employees
+      description: API publica recomendada para handoffs; internamente usa Agent Fleet.
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        "200":
+          description: Handoff list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/AgentHandoff" }
+    post:
+      summary: Crea un handoff entre Virtual Employees
+      description: API publica recomendada para handoffs; internamente usa Agent Fleet.
       requestBody:
         required: true
         content:
@@ -1430,8 +1618,29 @@ paths:
               schema: { $ref: "#/components/schemas/AgentHandoff" }
   /v1/agents/handoffs/{id}:
     patch:
-      summary: Actualiza estado de handoff
-      description: Requiere `companion:runtime:admin` o `companion:cross_org`.
+      summary: Actualiza estado de handoff entre Agents por compatibilidad tecnica
+      description: Endpoint legacy/tecnico. Para contratos nuevos usar `/v1/virtual-employees/handoffs/{id}`. Requiere `companion:runtime:admin` o `companion:cross_org`.
+      parameters:
+        - $ref: "#/components/parameters/UUIDPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { type: string, enum: [accepted, rejected, completed, cancelled] }
+      responses:
+        "200":
+          description: Handoff
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentHandoff" }
+  /v1/virtual-employees/handoffs/{id}:
+    patch:
+      summary: Actualiza estado de handoff entre Virtual Employees
+      description: API publica recomendada para handoffs; internamente usa Agent Fleet.
       parameters:
         - $ref: "#/components/parameters/UUIDPath"
       requestBody:
@@ -1791,7 +2000,10 @@ components:
         author_type: { type: string, enum: [user, assistant, system, tool] }
         author_id: { type: string }
         body: { type: string }
-        metadata: { type: object, additionalProperties: true }
+        metadata:
+          type: object
+          additionalProperties: true
+          description: Opaque Agent metadata. VirtualEmployee v1 stores semantic fields here as flat keys such as job_title, mission, responsibilities, owner_user_id, contact_channels and escalation_rules.
         created_at: { type: string, format: date-time }
     CapabilityManifest:
       type: object
@@ -2446,6 +2658,10 @@ components:
         created_by: { type: string }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    VirtualEmployee:
+      description: Public Virtual Employee representation. In v1 this is a semantic wrapper over Agent Fleet: `employee_id` maps directly to internal `agent_id`, persistence is `companion_agents`, Runtime still uses `agent_id`, and tenant is `org_id + product_surface`.
+      allOf:
+        - $ref: "#/components/schemas/Agent"
     AgentProfileInput:
       type: object
       required: [name, system_prompt]

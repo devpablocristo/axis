@@ -1,8 +1,13 @@
 # Agent Fleet
 
-La flota de empleados IA permite definir múltiples agentes persistentes por
+La flota de empleados IA permite definir multiples agentes persistentes por
 `org_id` y `product_surface` sin hardcodear verticales ni mover decisiones de
 acciones sensibles fuera de Nexus.
+
+Agent Fleet es la implementacion interna v1 de Virtual Employees. El contrato
+publico recomendado para producto y Console es `Virtual Employee`; los endpoints
+`/v1/agents` quedan como compatibilidad tecnica y superficie interna. Ver
+`virtual-employees.md`.
 
 ## Modelo
 
@@ -35,6 +40,21 @@ Si el agente no existe, está deshabilitado o el resolver no está configurado,
 el runtime falla cerrado antes de llamar al modelo.
 
 ## APIs
+
+Superficie publica recomendada:
+
+- `GET /v1/virtual-employees`: lista Virtual Employees de la customer org.
+- `GET /v1/virtual-employees/{employee_id}`: obtiene un Virtual Employee.
+- `PUT /v1/virtual-employees/{employee_id}`: crea o actualiza un Virtual
+  Employee.
+- `POST /v1/virtual-employees/{employee_id}/disable`: kill switch por Virtual
+  Employee.
+- `GET /v1/virtual-employees/handoffs`: lista handoffs recientes.
+- `POST /v1/virtual-employees/handoffs`: crea un handoff.
+- `PATCH /v1/virtual-employees/handoffs/{id}`: acepta, rechaza, completa o
+  cancela un handoff.
+
+Compatibilidad tecnica:
 
 - `GET /v1/agents`: lista agentes de la customer org.
 - `GET /v1/agents/{agent_id}`: obtiene un agente.

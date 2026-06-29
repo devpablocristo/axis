@@ -54,9 +54,52 @@ type agentRoutingContext struct {
 	ProductSurface string
 }
 
+type agentAPISurface struct {
+	routePrefix            string
+	downstreamPrefix       string
+	responseErrorCode      string
+	responseErrorMessage   string
+	profileRequiredMessage string
+	invalidIDMessage       string
+	accessDeniedMessage    string
+	auditActionPrefix      string
+	auditResource          string
+	defaultGeneratedIDStem string
+}
+
 func (s *server) agentsAPI(w http.ResponseWriter, r *http.Request) {
+	s.agentSurfaceAPI(w, r, agentAPISurface{
+		routePrefix:            "/api/agents",
+		downstreamPrefix:       "/v1/agents",
+		responseErrorCode:      "COMPANION_AGENTS_FAILED",
+		responseErrorMessage:   "companion agents request failed",
+		profileRequiredMessage: "agent profile is required",
+		invalidIDMessage:       "invalid agent id",
+		accessDeniedMessage:    "selected agent is not allowed for this principal",
+		auditActionPrefix:      "agent",
+		auditResource:          "agent",
+		defaultGeneratedIDStem: "agent",
+	})
+}
+
+func (s *server) virtualEmployeesAPI(w http.ResponseWriter, r *http.Request) {
+	s.agentSurfaceAPI(w, r, agentAPISurface{
+		routePrefix:            "/api/virtual-employees",
+		downstreamPrefix:       "/v1/virtual-employees",
+		responseErrorCode:      "COMPANION_VIRTUAL_EMPLOYEES_FAILED",
+		responseErrorMessage:   "companion virtual employees request failed",
+		profileRequiredMessage: "virtual employee profile is required",
+		invalidIDMessage:       "invalid virtual employee id",
+		accessDeniedMessage:    "selected virtual employee is not allowed for this principal",
+		auditActionPrefix:      "virtual_employee",
+		auditResource:          "virtual_employee",
+		defaultGeneratedIDStem: "virtual_employee",
+	})
+}
+
+func (s *server) agentSurfaceAPI(w http.ResponseWriter, r *http.Request, surface agentAPISurface) {
 	p := principalFromContext(r.Context())
-	parts := agentRouteParts(r.URL.Path)
+	parts := agentRouteParts(r.URL.Path, surface.routePrefix)
 	if r.Method == http.MethodGet && isListRequest(parts) {
 		if !requireScope(w, p, "axis:agents:read", "axis:agents:admin") {
 			return
@@ -69,9 +112,9 @@ func (s *server) agentsAPI(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			return
 		}
-		agents, err := s.listCompanionAgents(r, p, routing)
+		agents, err := s.listCompanionAgents(r, p, routing, surface.downstreamPrefix)
 		if err != nil {
-			writeLoggedError(w, http.StatusBadGateway, "COMPANION_AGENTS_FAILED", "companion agents request failed", err)
+			writeLoggedError(w, http.StatusBadGateway, surface.responseErrorCode, surface.responseErrorMessage, err)
 			return
 		}
 		items := make([]IAMAgent, 0, len(agents))
@@ -97,7 +140,7 @@ func (s *server) agentsAPI(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if !agentHasRealProfile(input) {
-			writeError(w, http.StatusBadRequest, "VALIDATION", "agent profile is required")
+			writeError(w, http.StatusBadRequest, "VALIDATION", surface.profileRequiredMessage)
 			return
 		}
 		routing, ok := s.agentRoutingForAxisOrg(w, r, p, axisOrgID, false)
@@ -106,7 +149,7 @@ func (s *server) agentsAPI(w http.ResponseWriter, r *http.Request) {
 		}
 		agentID := slugify(input.Name)
 		if agentID == "" {
-			agentID = "agent"
+			agentID = surface.defaultGeneratedIDStem
 		}
 		agentID = agentID + "_" + randomHex(4)
 		input.Status = "active"
@@ -114,19 +157,19 @@ func (s *server) agentsAPI(w http.ResponseWriter, r *http.Request) {
 		input.ReviewStatus = "approved"
 		input.ValidationStatus = "approved"
 		payload := viewToCompanionAgent(input, routing.RuntimeOrgID, routing.ProductSurface, agentID, p.Actor, nil)
-		agent, err := s.putCompanionAgent(r, p, routing, agentID, payload)
+		agent, err := s.putCompanionAgent(r, p, routing, agentID, payload, surface.downstreamPrefix)
 		if err != nil {
-			writeLoggedError(w, http.StatusBadGateway, "COMPANION_AGENTS_FAILED", "companion agents request failed", err)
+			writeLoggedError(w, http.StatusBadGateway, surface.responseErrorCode, surface.responseErrorMessage, err)
 			return
 		}
-		s.auditIAM(r, p, routing.AxisOrgID, "agent.created", "agent", agentID, map[string]any{"name": input.Name, "profile": input.Profile, "source": "companion"})
+		s.auditIAM(r, p, routing.AxisOrgID, surface.auditActionPrefix+".created", surface.auditResource, agentID, map[string]any{"name": input.Name, "profile": input.Profile, "source": "companion"})
 		writeJSON(w, http.StatusCreated, map[string]any{"item": companionAgentToView(agent, routing.AxisOrgID)})
 		return
 	}
 	if len(parts) >= 1 {
 		key, err := decodeAgentRuntimeKey(parts[0])
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "VALIDATION", "invalid agent id")
+			writeError(w, http.StatusBadRequest, "VALIDATION", surface.invalidIDMessage)
 			return
 		}
 		if len(parts) == 1 && (r.Method == http.MethodPut || r.Method == http.MethodPatch) {
@@ -135,11 +178,11 @@ func (s *server) agentsAPI(w http.ResponseWriter, r *http.Request) {
 			}
 			ok, accessErr := s.canAccessCompanionAgent(r, p, key)
 			if accessErr != nil {
-				writeOrgAccessError(w, accessErr, "selected agent is not allowed for this principal")
+				writeOrgAccessError(w, accessErr, surface.accessDeniedMessage)
 				return
 			}
 			if !ok {
-				writeError(w, http.StatusForbidden, "FORBIDDEN", "selected agent is not allowed for this principal")
+				writeError(w, http.StatusForbidden, "FORBIDDEN", surface.accessDeniedMessage)
 				return
 			}
 			input, ok := decodeJSONBody[IAMAgent](w, r)
@@ -147,37 +190,37 @@ func (s *server) agentsAPI(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if !agentHasRealProfile(input) {
-				writeError(w, http.StatusBadRequest, "VALIDATION", "agent profile is required")
+				writeError(w, http.StatusBadRequest, "VALIDATION", surface.profileRequiredMessage)
 				return
 			}
 			routing := agentRoutingContext{AxisOrgID: strings.TrimSpace(input.OrgID), RuntimeOrgID: key.OrgID, ProductSurface: key.ProductSurface}
 			if routing.AxisOrgID == "" {
 				routing.AxisOrgID = key.OrgID
 			}
-			existing, err := s.getCompanionAgent(r, p, key)
+			existing, err := s.getCompanionAgent(r, p, key, surface.downstreamPrefix)
 			if err != nil {
-				writeLoggedError(w, http.StatusBadGateway, "COMPANION_AGENTS_FAILED", "companion agents request failed", err)
+				writeLoggedError(w, http.StatusBadGateway, surface.responseErrorCode, surface.responseErrorMessage, err)
 				return
 			}
 			payload := viewToCompanionAgent(input, key.OrgID, key.ProductSurface, key.AgentID, p.Actor, &existing)
-			agent, err := s.putCompanionAgent(r, p, routing, key.AgentID, payload)
+			agent, err := s.putCompanionAgent(r, p, routing, key.AgentID, payload, surface.downstreamPrefix)
 			if err != nil {
-				writeLoggedError(w, http.StatusBadGateway, "COMPANION_AGENTS_FAILED", "companion agents request failed", err)
+				writeLoggedError(w, http.StatusBadGateway, surface.responseErrorCode, surface.responseErrorMessage, err)
 				return
 			}
-			s.auditIAM(r, p, routing.AxisOrgID, "agent.updated", "agent", key.AgentID, map[string]any{"name": input.Name, "profile": input.Profile, "source": "companion"})
+			s.auditIAM(r, p, routing.AxisOrgID, surface.auditActionPrefix+".updated", surface.auditResource, key.AgentID, map[string]any{"name": input.Name, "profile": input.Profile, "source": "companion"})
 			writeJSON(w, http.StatusOK, map[string]any{"item": companionAgentToView(agent, routing.AxisOrgID)})
 			return
 		}
 		if len(parts) == 2 {
-			s.agentLifecycle(w, r, p, key, parts[1])
+			s.agentLifecycle(w, r, p, key, parts[1], surface)
 			return
 		}
 	}
 	http.NotFound(w, r)
 }
 
-func (s *server) agentLifecycle(w http.ResponseWriter, r *http.Request, p authn.Principal, key agentRuntimeKey, action string) {
+func (s *server) agentLifecycle(w http.ResponseWriter, r *http.Request, p authn.Principal, key agentRuntimeKey, action string, surface agentAPISurface) {
 	if action == "purge" {
 		if r.Method != http.MethodDelete {
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -188,18 +231,18 @@ func (s *server) agentLifecycle(w http.ResponseWriter, r *http.Request, p authn.
 		}
 		ok, accessErr := s.canAccessCompanionAgent(r, p, key)
 		if accessErr != nil {
-			writeOrgAccessError(w, accessErr, "selected agent is not allowed for this principal")
+			writeOrgAccessError(w, accessErr, surface.accessDeniedMessage)
 			return
 		}
 		if !ok {
-			writeError(w, http.StatusForbidden, "FORBIDDEN", "selected agent is not allowed for this principal")
+			writeError(w, http.StatusForbidden, "FORBIDDEN", surface.accessDeniedMessage)
 			return
 		}
-		if err := s.deleteCompanionAgent(r, p, key); err != nil {
-			writeLoggedError(w, http.StatusBadGateway, "COMPANION_AGENTS_FAILED", "companion agents request failed", err)
+		if err := s.deleteCompanionAgent(r, p, key, surface.downstreamPrefix); err != nil {
+			writeLoggedError(w, http.StatusBadGateway, surface.responseErrorCode, surface.responseErrorMessage, err)
 			return
 		}
-		s.auditIAM(r, p, key.OrgID, "agent.purged", "agent", key.AgentID, map[string]any{"source": "companion", "product_surface": key.ProductSurface})
+		s.auditIAM(r, p, key.OrgID, surface.auditActionPrefix+".purged", surface.auditResource, key.AgentID, map[string]any{"source": "companion", "product_surface": key.ProductSurface})
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
@@ -212,23 +255,23 @@ func (s *server) agentLifecycle(w http.ResponseWriter, r *http.Request, p authn.
 	}
 	ok, accessErr := s.canAccessCompanionAgent(r, p, key)
 	if accessErr != nil {
-		writeOrgAccessError(w, accessErr, "selected agent is not allowed for this principal")
+		writeOrgAccessError(w, accessErr, surface.accessDeniedMessage)
 		return
 	}
 	if !ok {
-		writeError(w, http.StatusForbidden, "FORBIDDEN", "selected agent is not allowed for this principal")
+		writeError(w, http.StatusForbidden, "FORBIDDEN", surface.accessDeniedMessage)
 		return
 	}
 	if !validCompanionAgentAction(action) {
 		http.NotFound(w, r)
 		return
 	}
-	agent, err := s.postCompanionAgentAction(r, p, key, action)
+	agent, err := s.postCompanionAgentAction(r, p, key, action, surface.downstreamPrefix)
 	if err != nil {
-		writeLoggedError(w, http.StatusBadGateway, "COMPANION_AGENTS_FAILED", "companion agents request failed", err)
+		writeLoggedError(w, http.StatusBadGateway, surface.responseErrorCode, surface.responseErrorMessage, err)
 		return
 	}
-	s.auditIAM(r, p, key.OrgID, "agent."+action, "agent", key.AgentID, map[string]any{"source": "companion", "product_surface": key.ProductSurface})
+	s.auditIAM(r, p, key.OrgID, surface.auditActionPrefix+"."+action, surface.auditResource, key.AgentID, map[string]any{"source": "companion", "product_surface": key.ProductSurface})
 	writeJSON(w, http.StatusOK, map[string]any{"item": companionAgentToView(agent, key.OrgID)})
 }
 
@@ -290,8 +333,8 @@ func (s *server) canAccessCompanionAgent(r *http.Request, p authn.Principal, key
 	return s.canAccessOrg(r, p, key.OrgID)
 }
 
-func (s *server) listCompanionAgents(r *http.Request, p authn.Principal, routing agentRoutingContext) ([]companionAgent, error) {
-	target, err := s.companionAgentURL("/v1/agents")
+func (s *server) listCompanionAgents(r *http.Request, p authn.Principal, routing agentRoutingContext, downstreamPrefix string) ([]companionAgent, error) {
+	target, err := s.companionAgentURL(downstreamPrefix)
 	if err != nil {
 		return nil, err
 	}
@@ -320,8 +363,8 @@ func (s *server) listCompanionAgents(r *http.Request, p authn.Principal, routing
 	return payload.Data, nil
 }
 
-func (s *server) putCompanionAgent(r *http.Request, p authn.Principal, routing agentRoutingContext, agentID string, payload companionAgent) (companionAgent, error) {
-	target, err := s.companionAgentURL("/v1/agents/" + url.PathEscape(agentID))
+func (s *server) putCompanionAgent(r *http.Request, p authn.Principal, routing agentRoutingContext, agentID string, payload companionAgent, downstreamPrefix string) (companionAgent, error) {
+	target, err := s.companionAgentURL(downstreamPrefix + "/" + url.PathEscape(agentID))
 	if err != nil {
 		return companionAgent{}, err
 	}
@@ -353,8 +396,8 @@ func (s *server) putCompanionAgent(r *http.Request, p authn.Principal, routing a
 	return agent, nil
 }
 
-func (s *server) getCompanionAgent(r *http.Request, p authn.Principal, key agentRuntimeKey) (companionAgent, error) {
-	target, err := s.companionAgentURL("/v1/agents/" + url.PathEscape(key.AgentID))
+func (s *server) getCompanionAgent(r *http.Request, p authn.Principal, key agentRuntimeKey, downstreamPrefix string) (companionAgent, error) {
+	target, err := s.companionAgentURL(downstreamPrefix + "/" + url.PathEscape(key.AgentID))
 	if err != nil {
 		return companionAgent{}, err
 	}
@@ -381,8 +424,8 @@ func (s *server) getCompanionAgent(r *http.Request, p authn.Principal, key agent
 	return agent, nil
 }
 
-func (s *server) postCompanionAgentAction(r *http.Request, p authn.Principal, key agentRuntimeKey, action string) (companionAgent, error) {
-	target, err := s.companionAgentURL("/v1/agents/" + url.PathEscape(key.AgentID) + "/" + action)
+func (s *server) postCompanionAgentAction(r *http.Request, p authn.Principal, key agentRuntimeKey, action string, downstreamPrefix string) (companionAgent, error) {
+	target, err := s.companionAgentURL(downstreamPrefix + "/" + url.PathEscape(key.AgentID) + "/" + action)
 	if err != nil {
 		return companionAgent{}, err
 	}
@@ -409,8 +452,8 @@ func (s *server) postCompanionAgentAction(r *http.Request, p authn.Principal, ke
 	return agent, nil
 }
 
-func (s *server) deleteCompanionAgent(r *http.Request, p authn.Principal, key agentRuntimeKey) error {
-	target, err := s.companionAgentURL("/v1/agents/" + url.PathEscape(key.AgentID))
+func (s *server) deleteCompanionAgent(r *http.Request, p authn.Principal, key agentRuntimeKey, downstreamPrefix string) error {
+	target, err := s.companionAgentURL(downstreamPrefix + "/" + url.PathEscape(key.AgentID))
 	if err != nil {
 		return err
 	}
@@ -604,8 +647,8 @@ func decodeAgentRuntimeKey(value string) (agentRuntimeKey, error) {
 	return agentRuntimeKey{OrgID: parts[0], ProductSurface: parts[1], AgentID: parts[2]}, nil
 }
 
-func agentRouteParts(path string) []string {
-	path = strings.TrimPrefix(path, "/api/agents")
+func agentRouteParts(path string, routePrefix string) []string {
+	path = strings.TrimPrefix(path, routePrefix)
 	path = strings.Trim(path, "/")
 	if path == "" {
 		return nil

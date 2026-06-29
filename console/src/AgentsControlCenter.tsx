@@ -28,6 +28,8 @@ type ProfileCrudRow = AxisAgentProfileView & { id: string }
 type AgentSelection = { orgId: string; ids: string[] }
 type AgentActionError = { orgId: string; message: string }
 
+export const VIRTUAL_EMPLOYEES_BASE_PATH = '/api/virtual-employees'
+
 const CrudPage = PlatformCrudPage as unknown as <T extends { id: string }>(
   props: CrudPageProps<T>,
 ) => ReactElement
@@ -109,7 +111,7 @@ export function AgentsControlCenter({ orgId, tenantId }: { orgId: string; tenant
     setValidationBusyId(agent.id)
     setAgentActionError({ orgId: selectedOrgId, message: '' })
     try {
-      await crudClient.json(`/api/agents/${agent.id}/${action}`, { method: 'POST', body: {} })
+      await crudClient.json(`${VIRTUAL_EMPLOYEES_BASE_PATH}/${agent.id}/${action}`, { method: 'POST', body: {} })
       setReloadVersion((current) => current + 1)
     } catch (err) {
       setAgentActionError({ orgId: selectedOrgId, message: errorMessage(err) })
@@ -125,7 +127,7 @@ export function AgentsControlCenter({ orgId, tenantId }: { orgId: string; tenant
     try {
       for (const id of selectedIds) {
         const method = action === 'purge' ? 'DELETE' : 'POST'
-        await crudClient.json(`/api/agents/${id}/${action}`, { method, body: {} })
+        await crudClient.json(`${VIRTUAL_EMPLOYEES_BASE_PATH}/${id}/${action}`, { method, body: {} })
       }
       clearSelected()
       setReloadVersion((current) => current + 1)
@@ -162,13 +164,13 @@ export function AgentsControlCenter({ orgId, tenantId }: { orgId: string; tenant
       className={`page-section iam-control axis-crud-host${activeSection === 'agents' ? ' iam-control--external-lifecycle' : ''}`}
     >
       <div className="screen-nav agents-section-tabs">
-        <button type="button" className={activeSection === 'agents' ? 'active' : ''} onClick={() => setActiveSection('agents')}>Agentes</button>
+        <button type="button" className={activeSection === 'agents' ? 'active' : ''} onClick={() => setActiveSection('agents')}>Virtual Employees</button>
         <button type="button" className={activeSection === 'profiles' ? 'active' : ''} onClick={() => setActiveSection('profiles')}>Perfiles</button>
       </div>
       {activeSection === 'agents' ? (
         <CrudPage<AxisAgentView>
           key={`agents-${selectedOrgId}-${lifecycleView}-${reloadVersion}`}
-          basePath="/api/agents"
+          basePath={VIRTUAL_EMPLOYEES_BASE_PATH}
           listQuery={selectedOrgId ? `org_id=${encodeURIComponent(selectedOrgId)}` : undefined}
           httpClient={crudClient}
           stringsBase={crudStringsEs}
@@ -183,9 +185,9 @@ export function AgentsControlCenter({ orgId, tenantId }: { orgId: string; tenant
           allowUnarchive={isActive}
           allowRestore={isActive}
           allowPurge={isActive}
-          label="agente"
-          labelPlural="agentes"
-          labelPluralCap="Agentes"
+          label="virtual employee"
+          labelPlural="virtual employees"
+          labelPluralCap="Virtual Employees"
           createLabel="Nuevo"
           columns={agentColumns(selectedIds, toggleSelected, orgNameById, validationBusyId, (agent, action) => void applyReviewAction(agent, action))}
           formFields={agentFormFields(profileOptions)}
@@ -193,6 +195,12 @@ export function AgentsControlCenter({ orgId, tenantId }: { orgId: string; tenant
           searchText={(row) => [
             orgNameById.get(row.org_id) ?? row.org_id,
             row.name,
+            semanticString(row.metadata, 'job_title'),
+            semanticString(row.metadata, 'mission'),
+            semanticString(row.metadata, 'owner_user_id'),
+            ...semanticList(row.metadata, 'responsibilities'),
+            ...semanticList(row.metadata, 'contact_channels'),
+            ...semanticList(row.metadata, 'escalation_rules'),
             row.profile,
             row.autonomy,
             row.description,
@@ -211,6 +219,13 @@ export function AgentsControlCenter({ orgId, tenantId }: { orgId: string; tenant
             autonomy: row.autonomy,
             memory_enabled: row.memory_enabled,
             description: row.description,
+            _metadata_json: jsonText(row.metadata) || '{}',
+            job_title: semanticString(row.metadata, 'job_title'),
+            mission: semanticString(row.metadata, 'mission'),
+            responsibilities: semanticList(row.metadata, 'responsibilities').join('\n'),
+            owner_user_id: semanticString(row.metadata, 'owner_user_id'),
+            contact_channels: semanticList(row.metadata, 'contact_channels').join('\n'),
+            escalation_rules: semanticList(row.metadata, 'escalation_rules').join('\n'),
             capabilities: stringList(row.capabilities).join(', '),
             tools: stringList(row.tools).join(', '),
           })}
@@ -221,14 +236,15 @@ export function AgentsControlCenter({ orgId, tenantId }: { orgId: string; tenant
             autonomy: stringValue(values.autonomy),
             memory_enabled: booleanValue(values.memory_enabled),
             description: stringValue(values.description),
+            metadata: virtualEmployeeMetadata(values),
             capabilities: splitList(values.capabilities),
             tools: splitList(values.tools),
           })}
           isValid={(values) => isActive && stringValue(values.name).length > 0 && stringValue(values.profile).length > 0}
-          emptyState={profileOptions.length > 0 ? 'Sin agentes' : 'Sin perfiles disponibles'}
-          archivedEmptyState="Sin agentes archivados"
-          trashEmptyState="Sin agentes en papelera"
-          searchPlaceholder="Buscar agentes"
+          emptyState={profileOptions.length > 0 ? 'Sin virtual employees' : 'Sin perfiles disponibles'}
+          archivedEmptyState="Sin virtual employees archivados"
+          trashEmptyState="Sin virtual employees en papelera"
+          searchPlaceholder="Buscar virtual employees"
           listHeaderInlineSlot={() => (
             <div className="iam-control__lead-stack">
               <CreateAndBulkActions
@@ -421,6 +437,7 @@ function agentColumns(
     selectionColumn<AxisAgentView>(selectedIds, onToggle),
     { key: 'org_id', header: 'Org', render: (value) => orgNameById.get(String(value ?? '')) ?? String(value ?? '-') },
     { key: 'name', header: 'Nombre' },
+    { key: 'metadata', header: 'Puesto', render: (_value, row) => semanticString(row.metadata, 'job_title') || '-' },
     { key: 'profile', header: 'Perfil', render: (value) => formatProfile(String(value ?? '')) },
     { key: 'autonomy', header: 'Autonomía' },
     { key: 'source_org_id', header: 'Contexto', render: (_value, row) => formatOrigin(row) },
@@ -464,6 +481,12 @@ function agentFormFields(profileOptions: Array<{ label: string; value: string }>
     { key: 'autonomy', label: 'Autonomía', type: 'select' as const, required: true, options: AUTONOMY_OPTIONS },
     { key: 'memory_enabled', label: 'Memoria', type: 'checkbox' as const },
     { key: 'description', label: 'Descripción', type: 'textarea' as const, rows: 3, fullWidth: true },
+    { key: 'job_title', label: 'Puesto / Job title' },
+    { key: 'mission', label: 'Misión', type: 'textarea' as const, rows: 2, fullWidth: true },
+    { key: 'responsibilities', label: 'Responsabilidades', type: 'textarea' as const, rows: 3, fullWidth: true },
+    { key: 'owner_user_id', label: 'Owner humano' },
+    { key: 'contact_channels', label: 'Canales de contacto', type: 'textarea' as const, rows: 2, fullWidth: true },
+    { key: 'escalation_rules', label: 'Reglas de escalamiento', type: 'textarea' as const, rows: 2, fullWidth: true },
     { key: 'capabilities', label: 'Capabilities', type: 'textarea' as const, rows: 2, fullWidth: true },
     { key: 'tools', label: 'Tools', type: 'textarea' as const, rows: 2, fullWidth: true },
   ]
@@ -740,9 +763,71 @@ function booleanValue(value: unknown): boolean {
   return value === true
 }
 
+function virtualEmployeeMetadata(values: CrudFormValues): Record<string, unknown> {
+  const rawMetadata = parseMetadataJSON(values._metadata_json)
+  const base = { ...rawMetadata }
+  setSemanticString(base, 'job_title', values.job_title)
+  setSemanticString(base, 'mission', values.mission)
+  setSemanticList(base, 'responsibilities', values.responsibilities)
+  setSemanticString(base, 'owner_user_id', values.owner_user_id)
+  setSemanticList(base, 'contact_channels', values.contact_channels)
+  setSemanticList(base, 'escalation_rules', values.escalation_rules)
+  return base
+}
+
+function parseMetadataJSON(value: unknown): Record<string, unknown> {
+  const text = stringValue(value)
+  if (!text) return {}
+  try {
+    const parsed = JSON.parse(text) as unknown
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>
+    }
+  } catch {
+    return {}
+  }
+  return {}
+}
+
+function setSemanticString(metadata: Record<string, unknown>, key: string, value: unknown) {
+  const text = stringValue(value)
+  if (text) {
+    metadata[key] = text
+  } else {
+    delete metadata[key]
+  }
+}
+
+function setSemanticList(metadata: Record<string, unknown>, key: string, value: unknown) {
+  const items = splitSemanticList(value)
+  if (items.length > 0) {
+    metadata[key] = items
+  } else {
+    delete metadata[key]
+  }
+}
+
+function semanticString(metadata: unknown, key: string): string {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return ''
+  const value = (metadata as Record<string, unknown>)[key]
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function semanticList(metadata: unknown, key: string): string[] {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return []
+  return stringList((metadata as Record<string, unknown>)[key])
+}
+
 function errorMessage(err: unknown): string {
   if (err instanceof Error && err.message.trim()) return err.message
   return 'No se pudo completar la accion'
+}
+
+function splitSemanticList(value: unknown): string[] {
+  return stringValue(value)
+    .split(/[\n,]/)
+    .map((item) => item.trim())
+    .filter(Boolean)
 }
 
 function splitList(value: unknown): string[] {

@@ -77,6 +77,7 @@ func (u *Usecases) SaveAgent(ctx context.Context, agent Agent) (Agent, error) {
 	providedStatus := strings.TrimSpace(agent.Status) != ""
 	providedReview := strings.TrimSpace(agent.ReviewStatus) != ""
 	providedLifecycle := strings.TrimSpace(agent.LifecycleStatus) != ""
+	providedMetadata := agent.Metadata != nil
 
 	agent = normalizeAgent(agent)
 	if err := validateAgent(agent); err != nil {
@@ -99,6 +100,9 @@ func (u *Usecases) SaveAgent(ctx context.Context, agent Agent) (Agent, error) {
 		}
 		if !providedLifecycle {
 			agent.LifecycleStatus = existing.LifecycleStatus
+		}
+		if !providedMetadata {
+			agent.Metadata = existing.Metadata
 		}
 	case errors.Is(err, ErrNotFound):
 		// create: quedan los defaults seguros de normalizeAgent.

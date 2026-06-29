@@ -115,6 +115,8 @@ type IAMAgent struct {
 	UpdatedAt            time.Time      `json:"updated_at"`
 }
 
+type VirtualEmployeeView = IAMAgent
+
 type IAMStore interface {
 	ListOrgsForActor(context.Context, string, bool) ([]IAMOrg, error)
 	ActorCanAccessOrg(context.Context, string, string) (bool, error)

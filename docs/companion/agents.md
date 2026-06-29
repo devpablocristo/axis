@@ -3,6 +3,10 @@
 Companion usa perfiles globales persistidos en `agent_profiles`, Agent Fleet en
 `companion_agents` y enforcement en `internal/runtime`.
 
+En v1, **Virtual Employee** es el concepto publico de dominio y **Agent / Agent
+Fleet** es la implementacion interna. `employee_id` mapea a `agent_id`; Runtime
+todavia usa `agent_id` internamente.
+
 ## Modelo actual
 
 Cada run produce:

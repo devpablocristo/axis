@@ -275,7 +275,7 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
           <button type="button" className={route.area === 'home' ? 'active' : ''} onClick={() => navigate({ area: 'home', screen: 'summary' })}><Activity aria-hidden="true" />Inicio</button>
           <button type="button" className={route.area === 'chat' ? 'active' : ''} onClick={() => navigate({ area: 'chat', screen: 'workspace' })}><MessageSquareText aria-hidden="true" />Chat</button>
           <button type="button" className={route.area === 'prompts' ? 'active' : ''} onClick={() => navigate({ area: 'prompts', screen: 'product' })}><FileText aria-hidden="true" />Prompts</button>
-          <button type="button" className={route.area === 'agents' ? 'active' : ''} onClick={() => navigate({ area: 'agents', screen: 'list' })}><Bot aria-hidden="true" />Agentes</button>
+          <button type="button" className={route.area === 'agents' ? 'active' : ''} onClick={() => navigate({ area: 'agents', screen: 'list' })}><Bot aria-hidden="true" />Virtual Employees</button>
           {canViewIAM && <button type="button" className={route.area === 'iam' ? 'active' : ''} onClick={() => navigate({ area: 'iam', screen: 'internal' })}><KeyRound aria-hidden="true" />IAM</button>}
           <button type="button" className={route.area === 'operations' ? 'active' : ''} onClick={() => navigate({ area: 'operations', screen: 'runs' })}><Activity aria-hidden="true" />Operación</button>
           <button type="button" className={route.area === 'nexus' ? 'active' : ''} onClick={() => navigate({ area: 'nexus', screen: 'approvals' })}><GitPullRequestArrow aria-hidden="true" />Nexus</button>
@@ -352,7 +352,7 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
             <div className="metrics-grid">
               <Metric icon={<CheckCircle2 />} label="Aprobaciones" value={approvals.data.length} tone="green" />
               <Metric icon={<FileClock />} label="Requests" value={requests.data.length} tone="blue" />
-              <Metric icon={<Sparkles />} label="Agentes" value={agents.data.length} tone="violet" />
+              <Metric icon={<Sparkles />} label="Virtual Employees" value={agents.data.length} tone="violet" />
               <Metric icon={<DatabaseZap />} label="Capabilities" value={capabilities.data.length} tone="amber" />
             </div>
             <div className="screen-grid two">
@@ -700,6 +700,7 @@ function normalizeRouteArea(value: string): RouteArea {
   if (value === 'overview') return 'home'
   if (value === 'companion') return 'platform'
   if (value === 'access') return 'nexus'
+  if (value === 'virtual-employees') return 'agents'
   if (value === 'home' || value === 'chat' || value === 'prompts' || value === 'agents' || value === 'iam' || value === 'operations' || value === 'nexus' || value === 'platform' || value === 'control') {
     return value
   }
@@ -731,7 +732,7 @@ function routePath(route: Route) {
     return '/prompts'
   }
   if (route.area === 'agents') {
-    return '/agents'
+    return '/virtual-employees'
   }
   if (route.area === 'iam') {
     return '/iam'
@@ -751,7 +752,7 @@ function pageTitle(route: Route) {
     case 'nexus':
       return 'Nexus'
     case 'agents':
-      return 'Agentes'
+      return 'Virtual Employees'
     case 'iam':
       return 'IAM'
     case 'platform':
