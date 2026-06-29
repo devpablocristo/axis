@@ -33,6 +33,8 @@ type IAMUserView = {
 type SelectedRows = Record<IAMCrudResource, string[]>
 type LifecycleViews = Record<IAMCrudResource, CrudLifecycleView>
 type TenantRow = AxisTenantView
+type ScopedSelectedRows = { orgId: string; rows: SelectedRows }
+type ScopedBulkError = { orgId: string; message: string }
 
 type IAMControlCenterProps = {
   orgId: string
@@ -53,6 +55,10 @@ const ROLE_OPTIONS = [
   { label: 'Member', value: 'member' },
 ]
 
+function emptySelectedRows(): SelectedRows {
+  return { tenants: [], users: [] }
+}
+
 export function IAMControlCenter(props: IAMControlCenterProps) {
   const rootRef = useRef<HTMLElement | null>(null)
   // Persist the active tab so changing org/product never bounces it back to Orgs.
@@ -60,28 +66,19 @@ export function IAMControlCenter(props: IAMControlCenterProps) {
     () => (localStorage.getItem('axis.iam.tab') as IAMCrudResource) || 'tenants',
   )
   const [lifecycleViews, setLifecycleViews] = useState<LifecycleViews>({ tenants: 'active', users: 'active' })
-  const [selected, setSelected] = useState<SelectedRows>({ tenants: [], users: [] })
+  const [selected, setSelected] = useState<ScopedSelectedRows>(() => ({ orgId: props.orgId, rows: emptySelectedRows() }))
   const [createRequested, setCreateRequested] = useState<IAMCrudResource | null>(null)
   const [bulkBusy, setBulkBusy] = useState(false)
-  const [bulkError, setBulkError] = useState('')
+  const [bulkError, setBulkError] = useState<ScopedBulkError>(() => ({ orgId: props.orgId, message: '' }))
   const [reloadVersion, setReloadVersion] = useState(0)
   const selectedUserOrgId = props.orgId
+  const contextKey = `${props.productSurface}:${props.tenantId}`
+  const selectedRows = selected.orgId === props.orgId ? selected.rows : emptySelectedRows()
+  const currentBulkError = bulkError.orgId === props.orgId ? bulkError.message : ''
 
   useEffect(() => {
     localStorage.setItem('axis.iam.tab', activeCrud)
   }, [activeCrud])
-
-  // El tenant activo no entra en la query ni en el orgId, pero sí en el
-  // X-Tenant-ID que manda axisFetch. Al cambiar, forzar refetch para re-listar
-  // los items del nuevo tenant (sin tocar la tab activa).
-  useEffect(() => {
-    setReloadVersion((current) => current + 1)
-  }, [props.productSurface, props.tenantId])
-
-  useEffect(() => {
-    setSelected((current) => ({ ...current, users: [] }))
-    setBulkError('')
-  }, [props.orgId])
 
   useEffect(() => {
     if (!createRequested) return
@@ -104,27 +101,31 @@ export function IAMControlCenter(props: IAMControlCenterProps) {
 
   const toggleSelected = (resource: IAMCrudResource, id: string, checked: boolean) => {
     setSelected((current) => {
-      const currentIds = current[resource]
+      const currentRows = current.orgId === props.orgId ? current.rows : emptySelectedRows()
+      const currentIds = currentRows[resource]
       const nextIds = checked ? Array.from(new Set([...currentIds, id])) : currentIds.filter((item) => item !== id)
-      return { ...current, [resource]: nextIds }
+      return { orgId: props.orgId, rows: { ...currentRows, [resource]: nextIds } }
     })
   }
 
   const clearSelected = (resource: IAMCrudResource) => {
-    setSelected((current) => ({ ...current, [resource]: [] }))
+    setSelected((current) => {
+      const currentRows = current.orgId === props.orgId ? current.rows : emptySelectedRows()
+      return { orgId: props.orgId, rows: { ...currentRows, [resource]: [] } }
+    })
   }
 
   const setResourceLifecycleView = (resource: IAMCrudResource, view: CrudLifecycleView) => {
     setLifecycleViews((current) => ({ ...current, [resource]: view }))
     clearSelected(resource)
-    setBulkError('')
+    setBulkError({ orgId: props.orgId, message: '' })
   }
 
   const applyBulkAction = async (resource: IAMCrudResource, action: BulkAction, active: boolean) => {
-    const ids = selected[resource]
+    const ids = selectedRows[resource]
     if (!active || ids.length === 0 || bulkBusy) return
     setBulkBusy(true)
-    setBulkError('')
+    setBulkError({ orgId: props.orgId, message: '' })
     try {
       await applyLocalBulkAction({
         resource,
@@ -137,7 +138,7 @@ export function IAMControlCenter(props: IAMControlCenterProps) {
       setReloadVersion((current) => current + 1)
       await props.onRefreshShell()
     } catch (err) {
-      setBulkError(errorMessage(err))
+      setBulkError({ orgId: props.orgId, message: errorMessage(err) })
     } finally {
       setBulkBusy(false)
     }
@@ -169,15 +170,16 @@ export function IAMControlCenter(props: IAMControlCenterProps) {
             title={tenantsTitle}
             active={tenantsActive}
             lifecycleView={lifecycleViews.tenants}
-            selectedIds={selected.tenants}
+            selectedIds={selectedRows.tenants}
             bulkBusy={bulkBusy}
+            contextKey={contextKey}
             reloadVersion={reloadVersion}
             httpClient={crudClient}
             label="org"
             labelPlural="orgs"
             createLabel="Nueva"
             columns={[
-              selectionColumn<TenantRow>(selected.tenants, (id, checked) => toggleSelected('tenants', id, checked)),
+              selectionColumn<TenantRow>(selectedRows.tenants, (id, checked) => toggleSelected('tenants', id, checked)),
               { key: 'name', header: 'Nombre' },
               { key: 'status', header: 'Estado', render: (value) => formatStatus(String(value ?? '')) },
             ]}
@@ -195,7 +197,7 @@ export function IAMControlCenter(props: IAMControlCenterProps) {
             onBulkAction={(action) => void applyBulkAction('tenants', action, tenantsActive)}
             onLifecycleChange={(view) => setResourceLifecycleView('tenants', view)}
             onMutationSuccess={refreshAfterCrudMutation}
-            error={bulkError}
+            error={currentBulkError}
           />
         )}
 
@@ -205,15 +207,16 @@ export function IAMControlCenter(props: IAMControlCenterProps) {
             title={usersTitle}
             active={usersActive}
             lifecycleView={lifecycleViews.users}
-            selectedIds={selected.users}
+            selectedIds={selectedRows.users}
             bulkBusy={bulkBusy}
+            contextKey={contextKey}
             reloadVersion={reloadVersion}
             httpClient={crudClient}
             listQuery={`org_id=${encodeURIComponent(selectedUserOrgId)}`}
             label="usuario"
             labelPlural="usuarios"
             createLabel="Nuevo"
-            columns={userColumns(selected.users, (id, checked) => toggleSelected('users', id, checked))}
+            columns={userColumns(selectedRows.users, (id, checked) => toggleSelected('users', id, checked))}
             formFields={userFormFields(selectedUserOrgId)}
             searchText={(row) => [row.email, row.role, row.id].join(' ')}
             toFormValues={(row) => ({ email: row.email, role: row.role || 'member' })}
@@ -230,7 +233,7 @@ export function IAMControlCenter(props: IAMControlCenterProps) {
             onBulkAction={(action) => void applyBulkAction('users', action, usersActive)}
             onLifecycleChange={(view) => setResourceLifecycleView('users', view)}
             onMutationSuccess={refreshAfterCrudMutation}
-            error={bulkError}
+            error={currentBulkError}
           />
         )}
       </div>
@@ -245,6 +248,7 @@ function ContextCrudSection<T extends { id: string; status: string }>(props: {
   lifecycleView: CrudLifecycleView
   selectedIds: string[]
   bulkBusy: boolean
+  contextKey: string
   reloadVersion: number
   httpClient: CrudHttpClient
   listQuery?: string
@@ -274,7 +278,7 @@ function ContextCrudSection<T extends { id: string; status: string }>(props: {
   return (
     <div className="iam-control__crud-section" data-iam-crud-section={props.resource}>
       <CrudPage<T>
-        key={`${props.resource}-${props.title}-${props.lifecycleView}-${props.reloadVersion}-${props.listQuery ?? ''}`}
+        key={`${props.resource}-${props.title}-${props.lifecycleView}-${props.contextKey}-${props.reloadVersion}-${props.listQuery ?? ''}`}
         basePath={`/api/iam/${props.resource}`}
         listQuery={props.listQuery}
         httpClient={props.httpClient}
