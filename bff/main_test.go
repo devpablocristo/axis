@@ -1498,6 +1498,31 @@ func TestNewServerRequiresIssuerForDeployedAuthModes(t *testing.T) {
 	}
 }
 
+func TestAuthErrorsDoNotLeakAuthenticatorDetails(t *testing.T) {
+	srv := &server{
+		cfg: config{AuthMode: "oidc"},
+		oidcAuth: fakeAuthenticator{
+			err: fmt.Errorf("oidc discovery failed against https://issuer.internal.example/.well-known/openid-configuration"),
+		},
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/session", nil)
+	req.Header.Set("Authorization", "Bearer token")
+	rec := httptest.NewRecorder()
+
+	srv.routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, "issuer.internal.example") || strings.Contains(body, "openid-configuration") {
+		t.Fatalf("auth response leaked authenticator detail: %s", body)
+	}
+	if !strings.Contains(body, "authentication failed") {
+		t.Fatalf("expected stable auth failure message, got %s", body)
+	}
+}
+
 func newTestServer(target string, scopes []string) (*server, error) {
 	return newServer(config{
 		AuthMode:          "dev",

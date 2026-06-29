@@ -298,7 +298,7 @@ func writeAuthError(w http.ResponseWriter, err error) {
 		writeError(w, authErr.status, authErr.code, authErr.message)
 		return
 	}
-	writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", err.Error())
+	writeLoggedError(w, http.StatusUnauthorized, "UNAUTHORIZED", "authentication failed", err)
 }
 
 type appContextError struct {
