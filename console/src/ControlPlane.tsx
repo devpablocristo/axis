@@ -10,6 +10,17 @@ import {
   provisionTenant,
 } from './api'
 
+type ControlPlaneData = {
+  orgs: ControlOrg[]
+  tenants: AxisTenant[]
+  products: ControlProduct[]
+}
+
+async function loadControlPlaneData(): Promise<ControlPlaneData> {
+  const [orgs, tenants, products] = await Promise.all([listControlOrgs(), listControlTenants(), listControlProducts()])
+  return { orgs, tenants, products }
+}
+
 // ControlPlane is the platform-admin surface: it manages GLOBAL resources
 // (companies/organizations, products, and tenants = org x product) via the
 // /api/control/* API. Orthogonal to the active tenant/workspace.
@@ -24,23 +35,34 @@ export function ControlPlane() {
   const [provOrg, setProvOrg] = useState('')
   const [provProduct, setProvProduct] = useState('')
 
-  const reload = useCallback(async () => {
-    setError('')
-    try {
-      const [o, t, p] = await Promise.all([listControlOrgs(), listControlTenants(), listControlProducts()])
-      setOrgs(o)
-      setTenants(t)
-      setProducts(p)
-      if (!provOrg && o.length > 0) setProvOrg(o[0].id)
-      if (!provProduct && p.length > 0) setProvProduct(p[0].product_surface)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'error')
-    }
-  }, [provOrg, provProduct])
+  const applyData = useCallback((data: ControlPlaneData) => {
+    setOrgs(data.orgs)
+    setTenants(data.tenants)
+    setProducts(data.products)
+    setProvOrg((current) => current || data.orgs[0]?.id || '')
+    setProvProduct((current) => current || data.products[0]?.product_surface || '')
+  }, [])
 
   useEffect(() => {
-    void reload()
-  }, [reload])
+    let cancelled = false
+    const load = async () => {
+      try {
+        const data = await loadControlPlaneData()
+        if (!cancelled) applyData(data)
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : 'error')
+      }
+    }
+    void load()
+    return () => {
+      cancelled = true
+    }
+  }, [applyData])
+
+  const reload = async () => {
+    const data = await loadControlPlaneData()
+    applyData(data)
+  }
 
   const run = async (fn: () => Promise<unknown>) => {
     setBusy(true)
