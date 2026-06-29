@@ -81,6 +81,7 @@ Axis ya consume `platform/http/go/httpjson` para normalizar errores en varios do
 ### Follow-up — 2026-06-29
 
 - **BFF `stg`/`preview` dejan de confiar en headers dev** (PR #62): `authenticate` ahora solo acepta `X-Dev-*` cuando `AXIS_BFF_AUTH_MODE=dev`; `stg`, `preview`, `oidc` y `clerk` requieren Bearer/OIDC y `newServer` exige `AXIS_AUTH_ISSUER_URL`. Los workflows de STG/preview/PRD validan issuer/audience para cualquier modo no-dev. Tests: `TestStgAndPreviewAuthModesDoNotTrustDevHeaders`, `TestDevAuthModeStillTrustsDevHeaders`, `TestNewServerRequiresIssuerForDeployedAuthModes`.
+- **BFF auth errors no filtran detalles OIDC** (PR #63): `writeAuthError` ya no devuelve `err.Error()` para errores genéricos del autenticador; responde 401 `authentication failed` y loguea la causa server-side. Test: `TestAuthErrorsDoNotLeakAuthenticatorDetails`.
 
 Fecha: 2026-06-27 · Método: workflow multi-agente (138 agentes, 14 revisores × dimensión/módulo + verificación adversarial). **106 hallazgos confirmados** (25 HIGH / 43 MED / 38 LOW), 19 descartados (by-design/falso-positivo).
 
