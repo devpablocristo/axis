@@ -6,6 +6,7 @@ import {
 import {
   PromptEditorReview,
   ReadonlyContentViewer,
+  TextFileUploadInput,
   downloadTextFile,
   safeFileName,
   useTextFileUpload,
@@ -413,7 +414,7 @@ function PromptCrudScreen({
 
   return (
     <div className={`axis-prompts-crud${supportsTrash ? ' axis-prompts-crud--trash' : ''}`}>
-      <input aria-label={`Upload ${title}`} ref={upload.inputRef} {...upload.inputProps} />
+      <TextFileUploadInput aria-label={`Upload ${title}`} upload={upload} />
       {crudError ? <p className="alert-error">{crudError}</p> : null}
       {viewedPrompt ? (
         <ReadonlyContentViewer
