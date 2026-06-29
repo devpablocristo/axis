@@ -76,6 +76,7 @@ Axis ya consume `platform/http/go/httpjson` para normalizar errores en varios do
 - **BFF auth platform-role lookup fail-closed**: el upgrade de scopes en `authenticate` ya no ignora errores de `PlatformRolesForUser`; responde 500 estable/logueado y evita degradar permisos silenciosamente cuando falla el store.
 - **BFF org-access lookup fail-closed**: `selectedOrg`, `canAccessOrg` y agent/IAM callers ya no convierten errores de `ActorCanAccessOrg`/`ListOrgsForActor` en 403/not-found; responden 500 estable/logueado sin filtrar el error del store.
 - **BFF manual app-context handlers fail-closed**: prompts y agent-profiles usan el mismo `writeAppContextError` que el proxy genérico, evitando falsos 403 y filtrado de errores internos al resolver tenant/scopes.
+- **Nexus submit cross-org usa el org solicitado preservado**: `bindParamsToPrincipalOrg` ya no compara `params.org_id` contra el `X-Org-ID` rebindeado al org del API key cuando el principal tiene `nexus:cross_org`; usa `orgctx.Narrowed`, igual que list/read. Esto desbloquea productos externos como Medmory registrando requests sensibles para su org real (`cristo.tech`) con una service/admin key bound a `axis`. Verificado con `cd nexus && go test ./internal/requests`.
 
 Fecha: 2026-06-27 · Método: workflow multi-agente (138 agentes, 14 revisores × dimensión/módulo + verificación adversarial). **106 hallazgos confirmados** (25 HIGH / 43 MED / 38 LOW), 19 descartados (by-design/falso-positivo).
 
