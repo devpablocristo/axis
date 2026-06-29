@@ -15,6 +15,7 @@ type MockCrudPageProps = {
   basePath?: string
   columns: MockCrudColumn[]
   listHeaderInlineSlot?: () => ReactNode
+  onMutationSuccess?: () => Promise<void> | void
 }
 
 vi.mock('@devpablocristo/platform-crud-ui', async () => {
@@ -32,6 +33,7 @@ vi.mock('@devpablocristo/platform-crud-ui', async () => {
         'div',
         { 'data-testid': 'crudpage' },
         props.listHeaderInlineSlot?.(),
+        React.createElement('button', { type: 'button', onClick: () => props.onMutationSuccess?.() }, 'Mutacion interna'),
         React.createElement(
           'div',
           { 'data-testid': `row-${row.id}` },
@@ -105,5 +107,16 @@ describe('IAMControlCenter', () => {
     expect(hoisted.requests).toEqual([
       { url: '/api/iam/tenants/org-1/archive', init: { method: 'POST', body: {} } },
     ])
+  })
+
+  it('refreshes the shell after a successful CrudPage mutation', async () => {
+    const onRefreshShell = vi.fn(async () => {})
+    render(<IAMControlCenter {...baseProps} productSurface="axis" onRefreshShell={onRefreshShell} />)
+
+    const before = hoisted.mounts
+    fireEvent.click(screen.getByRole('button', { name: 'Mutacion interna' }))
+
+    await waitFor(() => expect(onRefreshShell).toHaveBeenCalledTimes(1))
+    expect(hoisted.mounts).toBeGreaterThan(before)
   })
 })

@@ -137,6 +137,11 @@ export function IAMControlCenter(props: IAMControlCenterProps) {
     }
   }
 
+  const refreshAfterCrudMutation = async () => {
+    setReloadVersion((current) => current + 1)
+    await props.onRefreshShell()
+  }
+
   return (
     <section ref={rootRef} className="page-section iam-control iam-control--external-lifecycle axis-crud-host">
 
@@ -183,6 +188,7 @@ export function IAMControlCenter(props: IAMControlCenterProps) {
             onClear={() => clearSelected('tenants')}
             onBulkAction={(action) => void applyBulkAction('tenants', action, tenantsActive)}
             onLifecycleChange={(view) => setResourceLifecycleView('tenants', view)}
+            onMutationSuccess={refreshAfterCrudMutation}
           />
         )}
 
@@ -216,6 +222,7 @@ export function IAMControlCenter(props: IAMControlCenterProps) {
             onClear={() => clearSelected('users')}
             onBulkAction={(action) => void applyBulkAction('users', action, usersActive)}
             onLifecycleChange={(view) => setResourceLifecycleView('users', view)}
+            onMutationSuccess={refreshAfterCrudMutation}
           />
         )}
       </div>
@@ -253,6 +260,7 @@ function ContextCrudSection<T extends { id: string; status: string }>(props: {
   onClear: () => void
   onBulkAction: (action: BulkAction) => void
   onLifecycleChange: (view: CrudLifecycleView) => void
+  onMutationSuccess: () => Promise<void>
 }) {
   return (
     <div className="iam-control__crud-section" data-iam-crud-section={props.resource}>
@@ -304,6 +312,7 @@ function ContextCrudSection<T extends { id: string; status: string }>(props: {
         )}
         toolbarActions={iamLifecycleToolbarActions(props.lifecycleView, props.onLifecycleChange)}
         externalSearch={props.externalSearch}
+        onMutationSuccess={props.onMutationSuccess}
         featureFlags={{ csvToolbar: false }}
       />
     </div>
