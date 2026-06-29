@@ -10,7 +10,7 @@ Alcance: revalidacion post-saneamiento y post-cutover B#3. No se confia ciegamen
 - B#3 verificado: `userRefOrg`, `scopesFromAxisOrg`, `listIAMUserViews` y `memberUserView` ya no aparecen en `bff`.
 - B#3 verificado: `/api/iam/users` para org normal requiere tenant real y lista/muta `axis_tenant_members`; `axis_org_members` queda como bridge Clerk/org picker.
 - Guardrail: `make hygiene` OK.
-- Guardrail inicial: `make lint` fallo por `console/src/App.tsx:93` (`no-useless-assignment`). Estado: **corregido en working tree** cambiando `nextSession` a asignacion definida antes de uso.
+- Guardrail inicial: `make lint` fallo por `console/src/App.tsx:93` (`no-useless-assignment`). Estado: **corregido en PR #54** cambiando `nextSession` a asignacion definida antes de uso.
 - Guardrail final: `make lint` OK (mantiene 16 warnings calibrados de console).
 - Console: `npm run typecheck && npm run test && npm run build` OK.
 
@@ -18,7 +18,7 @@ Alcance: revalidacion post-saneamiento y post-cutover B#3. No se confia ciegamen
 
 #### HIGH-2P-01 — Guardrail de lint roto en console
 
-Estado: **corregido en working tree**.
+Estado: **corregido en PR #54**.
 
 Evidencia: `make lint` fallaba en `console/src/App.tsx:93` por `no-useless-assignment`.
 
@@ -28,7 +28,7 @@ Fix: `let nextSession: AxisSession` en lugar de inicializar a `null` y reasignar
 
 #### MED-2P-01 — `tenantUserView` conflata error de store con not-found
 
-Estado: **corregido en working tree**.
+Estado: **corregido en PR #54**.
 
 Evidencia: `bff/iam_simple_handlers.go` hace `ListTenantMembers`; si falla devuelve `(empty,false)` y los lifecycle handlers pueden renderizar la mutacion como si el user no existiera.
 
@@ -38,7 +38,7 @@ Fix: `tenantUserView` ahora devuelve `(IAMUserView, error)`; update/lifecycle pr
 
 #### MED-2P-02 — `controlProvisionTenant` sigue sin atomicidad tenant+owner
 
-Estado: **corregido en working tree**.
+Estado: **corregido en PR #54**.
 
 Evidencia: `bff/control_handlers.go` crea tenant con `CreateTenant` y luego, opcionalmente, `UpsertTenantMember` para owner.
 
@@ -48,7 +48,7 @@ Fix: agregado `CreateTenantWithOwner` a `IAMStore`; `sqlIAMStore` lo ejecuta en 
 
 #### MED-2P-03 — Algunos proxies BFF devuelven `err.Error()` al cliente
 
-Estado: **corregido en working tree**.
+Estado: **corregido en PR #54**.
 
 Evidencia: `bff/prompts_handlers.go`, `bff/agent_profiles_handlers.go` y `bff/agent_handlers.go` aun escriben errores crudos en respuestas para fallas internas/downstream.
 
@@ -72,11 +72,11 @@ Axis ya consume `platform/http/go/httpjson` para normalizar errores en varios do
 
 ### Follow-up — 2026-06-28
 
-- **BFF platform-role lookup fail-closed**: `resolveAppContext` y `controlAPI` ya no tratan un error de `PlatformRolesForUser` como ausencia de rol. El proxy app-plane clasifica ese fallo como 500 estable/logueado, y Control Plane tambien responde 500 estable, evitando falsos 403 y filtrado de detalles en outage de store.
-- **BFF auth platform-role lookup fail-closed**: el upgrade de scopes en `authenticate` ya no ignora errores de `PlatformRolesForUser`; responde 500 estable/logueado y evita degradar permisos silenciosamente cuando falla el store.
-- **BFF org-access lookup fail-closed**: `selectedOrg`, `canAccessOrg` y agent/IAM callers ya no convierten errores de `ActorCanAccessOrg`/`ListOrgsForActor` en 403/not-found; responden 500 estable/logueado sin filtrar el error del store.
-- **BFF manual app-context handlers fail-closed**: prompts y agent-profiles usan el mismo `writeAppContextError` que el proxy genérico, evitando falsos 403 y filtrado de errores internos al resolver tenant/scopes.
-- **Nexus submit cross-org usa el org solicitado preservado**: `bindParamsToPrincipalOrg` ya no compara `params.org_id` contra el `X-Org-ID` rebindeado al org del API key cuando el principal tiene `nexus:cross_org`; usa `orgctx.Narrowed`, igual que list/read. Esto desbloquea productos externos como Medmory registrando requests sensibles para su org real (`cristo.tech`) con una service/admin key bound a `axis`. Verificado con `cd nexus && go test ./internal/requests`.
+- **BFF platform-role lookup fail-closed** (PR #55/#56): `resolveAppContext` y `controlAPI` ya no tratan un error de `PlatformRolesForUser` como ausencia de rol. El proxy app-plane clasifica ese fallo como 500 estable/logueado y Control Plane tambien responde 500 estable, evitando falsos 403 y filtrado de detalles en outage de store.
+- **BFF auth platform-role lookup fail-closed** (PR #57): el upgrade de scopes en `authenticate` ya no ignora errores de `PlatformRolesForUser`; responde 500 estable/logueado y evita degradar permisos silenciosamente cuando falla el store.
+- **BFF org-access lookup fail-closed** (PR #58): `selectedOrg`, `canAccessOrg` y agent/IAM callers ya no convierten errores de `ActorCanAccessOrg`/`ListOrgsForActor` en 403/not-found; responden 500 estable/logueado sin filtrar el error del store.
+- **BFF manual app-context handlers fail-closed** (PR #59): prompts y agent-profiles usan el mismo `writeAppContextError` que el proxy genérico, evitando falsos 403 y filtrado de errores internos al resolver tenant/scopes.
+- **Nexus submit cross-org usa el org solicitado preservado** (PR #60): `bindParamsToPrincipalOrg` ya no compara `params.org_id` contra el `X-Org-ID` rebindeado al org del API key cuando el principal tiene `nexus:cross_org`; usa `orgctx.Narrowed`, igual que list/read. Esto desbloquea productos externos como Medmory registrando requests sensibles para su org real (`cristo.tech`) con una service/admin key bound a `axis`. Verificado con `cd nexus && go test ./internal/requests`.
 
 Fecha: 2026-06-27 · Método: workflow multi-agente (138 agentes, 14 revisores × dimensión/módulo + verificación adversarial). **106 hallazgos confirmados** (25 HIGH / 43 MED / 38 LOW), 19 descartados (by-design/falso-positivo).
 
