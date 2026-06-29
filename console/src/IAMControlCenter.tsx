@@ -137,6 +137,7 @@ export function IAMControlCenter(props: IAMControlCenterProps) {
       })
       clearSelected(resource)
       setReloadVersion((current) => current + 1)
+      await props.onRefreshShell()
     } finally {
       setBulkBusy(false)
     }
