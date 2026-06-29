@@ -80,10 +80,10 @@ jobs:
               missing=1
             fi
           done
-          if [[ "$AXIS_BFF_AUTH_MODE" == "oidc" ]]; then
+          if [[ "$AXIS_BFF_AUTH_MODE" != "dev" ]]; then
             for var_name in AXIS_AUTH_ISSUER_URL AXIS_AUTH_AUDIENCE; do
               if [[ -z "${!var_name}" ]]; then
-                echo "::error::$var_name is required when AXIS_BFF_AUTH_MODE=oidc"
+                echo "::error::$var_name is required when AXIS_BFF_AUTH_MODE is not dev"
                 missing=1
               fi
             done
