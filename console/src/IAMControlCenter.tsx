@@ -63,6 +63,7 @@ export function IAMControlCenter(props: IAMControlCenterProps) {
   const [selected, setSelected] = useState<SelectedRows>({ tenants: [], users: [] })
   const [createRequested, setCreateRequested] = useState<IAMCrudResource | null>(null)
   const [bulkBusy, setBulkBusy] = useState(false)
+  const [bulkError, setBulkError] = useState('')
   const [reloadVersion, setReloadVersion] = useState(0)
   const selectedUserOrgId = props.orgId
 
@@ -79,6 +80,7 @@ export function IAMControlCenter(props: IAMControlCenterProps) {
 
   useEffect(() => {
     setSelected((current) => ({ ...current, users: [] }))
+    setBulkError('')
   }, [props.orgId])
 
   useEffect(() => {
@@ -115,12 +117,14 @@ export function IAMControlCenter(props: IAMControlCenterProps) {
   const setResourceLifecycleView = (resource: IAMCrudResource, view: CrudLifecycleView) => {
     setLifecycleViews((current) => ({ ...current, [resource]: view }))
     clearSelected(resource)
+    setBulkError('')
   }
 
   const applyBulkAction = async (resource: IAMCrudResource, action: BulkAction, active: boolean) => {
     const ids = selected[resource]
     if (!active || ids.length === 0 || bulkBusy) return
     setBulkBusy(true)
+    setBulkError('')
     try {
       await applyLocalBulkAction({
         resource,
@@ -132,6 +136,8 @@ export function IAMControlCenter(props: IAMControlCenterProps) {
       clearSelected(resource)
       setReloadVersion((current) => current + 1)
       await props.onRefreshShell()
+    } catch (err) {
+      setBulkError(errorMessage(err))
     } finally {
       setBulkBusy(false)
     }
@@ -189,6 +195,7 @@ export function IAMControlCenter(props: IAMControlCenterProps) {
             onBulkAction={(action) => void applyBulkAction('tenants', action, tenantsActive)}
             onLifecycleChange={(view) => setResourceLifecycleView('tenants', view)}
             onMutationSuccess={refreshAfterCrudMutation}
+            error={bulkError}
           />
         )}
 
@@ -223,6 +230,7 @@ export function IAMControlCenter(props: IAMControlCenterProps) {
             onBulkAction={(action) => void applyBulkAction('users', action, usersActive)}
             onLifecycleChange={(view) => setResourceLifecycleView('users', view)}
             onMutationSuccess={refreshAfterCrudMutation}
+            error={bulkError}
           />
         )}
       </div>
@@ -261,6 +269,7 @@ function ContextCrudSection<T extends { id: string; status: string }>(props: {
   onBulkAction: (action: BulkAction) => void
   onLifecycleChange: (view: CrudLifecycleView) => void
   onMutationSuccess: () => Promise<void>
+  error: string
 }) {
   return (
     <div className="iam-control__crud-section" data-iam-crud-section={props.resource}>
@@ -307,6 +316,7 @@ function ContextCrudSection<T extends { id: string; status: string }>(props: {
               onClear={props.onClear}
               onBulkAction={props.onBulkAction}
             />
+            {props.error ? <p role="alert" className="iam-control__inline-error">{props.error}</p> : null}
             {props.belowActionsSlot}
           </div>
         )}
@@ -479,4 +489,9 @@ function stringValue(value: unknown): string {
 function roleValue(value: unknown): string {
   const role = stringValue(value)
   return role || 'member'
+}
+
+function errorMessage(err: unknown): string {
+  if (err instanceof Error && err.message.trim()) return err.message
+  return 'No se pudo completar la accion'
 }

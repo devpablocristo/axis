@@ -11,7 +11,7 @@ Alcance: revalidacion post-saneamiento y post-cutover B#3. No se confia ciegamen
 - B#3 verificado: `/api/iam/users` para org normal requiere tenant real y lista/muta `axis_tenant_members`; `axis_org_members` queda como bridge Clerk/org picker.
 - Guardrail: `make hygiene` OK.
 - Guardrail inicial: `make lint` fallo por `console/src/App.tsx:93` (`no-useless-assignment`). Estado: **corregido en PR #54** cambiando `nextSession` a asignacion definida antes de uso.
-- Guardrail final: `make lint` OK (mantiene 16 warnings calibrados de console).
+- Guardrail final: `make lint` OK (mantiene 14 warnings calibrados de console).
 - Console: `npm run typecheck && npm run test && npm run build` OK.
 
 ### Hallazgos vigentes
@@ -86,6 +86,7 @@ Axis ya consume `platform/http/go/httpjson` para normalizar errores en varios do
 - **IAM console consume `platform-crud-ui@0.4.1` para mutaciones internas**: `CrudPage` ahora expone `onMutationSuccess`; `IAMControlCenter` lo usa para refrescar shell y remontear la lista tras create/edit/row lifecycle actions, cerrando el gap que quedaba despues de #64. Test: `IAMControlCenter refreshes the shell after a successful CrudPage mutation`.
 - **IAM console elimina mirror state de org de usuarios** (PR #65): `selectedUserOrgId` ahora deriva directamente de `props.orgId`, reduciendo uno de los warnings `set-state-in-effect` sin cambiar la seleccion global ni el refetch por tenant/producto. Tests: `IAMControlCenter` focalizado + build console.
 - **Agents console elimina mirror state de org** (PR #66): `selectedOrgId` ahora deriva directamente de `orgId`, reduciendo otro warning `set-state-in-effect` sin cambiar el selector global ni los queries de agentes/perfiles. Tests: typecheck/build console + `make lint`.
+- **IAM console muestra errores de bulk actions**: `applyBulkAction` ya no deja una promesa rechazada sin feedback; limpia errores al reintentar/cambiar contexto, conserva la seleccion ante fallo y muestra el mensaje inline. Test: `IAMControlCenter shows an inline error when a bulk mutation fails`.
 
 Fecha: 2026-06-27 · Método: workflow multi-agente (138 agentes, 14 revisores × dimensión/módulo + verificación adversarial). **106 hallazgos confirmados** (25 HIGH / 43 MED / 38 LOW), 19 descartados (by-design/falso-positivo).
 

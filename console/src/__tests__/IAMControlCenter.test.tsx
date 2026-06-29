@@ -4,7 +4,11 @@ import type { ReactNode } from 'react'
 
 // Count CrudPage mounts: it remounts (via its `key`) whenever reloadVersion or
 // the list query change, so a mount bump == a refetch.
-const hoisted = vi.hoisted(() => ({ mounts: 0, requests: [] as Array<{ url: string, init?: unknown }> }))
+const hoisted = vi.hoisted(() => ({
+  mounts: 0,
+  requests: [] as Array<{ url: string, init?: unknown }>,
+  failNextRequest: false,
+}))
 
 type MockCrudColumn = {
   key: string
@@ -52,6 +56,10 @@ vi.mock('../api', () => ({
   axisCrudHttpClient: () => ({
     json: async (url: string, init?: unknown) => {
       hoisted.requests.push({ url, init })
+      if (hoisted.failNextRequest) {
+        hoisted.failNextRequest = false
+        throw new Error('network down')
+      }
       return { items: [] }
     },
   }),
@@ -71,6 +79,7 @@ const baseProps = {
 beforeEach(() => {
   hoisted.mounts = 0
   hoisted.requests = []
+  hoisted.failNextRequest = false
   localStorage.clear()
 })
 
@@ -107,6 +116,19 @@ describe('IAMControlCenter', () => {
     expect(hoisted.requests).toEqual([
       { url: '/api/iam/tenants/org-1/archive', init: { method: 'POST', body: {} } },
     ])
+  })
+
+  it('shows an inline error when a bulk mutation fails', async () => {
+    const onRefreshShell = vi.fn(async () => {})
+    hoisted.failNextRequest = true
+    render(<IAMControlCenter {...baseProps} productSurface="axis" onRefreshShell={onRefreshShell} />)
+
+    fireEvent.click(screen.getByLabelText('Seleccionar org-1'))
+    fireEvent.click(screen.getByRole('button', { name: 'Archivar' }))
+
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('network down'))
+    expect(onRefreshShell).not.toHaveBeenCalled()
+    expect(screen.getByLabelText('Seleccionar org-1')).toBeChecked()
   })
 
   it('refreshes the shell after a successful CrudPage mutation', async () => {
