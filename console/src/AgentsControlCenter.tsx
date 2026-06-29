@@ -25,6 +25,7 @@ type BulkAction = 'archive' | 'trash' | 'restore' | 'purge'
 type ValidationFilter = 'all' | 'approved' | 'needs_review' | 'ignored'
 type AgentSection = 'agents' | 'profiles'
 type ProfileCrudRow = AxisAgentProfileView & { id: string }
+type AgentSelection = { orgId: string; ids: string[] }
 
 const CrudPage = PlatformCrudPage as unknown as <T extends { id: string }>(
   props: CrudPageProps<T>,
@@ -49,7 +50,7 @@ export function AgentsControlCenter({ orgId, tenantId }: { orgId: string; tenant
   const rootRef = useRef<HTMLElement | null>(null)
   const [activeSection, setActiveSection] = useState<AgentSection>('agents')
   const [lifecycleView, setLifecycleView] = useState<CrudLifecycleView>('active')
-  const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [selection, setSelection] = useState<AgentSelection>({ orgId, ids: [] })
   const [createRequested, setCreateRequested] = useState(false)
   const [bulkBusy, setBulkBusy] = useState(false)
   const [reloadVersion, setReloadVersion] = useState(0)
@@ -69,6 +70,7 @@ export function AgentsControlCenter({ orgId, tenantId }: { orgId: string; tenant
   })), [activeProfiles])
   const crudClient = useMemo(() => axisCrudHttpClient(orgId, tenantId), [orgId, tenantId])
   const isActive = selectedOrgId.length > 0 && profileOptions.length > 0
+  const selectedIds = selection.orgId === selectedOrgId ? selection.ids : []
   const refreshProfiles = () => setReloadVersion((current) => current + 1)
 
   useEffect(() => {
@@ -78,10 +80,6 @@ export function AgentsControlCenter({ orgId, tenantId }: { orgId: string; tenant
   useEffect(() => {
     void loadProfileOptions(orgId, tenantId, setAgentProfiles, setProfilesError)
   }, [orgId, tenantId, reloadVersion, activeSection])
-
-  useEffect(() => {
-    setSelectedIds([])
-  }, [orgId])
 
   useEffect(() => {
     if (!createRequested) return
@@ -94,10 +92,14 @@ export function AgentsControlCenter({ orgId, tenantId }: { orgId: string; tenant
   }, [createRequested, reloadVersion])
 
   const toggleSelected = (id: string, checked: boolean) => {
-    setSelectedIds((current) => checked ? Array.from(new Set([...current, id])) : current.filter((item) => item !== id))
+    setSelection((current) => {
+      const currentIds = current.orgId === selectedOrgId ? current.ids : []
+      const nextIds = checked ? Array.from(new Set([...currentIds, id])) : currentIds.filter((item) => item !== id)
+      return { orgId: selectedOrgId, ids: nextIds }
+    })
   }
 
-  const clearSelected = () => setSelectedIds([])
+  const clearSelected = () => setSelection({ orgId: selectedOrgId, ids: [] })
 
   const applyReviewAction = async (agent: AxisAgentView, action: 'approve' | 'ignore') => {
     if (!isActive || validationBusyId) return
@@ -123,6 +125,11 @@ export function AgentsControlCenter({ orgId, tenantId }: { orgId: string; tenant
     } finally {
       setBulkBusy(false)
     }
+  }
+
+  const setAgentLifecycleView = (view: CrudLifecycleView) => {
+    setLifecycleView(view)
+    clearSelected()
   }
 
   const orgSelector = (
@@ -226,10 +233,7 @@ export function AgentsControlCenter({ orgId, tenantId }: { orgId: string; tenant
               {profilesError && <p className="iam-control__inline-error">{profilesError}</p>}
             </div>
           )}
-          toolbarActions={lifecycleToolbarActions(lifecycleView, (view) => {
-            setLifecycleView(view)
-            clearSelected()
-          })}
+          toolbarActions={lifecycleToolbarActions(lifecycleView, setAgentLifecycleView)}
           featureFlags={{ csvToolbar: false }}
         />
       ) : (
@@ -282,10 +286,6 @@ function AgentProfilesCrud({ orgId, tenantId, onChanged }: { orgId: string; tena
   }
 
   useEffect(() => {
-    setSelectedProfileIds([])
-  }, [profileView])
-
-  useEffect(() => {
     if (!createProfileRequested) return
     const handle = window.setTimeout(() => {
       const buttons = Array.from(rootRef.current?.querySelectorAll<HTMLButtonElement>('.crud-page-shell__header-actions > .actions-row > .actions-row > button') ?? [])
@@ -300,6 +300,11 @@ function AgentProfilesCrud({ orgId, tenantId, onChanged }: { orgId: string; tena
   }
 
   const clearSelectedProfiles = () => setSelectedProfileIds([])
+
+  const setProfileLifecycleView = (view: CrudLifecycleView) => {
+    setProfileView(view)
+    clearSelectedProfiles()
+  }
 
   const applyProfileBulkAction = async (action: BulkAction) => {
     if (selectedProfileIds.length === 0 || profileBulkBusy) return
@@ -384,9 +389,9 @@ function AgentProfilesCrud({ orgId, tenantId, onChanged }: { orgId: string; tena
           </div>
         )}
         toolbarActions={[
-          { id: 'active', label: 'Activos', kind: profileView === 'active' ? 'primary' as const : 'secondary' as const, onClick: () => setProfileView('active') },
-          { id: 'archived', label: 'Archivados', kind: profileView === 'archived' ? 'primary' as const : 'secondary' as const, onClick: () => setProfileView('archived') },
-          { id: 'trash', label: 'Papelera', kind: profileView === 'trash' ? 'primary' as const : 'secondary' as const, onClick: () => setProfileView('trash') },
+          { id: 'active', label: 'Activos', kind: profileView === 'active' ? 'primary' as const : 'secondary' as const, onClick: () => setProfileLifecycleView('active') },
+          { id: 'archived', label: 'Archivados', kind: profileView === 'archived' ? 'primary' as const : 'secondary' as const, onClick: () => setProfileLifecycleView('archived') },
+          { id: 'trash', label: 'Papelera', kind: profileView === 'trash' ? 'primary' as const : 'secondary' as const, onClick: () => setProfileLifecycleView('trash') },
         ]}
         featureFlags={{ csvToolbar: false, archivedToggle: false, trashToggle: false }}
       />
