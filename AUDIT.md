@@ -82,6 +82,7 @@ Axis ya consume `platform/http/go/httpjson` para normalizar errores en varios do
 
 - **BFF `stg`/`preview` dejan de confiar en headers dev** (PR #62): `authenticate` ahora solo acepta `X-Dev-*` cuando `AXIS_BFF_AUTH_MODE=dev`; `stg`, `preview`, `oidc` y `clerk` requieren Bearer/OIDC y `newServer` exige `AXIS_AUTH_ISSUER_URL`. Los workflows de STG/preview/PRD validan issuer/audience para cualquier modo no-dev. Tests: `TestStgAndPreviewAuthModesDoNotTrustDevHeaders`, `TestDevAuthModeStillTrustsDevHeaders`, `TestNewServerRequiresIssuerForDeployedAuthModes`.
 - **BFF auth errors no filtran detalles OIDC** (PR #63): `writeAuthError` ya no devuelve `err.Error()` para errores genéricos del autenticador; responde 401 `authentication failed` y loguea la causa server-side. Test: `TestAuthErrorsDoNotLeakAuthenticatorDetails`.
+- **IAM console refresca shell tras bulk mutations** (PR #64): `IAMControlCenter` usa `onRefreshShell` despues de acciones bulk exitosas, asi el selector global de org/producto y `session.tenants` no quedan stale tras archivar/restaurar/purgar orgs o usuarios. Test: `IAMControlCenter refreshes the shell after a successful bulk mutation`. Nota: create/edit/lifecycle row-actions siguen dependiendo de `platform-crud-ui`; para cubrir esas mutaciones sin hacks hace falta un callback post-mutacion en `CrudPage`.
 
 Fecha: 2026-06-27 · Método: workflow multi-agente (138 agentes, 14 revisores × dimensión/módulo + verificación adversarial). **106 hallazgos confirmados** (25 HIGH / 43 MED / 38 LOW), 19 descartados (by-design/falso-positivo).
 
