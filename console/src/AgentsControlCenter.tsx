@@ -26,6 +26,7 @@ type ValidationFilter = 'all' | 'approved' | 'needs_review' | 'ignored'
 type AgentSection = 'agents' | 'profiles'
 type ProfileCrudRow = AxisAgentProfileView & { id: string }
 type AgentSelection = { orgId: string; ids: string[] }
+type AgentActionError = { orgId: string; message: string }
 
 const CrudPage = PlatformCrudPage as unknown as <T extends { id: string }>(
   props: CrudPageProps<T>,
@@ -58,6 +59,7 @@ export function AgentsControlCenter({ orgId, tenantId }: { orgId: string; tenant
   const selectedOrgId = orgId
   const [validationFilter, setValidationFilter] = useState<ValidationFilter>('all')
   const [validationBusyId, setValidationBusyId] = useState('')
+  const [agentActionError, setAgentActionError] = useState<AgentActionError>({ orgId, message: '' })
   const [agentProfiles, setAgentProfiles] = useState<AxisAgentProfileView[]>([])
   const [profilesError, setProfilesError] = useState('')
 
@@ -71,6 +73,7 @@ export function AgentsControlCenter({ orgId, tenantId }: { orgId: string; tenant
   const crudClient = useMemo(() => axisCrudHttpClient(orgId, tenantId), [orgId, tenantId])
   const isActive = selectedOrgId.length > 0 && profileOptions.length > 0
   const selectedIds = selection.orgId === selectedOrgId ? selection.ids : []
+  const agentActionErrorMessage = agentActionError.orgId === selectedOrgId ? agentActionError.message : ''
   const refreshProfiles = () => setReloadVersion((current) => current + 1)
 
   useEffect(() => {
@@ -104,9 +107,12 @@ export function AgentsControlCenter({ orgId, tenantId }: { orgId: string; tenant
   const applyReviewAction = async (agent: AxisAgentView, action: 'approve' | 'ignore') => {
     if (!isActive || validationBusyId) return
     setValidationBusyId(agent.id)
+    setAgentActionError({ orgId: selectedOrgId, message: '' })
     try {
       await crudClient.json(`/api/agents/${agent.id}/${action}`, { method: 'POST', body: {} })
       setReloadVersion((current) => current + 1)
+    } catch (err) {
+      setAgentActionError({ orgId: selectedOrgId, message: errorMessage(err) })
     } finally {
       setValidationBusyId('')
     }
@@ -115,6 +121,7 @@ export function AgentsControlCenter({ orgId, tenantId }: { orgId: string; tenant
   const applyBulkAction = async (action: BulkAction) => {
     if (!isActive || selectedIds.length === 0 || bulkBusy) return
     setBulkBusy(true)
+    setAgentActionError({ orgId: selectedOrgId, message: '' })
     try {
       for (const id of selectedIds) {
         const method = action === 'purge' ? 'DELETE' : 'POST'
@@ -122,6 +129,8 @@ export function AgentsControlCenter({ orgId, tenantId }: { orgId: string; tenant
       }
       clearSelected()
       setReloadVersion((current) => current + 1)
+    } catch (err) {
+      setAgentActionError({ orgId: selectedOrgId, message: errorMessage(err) })
     } finally {
       setBulkBusy(false)
     }
@@ -130,6 +139,7 @@ export function AgentsControlCenter({ orgId, tenantId }: { orgId: string; tenant
   const setAgentLifecycleView = (view: CrudLifecycleView) => {
     setLifecycleView(view)
     clearSelected()
+    setAgentActionError({ orgId: selectedOrgId, message: '' })
   }
 
   const orgSelector = (
@@ -230,6 +240,7 @@ export function AgentsControlCenter({ orgId, tenantId }: { orgId: string; tenant
                 onBulkAction={(action) => void applyBulkAction(action)}
               />
               {orgSelector}
+              {agentActionErrorMessage && <p role="alert" className="iam-control__inline-error">{agentActionErrorMessage}</p>}
               {profilesError && <p className="iam-control__inline-error">{profilesError}</p>}
             </div>
           )}
@@ -727,6 +738,11 @@ function stringList(value: unknown): string[] {
 
 function booleanValue(value: unknown): boolean {
   return value === true
+}
+
+function errorMessage(err: unknown): string {
+  if (err instanceof Error && err.message.trim()) return err.message
+  return 'No se pudo completar la accion'
 }
 
 function splitList(value: unknown): string[] {
