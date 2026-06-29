@@ -88,6 +88,7 @@ Axis ya consume `platform/http/go/httpjson` para normalizar errores en varios do
 - **Agents console elimina mirror state de org** (PR #66): `selectedOrgId` ahora deriva directamente de `orgId`, reduciendo otro warning `set-state-in-effect` sin cambiar el selector global ni los queries de agentes/perfiles. Tests: typecheck/build console + `make lint`.
 - **IAM console muestra errores de bulk actions**: `applyBulkAction` ya no deja una promesa rechazada sin feedback; limpia errores al reintentar/cambiar contexto, conserva la seleccion ante fallo y muestra el mensaje inline. Test: `IAMControlCenter shows an inline error when a bulk mutation fails`.
 - **Agents console elimina resets de seleccion en effects**: la seleccion de agentes queda scoped por org y los cambios de lifecycle limpian seleccion desde el handler, no desde `useEffect`; perfiles aplica el mismo patron para `profileView`. `npm run lint` baja de 14 a 12 warnings sin cambiar requests ni filtros.
+- **Agents console muestra errores de review/bulk actions**: approve/ignore y bulk archive/trash/restore/purge ya no dejan promesas rechazadas sin feedback; muestran error inline scoped al org activo y limpian el mensaje al reintentar/cambiar lifecycle.
 
 Fecha: 2026-06-27 · Método: workflow multi-agente (138 agentes, 14 revisores × dimensión/módulo + verificación adversarial). **106 hallazgos confirmados** (25 HIGH / 43 MED / 38 LOW), 19 descartados (by-design/falso-positivo).
 
