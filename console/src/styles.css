@@ -1162,7 +1162,11 @@ tbody tr:hover {
   display: none;
 }
 
-.agent-profiles-crud .crud-page-shell__header-actions > .actions-row > .actions-row > button:nth-last-child(-n + 3) {
+.employee-profiles-crud .crud-page-shell__header-actions > .actions-row > .actions-row > button:nth-last-child(-n + 3) {
+  display: none;
+}
+
+.job-roles-crud .crud-page-shell__header-actions > .actions-row > .actions-row > button:nth-last-child(-n + 2) {
   display: none;
 }
 

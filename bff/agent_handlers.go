@@ -83,18 +83,7 @@ func (s *server) agentsAPI(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) virtualEmployeesAPI(w http.ResponseWriter, r *http.Request) {
-	s.agentSurfaceAPI(w, r, agentAPISurface{
-		routePrefix:            "/api/virtual-employees",
-		downstreamPrefix:       "/v1/virtual-employees",
-		responseErrorCode:      "COMPANION_VIRTUAL_EMPLOYEES_FAILED",
-		responseErrorMessage:   "companion virtual employees request failed",
-		profileRequiredMessage: "virtual employee profile is required",
-		invalidIDMessage:       "invalid virtual employee id",
-		accessDeniedMessage:    "selected virtual employee is not allowed for this principal",
-		auditActionPrefix:      "virtual_employee",
-		auditResource:          "virtual_employee",
-		defaultGeneratedIDStem: "virtual_employee",
-	})
+	s.virtualEmployeesDomainAPI(w, r)
 }
 
 func (s *server) agentSurfaceAPI(w http.ResponseWriter, r *http.Request, surface agentAPISurface) {

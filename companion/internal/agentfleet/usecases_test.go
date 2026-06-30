@@ -355,13 +355,13 @@ func TestHandler_RegisterPatterns(t *testing.T) {
 	NewHandler(NewUsecases(newFakeRepo())).Register(mux)
 }
 
-func TestHandler_VirtualEmployeesCRUDLifecycleParity(t *testing.T) {
+func TestHandler_AgentsCRUDLifecycle(t *testing.T) {
 	t.Parallel()
 
 	mux := http.NewServeMux()
 	NewHandler(NewUsecases(newFakeRepo())).Register(mux)
 
-	res := serveAgentFleetRequest(t, mux, http.MethodPut, "/v1/virtual-employees/support", `{
+	res := serveAgentFleetRequest(t, mux, http.MethodPut, "/v1/agents/support", `{
 		"display_name":"Support",
 		"profile_id":"support.v1",
 		"status":"active",
@@ -378,37 +378,37 @@ func TestHandler_VirtualEmployeesCRUDLifecycleParity(t *testing.T) {
 	var saved Agent
 	decodeResponse(t, res, &saved)
 	if saved.AgentID != "support" || saved.Status != StatusActive || saved.ReviewStatus != ReviewApproved {
-		t.Fatalf("expected virtual employee to map onto agent support, got %+v", saved)
+		t.Fatalf("expected agent support, got %+v", saved)
 	}
 	if saved.Metadata["job_title"] != "Support Specialist" {
 		t.Fatalf("expected metadata round-trip on create, got %+v", saved.Metadata)
 	}
 
-	res = serveAgentFleetRequest(t, mux, http.MethodGet, "/v1/virtual-employees/support", "")
+	res = serveAgentFleetRequest(t, mux, http.MethodGet, "/v1/agents/support", "")
 	requireStatus(t, res, http.StatusOK)
 	var fetched Agent
 	decodeResponse(t, res, &fetched)
 	if fetched.AgentID != "support" {
-		t.Fatalf("expected employee_id to map to agent_id support, got %+v", fetched)
+		t.Fatalf("expected agent_id support, got %+v", fetched)
 	}
 	if fetched.Metadata["mission"] != "Keep customers moving" {
 		t.Fatalf("expected metadata round-trip on detail, got %+v", fetched.Metadata)
 	}
 
-	res = serveAgentFleetRequest(t, mux, http.MethodGet, "/v1/virtual-employees", "")
+	res = serveAgentFleetRequest(t, mux, http.MethodGet, "/v1/agents", "")
 	requireStatus(t, res, http.StatusOK)
 	var list struct {
 		Data []Agent `json:"data"`
 	}
 	decodeResponse(t, res, &list)
 	if len(list.Data) != 1 || list.Data[0].AgentID != "support" {
-		t.Fatalf("expected virtual employees list to use agent list, got %+v", list.Data)
+		t.Fatalf("expected agents list, got %+v", list.Data)
 	}
 	if list.Data[0].Metadata["job_title"] != "Support Specialist" {
 		t.Fatalf("expected metadata round-trip on list, got %+v", list.Data[0].Metadata)
 	}
 
-	res = serveAgentFleetRequest(t, mux, http.MethodPost, "/v1/virtual-employees/support/archive", "")
+	res = serveAgentFleetRequest(t, mux, http.MethodPost, "/v1/agents/support/archive", "")
 	requireStatus(t, res, http.StatusOK)
 	var archived Agent
 	decodeResponse(t, res, &archived)
@@ -416,7 +416,7 @@ func TestHandler_VirtualEmployeesCRUDLifecycleParity(t *testing.T) {
 		t.Fatalf("expected archive parity with agent lifecycle, got %+v", archived)
 	}
 
-	res = serveAgentFleetRequest(t, mux, http.MethodPost, "/v1/virtual-employees/support/approve", "")
+	res = serveAgentFleetRequest(t, mux, http.MethodPost, "/v1/agents/support/approve", "")
 	requireStatus(t, res, http.StatusOK)
 	var approved Agent
 	decodeResponse(t, res, &approved)
@@ -424,7 +424,7 @@ func TestHandler_VirtualEmployeesCRUDLifecycleParity(t *testing.T) {
 		t.Fatalf("expected approve parity with agent review, got %+v", approved)
 	}
 
-	res = serveAgentFleetRequest(t, mux, http.MethodPost, "/v1/virtual-employees/support/trash", "")
+	res = serveAgentFleetRequest(t, mux, http.MethodPost, "/v1/agents/support/trash", "")
 	requireStatus(t, res, http.StatusOK)
 	var trashed Agent
 	decodeResponse(t, res, &trashed)
@@ -432,7 +432,7 @@ func TestHandler_VirtualEmployeesCRUDLifecycleParity(t *testing.T) {
 		t.Fatalf("expected trash parity with agent lifecycle, got %+v", trashed)
 	}
 
-	res = serveAgentFleetRequest(t, mux, http.MethodPost, "/v1/virtual-employees/support/restore", "")
+	res = serveAgentFleetRequest(t, mux, http.MethodPost, "/v1/agents/support/restore", "")
 	requireStatus(t, res, http.StatusOK)
 	var restored Agent
 	decodeResponse(t, res, &restored)
@@ -440,7 +440,7 @@ func TestHandler_VirtualEmployeesCRUDLifecycleParity(t *testing.T) {
 		t.Fatalf("expected restore parity with agent lifecycle, got %+v", restored)
 	}
 
-	res = serveAgentFleetRequest(t, mux, http.MethodPost, "/v1/virtual-employees/support/disable", "")
+	res = serveAgentFleetRequest(t, mux, http.MethodPost, "/v1/agents/support/disable", "")
 	requireStatus(t, res, http.StatusOK)
 	var disabled Agent
 	decodeResponse(t, res, &disabled)
@@ -448,20 +448,20 @@ func TestHandler_VirtualEmployeesCRUDLifecycleParity(t *testing.T) {
 		t.Fatalf("expected disable parity with agent lifecycle, got %+v", disabled)
 	}
 
-	res = serveAgentFleetRequest(t, mux, http.MethodDelete, "/v1/virtual-employees/support", "")
+	res = serveAgentFleetRequest(t, mux, http.MethodDelete, "/v1/agents/support", "")
 	requireStatus(t, res, http.StatusNoContent)
 
-	res = serveAgentFleetRequest(t, mux, http.MethodGet, "/v1/virtual-employees/support", "")
+	res = serveAgentFleetRequest(t, mux, http.MethodGet, "/v1/agents/support", "")
 	requireStatus(t, res, http.StatusNotFound)
 }
 
-func TestHandler_VirtualEmployeesAssignmentAndHandoffParity(t *testing.T) {
+func TestHandler_AgentsAssignmentAndHandoff(t *testing.T) {
 	t.Parallel()
 
 	mux := http.NewServeMux()
 	NewHandler(NewUsecases(newFakeRepo())).Register(mux)
 
-	source := serveAgentFleetRequest(t, mux, http.MethodPut, "/v1/virtual-employees/source", `{
+	source := serveAgentFleetRequest(t, mux, http.MethodPut, "/v1/agents/source", `{
 		"display_name":"Source",
 		"profile_id":"source.v1",
 		"status":"active",
@@ -470,7 +470,7 @@ func TestHandler_VirtualEmployeesAssignmentAndHandoffParity(t *testing.T) {
 	}`)
 	requireStatus(t, source, http.StatusOK)
 
-	target := serveAgentFleetRequest(t, mux, http.MethodPut, "/v1/virtual-employees/target", `{
+	target := serveAgentFleetRequest(t, mux, http.MethodPut, "/v1/agents/target", `{
 		"display_name":"Target",
 		"profile_id":"target.v1",
 		"status":"active",
@@ -478,7 +478,7 @@ func TestHandler_VirtualEmployeesAssignmentAndHandoffParity(t *testing.T) {
 	}`)
 	requireStatus(t, target, http.StatusOK)
 
-	res := serveAgentFleetRequest(t, mux, http.MethodPost, "/v1/virtual-employees/assignments", `{"capability_id":"demo.read"}`)
+	res := serveAgentFleetRequest(t, mux, http.MethodPost, "/v1/agents/assignments", `{"capability_id":"demo.read"}`)
 	requireStatus(t, res, http.StatusOK)
 	var assignment AssignmentResult
 	decodeResponse(t, res, &assignment)
@@ -486,7 +486,7 @@ func TestHandler_VirtualEmployeesAssignmentAndHandoffParity(t *testing.T) {
 		t.Fatalf("expected assignment to reuse agent assignment, got %+v", assignment)
 	}
 
-	res = serveAgentFleetRequest(t, mux, http.MethodPost, "/v1/virtual-employees/handoffs", `{
+	res = serveAgentFleetRequest(t, mux, http.MethodPost, "/v1/agents/handoffs", `{
 		"from_agent_id":"source",
 		"to_agent_id":"target",
 		"task_id":"task-1"
@@ -498,7 +498,7 @@ func TestHandler_VirtualEmployeesAssignmentAndHandoffParity(t *testing.T) {
 		t.Fatalf("expected handoff parity with agents, got %+v", handoff)
 	}
 
-	res = serveAgentFleetRequest(t, mux, http.MethodGet, "/v1/virtual-employees/handoffs", "")
+	res = serveAgentFleetRequest(t, mux, http.MethodGet, "/v1/agents/handoffs", "")
 	requireStatus(t, res, http.StatusOK)
 	var handoffList struct {
 		Data []Handoff `json:"data"`
@@ -508,7 +508,7 @@ func TestHandler_VirtualEmployeesAssignmentAndHandoffParity(t *testing.T) {
 		t.Fatalf("expected handoff list parity, got %+v", handoffList.Data)
 	}
 
-	res = serveAgentFleetRequest(t, mux, http.MethodPatch, "/v1/virtual-employees/handoffs/"+handoff.ID, `{"status":"accepted"}`)
+	res = serveAgentFleetRequest(t, mux, http.MethodPatch, "/v1/agents/handoffs/"+handoff.ID, `{"status":"accepted"}`)
 	requireStatus(t, res, http.StatusOK)
 	var accepted Handoff
 	decodeResponse(t, res, &accepted)

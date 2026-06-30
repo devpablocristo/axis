@@ -43,20 +43,6 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/agents/handoffs", h.createHandoff)
 	mux.HandleFunc("PATCH /v1/agents/handoffs/{id}", h.updateHandoff)
 
-	mux.HandleFunc("GET /v1/virtual-employees", h.listAgents)
-	mux.HandleFunc("GET /v1/virtual-employees/{employee_id}", h.getAgent)
-	mux.HandleFunc("PUT /v1/virtual-employees/{employee_id}", h.putAgent)
-	mux.HandleFunc("POST /v1/virtual-employees/{employee_id}/disable", h.disableAgent)
-	mux.HandleFunc("POST /v1/virtual-employees/{employee_id}/archive", h.archiveAgent)
-	mux.HandleFunc("POST /v1/virtual-employees/{employee_id}/trash", h.trashAgent)
-	mux.HandleFunc("POST /v1/virtual-employees/{employee_id}/restore", h.restoreAgent)
-	mux.HandleFunc("POST /v1/virtual-employees/{employee_id}/approve", h.approveAgent)
-	mux.HandleFunc("POST /v1/virtual-employees/{employee_id}/ignore", h.ignoreAgent)
-	mux.HandleFunc("DELETE /v1/virtual-employees/{employee_id}", h.deleteAgent)
-	mux.HandleFunc("POST /v1/virtual-employees/assignments", h.assignAgent)
-	mux.HandleFunc("GET /v1/virtual-employees/handoffs", h.listHandoffs)
-	mux.HandleFunc("POST /v1/virtual-employees/handoffs", h.createHandoff)
-	mux.HandleFunc("PATCH /v1/virtual-employees/handoffs/{id}", h.updateHandoff)
 }
 
 func (h *Handler) listAgents(w http.ResponseWriter, r *http.Request) {

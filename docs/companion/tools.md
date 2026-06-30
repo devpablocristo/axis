@@ -16,7 +16,7 @@ El runtime filtra los schemas antes de enviarlos al modelo.
 
 ## Reglas
 
-- El LLM solo recibe schemas permitidos por `AgentProfile`, `AgentRoute` e
+- El LLM solo recibe schemas permitidos por `EmployeeProfile`, `AgentRoute` e
   `IdentityChain`.
 - Una tool fuera de allowlist se rechaza con guardrail `tool_policy`.
 - Prompt injection en args se rechaza antes de ejecutar la tool.

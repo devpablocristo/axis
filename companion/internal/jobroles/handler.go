@@ -30,10 +30,13 @@ func NewHandler(uc *Usecases) *Handler {
 
 func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/job-roles", h.listJobRoles)
+	mux.HandleFunc("POST /v1/job-roles", h.postJobRole)
 	mux.HandleFunc("GET /v1/job-roles/{job_role_id}", h.getJobRole)
+	mux.HandleFunc("PATCH /v1/job-roles/{job_role_id}", h.patchJobRole)
 	mux.HandleFunc("PUT /v1/job-roles/{job_role_id}", h.putJobRole)
 	mux.HandleFunc("POST /v1/job-roles/{job_role_id}/archive", h.archiveJobRole)
 	mux.HandleFunc("POST /v1/job-roles/{job_role_id}/restore", h.restoreJobRole)
+	mux.HandleFunc("POST /v1/job-roles/{job_role_id}/status", h.setJobRoleStatus)
 	mux.HandleFunc("GET /v1/job-roles/{job_role_id}/versions", h.listVersions)
 }
 
@@ -64,6 +67,70 @@ func (h *Handler) getJobRole(w http.ResponseWriter, r *http.Request) {
 	httpjson.WriteJSON(w, http.StatusOK, role)
 }
 
+func (h *Handler) postJobRole(w http.ResponseWriter, r *http.Request) {
+	orgID, surface, actorID, ok := jobRoleRequestContext(w, r)
+	if !ok {
+		return
+	}
+	if !jobRoleWriteAllowed(w, r) {
+		return
+	}
+	var role JobRole
+	if err := json.NewDecoder(r.Body).Decode(&role); err != nil {
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid json body")
+		return
+	}
+	role.OrgID = orgID
+	role.ProductSurface = surface
+	role.TenantID = jobRoleTenantID(r, role.TenantID)
+	role.JobRoleID = ""
+	role.JobRoleKey = ""
+	role.CreatedBy = actorID
+	saved, err := h.uc.UpsertJobRole(r.Context(), role)
+	if err != nil {
+		writeJobRoleError(w, err)
+		return
+	}
+	httpjson.WriteJSON(w, http.StatusCreated, saved)
+}
+
+func (h *Handler) patchJobRole(w http.ResponseWriter, r *http.Request) {
+	orgID, surface, actorID, ok := jobRoleRequestContext(w, r)
+	if !ok {
+		return
+	}
+	if !jobRoleWriteAllowed(w, r) {
+		return
+	}
+	identifier := strings.TrimSpace(r.PathValue("job_role_id"))
+	current, err := h.uc.GetJobRole(r.Context(), orgID, surface, identifier)
+	if err != nil {
+		writeJobRoleError(w, err)
+		return
+	}
+	var patch JobRole
+	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid json body")
+		return
+	}
+	if strings.TrimSpace(patch.Status) != "" && strings.TrimSpace(patch.Status) != current.Status {
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "status changes must use the status endpoint")
+		return
+	}
+	merged := mergeJobRolePatch(current, patch)
+	merged.OrgID = orgID
+	merged.ProductSurface = surface
+	merged.TenantID = jobRoleTenantID(r, merged.TenantID)
+	merged.JobRoleID = identifier
+	merged.CreatedBy = actorID
+	saved, err := h.uc.UpsertJobRole(r.Context(), merged)
+	if err != nil {
+		writeJobRoleError(w, err)
+		return
+	}
+	httpjson.WriteJSON(w, http.StatusOK, saved)
+}
+
 func (h *Handler) putJobRole(w http.ResponseWriter, r *http.Request) {
 	orgID, surface, actorID, ok := jobRoleRequestContext(w, r)
 	if !ok {
@@ -79,6 +146,7 @@ func (h *Handler) putJobRole(w http.ResponseWriter, r *http.Request) {
 	}
 	role.OrgID = orgID
 	role.ProductSurface = surface
+	role.TenantID = jobRoleTenantID(r, role.TenantID)
 	role.JobRoleID = strings.TrimSpace(r.PathValue("job_role_id"))
 	role.CreatedBy = actorID
 	saved, err := h.uc.UpsertJobRole(r.Context(), role)
@@ -95,6 +163,24 @@ func (h *Handler) archiveJobRole(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) restoreJobRole(w http.ResponseWriter, r *http.Request) {
 	h.lifecycleAction(w, r, h.uc.RestoreJobRole)
+}
+
+func (h *Handler) setJobRoleStatus(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Status string `json:"status"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid json body")
+		return
+	}
+	switch strings.ToLower(strings.TrimSpace(body.Status)) {
+	case "active":
+		h.lifecycleAction(w, r, h.uc.RestoreJobRole)
+	case "archived":
+		h.lifecycleAction(w, r, h.uc.ArchiveJobRole)
+	default:
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid job role status")
+	}
 }
 
 func (h *Handler) lifecycleAction(w http.ResponseWriter, r *http.Request, action func(context.Context, string, string, string, string) (JobRole, error)) {
@@ -158,6 +244,68 @@ func jobRoleRequestContext(w http.ResponseWriter, r *http.Request) (string, stri
 		surface = defaultProductSurf
 	}
 	return orgID, surface, id.EffectiveActorID(), true
+}
+
+func jobRoleTenantID(r *http.Request, fallback string) string {
+	for _, value := range []string{
+		r.URL.Query().Get("tenant_id"),
+		r.Header.Get("X-Tenant-ID"),
+		r.Header.Get("X-Axis-Tenant-ID"),
+		fallback,
+	} {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func mergeJobRolePatch(current, patch JobRole) JobRole {
+	if patch.Name != "" {
+		current.Name = patch.Name
+	}
+	if patch.Slug != "" {
+		current.Slug = patch.Slug
+	}
+	if patch.Description != "" {
+		current.Description = patch.Description
+	}
+	if patch.Mission != "" {
+		current.Mission = patch.Mission
+	}
+	if patch.Responsibilities != nil {
+		current.Responsibilities = patch.Responsibilities
+	}
+	if patch.RecommendedCapabilityIDs != nil {
+		current.RecommendedCapabilityIDs = patch.RecommendedCapabilityIDs
+	}
+	if patch.RecommendedCapabilities != nil {
+		current.RecommendedCapabilities = patch.RecommendedCapabilities
+	}
+	if patch.DefaultAutonomy != "" {
+		current.DefaultAutonomy = patch.DefaultAutonomy
+		current.DefaultAutonomyLevel = patch.DefaultAutonomy
+	}
+	if patch.DefaultAutonomyLevel != "" {
+		current.DefaultAutonomyLevel = patch.DefaultAutonomyLevel
+		current.DefaultAutonomy = patch.DefaultAutonomyLevel
+	}
+	if patch.DefaultPermissionBundleID != "" {
+		current.DefaultPermissionBundleID = patch.DefaultPermissionBundleID
+	}
+	if patch.SuccessCriteria != nil {
+		current.SuccessCriteria = patch.SuccessCriteria
+	}
+	if patch.DefaultSLAPolicy != nil {
+		current.DefaultSLAPolicy = patch.DefaultSLAPolicy
+	}
+	if patch.DefaultMemoryPolicy != nil {
+		current.DefaultMemoryPolicy = patch.DefaultMemoryPolicy
+	}
+	if patch.Metadata != nil {
+		current.Metadata = patch.Metadata
+	}
+	return current
 }
 
 func jobRoleWriteAllowed(w http.ResponseWriter, r *http.Request) bool {

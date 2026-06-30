@@ -63,8 +63,10 @@ type ConformanceRun struct {
 type Repository interface {
 	UpsertManifest(ctx context.Context, record ManifestRecord) (ManifestRecord, error)
 	GetManifest(ctx context.Context, capabilityID, version string) (ManifestRecord, error)
+	GetManifestByID(ctx context.Context, id string) (ManifestRecord, error)
 	ListManifests(ctx context.Context, filter ManifestFilter) ([]ManifestRecord, error)
 	UpdateManifestStatus(ctx context.Context, capabilityID, version, status string) (ManifestRecord, error)
+	UpdateManifestStatusByID(ctx context.Context, id, status string) (ManifestRecord, error)
 	SaveConformanceRun(ctx context.Context, run ConformanceRun) (ConformanceRun, error)
 	ListConformanceRuns(ctx context.Context, orgID, capabilityID string, limit int) ([]ConformanceRun, error)
 }
@@ -122,6 +124,24 @@ func (r *PostgresRepository) GetManifest(ctx context.Context, capabilityID, vers
 	return record, nil
 }
 
+func (r *PostgresRepository) GetManifestByID(ctx context.Context, id string) (ManifestRecord, error) {
+	parsed, err := uuid.Parse(strings.TrimSpace(id))
+	if err != nil {
+		return ManifestRecord{}, ErrManifestNotFound
+	}
+	row := r.db.Pool().QueryRow(ctx, selectCapabilityManifest+`
+		WHERE id = $1
+	`, parsed)
+	record, err := scanManifestRecord(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ManifestRecord{}, ErrManifestNotFound
+		}
+		return ManifestRecord{}, fmt.Errorf("get capability manifest by id: %w", err)
+	}
+	return record, nil
+}
+
 func (r *PostgresRepository) ListManifests(ctx context.Context, filter ManifestFilter) ([]ManifestRecord, error) {
 	limit := filter.Limit
 	if limit <= 0 || limit > 500 {
@@ -173,6 +193,28 @@ func (r *PostgresRepository) UpdateManifestStatus(ctx context.Context, capabilit
 		RETURNING id, capability_id, version, status, source, source_uri, manifest_json, imported_by, created_at, updated_at
 	`, strings.TrimSpace(capabilityID), strings.TrimSpace(version), status)
 	return scanManifestRecord(row)
+}
+
+func (r *PostgresRepository) UpdateManifestStatusByID(ctx context.Context, id, status string) (ManifestRecord, error) {
+	parsed, err := uuid.Parse(strings.TrimSpace(id))
+	if err != nil {
+		return ManifestRecord{}, ErrManifestNotFound
+	}
+	status = normalizeManifestStatus(status)
+	row := r.db.Pool().QueryRow(ctx, `
+		UPDATE companion_capability_manifests
+		SET status = $2, updated_at = now()
+		WHERE id = $1
+		RETURNING id, capability_id, version, status, source, source_uri, manifest_json, imported_by, created_at, updated_at
+	`, parsed, status)
+	record, err := scanManifestRecord(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ManifestRecord{}, ErrManifestNotFound
+		}
+		return ManifestRecord{}, fmt.Errorf("update capability manifest status by id: %w", err)
+	}
+	return record, nil
 }
 
 func (r *PostgresRepository) SaveConformanceRun(ctx context.Context, run ConformanceRun) (ConformanceRun, error) {

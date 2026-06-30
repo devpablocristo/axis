@@ -77,6 +77,15 @@ func (f *fakeCapabilityRepo) GetManifest(_ context.Context, capabilityID, versio
 	return record, nil
 }
 
+func (f *fakeCapabilityRepo) GetManifestByID(_ context.Context, id string) (ManifestRecord, error) {
+	for _, record := range f.records {
+		if record.ID.String() == id {
+			return record, nil
+		}
+	}
+	return ManifestRecord{}, ErrManifestNotFound
+}
+
 func (f *fakeCapabilityRepo) ListManifests(_ context.Context, filter ManifestFilter) ([]ManifestRecord, error) {
 	var out []ManifestRecord
 	for _, record := range f.records {
@@ -101,6 +110,19 @@ func (f *fakeCapabilityRepo) UpdateManifestStatus(_ context.Context, capabilityI
 	record.UpdatedAt = time.Now().UTC()
 	f.records[key] = record
 	return record, nil
+}
+
+func (f *fakeCapabilityRepo) UpdateManifestStatusByID(_ context.Context, id, status string) (ManifestRecord, error) {
+	for key, record := range f.records {
+		if record.ID.String() != id {
+			continue
+		}
+		record.Status = normalizeManifestStatus(status)
+		record.UpdatedAt = time.Now().UTC()
+		f.records[key] = record
+		return record, nil
+	}
+	return ManifestRecord{}, ErrManifestNotFound
 }
 
 func (f *fakeCapabilityRepo) SaveConformanceRun(_ context.Context, run ConformanceRun) (ConformanceRun, error) {

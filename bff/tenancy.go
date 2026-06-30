@@ -94,7 +94,7 @@ func (s *memoryIAMStore) createTenantLocked(tenant IAMTenant) IAMTenant {
 		}
 	}
 	now := time.Now().UTC()
-	tenant.ID = firstNonEmpty(tenant.ID, "tenant_"+randomHex(8))
+	tenant.ID = firstNonEmpty(tenant.ID, randomUUID())
 	tenant.Status = firstNonEmpty(tenant.Status, "active")
 	tenant.CreatedAt, tenant.UpdatedAt = now, now
 	s.tenants[tenant.ID] = tenant
@@ -268,7 +268,7 @@ func (s *sqlIAMStore) TenantByID(ctx context.Context, tenantID string) (IAMTenan
 
 func (s *sqlIAMStore) CreateTenant(ctx context.Context, tenant IAMTenant) (IAMTenant, error) {
 	now := time.Now().UTC()
-	tenant.ID = firstNonEmpty(tenant.ID, "tenant_"+randomHex(8))
+	tenant.ID = firstNonEmpty(tenant.ID, randomUUID())
 	tenant.Status = firstNonEmpty(tenant.Status, "active")
 	out, err := scanTenant(s.db.QueryRowContext(ctx, `
 		INSERT INTO axis_tenants (id, org_id, product_surface, name, status, plan, created_at, updated_at)
@@ -285,7 +285,7 @@ func (s *sqlIAMStore) CreateTenant(ctx context.Context, tenant IAMTenant) (IAMTe
 
 func (s *sqlIAMStore) CreateTenantWithOwner(ctx context.Context, tenant IAMTenant, ownerUserID string) (IAMTenant, error) {
 	now := time.Now().UTC()
-	tenant.ID = firstNonEmpty(tenant.ID, "tenant_"+randomHex(8))
+	tenant.ID = firstNonEmpty(tenant.ID, randomUUID())
 	tenant.Status = firstNonEmpty(tenant.Status, "active")
 	ownerUserID = strings.TrimSpace(ownerUserID)
 	tx, err := s.db.BeginTx(ctx, nil)

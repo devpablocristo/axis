@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/google/uuid"
 )
 
 type fakeRepo struct {
@@ -43,11 +45,15 @@ func (f *fakeRepo) ListProfiles(_ context.Context, lifecycle LifecycleView) ([]P
 }
 
 func (f *fakeRepo) GetProfile(_ context.Context, profileID string) (Profile, error) {
-	profile, ok := f.profiles[profileID]
-	if !ok {
-		return Profile{}, ErrNotFound
+	if profile, ok := f.profiles[profileID]; ok {
+		return profile, nil
 	}
-	return profile, nil
+	for _, profile := range f.profiles {
+		if profile.ID.String() == profileID {
+			return profile, nil
+		}
+	}
+	return Profile{}, ErrNotFound
 }
 
 func (f *fakeRepo) IsArchivedOrTrashed(_ context.Context, profileID string) (bool, bool, error) {
@@ -59,42 +65,45 @@ func (f *fakeRepo) IsArchivedOrTrashed(_ context.Context, profileID string) (boo
 }
 
 func (f *fakeRepo) UpsertProfile(_ context.Context, profile Profile) (Profile, error) {
+	if profile.ID == uuid.Nil {
+		profile.ID = uuid.New()
+	}
 	f.profiles[profile.ProfileID] = profile
 	return profile, nil
 }
 
 func (f *fakeRepo) ArchiveProfile(_ context.Context, profileID string) (Profile, error) {
-	profile, ok := f.profiles[profileID]
+	profile, key, ok := f.getProfileWithKey(profileID)
 	if !ok {
 		return Profile{}, ErrNotFound
 	}
 	now := profile.UpdatedAt
 	profile.ArchivedAt = &now
 	profile.TrashedAt = nil
-	f.profiles[profileID] = profile
+	f.profiles[key] = profile
 	return profile, nil
 }
 
 func (f *fakeRepo) TrashProfile(_ context.Context, profileID string) (Profile, error) {
-	profile, ok := f.profiles[profileID]
+	profile, key, ok := f.getProfileWithKey(profileID)
 	if !ok {
 		return Profile{}, ErrNotFound
 	}
 	now := profile.UpdatedAt
 	profile.ArchivedAt = nil
 	profile.TrashedAt = &now
-	f.profiles[profileID] = profile
+	f.profiles[key] = profile
 	return profile, nil
 }
 
 func (f *fakeRepo) RestoreProfile(_ context.Context, profileID string) (Profile, error) {
-	profile, ok := f.profiles[profileID]
+	profile, key, ok := f.getProfileWithKey(profileID)
 	if !ok {
 		return Profile{}, ErrNotFound
 	}
 	profile.ArchivedAt = nil
 	profile.TrashedAt = nil
-	f.profiles[profileID] = profile
+	f.profiles[key] = profile
 	return profile, nil
 }
 
@@ -109,6 +118,18 @@ func (f *fakeRepo) PurgeProfile(_ context.Context, profileID string) error {
 
 func (f *fakeRepo) ListVersions(_ context.Context, profileID string, _ int) ([]Version, error) {
 	return f.versions[profileID], nil
+}
+
+func (f *fakeRepo) getProfileWithKey(profileID string) (Profile, string, bool) {
+	if profile, ok := f.profiles[profileID]; ok {
+		return profile, profileID, true
+	}
+	for key, profile := range f.profiles {
+		if profile.ID.String() == profileID {
+			return profile, key, true
+		}
+	}
+	return Profile{}, "", false
 }
 
 func TestUpsertProfileAcceptsCompleteProfile(t *testing.T) {

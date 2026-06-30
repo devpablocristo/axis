@@ -18,6 +18,7 @@ type CreateTaskRequest struct {
 	Priority    string          `json:"priority,omitempty"`
 	CreatedBy   string          `json:"created_by,omitempty"`
 	AssignedTo  string          `json:"assigned_to,omitempty"`
+	AssigneeEmployeeID string   `json:"assignee_employee_id,omitempty"`
 	Channel     string          `json:"channel,omitempty"`
 	Summary     string          `json:"summary,omitempty"`
 	ContextJSON json.RawMessage `json:"context_json,omitempty"`
@@ -27,6 +28,7 @@ type TaskResponse struct {
 	ID                 string          `json:"id"`
 	OrgID              string          `json:"org_id,omitempty"`
 	ProductSurface     string          `json:"product_surface,omitempty"`
+	AssigneeEmployeeID string          `json:"assignee_employee_id,omitempty"`
 	AgentID            string          `json:"agent_id,omitempty"`
 	RunType            string          `json:"run_type,omitempty"`
 	Title              string          `json:"title"`
@@ -175,7 +177,9 @@ type ChatRequest struct {
 	Message          string          `json:"message"`
 	Channel          string          `json:"channel,omitempty"`           // default: "api"
 	ProductSurface   string          `json:"product_surface,omitempty"`   // "companion" | "ponti" | "pymes"
-	AgentID          string          `json:"agent_id,omitempty"`          // empleado IA persistente a usar
+	TenantID         string          `json:"tenant_id,omitempty"`         // tenant UUID para resolver Virtual Employees
+	EmployeeID       string          `json:"employee_id,omitempty"`       // Virtual Employee publico a usar
+	AgentID          string          `json:"agent_id,omitempty"`          // Agent tecnico legacy a usar
 	RouteHint        string          `json:"route_hint,omitempty"`        // compatibilidad: el runtime decide routing
 	ConfirmedActions []string        `json:"confirmed_actions,omitempty"` // compatibilidad UI legacy
 	Handoff          json.RawMessage `json:"handoff,omitempty"`           // compatibilidad UI legacy
@@ -200,6 +204,7 @@ type ChatResponse struct {
 	Task     TaskResponse      `json:"task"`
 	Messages []MessageResponse `json:"messages"`
 	RunID    string            `json:"run_id,omitempty"`
+	EmployeeID string         `json:"employee_id,omitempty"`
 	AgentID  string            `json:"agent_id,omitempty"`
 }
 
@@ -366,6 +371,7 @@ func TaskToResponse(t domain.Task) TaskResponse {
 		ID:                 t.ID.String(),
 		OrgID:              t.OrgID,
 		ProductSurface:     contextString(t.ContextJSON, "product_surface"),
+		AssigneeEmployeeID: contextString(t.ContextJSON, "employee_id"),
 		AgentID:            contextString(t.ContextJSON, "agent_id"),
 		RunType:            contextString(t.ContextJSON, "run_type"),
 		Title:              t.Title,
@@ -437,6 +443,7 @@ func ChatResponseFromRuntimeResult(task domain.Task, messages []domain.TaskMessa
 	resp := ChatResponseFromResult(task, messages)
 	resp.RunID = strings.TrimSpace(runID)
 	resp.AgentID = strings.TrimSpace(agentID)
+	resp.EmployeeID = contextString(task.ContextJSON, "employee_id")
 	resp.ToolCalls = toolCalls
 	resp.PendingConfirmations = pendingConfirmationsFromToolCalls(toolCalls)
 	return resp

@@ -1,7 +1,8 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
-import { AgentsControlCenter, VIRTUAL_EMPLOYEES_BASE_PATH } from './AgentsControlCenter'
+import { AgentsControlCenter } from './AgentsControlCenter'
+import { createVirtualEmployee, updateVirtualEmployee, upsertJobRole } from './api'
 
 const crudPageProps = vi.hoisted(() => [] as Array<Record<string, unknown>>)
 
@@ -10,12 +11,16 @@ vi.mock('@devpablocristo/platform-crud-ui', () => ({
   CrudPage: (props: Record<string, unknown>) => {
     crudPageProps.push(props)
     const slot = props.listHeaderInlineSlot as (() => ReactNode) | undefined
+    const columns = (props.columns ?? []) as Array<{ header?: string }>
     return (
       <div data-testid="crud-page">
         <h2>{String(props.labelPluralCap ?? '')}</h2>
         <p>{String(props.basePath ?? '')}</p>
         <p>{String(props.searchPlaceholder ?? '')}</p>
         <p>{String(props.emptyState ?? '')}</p>
+        <div>
+          {columns.map((column, index) => <span key={`${column.header ?? 'column'}-${index}`}>{column.header ?? ''}</span>)}
+        </div>
         {slot?.()}
       </div>
     )
@@ -26,35 +31,44 @@ vi.mock('./api', async () => {
   const actual = await vi.importActual<typeof import('./api')>('./api')
   return {
     ...actual,
-    archiveAgentProfile: vi.fn(),
+    archiveEmployeeProfile: vi.fn(),
     axisCrudHttpClient: vi.fn(() => ({ json: vi.fn() })),
-    listAgentProfiles: vi.fn(async () => [{
-      profile_id: 'support.v1',
+    createEmployeeProfile: vi.fn(),
+    createHandoff: vi.fn(),
+    createVirtualEmployee: vi.fn(),
+    listEmployeeProfiles: vi.fn(async () => [{
+      profile_id: '11111111-1111-4111-8111-111111111111',
+      profile_key: 'support.v1',
       family_id: 'support',
       version_label: 'v1',
       name: 'Support',
       max_autonomy: 'A2',
       enabled: true,
     }]),
+    listHandoffs: vi.fn(async () => []),
     listIAMTenants: vi.fn(async () => [{ id: 'org-a', name: 'Org A', status: 'active' }]),
     listJobRoles: vi.fn(async () => [{
-      job_role_id: 'billing-specialist',
+      job_role_id: '22222222-2222-4222-8222-222222222222',
       org_id: 'org-a',
       product_surface: 'axis',
       name: 'Billing Specialist',
       slug: 'billing-specialist',
       mission: 'Keep billing clean',
       responsibilities: [{ title: 'Review invoices' }],
+      recommended_capability_ids: ['33333333-3333-4333-8333-333333333333'],
       recommended_capabilities: ['billing.read'],
       default_autonomy_level: 'A2',
       status: 'active',
     }]),
-    purgeAgentProfile: vi.fn(),
+    listVirtualEmployees: vi.fn(async () => []),
+    purgeEmployeeProfile: vi.fn(),
     archiveJobRole: vi.fn(),
     restoreJobRole: vi.fn(),
-    restoreAgentProfile: vi.fn(),
-    trashAgentProfile: vi.fn(),
-    upsertAgentProfile: vi.fn(),
+    restoreEmployeeProfile: vi.fn(),
+    trashEmployeeProfile: vi.fn(),
+    updateEmployeeProfile: vi.fn(),
+    updateHandoff: vi.fn(),
+    updateVirtualEmployee: vi.fn(),
     upsertJobRole: vi.fn(),
   }
 })
@@ -63,132 +77,219 @@ describe('AgentsControlCenter as Virtual Employees surface', () => {
   it('uses the Virtual Employees endpoint and public labels', async () => {
     crudPageProps.length = 0
 
-    render(<AgentsControlCenter orgId="org-a" tenantId="tenant-a" />)
+    render(<AgentsControlCenter orgId="org-a" tenantId="tenant-a" productSurface="medmory" />)
 
     expect(await screen.findByRole('button', { name: 'Virtual Employees' })).toBeInTheDocument()
     await waitFor(() => {
-      expect(crudPageProps.at(-1)?.basePath).toBe(VIRTUAL_EMPLOYEES_BASE_PATH)
+      expect(crudPageProps.at(-1)?.dataSource).toBeTruthy()
     })
     expect(screen.getAllByText('Virtual Employees').length).toBeGreaterThanOrEqual(2)
-    expect(screen.getByText(VIRTUAL_EMPLOYEES_BASE_PATH)).toBeInTheDocument()
     expect(screen.getByText('Buscar virtual employees')).toBeInTheDocument()
     expect(screen.getByText('Sin virtual employees')).toBeInTheDocument()
+    expect(screen.getByText('Tenant')).toBeInTheDocument()
+    expect(screen.queryByText('Org')).not.toBeInTheDocument()
+    expect(screen.queryByText('Contexto')).not.toBeInTheDocument()
   })
 
-  it('maps semantic fields into metadata without dropping existing metadata', async () => {
+  it('creates Virtual Employees with the clean domain payload', async () => {
     crudPageProps.length = 0
+    vi.mocked(createVirtualEmployee).mockClear()
 
-    render(<AgentsControlCenter orgId="org-a" tenantId="tenant-a" />)
+    render(<AgentsControlCenter orgId="org-a" tenantId="tenant-a" productSurface="medmory" />)
 
     await waitFor(() => {
-      expect(crudPageProps.at(-1)?.basePath).toBe(VIRTUAL_EMPLOYEES_BASE_PATH)
+      expect(crudPageProps.at(-1)?.dataSource).toBeTruthy()
     })
     const props = crudPageProps.at(-1) as {
       formFields: Array<{ key: string; label: string }>
-      toFormValues: (row: Record<string, unknown>) => Record<string, string | boolean>
-      toBody: (values: Record<string, string | boolean>) => Record<string, unknown>
+      dataSource: {
+        create: (values: Record<string, string | boolean>) => Promise<void>
+      }
     }
     expect(props.formFields.map((field) => field.label)).toEqual(expect.arrayContaining([
+      'Supervisor user ID',
+      'Job Role',
+      'Perfil',
+      'Autonomía',
+      'Capability IDs',
+      'Memory ID',
+    ]))
+    expect(props.formFields.map((field) => field.label)).not.toEqual(expect.arrayContaining([
+      'Tools',
       'Puesto / Job title',
       'Misión',
-      'Responsabilidades',
-      'Owner humano',
-      'Canales de contacto',
-      'Reglas de escalamiento',
+      'Metadata JSON',
     ]))
 
-    const formValues = props.toFormValues({
-      id: 'employee-1',
-      org_id: 'org-a',
+    await props.dataSource.create({
       name: 'Finance Employee',
-      profile: 'finance.v1',
+      supervisor_user_id: '44444444-4444-4444-8444-444444444444',
+      profile_id: '11111111-1111-4111-8111-111111111111',
+      job_role_id: '22222222-2222-4222-8222-222222222222',
       autonomy: 'A2',
-      memory_enabled: true,
-      description: 'Normal description',
-      capabilities: ['billing.read'],
-      tools: ['billing_read'],
-      metadata: {
-        custom_flag: 'keep-me',
-        job_title: 'Finance Coordinator',
-        mission: 'Close monthly billing',
-        responsibilities: ['review invoices', 'escalate blockers'],
-        owner_user_id: 'user-123',
-        contact_channels: ['slack:#finance'],
-        escalation_rules: ['manager after 2 days'],
-      },
+      capability_ids: '55555555-5555-4555-8555-555555555555',
+      memory_id: '',
     })
 
-    expect(formValues.job_title).toBe('Finance Coordinator')
-    expect(formValues.mission).toBe('Close monthly billing')
-    expect(formValues.responsibilities).toBe('review invoices\nescalate blockers')
-    const body = props.toBody({
-      ...formValues,
-      name: 'Finance Lead',
-      profile: 'finance.v2',
-      autonomy: 'A3',
-    })
-    expect(body.name).toBe('Finance Lead')
-    expect(body.metadata).toEqual({
-      custom_flag: 'keep-me',
-      job_title: 'Finance Coordinator',
-      mission: 'Close monthly billing',
-      responsibilities: ['review invoices', 'escalate blockers'],
-      owner_user_id: 'user-123',
-      contact_channels: ['slack:#finance'],
-      escalation_rules: ['manager after 2 days'],
-    })
+    expect(createVirtualEmployee).toHaveBeenCalledWith(
+      'org-a',
+      {
+        name: 'Finance Employee',
+        supervisor_user_id: '44444444-4444-4444-8444-444444444444',
+        job_role_id: '22222222-2222-4222-8222-222222222222',
+        profile_id: '11111111-1111-4111-8111-111111111111',
+        autonomy: 'A2',
+        capability_ids: ['55555555-5555-4555-8555-555555555555'],
+        memory_id: null,
+      },
+      'tenant-a',
+    )
   })
 
   it('does not apply Job Role defaults when editing an existing Virtual Employee', async () => {
     crudPageProps.length = 0
+    vi.mocked(createVirtualEmployee).mockClear()
+    vi.mocked(updateVirtualEmployee).mockClear()
 
-    render(<AgentsControlCenter orgId="org-a" tenantId="tenant-a" />)
+    render(<AgentsControlCenter orgId="org-a" tenantId="tenant-a" productSurface="medmory" />)
 
     await waitFor(() => {
       const props = crudPageProps.at(-1) as {
-        basePath?: string
-        toBody?: (values: Record<string, string | boolean>) => Record<string, unknown>
+        dataSource?: {
+          create: (values: Record<string, string | boolean>) => Promise<void>
+        }
       }
-      expect(props.basePath).toBe(VIRTUAL_EMPLOYEES_BASE_PATH)
-      expect(props.toBody?.({
-        name: 'Billing Employee',
-        profile: 'support.v1',
-        autonomy: 'A2',
-        memory_enabled: true,
-        description: '',
-        job_role_id: 'billing-specialist',
-        job_title: '',
-        mission: '',
-        responsibilities: '',
-        capabilities: '',
-        tools: '',
-      }).metadata).toMatchObject({
-        job_role_id: 'billing-specialist',
-        job_title: 'Billing Specialist',
-        mission: 'Keep billing clean',
-        responsibilities: ['Review invoices'],
-      })
+      expect(props.dataSource).toBeTruthy()
     })
 
     const props = crudPageProps.at(-1) as {
-      toBody: (values: Record<string, string | boolean>) => Record<string, unknown>
+      dataSource: {
+        create: (values: Record<string, string | boolean>) => Promise<void>
+        update: (row: { id: string }, values: Record<string, string | boolean>) => Promise<void>
+      }
     }
-    const body = props.toBody({
-      _metadata_json: '{}',
+    await props.dataSource.create({
       name: 'Billing Employee',
-      profile: 'support.v1',
+      supervisor_user_id: '44444444-4444-4444-8444-444444444444',
+      profile_id: '11111111-1111-4111-8111-111111111111',
       autonomy: 'A2',
-      memory_enabled: true,
-      description: '',
-      job_role_id: 'billing-specialist',
-      job_title: '',
-      mission: '',
-      responsibilities: '',
-      capabilities: '',
-      tools: '',
+      job_role_id: '22222222-2222-4222-8222-222222222222',
+      capability_ids: '',
+      memory_id: '',
+    })
+    expect(createVirtualEmployee).toHaveBeenCalledWith(
+      'org-a',
+      expect.objectContaining({
+        capability_ids: ['33333333-3333-4333-8333-333333333333'],
+      }),
+      'tenant-a',
+    )
+
+    await props.dataSource.update({ id: 'employee-1' }, {
+        name: 'Billing Employee',
+        supervisor_user_id: '44444444-4444-4444-8444-444444444444',
+        profile_id: '11111111-1111-4111-8111-111111111111',
+        autonomy: 'A2',
+        job_role_id: '22222222-2222-4222-8222-222222222222',
+        capability_ids: '',
+        memory_id: '',
+      })
+    expect(updateVirtualEmployee).toHaveBeenCalledWith(
+      'org-a',
+      'employee-1',
+      expect.objectContaining({
+        capability_ids: [],
+      }),
+      'tenant-a',
+    )
+  })
+
+  it('keeps Job Role creation human-facing and generates technical fields', async () => {
+    crudPageProps.length = 0
+    vi.mocked(upsertJobRole).mockClear()
+
+    render(<AgentsControlCenter orgId="org-a" tenantId="tenant-a" productSurface="medmory" />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Job Roles' }))
+
+    await waitFor(() => {
+      expect(crudPageProps.at(-1)?.labelPluralCap).toBe('Job Roles')
+    })
+    const props = crudPageProps.at(-1) as {
+      formFields: Array<{ key: string; label: string }>
+      dataSource: {
+        create: (values: Record<string, string | boolean>) => Promise<void>
+      }
+    }
+    const labels = props.formFields.map((field) => field.label)
+
+    expect(labels).toEqual([
+      'Nombre',
+      'Descripción',
+      'Misión',
+      'Responsabilidades',
+      'Capabilities recomendadas',
+      'Autonomía default',
+      'Criterios de éxito',
+    ])
+    expect(labels.some((label) => label.includes('JSON'))).toBe(false)
+    expect(labels).not.toContain('Job Role ID')
+    expect(labels).not.toContain('Slug')
+
+    await props.dataSource.create({
+      name: 'Medical Case Assistant',
+      description: 'Clinical support role',
+      mission: 'Support medical review without autonomous diagnosis',
+      responsibilities: 'Resumir historia clínica\nDetectar señales de alarma, inconsistencias y datos faltantes',
+      recommended_capabilities: 'medical.records.read, medical.summary.generate',
+      default_autonomy_level: 'A1',
+      success_criteria: 'evidencia preparada\nrevisión humana requerida',
     })
 
-    expect(body.metadata).toEqual({ job_role_id: 'billing-specialist' })
-    expect(body.capabilities).toEqual([])
+    expect(upsertJobRole).toHaveBeenCalledWith(
+      'org-a',
+      'medical-case-assistant',
+      expect.objectContaining({
+        name: 'Medical Case Assistant',
+        slug: 'medical-case-assistant',
+        responsibilities: [
+          { title: 'Resumir historia clínica', description: '', expected_outcome: '', priority: 1 },
+          { title: 'Detectar señales de alarma, inconsistencias y datos faltantes', description: '', expected_outcome: '', priority: 2 },
+        ],
+        recommended_capabilities: ['medical.records.read', 'medical.summary.generate'],
+        default_autonomy_level: 'A1',
+        success_criteria: ['evidencia preparada', 'revisión humana requerida'],
+        default_sla_policy: {},
+        default_memory_policy: {},
+        metadata: {},
+      }),
+      'tenant-a',
+    )
+  })
+
+  it('shows public Employee handoffs without agent fields', async () => {
+    crudPageProps.length = 0
+
+    render(<AgentsControlCenter orgId="org-a" tenantId="tenant-a" productSurface="medmory" />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Handoffs' }))
+
+    await waitFor(() => {
+      expect(crudPageProps.at(-1)?.labelPluralCap).toBe('Handoffs')
+    })
+    const props = crudPageProps.at(-1) as {
+      formFields: Array<{ key: string; label: string }>
+      columns: Array<{ header?: string }>
+    }
+    expect(props.formFields.map((field) => field.key)).toEqual([
+      'task_id',
+      'from_employee_id',
+      'to_employee_id',
+      'reason',
+      'status',
+    ])
+    expect(props.formFields.map((field) => field.key)).not.toContain('from_agent_id')
+    expect(props.formFields.map((field) => field.key)).not.toContain('to_agent_id')
+    expect(props.columns.map((column) => column.header)).toEqual(expect.arrayContaining(['Desde', 'Hacia']))
   })
 })

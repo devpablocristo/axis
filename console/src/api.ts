@@ -65,14 +65,21 @@ export type AxisUserView = {
 
 export type AxisAgentView = {
   id: string
-  org_id: string
+  employee_id?: string
+  tenant_id?: string
+  org_id?: string
   name: string
-  profile: string
-  autonomy: 'A1' | 'A2' | 'A3'
-  memory_enabled: boolean
-  description: string
-  capabilities: string[]
-  tools: string[]
+  supervisor_user_id?: string
+  job_role_id?: string
+  profile_id?: string
+  profile?: string
+  autonomy: 'A0' | 'A1' | 'A2' | 'A3' | 'A4' | 'A5'
+  memory_id?: string | null
+  memory_enabled?: boolean
+  capability_ids?: string[]
+  capabilities?: string[]
+  tools?: string[]
+  description?: string
   status: string
   source_system?: string
   source_org_id?: string
@@ -89,19 +96,22 @@ export type AxisAgentView = {
   updated_at?: string
 }
 
-export type AxisAgentProfileView = {
+export type AxisEmployeeProfileView = {
   id?: string
   profile_id: string
+  profile_key?: string
   family_id: string
   version_label: string
   name: string
   description?: string
   system_prompt?: string
   max_autonomy: string
+  default_capability_ids?: string[]
   allowed_tools?: string[]
   allowed_capabilities?: string[]
   memory_policy?: Record<string, unknown>
   llm_config?: Record<string, unknown>
+  status?: string
   enabled: boolean
   archived_at?: string
   trashed_at?: string
@@ -126,6 +136,7 @@ export type AxisJobRoleView = {
   description?: string
   mission?: string
   responsibilities?: AxisJobRoleResponsibility[]
+  recommended_capability_ids?: string[]
   recommended_capabilities?: string[]
   default_autonomy_level: string
   default_permission_bundle_id?: string
@@ -139,6 +150,56 @@ export type AxisJobRoleView = {
   updated_at?: string
   archived_at?: string
   version?: number
+}
+
+export async function listVirtualEmployees(orgId: string, lifecycle: 'active' | 'archived' | 'trashed' | 'all' = 'active', tenantId?: string): Promise<AxisAgentView[]> {
+  const payload = await axisFetch<{ virtual_employees?: AxisAgentView[]; data?: AxisAgentView[]; items?: AxisAgentView[] }>(
+    `/api/virtual-employees?lifecycle=${encodeURIComponent(lifecycle)}`,
+    orgId,
+    { tenantId },
+  )
+  return (payload.virtual_employees ?? payload.data ?? payload.items ?? []).map(normalizeVirtualEmployee)
+}
+
+export async function createVirtualEmployee(orgId: string, input: Partial<AxisAgentView>, tenantId?: string): Promise<AxisAgentView> {
+  const payload = await axisFetch<AxisAgentView>('/api/virtual-employees', orgId, {
+    method: 'POST',
+    tenantId,
+    body: JSON.stringify(input),
+  })
+  return normalizeVirtualEmployee(payload)
+}
+
+export async function updateVirtualEmployee(orgId: string, employeeId: string, input: Partial<AxisAgentView>, tenantId?: string): Promise<AxisAgentView> {
+  const payload = await axisFetch<AxisAgentView>(`/api/virtual-employees/${encodeURIComponent(employeeId)}`, orgId, {
+    method: 'PATCH',
+    tenantId,
+    body: JSON.stringify(input),
+  })
+  return normalizeVirtualEmployee(payload)
+}
+
+export async function setVirtualEmployeeStatus(orgId: string, employeeId: string, status: string, tenantId?: string): Promise<AxisAgentView> {
+  const payload = await axisFetch<AxisAgentView>(`/api/virtual-employees/${encodeURIComponent(employeeId)}/status`, orgId, {
+    method: 'POST',
+    tenantId,
+    body: JSON.stringify({ status }),
+  })
+  return normalizeVirtualEmployee(payload)
+}
+
+function normalizeVirtualEmployee(employee: AxisAgentView): AxisAgentView {
+  const employeeId = employee.employee_id || employee.id
+  return {
+    ...employee,
+    id: employeeId,
+    employee_id: employeeId,
+    profile: employee.profile || employee.profile_id || '',
+    capabilities: employee.capabilities ?? employee.capability_ids ?? [],
+    tools: employee.tools ?? [],
+    memory_enabled: Boolean(employee.memory_id || employee.memory_enabled),
+    description: employee.description ?? '',
+  }
 }
 
 export type ServiceHealth = {
@@ -300,9 +361,19 @@ export type CompanionAgent = {
 
 export type CapabilityRecord = {
   id: string
+  capability_id?: string
+  capability_key?: string
+  name?: string
+  description?: string
+  version?: string
+  product_id?: string
+  product_surface?: string
+  tool_id?: string | null
+  mode?: string
+  risk_class?: string
   status: string
-  source: string
-  manifest: {
+  source?: string
+  manifest?: {
     capability_id: string
     product_surface?: string
     version: string
@@ -314,6 +385,18 @@ export type CapabilityRecord = {
     cost_class: string
   }
   updated_at?: string
+}
+
+export type ToolRecord = {
+  tool_id: string
+  tool_key: string
+  name: string
+  description?: string
+  connector_id?: string | null
+  product_surface?: string
+  operation?: string
+  side_effect?: boolean
+  status: string
 }
 
 export type MemoryConflict = {
@@ -496,62 +579,130 @@ export async function listIAMTenants(orgId: string, view = 'active', tenantId?: 
   return payload.items ?? []
 }
 
-export type AgentProfileLifecycle = 'active' | 'archived' | 'trash' | 'all'
+export type EmployeeProfileLifecycle = 'active' | 'archived' | 'trash' | 'all'
 
-export async function listAgentProfiles(
+export async function listEmployeeProfiles(
   orgId: string,
-  lifecycleOrIncludeArchived: AgentProfileLifecycle | boolean = 'active',
+  lifecycleOrIncludeArchived: EmployeeProfileLifecycle | boolean = 'active',
   tenantId?: string,
-): Promise<AxisAgentProfileView[]> {
+): Promise<AxisEmployeeProfileView[]> {
   const suffix = typeof lifecycleOrIncludeArchived === 'boolean'
     ? (lifecycleOrIncludeArchived ? '?include_archived=true' : '')
     : `?lifecycle=${encodeURIComponent(lifecycleOrIncludeArchived)}`
-  const payload = await axisFetch<{ profiles: AxisAgentProfileView[] }>(`/api/agent-profiles${suffix}`, orgId, { tenantId })
-  return payload.profiles ?? []
+  const payload = await axisFetch<{ employee_profiles?: AxisEmployeeProfileView[]; profiles?: AxisEmployeeProfileView[] }>(`/api/employee-profiles${suffix}`, orgId, { tenantId })
+  return payload.employee_profiles ?? payload.profiles ?? []
 }
 
-export async function upsertAgentProfile(
+export async function createEmployeeProfile(
   orgId: string,
-  profileId: string,
-  input: Partial<AxisAgentProfileView>,
+  input: Partial<AxisEmployeeProfileView>,
   tenantId?: string,
-): Promise<AxisAgentProfileView> {
-  return axisFetch<AxisAgentProfileView>(`/api/agent-profiles/${encodeURIComponent(profileId)}`, orgId, {
-    method: 'PUT',
+): Promise<AxisEmployeeProfileView> {
+  return axisFetch<AxisEmployeeProfileView>('/api/employee-profiles', orgId, {
+    method: 'POST',
     tenantId,
     body: JSON.stringify(input),
   })
 }
 
-export async function archiveAgentProfile(orgId: string, profileId: string, tenantId?: string): Promise<AxisAgentProfileView> {
-  return axisFetch<AxisAgentProfileView>(`/api/agent-profiles/${encodeURIComponent(profileId)}/archive`, orgId, {
+export async function updateEmployeeProfile(
+  orgId: string,
+  profileId: string,
+  input: Partial<AxisEmployeeProfileView>,
+  tenantId?: string,
+): Promise<AxisEmployeeProfileView> {
+  return axisFetch<AxisEmployeeProfileView>(`/api/employee-profiles/${encodeURIComponent(profileId)}`, orgId, {
+    method: 'PATCH',
+    tenantId,
+    body: JSON.stringify(input),
+  })
+}
+
+export async function archiveEmployeeProfile(orgId: string, profileId: string, tenantId?: string): Promise<AxisEmployeeProfileView> {
+  return axisFetch<AxisEmployeeProfileView>(`/api/employee-profiles/${encodeURIComponent(profileId)}/archive`, orgId, {
     method: 'POST',
     tenantId,
     body: '{}',
   })
 }
 
-export async function trashAgentProfile(orgId: string, profileId: string, tenantId?: string): Promise<AxisAgentProfileView> {
-  return axisFetch<AxisAgentProfileView>(`/api/agent-profiles/${encodeURIComponent(profileId)}/trash`, orgId, {
+export async function trashEmployeeProfile(orgId: string, profileId: string, tenantId?: string): Promise<AxisEmployeeProfileView> {
+  return axisFetch<AxisEmployeeProfileView>(`/api/employee-profiles/${encodeURIComponent(profileId)}/trash`, orgId, {
     method: 'POST',
     tenantId,
     body: '{}',
   })
 }
 
-export async function restoreAgentProfile(orgId: string, profileId: string, tenantId?: string): Promise<AxisAgentProfileView> {
-  return axisFetch<AxisAgentProfileView>(`/api/agent-profiles/${encodeURIComponent(profileId)}/restore`, orgId, {
+export async function restoreEmployeeProfile(orgId: string, profileId: string, tenantId?: string): Promise<AxisEmployeeProfileView> {
+  return axisFetch<AxisEmployeeProfileView>(`/api/employee-profiles/${encodeURIComponent(profileId)}/restore`, orgId, {
     method: 'POST',
     tenantId,
     body: '{}',
   })
 }
 
-export async function purgeAgentProfile(orgId: string, profileId: string, tenantId?: string): Promise<void> {
-  await axisFetch<void>(`/api/agent-profiles/${encodeURIComponent(profileId)}/purge`, orgId, {
+export async function purgeEmployeeProfile(orgId: string, profileId: string, tenantId?: string): Promise<void> {
+  await axisFetch<void>(`/api/employee-profiles/${encodeURIComponent(profileId)}/purge`, orgId, {
     method: 'DELETE',
     tenantId,
   })
+}
+
+export type AxisHandoffView = {
+  handoff_id: string
+  tenant_id: string
+  task_id?: string | null
+  from_employee_id?: string | null
+  to_employee_id: string
+  reason: string
+  status: 'pending' | 'accepted' | 'rejected' | 'cancelled'
+  created_by?: string
+  created_at?: string
+  updated_at?: string
+  resolved_at?: string | null
+}
+
+export async function listHandoffs(orgId: string, status = '', tenantId?: string): Promise<AxisHandoffView[]> {
+  const suffix = status ? `?status=${encodeURIComponent(status)}` : ''
+  const payload = await axisFetch<{ handoffs?: AxisHandoffView[]; data?: AxisHandoffView[] }>(`/api/handoffs${suffix}`, orgId, { tenantId })
+  return payload.handoffs ?? payload.data ?? []
+}
+
+export async function createHandoff(orgId: string, input: Partial<AxisHandoffView>, tenantId?: string): Promise<AxisHandoffView> {
+  return axisFetch<AxisHandoffView>('/api/handoffs', orgId, {
+    method: 'POST',
+    tenantId,
+    body: JSON.stringify(input),
+  })
+}
+
+export async function updateHandoff(orgId: string, handoffId: string, input: Partial<AxisHandoffView>, tenantId?: string): Promise<AxisHandoffView> {
+  return axisFetch<AxisHandoffView>(`/api/handoffs/${encodeURIComponent(handoffId)}`, orgId, {
+    method: 'PATCH',
+    tenantId,
+    body: JSON.stringify(input),
+  })
+}
+
+export type AxisAuditEventView = {
+  audit_event_id: string
+  tenant_id: string
+  actor_user_id?: string | null
+  resource_type: string
+  resource_id: string
+  action: string
+  occurred_at: string
+}
+
+export async function listAuditEvents(orgId: string, query: { resource_type?: string; resource_id?: string; limit?: number } = {}, tenantId?: string): Promise<AxisAuditEventView[]> {
+  const params = new URLSearchParams()
+  if (query.resource_type) params.set('resource_type', query.resource_type)
+  if (query.resource_id) params.set('resource_id', query.resource_id)
+  if (query.limit) params.set('limit', String(query.limit))
+  const suffix = params.toString() ? `?${params}` : ''
+  const payload = await axisFetch<{ audit_events?: AxisAuditEventView[]; data?: AxisAuditEventView[] }>(`/api/audit-events${suffix}`, orgId, { tenantId })
+  return payload.audit_events ?? payload.data ?? []
 }
 
 export type JobRoleLifecycle = 'active' | 'archived' | 'all'

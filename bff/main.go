@@ -172,8 +172,8 @@ func (s *server) routes() http.Handler {
 	mux.Handle("GET /api/services", s.withAuth(http.HandlerFunc(s.services)))
 	mux.Handle("/api/iam/", s.withAuth(http.HandlerFunc(s.iamAPI)))
 	mux.Handle("/api/control/", s.withAuth(http.HandlerFunc(s.controlAPI)))
-	mux.Handle("/api/agent-profiles", s.withAuth(http.HandlerFunc(s.agentProfilesAPI)))
-	mux.Handle("/api/agent-profiles/", s.withAuth(http.HandlerFunc(s.agentProfilesAPI)))
+	mux.Handle("/api/employee-profiles", s.withAuth(http.HandlerFunc(s.employeeProfilesAPI)))
+	mux.Handle("/api/employee-profiles/", s.withAuth(http.HandlerFunc(s.employeeProfilesAPI)))
 	mux.Handle("/api/prompts/", s.withAuth(http.HandlerFunc(s.promptsAPI)))
 	mux.Handle("/api/agents", s.withAuth(http.HandlerFunc(s.agentsAPI)))
 	mux.Handle("/api/agents/", s.withAuth(http.HandlerFunc(s.agentsAPI)))
@@ -181,6 +181,15 @@ func (s *server) routes() http.Handler {
 	mux.Handle("/api/virtual-employees/", s.withAuth(http.HandlerFunc(s.virtualEmployeesAPI)))
 	mux.Handle("/api/job-roles", s.withAuth(http.HandlerFunc(s.jobRolesAPI)))
 	mux.Handle("/api/job-roles/", s.withAuth(http.HandlerFunc(s.jobRolesAPI)))
+	mux.Handle("/api/capabilities", s.withAuth(http.HandlerFunc(s.capabilitiesAPI)))
+	mux.Handle("/api/capabilities/", s.withAuth(http.HandlerFunc(s.capabilitiesAPI)))
+	mux.Handle("/api/tools", s.withAuth(http.HandlerFunc(s.toolsAPI)))
+	mux.Handle("/api/tools/", s.withAuth(http.HandlerFunc(s.toolsAPI)))
+	mux.Handle("/api/memories", s.withAuth(http.HandlerFunc(s.memoriesAPI)))
+	mux.Handle("/api/memories/", s.withAuth(http.HandlerFunc(s.memoriesAPI)))
+	mux.Handle("/api/handoffs", s.withAuth(http.HandlerFunc(s.handoffsAPI)))
+	mux.Handle("/api/handoffs/", s.withAuth(http.HandlerFunc(s.handoffsAPI)))
+	mux.Handle("/api/audit-events", s.withAuth(http.HandlerFunc(s.auditEventsAPI)))
 	mux.HandleFunc("POST /api/webhooks/clerk", s.clerkWebhook)
 	mux.Handle("/api/companion/", s.withAuth(s.proxy("companion", "/api/companion", s.cfg.CompanionBaseURL, s.cfg.CompanionAudience)))
 	mux.Handle("/api/nexus/", s.withAuth(s.proxy("nexus", "/api/nexus", s.cfg.NexusBaseURL, s.cfg.NexusAudience)))
@@ -673,6 +682,9 @@ func defaultAdminScopes() []string {
 		"axis:agents:read",
 		"axis:agents:write",
 		"axis:agents:admin",
+		"axis:virtual_employees:read",
+		"axis:virtual_employees:write",
+		"axis:virtual_employees:admin",
 		"axis:iam:purge",
 		"companion:cross_org",
 		"companion:runtime:admin",
@@ -691,8 +703,9 @@ func defaultAdminScopes() []string {
 		"companion:products:admin",
 		"companion:assist:read",
 		"companion:assist:write",
-		"companion:agent_profiles:read",
-		"companion:agent_profiles:admin",
+		"companion:employee_profiles:read",
+		"companion:employee_profiles:admin",
+		"companion:audit:read",
 		"companion:observability:read",
 		"companion:costs:read",
 		"companion:evals:admin",

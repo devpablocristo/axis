@@ -17,15 +17,18 @@ import (
 	"github.com/devpablocristo/companion/internal/agentfleet"
 	"github.com/devpablocristo/companion/internal/agentprofiles"
 	"github.com/devpablocristo/companion/internal/assist"
+	commonaudit "github.com/devpablocristo/companion/internal/audit"
 	"github.com/devpablocristo/companion/internal/business"
 	"github.com/devpablocristo/companion/internal/capabilities"
 	"github.com/devpablocristo/companion/internal/connectors"
 	"github.com/devpablocristo/companion/internal/connectors/registry"
 	connectordomain "github.com/devpablocristo/companion/internal/connectors/usecases/domain"
+	"github.com/devpablocristo/companion/internal/handoffs"
 	"github.com/devpablocristo/companion/internal/jobroles"
 	"github.com/devpablocristo/companion/internal/jobs"
 	"github.com/devpablocristo/companion/internal/mcpgovernance"
 	"github.com/devpablocristo/companion/internal/mcpserver"
+	"github.com/devpablocristo/companion/internal/memories"
 	"github.com/devpablocristo/companion/internal/memory"
 	nexusassist "github.com/devpablocristo/companion/internal/nexus_assist"
 	"github.com/devpablocristo/companion/internal/ops"
@@ -35,6 +38,7 @@ import (
 	"github.com/devpablocristo/companion/internal/secrets"
 	"github.com/devpablocristo/companion/internal/securityevals"
 	"github.com/devpablocristo/companion/internal/tasks"
+	"github.com/devpablocristo/companion/internal/virtualemployees"
 	"github.com/devpablocristo/companion/internal/watchers"
 	"github.com/devpablocristo/companion/internal/watchers/pymesclient"
 	"github.com/devpablocristo/platform/authn/go/internaljwt"
@@ -64,6 +68,10 @@ type taskOrgGetter struct {
 
 type agentRuntimeResolver struct {
 	uc *agentfleet.Usecases
+}
+
+type employeeRuntimeResolver struct {
+	uc *virtualemployees.Usecases
 }
 
 type agentProfileRuntimeResolver struct {
@@ -200,6 +208,33 @@ func (r agentRuntimeResolver) ResolveRuntimeAgent(ctx context.Context, orgID, pr
 		Limits:              agent.Limits,
 		SLA:                 agent.SLA,
 		Version:             agent.Version,
+	}, nil
+}
+
+func (r employeeRuntimeResolver) ResolveRuntimeEmployee(ctx context.Context, tenantID, orgID, productSurface, employeeID string) (runtime.RuntimeEmployeeConfig, error) {
+	employee, err := r.uc.GetEmployee(ctx, tenantID, orgID, productSurface, employeeID)
+	if err != nil {
+		return runtime.RuntimeEmployeeConfig{}, err
+	}
+	capabilityIDs := make([]string, 0, len(employee.CapabilityIDs))
+	for _, id := range employee.CapabilityIDs {
+		if id != uuid.Nil {
+			capabilityIDs = append(capabilityIDs, id.String())
+		}
+	}
+	memoryID := ""
+	if employee.MemoryID != nil && *employee.MemoryID != uuid.Nil {
+		memoryID = employee.MemoryID.String()
+	}
+	return runtime.RuntimeEmployeeConfig{
+		EmployeeID:    employee.EmployeeID.String(),
+		TenantID:      employee.TenantID.String(),
+		Name:          employee.Name,
+		Status:        string(employee.Status),
+		ProfileID:     employee.ProfileID.String(),
+		Autonomy:      runtime.AutonomyLevel(employee.Autonomy),
+		CapabilityIDs: capabilityIDs,
+		MemoryID:      memoryID,
 	}, nil
 }
 
@@ -623,6 +658,8 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	})
 	connUC := connectors.NewUsecases(connRepo, connReg, nexusChecker)
 	connHandler := connectors.NewHandler(connUC)
+	auditRepo := commonaudit.NewPostgresRepository(db)
+	auditHandler := commonaudit.NewHandler(auditRepo)
 
 	repo := tasks.NewPostgresRepository(db)
 	uc := tasks.NewUsecases(repo, nexusGateway)
@@ -653,6 +690,10 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	}
 	memUC := memory.NewUsecases(memRepo).WithEmbeddingProvider(embeddingProvider).WithVectorStore(memory.NewPostgresVectorStore(db))
 	memHandler := memory.NewHandler(memUC, taskOrgGetter{repo: repo})
+	memoryContainerRepo := memories.NewPostgresRepository(db)
+	memoryContainerRepo.SetAuditRecorder(auditRepo)
+	memoryContainerUC := memories.NewUsecases(memoryContainerRepo)
+	memoryContainerHandler := memories.NewHandler(memoryContainerUC)
 	businessRepo := business.NewPostgresRepository(db)
 	businessUC := business.NewUsecases(businessRepo).WithMemoryProjector(businessMemoryProjector{uc: memUC})
 	businessHandler := business.NewHandler(businessUC)
@@ -681,8 +722,17 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	agentProfileUC := agentprofiles.NewUsecases(agentProfileRepo)
 	agentProfileHandler := agentprofiles.NewHandler(agentProfileUC)
 	jobRoleRepo := jobroles.NewPostgresRepository(db)
+	jobRoleRepo.SetAuditRecorder(auditRepo)
 	jobRoleUC := jobroles.NewUsecases(jobRoleRepo)
 	jobRoleHandler := jobroles.NewHandler(jobRoleUC)
+	virtualEmployeeRepo := virtualemployees.NewPostgresRepository(db)
+	virtualEmployeeRepo.SetAuditRecorder(auditRepo)
+	virtualEmployeeUC := virtualemployees.NewUsecases(virtualEmployeeRepo)
+	virtualEmployeeHandler := virtualemployees.NewHandler(virtualEmployeeUC)
+	handoffRepo := handoffs.NewPostgresRepository(db)
+	handoffRepo.SetAuditRecorder(auditRepo)
+	handoffUC := handoffs.NewUsecases(handoffRepo)
+	handoffHandler := handoffs.NewHandler(handoffUC)
 	agentUC := agentfleet.NewUsecases(agentRepo).
 		WithTaskOwnership(taskOwnershipAdapter{repo: repo}).
 		WithProfileChecker(profileCheckerAdapter{repo: agentProfileRepo})
@@ -770,6 +820,7 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	orchestrator.SetCostLedger(observabilityRepo)
 	orchestrator.SetRuntimeControls(runtimeControlsRepo)
 	orchestrator.SetAgentResolver(agentRuntimeResolver{uc: agentUC})
+	orchestrator.SetEmployeeResolver(employeeRuntimeResolver{uc: virtualEmployeeUC})
 	orchestrator.SetAgentProfileResolver(agentProfileRuntimeResolver{uc: agentProfileUC})
 	orchestrator.SetProductInstallationGuard(productGuard)
 	orchestrator.SetRateLimiter(productRateLimiter)
@@ -837,7 +888,7 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	})
 
 	assistRepo := assist.NewPostgresRepository(db)
-	assistUC, err := assist.NewUsecases(assistRepo, llmProvider, assist.NewPostgresLifecycleAudit(db))
+	assistUC, err := assist.NewUsecases(assistRepo, llmProvider, auditRepo)
 	if err != nil {
 		return nil, nil, fmt.Errorf("build assist usecases: %w", err)
 	}
@@ -850,9 +901,12 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	h.Register(mux)
 	watcherHandler.Register(mux)
 	memHandler.Register(mux)
+	memoryContainerHandler.Register(mux)
 	businessHandler.Register(mux)
 	productHandler.Register(mux)
 	agentHandler.Register(mux)
+	virtualEmployeeHandler.Register(mux)
+	handoffHandler.Register(mux)
 	agentProfileHandler.Register(mux)
 	jobRoleHandler.Register(mux)
 	chatHandler.Register(mux)
@@ -866,6 +920,7 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	jobHandler.Register(mux)
 	nexusAssistHandler.Register(mux)
 	mcpHandler.Register(mux)
+	auditHandler.Register(mux)
 	assistHandler.Register(mux)
 
 	// Seed conectores por defecto

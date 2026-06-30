@@ -12,14 +12,14 @@ import (
 	authn "github.com/devpablocristo/platform/authn/go"
 )
 
-func (s *server) agentProfilesAPI(w http.ResponseWriter, r *http.Request) {
+func (s *server) employeeProfilesAPI(w http.ResponseWriter, r *http.Request) {
 	p := principalFromContext(r.Context())
-	parts, err := agentProfileRouteParts(r.URL.Path)
+	parts, err := employeeProfileRouteParts(r.URL.Path)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "VALIDATION", "invalid agent profile path")
+		writeError(w, http.StatusBadRequest, "VALIDATION", "invalid employee profile path")
 		return
 	}
-	companionMethod, companionPath, requiredScopes, ok := agentProfileRoute(r.Method, parts)
+	companionMethod, companionPath, requiredScopes, ok := employeeProfileRoute(r.Method, parts)
 	if !ok {
 		http.NotFound(w, r)
 		return
@@ -33,7 +33,7 @@ func (s *server) agentProfilesAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body io.Reader
-	if r.Body != nil && (r.Method == http.MethodPut || r.Method == http.MethodPost) {
+	if r.Body != nil && (r.Method == http.MethodPatch || r.Method == http.MethodPost) {
 		raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "VALIDATION", "invalid request body")
@@ -41,10 +41,10 @@ func (s *server) agentProfilesAPI(w http.ResponseWriter, r *http.Request) {
 		}
 		body = bytes.NewReader(raw)
 	}
-	s.forwardAgentProfileRequest(w, r, p, orgID, productSurface, tenantID, scopes, companionMethod, companionPath, body)
+	s.forwardEmployeeProfileRequest(w, r, p, orgID, productSurface, tenantID, scopes, companionMethod, companionPath, body)
 }
 
-func (s *server) forwardAgentProfileRequest(w http.ResponseWriter, r *http.Request, p authn.Principal, orgID string, productSurface string, tenantID string, scopes []string, method string, companionPath string, body io.Reader) {
+func (s *server) forwardEmployeeProfileRequest(w http.ResponseWriter, r *http.Request, p authn.Principal, orgID string, productSurface string, tenantID string, scopes []string, method string, companionPath string, body io.Reader) {
 	target, err := url.Parse(s.cfg.CompanionBaseURL)
 	if err != nil {
 		writeLoggedError(w, http.StatusInternalServerError, "COMPANION_URL_INVALID", "companion URL is invalid", err)
@@ -82,27 +82,32 @@ func (s *server) forwardAgentProfileRequest(w http.ResponseWriter, r *http.Reque
 	_, _ = io.Copy(w, resp.Body)
 }
 
-func agentProfileRoute(method string, parts []string) (string, string, []string, bool) {
-	readScopes := []string{"companion:agent_profiles:read", "companion:agent_profiles:admin", "companion:runtime:admin"}
-	writeScopes := []string{"companion:agent_profiles:admin", "companion:runtime:admin"}
-	if len(parts) == 0 && method == http.MethodGet {
-		return http.MethodGet, "/v1/agent-profiles", readScopes, true
+func employeeProfileRoute(method string, parts []string) (string, string, []string, bool) {
+	readScopes := []string{"companion:employee_profiles:read", "companion:employee_profiles:admin", "companion:runtime:admin"}
+	writeScopes := []string{"companion:employee_profiles:admin", "companion:runtime:admin"}
+	if len(parts) == 0 {
+		switch method {
+		case http.MethodGet:
+			return http.MethodGet, "/v1/employee-profiles", readScopes, true
+		case http.MethodPost:
+			return http.MethodPost, "/v1/employee-profiles", writeScopes, true
+		}
 	}
 	if len(parts) == 1 {
-		profilePath := "/v1/agent-profiles/" + url.PathEscape(parts[0])
+		profilePath := "/v1/employee-profiles/" + url.PathEscape(parts[0])
 		switch method {
 		case http.MethodGet:
 			return http.MethodGet, profilePath, readScopes, true
-		case http.MethodPut:
-			return http.MethodPut, profilePath, writeScopes, true
+		case http.MethodPatch:
+			return http.MethodPatch, profilePath, writeScopes, true
 		}
 	}
 	if len(parts) == 2 {
-		profilePath := "/v1/agent-profiles/" + url.PathEscape(parts[0])
+		profilePath := "/v1/employee-profiles/" + url.PathEscape(parts[0])
 		switch {
 		case method == http.MethodGet && parts[1] == "versions":
 			return http.MethodGet, profilePath + "/versions", readScopes, true
-		case method == http.MethodPost && (parts[1] == "archive" || parts[1] == "restore" || parts[1] == "trash"):
+		case method == http.MethodPost && (parts[1] == "status" || parts[1] == "archive" || parts[1] == "restore" || parts[1] == "trash"):
 			return http.MethodPost, profilePath + "/" + parts[1], writeScopes, true
 		case method == http.MethodDelete && parts[1] == "purge":
 			return http.MethodDelete, profilePath + "/purge", writeScopes, true
@@ -111,8 +116,12 @@ func agentProfileRoute(method string, parts []string) (string, string, []string,
 	return "", "", nil, false
 }
 
-func agentProfileRouteParts(path string) ([]string, error) {
-	path = strings.TrimPrefix(path, "/api/agent-profiles")
+func employeeProfileRouteParts(path string) ([]string, error) {
+	path = strings.TrimPrefix(path, "/api/employee-profiles")
+	return profileRouteParts(path, "employee profile")
+}
+
+func profileRouteParts(path string, resource string) ([]string, error) {
 	path = strings.Trim(path, "/")
 	if path == "" {
 		return nil, nil
@@ -125,7 +134,7 @@ func agentProfileRouteParts(path string) ([]string, error) {
 			return nil, err
 		}
 		if strings.TrimSpace(decoded) == "" {
-			return nil, fmt.Errorf("empty agent profile path segment")
+			return nil, fmt.Errorf("empty %s path segment", resource)
 		}
 		parts = append(parts, decoded)
 	}

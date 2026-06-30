@@ -111,23 +111,21 @@ por la tool, consultar `GET /v1/requests/{request_id}` en Nexus, buscar el
 evento `mcp/mcp_tool_call` en observability y, si hubo bloqueo operativo,
 confirmar la alerta derivada en `GET /v1/ops/alerts`.
 
-## Agent Fleet
+## modulo tecnico de agents
 
 Para operacion de producto nueva, usar Virtual Employees como superficie
 publica:
 
 - `GET /v1/virtual-employees`: lista Virtual Employees de la customer org.
-- `PUT /v1/virtual-employees/{employee_id}`: crea o actualiza limites de un
+- `POST /v1/virtual-employees`: crea un Virtual Employee.
+- `PATCH /v1/virtual-employees/{employee_id}`: actualiza el core de un
   Virtual Employee.
-- `POST /v1/virtual-employees/{employee_id}/disable`: kill switch por Virtual
-  Employee.
-- `POST /v1/virtual-employees/handoffs`: registra handoff entre Virtual
-  Employees.
+- `POST /v1/virtual-employees/{employee_id}/status`: cambia su estado.
 
 Los endpoints de agents quedan como compatibilidad tecnica:
 
-- `GET /v1/agents`: lista empleados IA de la customer org.
-- `PUT /v1/agents/{agent_id}`: crea o actualiza límites de un empleado IA.
+- `GET /v1/agents`: lista agentes tecnicos de la customer org.
+- `PUT /v1/agents/{agent_id}`: crea o actualiza limites de un agente tecnico.
 - `POST /v1/agents/{agent_id}/disable`: kill switch por agente.
 - `POST /v1/agents/handoffs`: registra handoff entre agentes.
 

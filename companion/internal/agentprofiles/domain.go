@@ -50,6 +50,29 @@ type Profile struct {
 	UpdatedAt           time.Time      `json:"updated_at,omitempty"`
 }
 
+type EmployeeProfile struct {
+	ID                   uuid.UUID      `json:"id,omitempty"`
+	ProfileID            string         `json:"profile_id"`
+	ProfileKey           string         `json:"profile_key"`
+	FamilyID             string         `json:"family_id"`
+	VersionLabel         string         `json:"version_label"`
+	Name                 string         `json:"name"`
+	Description          string         `json:"description,omitempty"`
+	SystemPrompt         string         `json:"system_prompt"`
+	MaxAutonomy          string         `json:"max_autonomy"`
+	DefaultCapabilityIDs []string       `json:"default_capability_ids,omitempty"`
+	AllowedCapabilities  []string       `json:"allowed_capabilities,omitempty"`
+	AllowedTools         []string       `json:"allowed_tools,omitempty"`
+	MemoryPolicy         map[string]any `json:"memory_policy,omitempty"`
+	LLMConfig            map[string]any `json:"llm_config,omitempty"`
+	Status               string         `json:"status"`
+	Enabled              bool           `json:"enabled"`
+	ArchivedAt           *time.Time     `json:"archived_at,omitempty"`
+	TrashedAt            *time.Time     `json:"trashed_at,omitempty"`
+	CreatedAt            time.Time      `json:"created_at,omitempty"`
+	UpdatedAt            time.Time      `json:"updated_at,omitempty"`
+}
+
 type Version struct {
 	ID                  uuid.UUID      `json:"id,omitempty"`
 	AgentProfileID      uuid.UUID      `json:"agent_profile_id,omitempty"`
@@ -70,6 +93,47 @@ type Version struct {
 	OriginalCreatedAt   time.Time      `json:"original_created_at,omitempty"`
 	OriginalUpdatedAt   time.Time      `json:"original_updated_at,omitempty"`
 	SavedAt             time.Time      `json:"saved_at,omitempty"`
+}
+
+func employeeProfileFromProfile(profile Profile) EmployeeProfile {
+	profileID := profile.ProfileID
+	if profile.ID != uuid.Nil {
+		profileID = profile.ID.String()
+	}
+	return EmployeeProfile{
+		ID:                  profile.ID,
+		ProfileID:           profileID,
+		ProfileKey:          profile.ProfileID,
+		FamilyID:            profile.FamilyID,
+		VersionLabel:        profile.VersionLabel,
+		Name:                profile.Name,
+		Description:         profile.Description,
+		SystemPrompt:        profile.SystemPrompt,
+		MaxAutonomy:         profile.MaxAutonomy,
+		AllowedCapabilities: profile.AllowedCapabilities,
+		AllowedTools:        profile.AllowedTools,
+		MemoryPolicy:        profile.MemoryPolicy,
+		LLMConfig:           profile.LLMConfig,
+		Status:              employeeProfileStatus(profile),
+		Enabled:             profile.Enabled,
+		ArchivedAt:          profile.ArchivedAt,
+		TrashedAt:           profile.TrashedAt,
+		CreatedAt:           profile.CreatedAt,
+		UpdatedAt:           profile.UpdatedAt,
+	}
+}
+
+func employeeProfileStatus(profile Profile) string {
+	if profile.TrashedAt != nil {
+		return "trashed"
+	}
+	if profile.ArchivedAt != nil {
+		return "archived"
+	}
+	if !profile.Enabled {
+		return "disabled"
+	}
+	return "active"
 }
 
 func normalizeLifecycleView(value string, includeArchived bool) LifecycleView {

@@ -75,7 +75,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		OrgID:       orgID,
 		Name:        req.Name,
 		WatcherType: domain.WatcherType(req.WatcherType),
-		Config:      req.Config,
+		Config:      dto.WithConfigAssigneeEmployeeID(req.Config, req.AssigneeEmployeeID),
 		Enabled:     req.Enabled,
 	})
 	if err != nil {
@@ -175,6 +175,14 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Config != nil {
 		input.Config = req.Config
+	}
+	if req.AssigneeEmployeeID != nil {
+		config := watcher.Config
+		if input.Config != nil {
+			config = *input.Config
+		}
+		updated := dto.WithConfigAssigneeEmployeeID(config, *req.AssigneeEmployeeID)
+		input.Config = &updated
 	}
 
 	result, err := h.uc.Update(r.Context(), id, input)

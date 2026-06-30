@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 type fakeRepo struct {
@@ -43,26 +45,46 @@ func (f *fakeRepo) ListJobRoles(_ context.Context, orgID, productSurface string,
 }
 
 func (f *fakeRepo) GetJobRole(_ context.Context, orgID, productSurface, jobRoleID string) (JobRole, error) {
-	role, ok := f.roles[fakeKey(orgID, productSurface, jobRoleID)]
-	if !ok {
-		return JobRole{}, ErrNotFound
+	if role, ok := f.roles[fakeKey(orgID, productSurface, jobRoleID)]; ok {
+		return role, nil
 	}
-	return role, nil
+	for _, role := range f.roles {
+		if role.OrgID == orgID && role.ProductSurface == productSurface && role.JobRoleID == jobRoleID {
+			return role, nil
+		}
+	}
+	return JobRole{}, ErrNotFound
 }
 
 func (f *fakeRepo) UpsertJobRole(_ context.Context, role JobRole) (JobRole, error) {
+	role = normalizeJobRole(role)
+	storageKey := role.JobRoleKey
+	if storageKey == "" {
+		storageKey = role.JobRoleID
+		if _, err := uuid.Parse(storageKey); err == nil {
+			storageKey = ""
+		}
+	}
+	if storageKey == "" {
+		storageKey = role.Slug
+	}
 	for _, existing := range f.roles {
-		if existing.OrgID == role.OrgID && existing.ProductSurface == role.ProductSurface && existing.JobRoleID != role.JobRoleID && existing.Slug == role.Slug {
+		if existing.OrgID == role.OrgID && existing.ProductSurface == role.ProductSurface && existing.JobRoleKey != storageKey && existing.Slug == role.Slug {
 			return JobRole{}, ErrConflict
 		}
 	}
-	if existing, ok := f.roles[fakeKey(role.OrgID, role.ProductSurface, role.JobRoleID)]; ok {
+	if existing, ok := f.roles[fakeKey(role.OrgID, role.ProductSurface, storageKey)]; ok {
 		role.Version = existing.Version + 1
+		role.ID = existing.ID
+		role.JobRoleID = existing.JobRoleID
 	} else {
 		role.Version = 1
+		role.ID = uuid.New()
+		role.JobRoleID = role.ID.String()
 	}
-	f.roles[fakeKey(role.OrgID, role.ProductSurface, role.JobRoleID)] = role
-	f.versions[fakeKey(role.OrgID, role.ProductSurface, role.JobRoleID)] = append(f.versions[fakeKey(role.OrgID, role.ProductSurface, role.JobRoleID)], Version{
+	role.JobRoleKey = storageKey
+	f.roles[fakeKey(role.OrgID, role.ProductSurface, storageKey)] = role
+	f.versions[fakeKey(role.OrgID, role.ProductSurface, storageKey)] = append(f.versions[fakeKey(role.OrgID, role.ProductSurface, storageKey)], Version{
 		JobRoleID:      role.JobRoleID,
 		OrgID:          role.OrgID,
 		ProductSurface: role.ProductSurface,
@@ -74,7 +96,7 @@ func (f *fakeRepo) UpsertJobRole(_ context.Context, role JobRole) (JobRole, erro
 }
 
 func (f *fakeRepo) ArchiveJobRole(_ context.Context, orgID, productSurface, jobRoleID, actorID string) (JobRole, error) {
-	role, ok := f.roles[fakeKey(orgID, productSurface, jobRoleID)]
+	role, key, ok := f.getRoleWithKey(orgID, productSurface, jobRoleID)
 	if !ok {
 		return JobRole{}, ErrNotFound
 	}
@@ -85,15 +107,15 @@ func (f *fakeRepo) ArchiveJobRole(_ context.Context, orgID, productSurface, jobR
 	role.Status = "archived"
 	role.ArchivedAt = &now
 	role.Version++
-	f.roles[fakeKey(orgID, productSurface, jobRoleID)] = role
-	f.versions[fakeKey(orgID, productSurface, jobRoleID)] = append(f.versions[fakeKey(orgID, productSurface, jobRoleID)], Version{
-		JobRoleID: jobRoleID, OrgID: orgID, ProductSurface: productSurface, Version: role.Version, Action: "archive", ChangedBy: actorID, Role: role,
+	f.roles[key] = role
+	f.versions[key] = append(f.versions[key], Version{
+		JobRoleID: role.JobRoleID, OrgID: orgID, ProductSurface: productSurface, Version: role.Version, Action: "archive", ChangedBy: actorID, Role: role,
 	})
 	return role, nil
 }
 
 func (f *fakeRepo) RestoreJobRole(_ context.Context, orgID, productSurface, jobRoleID, actorID string) (JobRole, error) {
-	role, ok := f.roles[fakeKey(orgID, productSurface, jobRoleID)]
+	role, key, ok := f.getRoleWithKey(orgID, productSurface, jobRoleID)
 	if !ok {
 		return JobRole{}, ErrNotFound
 	}
@@ -103,15 +125,31 @@ func (f *fakeRepo) RestoreJobRole(_ context.Context, orgID, productSurface, jobR
 	role.Status = "active"
 	role.ArchivedAt = nil
 	role.Version++
-	f.roles[fakeKey(orgID, productSurface, jobRoleID)] = role
-	f.versions[fakeKey(orgID, productSurface, jobRoleID)] = append(f.versions[fakeKey(orgID, productSurface, jobRoleID)], Version{
-		JobRoleID: jobRoleID, OrgID: orgID, ProductSurface: productSurface, Version: role.Version, Action: "restore", ChangedBy: actorID, Role: role,
+	f.roles[key] = role
+	f.versions[key] = append(f.versions[key], Version{
+		JobRoleID: role.JobRoleID, OrgID: orgID, ProductSurface: productSurface, Version: role.Version, Action: "restore", ChangedBy: actorID, Role: role,
 	})
 	return role, nil
 }
 
 func (f *fakeRepo) ListVersions(_ context.Context, orgID, productSurface, jobRoleID string, _ int) ([]Version, error) {
-	return f.versions[fakeKey(orgID, productSurface, jobRoleID)], nil
+	_, key, ok := f.getRoleWithKey(orgID, productSurface, jobRoleID)
+	if !ok {
+		return f.versions[fakeKey(orgID, productSurface, jobRoleID)], nil
+	}
+	return f.versions[key], nil
+}
+
+func (f *fakeRepo) getRoleWithKey(orgID, productSurface, jobRoleID string) (JobRole, string, bool) {
+	if role, ok := f.roles[fakeKey(orgID, productSurface, jobRoleID)]; ok {
+		return role, fakeKey(orgID, productSurface, jobRoleID), true
+	}
+	for key, role := range f.roles {
+		if role.OrgID == orgID && role.ProductSurface == productSurface && role.JobRoleID == jobRoleID {
+			return role, key, true
+		}
+	}
+	return JobRole{}, "", false
 }
 
 func TestUpsertJobRoleNormalizesAndDefaults(t *testing.T) {
@@ -232,6 +270,33 @@ func TestUpsertJobRoleRejectsDuplicateSlug(t *testing.T) {
 	})
 	if !errors.Is(err, ErrConflict) {
 		t.Fatalf("expected duplicate slug conflict, got %v", err)
+	}
+}
+
+func TestCreateJobRoleWithoutIDRejectsExistingSlug(t *testing.T) {
+	t.Parallel()
+	repo := newFakeRepo()
+	uc := NewUsecases(repo)
+	_, err := uc.UpsertJobRole(context.Background(), JobRole{
+		OrgID:                "org-a",
+		ProductSurface:       "axis",
+		Name:                 "Billing Specialist",
+		Slug:                 "billing",
+		DefaultAutonomyLevel: "A2",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = uc.UpsertJobRole(context.Background(), JobRole{
+		OrgID:                "org-a",
+		ProductSurface:       "axis",
+		Name:                 "Billing Specialist Copy",
+		Slug:                 "billing",
+		DefaultAutonomyLevel: "A2",
+	})
+	if !errors.Is(err, ErrConflict) {
+		t.Fatalf("expected duplicate slug conflict for create, got %v", err)
 	}
 }
 

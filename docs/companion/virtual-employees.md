@@ -1,5 +1,13 @@
 # Virtual Employees
 
+Ver tambien `domain-model.md` para el mapa rector del dominio de Companion y
+la separacion entre VirtualEmployee, JobRole, Agent y EmployeeProfile.
+
+Este documento describe la superficie v1 actual. El modelo objetivo de dominio
+esta en `../specs/companion/domain/virtual-employees-domain-spec.md`. El mapa
+completo de entidades relacionadas esta en
+`../specs/companion/domain/workforce-domain-spec.md`.
+
 ## Definicion
 
 Un Virtual Employee es un trabajador digital persistente con identidad propia,
@@ -20,12 +28,12 @@ representa la superficie/producto conectado donde ese trabajo ocurre.
 
 Virtual Employee es el concepto publico de dominio que el usuario opera. El
 usuario no deberia necesitar entender la maquinaria interna de runtime,
-profiles, routing o Agent Fleet para asignar trabajo a un trabajador digital.
+routing o agents tecnicos para asignar trabajo a un trabajador digital.
 
 El concepto existe para separar dos preocupaciones:
 
 - **Virtual Employee**: abstraccion de producto y dominio.
-- **Agent / Agent Fleet**: implementacion tecnica actual en Companion.
+- **Agent**: ejecucion tecnica y compatibilidad de runtime.
 
 Esto permite exponer una experiencia estable de trabajador digital sin romper
 los contratos tecnicos existentes que todavia usan agents.
@@ -41,61 +49,47 @@ Regla de naming:
 
 ```text
 Virtual Employee = concepto publico de dominio
-Agent / Agent Fleet = implementacion interna v1
+Agent = ejecutor tecnico y compatibilidad de runtime
 ```
 
-Un Virtual Employee no reemplazo completamente a Agent. En v1, lo envuelve.
+Un Virtual Employee no es un Agent renombrado. El Employee es el trabajador
+digital persistente; el Agent es un ejecutor tecnico que el runtime puede usar.
 
 ## Implementacion V1
 
-VirtualEmployee v1 mapea 1:1 a Agent Fleet:
+VirtualEmployee v1 ya tiene entidad propia:
 
 ```text
-VirtualEmployee v1 -> companion_agents row
-employee_id -> agent_id
-tenant -> org_id + product_surface
+VirtualEmployee -> companion_virtual_employees row
+employee_id -> UUID publico del Employee
+tenant actual -> org_id + product_surface
 ```
 
-No hay tabla `virtual_employees` en v1. La persistencia sigue siendo
-`companion_agents`, con audit/versioning existente de Agent Fleet.
+La persistencia vive en `companion_virtual_employees`, con capacidades
+referenciadas por `companion_virtual_employee_capabilities` y audit separado en
+`companion_virtual_employee_audit`.
 
-Runtime sigue usando `agent_id` internamente. Por ejemplo, `/v1/chat` continua
-aceptando `agent_id` y el resolver de flota aplica los limites, profile,
-allowlists y estado del agente persistente.
+Runtime acepta `employee_id` en superficies nuevas y todavia puede usar
+`agent_id` para flujos tecnicos/compatibilidad.
 
 ## APIs Publicas Recomendadas
 
 Companion:
 
 - `GET /v1/virtual-employees`
+- `POST /v1/virtual-employees`
 - `GET /v1/virtual-employees/{employee_id}`
-- `PUT /v1/virtual-employees/{employee_id}`
-- `DELETE /v1/virtual-employees/{employee_id}`
-- `POST /v1/virtual-employees/{employee_id}/disable`
-- `POST /v1/virtual-employees/{employee_id}/archive`
-- `POST /v1/virtual-employees/{employee_id}/trash`
-- `POST /v1/virtual-employees/{employee_id}/restore`
-- `POST /v1/virtual-employees/{employee_id}/approve`
-- `POST /v1/virtual-employees/{employee_id}/ignore`
-- `POST /v1/virtual-employees/assignments`
-- `GET /v1/virtual-employees/handoffs`
-- `POST /v1/virtual-employees/handoffs`
-- `PATCH /v1/virtual-employees/handoffs/{id}`
+- `PATCH /v1/virtual-employees/{employee_id}`
+- `POST /v1/virtual-employees/{employee_id}/status`
 
 BFF / Console:
 
 - `/api/virtual-employees`
-- `/api/virtual-employees/{employee_id}` para update via `PUT`/`PATCH`
-- `/api/virtual-employees/{employee_id}/archive`
-- `/api/virtual-employees/{employee_id}/trash`
-- `/api/virtual-employees/{employee_id}/restore`
-- `/api/virtual-employees/{employee_id}/approve`
-- `/api/virtual-employees/{employee_id}/ignore`
-- `/api/virtual-employees/{employee_id}/purge`
+- `/api/virtual-employees/{employee_id}`
+- `/api/virtual-employees/{employee_id}/status`
 
-La Console debe usar Virtual Employees como recurso principal. BFF v1 sigue el
-CRUD historico de `/api/agents`; no agrega un endpoint detail separado si la
-superficie legacy no lo tenia.
+La Console debe usar Virtual Employees como recurso principal. Las rutas
+historicas de `/api/agents` quedan para agentes tecnicos y compatibilidad.
 
 ## Endpoints De Compatibilidad Tecnica
 
@@ -114,46 +108,36 @@ Uso recomendado:
 - Migraciones futuras: mantener compatibilidad hasta que todos los consumidores
   hayan pasado al contrato publico nuevo.
 
-## Metadata Semantica V1
+## Modelo Core V1
 
-V1 usa metadata plana sobre el Agent interno para datos semanticos de Virtual
-Employee:
+El contrato publico de Employee evita campos duplicados que pertenecen a otras
+entidades fuertes:
 
-```json
-{
-  "metadata": {
-    "job_role_id": "billing-specialist",
-    "job_title": "Billing Specialist",
-    "mission": "Keep customer billing healthy",
-    "responsibilities": ["review invoices", "escalate blockers"],
-    "owner_user_id": "user-123",
-    "contact_channels": ["slack:#billing-ops"],
-    "escalation_rules": ["manager after 2 business days"]
-  }
-}
+```text
+employee_id
+tenant_id
+name
+supervisor_user_id
+status
+job_role_id
+profile_id
+autonomy
+capability_ids
+memory_id
 ```
 
-Campos:
-
-- `metadata.job_title`: puesto visible.
-- `metadata.job_role_id`: referencia v1 al JobRole que ocupa el Virtual Employee.
-- `metadata.mission`: mision o funcion principal.
-- `metadata.responsibilities`: lista simple de responsabilidades.
-- `metadata.owner_user_id`: owner humano responsable.
-- `metadata.contact_channels`: referencias descriptivas a canales de contacto.
-- `metadata.escalation_rules`: reglas descriptivas de escalamiento.
-
-Esto es un contrato v1 pragmatico, no necesariamente el modelo final. No son
-columnas, no tienen validacion fuerte y no crean entidades separadas.
+`job_title`, `mission` y `responsibilities` pertenecen a `JobRole`.
+`memory_enabled` y `memory_scope_id` se reemplazan por `memory_id`.
+`allowed_tools` no forma parte del Employee: el Employee referencia
+capabilities.
 
 ## Relacion Con JobRole
 
-`JobRole` es el puesto de trabajo que puede ocupar un Virtual Employee dentro
-de `org_id + product_surface`.
+`JobRole` es el puesto de trabajo que ocupa un Virtual Employee dentro del
+tenant.
 
-En v1, JobRole tiene tabla propia y CRUD propio, pero la relacion con Virtual
-Employee se guarda como `metadata.job_role_id` para no migrar Agent Fleet ni
-cambiar Runtime.
+En v1 la relacion vive en `VirtualEmployee.job_role_id`. El JobRole tiene tabla
+propia y CRUD propio.
 
 JobRole puede sugerir defaults como mision, responsabilidades, capabilities
 recomendadas y autonomia. No es un IAM Role, no es un PermissionBundle y no
@@ -163,7 +147,6 @@ autoriza acciones directamente.
 
 Todavia no existe:
 
-- tabla `virtual_employees`;
 - Role CRUD;
 - Responsibilities como entidad;
 - Department como entidad;
@@ -183,8 +166,6 @@ fuera de Companion.
 
 Evoluciones posibles, no comprometidas en v1:
 
-- tabla dedicada `virtual_employees` si el concepto necesita lifecycle, owner,
-  department o reporting propios;
 - `role`/puesto como entidad gobernada;
 - responsabilidades versionadas con ownership y evidencia;
 - integracion real de canales de contacto;
@@ -196,4 +177,4 @@ Evoluciones posibles, no comprometidas en v1:
   publico y traduzca a `agent_id` internamente.
 
 La regla para avanzar es que Employee aporte semantica y lifecycle propios. Si
-solo cambia el nombre, debe seguir siendo una capa publica sobre Agent Fleet.
+un concepto es solo ejecucion tecnica, debe quedarse en Agent.

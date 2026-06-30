@@ -38,7 +38,7 @@ type AssistPack = {
   updated_at?: string
 }
 
-type AgentProfile = {
+type EmployeeProfile = {
   id?: string
   profile_id: string
   family_id: string
@@ -60,7 +60,7 @@ type AxisPromptRow = {
   id: string
   name: string
   promptKey: string
-  kind: 'assist-pack' | 'agent-profile'
+  kind: 'assist-pack' | 'employee-profile'
   description?: string
   version: string
   promptText: string
@@ -69,7 +69,7 @@ type AxisPromptRow = {
   enabled: boolean
   updatedAt?: string
   archived: boolean
-  original: AssistPack | AgentProfile
+  original: AssistPack | EmployeeProfile
 }
 
 type PendingUpload = {
@@ -112,7 +112,7 @@ export function PromptsControlCenter({
       {activeSection === 'product' ? (
         <AssistPackPromptsScreen orgId={orgId} tenantId={tenantId} productSurface={productSurface} section={activeSection} />
       ) : (
-        <AgentProfilePromptsScreen orgId={orgId} tenantId={tenantId} productSurface={productSurface} agents={agents} section={activeSection} />
+        <EmployeeProfilePromptsScreen orgId={orgId} tenantId={tenantId} productSurface={productSurface} agents={agents} section={activeSection} />
       )}
     </section>
   )
@@ -183,7 +183,7 @@ function AssistPackPromptsScreen({
   )
 }
 
-function AgentProfilePromptsScreen({
+function EmployeeProfilePromptsScreen({
   orgId,
   tenantId,
   productSurface,
@@ -214,18 +214,19 @@ function AgentProfilePromptsScreen({
         if (profileIDs.size === 0) {
           return []
         }
-        const response = await axisFetch<{ profiles: AgentProfile[] }>(
-          `/api/prompts/agent-profiles?lifecycle=${encodeURIComponent(view)}`,
+        const response = await axisFetch<{ profiles?: EmployeeProfile[]; employee_profiles?: EmployeeProfile[] }>(
+          `/api/prompts/employee-profiles?lifecycle=${encodeURIComponent(view)}`,
           orgId,
           productHeaders(productSurface, tenantId),
         )
-        return response.profiles
+        const profiles = response.employee_profiles ?? response.profiles ?? []
+        return profiles
           .filter((profile) => profileIDs.has(profile.profile_id))
           .map((profile) => ({
             id: profile.profile_id,
             name: profile.name,
             promptKey: profile.profile_id,
-            kind: 'agent-profile',
+            kind: 'employee-profile',
             description: profile.description,
             version: profile.version_label,
             promptText: profile.system_prompt,
@@ -238,8 +239,8 @@ function AgentProfilePromptsScreen({
           }))
       }}
       replacePrompt={async (row, content, nextVersion) => {
-        const profile = row.original as AgentProfile
-        await axisFetch(`/api/prompts/agent-profiles/${encodeURIComponent(profile.profile_id)}/system-prompt`, orgId, {
+        const profile = row.original as EmployeeProfile
+        await axisFetch(`/api/prompts/employee-profiles/${encodeURIComponent(profile.profile_id)}/system-prompt`, orgId, {
           method: 'PUT',
           tenantId,
           headers: { 'X-Product-Surface': productSurface },
@@ -259,7 +260,7 @@ function AgentProfilePromptsScreen({
         })
       }}
       archivePrompt={(row) =>
-        axisFetch(`/api/prompts/agent-profiles/${encodeURIComponent(row.id)}/archive`, orgId, {
+        axisFetch(`/api/prompts/employee-profiles/${encodeURIComponent(row.id)}/archive`, orgId, {
           method: 'POST',
           tenantId,
           headers: { 'X-Product-Surface': productSurface },
@@ -267,7 +268,7 @@ function AgentProfilePromptsScreen({
         })
       }
       restorePrompt={(row) =>
-        axisFetch(`/api/prompts/agent-profiles/${encodeURIComponent(row.id)}/restore`, orgId, {
+        axisFetch(`/api/prompts/employee-profiles/${encodeURIComponent(row.id)}/restore`, orgId, {
           method: 'POST',
           tenantId,
           headers: { 'X-Product-Surface': productSurface },
@@ -275,7 +276,7 @@ function AgentProfilePromptsScreen({
         })
       }
       trashPrompt={(row) =>
-        axisFetch(`/api/prompts/agent-profiles/${encodeURIComponent(row.id)}/trash`, orgId, {
+        axisFetch(`/api/prompts/employee-profiles/${encodeURIComponent(row.id)}/trash`, orgId, {
           method: 'POST',
           tenantId,
           headers: { 'X-Product-Surface': productSurface },
@@ -283,7 +284,7 @@ function AgentProfilePromptsScreen({
         })
       }
       purgePrompt={(row) =>
-        axisFetch(`/api/prompts/agent-profiles/${encodeURIComponent(row.id)}/purge`, orgId, {
+        axisFetch(`/api/prompts/employee-profiles/${encodeURIComponent(row.id)}/purge`, orgId, {
           method: 'DELETE',
           tenantId,
           headers: { 'X-Product-Surface': productSurface },

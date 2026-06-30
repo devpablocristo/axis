@@ -62,8 +62,8 @@ func promptRouteFromRequest(r *http.Request) (promptRoute, error) {
 		return promptRoute{}, err
 	}
 	readAssist := []string{"companion:assist:read", "companion:runtime:admin", "axis:products:admin"}
-	readProfiles := []string{"companion:agent_profiles:read", "companion:agent_profiles:admin", "companion:runtime:admin", "axis:agents:admin"}
-	writeProfiles := []string{"companion:agent_profiles:admin", "companion:runtime:admin", "axis:agents:admin"}
+	readProfiles := []string{"companion:employee_profiles:read", "companion:employee_profiles:admin", "companion:runtime:admin", "axis:agents:admin"}
+	writeProfiles := []string{"companion:employee_profiles:admin", "companion:runtime:admin", "axis:agents:admin"}
 	if len(parts) == 1 && parts[0] == "assist-packs" && r.Method == http.MethodGet {
 		query := cleanPromptQuery(r.URL.Query(), "lifecycle", "view")
 		path := "/v1/assist-packs"
@@ -84,39 +84,39 @@ func promptRouteFromRequest(r *http.Request) (promptRoute, error) {
 			ok:               true,
 		}, nil
 	}
-	if len(parts) == 1 && parts[0] == "agent-profiles" && r.Method == http.MethodGet {
+	if len(parts) == 1 && parts[0] == "employee-profiles" && r.Method == http.MethodGet {
 		query := r.URL.Query()
-		return promptRoute{method: http.MethodGet, path: "/v1/agent-profiles", rawQuery: query.Encode(), requiredScopes: readProfiles, ok: true}, nil
+		return promptRoute{method: http.MethodGet, path: "/v1/employee-profiles", rawQuery: query.Encode(), requiredScopes: readProfiles, ok: true}, nil
 	}
-	if len(parts) == 3 && parts[0] == "agent-profiles" && parts[2] == "system-prompt" && r.Method == http.MethodPut {
+	if len(parts) == 3 && parts[0] == "employee-profiles" && parts[2] == "system-prompt" && r.Method == http.MethodPut {
 		return promptRoute{
-			method:         http.MethodPut,
-			path:           "/v1/agent-profiles/" + url.PathEscape(parts[1]),
+			method:         http.MethodPatch,
+			path:           "/v1/employee-profiles/" + url.PathEscape(parts[1]),
 			requiredScopes: writeProfiles,
 			forwardBody:    true,
 			ok:             true,
 		}, nil
 	}
-	if len(parts) == 3 && parts[0] == "agent-profiles" && (parts[2] == "archive" || parts[2] == "restore") && r.Method == http.MethodPost {
+	if len(parts) == 3 && parts[0] == "employee-profiles" && (parts[2] == "archive" || parts[2] == "restore") && r.Method == http.MethodPost {
 		return promptRoute{
 			method:         http.MethodPost,
-			path:           "/v1/agent-profiles/" + url.PathEscape(parts[1]) + "/" + parts[2],
+			path:           "/v1/employee-profiles/" + url.PathEscape(parts[1]) + "/" + parts[2],
 			requiredScopes: writeProfiles,
 			ok:             true,
 		}, nil
 	}
-	if len(parts) == 3 && parts[0] == "agent-profiles" && parts[2] == "trash" && r.Method == http.MethodPost {
+	if len(parts) == 3 && parts[0] == "employee-profiles" && parts[2] == "trash" && r.Method == http.MethodPost {
 		return promptRoute{
 			method:         http.MethodPost,
-			path:           "/v1/agent-profiles/" + url.PathEscape(parts[1]) + "/trash",
+			path:           "/v1/employee-profiles/" + url.PathEscape(parts[1]) + "/trash",
 			requiredScopes: writeProfiles,
 			ok:             true,
 		}, nil
 	}
-	if len(parts) == 3 && parts[0] == "agent-profiles" && parts[2] == "purge" && r.Method == http.MethodDelete {
+	if len(parts) == 3 && parts[0] == "employee-profiles" && parts[2] == "purge" && r.Method == http.MethodDelete {
 		return promptRoute{
 			method:         http.MethodDelete,
-			path:           "/v1/agent-profiles/" + url.PathEscape(parts[1]) + "/purge",
+			path:           "/v1/employee-profiles/" + url.PathEscape(parts[1]) + "/purge",
 			requiredScopes: writeProfiles,
 			ok:             true,
 		}, nil

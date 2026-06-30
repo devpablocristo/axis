@@ -1,0 +1,9 @@
+DROP INDEX IF EXISTS idx_companion_virtual_employee_audit_employee;
+DROP TABLE IF EXISTS companion_virtual_employee_audit;
+
+DROP INDEX IF EXISTS idx_companion_virtual_employee_capabilities_capability;
+DROP TABLE IF EXISTS companion_virtual_employee_capabilities;
+
+DROP INDEX IF EXISTS idx_companion_virtual_employees_org_surface_status;
+DROP INDEX IF EXISTS idx_companion_virtual_employees_tenant_status;
+DROP TABLE IF EXISTS companion_virtual_employees;

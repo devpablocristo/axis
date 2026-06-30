@@ -140,7 +140,10 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
       load(setTraces, async () => filterByProduct((await axisFetch<{ traces: RunTrace[] }>(withProduct('/api/companion/v1/run-traces?limit=12', effectiveProductSurface), effectiveOrgId, productInit)).traces ?? [], effectiveProductSurface), []),
       load(setRuntimePolicy, () => axisFetch<RuntimePolicy>('/api/companion/v1/runtime/policy', effectiveOrgId, productInit), null),
       load(setAgents, async () => filterByProduct((await axisFetch<{ data: CompanionAgent[] }>(withProduct('/api/companion/v1/agents', effectiveProductSurface), effectiveOrgId, productInit)).data ?? [], effectiveProductSurface), []),
-      load(setCapabilities, async () => filterCapabilities((await axisFetch<{ capabilities: CapabilityRecord[] }>(withProduct('/api/companion/v1/capabilities?limit=100', effectiveProductSurface), effectiveOrgId, productInit)).capabilities ?? [], effectiveProductSurface).slice(0, 12), []),
+      load(setCapabilities, async () => {
+        const payload = await axisFetch<{ data?: CapabilityRecord[]; capability_catalog?: CapabilityRecord[]; capabilities?: CapabilityRecord[] }>(withProduct('/api/capabilities?limit=100', effectiveProductSurface), effectiveOrgId, productInit)
+        return filterCapabilities(payload.data ?? payload.capability_catalog ?? payload.capabilities ?? [], effectiveProductSurface).slice(0, 12)
+      }, []),
       load(setMemoryConflicts, async () => filterByProduct((await axisFetch<{ conflicts: MemoryConflict[] }>(withProduct('/api/companion/v1/memory/conflicts?limit=12', effectiveProductSurface), effectiveOrgId, productInit)).conflicts ?? [], effectiveProductSurface), []),
       load(setMemoryReviews, async () => filterByProduct((await axisFetch<{ reviews: MemoryReview[] }>(withProduct('/api/companion/v1/memory/reviews?limit=12', effectiveProductSurface), effectiveOrgId, productInit)).reviews ?? [], effectiveProductSurface), []),
       load(setMemorySummaries, async () => filterByProduct((await axisFetch<{ summaries: MemorySummary[] }>(withProduct('/api/companion/v1/memory/summaries?limit=12', effectiveProductSurface), effectiveOrgId, productInit)).summaries ?? [], effectiveProductSurface), []),
@@ -498,12 +501,12 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
                   <div className="panel-actions">
                     <button type="button" disabled={!capabilities.data.some((item) => item.status === 'draft')} onClick={() => {
                       const cap = capabilities.data.find((item) => item.status === 'draft')
-                      if (cap) void runAction('promote manifest', () => axisFetch(`/api/companion/v1/capabilities/${encodeURIComponent(cap.manifest.capability_id)}/versions/${encodeURIComponent(cap.manifest.version)}/promote`, orgId, { method: 'POST', tenantId, headers: { 'X-Product-Surface': productSurface }, body: '{}' }))
+                      if (cap) void runAction('activate capability', () => axisFetch(`/api/capabilities/${encodeURIComponent(capabilityPublicId(cap))}/status`, orgId, { method: 'POST', tenantId, headers: { 'X-Product-Surface': productSurface }, body: JSON.stringify({ status: 'active' }) }))
                     }}>
-                      <CheckCircle2 aria-hidden="true" />Promote draft
+                      <CheckCircle2 aria-hidden="true" />Activar draft
                     </button>
                   </div>
-                  <Table columns={['capability', 'version', 'risk', 'approval']} rows={capabilities.data.map((item) => [item.manifest.display_name || item.manifest.capability_id, item.manifest.version, item.manifest.risk_level, item.manifest.approval_required ? 'yes' : 'no'])} />
+                  <Table columns={['capability', 'version', 'risk', 'approval']} rows={capabilities.data.map((item) => [capabilityName(item), capabilityVersion(item), capabilityRisk(item), capabilityApproval(item)])} />
                 </Panel>
               </div>
             )}
@@ -534,7 +537,7 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
         )}
 
         {route.area === 'agents' && (
-          <AgentsControlCenter orgId={orgId} tenantId={tenantId} />
+          <AgentsControlCenter orgId={orgId} tenantId={tenantId} productSurface={productSurface} />
         )}
 
         {route.area === 'control' && canViewControl && (
@@ -710,7 +713,7 @@ function normalizeRouteArea(value: string): RouteArea {
 function normalizeRouteScreen(area: RouteArea, value: string | undefined) {
   if (!value) return ''
   if (area === 'prompts' && value === 'assist-packs') return 'product'
-  if (area === 'prompts' && value === 'agent-profiles') return 'agents'
+  if (area === 'prompts' && value === 'employee-profiles') return 'agents'
   if (area === 'platform' && value === 'control') return 'runtime'
   if (area === 'platform' && value === 'tasks') return 'runtime'
   if (area === 'operations' && value === 'billing-agent') return 'runs'
@@ -858,7 +861,34 @@ function filterByProduct<T extends { product_surface?: string }>(items: T[], pro
 }
 
 function filterCapabilities(items: CapabilityRecord[], productSurface: string) {
-  return items.filter((item) => !item.manifest.product_surface || sameProduct(item.manifest.product_surface, productSurface))
+  return items.filter((item) => !capabilityProductSurface(item) || sameProduct(capabilityProductSurface(item), productSurface))
+}
+
+function capabilityProductSurface(item: CapabilityRecord) {
+  return item.product_surface || item.manifest?.product_surface || ''
+}
+
+function capabilityPublicId(item: CapabilityRecord) {
+  return item.capability_id || item.id || item.manifest?.capability_id || ''
+}
+
+function capabilityName(item: CapabilityRecord) {
+  return item.name || item.manifest?.display_name || item.capability_key || item.manifest?.capability_id || item.id || '-'
+}
+
+function capabilityVersion(item: CapabilityRecord) {
+  return item.version || item.manifest?.version || '-'
+}
+
+function capabilityRisk(item: CapabilityRecord) {
+  return item.risk_class || item.manifest?.risk_level || '-'
+}
+
+function capabilityApproval(item: CapabilityRecord) {
+  if (typeof item.manifest?.approval_required === 'boolean') {
+    return item.manifest.approval_required ? 'yes' : 'no'
+  }
+  return item.risk_class === 'high' || item.risk_class === 'critical' ? 'review' : '-'
 }
 
 function sameProduct(value: string | undefined, productSurface: string) {
@@ -912,6 +942,7 @@ function axisChatAdapter(orgId: string, productSurface: string, tenantId: string
         message: input.message,
         chat_id: input.chatId ?? null,
         task_id: input.taskId ?? null,
+        tenant_id: tenantId,
         agent_id: input.agentId || undefined,
         product_surface: productSurface,
         route_hint: input.routeHint || undefined,

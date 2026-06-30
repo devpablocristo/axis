@@ -59,10 +59,10 @@ Nexus decide decisiones sensibles; los productos exponen capacidades de dominio.
 - Product installation guard: `companion` es superficie interna; cualquier
   superficie externa requiere instalacion activa antes de runtime runs,
   capability tools, connector execution, watchers y memory writes.
-- Virtual Employees / Agent fleet: producto y Console usan Virtual Employees
-  como concepto publico; v1 mapea 1:1 a Agent Fleet. `/v1/chat` todavia puede
-  seleccionar `agent_id`; el runtime resuelve limites persistentes, recorta
-  autonomia/tools/capabilities y registra ownership en traces y observability.
+- Virtual Employees / Agents: producto y Console usan Virtual Employees como
+  concepto publico; modulo tecnico de agents queda como modulo tecnico de agents. `/v1/chat`
+  todavia puede seleccionar `agent_id`; las superficies nuevas de workforce usan
+  `employee_id`.
 - Agent profiles: si el agente tiene `profile_id`, el runtime carga el prompt
   global versionado, aplica limites del perfil y falla cerrado si no existe o
   esta archivado/disabled.
@@ -75,8 +75,8 @@ y run traces. `companion_jobs` y `companion_job_events` guardan ejecución
 durable de trabajos operativos. `companion_observability_events` guarda el
 ledger redacted para replay. `companion_business_models` guarda el modelo
 empresarial activo y sus versiones. `companion_agents` y
-`companion_agent_handoffs` guardan flota, ownership y coordinacion. En v1,
-VirtualEmployee no tiene tabla propia: mapea a `companion_agents`.
+`companion_agent_handoffs` guardan flota tecnica y coordinacion entre agents.
+`companion_virtual_employees` guarda la entidad publica VirtualEmployee.
 `companion_run_traces` incluye `prompt_version` y `model` para auditar runtime IA.
 `companion_products` y `companion_product_installations` guardan el plano de
 control multi-producto. `companion_jobs` transporta `product_surface` como
@@ -87,7 +87,7 @@ events y eval reports quedan etiquetados por `product_surface`.
 
 El runtime usa providers de `platform/kernels/ai/go`. El prompt tiene versión
 `companion.system.v1`. El control plane construye una `IdentityChain`, un
-`AgentRoute` y un `AgentProfile` efectivo con allowlist de tools. El LLM solo
+`AgentRoute` y un `EmployeeProfile` efectivo con allowlist de tools. El LLM solo
 recibe schemas autorizados para la customer org/scopes presentes.
 
 La política runtime se versiona con `settings_version` y `control_plane_json`.

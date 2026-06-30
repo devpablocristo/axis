@@ -105,6 +105,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		Priority:    body.Priority,
 		CreatedBy:   createdBy,
 		AssignedTo:  body.AssignedTo,
+		AssigneeEmployeeID: body.AssigneeEmployeeID,
 		Channel:     body.Channel,
 		Summary:     body.Summary,
 		ContextJSON: body.ContextJSON,
@@ -726,6 +727,8 @@ func (h *Handler) chat(w http.ResponseWriter, r *http.Request) {
 		Workspace:      body.Workspace,
 		Channel:        body.Channel,
 		ProductSurface: identity.ProductSurface,
+		TenantID:       body.TenantID,
+		EmployeeID:     body.EmployeeID,
 		AgentID:        body.AgentID,
 		Identity:       identity,
 	})

@@ -86,6 +86,34 @@ type Manifest struct {
 	ObservabilityTags    []string       `json:"observability_tags"`
 }
 
+type Capability struct {
+	CapabilityID  string `json:"capability_id"`
+	CapabilityKey string `json:"capability_key"`
+	Name          string `json:"name"`
+	Description   string `json:"description"`
+	Version       string `json:"version"`
+	ProductID     string `json:"product_id,omitempty"`
+	ProductSurface string `json:"product_surface,omitempty"`
+	ToolID        string `json:"tool_id,omitempty"`
+	Mode          string `json:"mode"`
+	RiskClass     string `json:"risk_class"`
+	Status        string `json:"status"`
+}
+
+type Tool struct {
+	ToolID        string `json:"tool_id"`
+	ToolKey       string `json:"tool_key"`
+	Name          string `json:"name"`
+	Description   string `json:"description"`
+	ConnectorID   string `json:"connector_id,omitempty"`
+	ConnectorKey  string `json:"connector_key,omitempty"`
+	Operation     string `json:"operation"`
+	SideEffect    bool   `json:"side_effect"`
+	Status        string `json:"status"`
+	CapabilityID  string `json:"capability_id,omitempty"`
+	CapabilityKey string `json:"capability_key,omitempty"`
+}
+
 type manifestSet struct {
 	Capabilities []Manifest `json:"capabilities"`
 }

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/devpablocristo/companion/internal/products"
+	"github.com/google/uuid"
 )
 
 type Usecases struct {
@@ -138,6 +139,75 @@ func (uc *Usecases) ListManifests(ctx context.Context, filter ManifestFilter) ([
 		return nil, fmt.Errorf("capability repository is not configured")
 	}
 	return uc.repo.ListManifests(ctx, filter)
+}
+
+func (uc *Usecases) ListCapabilities(ctx context.Context, filter ManifestFilter) ([]Capability, error) {
+	records, err := uc.ListManifests(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Capability, 0, len(records))
+	for _, record := range records {
+		out = append(out, capabilityFromRecord(record))
+	}
+	return out, nil
+}
+
+func (uc *Usecases) GetCapability(ctx context.Context, capabilityID string) (Capability, error) {
+	if uc == nil || uc.repo == nil {
+		return Capability{}, fmt.Errorf("capability repository is not configured")
+	}
+	record, err := uc.repo.GetManifestByID(ctx, capabilityID)
+	if err != nil {
+		return Capability{}, err
+	}
+	return capabilityFromRecord(record), nil
+}
+
+func (uc *Usecases) SetCapabilityStatus(ctx context.Context, capabilityID, status string) (Capability, error) {
+	if uc == nil || uc.repo == nil {
+		return Capability{}, fmt.Errorf("capability repository is not configured")
+	}
+	status = normalizeCapabilityStatus(status)
+	record, err := uc.repo.UpdateManifestStatusByID(ctx, capabilityID, status)
+	if err != nil {
+		return Capability{}, err
+	}
+	return capabilityFromRecord(record), nil
+}
+
+func (uc *Usecases) ListTools(ctx context.Context, filter ManifestFilter) ([]Tool, error) {
+	records, err := uc.ListManifests(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Tool, 0, len(records))
+	for _, record := range records {
+		out = append(out, toolFromRecord(record))
+	}
+	return out, nil
+}
+
+func (uc *Usecases) GetTool(ctx context.Context, toolID string) (Tool, error) {
+	if uc == nil || uc.repo == nil {
+		return Tool{}, fmt.Errorf("capability repository is not configured")
+	}
+	record, err := uc.repo.GetManifestByID(ctx, toolID)
+	if err != nil {
+		return Tool{}, err
+	}
+	return toolFromRecord(record), nil
+}
+
+func (uc *Usecases) SetToolStatus(ctx context.Context, toolID, status string) (Tool, error) {
+	if uc == nil || uc.repo == nil {
+		return Tool{}, fmt.Errorf("capability repository is not configured")
+	}
+	record, err := uc.repo.UpdateManifestStatusByID(ctx, toolID, manifestStatusFromToolStatus(status))
+	if err != nil {
+		return Tool{}, err
+	}
+	return toolFromRecord(record), nil
 }
 
 func (uc *Usecases) GetManifest(ctx context.Context, capabilityID, version string) (ManifestRecord, error) {
@@ -313,6 +383,87 @@ func (uc *Usecases) ListConformanceRuns(ctx context.Context, orgID, capabilityID
 
 func (uc *Usecases) CheckConformance(ctx context.Context, manifest Manifest) (map[string]bool, []string) {
 	return uc.checkManifestConformance(ctx, manifest)
+}
+
+func capabilityFromRecord(record ManifestRecord) Capability {
+	manifest := record.Manifest.Normalize()
+	id := ""
+	if record.ID != uuid.Nil {
+		id = record.ID.String()
+	}
+	return Capability{
+		CapabilityID:   id,
+		CapabilityKey:  manifest.CapabilityID,
+		Name:           manifest.DisplayName,
+		Description:    manifest.Description,
+		Version:        manifest.Version,
+		ProductSurface: manifest.ProductSurface,
+		ToolID:         id,
+		Mode:           capabilityMode(manifest),
+		RiskClass:      manifest.RiskLevel,
+		Status:         record.Status,
+	}
+}
+
+func toolFromRecord(record ManifestRecord) Tool {
+	manifest := record.Manifest.Normalize()
+	id := ""
+	if record.ID != uuid.Nil {
+		id = record.ID.String()
+	}
+	return Tool{
+		ToolID:        id,
+		ToolKey:       strings.Trim(strings.TrimSpace(manifest.Connector)+"."+strings.TrimSpace(manifest.CapabilityID), "."),
+		Name:          manifest.DisplayName,
+		Description:   manifest.Description,
+		ConnectorKey:  manifest.Connector,
+		Operation:     manifest.CapabilityID,
+		SideEffect:    manifest.SideEffectType != SideEffectRead || manifest.ActionType != ActionTypeRead,
+		Status:        toolStatusFromManifestStatus(record.Status),
+		CapabilityID:  id,
+		CapabilityKey: manifest.CapabilityID,
+	}
+}
+
+func capabilityMode(manifest Manifest) string {
+	if manifest.SideEffectType == SideEffectExecute {
+		return "execute"
+	}
+	if manifest.ActionType == ActionTypeWrite || manifest.SideEffectType == SideEffectWrite || manifest.SideEffectType == SideEffectNotify {
+		return "write"
+	}
+	return "read"
+}
+
+func normalizeCapabilityStatus(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case ManifestStatusDraft, ManifestStatusActive, ManifestStatusDeprecated, ManifestStatusBlocked:
+		return strings.ToLower(strings.TrimSpace(status))
+	default:
+		return ManifestStatusActive
+	}
+}
+
+func toolStatusFromManifestStatus(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case ManifestStatusDeprecated:
+		return "deprecated"
+	case ManifestStatusBlocked, ManifestStatusDraft:
+		return "disabled"
+	default:
+		return "active"
+	}
+}
+
+func manifestStatusFromToolStatus(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "deprecated":
+		return ManifestStatusDeprecated
+	case "disabled":
+		return ManifestStatusBlocked
+	default:
+		return ManifestStatusActive
+	}
 }
 
 func (uc *Usecases) checkManifestConformance(ctx context.Context, manifest Manifest) (map[string]bool, []string) {

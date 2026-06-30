@@ -59,10 +59,13 @@ URL por defecto: `http://localhost:18085`.
 
 - `companion/architecture.md`
 - `companion/boundaries.md`
+- `companion/domain-model.md`
 - `companion/memory.md`
 - `companion/agents.md`
 - `companion/virtual-employees.md`
 - `companion/job-roles.md`
+- `companion/workforce-platform-debt.md`
+- `companion/workforce-implementation-gap.md`
 - `companion/tools.md`
 - `companion/nexus-integration.md`
 - `companion/security.md`

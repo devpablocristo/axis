@@ -46,17 +46,31 @@ func (u *Usecases) GetJobRole(ctx context.Context, orgID, productSurface, jobRol
 func (u *Usecases) UpsertJobRole(ctx context.Context, role JobRole) (JobRole, error) {
 	role = normalizeJobRole(role)
 	if err := validateJobRole(role); err != nil {
-		return JobRole{}, fmt.Errorf("%w: job_role_id, org_id, product_surface, name, slug, status and default_autonomy_level are required", err)
+		return JobRole{}, fmt.Errorf("%w: org_id, product_surface, name, slug, status and default_autonomy_level are required", err)
 	}
 	if role.Status == "archived" {
 		return JobRole{}, fmt.Errorf("%w: create/update cannot set archived status; use archive endpoint", ErrValidation)
 	}
-	existing, err := u.repo.GetJobRole(ctx, role.OrgID, role.ProductSurface, role.JobRoleID)
-	if err != nil && !errors.Is(err, ErrNotFound) {
-		return JobRole{}, err
-	}
-	if err == nil && existing.Status == "archived" {
-		return JobRole{}, fmt.Errorf("%w: job role is archived; restore it before updating", ErrConflict)
+	if role.JobRoleID == "" {
+		existing, err := u.repo.GetJobRole(ctx, role.OrgID, role.ProductSurface, role.Slug)
+		if err != nil && !errors.Is(err, ErrNotFound) {
+			return JobRole{}, err
+		}
+		if err == nil && existing.JobRoleID != "" {
+			return JobRole{}, fmt.Errorf("%w: slug already exists", ErrConflict)
+		}
+	} else {
+		existing, err := u.repo.GetJobRole(ctx, role.OrgID, role.ProductSurface, role.JobRoleID)
+		if err != nil && !errors.Is(err, ErrNotFound) {
+			return JobRole{}, err
+		}
+		if err == nil {
+			if existing.Status == "archived" {
+				return JobRole{}, fmt.Errorf("%w: job role is archived; restore it before updating", ErrConflict)
+			}
+			role.ID = existing.ID
+			role.JobRoleKey = existing.JobRoleKey
+		}
 	}
 	return u.repo.UpsertJobRole(ctx, role)
 }

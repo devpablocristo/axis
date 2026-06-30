@@ -31,10 +31,15 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/capabilities/validate", h.validate)
 	mux.HandleFunc("GET /v1/capabilities/conformance-runs", h.listConformanceRuns)
 	mux.HandleFunc("POST /v1/capabilities/conformance-runs", h.runConformance)
+	mux.HandleFunc("GET /v1/capabilities/{capability_id}", h.getCapability)
+	mux.HandleFunc("POST /v1/capabilities/{capability_id}/status", h.setCapabilityStatus)
 	mux.HandleFunc("GET /v1/capabilities/{capability_id}/versions", h.versions)
 	mux.HandleFunc("POST /v1/capabilities/{capability_id}/versions/{version}/promote", h.promote)
 	mux.HandleFunc("POST /v1/capabilities/{capability_id}/versions/{version}/deprecate", h.deprecate)
 	mux.HandleFunc("POST /v1/capabilities/{capability_id}/versions/{version}/block", h.block)
+	mux.HandleFunc("GET /v1/tools", h.listTools)
+	mux.HandleFunc("GET /v1/tools/{tool_id}", h.getTool)
+	mux.HandleFunc("POST /v1/tools/{tool_id}/status", h.setToolStatus)
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
@@ -50,7 +55,97 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		httpjson.WriteFlatInternalError(w, err, "list capabilities failed")
 		return
 	}
-	httpjson.WriteJSON(w, http.StatusOK, map[string]any{"capabilities": records})
+	capabilities, err := h.uc.ListCapabilities(r.Context(), ManifestFilter{
+		Status: strings.TrimSpace(r.URL.Query().Get("status")),
+		Limit:  limit,
+	})
+	if err != nil {
+		httpjson.WriteFlatInternalError(w, err, "list capabilities failed")
+		return
+	}
+	httpjson.WriteJSON(w, http.StatusOK, map[string]any{
+		"capabilities":      records,
+		"data":              capabilities,
+		"manifest_records":  records,
+		"capability_catalog": capabilities,
+	})
+}
+
+func (h *Handler) getCapability(w http.ResponseWriter, r *http.Request) {
+	if !requireCapabilityScope(w, r, scopeCapabilitiesRead, scopeCapabilitiesAdmin) {
+		return
+	}
+	capability, err := h.uc.GetCapability(r.Context(), r.PathValue("capability_id"))
+	if err != nil {
+		writeManifestError(w, err, "get capability failed")
+		return
+	}
+	httpjson.WriteJSON(w, http.StatusOK, capability)
+}
+
+func (h *Handler) setCapabilityStatus(w http.ResponseWriter, r *http.Request) {
+	if !requireCapabilityScope(w, r, scopeCapabilitiesAdmin) {
+		return
+	}
+	var body struct {
+		Status string `json:"status"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid json body")
+		return
+	}
+	capability, err := h.uc.SetCapabilityStatus(r.Context(), r.PathValue("capability_id"), body.Status)
+	if err != nil {
+		writeManifestError(w, err, "set capability status failed")
+		return
+	}
+	httpjson.WriteJSON(w, http.StatusOK, capability)
+}
+
+func (h *Handler) listTools(w http.ResponseWriter, r *http.Request) {
+	if !requireCapabilityScope(w, r, scopeCapabilitiesRead, scopeCapabilitiesAdmin) {
+		return
+	}
+	tools, err := h.uc.ListTools(r.Context(), ManifestFilter{
+		Status: strings.TrimSpace(r.URL.Query().Get("status")),
+		Limit:  parseLimit(r, 100),
+	})
+	if err != nil {
+		httpjson.WriteFlatInternalError(w, err, "list tools failed")
+		return
+	}
+	httpjson.WriteJSON(w, http.StatusOK, map[string]any{"tools": tools, "data": tools})
+}
+
+func (h *Handler) getTool(w http.ResponseWriter, r *http.Request) {
+	if !requireCapabilityScope(w, r, scopeCapabilitiesRead, scopeCapabilitiesAdmin) {
+		return
+	}
+	tool, err := h.uc.GetTool(r.Context(), r.PathValue("tool_id"))
+	if err != nil {
+		writeManifestError(w, err, "get tool failed")
+		return
+	}
+	httpjson.WriteJSON(w, http.StatusOK, tool)
+}
+
+func (h *Handler) setToolStatus(w http.ResponseWriter, r *http.Request) {
+	if !requireCapabilityScope(w, r, scopeCapabilitiesAdmin) {
+		return
+	}
+	var body struct {
+		Status string `json:"status"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid json body")
+		return
+	}
+	tool, err := h.uc.SetToolStatus(r.Context(), r.PathValue("tool_id"), body.Status)
+	if err != nil {
+		writeManifestError(w, err, "set tool status failed")
+		return
+	}
+	httpjson.WriteJSON(w, http.StatusOK, tool)
 }
 
 func (h *Handler) versions(w http.ResponseWriter, r *http.Request) {

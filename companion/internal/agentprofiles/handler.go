@@ -9,12 +9,13 @@ import (
 
 	"github.com/devpablocristo/companion/internal/identityctx"
 	"github.com/devpablocristo/platform/http/go/httpjson"
+	"github.com/google/uuid"
 )
 
 const (
-	scopeAgentProfilesRead  = "companion:agent_profiles:read"
-	scopeAgentProfilesAdmin = "companion:agent_profiles:admin"
-	scopeRuntimeAdmin       = "companion:runtime:admin"
+	scopeEmployeeProfilesRead  = "companion:employee_profiles:read"
+	scopeEmployeeProfilesAdmin = "companion:employee_profiles:admin"
+	scopeRuntimeAdmin          = "companion:runtime:admin"
 )
 
 type Handler struct {
@@ -26,32 +27,38 @@ func NewHandler(uc *Usecases) *Handler {
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
-	mux.HandleFunc("GET /v1/agent-profiles", h.listProfiles)
-	mux.HandleFunc("GET /v1/agent-profiles/{profile_id}", h.getProfile)
-	mux.HandleFunc("PUT /v1/agent-profiles/{profile_id}", h.putProfile)
-	mux.HandleFunc("POST /v1/agent-profiles/{profile_id}/archive", h.archiveProfile)
-	mux.HandleFunc("POST /v1/agent-profiles/{profile_id}/trash", h.trashProfile)
-	mux.HandleFunc("POST /v1/agent-profiles/{profile_id}/restore", h.restoreProfile)
-	mux.HandleFunc("DELETE /v1/agent-profiles/{profile_id}/purge", h.purgeProfile)
-	mux.HandleFunc("GET /v1/agent-profiles/{profile_id}/versions", h.listVersions)
+	mux.HandleFunc("GET /v1/employee-profiles", h.listEmployeeProfiles)
+	mux.HandleFunc("POST /v1/employee-profiles", h.postEmployeeProfile)
+	mux.HandleFunc("GET /v1/employee-profiles/{profile_id}", h.getEmployeeProfile)
+	mux.HandleFunc("PATCH /v1/employee-profiles/{profile_id}", h.patchEmployeeProfile)
+	mux.HandleFunc("POST /v1/employee-profiles/{profile_id}/status", h.setEmployeeProfileStatus)
+	mux.HandleFunc("POST /v1/employee-profiles/{profile_id}/archive", h.archiveEmployeeProfile)
+	mux.HandleFunc("POST /v1/employee-profiles/{profile_id}/trash", h.trashEmployeeProfile)
+	mux.HandleFunc("POST /v1/employee-profiles/{profile_id}/restore", h.restoreEmployeeProfile)
+	mux.HandleFunc("DELETE /v1/employee-profiles/{profile_id}/purge", h.purgeEmployeeProfile)
+	mux.HandleFunc("GET /v1/employee-profiles/{profile_id}/versions", h.listEmployeeProfileVersions)
 }
 
-func (h *Handler) listProfiles(w http.ResponseWriter, r *http.Request) {
-	if !requireScope(w, r, scopeAgentProfilesRead, scopeAgentProfilesAdmin, scopeRuntimeAdmin) {
+func (h *Handler) listEmployeeProfiles(w http.ResponseWriter, r *http.Request) {
+	if !requireScope(w, r, scopeEmployeeProfilesRead, scopeEmployeeProfilesAdmin, scopeRuntimeAdmin) {
 		return
 	}
 	includeArchived := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("include_archived")), "true")
 	lifecycle := strings.TrimSpace(r.URL.Query().Get("lifecycle"))
 	profiles, err := h.uc.ListProfiles(r.Context(), lifecycle, includeArchived)
 	if err != nil {
-		httpjson.WriteFlatInternalError(w, err, "list agent profiles failed")
+		httpjson.WriteFlatInternalError(w, err, "list employee profiles failed")
 		return
 	}
-	httpjson.WriteJSON(w, http.StatusOK, map[string]any{"profiles": profiles})
+	out := make([]EmployeeProfile, 0, len(profiles))
+	for _, profile := range profiles {
+		out = append(out, employeeProfileFromProfile(profile))
+	}
+	httpjson.WriteJSON(w, http.StatusOK, map[string]any{"employee_profiles": out, "profiles": out})
 }
 
-func (h *Handler) getProfile(w http.ResponseWriter, r *http.Request) {
-	if !requireScope(w, r, scopeAgentProfilesRead, scopeAgentProfilesAdmin, scopeRuntimeAdmin) {
+func (h *Handler) getEmployeeProfile(w http.ResponseWriter, r *http.Request) {
+	if !requireScope(w, r, scopeEmployeeProfilesRead, scopeEmployeeProfilesAdmin, scopeRuntimeAdmin) {
 		return
 	}
 	profile, err := h.uc.GetProfile(r.Context(), r.PathValue("profile_id"))
@@ -59,59 +66,70 @@ func (h *Handler) getProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	httpjson.WriteJSON(w, http.StatusOK, profile)
+	httpjson.WriteJSON(w, http.StatusOK, employeeProfileFromProfile(profile))
 }
 
-func (h *Handler) putProfile(w http.ResponseWriter, r *http.Request) {
-	if !requireScope(w, r, scopeAgentProfilesAdmin, scopeRuntimeAdmin) {
+func (h *Handler) postEmployeeProfile(w http.ResponseWriter, r *http.Request) {
+	if !requireScope(w, r, scopeEmployeeProfilesAdmin, scopeRuntimeAdmin) {
 		return
 	}
-	var body profileRequest
+	var body employeeProfileRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid json body")
 		return
 	}
-	enabled := true
-	if body.Enabled != nil {
-		enabled = *body.Enabled
-	}
-	profile, err := h.uc.UpsertProfile(r.Context(), Profile{
-		ProfileID:           strings.TrimSpace(r.PathValue("profile_id")),
-		FamilyID:            body.FamilyID,
-		VersionLabel:        body.VersionLabel,
-		Name:                body.Name,
-		Description:         body.Description,
-		SystemPrompt:        body.SystemPrompt,
-		MaxAutonomy:         body.MaxAutonomy,
-		AllowedTools:        body.AllowedTools,
-		AllowedCapabilities: body.AllowedCapabilities,
-		MemoryPolicy:        body.MemoryPolicy,
-		LLMConfig:           body.LLMConfig,
-		Enabled:             enabled,
-	})
+	profile, err := h.uc.UpsertProfile(r.Context(), employeeProfileRequestToProfile(body, Profile{}))
 	if err != nil {
 		writeError(w, err)
 		return
 	}
-	httpjson.WriteJSON(w, http.StatusOK, profile)
+	httpjson.WriteJSON(w, http.StatusCreated, employeeProfileFromProfile(profile))
 }
 
-type profileRequest struct {
-	FamilyID            string         `json:"family_id"`
-	VersionLabel        string         `json:"version_label"`
-	Name                string         `json:"name"`
-	Description         string         `json:"description"`
-	SystemPrompt        string         `json:"system_prompt"`
-	MaxAutonomy         string         `json:"max_autonomy"`
-	AllowedTools        []string       `json:"allowed_tools"`
-	AllowedCapabilities []string       `json:"allowed_capabilities"`
-	MemoryPolicy        map[string]any `json:"memory_policy"`
-	LLMConfig           map[string]any `json:"llm_config"`
-	Enabled             *bool          `json:"enabled"`
+func (h *Handler) patchEmployeeProfile(w http.ResponseWriter, r *http.Request) {
+	if !requireScope(w, r, scopeEmployeeProfilesAdmin, scopeRuntimeAdmin) {
+		return
+	}
+	current, err := h.uc.GetProfile(r.Context(), r.PathValue("profile_id"))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	var body employeeProfileRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid json body")
+		return
+	}
+	profile, err := h.uc.UpsertProfile(r.Context(), employeeProfileRequestToProfile(body, current))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	httpjson.WriteJSON(w, http.StatusOK, employeeProfileFromProfile(profile))
 }
 
-func (h *Handler) archiveProfile(w http.ResponseWriter, r *http.Request) {
-	if !requireScope(w, r, scopeAgentProfilesAdmin, scopeRuntimeAdmin) {
+func (h *Handler) setEmployeeProfileStatus(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Status string `json:"status"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid json body")
+		return
+	}
+	switch strings.ToLower(strings.TrimSpace(body.Status)) {
+	case "active":
+		h.restoreEmployeeProfile(w, r)
+	case "archived":
+		h.archiveEmployeeProfile(w, r)
+	case "trashed", "trash":
+		h.trashEmployeeProfile(w, r)
+	default:
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid employee profile status")
+	}
+}
+
+func (h *Handler) archiveEmployeeProfile(w http.ResponseWriter, r *http.Request) {
+	if !requireScope(w, r, scopeEmployeeProfilesAdmin, scopeRuntimeAdmin) {
 		return
 	}
 	profile, err := h.uc.ArchiveProfile(r.Context(), r.PathValue("profile_id"))
@@ -119,23 +137,11 @@ func (h *Handler) archiveProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	httpjson.WriteJSON(w, http.StatusOK, profile)
+	httpjson.WriteJSON(w, http.StatusOK, employeeProfileFromProfile(profile))
 }
 
-func (h *Handler) restoreProfile(w http.ResponseWriter, r *http.Request) {
-	if !requireScope(w, r, scopeAgentProfilesAdmin, scopeRuntimeAdmin) {
-		return
-	}
-	profile, err := h.uc.RestoreProfile(r.Context(), r.PathValue("profile_id"))
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	httpjson.WriteJSON(w, http.StatusOK, profile)
-}
-
-func (h *Handler) trashProfile(w http.ResponseWriter, r *http.Request) {
-	if !requireScope(w, r, scopeAgentProfilesAdmin, scopeRuntimeAdmin) {
+func (h *Handler) trashEmployeeProfile(w http.ResponseWriter, r *http.Request) {
+	if !requireScope(w, r, scopeEmployeeProfilesAdmin, scopeRuntimeAdmin) {
 		return
 	}
 	profile, err := h.uc.TrashProfile(r.Context(), r.PathValue("profile_id"))
@@ -143,11 +149,23 @@ func (h *Handler) trashProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	httpjson.WriteJSON(w, http.StatusOK, profile)
+	httpjson.WriteJSON(w, http.StatusOK, employeeProfileFromProfile(profile))
 }
 
-func (h *Handler) purgeProfile(w http.ResponseWriter, r *http.Request) {
-	if !requireScope(w, r, scopeAgentProfilesAdmin, scopeRuntimeAdmin) {
+func (h *Handler) restoreEmployeeProfile(w http.ResponseWriter, r *http.Request) {
+	if !requireScope(w, r, scopeEmployeeProfilesAdmin, scopeRuntimeAdmin) {
+		return
+	}
+	profile, err := h.uc.RestoreProfile(r.Context(), r.PathValue("profile_id"))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	httpjson.WriteJSON(w, http.StatusOK, employeeProfileFromProfile(profile))
+}
+
+func (h *Handler) purgeEmployeeProfile(w http.ResponseWriter, r *http.Request) {
+	if !requireScope(w, r, scopeEmployeeProfilesAdmin, scopeRuntimeAdmin) {
 		return
 	}
 	if err := h.uc.PurgeProfile(r.Context(), r.PathValue("profile_id")); err != nil {
@@ -157,8 +175,8 @@ func (h *Handler) purgeProfile(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *Handler) listVersions(w http.ResponseWriter, r *http.Request) {
-	if !requireScope(w, r, scopeAgentProfilesRead, scopeAgentProfilesAdmin, scopeRuntimeAdmin) {
+func (h *Handler) listEmployeeProfileVersions(w http.ResponseWriter, r *http.Request) {
+	if !requireScope(w, r, scopeEmployeeProfilesRead, scopeEmployeeProfilesAdmin, scopeRuntimeAdmin) {
 		return
 	}
 	limit := 50
@@ -176,6 +194,138 @@ func (h *Handler) listVersions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpjson.WriteJSON(w, http.StatusOK, map[string]any{"versions": versions})
+}
+
+type employeeProfileRequest struct {
+	ProfileID            string         `json:"profile_id"`
+	ProfileKey           string         `json:"profile_key"`
+	FamilyID             string         `json:"family_id"`
+	VersionLabel         string         `json:"version_label"`
+	Name                 string         `json:"name"`
+	Description          string         `json:"description"`
+	SystemPrompt         string         `json:"system_prompt"`
+	MaxAutonomy          string         `json:"max_autonomy"`
+	DefaultCapabilityIDs []string       `json:"default_capability_ids"`
+	AllowedCapabilities  []string       `json:"allowed_capabilities"`
+	AllowedTools         []string       `json:"allowed_tools"`
+	MemoryPolicy         map[string]any `json:"memory_policy"`
+	LLMConfig            map[string]any `json:"llm_config"`
+	Enabled              *bool          `json:"enabled"`
+}
+
+func employeeProfileRequestToProfile(body employeeProfileRequest, current Profile) Profile {
+	profile := current
+	if profile.ProfileID == "" {
+		profile.ProfileID = employeeProfileKey(body)
+	}
+	if body.ProfileKey != "" {
+		profile.ProfileID = strings.TrimSpace(body.ProfileKey)
+	} else if body.ProfileID != "" {
+		if _, err := uuid.Parse(strings.TrimSpace(body.ProfileID)); err != nil {
+			profile.ProfileID = strings.TrimSpace(body.ProfileID)
+		}
+	}
+	if body.Name != "" {
+		profile.Name = body.Name
+	}
+	if body.FamilyID != "" {
+		profile.FamilyID = body.FamilyID
+	}
+	if profile.FamilyID == "" {
+		profile.FamilyID = familyIDFromProfileKey(profile.ProfileID)
+	}
+	if body.VersionLabel != "" {
+		profile.VersionLabel = body.VersionLabel
+	}
+	if profile.VersionLabel == "" {
+		profile.VersionLabel = "v1"
+	}
+	profile.Description = body.Description
+	if body.SystemPrompt != "" {
+		profile.SystemPrompt = body.SystemPrompt
+	}
+	if body.MaxAutonomy != "" {
+		profile.MaxAutonomy = body.MaxAutonomy
+	}
+	if body.AllowedTools != nil {
+		profile.AllowedTools = body.AllowedTools
+	}
+	if body.DefaultCapabilityIDs != nil {
+		profile.AllowedCapabilities = body.DefaultCapabilityIDs
+	} else if body.AllowedCapabilities != nil {
+		profile.AllowedCapabilities = body.AllowedCapabilities
+	}
+	if body.MemoryPolicy != nil {
+		profile.MemoryPolicy = body.MemoryPolicy
+	}
+	if body.LLMConfig != nil {
+		profile.LLMConfig = body.LLMConfig
+	}
+	profile.Enabled = true
+	if current.ProfileID != "" {
+		profile.Enabled = current.Enabled
+	}
+	if body.Enabled != nil {
+		profile.Enabled = *body.Enabled
+	}
+	return profile
+}
+
+func employeeProfileKey(body employeeProfileRequest) string {
+	for _, value := range []string{body.ProfileKey, body.ProfileID} {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, err := uuid.Parse(value); err == nil {
+			continue
+		}
+		return value
+	}
+	familyID := strings.TrimSpace(body.FamilyID)
+	if familyID == "" {
+		familyID = "employee." + keySegment(body.Name)
+	}
+	version := strings.TrimSpace(body.VersionLabel)
+	if version == "" {
+		version = "v1"
+	}
+	return strings.Trim(familyID+"."+version, ".")
+}
+
+func familyIDFromProfileKey(profileKey string) string {
+	profileKey = strings.TrimSpace(profileKey)
+	if profileKey == "" {
+		return ""
+	}
+	index := strings.LastIndex(profileKey, ".")
+	if index <= 0 {
+		return profileKey
+	}
+	return profileKey[:index]
+}
+
+func keySegment(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	var builder strings.Builder
+	lastDot := false
+	for _, r := range value {
+		isAlphaNum := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')
+		if isAlphaNum {
+			builder.WriteRune(r)
+			lastDot = false
+			continue
+		}
+		if !lastDot {
+			builder.WriteByte('.')
+			lastDot = true
+		}
+	}
+	out := strings.Trim(builder.String(), ".")
+	if out == "" {
+		return "profile"
+	}
+	return out
 }
 
 func requireScope(w http.ResponseWriter, r *http.Request, scopes ...string) bool {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	sharedpostgres "github.com/devpablocristo/platform/databases/postgres/go"
@@ -64,7 +65,8 @@ func (r *PostgresRepository) ListProfiles(ctx context.Context, lifecycle Lifecyc
 }
 
 func (r *PostgresRepository) GetProfile(ctx context.Context, profileID string) (Profile, error) {
-	row := r.db.Pool().QueryRow(ctx, selectProfileSQL+` WHERE profile_id = $1`, strings.TrimSpace(profileID))
+	predicate, arg := profileLookupPredicate(profileID, "$1")
+	row := r.db.Pool().QueryRow(ctx, selectProfileSQL+` WHERE `+predicate, arg)
 	profile, err := scanProfile(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -80,10 +82,10 @@ func (r *PostgresRepository) GetProfile(ctx context.Context, profileID string) (
 // upsert. Returns ErrNotFound when the profile does not exist.
 func (r *PostgresRepository) IsArchivedOrTrashed(ctx context.Context, profileID string) (bool, bool, error) {
 	var archived, trashed bool
+	predicate, arg := profileLookupPredicate(profileID, "$1")
 	err := r.db.Pool().QueryRow(ctx, `
 		SELECT archived_at IS NOT NULL, trashed_at IS NOT NULL
-		FROM agent_profiles WHERE profile_id = $1
-	`, strings.TrimSpace(profileID)).Scan(&archived, &trashed)
+		FROM agent_profiles WHERE `+predicate, arg).Scan(&archived, &trashed)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return false, false, ErrNotFound
@@ -297,4 +299,12 @@ func nonNilMap(value map[string]any) map[string]any {
 		return map[string]any{}
 	}
 	return value
+}
+
+func profileLookupPredicate(identifier, placeholder string) (string, any) {
+	identifier = strings.TrimSpace(identifier)
+	if parsed, err := uuid.Parse(identifier); err == nil {
+		return "id = " + placeholder, parsed
+	}
+	return "profile_id = " + placeholder, identifier
 }

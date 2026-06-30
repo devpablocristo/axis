@@ -10,24 +10,25 @@ import (
 	"github.com/devpablocristo/companion/internal/identityctx"
 	authn "github.com/devpablocristo/platform/authn/go"
 	"github.com/devpablocristo/platform/authn/go/identityhttp"
+	"github.com/google/uuid"
 )
 
-func TestHandlerPutProfileDefaultsEnabled(t *testing.T) {
+func TestHandlerEmployeeProfileDefaultsEnabled(t *testing.T) {
 	t.Parallel()
 
 	mux := http.NewServeMux()
 	NewHandler(NewUsecases(newFakeRepo())).Register(mux)
-	body := bytes.NewBufferString(`{"family_id":"axis.ops.billing","version_label":"v1","name":"Billing Agent","system_prompt":"Handle billing.","max_autonomy":"A1"}`)
-	req := httptest.NewRequest(http.MethodPut, "/v1/agent-profiles/axis.ops.billing.v1", body)
-	req = withProfilePrincipal(req, []string{"companion:agent_profiles:admin"})
+	body := bytes.NewBufferString(`{"profile_key":"axis.ops.billing.v1","family_id":"axis.ops.billing","version_label":"v1","name":"Billing Profile","system_prompt":"Handle billing.","max_autonomy":"A1"}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/employee-profiles", body)
+	req = withProfilePrincipal(req, []string{"companion:employee_profiles:admin"})
 	res := httptest.NewRecorder()
 
 	mux.ServeHTTP(res, req)
 
-	if res.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d body=%s", res.Code, res.Body.String())
+	if res.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d body=%s", res.Code, res.Body.String())
 	}
-	var profile Profile
+	var profile EmployeeProfile
 	if err := json.Unmarshal(res.Body.Bytes(), &profile); err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +45,7 @@ func TestHandlerRejectsMissingScope(t *testing.T) {
 
 	mux := http.NewServeMux()
 	NewHandler(NewUsecases(newFakeRepo())).Register(mux)
-	req := httptest.NewRequest(http.MethodGet, "/v1/agent-profiles", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/employee-profiles", nil)
 	req = withProfilePrincipal(req, []string{"companion:tasks:read"})
 	res := httptest.NewRecorder()
 
@@ -52,6 +53,63 @@ func TestHandlerRejectsMissingScope(t *testing.T) {
 
 	if res.Code != http.StatusForbidden {
 		t.Fatalf("expected 403, got %d body=%s", res.Code, res.Body.String())
+	}
+}
+
+func TestHandlerDoesNotRegisterAgentProfilesPublicRoute(t *testing.T) {
+	t.Parallel()
+
+	mux := http.NewServeMux()
+	NewHandler(NewUsecases(newFakeRepo())).Register(mux)
+	req := httptest.NewRequest(http.MethodGet, "/v1/agent-profiles", nil)
+	req = withProfilePrincipal(req, []string{"companion:employee_profiles:read"})
+	res := httptest.NewRecorder()
+
+	mux.ServeHTTP(res, req)
+
+	if res.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d body=%s", res.Code, res.Body.String())
+	}
+}
+
+func TestHandlerEmployeeProfilePublicSurface(t *testing.T) {
+	t.Parallel()
+
+	mux := http.NewServeMux()
+	NewHandler(NewUsecases(newFakeRepo())).Register(mux)
+	body := bytes.NewBufferString(`{"name":"Medical Case Assistant","system_prompt":"Assist medical case review.","max_autonomy":"A2"}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/employee-profiles", body)
+	req = withProfilePrincipal(req, []string{"companion:employee_profiles:admin"})
+	res := httptest.NewRecorder()
+
+	mux.ServeHTTP(res, req)
+
+	if res.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d body=%s", res.Code, res.Body.String())
+	}
+	var profile EmployeeProfile
+	if err := json.Unmarshal(res.Body.Bytes(), &profile); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := uuid.Parse(profile.ProfileID); err != nil {
+		t.Fatalf("expected public UUID profile_id, got %q", profile.ProfileID)
+	}
+	if profile.ProfileKey != "employee.medical.case.assistant.v1" {
+		t.Fatalf("expected generated profile_key, got %+v", profile)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/v1/employee-profiles/"+profile.ProfileID+"/status", bytes.NewBufferString(`{"status":"archived"}`))
+	req = withProfilePrincipal(req, []string{"companion:employee_profiles:admin"})
+	res = httptest.NewRecorder()
+	mux.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", res.Code, res.Body.String())
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &profile); err != nil {
+		t.Fatal(err)
+	}
+	if profile.Status != "archived" {
+		t.Fatalf("expected archived employee profile, got %+v", profile)
 	}
 }
 

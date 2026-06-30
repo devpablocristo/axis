@@ -34,6 +34,7 @@ type IdentityChain struct {
 	ActorType           string   `json:"actor_type,omitempty"`
 	ProductSurface      string   `json:"product_surface,omitempty"`
 	TaskID              string   `json:"task_id,omitempty"`
+	EmployeeID          string   `json:"employee_id,omitempty"`
 	AgentID             string   `json:"agent_id,omitempty"`
 	AuthScopes          []string `json:"auth_scopes,omitempty"`
 	CompanionPrincipal  string   `json:"companion_principal"`

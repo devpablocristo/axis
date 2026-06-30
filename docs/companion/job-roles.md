@@ -1,5 +1,10 @@
 # Job Roles
 
+Ver tambien `domain-model.md` para el mapa rector del dominio de Companion y
+la separacion entre JobRole, IAM Role, EmployeeProfile y PermissionBundle.
+El modelo objetivo detallado esta en
+`../specs/companion/domain/job-roles-domain-spec.md`.
+
 Un `JobRole` es un puesto de trabajo dentro de una customer org y un product
 surface. Define que funcion debe cumplir un Virtual Employee.
 
@@ -12,8 +17,12 @@ tenant = org_id + product_surface
 ## Concepto
 
 `JobRole` representa el puesto. `VirtualEmployee` representa el trabajador
-digital que ocupa ese puesto. `Agent / Agent Fleet` sigue siendo la
-implementacion interna v1 del Virtual Employee.
+digital que ocupa ese puesto. `Agent` queda como ejecutor tecnico de runtime,
+no como puesto ni perfil laboral.
+
+En el modelo objetivo, `JobRole.job_role_id` es UUID y las capabilities
+recomendadas se referencian por `recommended_capability_ids`. La implementacion
+v1 todavia usa `job_role_id` textual y `recommended_capabilities` como keys.
 
 `JobRole` no es un IAM Role, Account Role ni PermissionBundle. Puede sugerir
 defaults, pero no autoriza acciones directamente.
@@ -81,14 +90,14 @@ No hay delete fisico en v1. El lifecycle soportado es `active` y `archived`.
 
 ## Relacion Con Virtual Employees
 
-En v1, un Virtual Employee puede referenciar un JobRole mediante:
+En v1, un Virtual Employee referencia un JobRole mediante:
 
 ```text
-metadata.job_role_id
+job_role_id
 ```
 
-Esto evita migrar `companion_agents` y no cambia Runtime. La relacion es una
-referencia debil v1; no hay FK fuerte desde Agent Fleet.
+La relacion pertenece al core de `VirtualEmployee`. No autoriza permisos ni
+cambia Runtime.
 
 Al crear o editar un Virtual Employee, Console puede usar el JobRole para
 prellenar defaults seguros como puesto, mision, responsabilidades,
@@ -117,6 +126,6 @@ Todavia no existe:
 - Permission enforcement desde JobRole.
 - Multi-role employee.
 - Multi-agent employee.
-- FK fuerte con Agent Fleet.
+- FK fuerte con modulo tecnico de agents.
 - Cambio de Runtime.
 - Cambio de Capabilities, Tools, Jobs, Watchers o Memory.

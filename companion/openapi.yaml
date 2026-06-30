@@ -469,6 +469,130 @@ paths:
           schema: { type: string, enum: ["true"] }
       responses:
         "200": { description: Deleted count }
+  /v1/memories:
+    get:
+      summary: Lista contenedores Memory
+      description: Memory es el contenedor fuerte que puede referenciar un Virtual Employee mediante `memory_id`.
+      parameters:
+        - in: query
+          name: lifecycle
+          schema: { type: string, enum: [active, archived, all], default: active }
+      responses:
+        "200":
+          description: Memory container list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Memory" }
+    post:
+      summary: Crea un contenedor Memory
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MemoryInput" }
+      responses:
+        "201":
+          description: Memory container created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Memory" }
+  /v1/memories/{memory_id}:
+    get:
+      summary: Obtiene un contenedor Memory
+      parameters:
+        - in: path
+          name: memory_id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Memory container
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Memory" }
+    patch:
+      summary: Actualiza un contenedor Memory
+      parameters:
+        - in: path
+          name: memory_id
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MemoryInput" }
+      responses:
+        "200":
+          description: Memory container updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Memory" }
+  /v1/memories/{memory_id}/status:
+    post:
+      summary: Cambia status de un contenedor Memory
+      parameters:
+        - in: path
+          name: memory_id
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { type: string, enum: [active, disabled, archived] }
+      responses:
+        "200":
+          description: Memory status changed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Memory" }
+  /v1/memories/{memory_id}/entries:
+    get:
+      summary: Lista entries de un contenedor Memory
+      parameters:
+        - in: path
+          name: memory_id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Memory entries
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/MemoryContainerEntry" }
+    post:
+      summary: Crea un entry dentro de un contenedor Memory
+      parameters:
+        - in: path
+          name: memory_id
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MemoryContainerEntryInput" }
+      responses:
+        "201":
+          description: Memory entry created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MemoryContainerEntry" }
   /v1/memory/{id}/reviews:
     post:
       summary: Crea una review de memoria
@@ -568,10 +692,32 @@ paths:
                     items: { $ref: "#/components/schemas/CapabilityManifest" }
   /v1/capabilities:
     get:
-      summary: Lista capability manifests persistidos
-      description: Requiere `companion:capabilities:read` o `companion:capabilities:admin`.
+      summary: Lista capabilities
+      description: |
+        Superficie publica de Capability. `capability_id` es UUID publico; la
+        key semantica historica vive en `capability_key`. Por compatibilidad
+        tambien devuelve `manifest_records` con los manifests versionados.
       responses:
-        "200": { description: Capability records }
+        "200":
+          description: Capability list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Capability" }
+                  capability_catalog:
+                    type: array
+                    items: { $ref: "#/components/schemas/Capability" }
+                  manifest_records:
+                    type: array
+                    items: { $ref: "#/components/schemas/CapabilityManifestRecord" }
+                  capabilities:
+                    type: array
+                    deprecated: true
+                    items: { $ref: "#/components/schemas/CapabilityManifestRecord" }
     post:
       summary: Importa un capability manifest como draft
       description: Requiere `companion:capabilities:admin`.
@@ -582,6 +728,101 @@ paths:
             schema: { $ref: "#/components/schemas/CapabilityManifest" }
       responses:
         "201": { description: Capability imported }
+  /v1/capabilities/{capability_id}:
+    get:
+      summary: Obtiene una Capability por UUID
+      parameters:
+        - in: path
+          name: capability_id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Capability
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Capability" }
+        "404": { description: Capability not found }
+  /v1/capabilities/{capability_id}/status:
+    post:
+      summary: Cambia el status de una Capability
+      parameters:
+        - in: path
+          name: capability_id
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { type: string, enum: [draft, active, deprecated, blocked] }
+      responses:
+        "200":
+          description: Capability status changed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Capability" }
+  /v1/tools:
+    get:
+      summary: Lista Tools tecnicas derivadas de capabilities
+      description: Tools son funciones tecnicas invocables; no reemplazan Capability ni son asignadas directamente al Employee en el modelo objetivo.
+      responses:
+        "200":
+          description: Tool list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tools:
+                    type: array
+                    items: { $ref: "#/components/schemas/Tool" }
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Tool" }
+  /v1/tools/{tool_id}:
+    get:
+      summary: Obtiene una Tool por UUID
+      parameters:
+        - in: path
+          name: tool_id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Tool
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Tool" }
+        "404": { description: Tool not found }
+  /v1/tools/{tool_id}/status:
+    post:
+      summary: Cambia el status de una Tool derivada
+      description: En v1 actualiza el status del manifest subyacente; `disabled` mapea a `blocked`.
+      parameters:
+        - in: path
+          name: tool_id
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { type: string, enum: [active, disabled, deprecated] }
+      responses:
+        "200":
+          description: Tool status changed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Tool" }
   /v1/capabilities/import-source:
     post:
       summary: Importa capability manifests desde una fuente JSON
@@ -1227,7 +1468,7 @@ paths:
   /v1/agents:
     get:
       summary: Lista Agents de compatibilidad tecnica
-      description: Endpoint legacy/tecnico de Agent Fleet. Para producto y Console usar `/v1/virtual-employees`. Requiere `companion:runtime:admin` o `companion:cross_org`.
+      description: Endpoint legacy/tecnico de modulo tecnico de agents. Para producto y Console usar `/v1/virtual-employees`. Requiere `companion:runtime:admin` o `companion:cross_org`.
       responses:
         "200":
           description: Agent list
@@ -1242,7 +1483,11 @@ paths:
   /v1/virtual-employees:
     get:
       summary: Lista Virtual Employees de la customer org
-      description: API publica recomendada para trabajadores digitales persistentes. V1 reutiliza Agent Fleet; `tenant = org_id + product_surface`.
+      description: API publica recomendada para trabajadores digitales persistentes. `tenant_id` es UUID publico y Companion mantiene `org_id + product_surface` solo como contexto interno de transicion.
+      parameters:
+        - in: query
+          name: lifecycle
+          schema: { type: string, enum: [active, archived, trashed, all], default: active }
       responses:
         "200":
           description: Virtual Employee list
@@ -1254,29 +1499,66 @@ paths:
                   data:
                     type: array
                     items: { $ref: "#/components/schemas/VirtualEmployee" }
-  /v1/agent-profiles:
+    post:
+      summary: Crea un Virtual Employee
+      description: Crea un trabajador digital persistente con ID automatico. No acepta `agent_id`, `metadata`, `job_title`, `mission`, `responsibilities`, `allowed_tools`, `memory_enabled` ni `memory_scope_id`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/VirtualEmployeeInput" }
+      responses:
+        "201":
+          description: Virtual Employee created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VirtualEmployee" }
+  /v1/employee-profiles:
     get:
-      summary: Lista perfiles globales de agentes
-      description: Requiere `companion:agent_profiles:read`, `companion:agent_profiles:admin` o `companion:runtime:admin`.
+      summary: Lista Employee Profiles
+      description: |
+        Superficie publica recomendada para perfiles de Virtual Employees.
+        En v1 reutiliza Agent Profiles internamente; `profile_id` es el UUID
+        publico del perfil y `profile_key` conserva la key tecnica usada por
+        Agent/Runtime durante la transicion.
       parameters:
+        - in: query
+          name: lifecycle
+          schema: { type: string, enum: [active, archived, trash, all], default: active }
         - in: query
           name: include_archived
           schema: { type: boolean, default: false }
       responses:
         "200":
-          description: Agent profile list
+          description: Employee Profile list
           content:
             application/json:
               schema:
                 type: object
                 properties:
+                  employee_profiles:
+                    type: array
+                    items: { $ref: "#/components/schemas/EmployeeProfile" }
                   profiles:
                     type: array
-                    items: { $ref: "#/components/schemas/AgentProfile" }
-  /v1/agent-profiles/{profile_id}:
+                    items: { $ref: "#/components/schemas/EmployeeProfile" }
+    post:
+      summary: Crea un Employee Profile
+      description: Crea un perfil con UUID publico automatico; el cliente puede enviar `profile_key` humano o dejarlo autogenerado.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EmployeeProfileInput" }
+      responses:
+        "201":
+          description: Employee Profile created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EmployeeProfile" }
+  /v1/employee-profiles/{profile_id}:
     get:
-      summary: Obtiene un perfil global de agente
-      description: Requiere scope de lectura de agent profiles.
+      summary: Obtiene un Employee Profile
       parameters:
         - in: path
           name: profile_id
@@ -1284,14 +1566,13 @@ paths:
           schema: { type: string }
       responses:
         "200":
-          description: Agent profile
+          description: Employee Profile
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/AgentProfile" }
-        "404": { description: Agent profile not found }
-    put:
-      summary: Crea o actualiza un perfil global de agente
-      description: Requiere `companion:agent_profiles:admin` o `companion:runtime:admin`.
+              schema: { $ref: "#/components/schemas/EmployeeProfile" }
+        "404": { description: Employee Profile not found }
+    patch:
+      summary: Actualiza un Employee Profile
       parameters:
         - in: path
           name: profile_id
@@ -1301,41 +1582,79 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/AgentProfileInput" }
+            schema: { $ref: "#/components/schemas/EmployeeProfileInput" }
       responses:
         "200":
-          description: Agent profile saved
+          description: Employee Profile updated
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/AgentProfile" }
-  /v1/agent-profiles/{profile_id}/archive:
+              schema: { $ref: "#/components/schemas/EmployeeProfile" }
+  /v1/employee-profiles/{profile_id}/status:
     post:
-      summary: Archiva un perfil global de agente
-      description: Requiere scope admin de agent profiles.
+      summary: Cambia el status de un Employee Profile
+      parameters:
+        - in: path
+          name: profile_id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { type: string, enum: [active, archived, trashed] }
+      responses:
+        "200":
+          description: Employee Profile status changed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EmployeeProfile" }
+  /v1/employee-profiles/{profile_id}/archive:
+    post:
+      summary: Archiva un Employee Profile
       parameters:
         - in: path
           name: profile_id
           required: true
           schema: { type: string }
       responses:
-        "200": { description: Agent profile archived }
-        "404": { description: Agent profile not found }
-  /v1/agent-profiles/{profile_id}/restore:
+        "200": { description: Employee Profile archived }
+  /v1/employee-profiles/{profile_id}/restore:
     post:
-      summary: Restaura un perfil global de agente
-      description: Requiere scope admin de agent profiles.
+      summary: Restaura un Employee Profile
       parameters:
         - in: path
           name: profile_id
           required: true
           schema: { type: string }
       responses:
-        "200": { description: Agent profile restored }
-        "404": { description: Agent profile not found }
-  /v1/agent-profiles/{profile_id}/versions:
+        "200": { description: Employee Profile restored }
+  /v1/employee-profiles/{profile_id}/trash:
+    post:
+      summary: Mueve un Employee Profile a papelera
+      parameters:
+        - in: path
+          name: profile_id
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Employee Profile trashed }
+  /v1/employee-profiles/{profile_id}/purge:
+    delete:
+      summary: Elimina definitivamente un Employee Profile en papelera
+      parameters:
+        - in: path
+          name: profile_id
+          required: true
+          schema: { type: string }
+      responses:
+        "204": { description: Employee Profile purged }
+  /v1/employee-profiles/{profile_id}/versions:
     get:
-      summary: Lista snapshots anteriores de un perfil global de agente
-      description: Requiere scope de lectura de agent profiles.
+      summary: Lista snapshots anteriores de un Employee Profile
       parameters:
         - in: path
           name: profile_id
@@ -1346,7 +1665,7 @@ paths:
           schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
       responses:
         "200":
-          description: Agent profile versions
+          description: Employee Profile versions
           content:
             application/json:
               schema:
@@ -1354,7 +1673,7 @@ paths:
                 properties:
                   versions:
                     type: array
-                    items: { $ref: "#/components/schemas/AgentProfileVersion" }
+                    items: { $ref: "#/components/schemas/EmployeeProfileVersion" }
   /v1/job-roles:
     get:
       summary: Lista JobRoles de la customer org
@@ -1370,6 +1689,10 @@ paths:
         - in: query
           name: product_surface
           schema: { type: string }
+        - in: query
+          name: tenant_id
+          description: Tenant UUID objetivo; durante la transicion Companion lo guarda como identificador opaco.
+          schema: { type: string, format: uuid }
         - in: query
           name: lifecycle
           schema: { type: string, enum: [active, archived, all], default: active }
@@ -1390,10 +1713,37 @@ paths:
                   data:
                     type: array
                     items: { $ref: "#/components/schemas/JobRole" }
+    post:
+      summary: Crea un JobRole con ID automatico
+      description: |
+        Superficie publica recomendada. El cliente no envia `job_role_id`; el
+        backend genera un UUID publico. `slug` es la key humana unica dentro
+        del tenant/contexto. JobRole recomienda defaults; no autoriza permisos.
+      parameters:
+        - in: query
+          name: org_id
+          schema: { type: string }
+        - in: query
+          name: product_surface
+          schema: { type: string }
+        - in: query
+          name: tenant_id
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/JobRoleInput" }
+      responses:
+        "201":
+          description: JobRole created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JobRole" }
   /v1/job-roles/{job_role_id}:
     get:
       summary: Obtiene un JobRole
-      description: Requiere scope de lectura de Agents/Runtime admin en v1.
+      description: Requiere scope de lectura de Agents/Runtime admin en v1. `job_role_id` es UUID publico; durante la transicion tambien se aceptan keys legacy.
       parameters:
         - in: path
           name: job_role_id
@@ -1412,12 +1762,44 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/JobRole" }
         "404": { description: JobRole not found }
-    put:
-      summary: Crea o actualiza un JobRole
+    patch:
+      summary: Actualiza un JobRole
       description: |
-        Crea o actualiza un puesto de trabajo. Los campos `recommended_capabilities`,
-        `default_permission_bundle_id`, `default_sla_policy` y
-        `default_memory_policy` son defaults/recomendaciones, no enforcement.
+        Superficie publica recomendada para modificar un JobRole existente.
+        No cambia status; para archivar/restaurar usar `/status`.
+      parameters:
+        - in: path
+          name: job_role_id
+          required: true
+          schema: { type: string, format: uuid }
+        - in: query
+          name: org_id
+          schema: { type: string }
+        - in: query
+          name: product_surface
+          schema: { type: string }
+        - in: query
+          name: tenant_id
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/JobRoleInput" }
+      responses:
+        "200":
+          description: JobRole updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JobRole" }
+    put:
+      summary: Crea o actualiza un JobRole legacy
+      description: |
+        Compatibilidad tecnica para BFF/Console actuales. Para contratos nuevos
+        usar `POST /v1/job-roles` y `PATCH /v1/job-roles/{job_role_id}`.
+        Los campos `recommended_capabilities`, `default_permission_bundle_id`,
+        `default_sla_policy` y `default_memory_policy` son defaults/recomendaciones,
+        no enforcement.
       parameters:
         - in: path
           name: job_role_id
@@ -1440,9 +1822,33 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/JobRole" }
+  /v1/job-roles/{job_role_id}/status:
+    post:
+      summary: Cambia el status de un JobRole
+      description: Cambia entre `active` y `archived`. Idempotente cuando no hay cambio real.
+      parameters:
+        - in: path
+          name: job_role_id
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { type: string, enum: [active, archived] }
+      responses:
+        "200":
+          description: JobRole status changed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JobRole" }
   /v1/job-roles/{job_role_id}/archive:
     post:
-      summary: Archiva un JobRole
+      summary: Archiva un JobRole legacy
       description: Archiva el puesto sin borrar datos ni afectar permisos reales.
       parameters:
         - in: path
@@ -1488,19 +1894,13 @@ paths:
   /v1/agents/assignments:
     post:
       summary: Asigna un Agent activo por compatibilidad tecnica
-      description: Endpoint tecnico/legacy. Para contratos nuevos usar `/v1/virtual-employees/assignments`. Requiere `companion:runtime:admin` o `companion:cross_org`.
+      description: Endpoint tecnico de modulo tecnico de agents. La asignacion publica por Employee queda para Work Domain; no forma parte del core `VirtualEmployee`.
       responses:
         "200": { description: Agent assignment }
-  /v1/virtual-employees/assignments:
-    post:
-      summary: Asigna un Virtual Employee activo para un intent/capability
-      description: Superficie publica recomendada. Internamente reutiliza assignment de Agent Fleet.
-      responses:
-        "200": { description: Virtual Employee assignment }
   /v1/agents/{agent_id}:
     get:
       summary: Obtiene un Agent de compatibilidad tecnica
-      description: Endpoint legacy/tecnico. Para producto y Console usar `/v1/virtual-employees/{employee_id}`. Requiere `companion:runtime:admin` o `companion:cross_org`.
+      description: Endpoint tecnico de modulo tecnico de agents. Para trabajadores digitales publicos usar `/v1/virtual-employees/{employee_id}`.
       parameters:
         - in: path
           name: agent_id
@@ -1514,7 +1914,7 @@ paths:
               schema: { $ref: "#/components/schemas/Agent" }
     put:
       summary: Crea o actualiza un Agent de compatibilidad tecnica
-      description: Endpoint legacy/tecnico de Agent Fleet. Para producto y Console usar `/v1/virtual-employees/{employee_id}`. Requiere `companion:runtime:admin` o `companion:cross_org`.
+      description: Endpoint tecnico de modulo tecnico de agents. No crea VirtualEmployees.
       parameters:
         - in: path
           name: agent_id
@@ -1534,51 +1934,172 @@ paths:
   /v1/virtual-employees/{employee_id}:
     get:
       summary: Obtiene un Virtual Employee
-      description: API publica recomendada. `employee_id` es el identificador publico y mapea directamente a `agent_id`.
+      description: API publica recomendada. `employee_id` es UUID publico del Virtual Employee.
       parameters:
         - in: path
           name: employee_id
           required: true
-          schema: { type: string }
+          schema: { type: string, format: uuid }
       responses:
         "200":
           description: Virtual Employee
           content:
             application/json:
               schema: { $ref: "#/components/schemas/VirtualEmployee" }
-    put:
-      summary: Crea o actualiza un Virtual Employee
-      description: API publica recomendada. V1 es un wrapper de Agent Fleet; no crea persistencia separada.
+    patch:
+      summary: Actualiza un Virtual Employee
+      description: Actualiza solo el core del Employee. No cambia status; para lifecycle usar `/status`.
       parameters:
         - in: path
           name: employee_id
           required: true
-          schema: { type: string }
+          schema: { type: string, format: uuid }
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/VirtualEmployee" }
+            schema: { $ref: "#/components/schemas/VirtualEmployeeInput" }
       responses:
         "200":
-          description: Virtual Employee
+          description: Virtual Employee updated
           content:
             application/json:
               schema: { $ref: "#/components/schemas/VirtualEmployee" }
-    delete:
-      summary: Elimina un Virtual Employee
-      description: Elimina el Agent interno asociado al `employee_id`.
+  /v1/virtual-employees/{employee_id}/status:
+    post:
+      summary: Cambia el status de un Virtual Employee
       parameters:
         - in: path
           name: employee_id
           required: true
-          schema: { type: string }
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { $ref: "#/components/schemas/EmployeeStatus" }
       responses:
-        "204": { description: Virtual Employee deleted }
+        "200":
+          description: Virtual Employee status changed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VirtualEmployee" }
+  /v1/handoffs:
+    get:
+      summary: Lista handoffs Employee -> Employee
+      description: Superficie publica de Workforce. No usa `agent_id`; los handoffs tecnicos de modulo tecnico de agents viven en `/v1/agents/handoffs`.
+      parameters:
+        - in: query
+          name: tenant_id
+          required: true
+          schema: { type: string, format: uuid }
+        - in: query
+          name: status
+          schema: { $ref: "#/components/schemas/HandoffStatus" }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+      responses:
+        "200":
+          description: Handoff list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  handoffs:
+                    type: array
+                    items: { $ref: "#/components/schemas/Handoff" }
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Handoff" }
+    post:
+      summary: Crea un handoff Employee -> Employee
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/HandoffInput" }
+      responses:
+        "201":
+          description: Handoff created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Handoff" }
+  /v1/handoffs/{handoff_id}:
+    get:
+      summary: Obtiene un handoff Employee -> Employee
+      parameters:
+        - in: path
+          name: handoff_id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Handoff
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Handoff" }
+        "404": { description: Handoff not found }
+    patch:
+      summary: Actualiza un handoff Employee -> Employee
+      description: Cambiar status a `accepted` puede reasignar la Task indicada por `task_id` al `to_employee_id`.
+      parameters:
+        - in: path
+          name: handoff_id
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/HandoffInput" }
+      responses:
+        "200":
+          description: Handoff updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Handoff" }
+  /v1/audit-events:
+    get:
+      summary: Lista AuditEvents comunes de Workforce
+      description: Lee eventos comunes desde `lifecycle_audit`. No reemplaza Nexus evidence ni approvals.
+      parameters:
+        - in: query
+          name: tenant_id
+          required: true
+          schema: { type: string, format: uuid }
+        - in: query
+          name: resource_type
+          schema: { type: string }
+        - in: query
+          name: resource_id
+          schema: { type: string, format: uuid }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+      responses:
+        "200":
+          description: Audit event list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  audit_events:
+                    type: array
+                    items: { $ref: "#/components/schemas/AuditEvent" }
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/AuditEvent" }
   /v1/agents/{agent_id}/disable:
     post:
       summary: Deshabilita un Agent de compatibilidad tecnica
-      description: Endpoint legacy/tecnico. Para producto y Console usar `/v1/virtual-employees/{employee_id}/disable`. Requiere `companion:runtime:admin` o `companion:cross_org`.
+      description: Endpoint tecnico de modulo tecnico de agents. Para VirtualEmployees usar `/v1/virtual-employees/{employee_id}/status`.
       parameters:
         - in: path
           name: agent_id
@@ -1590,100 +2111,10 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Agent" }
-  /v1/virtual-employees/{employee_id}/disable:
-    post:
-      summary: Deshabilita un Virtual Employee
-      description: API publica recomendada. Wrapper de Agent Fleet; `employee_id` mapea a `agent_id`.
-      parameters:
-        - in: path
-          name: employee_id
-          required: true
-          schema: { type: string }
-      responses:
-        "200":
-          description: Virtual Employee
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/VirtualEmployee" }
-  /v1/virtual-employees/{employee_id}/archive:
-    post:
-      summary: Archiva un Virtual Employee
-      description: API publica recomendada. Wrapper de lifecycle de Agent Fleet.
-      parameters:
-        - in: path
-          name: employee_id
-          required: true
-          schema: { type: string }
-      responses:
-        "200":
-          description: Virtual Employee
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/VirtualEmployee" }
-  /v1/virtual-employees/{employee_id}/trash:
-    post:
-      summary: Mueve un Virtual Employee a trash
-      description: API publica recomendada. Wrapper de lifecycle de Agent Fleet.
-      parameters:
-        - in: path
-          name: employee_id
-          required: true
-          schema: { type: string }
-      responses:
-        "200":
-          description: Virtual Employee
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/VirtualEmployee" }
-  /v1/virtual-employees/{employee_id}/restore:
-    post:
-      summary: Restaura un Virtual Employee
-      description: API publica recomendada. Wrapper de lifecycle de Agent Fleet.
-      parameters:
-        - in: path
-          name: employee_id
-          required: true
-          schema: { type: string }
-      responses:
-        "200":
-          description: Virtual Employee
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/VirtualEmployee" }
-  /v1/virtual-employees/{employee_id}/approve:
-    post:
-      summary: Aprueba un Virtual Employee
-      description: API publica recomendada. Wrapper de review de Agent Fleet.
-      parameters:
-        - in: path
-          name: employee_id
-          required: true
-          schema: { type: string }
-      responses:
-        "200":
-          description: Virtual Employee
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/VirtualEmployee" }
-  /v1/virtual-employees/{employee_id}/ignore:
-    post:
-      summary: Ignora review de un Virtual Employee
-      description: API publica recomendada. Wrapper de review de Agent Fleet.
-      parameters:
-        - in: path
-          name: employee_id
-          required: true
-          schema: { type: string }
-      responses:
-        "200":
-          description: Virtual Employee
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/VirtualEmployee" }
   /v1/agents/handoffs:
     get:
       summary: Lista handoffs entre Agents por compatibilidad tecnica
-      description: Endpoint legacy/tecnico. Para contratos nuevos usar `/v1/virtual-employees/handoffs`. Requiere `companion:runtime:admin` o `companion:cross_org`.
+      description: Endpoint tecnico de modulo tecnico de agents. Handoffs publicos entre Employees quedan para Work Domain.
       parameters:
         - in: query
           name: limit
@@ -1701,40 +2132,7 @@ paths:
                     items: { $ref: "#/components/schemas/AgentHandoff" }
     post:
       summary: Crea un handoff entre Agents por compatibilidad tecnica
-      description: Endpoint legacy/tecnico. Para contratos nuevos usar `/v1/virtual-employees/handoffs`. Requiere `companion:runtime:admin` o `companion:cross_org`.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: "#/components/schemas/AgentHandoff" }
-      responses:
-        "201":
-          description: Handoff
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/AgentHandoff" }
-  /v1/virtual-employees/handoffs:
-    get:
-      summary: Lista handoffs entre Virtual Employees
-      description: API publica recomendada para handoffs; internamente usa Agent Fleet.
-      parameters:
-        - in: query
-          name: limit
-          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
-      responses:
-        "200":
-          description: Handoff list
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    type: array
-                    items: { $ref: "#/components/schemas/AgentHandoff" }
-    post:
-      summary: Crea un handoff entre Virtual Employees
-      description: API publica recomendada para handoffs; internamente usa Agent Fleet.
+      description: Endpoint tecnico de modulo tecnico de agents. Handoffs publicos entre Employees quedan para Work Domain.
       requestBody:
         required: true
         content:
@@ -1749,28 +2147,7 @@ paths:
   /v1/agents/handoffs/{id}:
     patch:
       summary: Actualiza estado de handoff entre Agents por compatibilidad tecnica
-      description: Endpoint legacy/tecnico. Para contratos nuevos usar `/v1/virtual-employees/handoffs/{id}`. Requiere `companion:runtime:admin` o `companion:cross_org`.
-      parameters:
-        - $ref: "#/components/parameters/UUIDPath"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [status]
-              properties:
-                status: { type: string, enum: [accepted, rejected, completed, cancelled] }
-      responses:
-        "200":
-          description: Handoff
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/AgentHandoff" }
-  /v1/virtual-employees/handoffs/{id}:
-    patch:
-      summary: Actualiza estado de handoff entre Virtual Employees
-      description: API publica recomendada para handoffs; internamente usa Agent Fleet.
+      description: Endpoint tecnico de modulo tecnico de agents. Handoffs publicos entre Employees quedan para Work Domain. Requiere `companion:runtime:admin` o `companion:cross_org`.
       parameters:
         - $ref: "#/components/parameters/UUIDPath"
       requestBody:
@@ -2016,7 +2393,9 @@ components:
         chat_id: { type: string, format: uuid, description: "Continúa conversación durable existente" }
         channel: { type: string, description: "Canal del caller. Default: api." }
         product_surface: { type: string }
-        agent_id: { type: string, description: "Empleado IA persistente que toma ownership de la ejecución" }
+        tenant_id: { type: string, format: uuid, description: "Tenant UUID requerido cuando se usa employee_id." }
+        employee_id: { type: string, format: uuid, description: "Virtual Employee publico que toma ownership de la ejecucion." }
+        agent_id: { type: string, description: "Agent tecnico legacy para runtime/compatibilidad." }
         route_hint: { type: string }
         confirmed_actions:
           type: array
@@ -2055,6 +2434,7 @@ components:
         routing_source: { type: string }
         output_kind: { type: string }
         run_id: { type: string, format: uuid }
+        employee_id: { type: string, format: uuid }
         agent_id: { type: string }
         task: { $ref: "#/components/schemas/Task" }
         messages:
@@ -2133,7 +2513,7 @@ components:
         metadata:
           type: object
           additionalProperties: true
-          description: Opaque Agent metadata. VirtualEmployee v1 stores semantic fields here as flat keys such as job_title, mission, responsibilities, owner_user_id, contact_channels and escalation_rules.
+          description: Opaque message metadata for chat/tool events.
         created_at: { type: string, format: date-time }
     CapabilityManifest:
       type: object
@@ -2208,6 +2588,65 @@ components:
         observability_tags:
           type: array
           items: { type: string }
+    CapabilityManifestRecord:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        manifest: { $ref: "#/components/schemas/CapabilityManifest" }
+        status: { type: string, enum: [draft, active, deprecated, blocked] }
+        source: { type: string, enum: [generated, imported, url] }
+        source_uri: { type: string }
+        imported_by: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    Capability:
+      type: object
+      required: [capability_id, capability_key, name, description, version, mode, risk_class, status]
+      properties:
+        capability_id:
+          type: string
+          format: uuid
+          description: Strong public UUID.
+        capability_key:
+          type: string
+          description: Human/semantic key such as billing.invoice.read.
+        name: { type: string }
+        description: { type: string }
+        version: { type: string }
+        product_id:
+          type: string
+          format: uuid
+          description: Target model field; omitted while Product UUID migration is pending.
+        product_surface:
+          type: string
+          description: Compatibility product key used until Product has UUID identity everywhere.
+        tool_id: { type: string, format: uuid }
+        mode: { type: string, enum: [read, write, execute] }
+        risk_class: { type: string, enum: [low, medium, high, critical] }
+        status: { type: string, enum: [draft, active, deprecated, blocked] }
+    Tool:
+      type: object
+      required: [tool_id, tool_key, name, description, operation, side_effect, status]
+      properties:
+        tool_id:
+          type: string
+          format: uuid
+          description: Strong public UUID. In v1 it is derived from the backing capability manifest record.
+        tool_key:
+          type: string
+          description: Technical key derived from connector and operation.
+        name: { type: string }
+        description: { type: string }
+        connector_id:
+          type: string
+          format: uuid
+          description: Target model field; omitted while connectors still expose key identity.
+        connector_key: { type: string }
+        operation: { type: string }
+        side_effect: { type: boolean }
+        status: { type: string, enum: [active, disabled, deprecated] }
+        capability_id: { type: string, format: uuid }
+        capability_key: { type: string }
     CapabilityManifestSourceImportRequest:
       type: object
       required: [source_url]
@@ -2296,6 +2735,10 @@ components:
           type: string
           description: Si falta, Companion usa el actor efectivo autenticado; si difiere, debe coincidir con `on_behalf_of` o requerir scope operador.
         assigned_to: { type: string }
+        assignee_employee_id:
+          type: string
+          format: uuid
+          description: Virtual Employee asignado. Se persiste en context_json en la version actual.
         channel: { type: string }
         summary: { type: string }
         context_json: { type: object, additionalProperties: true }
@@ -2304,8 +2747,18 @@ components:
       properties:
         id: { type: string, format: uuid }
         org_id: { type: string, description: Customer org/work context donde trabaja Companion. }
+        product_surface: { type: string }
+        assignee_employee_id: { type: string, format: uuid }
+        agent_id: { type: string, description: Agent tecnico legacy si la task viene de runtime antiguo. }
         title: { type: string }
+        goal: { type: string }
         status: { type: string }
+        priority: { type: string }
+        created_by: { type: string }
+        assigned_to: { type: string }
+        channel: { type: string }
+        summary: { type: string }
+        context_json: { type: object, additionalProperties: true }
         nexus_status: { type: string }
         nexus_last_checked_at: { type: string, format: date-time }
     SetTaskPlanRequest:
@@ -2447,6 +2900,55 @@ components:
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
         expires_at: { type: string, format: date-time }
+    Memory:
+      type: object
+      required: [memory_id, tenant_id, policy, status]
+      properties:
+        memory_id: { type: string, format: uuid }
+        tenant_id: { type: string, format: uuid }
+        owner_employee_id: { type: string, format: uuid, nullable: true }
+        policy: { $ref: "#/components/schemas/MemoryPolicy" }
+        status: { type: string, enum: [active, disabled, archived] }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        archived_at: { type: string, format: date-time, nullable: true }
+        version: { type: integer }
+    MemoryInput:
+      type: object
+      additionalProperties: false
+      properties:
+        owner_employee_id: { type: string, format: uuid, nullable: true }
+        policy: { $ref: "#/components/schemas/MemoryPolicy" }
+        status: { type: string, enum: [active, disabled] }
+    MemoryPolicy:
+      type: object
+      required: [enabled_by_default, retention_days, allow_user_memory, allow_task_memory, allow_tenant_memory]
+      properties:
+        enabled_by_default: { type: boolean }
+        retention_days: { type: integer, minimum: 0 }
+        allow_user_memory: { type: boolean }
+        allow_task_memory: { type: boolean }
+        allow_tenant_memory: { type: boolean }
+    MemoryContainerEntry:
+      type: object
+      required: [memory_entry_id, memory_id, kind, content_text, confidence, status]
+      properties:
+        memory_entry_id: { type: string, format: uuid }
+        memory_id: { type: string, format: uuid }
+        kind: { type: string, enum: [fact, preference, summary, procedure, note] }
+        content_text: { type: string }
+        confidence: { type: number, minimum: 0, maximum: 1 }
+        status: { type: string, enum: [active, archived] }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    MemoryContainerEntryInput:
+      type: object
+      required: [kind, content_text]
+      additionalProperties: false
+      properties:
+        kind: { type: string, enum: [fact, preference, summary, procedure, note] }
+        content_text: { type: string }
+        confidence: { type: number, minimum: 0, maximum: 1 }
     MemorySearchResponse:
       type: object
       properties:
@@ -2478,6 +2980,10 @@ components:
             - type: object
               additionalProperties: true
           description: Para `watcher_type=capability`, usar `CapabilityWatcherConfig`; los tipos Pymes existentes aceptan su config historica.
+        assignee_employee_id:
+          type: string
+          format: uuid
+          description: Virtual Employee que debe recibir el trabajo generado por este Watcher. Se proyecta dentro de config en la version actual.
         enabled: { type: boolean }
     UpdateWatcherRequest:
       type: object
@@ -2488,6 +2994,10 @@ components:
             - $ref: "#/components/schemas/CapabilityWatcherConfig"
             - type: object
               additionalProperties: true
+        assignee_employee_id:
+          type: string
+          format: uuid
+          description: Enviar string vacio para limpiar el assignee.
         enabled: { type: boolean }
     CapabilityWatcherConfig:
       type: object
@@ -2521,6 +3031,7 @@ components:
         name: { type: string }
         watcher_type: { type: string }
         config: { type: object, additionalProperties: true }
+        assignee_employee_id: { type: string, format: uuid }
         enabled: { type: boolean }
         last_run_at: { type: string, format: date-time }
         last_result: { type: object, additionalProperties: true }
@@ -2789,48 +3300,98 @@ components:
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     VirtualEmployee:
-      description: |
-        Public Virtual Employee representation. In v1 this is a semantic
-        wrapper over Agent Fleet: `employee_id` maps directly to internal
-        `agent_id`, persistence is `companion_agents`, Runtime still uses
-        `agent_id`, and tenant is `org_id + product_surface`.
-      allOf:
-        - $ref: "#/components/schemas/Agent"
-    AgentProfileInput:
+      type: object
+      description: Trabajador digital persistente con identidad propia. No es un Agent ni un alias de modulo tecnico de agents.
+      required: [employee_id, tenant_id, name, supervisor_user_id, status, job_role_id, profile_id, autonomy, capability_ids]
+      properties:
+        employee_id: { type: string, format: uuid }
+        tenant_id: { type: string, format: uuid }
+        name: { type: string }
+        supervisor_user_id: { type: string, format: uuid }
+        status: { $ref: "#/components/schemas/EmployeeStatus" }
+        job_role_id: { type: string, format: uuid }
+        profile_id: { type: string, format: uuid }
+        autonomy: { $ref: "#/components/schemas/AutonomyLevel" }
+        capability_ids:
+          type: array
+          items: { type: string, format: uuid }
+        memory_id: { type: string, format: uuid, nullable: true }
+    VirtualEmployeeInput:
+      type: object
+      required: [name, supervisor_user_id, job_role_id, profile_id, autonomy]
+      additionalProperties: false
+      properties:
+        name: { type: string }
+        supervisor_user_id: { type: string, format: uuid }
+        status: { $ref: "#/components/schemas/EmployeeStatus" }
+        job_role_id: { type: string, format: uuid }
+        profile_id: { type: string, format: uuid }
+        autonomy: { $ref: "#/components/schemas/AutonomyLevel" }
+        capability_ids:
+          type: array
+          items: { type: string, format: uuid }
+        memory_id: { type: string, format: uuid, nullable: true }
+    EmployeeStatus:
+      type: string
+      enum: [draft, active, disabled, suspended, archived, trashed, error]
+    AutonomyLevel:
+      type: string
+      enum: [A0, A1, A2, A3, A4, A5]
+    EmployeeProfileInput:
       type: object
       required: [name, system_prompt]
       properties:
+        profile_key:
+          type: string
+          description: Human-readable technical key. Optional on create; generated from name/family/version when omitted.
         family_id: { type: string }
-        version_label: { type: string }
+        version_label: { type: string, default: v1 }
         name: { type: string }
         description: { type: string }
         system_prompt: { type: string }
         max_autonomy: { type: string, enum: [A0, A1, A2, A3, A4, A5], default: A1 }
-        allowed_tools:
+        default_capability_ids:
           type: array
-          items: { type: string }
+          description: Target model field. During transition it maps to the existing profile capability allowlist.
+          items: { type: string, format: uuid }
         allowed_capabilities:
           type: array
+          deprecated: true
+          description: Legacy capability keys used by the technical runtime profile.
+          items: { type: string }
+        allowed_tools:
+          type: array
+          deprecated: true
+          description: Legacy direct tool allowlist. Employees should reference capabilities instead.
           items: { type: string }
         memory_policy: { type: object, additionalProperties: true }
         llm_config: { type: object, additionalProperties: true }
         enabled: { type: boolean, default: true }
-    AgentProfile:
+    EmployeeProfile:
       allOf:
-        - $ref: "#/components/schemas/AgentProfileInput"
+        - $ref: "#/components/schemas/EmployeeProfileInput"
         - type: object
+          required: [profile_id, profile_key, name, system_prompt, max_autonomy, status]
           properties:
             id: { type: string, format: uuid }
-            profile_id: { type: string }
+            profile_id:
+              type: string
+              format: uuid
+              description: Public EmployeeProfile UUID.
+            profile_key:
+              type: string
+              description: Compatibility key currently used by the technical runtime profile.
+            status: { type: string, enum: [active, disabled, archived, trashed] }
             archived_at: { type: string, format: date-time }
+            trashed_at: { type: string, format: date-time }
             created_at: { type: string, format: date-time }
             updated_at: { type: string, format: date-time }
-    AgentProfileVersion:
+    EmployeeProfileVersion:
       allOf:
-        - $ref: "#/components/schemas/AgentProfile"
+        - $ref: "#/components/schemas/EmployeeProfile"
         - type: object
           properties:
-            agent_profile_id: { type: string, format: uuid }
+            employee_profile_id: { type: string, format: uuid }
             original_created_at: { type: string, format: date-time }
             original_updated_at: { type: string, format: date-time }
             saved_at: { type: string, format: date-time }
@@ -2841,6 +3402,14 @@ components:
         title: { type: string }
         description: { type: string }
         expected_outcome: { type: string }
+        priority: { type: integer }
+    JobRoleSuccessCriterion:
+      type: object
+      required: [title]
+      properties:
+        title: { type: string }
+        description: { type: string }
+        target_value: { type: string }
         priority: { type: integer }
     JobRoleInput:
       type: object
@@ -2853,29 +3422,50 @@ components:
         responsibilities:
           type: array
           items: { $ref: "#/components/schemas/JobRoleResponsibility" }
+        recommended_capability_ids:
+          type: array
+          description: Capability UUIDs recommended for Virtual Employees occupying this JobRole; not an authorization mechanism.
+          items: { type: string, format: uuid }
         recommended_capabilities:
           type: array
-          description: Capability IDs/keys recommended for Virtual Employees occupying this JobRole; not an authorization mechanism.
+          deprecated: true
+          description: Legacy capability keys recommended for Virtual Employees occupying this JobRole; prefer `recommended_capability_ids`.
           items: { type: string }
+        default_autonomy: { type: string, enum: [A0, A1, A2, A3, A4, A5], default: A2 }
         default_autonomy_level: { type: string, enum: [A0, A1, A2, A3, A4, A5], default: A2 }
         default_permission_bundle_id:
           type: string
+          deprecated: true
           description: Informational/default reference only; JobRole does not grant permissions.
         success_criteria:
           type: array
-          items: { type: string }
-        default_sla_policy: { type: object, additionalProperties: true }
-        default_memory_policy: { type: object, additionalProperties: true }
-        status: { type: string, enum: [active, archived], default: active }
-        metadata: { type: object, additionalProperties: true }
+          items: { $ref: "#/components/schemas/JobRoleSuccessCriterion" }
+        default_sla_policy:
+          type: object
+          deprecated: true
+          additionalProperties: true
+        default_memory_policy:
+          type: object
+          deprecated: true
+          additionalProperties: true
+        status: { type: string, enum: [active, archived], default: active, readOnly: true }
+        metadata:
+          type: object
+          deprecated: true
+          additionalProperties: true
     JobRole:
       allOf:
         - $ref: "#/components/schemas/JobRoleInput"
         - type: object
-          required: [job_role_id, org_id, product_surface, name, slug, default_autonomy_level, status, version]
+          required: [job_role_id, name, slug, default_autonomy, status, version]
           properties:
             id: { type: string, format: uuid }
-            job_role_id: { type: string }
+            job_role_id: { type: string, format: uuid }
+            job_role_key:
+              type: string
+              deprecated: true
+              description: Legacy internal key kept only during migration from path-based JobRole IDs.
+            tenant_id: { type: string, format: uuid }
             org_id: { type: string }
             product_surface: { type: string }
             created_by: { type: string }
@@ -2887,7 +3477,8 @@ components:
       type: object
       properties:
         id: { type: string, format: uuid }
-        job_role_id: { type: string }
+        job_role_id: { type: string, format: uuid }
+        tenant_id: { type: string, format: uuid }
         org_id: { type: string }
         product_surface: { type: string }
         version: { type: integer, format: int64 }
@@ -2910,6 +3501,42 @@ components:
         created_by: { type: string }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    HandoffStatus:
+      type: string
+      enum: [pending, accepted, rejected, cancelled]
+    HandoffInput:
+      type: object
+      required: [to_employee_id]
+      properties:
+        task_id: { type: string, format: uuid, nullable: true }
+        from_employee_id: { type: string, format: uuid, nullable: true }
+        to_employee_id: { type: string, format: uuid }
+        reason: { type: string }
+        status: { $ref: "#/components/schemas/HandoffStatus" }
+    Handoff:
+      allOf:
+        - $ref: "#/components/schemas/HandoffInput"
+        - type: object
+          required: [handoff_id, tenant_id, to_employee_id, status]
+          properties:
+            handoff_id: { type: string, format: uuid }
+            tenant_id: { type: string, format: uuid }
+            created_by: { type: string }
+            created_at: { type: string, format: date-time }
+            updated_at: { type: string, format: date-time }
+            resolved_at: { type: string, format: date-time, nullable: true }
+    AuditEvent:
+      type: object
+      required: [audit_event_id, tenant_id, resource_type, resource_id, action, occurred_at]
+      properties:
+        audit_event_id: { type: string, format: uuid }
+        tenant_id: { type: string }
+        resource_type: { type: string }
+        resource_id: { type: string, format: uuid }
+        action: { type: string }
+        actor_user_id: { type: string }
+        reason: { type: string }
+        occurred_at: { type: string, format: date-time }
     Job:
       type: object
       properties:

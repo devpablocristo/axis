@@ -1,6 +1,7 @@
 package jobroles
 
 import (
+	"encoding/json"
 	"errors"
 	"regexp"
 	"strings"
@@ -30,20 +31,55 @@ type Responsibility struct {
 	Priority        int    `json:"priority,omitempty"`
 }
 
+type SuccessCriterion struct {
+	Title       string `json:"title"`
+	Description string `json:"description,omitempty"`
+	TargetValue string `json:"target_value,omitempty"`
+	Priority    int    `json:"priority,omitempty"`
+}
+
+type SuccessCriteria []SuccessCriterion
+
+func (criteria *SuccessCriteria) UnmarshalJSON(data []byte) error {
+	var structured []SuccessCriterion
+	if err := json.Unmarshal(data, &structured); err == nil {
+		*criteria = structured
+		return nil
+	}
+	var legacy []string
+	if err := json.Unmarshal(data, &legacy); err != nil {
+		return err
+	}
+	out := make([]SuccessCriterion, 0, len(legacy))
+	for _, value := range legacy {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		out = append(out, SuccessCriterion{Title: value})
+	}
+	*criteria = out
+	return nil
+}
+
 type JobRole struct {
 	ID                        uuid.UUID        `json:"id,omitempty"`
 	JobRoleID                 string           `json:"job_role_id"`
-	OrgID                     string           `json:"org_id"`
-	ProductSurface            string           `json:"product_surface"`
+	JobRoleKey                string           `json:"job_role_key,omitempty"`
+	TenantID                  string           `json:"tenant_id,omitempty"`
+	OrgID                     string           `json:"org_id,omitempty"`
+	ProductSurface            string           `json:"product_surface,omitempty"`
 	Name                      string           `json:"name"`
 	Slug                      string           `json:"slug"`
 	Description               string           `json:"description,omitempty"`
 	Mission                   string           `json:"mission,omitempty"`
 	Responsibilities          []Responsibility `json:"responsibilities,omitempty"`
+	RecommendedCapabilityIDs  []string         `json:"recommended_capability_ids,omitempty"`
 	RecommendedCapabilities   []string         `json:"recommended_capabilities,omitempty"`
+	DefaultAutonomy           string           `json:"default_autonomy,omitempty"`
 	DefaultAutonomyLevel      string           `json:"default_autonomy_level"`
 	DefaultPermissionBundleID string           `json:"default_permission_bundle_id,omitempty"`
-	SuccessCriteria           []string         `json:"success_criteria,omitempty"`
+	SuccessCriteria           SuccessCriteria  `json:"success_criteria,omitempty"`
 	DefaultSLAPolicy          map[string]any   `json:"default_sla_policy,omitempty"`
 	DefaultMemoryPolicy       map[string]any   `json:"default_memory_policy,omitempty"`
 	Status                    string           `json:"status"`
@@ -58,6 +94,7 @@ type JobRole struct {
 type Version struct {
 	ID             uuid.UUID `json:"id,omitempty"`
 	JobRoleID      string    `json:"job_role_id"`
+	TenantID       string    `json:"tenant_id,omitempty"`
 	OrgID          string    `json:"org_id"`
 	ProductSurface string    `json:"product_surface"`
 	Version        int64     `json:"version"`
@@ -85,6 +122,8 @@ func normalizeLifecycleView(value string, includeArchived bool) LifecycleView {
 
 func normalizeJobRole(role JobRole) JobRole {
 	role.JobRoleID = strings.TrimSpace(role.JobRoleID)
+	role.JobRoleKey = strings.TrimSpace(role.JobRoleKey)
+	role.TenantID = strings.TrimSpace(role.TenantID)
 	role.OrgID = strings.TrimSpace(role.OrgID)
 	role.ProductSurface = strings.TrimSpace(role.ProductSurface)
 	if role.ProductSurface == "" {
@@ -98,13 +137,22 @@ func normalizeJobRole(role JobRole) JobRole {
 	role.Description = strings.TrimSpace(role.Description)
 	role.Mission = strings.TrimSpace(role.Mission)
 	role.Responsibilities = normalizeResponsibilities(role.Responsibilities)
+	role.SuccessCriteria = normalizeSuccessCriteria(role.SuccessCriteria)
+	role.RecommendedCapabilityIDs = normalizeList(role.RecommendedCapabilityIDs)
 	role.RecommendedCapabilities = normalizeList(role.RecommendedCapabilities)
+	role.DefaultAutonomy = strings.TrimSpace(role.DefaultAutonomy)
 	role.DefaultAutonomyLevel = strings.TrimSpace(role.DefaultAutonomyLevel)
-	if role.DefaultAutonomyLevel == "" {
+	if role.DefaultAutonomy == "" && role.DefaultAutonomyLevel != "" {
+		role.DefaultAutonomy = role.DefaultAutonomyLevel
+	}
+	if role.DefaultAutonomyLevel == "" && role.DefaultAutonomy != "" {
+		role.DefaultAutonomyLevel = role.DefaultAutonomy
+	}
+	if role.DefaultAutonomy == "" {
+		role.DefaultAutonomy = "A2"
 		role.DefaultAutonomyLevel = "A2"
 	}
 	role.DefaultPermissionBundleID = strings.TrimSpace(role.DefaultPermissionBundleID)
-	role.SuccessCriteria = normalizeList(role.SuccessCriteria)
 	if role.DefaultSLAPolicy == nil {
 		role.DefaultSLAPolicy = map[string]any{}
 	}
@@ -123,7 +171,7 @@ func normalizeJobRole(role JobRole) JobRole {
 }
 
 func validateJobRole(role JobRole) error {
-	if role.JobRoleID == "" || role.OrgID == "" || role.ProductSurface == "" || role.Name == "" || role.Slug == "" {
+	if role.OrgID == "" || role.ProductSurface == "" || role.Name == "" || role.Slug == "" {
 		return ErrValidation
 	}
 	switch role.DefaultAutonomyLevel {
@@ -141,6 +189,16 @@ func validateJobRole(role JobRole) error {
 			return ErrValidation
 		}
 	}
+	for _, criterion := range role.SuccessCriteria {
+		if strings.TrimSpace(criterion.Title) == "" {
+			return ErrValidation
+		}
+	}
+	for _, capabilityID := range role.RecommendedCapabilityIDs {
+		if _, err := uuid.Parse(capabilityID); err != nil {
+			return ErrValidation
+		}
+	}
 	return nil
 }
 
@@ -151,6 +209,20 @@ func normalizeResponsibilities(values []Responsibility) []Responsibility {
 		value.Description = strings.TrimSpace(value.Description)
 		value.ExpectedOutcome = strings.TrimSpace(value.ExpectedOutcome)
 		if value.Title == "" && value.Description == "" && value.ExpectedOutcome == "" {
+			continue
+		}
+		out = append(out, value)
+	}
+	return out
+}
+
+func normalizeSuccessCriteria(values SuccessCriteria) SuccessCriteria {
+	out := make(SuccessCriteria, 0, len(values))
+	for _, value := range values {
+		value.Title = strings.TrimSpace(value.Title)
+		value.Description = strings.TrimSpace(value.Description)
+		value.TargetValue = strings.TrimSpace(value.TargetValue)
+		if value.Title == "" && value.Description == "" && value.TargetValue == "" {
 			continue
 		}
 		out = append(out, value)

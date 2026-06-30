@@ -1,13 +1,17 @@
 # Agent Fleet
 
-La flota de empleados IA permite definir multiples agentes persistentes por
+Agent Fleet es el modulo tecnico que administra agentes persistentes por
 `org_id` y `product_surface` sin hardcodear verticales ni mover decisiones de
 acciones sensibles fuera de Nexus.
 
-Agent Fleet es la implementacion interna v1 de Virtual Employees. El contrato
-publico recomendado para producto y Console es `Virtual Employee`; los endpoints
-`/v1/agents` quedan como compatibilidad tecnica y superficie interna. Ver
-`virtual-employees.md`.
+No es el dominio publico de Virtual Employees. Los endpoints `/v1/agents`
+quedan para agentes tecnicos, compatibilidad y runtime. Ver
+`virtual-employees.md` para la entidad publica `VirtualEmployee`.
+
+El modelo objetivo ya no trata Agent Fleet como dominio publico. Ver
+`../specs/companion/domain/agents-domain-spec.md` para `Agent` como ejecutor
+tecnico y `../specs/companion/domain/virtual-employees-domain-spec.md` para
+`VirtualEmployee`.
 
 ## Modelo
 
@@ -41,20 +45,7 @@ el runtime falla cerrado antes de llamar al modelo.
 
 ## APIs
 
-Superficie publica recomendada:
-
-- `GET /v1/virtual-employees`: lista Virtual Employees de la customer org.
-- `GET /v1/virtual-employees/{employee_id}`: obtiene un Virtual Employee.
-- `PUT /v1/virtual-employees/{employee_id}`: crea o actualiza un Virtual
-  Employee.
-- `POST /v1/virtual-employees/{employee_id}/disable`: kill switch por Virtual
-  Employee.
-- `GET /v1/virtual-employees/handoffs`: lista handoffs recientes.
-- `POST /v1/virtual-employees/handoffs`: crea un handoff.
-- `PATCH /v1/virtual-employees/handoffs/{id}`: acepta, rechaza, completa o
-  cancela un handoff.
-
-Compatibilidad tecnica:
+Superficie tecnica:
 
 - `GET /v1/agents`: lista agentes de la customer org.
 - `GET /v1/agents/{agent_id}`: obtiene un agente.
@@ -76,6 +67,6 @@ por sí mismo.
 
 ## Frontera con Nexus
 
-Agent Fleet solo define qué empleado IA puede operar y con qué límites. Nexus
+Agent Fleet solo define que agente tecnico puede operar y con que limites. Nexus
 sigue decidiendo allow/deny/approval para acciones sensibles, approvals,
 evidence y auditoría de side effects.

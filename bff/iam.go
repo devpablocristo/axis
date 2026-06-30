@@ -1240,6 +1240,22 @@ func randomHex(bytes int) string {
 	return hex.EncodeToString(buf)
 }
 
+func randomUUID() string {
+	buf := make([]byte, 16)
+	if _, err := rand.Read(buf); err != nil {
+		return fmt.Sprintf("00000000-0000-4000-8000-%012x", time.Now().UnixNano())
+	}
+	buf[6] = (buf[6] & 0x0f) | 0x40
+	buf[8] = (buf[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
+		buf[0:4],
+		buf[4:6],
+		buf[6:8],
+		buf[8:10],
+		buf[10:16],
+	)
+}
+
 func decodeJSONBody[T any](w http.ResponseWriter, r *http.Request) (T, bool) {
 	var out T
 	if err := json.NewDecoder(r.Body).Decode(&out); err != nil {

@@ -1,0 +1,5 @@
+DROP INDEX IF EXISTS idx_companion_employee_handoffs_task;
+DROP INDEX IF EXISTS idx_companion_employee_handoffs_to_employee;
+DROP INDEX IF EXISTS idx_companion_employee_handoffs_org_surface_status;
+DROP INDEX IF EXISTS idx_companion_employee_handoffs_tenant_status;
+DROP TABLE IF EXISTS companion_employee_handoffs;

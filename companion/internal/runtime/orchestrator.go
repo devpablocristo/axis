@@ -32,6 +32,7 @@ type Orchestrator struct {
 	observer          ObservabilityRecorder
 	costs             CostLedger
 	agents            AgentResolver
+	employees         EmployeeResolver
 	agentProfiles     AgentProfileResolver
 	installationGuard ProductInstallationGuard
 	rateLimiter       productlimits.Limiter
@@ -74,6 +75,10 @@ func (o *Orchestrator) SetAgentResolver(resolver AgentResolver) {
 	o.agents = resolver
 }
 
+func (o *Orchestrator) SetEmployeeResolver(resolver EmployeeResolver) {
+	o.employees = resolver
+}
+
 func (o *Orchestrator) SetAgentProfileResolver(resolver AgentProfileResolver) {
 	o.agentProfiles = resolver
 }
@@ -104,6 +109,8 @@ type RunInput struct {
 	AuthScopes     []string
 	Identity       identityctx.IdentityContext
 	ProductSurface string
+	TenantID       string
+	EmployeeID     string
 	AgentID        string
 	Message        string
 	RouteHint      string
@@ -146,7 +153,49 @@ func (o *Orchestrator) Run(ctx context.Context, in RunInput) (RunResult, error) 
 		trace := o.rejectedRateLimitTrace(ctx, in, identity, route, err.Error())
 		return RunResult{Reply: "La organización alcanzó el límite temporal de uso de runtime para este producto.", Trace: trace}, nil
 	}
-	if agentID := strings.TrimSpace(in.AgentID); agentID != "" {
+	if employeeID := strings.TrimSpace(in.EmployeeID); employeeID != "" {
+		tenantID := strings.TrimSpace(in.TenantID)
+		identity.EmployeeID = employeeID
+		if o.employees == nil {
+			trace := o.rejectedEmployeeTrace(ctx, in, identity, route, "employee resolver is not configured")
+			return RunResult{Reply: "No puedo operar con ese Virtual Employee porque el resolver no está configurado para este runtime.", Trace: trace}, nil
+		}
+		employee, err := o.employees.ResolveRuntimeEmployee(ctx, tenantID, in.OrgID, productSurface, employeeID)
+		if err != nil {
+			trace := o.rejectedEmployeeTrace(ctx, in, identity, route, "employee not available: "+err.Error())
+			return RunResult{Reply: "No puedo operar con ese Virtual Employee para esta organización.", Trace: trace}, nil
+		}
+		identity.EmployeeID = employee.EmployeeID
+		var event *GuardrailEvent
+		route, event = applyRuntimeEmployee(route, employee)
+		if event != nil {
+			trace := o.rejectedEmployeeTrace(ctx, in, identity, route, event.Reason)
+			trace.GuardrailEvents = []GuardrailEvent{*event}
+			return RunResult{Reply: "No puedo operar con ese Virtual Employee bajo la configuración actual.", Trace: trace}, nil
+		}
+		if strings.TrimSpace(employee.ProfileID) != "" {
+			if o.agentProfiles == nil {
+				trace := o.rejectedEmployeeTrace(ctx, in, identity, route, "employee profile resolver is not configured")
+				return RunResult{Reply: "No puedo operar con ese Virtual Employee porque su perfil no está configurado para este runtime.", Trace: trace}, nil
+			}
+			profile, err := o.agentProfiles.ResolveRuntimeAgentProfile(ctx, employee.ProfileID)
+			if err != nil {
+				trace := o.rejectedEmployeeTrace(ctx, in, identity, route, "employee profile not available: "+err.Error())
+				return RunResult{Reply: "No puedo operar con ese Virtual Employee porque su perfil no está disponible.", Trace: trace}, nil
+			}
+			route, event = applyRuntimeAgentProfile(route, profile)
+			if profile.MaxAutonomy != "" {
+				route.Autonomy = lowerAutonomy(route.Autonomy, profile.MaxAutonomy)
+				route.Profile.MaxAutonomy = route.Autonomy
+			}
+			if event != nil {
+				trace := o.rejectedEmployeeTrace(ctx, in, identity, route, event.Reason)
+				trace.GuardrailEvents = []GuardrailEvent{*event}
+				return RunResult{Reply: "No puedo operar con ese Virtual Employee bajo la configuración actual.", Trace: trace}, nil
+			}
+		}
+	}
+	if agentID := strings.TrimSpace(in.AgentID); agentID != "" && strings.TrimSpace(in.EmployeeID) == "" {
 		identity.AgentID = agentID
 		if o.agents == nil {
 			route.Profile.AgentID = agentID
@@ -623,6 +672,30 @@ func (o *Orchestrator) rejectedAgentTrace(ctx context.Context, in RunInput, iden
 	o.recordObservabilityEvent(ctx, trace, in, "guardrail", "agent_fleet", map[string]any{
 		"agent_id": identity.AgentID,
 		"reason":   reason,
+	})
+	o.finishTrace(ctx, trace, in, reason)
+	return trace
+}
+
+func (o *Orchestrator) rejectedEmployeeTrace(ctx context.Context, in RunInput, identity IdentityChain, route AgentRoute, reason string) RunTrace {
+	now := time.Now().UTC()
+	trace := RunTrace{
+		RunID:          uuid.NewString(),
+		IdentityChain:  identity,
+		Intent:         route.Intent,
+		ProductSurface: route.Product,
+		AutonomyLevel:  route.Autonomy,
+		PromptVersion:  SystemPromptVersion,
+		Model:          firstNonEmpty(o.model, DefaultGeminiModel),
+		StartedAt:      now,
+		CompletedAt:    now,
+	}
+	if reason != "" {
+		trace.GuardrailEvents = append(trace.GuardrailEvents, GuardrailEvent{Type: "virtual_employee", Target: "employee:" + identity.EmployeeID, Reason: reason})
+	}
+	o.recordObservabilityEvent(ctx, trace, in, "guardrail", "virtual_employee", map[string]any{
+		"employee_id": identity.EmployeeID,
+		"reason":      reason,
 	})
 	o.finishTrace(ctx, trace, in, reason)
 	return trace

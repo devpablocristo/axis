@@ -8,19 +8,28 @@ import type { ReactElement } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   archiveJobRole,
-  archiveAgentProfile,
+  archiveEmployeeProfile,
   axisCrudHttpClient,
-  listAgentProfiles,
+  createEmployeeProfile,
+  createHandoff,
+  createVirtualEmployee,
+  listEmployeeProfiles,
+  listHandoffs,
   listIAMTenants,
   listJobRoles,
-  purgeAgentProfile,
+  listVirtualEmployees,
+  purgeEmployeeProfile,
   restoreJobRole,
-  restoreAgentProfile,
-  trashAgentProfile,
-  upsertAgentProfile,
+  restoreEmployeeProfile,
+  setVirtualEmployeeStatus,
+  trashEmployeeProfile,
+  updateVirtualEmployee,
+  updateEmployeeProfile,
+  updateHandoff,
   upsertJobRole,
-  type AxisAgentProfileView,
   type AxisAgentView,
+  type AxisEmployeeProfileView,
+  type AxisHandoffView,
   type AxisJobRoleView,
   type AxisTenantView,
 } from './api'
@@ -28,9 +37,10 @@ import {
 type CrudLifecycleView = 'active' | 'archived' | 'trash'
 type BulkAction = 'archive' | 'trash' | 'restore' | 'purge'
 type ValidationFilter = 'all' | 'approved' | 'needs_review' | 'ignored'
-type AgentSection = 'agents' | 'profiles' | 'job_roles'
-type ProfileCrudRow = AxisAgentProfileView & { id: string }
+type AgentSection = 'agents' | 'profiles' | 'job_roles' | 'handoffs'
+type ProfileCrudRow = AxisEmployeeProfileView & { id: string }
 type JobRoleCrudRow = AxisJobRoleView & { id: string }
+type HandoffCrudRow = AxisHandoffView & { id: string }
 type AgentSelection = { orgId: string; ids: string[] }
 type AgentActionError = { orgId: string; message: string }
 
@@ -55,7 +65,7 @@ const PROFILE_AUTONOMY_OPTIONS = [
   { label: 'A5', value: 'A5' },
 ]
 
-export function AgentsControlCenter({ orgId, tenantId }: { orgId: string; tenantId: string }) {
+export function AgentsControlCenter({ orgId, tenantId, productSurface }: { orgId: string; tenantId: string; productSurface: string }) {
   const rootRef = useRef<HTMLElement | null>(null)
   const [activeSection, setActiveSection] = useState<AgentSection>('agents')
   const [lifecycleView, setLifecycleView] = useState<CrudLifecycleView>('active')
@@ -68,16 +78,16 @@ export function AgentsControlCenter({ orgId, tenantId }: { orgId: string; tenant
   const [validationFilter, setValidationFilter] = useState<ValidationFilter>('all')
   const [validationBusyId, setValidationBusyId] = useState('')
   const [agentActionError, setAgentActionError] = useState<AgentActionError>({ orgId, message: '' })
-  const [agentProfiles, setAgentProfiles] = useState<AxisAgentProfileView[]>([])
+  const [employeeProfiles, setEmployeeProfiles] = useState<AxisEmployeeProfileView[]>([])
   const [jobRoles, setJobRoles] = useState<AxisJobRoleView[]>([])
   const [profilesError, setProfilesError] = useState('')
   const [jobRolesError, setJobRolesError] = useState('')
 
   const activeOrgs = useMemo(() => axisOrgs.filter((org) => lifecycleBucket(org.status) === 'active'), [axisOrgs])
   const orgNameById = useMemo(() => new Map(activeOrgs.map((org) => [org.id, org.name])), [activeOrgs])
-  const activeProfiles = useMemo(() => agentProfiles.filter((profile) => profile.enabled && !profile.archived_at), [agentProfiles])
+  const activeProfiles = useMemo(() => employeeProfiles.filter((profile) => profile.enabled && !profile.archived_at), [employeeProfiles])
   const profileOptions = useMemo(() => activeProfiles.map((profile) => ({
-    label: `${profile.name} · ${profile.profile_id}`,
+    label: `${profile.name} · ${profile.profile_key || profile.profile_id}`,
     value: profile.profile_id,
   })), [activeProfiles])
   const activeJobRoles = useMemo(() => jobRoles.filter((role) => role.status === 'active' && !role.archived_at), [jobRoles])
@@ -89,6 +99,15 @@ export function AgentsControlCenter({ orgId, tenantId }: { orgId: string; tenant
       value: role.job_role_id,
     })),
   ], [activeJobRoles])
+  const employeeDataSource: NonNullable<CrudPageProps<AxisAgentView>['dataSource']> = useMemo(() => ({
+    list: async ({ view }) => listVirtualEmployees(orgId, view === 'trash' ? 'trashed' : view, tenantId),
+    create: async (values) => createVirtualEmployee(orgId, virtualEmployeePayload(values, jobRoleById.get(stringValue(values.job_role_id)), shouldApplyJobRoleDefaults(values)), tenantId),
+    update: async (row, values) => updateVirtualEmployee(orgId, row.id, virtualEmployeePayload(values, jobRoleById.get(stringValue(values.job_role_id)), false), tenantId),
+    archive: async (row) => setVirtualEmployeeStatus(orgId, row.id, 'archived', tenantId),
+    trash: async (row) => setVirtualEmployeeStatus(orgId, row.id, 'trashed', tenantId),
+    unarchive: async (row) => setVirtualEmployeeStatus(orgId, row.id, 'active', tenantId),
+    restore: async (row) => setVirtualEmployeeStatus(orgId, row.id, 'active', tenantId),
+  }), [orgId, tenantId, jobRoleById])
   const crudClient = useMemo(() => axisCrudHttpClient(orgId, tenantId), [orgId, tenantId])
   const isActive = selectedOrgId.length > 0 && profileOptions.length > 0
   const selectedIds = selection.orgId === selectedOrgId ? selection.ids : []
@@ -100,7 +119,7 @@ export function AgentsControlCenter({ orgId, tenantId }: { orgId: string; tenant
   }, [orgId, tenantId, reloadVersion])
 
   useEffect(() => {
-    void loadProfileOptions(orgId, tenantId, setAgentProfiles, setProfilesError)
+    void loadProfileOptions(orgId, tenantId, setEmployeeProfiles, setProfilesError)
   }, [orgId, tenantId, reloadVersion, activeSection])
 
   useEffect(() => {
@@ -188,13 +207,12 @@ export function AgentsControlCenter({ orgId, tenantId }: { orgId: string; tenant
         <button type="button" className={activeSection === 'agents' ? 'active' : ''} onClick={() => setActiveSection('agents')}>Virtual Employees</button>
         <button type="button" className={activeSection === 'profiles' ? 'active' : ''} onClick={() => setActiveSection('profiles')}>Perfiles</button>
         <button type="button" className={activeSection === 'job_roles' ? 'active' : ''} onClick={() => setActiveSection('job_roles')}>Job Roles</button>
+        <button type="button" className={activeSection === 'handoffs' ? 'active' : ''} onClick={() => setActiveSection('handoffs')}>Handoffs</button>
       </div>
       {activeSection === 'agents' ? (
         <CrudPage<AxisAgentView>
           key={`agents-${selectedOrgId}-${lifecycleView}-${reloadVersion}`}
-          basePath={VIRTUAL_EMPLOYEES_BASE_PATH}
-          listQuery={selectedOrgId ? `org_id=${encodeURIComponent(selectedOrgId)}` : undefined}
-          httpClient={crudClient}
+          dataSource={employeeDataSource}
           stringsBase={crudStringsEs}
           strings={{ actionTrash: 'Papelera' }}
           initialView={lifecycleView}
@@ -211,62 +229,33 @@ export function AgentsControlCenter({ orgId, tenantId }: { orgId: string; tenant
           labelPlural="virtual employees"
           labelPluralCap="Virtual Employees"
           createLabel="Nuevo"
-          columns={agentColumns(selectedIds, toggleSelected, orgNameById, validationBusyId, (agent, action) => void applyReviewAction(agent, action))}
+          columns={agentColumns(selectedIds, toggleSelected)}
           formFields={agentFormFields(profileOptions, jobRoleOptions)}
           preSearchFilter={(items) => validationFilter === 'all' ? items : items.filter((item) => normalizeValidationStatus(item) === validationFilter)}
           searchText={(row) => [
-            orgNameById.get(row.org_id) ?? row.org_id,
+            row.tenant_id,
             row.name,
-            semanticString(row.metadata, 'job_title'),
-            semanticString(row.metadata, 'job_role_id'),
-            semanticString(row.metadata, 'mission'),
-            semanticString(row.metadata, 'owner_user_id'),
-            ...semanticList(row.metadata, 'responsibilities'),
-            ...semanticList(row.metadata, 'contact_channels'),
-            ...semanticList(row.metadata, 'escalation_rules'),
-            row.profile,
+            row.supervisor_user_id,
+            row.job_role_id,
+            row.profile_id,
             row.autonomy,
-            row.description,
-            row.origin_kind,
-            row.validation_status,
-            row.review_status,
-            row.source_product_surface,
-            row.source_org_id,
-            row.source_agent_id,
-            ...stringList(row.capabilities),
-            ...stringList(row.tools),
+            row.memory_id,
+            ...stringList(row.capability_ids),
           ].join(' ')}
           toFormValues={(row) => ({
             name: row.name,
-            profile: row.profile,
+            supervisor_user_id: row.supervisor_user_id ?? '',
+            profile_id: row.profile_id ?? row.profile ?? '',
+            job_role_id: row.job_role_id ?? '',
             autonomy: row.autonomy,
-            memory_enabled: row.memory_enabled,
-            description: row.description,
-            _metadata_json: jsonText(row.metadata) || '{}',
-            job_role_id: semanticString(row.metadata, 'job_role_id'),
-            job_title: semanticString(row.metadata, 'job_title'),
-            mission: semanticString(row.metadata, 'mission'),
-            responsibilities: semanticList(row.metadata, 'responsibilities').join('\n'),
-            owner_user_id: semanticString(row.metadata, 'owner_user_id'),
-            contact_channels: semanticList(row.metadata, 'contact_channels').join('\n'),
-            escalation_rules: semanticList(row.metadata, 'escalation_rules').join('\n'),
-            capabilities: stringList(row.capabilities).join(', '),
-            tools: stringList(row.tools).join(', '),
+            capability_ids: stringList(row.capability_ids).join(', '),
+            memory_id: row.memory_id ?? '',
           })}
-          toBody={(values) => ({
-            org_id: selectedOrgId,
-            name: stringValue(values.name),
-            profile: stringValue(values.profile),
-            autonomy: stringValue(values.autonomy),
-            memory_enabled: booleanValue(values.memory_enabled),
-            description: stringValue(values.description),
-            metadata: virtualEmployeeMetadata(values, jobRoleById.get(stringValue(values.job_role_id)), shouldApplyJobRoleDefaults(values)),
-            capabilities: splitList(values.capabilities).length > 0 || !shouldApplyJobRoleDefaults(values)
-              ? splitList(values.capabilities)
-              : stringList(jobRoleById.get(stringValue(values.job_role_id))?.recommended_capabilities),
-            tools: splitList(values.tools),
-          })}
-          isValid={(values) => isActive && stringValue(values.name).length > 0 && stringValue(values.profile).length > 0}
+          isValid={(values) => isActive
+            && stringValue(values.name).length > 0
+            && stringValue(values.supervisor_user_id).length > 0
+            && stringValue(values.profile_id).length > 0
+            && stringValue(values.job_role_id).length > 0}
           emptyState={profileOptions.length > 0 ? 'Sin virtual employees' : 'Sin perfiles disponibles'}
           archivedEmptyState="Sin virtual employees archivados"
           trashEmptyState="Sin virtual employees en papelera"
@@ -291,15 +280,17 @@ export function AgentsControlCenter({ orgId, tenantId }: { orgId: string; tenant
           featureFlags={{ csvToolbar: false }}
         />
       ) : activeSection === 'profiles' ? (
-        <AgentProfilesCrud orgId={orgId} tenantId={tenantId} onChanged={refreshProfiles} />
-      ) : (
+        <EmployeeProfilesCrud orgId={orgId} tenantId={tenantId} onChanged={refreshProfiles} />
+      ) : activeSection === 'job_roles' ? (
         <JobRolesCrud orgId={orgId} tenantId={tenantId} onChanged={refreshProfiles} />
+      ) : (
+        <HandoffsCrud orgId={orgId} tenantId={tenantId} onChanged={refreshProfiles} />
       )}
     </section>
   )
 }
 
-function AgentProfilesCrud({ orgId, tenantId, onChanged }: { orgId: string; tenantId: string; onChanged: () => void }) {
+function EmployeeProfilesCrud({ orgId, tenantId, onChanged }: { orgId: string; tenantId: string; onChanged: () => void }) {
   const rootRef = useRef<HTMLDivElement | null>(null)
   const [profileView, setProfileView] = useState<CrudLifecycleView>('active')
   const [selectedProfileIds, setSelectedProfileIds] = useState<string[]>([])
@@ -307,36 +298,36 @@ function AgentProfilesCrud({ orgId, tenantId, onChanged }: { orgId: string; tena
   const [profileBulkBusy, setProfileBulkBusy] = useState(false)
   const dataSource: NonNullable<CrudPageProps<ProfileCrudRow>['dataSource']> = {
     async list({ view }) {
-      const profiles = await listAgentProfiles(orgId, view, tenantId)
+      const profiles = await listEmployeeProfiles(orgId, view, tenantId)
       return profiles.map(profileToRow)
     },
     async create(values) {
       const profileId = stringValue(values.profile_id)
-      await upsertAgentProfile(orgId, profileId, profilePayload(values, true), tenantId)
+      await createEmployeeProfile(orgId, { ...profilePayload(values, true), profile_key: profileId }, tenantId)
       onChanged()
     },
     async update(row, values) {
-      await upsertAgentProfile(orgId, row.profile_id, profilePayload(values, row.enabled), tenantId)
+      await updateEmployeeProfile(orgId, row.profile_id, profilePayload(values, row.enabled), tenantId)
       onChanged()
     },
     async archive(row) {
-      await archiveAgentProfile(orgId, row.profile_id, tenantId)
+      await archiveEmployeeProfile(orgId, row.profile_id, tenantId)
       onChanged()
     },
     async trash(row) {
-      await trashAgentProfile(orgId, row.profile_id, tenantId)
+      await trashEmployeeProfile(orgId, row.profile_id, tenantId)
       onChanged()
     },
     async unarchive(row) {
-      await restoreAgentProfile(orgId, row.profile_id, tenantId)
+      await restoreEmployeeProfile(orgId, row.profile_id, tenantId)
       onChanged()
     },
     async restore(row) {
-      await restoreAgentProfile(orgId, row.profile_id, tenantId)
+      await restoreEmployeeProfile(orgId, row.profile_id, tenantId)
       onChanged()
     },
     async purge(row) {
-      await purgeAgentProfile(orgId, row.profile_id, tenantId)
+      await purgeEmployeeProfile(orgId, row.profile_id, tenantId)
       onChanged()
     },
   }
@@ -368,13 +359,13 @@ function AgentProfilesCrud({ orgId, tenantId, onChanged }: { orgId: string; tena
     try {
       for (const profileId of selectedProfileIds) {
         if (action === 'archive') {
-          await archiveAgentProfile(orgId, profileId, tenantId)
+          await archiveEmployeeProfile(orgId, profileId, tenantId)
         } else if (action === 'trash') {
-          await trashAgentProfile(orgId, profileId, tenantId)
+          await trashEmployeeProfile(orgId, profileId, tenantId)
         } else if (action === 'restore') {
-          await restoreAgentProfile(orgId, profileId, tenantId)
+          await restoreEmployeeProfile(orgId, profileId, tenantId)
         } else {
-          await purgeAgentProfile(orgId, profileId, tenantId)
+          await purgeEmployeeProfile(orgId, profileId, tenantId)
         }
       }
       clearSelectedProfiles()
@@ -386,7 +377,7 @@ function AgentProfilesCrud({ orgId, tenantId, onChanged }: { orgId: string; tena
   }
 
   return (
-    <div ref={rootRef} className="agent-profiles-crud">
+    <div ref={rootRef} className="employee-profiles-crud">
       <CrudPage<ProfileCrudRow>
         key={`profiles-${profileView}`}
         dataSource={dataSource}
@@ -411,6 +402,7 @@ function AgentProfilesCrud({ orgId, tenantId, onChanged }: { orgId: string; tena
         searchText={(row) => [
           row.name,
           row.profile_id,
+          row.profile_key,
           row.family_id,
           row.version_label,
           row.description,
@@ -467,12 +459,12 @@ function JobRolesCrud({ orgId, tenantId, onChanged }: { orgId: string; tenantId:
       return roles.map(jobRoleToRow)
     },
     async create(values) {
-      const jobRoleId = stringValue(values.job_role_id)
+      const jobRoleId = jobRoleGeneratedId(values)
       await upsertJobRole(orgId, jobRoleId, jobRolePayload(values), tenantId)
       onChanged()
     },
     async update(row, values) {
-      await upsertJobRole(orgId, row.job_role_id, jobRolePayload(values), tenantId)
+      await upsertJobRole(orgId, row.job_role_id, jobRolePayload(values, row), tenantId)
       onChanged()
     },
     async archive(row) {
@@ -563,8 +555,7 @@ function JobRolesCrud({ orgId, tenantId, onChanged }: { orgId: string; tenantId:
         ].join(' ')}
         toFormValues={jobRoleToFormValues}
         isValid={(values) => (
-          stringValue(values.job_role_id).length > 0
-          && stringValue(values.name).length > 0
+          stringValue(values.name).length > 0
           && stringValue(values.default_autonomy_level).length > 0
         )}
         emptyState="Sin job roles"
@@ -592,26 +583,118 @@ function JobRolesCrud({ orgId, tenantId, onChanged }: { orgId: string; tenantId:
   )
 }
 
+function HandoffsCrud({ orgId, tenantId, onChanged }: { orgId: string; tenantId: string; onChanged: () => void }) {
+  const dataSource: NonNullable<CrudPageProps<HandoffCrudRow>['dataSource']> = {
+    async list() {
+      const handoffs = await listHandoffs(orgId, '', tenantId)
+      return handoffs.map(handoffToRow)
+    },
+    async create(values) {
+      await createHandoff(orgId, handoffPayload(values), tenantId)
+      onChanged()
+    },
+    async update(row, values) {
+      await updateHandoff(orgId, row.handoff_id, handoffPayload(values, row), tenantId)
+      onChanged()
+    },
+    async archive(row) {
+      await updateHandoff(orgId, row.handoff_id, { status: 'cancelled' }, tenantId)
+      onChanged()
+    },
+    async unarchive(row) {
+      await updateHandoff(orgId, row.handoff_id, { status: 'pending' }, tenantId)
+      onChanged()
+    },
+    async restore(row) {
+      await updateHandoff(orgId, row.handoff_id, { status: 'pending' }, tenantId)
+      onChanged()
+    },
+  }
+  return (
+    <div className="handoffs-crud">
+      <CrudPage<HandoffCrudRow>
+        dataSource={dataSource}
+        stringsBase={crudStringsEs}
+        strings={{ actionArchive: 'Cancelar', actionUnarchive: 'Reabrir' }}
+        supportsArchived
+        allowCreate
+        allowEdit
+        allowArchive
+        allowUnarchive
+        allowRestore
+        label="handoff"
+        labelPlural="handoffs"
+        labelPluralCap="Handoffs"
+        createLabel="Nuevo"
+        columns={handoffColumns()}
+        formFields={handoffFormFields()}
+        searchText={(row) => [
+          row.handoff_id,
+          row.task_id,
+          row.from_employee_id,
+          row.to_employee_id,
+          row.reason,
+          row.status,
+        ].join(' ')}
+        toFormValues={handoffToFormValues}
+        isValid={(values) => stringValue(values.to_employee_id).length > 0}
+        emptyState="Sin handoffs"
+        archivedEmptyState="Sin handoffs cerrados"
+        searchPlaceholder="Buscar handoffs"
+        toolbarActions={[
+          { id: 'all', label: 'Todos', kind: 'primary' as const, onClick: () => undefined },
+        ]}
+        featureFlags={{ csvToolbar: false, archivedToggle: false, trashToggle: false }}
+      />
+    </div>
+  )
+}
+
 function agentColumns(
   selectedIds: string[],
   onToggle: (id: string, checked: boolean) => void,
-  orgNameById: Map<string, string>,
-  validationBusyId: string,
-  onReviewAction: (agent: AxisAgentView, action: 'approve' | 'ignore') => void,
 ): CrudPageProps<AxisAgentView>['columns'] {
   return [
     selectionColumn<AxisAgentView>(selectedIds, onToggle),
-    { key: 'org_id', header: 'Org', render: (value) => orgNameById.get(String(value ?? '')) ?? String(value ?? '-') },
+    { key: 'tenant_id', header: 'Tenant', render: (value) => String(value ?? '-') },
     { key: 'name', header: 'Nombre' },
-    { key: 'metadata', header: 'Puesto', render: (_value, row) => semanticString(row.metadata, 'job_title') || '-' },
-    { key: 'profile', header: 'Perfil', render: (value) => formatProfile(String(value ?? '')) },
+    { key: 'job_role_id', header: 'Job Role', render: (value) => shortId(String(value ?? '')) },
+    { key: 'profile_id', header: 'Perfil', render: (value) => shortId(String(value ?? '')) },
     { key: 'autonomy', header: 'Autonomía' },
-    { key: 'source_org_id', header: 'Contexto', render: (_value, row) => formatOrigin(row) },
-    { key: 'origin_kind', header: 'Origen', render: (value) => formatOriginKind(String(value ?? '')) },
-    { key: 'validation_status', header: 'Validación', render: (_value, row) => (
-      <ValidationCell agent={row} busy={validationBusyId === row.id} onAction={onReviewAction} />
-    ) },
+    { key: 'supervisor_user_id', header: 'Supervisor', render: (value) => shortId(String(value ?? '')) },
     { key: 'status', header: 'Estado', render: (value) => formatStatus(String(value ?? '')) },
+  ]
+}
+
+function handoffColumns(): CrudPageProps<HandoffCrudRow>['columns'] {
+  return [
+    { key: 'handoff_id', header: 'Handoff', render: (value) => shortId(String(value ?? '')) },
+    { key: 'task_id', header: 'Task', render: (value) => shortId(String(value ?? '')) },
+    { key: 'from_employee_id', header: 'Desde', render: (value) => shortId(String(value ?? '')) },
+    { key: 'to_employee_id', header: 'Hacia', render: (value) => shortId(String(value ?? '')) },
+    { key: 'reason', header: 'Motivo' },
+    { key: 'status', header: 'Estado', render: (value) => formatStatus(String(value ?? '')) },
+  ]
+}
+
+function handoffFormFields(): CrudPageProps<HandoffCrudRow>['formFields'] {
+  return [
+    { key: 'task_id', label: 'Task ID' },
+    { key: 'from_employee_id', label: 'From employee ID' },
+    { key: 'to_employee_id', label: 'To employee ID', required: true },
+    { key: 'reason', label: 'Motivo', type: 'textarea' as const, rows: 3, fullWidth: true },
+    {
+      key: 'status',
+      label: 'Estado',
+      type: 'select' as const,
+      required: true,
+      options: [
+        { label: 'Pendiente', value: 'pending' },
+        { label: 'Aceptado', value: 'accepted' },
+        { label: 'Rechazado', value: 'rejected' },
+        { label: 'Cancelado', value: 'cancelled' },
+      ],
+    },
   ]
 }
 
@@ -646,19 +729,12 @@ function agentFormFields(
 ): CrudPageProps<AxisAgentView>['formFields'] {
   return [
     { key: 'name', label: 'Nombre', required: true },
-    { key: 'profile', label: 'Perfil', type: 'select' as const, required: true, options: profileOptions },
-    { key: 'job_role_id', label: 'Job Role', type: 'select' as const, options: jobRoleOptions },
+    { key: 'supervisor_user_id', label: 'Supervisor user ID', required: true },
+    { key: 'job_role_id', label: 'Job Role', type: 'select' as const, required: true, options: jobRoleOptions },
+    { key: 'profile_id', label: 'Perfil', type: 'select' as const, required: true, options: profileOptions },
     { key: 'autonomy', label: 'Autonomía', type: 'select' as const, required: true, options: AUTONOMY_OPTIONS },
-    { key: 'memory_enabled', label: 'Memoria', type: 'checkbox' as const },
-    { key: 'description', label: 'Descripción', type: 'textarea' as const, rows: 3, fullWidth: true },
-    { key: 'job_title', label: 'Puesto / Job title' },
-    { key: 'mission', label: 'Misión', type: 'textarea' as const, rows: 2, fullWidth: true },
-    { key: 'responsibilities', label: 'Responsabilidades', type: 'textarea' as const, rows: 3, fullWidth: true },
-    { key: 'owner_user_id', label: 'Owner humano' },
-    { key: 'contact_channels', label: 'Canales de contacto', type: 'textarea' as const, rows: 2, fullWidth: true },
-    { key: 'escalation_rules', label: 'Reglas de escalamiento', type: 'textarea' as const, rows: 2, fullWidth: true },
-    { key: 'capabilities', label: 'Capabilities', type: 'textarea' as const, rows: 2, fullWidth: true },
-    { key: 'tools', label: 'Tools', type: 'textarea' as const, rows: 2, fullWidth: true },
+    { key: 'capability_ids', label: 'Capability IDs', type: 'textarea' as const, rows: 2, fullWidth: true },
+    { key: 'memory_id', label: 'Memory ID' },
   ]
 }
 
@@ -669,7 +745,7 @@ function profileColumns(
   return [
     selectionColumn<ProfileCrudRow>(selectedIds, onToggle),
     { key: 'name', header: 'Nombre' },
-    { key: 'profile_id', header: 'Profile ID' },
+    { key: 'profile_key', header: 'Profile key', render: (_value, row) => row.profile_key || row.profile_id },
     { key: 'family_id', header: 'Familia' },
     { key: 'version_label', header: 'Versión' },
     { key: 'max_autonomy', header: 'Autonomía' },
@@ -679,7 +755,7 @@ function profileColumns(
 
 function profileFormFields(): CrudPageProps<ProfileCrudRow>['formFields'] {
   return [
-    { key: 'profile_id', label: 'Profile ID', required: true, createOnly: true },
+    { key: 'profile_id', label: 'Profile key', required: true, createOnly: true },
     { key: 'name', label: 'Nombre', required: true },
     { key: 'family_id', label: 'Familia', required: true },
     { key: 'version_label', label: 'Versión', required: true },
@@ -693,13 +769,13 @@ function profileFormFields(): CrudPageProps<ProfileCrudRow>['formFields'] {
   ]
 }
 
-function profileToRow(profile: AxisAgentProfileView): ProfileCrudRow {
+function profileToRow(profile: AxisEmployeeProfileView): ProfileCrudRow {
   return { ...profile, id: profile.profile_id }
 }
 
 function profileToFormValues(row: ProfileCrudRow): CrudFormValues {
   return {
-    profile_id: row.profile_id,
+    profile_id: row.profile_key || row.profile_id,
     name: row.name,
     family_id: row.family_id,
     version_label: row.version_label,
@@ -713,7 +789,7 @@ function profileToFormValues(row: ProfileCrudRow): CrudFormValues {
   }
 }
 
-function profilePayload(values: CrudFormValues, enabled: boolean): Partial<AxisAgentProfileView> {
+function profilePayload(values: CrudFormValues, enabled: boolean): Partial<AxisEmployeeProfileView> {
   return {
     family_id: stringValue(values.family_id),
     version_label: stringValue(values.version_label),
@@ -736,8 +812,6 @@ function jobRoleColumns(
   return [
     selectionColumn<JobRoleCrudRow>(selectedIds, onToggle),
     { key: 'name', header: 'Nombre' },
-    { key: 'job_role_id', header: 'Job Role ID' },
-    { key: 'slug', header: 'Slug' },
     { key: 'default_autonomy_level', header: 'Autonomía' },
     { key: 'recommended_capabilities', header: 'Capabilities', render: (value) => stringList(value).join(', ') || '-' },
     { key: 'status', header: 'Estado', render: (value) => formatStatus(String(value ?? '')) },
@@ -746,19 +820,13 @@ function jobRoleColumns(
 
 function jobRoleFormFields(): CrudPageProps<JobRoleCrudRow>['formFields'] {
   return [
-    { key: 'job_role_id', label: 'Job Role ID', required: true, createOnly: true },
     { key: 'name', label: 'Nombre', required: true },
-    { key: 'slug', label: 'Slug' },
     { key: 'description', label: 'Descripción', type: 'textarea' as const, rows: 3, fullWidth: true },
     { key: 'mission', label: 'Misión', type: 'textarea' as const, rows: 3, fullWidth: true },
-    { key: 'responsibilities', label: 'Responsibilities JSON', type: 'textarea' as const, rows: 6, fullWidth: true },
-    { key: 'recommended_capabilities', label: 'Recommended capabilities', type: 'textarea' as const, rows: 2, fullWidth: true },
+    { key: 'responsibilities', label: 'Responsabilidades', type: 'textarea' as const, rows: 5, fullWidth: true },
+    { key: 'recommended_capabilities', label: 'Capabilities recomendadas', type: 'textarea' as const, rows: 2, fullWidth: true },
     { key: 'default_autonomy_level', label: 'Autonomía default', type: 'select' as const, required: true, options: PROFILE_AUTONOMY_OPTIONS },
-    { key: 'default_permission_bundle_id', label: 'Default permission bundle ID' },
-    { key: 'success_criteria', label: 'Success criteria', type: 'textarea' as const, rows: 3, fullWidth: true },
-    { key: 'default_sla_policy', label: 'Default SLA policy JSON', type: 'textarea' as const, rows: 4, fullWidth: true },
-    { key: 'default_memory_policy', label: 'Default memory policy JSON', type: 'textarea' as const, rows: 4, fullWidth: true },
-    { key: 'metadata', label: 'Metadata JSON', type: 'textarea' as const, rows: 4, fullWidth: true },
+    { key: 'success_criteria', label: 'Criterios de éxito', type: 'textarea' as const, rows: 3, fullWidth: true },
   ]
 }
 
@@ -768,62 +836,96 @@ function jobRoleToRow(role: AxisJobRoleView): JobRoleCrudRow {
 
 function jobRoleToFormValues(row: JobRoleCrudRow): CrudFormValues {
   return {
-    job_role_id: row.job_role_id,
     name: row.name,
-    slug: row.slug,
     description: row.description ?? '',
     mission: row.mission ?? '',
-    responsibilities: JSON.stringify(row.responsibilities ?? [], null, 2),
+    responsibilities: responsibilitiesToText(row.responsibilities),
     recommended_capabilities: stringList(row.recommended_capabilities).join(', '),
     default_autonomy_level: row.default_autonomy_level,
-    default_permission_bundle_id: row.default_permission_bundle_id ?? '',
     success_criteria: stringList(row.success_criteria).join('\n'),
-    default_sla_policy: jsonText(row.default_sla_policy),
-    default_memory_policy: jsonText(row.default_memory_policy),
-    metadata: jsonText(row.metadata),
   }
 }
 
-function jobRolePayload(values: CrudFormValues): Partial<AxisJobRoleView> {
+function jobRolePayload(values: CrudFormValues, existing?: AxisJobRoleView): Partial<AxisJobRoleView> {
+  const name = stringValue(values.name)
+  const generatedSlug = slugify(name)
   return {
-    name: stringValue(values.name),
-    slug: stringValue(values.slug),
+    name,
+    slug: existing?.slug || generatedSlug,
     description: stringValue(values.description),
     mission: stringValue(values.mission),
-    responsibilities: parseResponsibilitiesJSON(values.responsibilities),
+    responsibilities: responsibilitiesFromText(values.responsibilities),
     recommended_capabilities: splitList(values.recommended_capabilities),
     default_autonomy_level: stringValue(values.default_autonomy_level) || 'A2',
-    default_permission_bundle_id: stringValue(values.default_permission_bundle_id),
+    default_permission_bundle_id: existing?.default_permission_bundle_id ?? '',
     success_criteria: splitSemanticList(values.success_criteria),
-    default_sla_policy: parseOptionalJSON(values.default_sla_policy, 'Default SLA policy JSON'),
-    default_memory_policy: parseOptionalJSON(values.default_memory_policy, 'Default memory policy JSON'),
-    metadata: parseOptionalJSON(values.metadata, 'Metadata JSON'),
+    default_sla_policy: existing?.default_sla_policy ?? {},
+    default_memory_policy: existing?.default_memory_policy ?? {},
+    metadata: existing?.metadata ?? {},
   }
 }
 
-function parseResponsibilitiesJSON(value: unknown): AxisJobRoleView['responsibilities'] {
-  const raw = stringValue(value)
-  if (!raw) return []
-  try {
-    const parsed = JSON.parse(raw) as unknown
-    if (!Array.isArray(parsed)) {
-      throw new Error('expected array')
-    }
-    return parsed.map((item) => {
-      if (!item || typeof item !== 'object' || Array.isArray(item)) {
-        throw new Error('expected object')
-      }
-      const record = item as Record<string, unknown>
-      return {
-        title: stringValue(record.title),
-        description: stringValue(record.description),
-        expected_outcome: stringValue(record.expected_outcome),
-        priority: numberValue(record.priority),
-      }
-    }).filter((item) => item.title || item.description || item.expected_outcome)
-  } catch {
-    throw new Error('Responsibilities JSON inválido')
+function handoffToRow(handoff: AxisHandoffView): HandoffCrudRow {
+  return { ...handoff, id: handoff.handoff_id }
+}
+
+function handoffToFormValues(row: HandoffCrudRow): CrudFormValues {
+  return {
+    task_id: row.task_id ?? '',
+    from_employee_id: row.from_employee_id ?? '',
+    to_employee_id: row.to_employee_id,
+    reason: row.reason,
+    status: row.status,
   }
+}
+
+function handoffPayload(values: CrudFormValues, existing?: AxisHandoffView): Partial<AxisHandoffView> {
+  return {
+    task_id: stringValue(values.task_id) || existing?.task_id || null,
+    from_employee_id: stringValue(values.from_employee_id) || existing?.from_employee_id || null,
+    to_employee_id: stringValue(values.to_employee_id) || existing?.to_employee_id || '',
+    reason: stringValue(values.reason) || existing?.reason || '',
+    status: (stringValue(values.status) || existing?.status || 'pending') as AxisHandoffView['status'],
+  }
+}
+
+function jobRoleGeneratedId(values: CrudFormValues): string {
+  return slugify(stringValue(values.name)) || `job-role-${Date.now()}`
+}
+
+function responsibilitiesFromText(value: unknown): AxisJobRoleView['responsibilities'] {
+  return splitTextLines(value).map((line, index) => {
+    const [title, description = '', expectedOutcome = ''] = line.split('|').map((part) => part.trim())
+    return {
+      title,
+      description,
+      expected_outcome: expectedOutcome,
+      priority: index + 1,
+    }
+  }).filter((item) => item.title || item.description || item.expected_outcome)
+}
+
+function responsibilitiesToText(value: unknown): string {
+  if (!Array.isArray(value)) return ''
+  return value.map((item) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return ''
+    const record = item as Record<string, unknown>
+    return [
+      stringValue(record.title),
+      stringValue(record.description),
+      stringValue(record.expected_outcome),
+    ].filter(Boolean).join(' | ')
+  }).filter(Boolean).join('\n')
+}
+
+function slugify(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
 }
 
 function responsibilitySearchText(value: unknown): string[] {
@@ -835,7 +937,7 @@ function responsibilitySearchText(value: unknown): string[] {
   })
 }
 
-function formatProfileStatus(profile: AxisAgentProfileView): string {
+function formatProfileStatus(profile: AxisEmployeeProfileView): string {
   if (profile.trashed_at) return 'papelera'
   if (profile.archived_at) return 'archivado'
   if (!profile.enabled) return 'deshabilitado'
@@ -975,15 +1077,15 @@ async function loadOrgOptions(orgId: string, tenantId: string, setAxisOrgs: (row
 async function loadProfileOptions(
   orgId: string,
   tenantId: string,
-  setAgentProfiles: (rows: AxisAgentProfileView[]) => void,
+  setEmployeeProfiles: (rows: AxisEmployeeProfileView[]) => void,
   setProfilesError: (message: string) => void,
 ) {
   try {
-    const profiles = await listAgentProfiles(orgId, 'active', tenantId)
-    setAgentProfiles(profiles)
+    const profiles = await listEmployeeProfiles(orgId, 'active', tenantId)
+    setEmployeeProfiles(profiles)
     setProfilesError('')
   } catch (err) {
-    setAgentProfiles([])
+    setEmployeeProfiles([])
     setProfilesError(err instanceof Error ? err.message : 'No se pudieron cargar los perfiles')
   }
 }
@@ -1019,6 +1121,14 @@ function formatStatus(status: string): string {
       return 'archivado'
     case 'trash':
       return 'papelera'
+    case 'pending':
+      return 'pendiente'
+    case 'accepted':
+      return 'aceptado'
+    case 'rejected':
+      return 'rechazado'
+    case 'cancelled':
+      return 'cancelado'
     default:
       return status || '-'
   }
@@ -1029,10 +1139,13 @@ function formatProfile(profile: string): string {
   return profile || '-'
 }
 
-function formatOrigin(agent: AxisAgentView): string {
-  const product = agent.source_product_surface?.trim()
-  const org = agent.source_org_id?.trim()
-  if (product && org) return `${product} / ${org}`
+function formatTenant(agent: AxisAgentView, orgNameById: Map<string, string>, productSurface: string): string {
+  const orgId = agent.org_id?.trim()
+  const org = orgNameById.get(orgId) ?? orgId
+  const product = productSurface.trim()
+  if (org && product) return `${org} / ${product}`
+  if (org) return org
+  if (product) return product
   return '-'
 }
 
@@ -1072,6 +1185,11 @@ function stringValue(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
+function shortId(value: string): string {
+  const text = value.trim()
+  return text ? text.slice(0, 8) : '-'
+}
+
 function stringList(value: unknown): string[] {
   if (!Array.isArray(value)) return []
   return value.map((item) => String(item ?? '').trim()).filter(Boolean)
@@ -1081,14 +1199,23 @@ function booleanValue(value: unknown): boolean {
   return value === true
 }
 
-function numberValue(value: unknown): number {
-  if (typeof value === 'number' && Number.isFinite(value)) return value
-  const parsed = Number.parseInt(String(value ?? '').trim(), 10)
-  return Number.isFinite(parsed) ? parsed : 0
-}
-
 function shouldApplyJobRoleDefaults(values: CrudFormValues): boolean {
   return !Object.prototype.hasOwnProperty.call(values, '_metadata_json')
+}
+
+function virtualEmployeePayload(values: CrudFormValues, jobRole?: AxisJobRoleView, applyDefaults = false): Partial<AxisAgentView> {
+  const capabilityIds = splitList(values.capability_ids)
+  const defaultCapabilityIds = stringList(jobRole?.recommended_capability_ids)
+  const memoryId = stringValue(values.memory_id)
+  return {
+    name: stringValue(values.name),
+    supervisor_user_id: stringValue(values.supervisor_user_id),
+    job_role_id: stringValue(values.job_role_id),
+    profile_id: stringValue(values.profile_id),
+    autonomy: (stringValue(values.autonomy) || 'A1') as AxisAgentView['autonomy'],
+    capability_ids: capabilityIds.length > 0 || !applyDefaults ? capabilityIds : defaultCapabilityIds,
+    memory_id: memoryId || null,
+  }
 }
 
 function virtualEmployeeMetadata(values: CrudFormValues, jobRole?: AxisJobRoleView, applyDefaults = false): Record<string, unknown> {
@@ -1160,6 +1287,13 @@ function errorMessage(err: unknown): string {
 function splitSemanticList(value: unknown): string[] {
   return stringValue(value)
     .split(/[\n,]/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+function splitTextLines(value: unknown): string[] {
+  return stringValue(value)
+    .split('\n')
     .map((item) => item.trim())
     .filter(Boolean)
 }

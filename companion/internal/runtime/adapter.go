@@ -30,6 +30,8 @@ func (a *OrchestratorAdapter) Run(ctx context.Context, in tasks.OrchestratorInpu
 		Messages:       convertMessages(in.Messages),
 		TaskID:         in.TaskID,
 		ProductSurface: in.ProductSurface,
+		TenantID:       in.TenantID,
+		EmployeeID:     in.EmployeeID,
 		AgentID:        in.AgentID,
 		Handoff:        in.Handoff,
 		Workspace:      in.Workspace,
@@ -47,10 +49,11 @@ func (a *OrchestratorAdapter) Run(ctx context.Context, in tasks.OrchestratorInpu
 		"guardrail_events", len(result.Trace.GuardrailEvents),
 	)
 	return tasks.OrchestratorResult{
-		Reply:     result.Reply,
-		RunID:     result.Trace.RunID,
-		AgentID:   result.Trace.IdentityChain.AgentID,
-		ToolCalls: convertToolCalls(result.Trace.ToolCalls),
+		Reply:      result.Reply,
+		RunID:      result.Trace.RunID,
+		EmployeeID: result.Trace.IdentityChain.EmployeeID,
+		AgentID:    result.Trace.IdentityChain.AgentID,
+		ToolCalls:  convertToolCalls(result.Trace.ToolCalls),
 	}, nil
 }
 

@@ -99,7 +99,9 @@ type OrchestratorInput struct {
 	Messages       []domain.TaskMessage
 	TaskID         *uuid.UUID // opcional: vincula el trace a una task
 	ProductSurface string     // opcional: "companion" (default) | "ponti" | "pymes" — afecta routing
-	AgentID        string     // opcional: empleado IA persistente que toma ownership de la ejecución
+	TenantID       string     // requerido si EmployeeID resuelve un Virtual Employee
+	EmployeeID     string     // opcional: Virtual Employee persistente que toma ownership de la ejecución
+	AgentID        string     // opcional legacy: Agent tecnico persistente
 }
 
 type OrchestratorToolCall struct {
@@ -116,6 +118,7 @@ type OrchestratorToolCall struct {
 type OrchestratorResult struct {
 	Reply     string
 	RunID     string
+	EmployeeID string
 	AgentID   string
 	ToolCalls []OrchestratorToolCall
 }

@@ -21,6 +21,7 @@ type CreateTaskInput struct {
 	Priority    string
 	CreatedBy   string
 	AssignedTo  string
+	AssigneeEmployeeID string
 	Channel     string
 	Summary     string
 	ContextJSON json.RawMessage
@@ -47,6 +48,9 @@ func (u *Usecases) Create(ctx context.Context, in CreateTaskInput) (domain.Task,
 	}
 	if len(t.ContextJSON) == 0 {
 		t.ContextJSON = json.RawMessage(`{}`)
+	}
+	if updated, ok := mergeTaskEmployeeID(t.ContextJSON, in.AssigneeEmployeeID); ok {
+		t.ContextJSON = updated
 	}
 	out, err := u.repo.CreateTask(ctx, t)
 	if err != nil {
