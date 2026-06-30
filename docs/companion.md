@@ -62,6 +62,7 @@ URL por defecto: `http://localhost:18085`.
 - `companion/memory.md`
 - `companion/agents.md`
 - `companion/virtual-employees.md`
+- `companion/job-roles.md`
 - `companion/tools.md`
 - `companion/nexus-integration.md`
 - `companion/security.md`

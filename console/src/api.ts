@@ -109,6 +109,38 @@ export type AxisAgentProfileView = {
   updated_at?: string
 }
 
+export type AxisJobRoleResponsibility = {
+  title: string
+  description?: string
+  expected_outcome?: string
+  priority?: number
+}
+
+export type AxisJobRoleView = {
+  id?: string
+  job_role_id: string
+  org_id: string
+  product_surface: string
+  name: string
+  slug: string
+  description?: string
+  mission?: string
+  responsibilities?: AxisJobRoleResponsibility[]
+  recommended_capabilities?: string[]
+  default_autonomy_level: string
+  default_permission_bundle_id?: string
+  success_criteria?: string[]
+  default_sla_policy?: Record<string, unknown>
+  default_memory_policy?: Record<string, unknown>
+  status: string
+  metadata?: Record<string, unknown>
+  created_by?: string
+  created_at?: string
+  updated_at?: string
+  archived_at?: string
+  version?: number
+}
+
 export type ServiceHealth = {
   companion: string
   nexus: string
@@ -519,6 +551,46 @@ export async function purgeAgentProfile(orgId: string, profileId: string, tenant
   await axisFetch<void>(`/api/agent-profiles/${encodeURIComponent(profileId)}/purge`, orgId, {
     method: 'DELETE',
     tenantId,
+  })
+}
+
+export type JobRoleLifecycle = 'active' | 'archived' | 'all'
+
+export async function listJobRoles(orgId: string, lifecycle: JobRoleLifecycle = 'active', tenantId?: string): Promise<AxisJobRoleView[]> {
+  const payload = await axisFetch<{ job_roles?: AxisJobRoleView[]; data?: AxisJobRoleView[] }>(
+    `/api/job-roles?lifecycle=${encodeURIComponent(lifecycle)}`,
+    orgId,
+    { tenantId },
+  )
+  return payload.job_roles ?? payload.data ?? []
+}
+
+export async function upsertJobRole(
+  orgId: string,
+  jobRoleId: string,
+  input: Partial<AxisJobRoleView>,
+  tenantId?: string,
+): Promise<AxisJobRoleView> {
+  return axisFetch<AxisJobRoleView>(`/api/job-roles/${encodeURIComponent(jobRoleId)}`, orgId, {
+    method: 'PUT',
+    tenantId,
+    body: JSON.stringify(input),
+  })
+}
+
+export async function archiveJobRole(orgId: string, jobRoleId: string, tenantId?: string): Promise<AxisJobRoleView> {
+  return axisFetch<AxisJobRoleView>(`/api/job-roles/${encodeURIComponent(jobRoleId)}/archive`, orgId, {
+    method: 'POST',
+    tenantId,
+    body: '{}',
+  })
+}
+
+export async function restoreJobRole(orgId: string, jobRoleId: string, tenantId?: string): Promise<AxisJobRoleView> {
+  return axisFetch<AxisJobRoleView>(`/api/job-roles/${encodeURIComponent(jobRoleId)}/restore`, orgId, {
+    method: 'POST',
+    tenantId,
+    body: '{}',
   })
 }
 

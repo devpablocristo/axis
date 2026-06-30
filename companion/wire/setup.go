@@ -22,6 +22,7 @@ import (
 	"github.com/devpablocristo/companion/internal/connectors"
 	"github.com/devpablocristo/companion/internal/connectors/registry"
 	connectordomain "github.com/devpablocristo/companion/internal/connectors/usecases/domain"
+	"github.com/devpablocristo/companion/internal/jobroles"
 	"github.com/devpablocristo/companion/internal/jobs"
 	"github.com/devpablocristo/companion/internal/mcpgovernance"
 	"github.com/devpablocristo/companion/internal/mcpserver"
@@ -679,6 +680,9 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	agentProfileRepo := agentprofiles.NewPostgresRepository(db)
 	agentProfileUC := agentprofiles.NewUsecases(agentProfileRepo)
 	agentProfileHandler := agentprofiles.NewHandler(agentProfileUC)
+	jobRoleRepo := jobroles.NewPostgresRepository(db)
+	jobRoleUC := jobroles.NewUsecases(jobRoleRepo)
+	jobRoleHandler := jobroles.NewHandler(jobRoleUC)
 	agentUC := agentfleet.NewUsecases(agentRepo).
 		WithTaskOwnership(taskOwnershipAdapter{repo: repo}).
 		WithProfileChecker(profileCheckerAdapter{repo: agentProfileRepo})
@@ -850,6 +854,7 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	productHandler.Register(mux)
 	agentHandler.Register(mux)
 	agentProfileHandler.Register(mux)
+	jobRoleHandler.Register(mux)
 	chatHandler.Register(mux)
 	connHandler.Register(mux)
 	capabilityHandler.Register(mux)

@@ -179,6 +179,8 @@ func (s *server) routes() http.Handler {
 	mux.Handle("/api/agents/", s.withAuth(http.HandlerFunc(s.agentsAPI)))
 	mux.Handle("/api/virtual-employees", s.withAuth(http.HandlerFunc(s.virtualEmployeesAPI)))
 	mux.Handle("/api/virtual-employees/", s.withAuth(http.HandlerFunc(s.virtualEmployeesAPI)))
+	mux.Handle("/api/job-roles", s.withAuth(http.HandlerFunc(s.jobRolesAPI)))
+	mux.Handle("/api/job-roles/", s.withAuth(http.HandlerFunc(s.jobRolesAPI)))
 	mux.HandleFunc("POST /api/webhooks/clerk", s.clerkWebhook)
 	mux.Handle("/api/companion/", s.withAuth(s.proxy("companion", "/api/companion", s.cfg.CompanionBaseURL, s.cfg.CompanionAudience)))
 	mux.Handle("/api/nexus/", s.withAuth(s.proxy("nexus", "/api/nexus", s.cfg.NexusBaseURL, s.cfg.NexusAudience)))

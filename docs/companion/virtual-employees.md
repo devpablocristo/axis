@@ -122,6 +122,7 @@ Employee:
 ```json
 {
   "metadata": {
+    "job_role_id": "billing-specialist",
     "job_title": "Billing Specialist",
     "mission": "Keep customer billing healthy",
     "responsibilities": ["review invoices", "escalate blockers"],
@@ -135,6 +136,7 @@ Employee:
 Campos:
 
 - `metadata.job_title`: puesto visible.
+- `metadata.job_role_id`: referencia v1 al JobRole que ocupa el Virtual Employee.
 - `metadata.mission`: mision o funcion principal.
 - `metadata.responsibilities`: lista simple de responsabilidades.
 - `metadata.owner_user_id`: owner humano responsable.
@@ -143,6 +145,19 @@ Campos:
 
 Esto es un contrato v1 pragmatico, no necesariamente el modelo final. No son
 columnas, no tienen validacion fuerte y no crean entidades separadas.
+
+## Relacion Con JobRole
+
+`JobRole` es el puesto de trabajo que puede ocupar un Virtual Employee dentro
+de `org_id + product_surface`.
+
+En v1, JobRole tiene tabla propia y CRUD propio, pero la relacion con Virtual
+Employee se guarda como `metadata.job_role_id` para no migrar Agent Fleet ni
+cambiar Runtime.
+
+JobRole puede sugerir defaults como mision, responsabilidades, capabilities
+recomendadas y autonomia. No es un IAM Role, no es un PermissionBundle y no
+autoriza acciones directamente.
 
 ## Fuera De Alcance V1
 

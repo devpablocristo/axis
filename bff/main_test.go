@@ -341,6 +341,123 @@ func TestAgentProfilesEndpointRejectsMemberWrites(t *testing.T) {
 	}
 }
 
+func TestJobRolesEndpointReadsCompanionJobRoles(t *testing.T) {
+	var gotPath, gotAuth string
+	downstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.String()
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"job_roles":[{"job_role_id":"billing-specialist","org_id":"org-a","product_surface":"axis","name":"Billing Specialist","slug":"billing-specialist","default_autonomy_level":"A2","status":"active","version":1}]}`))
+	}))
+	defer downstream.Close()
+
+	srv, err := newTestServer(downstream.URL, []string{"companion:agents:read"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tenantID := seedTenantForActor(t, srv, "org-a", "axis", "admin")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/job-roles?lifecycle=all", nil)
+	req.Header.Set("X-Tenant-ID", tenantID)
+	rec := httptest.NewRecorder()
+	srv.routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if gotPath != "/v1/job-roles?lifecycle=all" {
+		t.Fatalf("expected companion job roles path, got %q", gotPath)
+	}
+	if !strings.HasPrefix(gotAuth, "Bearer ") {
+		t.Fatalf("expected bearer token, got %q", gotAuth)
+	}
+	claims := decodeClaims(t, strings.TrimPrefix(gotAuth, "Bearer "))
+	if claims["aud"] != "companion" || claims["org_id"] != "org-a" || claims["product_surface"] != "axis" {
+		t.Fatalf("unexpected downstream claims: %#v", claims)
+	}
+}
+
+func TestJobRolesEndpointWritesCompanionJobRoles(t *testing.T) {
+	var requests []string
+	var gotBody string
+	downstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.Method+" "+r.URL.String())
+		if r.Body != nil {
+			body, _ := io.ReadAll(r.Body)
+			gotBody = string(body)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPut && r.URL.Path == "/v1/job-roles/billing-specialist":
+			_, _ = w.Write([]byte(`{"job_role_id":"billing-specialist","org_id":"org-a","product_surface":"axis","name":"Billing Specialist","slug":"billing-specialist","default_autonomy_level":"A2","status":"active","version":1}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/job-roles/billing-specialist/archive":
+			_, _ = w.Write([]byte(`{"job_role_id":"billing-specialist","status":"archived","version":2}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/job-roles/billing-specialist/restore":
+			_, _ = w.Write([]byte(`{"job_role_id":"billing-specialist","status":"active","version":3}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer downstream.Close()
+
+	srv, err := newTestServer(downstream.URL, []string{"companion:agents:admin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tenantID := seedTenantForActor(t, srv, "org-a", "axis", "admin")
+	if err := srv.iam.SetPlatformRole(context.Background(), srv.cfg.DevUserID, "platform_admin"); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPut, "/api/job-roles/billing-specialist", strings.NewReader(`{"name":"Billing Specialist","slug":"billing-specialist","default_autonomy_level":"A2"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Tenant-ID", tenantID)
+	rec := httptest.NewRecorder()
+	srv.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected put 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(gotBody, `"name":"Billing Specialist"`) {
+		t.Fatalf("expected forwarded body, got %q", gotBody)
+	}
+	for _, path := range []string{
+		"/api/job-roles/billing-specialist/archive",
+		"/api/job-roles/billing-specialist/restore",
+	} {
+		req = httptest.NewRequest(http.MethodPost, path, nil)
+		req.Header.Set("X-Tenant-ID", tenantID)
+		rec = httptest.NewRecorder()
+		srv.routes().ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected action 200 for %s, got %d body=%s", path, rec.Code, rec.Body.String())
+		}
+	}
+	want := []string{
+		"PUT /v1/job-roles/billing-specialist",
+		"POST /v1/job-roles/billing-specialist/archive",
+		"POST /v1/job-roles/billing-specialist/restore",
+	}
+	if strings.Join(requests, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("unexpected downstream requests:\n%s", strings.Join(requests, "\n"))
+	}
+}
+
+func TestJobRolesEndpointRejectsMemberWrites(t *testing.T) {
+	srv, err := newTestServer("http://127.0.0.1:1", orgMemberScopes())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPut, "/api/job-roles/billing-specialist", strings.NewReader(`{"name":"Billing Specialist"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestPromptsEndpointAdaptsAssistPacks(t *testing.T) {
 	var requests []string
 	var gotAuth string
@@ -1474,6 +1591,7 @@ func TestManualAppContextHandlersSurfaceStoreErrorAsStable500(t *testing.T) {
 	}{
 		{name: "prompts", path: "/api/prompts/assist-packs"},
 		{name: "agent profiles", path: "/api/agent-profiles"},
+		{name: "job roles", path: "/api/job-roles"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			srv, err := newTestServer("http://127.0.0.1:1", defaultAdminScopes())

@@ -1355,6 +1355,136 @@ paths:
                   versions:
                     type: array
                     items: { $ref: "#/components/schemas/AgentProfileVersion" }
+  /v1/job-roles:
+    get:
+      summary: Lista JobRoles de la customer org
+      description: |
+        API publica para puestos de trabajo de Virtual Employees. Un JobRole
+        define funcion, mision, responsabilidades y defaults recomendados para
+        un trabajador digital dentro de `org_id + product_surface`. No autoriza
+        acciones ni reemplaza IAM Role/PermissionBundle.
+      parameters:
+        - in: query
+          name: org_id
+          schema: { type: string }
+        - in: query
+          name: product_surface
+          schema: { type: string }
+        - in: query
+          name: lifecycle
+          schema: { type: string, enum: [active, archived, all], default: active }
+        - in: query
+          name: include_archived
+          schema: { type: boolean, default: false }
+      responses:
+        "200":
+          description: JobRole list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  job_roles:
+                    type: array
+                    items: { $ref: "#/components/schemas/JobRole" }
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/JobRole" }
+  /v1/job-roles/{job_role_id}:
+    get:
+      summary: Obtiene un JobRole
+      description: Requiere scope de lectura de Agents/Runtime admin en v1.
+      parameters:
+        - in: path
+          name: job_role_id
+          required: true
+          schema: { type: string }
+        - in: query
+          name: org_id
+          schema: { type: string }
+        - in: query
+          name: product_surface
+          schema: { type: string }
+      responses:
+        "200":
+          description: JobRole
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JobRole" }
+        "404": { description: JobRole not found }
+    put:
+      summary: Crea o actualiza un JobRole
+      description: |
+        Crea o actualiza un puesto de trabajo. Los campos `recommended_capabilities`,
+        `default_permission_bundle_id`, `default_sla_policy` y
+        `default_memory_policy` son defaults/recomendaciones, no enforcement.
+      parameters:
+        - in: path
+          name: job_role_id
+          required: true
+          schema: { type: string }
+        - in: query
+          name: org_id
+          schema: { type: string }
+        - in: query
+          name: product_surface
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/JobRoleInput" }
+      responses:
+        "200":
+          description: JobRole saved
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JobRole" }
+  /v1/job-roles/{job_role_id}/archive:
+    post:
+      summary: Archiva un JobRole
+      description: Archiva el puesto sin borrar datos ni afectar permisos reales.
+      parameters:
+        - in: path
+          name: job_role_id
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: JobRole archived }
+        "404": { description: JobRole not found }
+  /v1/job-roles/{job_role_id}/restore:
+    post:
+      summary: Restaura un JobRole archivado
+      parameters:
+        - in: path
+          name: job_role_id
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: JobRole restored }
+        "404": { description: JobRole not found }
+  /v1/job-roles/{job_role_id}/versions:
+    get:
+      summary: Lista snapshots auditados de un JobRole
+      parameters:
+        - in: path
+          name: job_role_id
+          required: true
+          schema: { type: string }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        "200":
+          description: JobRole versions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  versions:
+                    type: array
+                    items: { $ref: "#/components/schemas/JobRoleVersion" }
   /v1/agents/assignments:
     post:
       summary: Asigna un Agent activo por compatibilidad tecnica
@@ -2659,7 +2789,11 @@ components:
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     VirtualEmployee:
-      description: Public Virtual Employee representation. In v1 this is a semantic wrapper over Agent Fleet: `employee_id` maps directly to internal `agent_id`, persistence is `companion_agents`, Runtime still uses `agent_id`, and tenant is `org_id + product_surface`.
+      description: |
+        Public Virtual Employee representation. In v1 this is a semantic
+        wrapper over Agent Fleet: `employee_id` maps directly to internal
+        `agent_id`, persistence is `companion_agents`, Runtime still uses
+        `agent_id`, and tenant is `org_id + product_surface`.
       allOf:
         - $ref: "#/components/schemas/Agent"
     AgentProfileInput:
@@ -2700,6 +2834,67 @@ components:
             original_created_at: { type: string, format: date-time }
             original_updated_at: { type: string, format: date-time }
             saved_at: { type: string, format: date-time }
+    JobRoleResponsibility:
+      type: object
+      required: [title]
+      properties:
+        title: { type: string }
+        description: { type: string }
+        expected_outcome: { type: string }
+        priority: { type: integer }
+    JobRoleInput:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        slug: { type: string }
+        description: { type: string }
+        mission: { type: string }
+        responsibilities:
+          type: array
+          items: { $ref: "#/components/schemas/JobRoleResponsibility" }
+        recommended_capabilities:
+          type: array
+          description: Capability IDs/keys recommended for Virtual Employees occupying this JobRole; not an authorization mechanism.
+          items: { type: string }
+        default_autonomy_level: { type: string, enum: [A0, A1, A2, A3, A4, A5], default: A2 }
+        default_permission_bundle_id:
+          type: string
+          description: Informational/default reference only; JobRole does not grant permissions.
+        success_criteria:
+          type: array
+          items: { type: string }
+        default_sla_policy: { type: object, additionalProperties: true }
+        default_memory_policy: { type: object, additionalProperties: true }
+        status: { type: string, enum: [active, archived], default: active }
+        metadata: { type: object, additionalProperties: true }
+    JobRole:
+      allOf:
+        - $ref: "#/components/schemas/JobRoleInput"
+        - type: object
+          required: [job_role_id, org_id, product_surface, name, slug, default_autonomy_level, status, version]
+          properties:
+            id: { type: string, format: uuid }
+            job_role_id: { type: string }
+            org_id: { type: string }
+            product_surface: { type: string }
+            created_by: { type: string }
+            created_at: { type: string, format: date-time }
+            updated_at: { type: string, format: date-time }
+            archived_at: { type: string, format: date-time }
+            version: { type: integer, format: int64 }
+    JobRoleVersion:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        job_role_id: { type: string }
+        org_id: { type: string }
+        product_surface: { type: string }
+        version: { type: integer, format: int64 }
+        action: { type: string }
+        changed_by: { type: string }
+        role: { $ref: "#/components/schemas/JobRole" }
+        created_at: { type: string, format: date-time }
     AgentHandoff:
       type: object
       properties:

@@ -37,10 +37,25 @@ vi.mock('./api', async () => {
       enabled: true,
     }]),
     listIAMTenants: vi.fn(async () => [{ id: 'org-a', name: 'Org A', status: 'active' }]),
+    listJobRoles: vi.fn(async () => [{
+      job_role_id: 'billing-specialist',
+      org_id: 'org-a',
+      product_surface: 'axis',
+      name: 'Billing Specialist',
+      slug: 'billing-specialist',
+      mission: 'Keep billing clean',
+      responsibilities: [{ title: 'Review invoices' }],
+      recommended_capabilities: ['billing.read'],
+      default_autonomy_level: 'A2',
+      status: 'active',
+    }]),
     purgeAgentProfile: vi.fn(),
+    archiveJobRole: vi.fn(),
+    restoreJobRole: vi.fn(),
     restoreAgentProfile: vi.fn(),
     trashAgentProfile: vi.fn(),
     upsertAgentProfile: vi.fn(),
+    upsertJobRole: vi.fn(),
   }
 })
 
@@ -122,5 +137,58 @@ describe('AgentsControlCenter as Virtual Employees surface', () => {
       contact_channels: ['slack:#finance'],
       escalation_rules: ['manager after 2 days'],
     })
+  })
+
+  it('does not apply Job Role defaults when editing an existing Virtual Employee', async () => {
+    crudPageProps.length = 0
+
+    render(<AgentsControlCenter orgId="org-a" tenantId="tenant-a" />)
+
+    await waitFor(() => {
+      const props = crudPageProps.at(-1) as {
+        basePath?: string
+        toBody?: (values: Record<string, string | boolean>) => Record<string, unknown>
+      }
+      expect(props.basePath).toBe(VIRTUAL_EMPLOYEES_BASE_PATH)
+      expect(props.toBody?.({
+        name: 'Billing Employee',
+        profile: 'support.v1',
+        autonomy: 'A2',
+        memory_enabled: true,
+        description: '',
+        job_role_id: 'billing-specialist',
+        job_title: '',
+        mission: '',
+        responsibilities: '',
+        capabilities: '',
+        tools: '',
+      }).metadata).toMatchObject({
+        job_role_id: 'billing-specialist',
+        job_title: 'Billing Specialist',
+        mission: 'Keep billing clean',
+        responsibilities: ['Review invoices'],
+      })
+    })
+
+    const props = crudPageProps.at(-1) as {
+      toBody: (values: Record<string, string | boolean>) => Record<string, unknown>
+    }
+    const body = props.toBody({
+      _metadata_json: '{}',
+      name: 'Billing Employee',
+      profile: 'support.v1',
+      autonomy: 'A2',
+      memory_enabled: true,
+      description: '',
+      job_role_id: 'billing-specialist',
+      job_title: '',
+      mission: '',
+      responsibilities: '',
+      capabilities: '',
+      tools: '',
+    })
+
+    expect(body.metadata).toEqual({ job_role_id: 'billing-specialist' })
+    expect(body.capabilities).toEqual([])
   })
 })
