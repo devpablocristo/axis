@@ -3,14 +3,14 @@
 Companion usa perfiles de runtime persistidos internamente y agents tecnicos en
 `companion_agents` para compatibilidad de ejecucion.
 
-**Virtual Employee** es el concepto publico de dominio y **Agent** es la
-superficie tecnica de runtime. `employee_id` no mapea a `agent_id`; Runtime
-acepta `employee_id` para Employees y conserva `agent_id` para compatibilidad
+**Virployee** es el concepto publico de dominio y **Agent** es la
+superficie tecnica de runtime. `virployee_id` no mapea a `agent_id`; Runtime
+acepta `virployee_id` para Employees y conserva `agent_id` para compatibilidad
 tecnica.
 
 El modelo objetivo separa ambos conceptos. Ver
 `../specs/companion/domain/agents-domain-spec.md` y
-`../specs/companion/domain/virtual-employees-domain-spec.md`.
+`../specs/companion/domain/virployees-domain-spec.md`.
 
 ## Modelo actual
 
@@ -20,7 +20,7 @@ Cada run produce:
   scopes y principal tecnico `companion.employee_ai`.
 - `AgentRoute`: intención clasificada, producto, autonomía efectiva y allowed
   tools.
-- `EmployeeProfile`: perfil efectivo versionado, prompt, autonomía
+- `VirployeeProfile`: perfil efectivo versionado, prompt, autonomía
   máxima, allowlist de tools/capabilities, memory policy y scopes requeridos.
 - `agent_id`: Agent tecnico persistente opcional, resuelto desde `internal/agentfleet`.
 
@@ -36,7 +36,7 @@ aplica sus límites de autonomía/tools/capabilities y escribe `agent_id` en
 traces, observability y task context.
 
 El prompt reusable no vive en Medmory ni en el modulo tecnico de agents: vive
-en Employee Profiles. Ejemplo: `billing_agent` puede referenciar
+en Virployee Profiles. Ejemplo: `billing_agent` puede referenciar
 `axis.ops.billing.v1` como `profile_key` tecnico.
 
 Los handoffs entre agentes quedan persistidos y auditados, pero no sustituyen a

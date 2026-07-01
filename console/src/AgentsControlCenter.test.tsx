@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { AgentsControlCenter } from './AgentsControlCenter'
-import { createVirtualEmployee, updateVirtualEmployee, upsertJobRole } from './api'
+import { createVirployee, updateVirployee, upsertJobRole } from './api'
 
 const crudPageProps = vi.hoisted(() => [] as Array<Record<string, unknown>>)
 
@@ -31,12 +31,12 @@ vi.mock('./api', async () => {
   const actual = await vi.importActual<typeof import('./api')>('./api')
   return {
     ...actual,
-    archiveEmployeeProfile: vi.fn(),
+    archiveVirployeeProfile: vi.fn(),
     axisCrudHttpClient: vi.fn(() => ({ json: vi.fn() })),
-    createEmployeeProfile: vi.fn(),
+    createVirployeeProfile: vi.fn(),
     createHandoff: vi.fn(),
-    createVirtualEmployee: vi.fn(),
-    listEmployeeProfiles: vi.fn(async () => [{
+    createVirployee: vi.fn(),
+    listVirployeeProfiles: vi.fn(async () => [{
       profile_id: '11111111-1111-4111-8111-111111111111',
       profile_key: 'support.v1',
       family_id: 'support',
@@ -60,40 +60,41 @@ vi.mock('./api', async () => {
       default_autonomy_level: 'A2',
       status: 'active',
     }]),
-    listVirtualEmployees: vi.fn(async () => []),
-    purgeEmployeeProfile: vi.fn(),
+    listVirployees: vi.fn(async () => []),
+    purgeVirployeeProfile: vi.fn(),
     archiveJobRole: vi.fn(),
     restoreJobRole: vi.fn(),
-    restoreEmployeeProfile: vi.fn(),
-    trashEmployeeProfile: vi.fn(),
-    updateEmployeeProfile: vi.fn(),
+    restoreVirployeeProfile: vi.fn(),
+    trashVirployeeProfile: vi.fn(),
+    trashJobRole: vi.fn(),
+    updateVirployeeProfile: vi.fn(),
     updateHandoff: vi.fn(),
-    updateVirtualEmployee: vi.fn(),
+    updateVirployee: vi.fn(),
     upsertJobRole: vi.fn(),
   }
 })
 
-describe('AgentsControlCenter as Virtual Employees surface', () => {
-  it('uses the Virtual Employees endpoint and public labels', async () => {
+describe('AgentsControlCenter as Virployees surface', () => {
+  it('uses the Virployees endpoint and public labels', async () => {
     crudPageProps.length = 0
 
     render(<AgentsControlCenter orgId="org-a" tenantId="tenant-a" productSurface="medmory" />)
 
-    expect(await screen.findByRole('button', { name: 'Virtual Employees' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Virployees' })).toBeInTheDocument()
     await waitFor(() => {
       expect(crudPageProps.at(-1)?.dataSource).toBeTruthy()
     })
-    expect(screen.getAllByText('Virtual Employees').length).toBeGreaterThanOrEqual(2)
-    expect(screen.getByText('Buscar virtual employees')).toBeInTheDocument()
-    expect(screen.getByText('Sin virtual employees')).toBeInTheDocument()
+    expect(screen.getAllByText('Virployees').length).toBeGreaterThanOrEqual(2)
+    expect(screen.getByText('Buscar virployees')).toBeInTheDocument()
+    expect(screen.getByText('Sin virployees')).toBeInTheDocument()
     expect(screen.getByText('Tenant')).toBeInTheDocument()
     expect(screen.queryByText('Org')).not.toBeInTheDocument()
     expect(screen.queryByText('Contexto')).not.toBeInTheDocument()
   })
 
-  it('creates Virtual Employees with the clean domain payload', async () => {
+  it('creates Virployees with the clean domain payload', async () => {
     crudPageProps.length = 0
-    vi.mocked(createVirtualEmployee).mockClear()
+    vi.mocked(createVirployee).mockClear()
 
     render(<AgentsControlCenter orgId="org-a" tenantId="tenant-a" productSurface="medmory" />)
 
@@ -105,6 +106,9 @@ describe('AgentsControlCenter as Virtual Employees surface', () => {
       dataSource: {
         create: (values: Record<string, string | boolean>) => Promise<void>
       }
+      supportsTrash?: boolean
+      trashEmptyState?: string
+      toolbarActions: Array<{ label: string }>
     }
     expect(props.formFields.map((field) => field.label)).toEqual(expect.arrayContaining([
       'Supervisor user ID',
@@ -131,7 +135,7 @@ describe('AgentsControlCenter as Virtual Employees surface', () => {
       memory_id: '',
     })
 
-    expect(createVirtualEmployee).toHaveBeenCalledWith(
+    expect(createVirployee).toHaveBeenCalledWith(
       'org-a',
       {
         name: 'Finance Employee',
@@ -146,10 +150,10 @@ describe('AgentsControlCenter as Virtual Employees surface', () => {
     )
   })
 
-  it('does not apply Job Role defaults when editing an existing Virtual Employee', async () => {
+  it('does not apply Job Role defaults when editing an existing Virployee', async () => {
     crudPageProps.length = 0
-    vi.mocked(createVirtualEmployee).mockClear()
-    vi.mocked(updateVirtualEmployee).mockClear()
+    vi.mocked(createVirployee).mockClear()
+    vi.mocked(updateVirployee).mockClear()
 
     render(<AgentsControlCenter orgId="org-a" tenantId="tenant-a" productSurface="medmory" />)
 
@@ -177,7 +181,7 @@ describe('AgentsControlCenter as Virtual Employees surface', () => {
       capability_ids: '',
       memory_id: '',
     })
-    expect(createVirtualEmployee).toHaveBeenCalledWith(
+    expect(createVirployee).toHaveBeenCalledWith(
       'org-a',
       expect.objectContaining({
         capability_ids: ['33333333-3333-4333-8333-333333333333'],
@@ -194,7 +198,7 @@ describe('AgentsControlCenter as Virtual Employees surface', () => {
         capability_ids: '',
         memory_id: '',
       })
-    expect(updateVirtualEmployee).toHaveBeenCalledWith(
+    expect(updateVirployee).toHaveBeenCalledWith(
       'org-a',
       'employee-1',
       expect.objectContaining({
@@ -225,7 +229,6 @@ describe('AgentsControlCenter as Virtual Employees surface', () => {
 
     expect(labels).toEqual([
       'Nombre',
-      'Descripción',
       'Misión',
       'Responsabilidades',
       'Capabilities recomendadas',
@@ -235,10 +238,12 @@ describe('AgentsControlCenter as Virtual Employees surface', () => {
     expect(labels.some((label) => label.includes('JSON'))).toBe(false)
     expect(labels).not.toContain('Job Role ID')
     expect(labels).not.toContain('Slug')
+    expect(props.supportsTrash).toBe(true)
+    expect(props.trashEmptyState).toBe('Sin job roles en papelera')
+    expect(props.toolbarActions.map((action) => action.label)).toEqual(['Activos', 'Archivados', 'Papelera'])
 
     await props.dataSource.create({
       name: 'Medical Case Assistant',
-      description: 'Clinical support role',
       mission: 'Support medical review without autonomous diagnosis',
       responsibilities: 'Resumir historia clínica\nDetectar señales de alarma, inconsistencias y datos faltantes',
       recommended_capabilities: 'medical.records.read, medical.summary.generate',
@@ -265,6 +270,7 @@ describe('AgentsControlCenter as Virtual Employees surface', () => {
       }),
       'tenant-a',
     )
+    expect(vi.mocked(upsertJobRole).mock.calls.at(-1)?.[2]).not.toHaveProperty('description')
   })
 
   it('shows public Employee handoffs without agent fields', async () => {
@@ -280,16 +286,22 @@ describe('AgentsControlCenter as Virtual Employees surface', () => {
     const props = crudPageProps.at(-1) as {
       formFields: Array<{ key: string; label: string }>
       columns: Array<{ header?: string }>
+      toolbarActions: Array<{ label: string }>
+      listHeaderInlineSlot?: () => ReactNode
+      supportsArchived?: boolean
     }
     expect(props.formFields.map((field) => field.key)).toEqual([
       'task_id',
-      'from_employee_id',
-      'to_employee_id',
+      'from_virployee_id',
+      'to_virployee_id',
       'reason',
       'status',
     ])
     expect(props.formFields.map((field) => field.key)).not.toContain('from_agent_id')
     expect(props.formFields.map((field) => field.key)).not.toContain('to_agent_id')
     expect(props.columns.map((column) => column.header)).toEqual(expect.arrayContaining(['Desde', 'Hacia']))
+    expect(props.supportsArchived).toBeFalsy()
+    expect(props.listHeaderInlineSlot?.()).toBeTruthy()
+    expect(props.toolbarActions.map((action) => action.label)).toEqual(['Todos', 'Pendientes', 'Aceptados', 'Rechazados', 'Cancelados'])
   })
 })

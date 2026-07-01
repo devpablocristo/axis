@@ -37,24 +37,30 @@ func clerkStatus(err error) int {
 }
 
 type clerkIdentityAdapter struct {
-	secretKey string
-	baseURL   string
-	client    *http.Client
-	store     IAMStore
-	ownerOrg  string // Axis org id whose accounts may hold the global owner role
+	secretKey       string
+	baseURL         string
+	client          *http.Client
+	store           IAMStore
+	ownerOrg        string // Axis org id whose accounts may hold the global owner role
+	productSurfaces []string
 }
 
 func newClerkIdentityAdapter(secretKey string, baseURL string, client *http.Client, store IAMStore, ownerOrg string) HumanIdentityProvider {
+	return newClerkIdentityAdapterWithProducts(secretKey, baseURL, client, store, ownerOrg, nil)
+}
+
+func newClerkIdentityAdapterWithProducts(secretKey string, baseURL string, client *http.Client, store IAMStore, ownerOrg string, productSurfaces []string) HumanIdentityProvider {
 	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	if baseURL == "" {
 		baseURL = "https://api.clerk.com/v1"
 	}
 	return &clerkIdentityAdapter{
-		secretKey: strings.TrimSpace(secretKey),
-		baseURL:   baseURL,
-		client:    client,
-		store:     store,
-		ownerOrg:  strings.TrimSpace(ownerOrg),
+		secretKey:       strings.TrimSpace(secretKey),
+		baseURL:         baseURL,
+		client:          client,
+		store:           store,
+		ownerOrg:        strings.TrimSpace(ownerOrg),
+		productSurfaces: productSurfaces,
 	}
 }
 
@@ -148,24 +154,17 @@ func (a *clerkIdentityAdapter) SyncPrincipal(ctx context.Context, p authn.Princi
 	return err
 }
 
-// ensureAxisTenant provisiona el tenant 'axis' (workspace por defecto) del org —
-// así ningún org de Clerk (webhook/login) queda sin tenant. Si actor != "", lo
-// agrega como tenant-member; owner se mapea a admin (owner es rol global de
-// plataforma, no per-tenant). Idempotente: CreateTenant keyado en (org,product),
-// UpsertTenantMember en (tenant,user).
+// ensureAxisTenant provisiona los tenants base del org, empezando por 'axis'.
+// Así ningún org de Clerk (webhook/login) queda sin workspace operativo. Si
+// actor != "", lo agrega como tenant-member; owner se mapea a admin (owner es
+// rol global de plataforma, no per-tenant). Idempotente: CreateTenant keyado en
+// (org,product), UpsertTenantMember en (tenant,user).
 func (a *clerkIdentityAdapter) ensureAxisTenant(ctx context.Context, orgID, name, actor, role string) error {
 	orgID = strings.TrimSpace(orgID)
 	if orgID == "" {
 		return nil
 	}
-	tenant, err := a.store.CreateTenant(ctx, IAMTenant{OrgID: orgID, ProductSurface: defaultOrgProductSurface, Name: firstNonEmpty(name, orgID), Status: "active"})
-	if err != nil {
-		return err
-	}
 	actor = strings.TrimSpace(actor)
-	if actor == "" {
-		return nil
-	}
 	tenantRole := normalizedRole(role)
 	switch tenantRole {
 	case "owner":
@@ -173,8 +172,24 @@ func (a *clerkIdentityAdapter) ensureAxisTenant(ctx context.Context, orgID, name
 	case "":
 		tenantRole = "member"
 	}
-	_, err = a.store.UpsertTenantMember(ctx, IAMTenantMember{TenantID: tenant.ID, UserID: actor, Role: tenantRole, Status: "active"})
-	return err
+	for _, productSurface := range productSurfacesOrDefault(a.productSurfaces) {
+		tenant, err := a.store.CreateTenant(ctx, IAMTenant{
+			OrgID:          orgID,
+			ProductSurface: productSurface,
+			Name:           firstNonEmpty(name, orgID) + " / " + productSurface,
+			Status:         "active",
+		})
+		if err != nil {
+			return err
+		}
+		if actor == "" {
+			continue
+		}
+		if _, err := a.store.UpsertTenantMember(ctx, IAMTenantMember{TenantID: tenant.ID, UserID: actor, Role: tenantRole, Status: "active"}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // clerkOrgID resolves an Axis org id to its Clerk organization id. Axis stores

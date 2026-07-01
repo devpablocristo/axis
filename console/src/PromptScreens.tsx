@@ -38,7 +38,7 @@ type AssistPack = {
   updated_at?: string
 }
 
-type EmployeeProfile = {
+type VirployeeProfile = {
   id?: string
   profile_id: string
   family_id: string
@@ -60,7 +60,7 @@ type AxisPromptRow = {
   id: string
   name: string
   promptKey: string
-  kind: 'assist-pack' | 'employee-profile'
+  kind: 'assist-pack' | 'virployee-profile'
   description?: string
   version: string
   promptText: string
@@ -69,7 +69,7 @@ type AxisPromptRow = {
   enabled: boolean
   updatedAt?: string
   archived: boolean
-  original: AssistPack | EmployeeProfile
+  original: AssistPack | VirployeeProfile
 }
 
 type PendingUpload = {
@@ -112,7 +112,7 @@ export function PromptsControlCenter({
       {activeSection === 'product' ? (
         <AssistPackPromptsScreen orgId={orgId} tenantId={tenantId} productSurface={productSurface} section={activeSection} />
       ) : (
-        <EmployeeProfilePromptsScreen orgId={orgId} tenantId={tenantId} productSurface={productSurface} agents={agents} section={activeSection} />
+        <VirployeeProfilePromptsScreen orgId={orgId} tenantId={tenantId} productSurface={productSurface} agents={agents} section={activeSection} />
       )}
     </section>
   )
@@ -183,7 +183,7 @@ function AssistPackPromptsScreen({
   )
 }
 
-function EmployeeProfilePromptsScreen({
+function VirployeeProfilePromptsScreen({
   orgId,
   tenantId,
   productSurface,
@@ -214,19 +214,19 @@ function EmployeeProfilePromptsScreen({
         if (profileIDs.size === 0) {
           return []
         }
-        const response = await axisFetch<{ profiles?: EmployeeProfile[]; employee_profiles?: EmployeeProfile[] }>(
-          `/api/prompts/employee-profiles?lifecycle=${encodeURIComponent(view)}`,
+        const response = await axisFetch<{ profiles?: VirployeeProfile[]; virployee_profiles?: VirployeeProfile[] }>(
+          `/api/prompts/virployee-profiles?lifecycle=${encodeURIComponent(view)}`,
           orgId,
           productHeaders(productSurface, tenantId),
         )
-        const profiles = response.employee_profiles ?? response.profiles ?? []
+        const profiles = response.virployee_profiles ?? response.profiles ?? []
         return profiles
           .filter((profile) => profileIDs.has(profile.profile_id))
           .map((profile) => ({
             id: profile.profile_id,
             name: profile.name,
             promptKey: profile.profile_id,
-            kind: 'employee-profile',
+            kind: 'virployee-profile',
             description: profile.description,
             version: profile.version_label,
             promptText: profile.system_prompt,
@@ -239,8 +239,8 @@ function EmployeeProfilePromptsScreen({
           }))
       }}
       replacePrompt={async (row, content, nextVersion) => {
-        const profile = row.original as EmployeeProfile
-        await axisFetch(`/api/prompts/employee-profiles/${encodeURIComponent(profile.profile_id)}/system-prompt`, orgId, {
+        const profile = row.original as VirployeeProfile
+        await axisFetch(`/api/prompts/virployee-profiles/${encodeURIComponent(profile.profile_id)}/system-prompt`, orgId, {
           method: 'PUT',
           tenantId,
           headers: { 'X-Product-Surface': productSurface },
@@ -260,7 +260,7 @@ function EmployeeProfilePromptsScreen({
         })
       }}
       archivePrompt={(row) =>
-        axisFetch(`/api/prompts/employee-profiles/${encodeURIComponent(row.id)}/archive`, orgId, {
+        axisFetch(`/api/prompts/virployee-profiles/${encodeURIComponent(row.id)}/archive`, orgId, {
           method: 'POST',
           tenantId,
           headers: { 'X-Product-Surface': productSurface },
@@ -268,7 +268,7 @@ function EmployeeProfilePromptsScreen({
         })
       }
       restorePrompt={(row) =>
-        axisFetch(`/api/prompts/employee-profiles/${encodeURIComponent(row.id)}/restore`, orgId, {
+        axisFetch(`/api/prompts/virployee-profiles/${encodeURIComponent(row.id)}/restore`, orgId, {
           method: 'POST',
           tenantId,
           headers: { 'X-Product-Surface': productSurface },
@@ -276,7 +276,7 @@ function EmployeeProfilePromptsScreen({
         })
       }
       trashPrompt={(row) =>
-        axisFetch(`/api/prompts/employee-profiles/${encodeURIComponent(row.id)}/trash`, orgId, {
+        axisFetch(`/api/prompts/virployee-profiles/${encodeURIComponent(row.id)}/trash`, orgId, {
           method: 'POST',
           tenantId,
           headers: { 'X-Product-Surface': productSurface },
@@ -284,7 +284,7 @@ function EmployeeProfilePromptsScreen({
         })
       }
       purgePrompt={(row) =>
-        axisFetch(`/api/prompts/employee-profiles/${encodeURIComponent(row.id)}/purge`, orgId, {
+        axisFetch(`/api/prompts/virployee-profiles/${encodeURIComponent(row.id)}/purge`, orgId, {
           method: 'DELETE',
           tenantId,
           headers: { 'X-Product-Surface': productSurface },
@@ -516,7 +516,7 @@ function PromptCrudScreen({
               view={effectivePromptView}
               busy={bulkBusy}
               supportsTrash={supportsTrash}
-              onCreate={() => setCrudError('Para crear un prompt de perfil, primero creá el perfil en Virtual Employees > Perfiles.')}
+              onCreate={() => setCrudError('Para crear un prompt de perfil, primero creá el perfil en Virployees > Perfiles.')}
               onClear={clearSelected}
               onBulkAction={(action) => void applyBulkAction(action, items)}
             />

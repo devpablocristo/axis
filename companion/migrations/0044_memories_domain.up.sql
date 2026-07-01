@@ -3,7 +3,7 @@ CREATE TABLE IF NOT EXISTS companion_memories (
     tenant_id         UUID NOT NULL,
     org_id            TEXT NOT NULL,
     product_surface   TEXT NOT NULL,
-    owner_employee_id UUID,
+    owner_virployee_id UUID,
     policy_json       JSONB NOT NULL DEFAULT jsonb_build_object(
         'enabled_by_default', true,
         'retention_days', 365,

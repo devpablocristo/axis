@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestHandoffsPublicContractProxiesEmployeeIDs(t *testing.T) {
+func TestHandoffsPublicContractProxiesVirployeeIDs(t *testing.T) {
 	var requests []string
 	var gotTenant string
 	var gotBody string
@@ -25,9 +25,9 @@ func TestHandoffsPublicContractProxiesEmployeeIDs(t *testing.T) {
 			_, _ = w.Write([]byte(`{"data":[]}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/handoffs":
 			w.WriteHeader(http.StatusCreated)
-			_, _ = w.Write([]byte(`{"handoff_id":"11111111-1111-4111-8111-111111111111","tenant_id":"22222222-2222-4222-8222-222222222222","from_employee_id":null,"to_employee_id":"33333333-3333-4333-8333-333333333333","reason":"handoff","status":"pending"}`))
+			_, _ = w.Write([]byte(`{"handoff_id":"11111111-1111-4111-8111-111111111111","tenant_id":"22222222-2222-4222-8222-222222222222","from_virployee_id":null,"to_virployee_id":"33333333-3333-4333-8333-333333333333","reason":"handoff","status":"pending"}`))
 		case r.Method == http.MethodPatch && r.URL.Path == "/v1/handoffs/11111111-1111-4111-8111-111111111111":
-			_, _ = w.Write([]byte(`{"handoff_id":"11111111-1111-4111-8111-111111111111","tenant_id":"22222222-2222-4222-8222-222222222222","to_employee_id":"33333333-3333-4333-8333-333333333333","reason":"handoff","status":"accepted"}`))
+			_, _ = w.Write([]byte(`{"handoff_id":"11111111-1111-4111-8111-111111111111","tenant_id":"22222222-2222-4222-8222-222222222222","to_virployee_id":"33333333-3333-4333-8333-333333333333","reason":"handoff","status":"accepted"}`))
 		default:
 			http.NotFound(w, r)
 		}
@@ -47,7 +47,7 @@ func TestHandoffsPublicContractProxiesEmployeeIDs(t *testing.T) {
 		code   int
 	}{
 		{http.MethodGet, "/api/handoffs", "", http.StatusOK},
-		{http.MethodPost, "/api/handoffs", `{"to_employee_id":"33333333-3333-4333-8333-333333333333","reason":"handoff"}`, http.StatusCreated},
+		{http.MethodPost, "/api/handoffs", `{"to_virployee_id":"33333333-3333-4333-8333-333333333333","reason":"handoff"}`, http.StatusCreated},
 		{http.MethodPatch, "/api/handoffs/11111111-1111-4111-8111-111111111111", `{"status":"accepted"}`, http.StatusOK},
 	} {
 		req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))

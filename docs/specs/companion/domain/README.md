@@ -21,16 +21,16 @@ Debe separar explicitamente:
 - `workforce-domain-spec.md`: mapa rector del dominio Workforce.
 - `identity-and-tenancy-domain-spec.md`: `Organization`, `Product`, `Tenant`
   y `User`.
-- `virtual-employees-domain-spec.md`: modelo objetivo core de
-  `VirtualEmployee`.
+- `virployees-domain-spec.md`: modelo objetivo core de
+  `Virployee`.
 - `job-roles-domain-spec.md`: `JobRole`, `Responsibility` y
   `SuccessCriterion`.
-- `employee-profiles-domain-spec.md`: `EmployeeProfile`, `LLMConfig` y
+- `virployee-profiles-domain-spec.md`: `VirployeeProfile`, `LLMConfig` y
   `MemoryPolicy`.
 - `capabilities-and-tools-domain-spec.md`: `Capability` y `Tool`.
 - `memory-domain-spec.md`: `Memory` y `MemoryEntry`.
 - `agents-domain-spec.md`: `Agent` como ejecutor tecnico, separado de
-  `VirtualEmployee`.
+  `Virployee`.
 - `work-domain-spec.md`: `Task`, `Watcher` y `Handoff`.
 - `audit-domain-spec.md`: `AuditEvent` y reglas de historial.
 

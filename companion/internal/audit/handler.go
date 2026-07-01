@@ -13,10 +13,11 @@ import (
 )
 
 const (
-	scopeAuditRead    = "companion:audit:read"
-	scopeRuntimeAdmin = "companion:runtime:admin"
-	scopeAgentsAdmin  = "companion:agents:admin"
-	scopeCrossOrg     = "companion:cross_org"
+	scopeAuditRead           = "companion:audit:read"
+	scopeRuntimeAdmin        = "companion:runtime:admin"
+	scopeVirployeesAdmin     = "companion:virployees:admin"
+	scopeAxisVirployeesAdmin = "axis:virployees:admin"
+	scopeCrossOrg            = "companion:cross_org"
 )
 
 type Handler struct {
@@ -36,7 +37,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "audit endpoints require authenticated context")
 		return
 	}
-	if !identityctx.HasAnyScope(r, scopeAuditRead, scopeRuntimeAdmin, scopeAgentsAdmin, scopeCrossOrg) {
+	if !identityctx.HasAnyScope(r, scopeAuditRead, scopeRuntimeAdmin, scopeVirployeesAdmin, scopeAxisVirployeesAdmin, scopeCrossOrg) {
 		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "missing audit scope")
 		return
 	}

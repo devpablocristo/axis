@@ -11,7 +11,7 @@ Capability = habilidad reusable
 Tool = funcion tecnica invocable
 ```
 
-Un `VirtualEmployee` referencia capabilities, no tools.
+Un `Virployee` referencia capabilities, no tools.
 
 ## Capability
 
@@ -57,9 +57,9 @@ Relaciones:
 ```text
 Capability.product_id -> Product.product_id
 Capability.tool_id -> Tool.tool_id | null
-VirtualEmployee.capability_ids -> Capability.capability_id[]
+Virployee.capability_ids -> Capability.capability_id[]
 JobRole.recommended_capability_ids -> Capability.capability_id[]
-EmployeeProfile.default_capability_ids -> Capability.capability_id[]
+VirployeeProfile.default_capability_ids -> Capability.capability_id[]
 ```
 
 Estado actual: existe `companion_capability_manifests` con `id uuid`,

@@ -15,6 +15,7 @@ var (
 	ErrInvalidPayload   = errors.New("invalid connector payload")
 	ErrForbidden        = domainerr.Forbidden("connector access forbidden")
 	ErrConflict         = domainerr.Conflict("connector execution conflict")
+	ErrValidation       = domainerr.Validation("connector validation failed")
 )
 
 // IsNotFound verifica si el error es de conector no encontrado.

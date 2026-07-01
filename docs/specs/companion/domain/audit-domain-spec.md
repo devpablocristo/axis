@@ -7,7 +7,7 @@ Este spec define audit como historial separado del core de las entidades.
 Regla:
 
 ```text
-Audit no vive dentro de VirtualEmployee.
+Audit no vive dentro de Virployee.
 ```
 
 ## AuditEvent
@@ -48,18 +48,18 @@ AuditEvent.resource_id -> ID del recurso indicado por resource_type
 
 Reglas:
 
-- `resource_type` debe usar nombres de dominio: `virtual_employee`,
-  `job_role`, `employee_profile`, `capability`, `memory`, `task`,
+- `resource_type` debe usar nombres de dominio: `virployee`,
+  `job_role`, `virployee_profile`, `capability`, `memory`, `task`,
   `watcher`, `handoff`.
 - `action` debe ser verbo/evento estable: `created`, `updated`,
   `archived`, `restored`, `status_changed`.
 - `created_at`, `updated_at`, `archived_at`, `trashed_at` y `version` no son
-  campos core de `VirtualEmployee`; son historial o implementacion tecnica.
+  campos core de `Virployee`; son historial o implementacion tecnica.
 
 Estado actual: existe `lifecycle_audit` como tabla comun append-only para
 eventos de lifecycle y existen tablas de audit/snapshot separadas como
 `companion_agent_audit`, `companion_job_role_audit`,
-`companion_virtual_employee_audit`, `companion_memory_audit` y
+`companion_virployee_audit`, `companion_memory_audit` y
 `companion_memory_container_audit`.
 
 Brecha: el naming y shape de audit deben alinearse con entidades de dominio,
@@ -71,5 +71,5 @@ no con aliases tecnicos.
 |---|---|---|
 | `created_at` en core | Campo tecnico mezclado con dominio. | Audit/event log separado. |
 | `version` en entidades | Puede ser tecnico de concurrencia/historial. | Mantener fuera del core de dominio. |
-| `companion_agent_audit` | Audita Agent tecnico. | Solo usarlo para Agent; Employee usa `virtual_employee`. |
+| `companion_agent_audit` | Audita Agent tecnico. | Solo usarlo para Agent; Employee usa `virployee`. |
 | Audits dispersos | Shapes distintos por modulo. | `lifecycle_audit` como `AuditEvent` comun y snapshots especificos cuando hagan falta. |

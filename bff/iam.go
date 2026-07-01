@@ -115,7 +115,7 @@ type IAMAgent struct {
 	UpdatedAt            time.Time      `json:"updated_at"`
 }
 
-type VirtualEmployeeView = IAMAgent
+type VirployeeView = IAMAgent
 
 type IAMStore interface {
 	ListOrgsForActor(context.Context, string, bool) ([]IAMOrg, error)
@@ -680,7 +680,7 @@ CREATE TABLE IF NOT EXISTS axis_tenants (
 	UNIQUE (org_id, product_surface)
 );
 CREATE TABLE IF NOT EXISTS axis_tenant_members (
-	tenant_id text NOT NULL REFERENCES axis_tenants(id) ON DELETE CASCADE,
+	tenant_id text NOT NULL REFERENCES axis_tenants(id) ON DELETE CASCADE ON UPDATE CASCADE,
 	user_id text NOT NULL REFERENCES axis_users(id) ON DELETE CASCADE,
 	role text NOT NULL DEFAULT 'member',
 	status text NOT NULL DEFAULT 'active',
@@ -701,6 +701,48 @@ CREATE INDEX IF NOT EXISTS idx_axis_tenants_org ON axis_tenants(org_id, status);
 `)
 	if err != nil {
 		return fmt.Errorf("migrate axis control plane: %w", err)
+	}
+	if err := s.normalizeTenantIDs(ctx); err != nil {
+		return fmt.Errorf("normalize axis tenant ids: %w", err)
+	}
+	return nil
+}
+
+func (s *sqlIAMStore) normalizeTenantIDs(ctx context.Context) error {
+	if _, err := s.db.ExecContext(ctx, `
+		ALTER TABLE axis_tenant_members DROP CONSTRAINT IF EXISTS axis_tenant_members_tenant_id_fkey;
+		ALTER TABLE axis_tenant_members
+			ADD CONSTRAINT axis_tenant_members_tenant_id_fkey
+			FOREIGN KEY (tenant_id) REFERENCES axis_tenants(id)
+			ON DELETE CASCADE ON UPDATE CASCADE;
+	`); err != nil {
+		return err
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id
+		FROM axis_tenants
+		WHERE id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+		ORDER BY created_at, id
+	`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if _, err := s.db.ExecContext(ctx, `UPDATE axis_tenants SET id = $1, updated_at = now() WHERE id = $2`, randomUUID(), id); err != nil {
+			return err
+		}
 	}
 	return nil
 }

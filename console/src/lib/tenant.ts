@@ -11,7 +11,8 @@ export function deriveTenantId(
   orgId: string,
   productSurface: string,
 ): string {
-  return (tenants ?? []).find((t) => t.org_id === orgId && t.product_surface === productSurface)?.id ?? ''
+  const id = (tenants ?? []).find((t) => t.org_id === orgId && t.product_surface === productSurface)?.id ?? ''
+  return isUuid(id) ? id : ''
 }
 
 export function workspaceOrgs(tenants: WorkspaceTenant[] | undefined): string[] {
@@ -26,4 +27,8 @@ export function workspaceProducts(tenants: WorkspaceTenant[] | undefined, orgId:
 export function preferred(options: string[], prefer: string): string | undefined {
   if (options.length === 0) return undefined
   return options.includes(prefer) ? prefer : options[0]
+}
+
+export function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.trim())
 }

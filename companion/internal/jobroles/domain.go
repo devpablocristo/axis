@@ -21,6 +21,7 @@ type LifecycleView string
 const (
 	LifecycleActive   LifecycleView = "active"
 	LifecycleArchived LifecycleView = "archived"
+	LifecycleTrash    LifecycleView = "trash"
 	LifecycleAll      LifecycleView = "all"
 )
 
@@ -108,6 +109,8 @@ func normalizeLifecycleView(value string, includeArchived bool) LifecycleView {
 	switch LifecycleView(strings.ToLower(strings.TrimSpace(value))) {
 	case LifecycleArchived:
 		return LifecycleArchived
+	case LifecycleTrash:
+		return LifecycleTrash
 	case LifecycleAll:
 		return LifecycleAll
 	case LifecycleActive:
@@ -180,7 +183,7 @@ func validateJobRole(role JobRole) error {
 		return ErrValidation
 	}
 	switch role.Status {
-	case "active", "archived":
+	case "active", "archived", "trash":
 	default:
 		return ErrValidation
 	}

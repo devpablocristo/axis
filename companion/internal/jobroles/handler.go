@@ -13,11 +13,15 @@ import (
 )
 
 const (
-	scopeAgentRead     = "companion:agents:read"
-	scopeAgentAdmin    = "companion:agents:admin"
-	scopeRuntimeAdmin  = "companion:runtime:admin"
-	scopeCrossOrg      = "companion:cross_org"
-	defaultProductSurf = "axis-console"
+	scopeVirployeeRead      = "companion:virployees:read"
+	scopeVirployeeWrite     = "companion:virployees:write"
+	scopeVirployeeAdmin     = "companion:virployees:admin"
+	scopeAxisVirployeeRead  = "axis:virployees:read"
+	scopeAxisVirployeeWrite = "axis:virployees:write"
+	scopeAxisVirployeeAdmin = "axis:virployees:admin"
+	scopeRuntimeAdmin       = "companion:runtime:admin"
+	scopeCrossOrg           = "companion:cross_org"
+	defaultProductSurf      = "axis-console"
 )
 
 type Handler struct {
@@ -35,6 +39,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("PATCH /v1/job-roles/{job_role_id}", h.patchJobRole)
 	mux.HandleFunc("PUT /v1/job-roles/{job_role_id}", h.putJobRole)
 	mux.HandleFunc("POST /v1/job-roles/{job_role_id}/archive", h.archiveJobRole)
+	mux.HandleFunc("POST /v1/job-roles/{job_role_id}/trash", h.trashJobRole)
 	mux.HandleFunc("POST /v1/job-roles/{job_role_id}/restore", h.restoreJobRole)
 	mux.HandleFunc("POST /v1/job-roles/{job_role_id}/status", h.setJobRoleStatus)
 	mux.HandleFunc("GET /v1/job-roles/{job_role_id}/versions", h.listVersions)
@@ -161,6 +166,10 @@ func (h *Handler) archiveJobRole(w http.ResponseWriter, r *http.Request) {
 	h.lifecycleAction(w, r, h.uc.ArchiveJobRole)
 }
 
+func (h *Handler) trashJobRole(w http.ResponseWriter, r *http.Request) {
+	h.lifecycleAction(w, r, h.uc.TrashJobRole)
+}
+
 func (h *Handler) restoreJobRole(w http.ResponseWriter, r *http.Request) {
 	h.lifecycleAction(w, r, h.uc.RestoreJobRole)
 }
@@ -178,6 +187,8 @@ func (h *Handler) setJobRoleStatus(w http.ResponseWriter, r *http.Request) {
 		h.lifecycleAction(w, r, h.uc.RestoreJobRole)
 	case "archived":
 		h.lifecycleAction(w, r, h.uc.ArchiveJobRole)
+	case "trash":
+		h.lifecycleAction(w, r, h.uc.TrashJobRole)
 	default:
 		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid job role status")
 	}
@@ -226,7 +237,7 @@ func jobRoleRequestContext(w http.ResponseWriter, r *http.Request) (string, stri
 		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "job role endpoints require authenticated admin context")
 		return "", "", "", false
 	}
-	if !identityctx.HasAnyScope(r, scopeAgentRead, scopeAgentAdmin, scopeRuntimeAdmin, scopeCrossOrg) {
+	if !identityctx.HasAnyScope(r, scopeVirployeeRead, scopeVirployeeAdmin, scopeAxisVirployeeRead, scopeAxisVirployeeAdmin, scopeRuntimeAdmin, scopeCrossOrg) {
 		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "missing job role scope")
 		return "", "", "", false
 	}
@@ -309,7 +320,7 @@ func mergeJobRolePatch(current, patch JobRole) JobRole {
 }
 
 func jobRoleWriteAllowed(w http.ResponseWriter, r *http.Request) bool {
-	if identityctx.HasAnyScope(r, scopeAgentAdmin, scopeRuntimeAdmin) {
+	if identityctx.HasAnyScope(r, scopeVirployeeWrite, scopeVirployeeAdmin, scopeAxisVirployeeWrite, scopeAxisVirployeeAdmin, scopeRuntimeAdmin) {
 		return true
 	}
 	httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "missing job role write scope")

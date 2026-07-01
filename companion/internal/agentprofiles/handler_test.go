@@ -13,14 +13,14 @@ import (
 	"github.com/google/uuid"
 )
 
-func TestHandlerEmployeeProfileDefaultsEnabled(t *testing.T) {
+func TestHandlerVirployeeProfileDefaultsEnabled(t *testing.T) {
 	t.Parallel()
 
 	mux := http.NewServeMux()
 	NewHandler(NewUsecases(newFakeRepo())).Register(mux)
 	body := bytes.NewBufferString(`{"profile_key":"axis.ops.billing.v1","family_id":"axis.ops.billing","version_label":"v1","name":"Billing Profile","system_prompt":"Handle billing.","max_autonomy":"A1"}`)
-	req := httptest.NewRequest(http.MethodPost, "/v1/employee-profiles", body)
-	req = withProfilePrincipal(req, []string{"companion:employee_profiles:admin"})
+	req := httptest.NewRequest(http.MethodPost, "/v1/virployee-profiles", body)
+	req = withProfilePrincipal(req, []string{"companion:virployee_profiles:admin"})
 	res := httptest.NewRecorder()
 
 	mux.ServeHTTP(res, req)
@@ -28,7 +28,7 @@ func TestHandlerEmployeeProfileDefaultsEnabled(t *testing.T) {
 	if res.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d body=%s", res.Code, res.Body.String())
 	}
-	var profile EmployeeProfile
+	var profile VirployeeProfile
 	if err := json.Unmarshal(res.Body.Bytes(), &profile); err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +45,7 @@ func TestHandlerRejectsMissingScope(t *testing.T) {
 
 	mux := http.NewServeMux()
 	NewHandler(NewUsecases(newFakeRepo())).Register(mux)
-	req := httptest.NewRequest(http.MethodGet, "/v1/employee-profiles", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/virployee-profiles", nil)
 	req = withProfilePrincipal(req, []string{"companion:tasks:read"})
 	res := httptest.NewRecorder()
 
@@ -62,7 +62,7 @@ func TestHandlerDoesNotRegisterAgentProfilesPublicRoute(t *testing.T) {
 	mux := http.NewServeMux()
 	NewHandler(NewUsecases(newFakeRepo())).Register(mux)
 	req := httptest.NewRequest(http.MethodGet, "/v1/agent-profiles", nil)
-	req = withProfilePrincipal(req, []string{"companion:employee_profiles:read"})
+	req = withProfilePrincipal(req, []string{"companion:virployee_profiles:read"})
 	res := httptest.NewRecorder()
 
 	mux.ServeHTTP(res, req)
@@ -72,14 +72,14 @@ func TestHandlerDoesNotRegisterAgentProfilesPublicRoute(t *testing.T) {
 	}
 }
 
-func TestHandlerEmployeeProfilePublicSurface(t *testing.T) {
+func TestHandlerVirployeeProfilePublicSurface(t *testing.T) {
 	t.Parallel()
 
 	mux := http.NewServeMux()
 	NewHandler(NewUsecases(newFakeRepo())).Register(mux)
 	body := bytes.NewBufferString(`{"name":"Medical Case Assistant","system_prompt":"Assist medical case review.","max_autonomy":"A2"}`)
-	req := httptest.NewRequest(http.MethodPost, "/v1/employee-profiles", body)
-	req = withProfilePrincipal(req, []string{"companion:employee_profiles:admin"})
+	req := httptest.NewRequest(http.MethodPost, "/v1/virployee-profiles", body)
+	req = withProfilePrincipal(req, []string{"companion:virployee_profiles:admin"})
 	res := httptest.NewRecorder()
 
 	mux.ServeHTTP(res, req)
@@ -87,7 +87,7 @@ func TestHandlerEmployeeProfilePublicSurface(t *testing.T) {
 	if res.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d body=%s", res.Code, res.Body.String())
 	}
-	var profile EmployeeProfile
+	var profile VirployeeProfile
 	if err := json.Unmarshal(res.Body.Bytes(), &profile); err != nil {
 		t.Fatal(err)
 	}
@@ -98,8 +98,8 @@ func TestHandlerEmployeeProfilePublicSurface(t *testing.T) {
 		t.Fatalf("expected generated profile_key, got %+v", profile)
 	}
 
-	req = httptest.NewRequest(http.MethodPost, "/v1/employee-profiles/"+profile.ProfileID+"/status", bytes.NewBufferString(`{"status":"archived"}`))
-	req = withProfilePrincipal(req, []string{"companion:employee_profiles:admin"})
+	req = httptest.NewRequest(http.MethodPost, "/v1/virployee-profiles/"+profile.ProfileID+"/status", bytes.NewBufferString(`{"status":"archived"}`))
+	req = withProfilePrincipal(req, []string{"companion:virployee_profiles:admin"})
 	res = httptest.NewRecorder()
 	mux.ServeHTTP(res, req)
 	if res.Code != http.StatusOK {
@@ -109,7 +109,7 @@ func TestHandlerEmployeeProfilePublicSurface(t *testing.T) {
 		t.Fatal(err)
 	}
 	if profile.Status != "archived" {
-		t.Fatalf("expected archived employee profile, got %+v", profile)
+		t.Fatalf("expected archived virployee profile, got %+v", profile)
 	}
 }
 

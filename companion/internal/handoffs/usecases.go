@@ -33,7 +33,7 @@ func (uc *Usecases) Get(ctx context.Context, tenantID, orgID, productSurface, ha
 func (uc *Usecases) Create(ctx context.Context, handoff Handoff) (Handoff, error) {
 	handoff = normalize(handoff)
 	if err := validate(handoff); err != nil {
-		return Handoff{}, fmt.Errorf("%w: invalid employee handoff", err)
+		return Handoff{}, fmt.Errorf("%w: invalid Virployee handoff", err)
 	}
 	return uc.repo.Create(ctx, handoff)
 }
@@ -46,11 +46,11 @@ func (uc *Usecases) Update(ctx context.Context, tenantID, orgID, productSurface,
 	if patch.TaskID != nil {
 		current.TaskID = patch.TaskID
 	}
-	if patch.FromEmployeeID != nil {
-		current.FromEmployeeID = patch.FromEmployeeID
+	if patch.FromVirployeeID != nil {
+		current.FromVirployeeID = patch.FromVirployeeID
 	}
-	if patch.ToEmployeeID != uuid.Nil {
-		current.ToEmployeeID = patch.ToEmployeeID
+	if patch.ToVirployeeID != uuid.Nil {
+		current.ToVirployeeID = patch.ToVirployeeID
 	}
 	if strings.TrimSpace(patch.Reason) != "" {
 		current.Reason = patch.Reason
@@ -64,7 +64,7 @@ func (uc *Usecases) Update(ctx context.Context, tenantID, orgID, productSurface,
 	current.OrgID = orgID
 	current.ProductSurface = productSurface
 	if err := validate(normalize(current)); err != nil {
-		return Handoff{}, fmt.Errorf("%w: invalid employee handoff", err)
+		return Handoff{}, fmt.Errorf("%w: invalid Virployee handoff", err)
 	}
 	return uc.repo.Update(ctx, current)
 }

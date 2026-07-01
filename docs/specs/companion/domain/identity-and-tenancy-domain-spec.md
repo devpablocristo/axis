@@ -94,7 +94,7 @@ Brecha: `product_surface` debe ser `product_key`; `product_id` debe ser UUID.
 
 Definicion: instancia de trabajo de una organizacion en un producto.
 
-Utilidad: define donde vive un `VirtualEmployee` y donde se scopen datos
+Utilidad: define donde vive un `Virployee` y donde se scopen datos
 operativos.
 
 No representa: organization sola, product solo ni permisos.
@@ -125,7 +125,7 @@ TenantStatus: active, suspended, archived
 Relaciones:
 
 ```text
-VirtualEmployee.tenant_id -> Tenant.tenant_id
+Virployee.tenant_id -> Tenant.tenant_id
 JobRole.tenant_id -> Tenant.tenant_id
 Memory.tenant_id -> Tenant.tenant_id
 Task.tenant_id -> Tenant.tenant_id
@@ -136,7 +136,7 @@ Estado actual: existe `axis_tenants.id` en BFF. Hoy resuelve
 
 Brecha: el modelo objetivo usa `tenant_id` en Employees. `org_id` y
 `product_surface` quedan dentro de Tenant como implementacion actual, no como
-campos de `VirtualEmployee`.
+campos de `Virployee`.
 
 ## User
 
@@ -172,7 +172,7 @@ UserStatus: invited, active, disabled, archived
 Relaciones:
 
 ```text
-VirtualEmployee.supervisor_user_id -> User.user_id
+Virployee.supervisor_user_id -> User.user_id
 AuditEvent.actor_user_id -> User.user_id | null
 ```
 

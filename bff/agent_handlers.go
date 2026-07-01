@@ -82,10 +82,6 @@ func (s *server) agentsAPI(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *server) virtualEmployeesAPI(w http.ResponseWriter, r *http.Request) {
-	s.virtualEmployeesDomainAPI(w, r)
-}
-
 func (s *server) agentSurfaceAPI(w http.ResponseWriter, r *http.Request, surface agentAPISurface) {
 	p := principalFromContext(r.Context())
 	parts := agentRouteParts(r.URL.Path, surface.routePrefix)

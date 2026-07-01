@@ -22,7 +22,7 @@ func TestCreateTenantGeneratesUUID(t *testing.T) {
 	}
 }
 
-func TestCreateTenantPreservesExplicitID(t *testing.T) {
+func TestCreateTenantIgnoresExplicitID(t *testing.T) {
 	store := newMemoryIAMStore()
 	if _, err := store.CreateOrg(context.Background(), IAMOrg{ID: "org-a", Name: "Org A", Status: "active"}, ""); err != nil {
 		t.Fatal(err)
@@ -31,7 +31,7 @@ func TestCreateTenantPreservesExplicitID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if tenant.ID != "explicit-tenant" {
-		t.Fatalf("expected explicit id preserved, got %q", tenant.ID)
+	if !uuidV4Pattern.MatchString(tenant.ID) || tenant.ID == "explicit-tenant" {
+		t.Fatalf("expected explicit tenant id to be replaced by generated UUID, got %q", tenant.ID)
 	}
 }

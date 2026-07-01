@@ -169,11 +169,6 @@ h1 {
   letter-spacing: 0;
 }
 
-.topbar p {
-  margin: 5px 0 0;
-  color: var(--axis-muted);
-}
-
 .toolbar {
   display: flex;
   align-items: end;
@@ -439,15 +434,6 @@ button:disabled,
 .metric.violet svg { color: #7f56d9; }
 .metric.amber svg { color: var(--axis-warning); }
 
-.health-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin: 12px 0 16px;
-}
-
-.health,
-.scope-pill,
 .agent-control__status {
   min-height: 26px;
   display: inline-flex;
@@ -460,21 +446,6 @@ button:disabled,
   color: var(--axis-muted);
   font-size: 12px;
   white-space: nowrap;
-}
-
-.health b {
-  color: var(--axis-text);
-}
-
-.health.ok {
-  border-color: #9ad8c3;
-  color: var(--axis-primary-strong);
-}
-
-.health.warn {
-  border-color: #f0c36d;
-  color: var(--axis-warning);
-  background: var(--axis-warning-soft);
 }
 
 .screen-nav,
@@ -1162,11 +1133,19 @@ tbody tr:hover {
   display: none;
 }
 
-.employee-profiles-crud .crud-page-shell__header-actions > .actions-row > .actions-row > button:nth-last-child(-n + 3) {
+.virployee-profiles-crud .crud-page-shell__header-actions > .actions-row > .actions-row > button:nth-last-child(-n + 3) {
   display: none;
 }
 
-.job-roles-crud .crud-page-shell__header-actions > .actions-row > .actions-row > button:nth-last-child(-n + 2) {
+.job-roles-crud .crud-page-shell__header-actions > .actions-row > .actions-row > button:nth-last-child(-n + 3) {
+  display: none;
+}
+
+.connectors-crud .crud-page-shell__header-actions > .actions-row > .actions-row > button:nth-last-child(-n + 2) {
+  display: none;
+}
+
+.handoffs-crud .crud-page-shell__header-actions > .actions-row > .actions-row > button:nth-last-child(1) {
   display: none;
 }
 

@@ -82,8 +82,8 @@ func (s *server) forwardJobRoleRequest(w http.ResponseWriter, r *http.Request, p
 }
 
 func jobRoleRoute(method string, parts []string) (string, string, []string, bool) {
-	readScopes := []string{"companion:agents:read", "companion:agents:admin", "companion:runtime:admin"}
-	writeScopes := []string{"companion:agents:admin", "companion:runtime:admin"}
+	readScopes := []string{"axis:virployees:read", "axis:virployees:admin", "companion:virployees:read", "companion:virployees:admin", "companion:runtime:admin"}
+	writeScopes := []string{"axis:virployees:write", "axis:virployees:admin", "companion:virployees:write", "companion:virployees:admin", "companion:runtime:admin"}
 	if len(parts) == 0 && method == http.MethodGet {
 		return http.MethodGet, "/v1/job-roles", readScopes, true
 	}
@@ -101,7 +101,7 @@ func jobRoleRoute(method string, parts []string) (string, string, []string, bool
 		switch {
 		case method == http.MethodGet && parts[1] == "versions":
 			return http.MethodGet, rolePath + "/versions", readScopes, true
-		case method == http.MethodPost && (parts[1] == "archive" || parts[1] == "restore"):
+		case method == http.MethodPost && (parts[1] == "archive" || parts[1] == "trash" || parts[1] == "restore"):
 			return http.MethodPost, rolePath + "/" + parts[1], writeScopes, true
 		}
 	}

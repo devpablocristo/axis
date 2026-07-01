@@ -12,14 +12,14 @@ import (
 	authn "github.com/devpablocristo/platform/authn/go"
 )
 
-func (s *server) employeeProfilesAPI(w http.ResponseWriter, r *http.Request) {
+func (s *server) virployeeProfilesAPI(w http.ResponseWriter, r *http.Request) {
 	p := principalFromContext(r.Context())
-	parts, err := employeeProfileRouteParts(r.URL.Path)
+	parts, err := virployeeProfileRouteParts(r.URL.Path)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "VALIDATION", "invalid employee profile path")
+		writeError(w, http.StatusBadRequest, "VALIDATION", "invalid virployee profile path")
 		return
 	}
-	companionMethod, companionPath, requiredScopes, ok := employeeProfileRoute(r.Method, parts)
+	companionMethod, companionPath, requiredScopes, ok := virployeeProfileRoute(r.Method, parts)
 	if !ok {
 		http.NotFound(w, r)
 		return
@@ -41,10 +41,10 @@ func (s *server) employeeProfilesAPI(w http.ResponseWriter, r *http.Request) {
 		}
 		body = bytes.NewReader(raw)
 	}
-	s.forwardEmployeeProfileRequest(w, r, p, orgID, productSurface, tenantID, scopes, companionMethod, companionPath, body)
+	s.forwardVirployeeProfileRequest(w, r, p, orgID, productSurface, tenantID, scopes, companionMethod, companionPath, body)
 }
 
-func (s *server) forwardEmployeeProfileRequest(w http.ResponseWriter, r *http.Request, p authn.Principal, orgID string, productSurface string, tenantID string, scopes []string, method string, companionPath string, body io.Reader) {
+func (s *server) forwardVirployeeProfileRequest(w http.ResponseWriter, r *http.Request, p authn.Principal, orgID string, productSurface string, tenantID string, scopes []string, method string, companionPath string, body io.Reader) {
 	target, err := url.Parse(s.cfg.CompanionBaseURL)
 	if err != nil {
 		writeLoggedError(w, http.StatusInternalServerError, "COMPANION_URL_INVALID", "companion URL is invalid", err)
@@ -82,19 +82,19 @@ func (s *server) forwardEmployeeProfileRequest(w http.ResponseWriter, r *http.Re
 	_, _ = io.Copy(w, resp.Body)
 }
 
-func employeeProfileRoute(method string, parts []string) (string, string, []string, bool) {
-	readScopes := []string{"companion:employee_profiles:read", "companion:employee_profiles:admin", "companion:runtime:admin"}
-	writeScopes := []string{"companion:employee_profiles:admin", "companion:runtime:admin"}
+func virployeeProfileRoute(method string, parts []string) (string, string, []string, bool) {
+	readScopes := []string{"companion:virployee_profiles:read", "companion:virployee_profiles:admin", "companion:runtime:admin"}
+	writeScopes := []string{"companion:virployee_profiles:admin", "companion:runtime:admin"}
 	if len(parts) == 0 {
 		switch method {
 		case http.MethodGet:
-			return http.MethodGet, "/v1/employee-profiles", readScopes, true
+			return http.MethodGet, "/v1/virployee-profiles", readScopes, true
 		case http.MethodPost:
-			return http.MethodPost, "/v1/employee-profiles", writeScopes, true
+			return http.MethodPost, "/v1/virployee-profiles", writeScopes, true
 		}
 	}
 	if len(parts) == 1 {
-		profilePath := "/v1/employee-profiles/" + url.PathEscape(parts[0])
+		profilePath := "/v1/virployee-profiles/" + url.PathEscape(parts[0])
 		switch method {
 		case http.MethodGet:
 			return http.MethodGet, profilePath, readScopes, true
@@ -103,7 +103,7 @@ func employeeProfileRoute(method string, parts []string) (string, string, []stri
 		}
 	}
 	if len(parts) == 2 {
-		profilePath := "/v1/employee-profiles/" + url.PathEscape(parts[0])
+		profilePath := "/v1/virployee-profiles/" + url.PathEscape(parts[0])
 		switch {
 		case method == http.MethodGet && parts[1] == "versions":
 			return http.MethodGet, profilePath + "/versions", readScopes, true
@@ -116,9 +116,9 @@ func employeeProfileRoute(method string, parts []string) (string, string, []stri
 	return "", "", nil, false
 }
 
-func employeeProfileRouteParts(path string) ([]string, error) {
-	path = strings.TrimPrefix(path, "/api/employee-profiles")
-	return profileRouteParts(path, "employee profile")
+func virployeeProfileRouteParts(path string) ([]string, error) {
+	path = strings.TrimPrefix(path, "/api/virployee-profiles")
+	return profileRouteParts(path, "virployee profile")
 }
 
 func profileRouteParts(path string, resource string) ([]string, error) {

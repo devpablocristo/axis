@@ -13,39 +13,39 @@ import (
 )
 
 type CreateTaskRequest struct {
-	Title       string          `json:"title"`
-	Goal        string          `json:"goal,omitempty"`
-	Priority    string          `json:"priority,omitempty"`
-	CreatedBy   string          `json:"created_by,omitempty"`
-	AssignedTo  string          `json:"assigned_to,omitempty"`
-	AssigneeEmployeeID string   `json:"assignee_employee_id,omitempty"`
-	Channel     string          `json:"channel,omitempty"`
-	Summary     string          `json:"summary,omitempty"`
-	ContextJSON json.RawMessage `json:"context_json,omitempty"`
+	Title               string          `json:"title"`
+	Goal                string          `json:"goal,omitempty"`
+	Priority            string          `json:"priority,omitempty"`
+	CreatedBy           string          `json:"created_by,omitempty"`
+	AssignedTo          string          `json:"assigned_to,omitempty"`
+	AssigneeVirployeeID string          `json:"assignee_virployee_id,omitempty"`
+	Channel             string          `json:"channel,omitempty"`
+	Summary             string          `json:"summary,omitempty"`
+	ContextJSON         json.RawMessage `json:"context_json,omitempty"`
 }
 
 type TaskResponse struct {
-	ID                 string          `json:"id"`
-	OrgID              string          `json:"org_id,omitempty"`
-	ProductSurface     string          `json:"product_surface,omitempty"`
-	AssigneeEmployeeID string          `json:"assignee_employee_id,omitempty"`
-	AgentID            string          `json:"agent_id,omitempty"`
-	RunType            string          `json:"run_type,omitempty"`
-	Title              string          `json:"title"`
-	Goal               string          `json:"goal"`
-	Status             string          `json:"status"`
-	Priority           string          `json:"priority"`
-	CreatedBy          string          `json:"created_by"`
-	AssignedTo         string          `json:"assigned_to"`
-	Channel            string          `json:"channel"`
-	Summary            string          `json:"summary"`
-	ContextJSON        json.RawMessage `json:"context_json"`
-	NexusStatus        string          `json:"nexus_status,omitempty"`
-	NexusLastCheckedAt *string         `json:"nexus_last_checked_at,omitempty"`
-	NexusSyncError     string          `json:"nexus_sync_error,omitempty"`
-	CreatedAt          string          `json:"created_at"`
-	UpdatedAt          string          `json:"updated_at"`
-	ClosedAt           *string         `json:"closed_at,omitempty"`
+	ID                  string          `json:"id"`
+	OrgID               string          `json:"org_id,omitempty"`
+	ProductSurface      string          `json:"product_surface,omitempty"`
+	AssigneeVirployeeID string          `json:"assignee_virployee_id,omitempty"`
+	AgentID             string          `json:"agent_id,omitempty"`
+	RunType             string          `json:"run_type,omitempty"`
+	Title               string          `json:"title"`
+	Goal                string          `json:"goal"`
+	Status              string          `json:"status"`
+	Priority            string          `json:"priority"`
+	CreatedBy           string          `json:"created_by"`
+	AssignedTo          string          `json:"assigned_to"`
+	Channel             string          `json:"channel"`
+	Summary             string          `json:"summary"`
+	ContextJSON         json.RawMessage `json:"context_json"`
+	NexusStatus         string          `json:"nexus_status,omitempty"`
+	NexusLastCheckedAt  *string         `json:"nexus_last_checked_at,omitempty"`
+	NexusSyncError      string          `json:"nexus_sync_error,omitempty"`
+	CreatedAt           string          `json:"created_at"`
+	UpdatedAt           string          `json:"updated_at"`
+	ClosedAt            *string         `json:"closed_at,omitempty"`
 }
 
 type MessageResponse struct {
@@ -177,8 +177,8 @@ type ChatRequest struct {
 	Message          string          `json:"message"`
 	Channel          string          `json:"channel,omitempty"`           // default: "api"
 	ProductSurface   string          `json:"product_surface,omitempty"`   // "companion" | "ponti" | "pymes"
-	TenantID         string          `json:"tenant_id,omitempty"`         // tenant UUID para resolver Virtual Employees
-	EmployeeID       string          `json:"employee_id,omitempty"`       // Virtual Employee publico a usar
+	TenantID         string          `json:"tenant_id,omitempty"`         // tenant UUID para resolver Virployees
+	VirployeeID      string          `json:"virployee_id,omitempty"`      // Virployee publico a usar
 	AgentID          string          `json:"agent_id,omitempty"`          // Agent tecnico legacy a usar
 	RouteHint        string          `json:"route_hint,omitempty"`        // compatibilidad: el runtime decide routing
 	ConfirmedActions []string        `json:"confirmed_actions,omitempty"` // compatibilidad UI legacy
@@ -201,11 +201,11 @@ type ChatResponse struct {
 	PendingConfirmations []PendingConfirmationResponse `json:"pending_confirmations,omitempty"`
 
 	// Companion-specific extras: la task FSM + el log completo de mensajes.
-	Task     TaskResponse      `json:"task"`
-	Messages []MessageResponse `json:"messages"`
-	RunID    string            `json:"run_id,omitempty"`
-	EmployeeID string         `json:"employee_id,omitempty"`
-	AgentID  string            `json:"agent_id,omitempty"`
+	Task        TaskResponse      `json:"task"`
+	Messages    []MessageResponse `json:"messages"`
+	RunID       string            `json:"run_id,omitempty"`
+	VirployeeID string            `json:"virployee_id,omitempty"`
+	AgentID     string            `json:"agent_id,omitempty"`
 }
 
 type ChatToolCallResponse struct {
@@ -368,27 +368,27 @@ func TaskToResponse(t domain.Task) TaskResponse {
 		nexusLastChecked = &s
 	}
 	return TaskResponse{
-		ID:                 t.ID.String(),
-		OrgID:              t.OrgID,
-		ProductSurface:     contextString(t.ContextJSON, "product_surface"),
-		AssigneeEmployeeID: contextString(t.ContextJSON, "employee_id"),
-		AgentID:            contextString(t.ContextJSON, "agent_id"),
-		RunType:            contextString(t.ContextJSON, "run_type"),
-		Title:              t.Title,
-		Goal:               t.Goal,
-		Status:             t.Status,
-		Priority:           t.Priority,
-		CreatedBy:          t.CreatedBy,
-		AssignedTo:         t.AssignedTo,
-		Channel:            t.Channel,
-		Summary:            t.Summary,
-		ContextJSON:        t.ContextJSON,
-		NexusStatus:        t.NexusStatus,
-		NexusLastCheckedAt: nexusLastChecked,
-		NexusSyncError:     t.NexusSyncError,
-		CreatedAt:          t.CreatedAt.UTC().Format(time.RFC3339),
-		UpdatedAt:          t.UpdatedAt.UTC().Format(time.RFC3339),
-		ClosedAt:           closed,
+		ID:                  t.ID.String(),
+		OrgID:               t.OrgID,
+		ProductSurface:      contextString(t.ContextJSON, "product_surface"),
+		AssigneeVirployeeID: contextString(t.ContextJSON, "virployee_id"),
+		AgentID:             contextString(t.ContextJSON, "agent_id"),
+		RunType:             contextString(t.ContextJSON, "run_type"),
+		Title:               t.Title,
+		Goal:                t.Goal,
+		Status:              t.Status,
+		Priority:            t.Priority,
+		CreatedBy:           t.CreatedBy,
+		AssignedTo:          t.AssignedTo,
+		Channel:             t.Channel,
+		Summary:             t.Summary,
+		ContextJSON:         t.ContextJSON,
+		NexusStatus:         t.NexusStatus,
+		NexusLastCheckedAt:  nexusLastChecked,
+		NexusSyncError:      t.NexusSyncError,
+		CreatedAt:           t.CreatedAt.UTC().Format(time.RFC3339),
+		UpdatedAt:           t.UpdatedAt.UTC().Format(time.RFC3339),
+		ClosedAt:            closed,
 	}
 }
 
@@ -443,7 +443,7 @@ func ChatResponseFromRuntimeResult(task domain.Task, messages []domain.TaskMessa
 	resp := ChatResponseFromResult(task, messages)
 	resp.RunID = strings.TrimSpace(runID)
 	resp.AgentID = strings.TrimSpace(agentID)
-	resp.EmployeeID = contextString(task.ContextJSON, "employee_id")
+	resp.VirployeeID = contextString(task.ContextJSON, "virployee_id")
 	resp.ToolCalls = toolCalls
 	resp.PendingConfirmations = pendingConfirmationsFromToolCalls(toolCalls)
 	return resp

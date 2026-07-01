@@ -13,9 +13,9 @@ import (
 )
 
 const (
-	scopeEmployeeProfilesRead  = "companion:employee_profiles:read"
-	scopeEmployeeProfilesAdmin = "companion:employee_profiles:admin"
-	scopeRuntimeAdmin          = "companion:runtime:admin"
+	scopeVirployeeProfilesRead  = "companion:virployee_profiles:read"
+	scopeVirployeeProfilesAdmin = "companion:virployee_profiles:admin"
+	scopeRuntimeAdmin           = "companion:runtime:admin"
 )
 
 type Handler struct {
@@ -27,38 +27,38 @@ func NewHandler(uc *Usecases) *Handler {
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
-	mux.HandleFunc("GET /v1/employee-profiles", h.listEmployeeProfiles)
-	mux.HandleFunc("POST /v1/employee-profiles", h.postEmployeeProfile)
-	mux.HandleFunc("GET /v1/employee-profiles/{profile_id}", h.getEmployeeProfile)
-	mux.HandleFunc("PATCH /v1/employee-profiles/{profile_id}", h.patchEmployeeProfile)
-	mux.HandleFunc("POST /v1/employee-profiles/{profile_id}/status", h.setEmployeeProfileStatus)
-	mux.HandleFunc("POST /v1/employee-profiles/{profile_id}/archive", h.archiveEmployeeProfile)
-	mux.HandleFunc("POST /v1/employee-profiles/{profile_id}/trash", h.trashEmployeeProfile)
-	mux.HandleFunc("POST /v1/employee-profiles/{profile_id}/restore", h.restoreEmployeeProfile)
-	mux.HandleFunc("DELETE /v1/employee-profiles/{profile_id}/purge", h.purgeEmployeeProfile)
-	mux.HandleFunc("GET /v1/employee-profiles/{profile_id}/versions", h.listEmployeeProfileVersions)
+	mux.HandleFunc("GET /v1/virployee-profiles", h.listVirployeeProfiles)
+	mux.HandleFunc("POST /v1/virployee-profiles", h.postVirployeeProfile)
+	mux.HandleFunc("GET /v1/virployee-profiles/{profile_id}", h.getVirployeeProfile)
+	mux.HandleFunc("PATCH /v1/virployee-profiles/{profile_id}", h.patchVirployeeProfile)
+	mux.HandleFunc("POST /v1/virployee-profiles/{profile_id}/status", h.setVirployeeProfileStatus)
+	mux.HandleFunc("POST /v1/virployee-profiles/{profile_id}/archive", h.archiveVirployeeProfile)
+	mux.HandleFunc("POST /v1/virployee-profiles/{profile_id}/trash", h.trashVirployeeProfile)
+	mux.HandleFunc("POST /v1/virployee-profiles/{profile_id}/restore", h.restoreVirployeeProfile)
+	mux.HandleFunc("DELETE /v1/virployee-profiles/{profile_id}/purge", h.purgeVirployeeProfile)
+	mux.HandleFunc("GET /v1/virployee-profiles/{profile_id}/versions", h.listVirployeeProfileVersions)
 }
 
-func (h *Handler) listEmployeeProfiles(w http.ResponseWriter, r *http.Request) {
-	if !requireScope(w, r, scopeEmployeeProfilesRead, scopeEmployeeProfilesAdmin, scopeRuntimeAdmin) {
+func (h *Handler) listVirployeeProfiles(w http.ResponseWriter, r *http.Request) {
+	if !requireScope(w, r, scopeVirployeeProfilesRead, scopeVirployeeProfilesAdmin, scopeRuntimeAdmin) {
 		return
 	}
 	includeArchived := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("include_archived")), "true")
 	lifecycle := strings.TrimSpace(r.URL.Query().Get("lifecycle"))
 	profiles, err := h.uc.ListProfiles(r.Context(), lifecycle, includeArchived)
 	if err != nil {
-		httpjson.WriteFlatInternalError(w, err, "list employee profiles failed")
+		httpjson.WriteFlatInternalError(w, err, "list virployee profiles failed")
 		return
 	}
-	out := make([]EmployeeProfile, 0, len(profiles))
+	out := make([]VirployeeProfile, 0, len(profiles))
 	for _, profile := range profiles {
-		out = append(out, employeeProfileFromProfile(profile))
+		out = append(out, virployeeProfileFromProfile(profile))
 	}
-	httpjson.WriteJSON(w, http.StatusOK, map[string]any{"employee_profiles": out, "profiles": out})
+	httpjson.WriteJSON(w, http.StatusOK, map[string]any{"virployee_profiles": out, "profiles": out})
 }
 
-func (h *Handler) getEmployeeProfile(w http.ResponseWriter, r *http.Request) {
-	if !requireScope(w, r, scopeEmployeeProfilesRead, scopeEmployeeProfilesAdmin, scopeRuntimeAdmin) {
+func (h *Handler) getVirployeeProfile(w http.ResponseWriter, r *http.Request) {
+	if !requireScope(w, r, scopeVirployeeProfilesRead, scopeVirployeeProfilesAdmin, scopeRuntimeAdmin) {
 		return
 	}
 	profile, err := h.uc.GetProfile(r.Context(), r.PathValue("profile_id"))
@@ -66,28 +66,28 @@ func (h *Handler) getEmployeeProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	httpjson.WriteJSON(w, http.StatusOK, employeeProfileFromProfile(profile))
+	httpjson.WriteJSON(w, http.StatusOK, virployeeProfileFromProfile(profile))
 }
 
-func (h *Handler) postEmployeeProfile(w http.ResponseWriter, r *http.Request) {
-	if !requireScope(w, r, scopeEmployeeProfilesAdmin, scopeRuntimeAdmin) {
+func (h *Handler) postVirployeeProfile(w http.ResponseWriter, r *http.Request) {
+	if !requireScope(w, r, scopeVirployeeProfilesAdmin, scopeRuntimeAdmin) {
 		return
 	}
-	var body employeeProfileRequest
+	var body virployeeProfileRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid json body")
 		return
 	}
-	profile, err := h.uc.UpsertProfile(r.Context(), employeeProfileRequestToProfile(body, Profile{}))
+	profile, err := h.uc.UpsertProfile(r.Context(), virployeeProfileRequestToProfile(body, Profile{}))
 	if err != nil {
 		writeError(w, err)
 		return
 	}
-	httpjson.WriteJSON(w, http.StatusCreated, employeeProfileFromProfile(profile))
+	httpjson.WriteJSON(w, http.StatusCreated, virployeeProfileFromProfile(profile))
 }
 
-func (h *Handler) patchEmployeeProfile(w http.ResponseWriter, r *http.Request) {
-	if !requireScope(w, r, scopeEmployeeProfilesAdmin, scopeRuntimeAdmin) {
+func (h *Handler) patchVirployeeProfile(w http.ResponseWriter, r *http.Request) {
+	if !requireScope(w, r, scopeVirployeeProfilesAdmin, scopeRuntimeAdmin) {
 		return
 	}
 	current, err := h.uc.GetProfile(r.Context(), r.PathValue("profile_id"))
@@ -95,20 +95,20 @@ func (h *Handler) patchEmployeeProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	var body employeeProfileRequest
+	var body virployeeProfileRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid json body")
 		return
 	}
-	profile, err := h.uc.UpsertProfile(r.Context(), employeeProfileRequestToProfile(body, current))
+	profile, err := h.uc.UpsertProfile(r.Context(), virployeeProfileRequestToProfile(body, current))
 	if err != nil {
 		writeError(w, err)
 		return
 	}
-	httpjson.WriteJSON(w, http.StatusOK, employeeProfileFromProfile(profile))
+	httpjson.WriteJSON(w, http.StatusOK, virployeeProfileFromProfile(profile))
 }
 
-func (h *Handler) setEmployeeProfileStatus(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) setVirployeeProfileStatus(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Status string `json:"status"`
 	}
@@ -118,18 +118,18 @@ func (h *Handler) setEmployeeProfileStatus(w http.ResponseWriter, r *http.Reques
 	}
 	switch strings.ToLower(strings.TrimSpace(body.Status)) {
 	case "active":
-		h.restoreEmployeeProfile(w, r)
+		h.restoreVirployeeProfile(w, r)
 	case "archived":
-		h.archiveEmployeeProfile(w, r)
+		h.archiveVirployeeProfile(w, r)
 	case "trashed", "trash":
-		h.trashEmployeeProfile(w, r)
+		h.trashVirployeeProfile(w, r)
 	default:
-		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid employee profile status")
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid virployee profile status")
 	}
 }
 
-func (h *Handler) archiveEmployeeProfile(w http.ResponseWriter, r *http.Request) {
-	if !requireScope(w, r, scopeEmployeeProfilesAdmin, scopeRuntimeAdmin) {
+func (h *Handler) archiveVirployeeProfile(w http.ResponseWriter, r *http.Request) {
+	if !requireScope(w, r, scopeVirployeeProfilesAdmin, scopeRuntimeAdmin) {
 		return
 	}
 	profile, err := h.uc.ArchiveProfile(r.Context(), r.PathValue("profile_id"))
@@ -137,11 +137,11 @@ func (h *Handler) archiveEmployeeProfile(w http.ResponseWriter, r *http.Request)
 		writeError(w, err)
 		return
 	}
-	httpjson.WriteJSON(w, http.StatusOK, employeeProfileFromProfile(profile))
+	httpjson.WriteJSON(w, http.StatusOK, virployeeProfileFromProfile(profile))
 }
 
-func (h *Handler) trashEmployeeProfile(w http.ResponseWriter, r *http.Request) {
-	if !requireScope(w, r, scopeEmployeeProfilesAdmin, scopeRuntimeAdmin) {
+func (h *Handler) trashVirployeeProfile(w http.ResponseWriter, r *http.Request) {
+	if !requireScope(w, r, scopeVirployeeProfilesAdmin, scopeRuntimeAdmin) {
 		return
 	}
 	profile, err := h.uc.TrashProfile(r.Context(), r.PathValue("profile_id"))
@@ -149,11 +149,11 @@ func (h *Handler) trashEmployeeProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	httpjson.WriteJSON(w, http.StatusOK, employeeProfileFromProfile(profile))
+	httpjson.WriteJSON(w, http.StatusOK, virployeeProfileFromProfile(profile))
 }
 
-func (h *Handler) restoreEmployeeProfile(w http.ResponseWriter, r *http.Request) {
-	if !requireScope(w, r, scopeEmployeeProfilesAdmin, scopeRuntimeAdmin) {
+func (h *Handler) restoreVirployeeProfile(w http.ResponseWriter, r *http.Request) {
+	if !requireScope(w, r, scopeVirployeeProfilesAdmin, scopeRuntimeAdmin) {
 		return
 	}
 	profile, err := h.uc.RestoreProfile(r.Context(), r.PathValue("profile_id"))
@@ -161,11 +161,11 @@ func (h *Handler) restoreEmployeeProfile(w http.ResponseWriter, r *http.Request)
 		writeError(w, err)
 		return
 	}
-	httpjson.WriteJSON(w, http.StatusOK, employeeProfileFromProfile(profile))
+	httpjson.WriteJSON(w, http.StatusOK, virployeeProfileFromProfile(profile))
 }
 
-func (h *Handler) purgeEmployeeProfile(w http.ResponseWriter, r *http.Request) {
-	if !requireScope(w, r, scopeEmployeeProfilesAdmin, scopeRuntimeAdmin) {
+func (h *Handler) purgeVirployeeProfile(w http.ResponseWriter, r *http.Request) {
+	if !requireScope(w, r, scopeVirployeeProfilesAdmin, scopeRuntimeAdmin) {
 		return
 	}
 	if err := h.uc.PurgeProfile(r.Context(), r.PathValue("profile_id")); err != nil {
@@ -175,8 +175,8 @@ func (h *Handler) purgeEmployeeProfile(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *Handler) listEmployeeProfileVersions(w http.ResponseWriter, r *http.Request) {
-	if !requireScope(w, r, scopeEmployeeProfilesRead, scopeEmployeeProfilesAdmin, scopeRuntimeAdmin) {
+func (h *Handler) listVirployeeProfileVersions(w http.ResponseWriter, r *http.Request) {
+	if !requireScope(w, r, scopeVirployeeProfilesRead, scopeVirployeeProfilesAdmin, scopeRuntimeAdmin) {
 		return
 	}
 	limit := 50
@@ -196,7 +196,7 @@ func (h *Handler) listEmployeeProfileVersions(w http.ResponseWriter, r *http.Req
 	httpjson.WriteJSON(w, http.StatusOK, map[string]any{"versions": versions})
 }
 
-type employeeProfileRequest struct {
+type virployeeProfileRequest struct {
 	ProfileID            string         `json:"profile_id"`
 	ProfileKey           string         `json:"profile_key"`
 	FamilyID             string         `json:"family_id"`
@@ -213,10 +213,10 @@ type employeeProfileRequest struct {
 	Enabled              *bool          `json:"enabled"`
 }
 
-func employeeProfileRequestToProfile(body employeeProfileRequest, current Profile) Profile {
+func virployeeProfileRequestToProfile(body virployeeProfileRequest, current Profile) Profile {
 	profile := current
 	if profile.ProfileID == "" {
-		profile.ProfileID = employeeProfileKey(body)
+		profile.ProfileID = virployeeProfileKey(body)
 	}
 	if body.ProfileKey != "" {
 		profile.ProfileID = strings.TrimSpace(body.ProfileKey)
@@ -271,7 +271,7 @@ func employeeProfileRequestToProfile(body employeeProfileRequest, current Profil
 	return profile
 }
 
-func employeeProfileKey(body employeeProfileRequest) string {
+func virployeeProfileKey(body virployeeProfileRequest) string {
 	for _, value := range []string{body.ProfileKey, body.ProfileID} {
 		value = strings.TrimSpace(value)
 		if value == "" {

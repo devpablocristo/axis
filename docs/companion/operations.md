@@ -113,14 +113,14 @@ confirmar la alerta derivada en `GET /v1/ops/alerts`.
 
 ## modulo tecnico de agents
 
-Para operacion de producto nueva, usar Virtual Employees como superficie
+Para operacion de producto nueva, usar Virployees como superficie
 publica:
 
-- `GET /v1/virtual-employees`: lista Virtual Employees de la customer org.
-- `POST /v1/virtual-employees`: crea un Virtual Employee.
-- `PATCH /v1/virtual-employees/{employee_id}`: actualiza el core de un
-  Virtual Employee.
-- `POST /v1/virtual-employees/{employee_id}/status`: cambia su estado.
+- `GET /v1/virployees`: lista Virployees de la customer org.
+- `POST /v1/virployees`: crea un Virployee.
+- `PATCH /v1/virployees/{virployee_id}`: actualiza el core de un
+  Virployee.
+- `POST /v1/virployees/{virployee_id}/status`: cambia su estado.
 
 Los endpoints de agents quedan como compatibilidad tecnica:
 

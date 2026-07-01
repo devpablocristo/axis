@@ -15,14 +15,14 @@ import (
 	"github.com/devpablocristo/platform/authn/go/identityhttp"
 )
 
-func TestHandlerCreatesAndUpdatesEmployeeHandoff(t *testing.T) {
+func TestHandlerCreatesAndUpdatesVirployeeHandoff(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()
 	NewHandler(NewUsecases(newFakeRepo())).Register(mux)
-	toEmployeeID := uuid.NewString()
-	body := bytes.NewBufferString(`{"to_employee_id":"` + toEmployeeID + `","reason":"Needs medical review"}`)
+	toVirployeeID := uuid.NewString()
+	body := bytes.NewBufferString(`{"to_virployee_id":"` + toVirployeeID + `","reason":"Needs medical review"}`)
 	req := httptest.NewRequest(http.MethodPost, "/v1/handoffs?org_id=org-a&product_surface=axis&tenant_id=11111111-1111-4111-8111-111111111111", body)
-	req = withHandoffPrincipal(req, []string{"companion:agents:admin"})
+	req = withHandoffPrincipal(req, []string{"companion:virployees:admin"})
 	res := httptest.NewRecorder()
 
 	mux.ServeHTTP(res, req)
@@ -34,12 +34,12 @@ func TestHandlerCreatesAndUpdatesEmployeeHandoff(t *testing.T) {
 	if err := json.Unmarshal(res.Body.Bytes(), &created); err != nil {
 		t.Fatal(err)
 	}
-	if created.ToEmployeeID.String() != toEmployeeID || created.Status != StatusPending {
+	if created.ToVirployeeID.String() != toVirployeeID || created.Status != StatusPending {
 		t.Fatalf("unexpected handoff: %+v", created)
 	}
 
 	req = httptest.NewRequest(http.MethodPatch, "/v1/handoffs/"+created.HandoffID.String()+"?org_id=org-a&product_surface=axis&tenant_id=11111111-1111-4111-8111-111111111111", bytes.NewBufferString(`{"status":"accepted"}`))
-	req = withHandoffPrincipal(req, []string{"companion:agents:admin"})
+	req = withHandoffPrincipal(req, []string{"companion:virployees:admin"})
 	res = httptest.NewRecorder()
 	mux.ServeHTTP(res, req)
 	if res.Code != http.StatusOK {
@@ -54,12 +54,12 @@ func TestHandlerCreatesAndUpdatesEmployeeHandoff(t *testing.T) {
 	}
 }
 
-func TestHandlerRejectsMissingToEmployee(t *testing.T) {
+func TestHandlerRejectsMissingToVirployee(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()
 	NewHandler(NewUsecases(newFakeRepo())).Register(mux)
 	req := httptest.NewRequest(http.MethodPost, "/v1/handoffs?org_id=org-a&product_surface=axis&tenant_id=11111111-1111-4111-8111-111111111111", bytes.NewBufferString(`{"reason":"missing target"}`))
-	req = withHandoffPrincipal(req, []string{"companion:agents:admin"})
+	req = withHandoffPrincipal(req, []string{"companion:virployees:admin"})
 	res := httptest.NewRecorder()
 
 	mux.ServeHTTP(res, req)

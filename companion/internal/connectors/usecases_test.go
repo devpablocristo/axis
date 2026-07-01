@@ -47,10 +47,29 @@ func (f *fakeConnectorRepo) GetConnector(ctx context.Context, id uuid.UUID) (dom
 }
 
 func (f *fakeConnectorRepo) ListConnectors(ctx context.Context) ([]domain.Connector, error) {
+	return f.ListConnectorsByLifecycle(ctx, ConnectorStatusActive)
+}
+
+func (f *fakeConnectorRepo) ListConnectorsByLifecycle(ctx context.Context, lifecycle string) ([]domain.Connector, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	var out []domain.Connector
 	for _, c := range f.connectors {
+		switch lifecycle {
+		case ConnectorStatusArchived:
+			if c.Status != ConnectorStatusArchived {
+				continue
+			}
+		case ConnectorStatusTrash:
+			if c.Status != ConnectorStatusTrash {
+				continue
+			}
+		case "all":
+		default:
+			if c.Status == ConnectorStatusArchived || c.Status == ConnectorStatusTrash {
+				continue
+			}
+		}
 		out = append(out, c)
 	}
 	return out, nil
@@ -60,6 +79,22 @@ func (f *fakeConnectorRepo) UpdateConnector(ctx context.Context, c domain.Connec
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.connectors[c.ID] = c
+	return c, nil
+}
+
+func (f *fakeConnectorRepo) SetConnectorStatus(ctx context.Context, id uuid.UUID, status string) (domain.Connector, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	c, ok := f.connectors[id]
+	if !ok {
+		return domain.Connector{}, ErrNotFound
+	}
+	if c.Status == status {
+		return c, nil
+	}
+	c.Status = status
+	c.Enabled = status == ConnectorStatusActive
+	f.connectors[id] = c
 	return c, nil
 }
 

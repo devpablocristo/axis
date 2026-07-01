@@ -30,28 +30,30 @@ const (
 )
 
 type config struct {
-	Addr               string
-	AuthMode           string
-	AuthIssuerURL      string
-	AuthAudience       string
-	IdentityProvider   string
-	ClerkSecretKey     string
-	ClerkAPIBaseURL    string
-	ClerkWebhookSecret string
-	ControlDatabaseURL string
-	OwnerOrgID         string
-	DevOrgID           string
-	DevUserID          string
-	DevScopes          []string
-	InternalJWTSecret  string
-	InternalJWTIssuer  string
-	CompanionBaseURL   string
-	CompanionAudience  string
-	NexusBaseURL       string
-	NexusAudience      string
-	AllowedOrigin      string
-	DownstreamTimeout  time.Duration
-	ReadHeaderTimeout  time.Duration
+	Addr                  string
+	AuthMode              string
+	AuthIssuerURL         string
+	AuthAudience          string
+	IdentityProvider      string
+	ClerkSecretKey        string
+	ClerkAPIBaseURL       string
+	ClerkWebhookSecret    string
+	ControlDatabaseURL    string
+	OwnerOrgID            string
+	DevOrgID              string
+	DevUserID             string
+	DevProductSurfaces    []string
+	BootstrapDevWorkspace bool
+	DevScopes             []string
+	InternalJWTSecret     string
+	InternalJWTIssuer     string
+	CompanionBaseURL      string
+	CompanionAudience     string
+	NexusBaseURL          string
+	NexusAudience         string
+	AllowedOrigin         string
+	DownstreamTimeout     time.Duration
+	ReadHeaderTimeout     time.Duration
 }
 
 type server struct {
@@ -82,29 +84,32 @@ func loadConfig() config {
 	if !strings.HasPrefix(addr, ":") {
 		addr = ":" + addr
 	}
+	authMode := strings.ToLower(env("AXIS_BFF_AUTH_MODE", "dev"))
 	return config{
-		Addr:               addr,
-		AuthMode:           strings.ToLower(env("AXIS_BFF_AUTH_MODE", "dev")),
-		AuthIssuerURL:      env("AXIS_AUTH_ISSUER_URL", ""),
-		AuthAudience:       env("AXIS_AUTH_AUDIENCE", ""),
-		IdentityProvider:   strings.ToLower(env("AXIS_IDENTITY_PROVIDER", "")),
-		ClerkSecretKey:     firstNonEmpty(env("AXIS_CLERK_SECRET_KEY", ""), env("CLERK_SECRET_KEY", "")),
-		ClerkAPIBaseURL:    env("AXIS_CLERK_API_BASE_URL", "https://api.clerk.com/v1"),
-		ClerkWebhookSecret: env("AXIS_CLERK_WEBHOOK_SECRET", ""),
-		ControlDatabaseURL: env("AXIS_CONTROL_DATABASE_URL", ""),
-		OwnerOrgID:         env("AXIS_OWNER_ORG", defaultOwnerOrgID),
-		DevOrgID:           env("AXIS_DEV_ORG_ID", defaultDevOrgID),
-		DevUserID:          env("AXIS_DEV_USER_ID", defaultDevUserID),
-		DevScopes:          splitScopes(env("AXIS_DEV_SCOPES", strings.Join(defaultAdminScopes(), " "))),
-		InternalJWTSecret:  env("AXIS_INTERNAL_JWT_SECRET", "axis-dev-internal-jwt-secret-change-me"),
-		InternalJWTIssuer:  env("AXIS_INTERNAL_JWT_ISSUER", defaultInternalIssuer),
-		CompanionBaseURL:   env("COMPANION_BASE_URL", "http://localhost:18085"),
-		CompanionAudience:  env("AXIS_COMPANION_AUDIENCE", "companion"),
-		NexusBaseURL:       env("NEXUS_BASE_URL", "http://localhost:18084"),
-		NexusAudience:      env("AXIS_NEXUS_AUDIENCE", "nexus"),
-		AllowedOrigin:      env("AXIS_ALLOWED_ORIGIN", ""),
-		DownstreamTimeout:  durationEnv("AXIS_DOWNSTREAM_TIMEOUT", 10*time.Second),
-		ReadHeaderTimeout:  durationEnv("AXIS_READ_HEADER_TIMEOUT", 5*time.Second),
+		Addr:                  addr,
+		AuthMode:              authMode,
+		AuthIssuerURL:         env("AXIS_AUTH_ISSUER_URL", ""),
+		AuthAudience:          env("AXIS_AUTH_AUDIENCE", ""),
+		IdentityProvider:      strings.ToLower(env("AXIS_IDENTITY_PROVIDER", "")),
+		ClerkSecretKey:        firstNonEmpty(env("AXIS_CLERK_SECRET_KEY", ""), env("CLERK_SECRET_KEY", "")),
+		ClerkAPIBaseURL:       env("AXIS_CLERK_API_BASE_URL", "https://api.clerk.com/v1"),
+		ClerkWebhookSecret:    env("AXIS_CLERK_WEBHOOK_SECRET", ""),
+		ControlDatabaseURL:    env("AXIS_CONTROL_DATABASE_URL", ""),
+		OwnerOrgID:            env("AXIS_OWNER_ORG", defaultOwnerOrgID),
+		DevOrgID:              env("AXIS_DEV_ORG_ID", defaultDevOrgID),
+		DevUserID:             env("AXIS_DEV_USER_ID", defaultDevUserID),
+		DevProductSurfaces:    splitScopes(env("AXIS_DEV_PRODUCT_SURFACES", defaultOrgProductSurface+" medmory")),
+		BootstrapDevWorkspace: boolEnv("AXIS_BOOTSTRAP_DEV_WORKSPACE", isDevAuthMode(authMode)),
+		DevScopes:             splitScopes(env("AXIS_DEV_SCOPES", strings.Join(defaultAdminScopes(), " "))),
+		InternalJWTSecret:     env("AXIS_INTERNAL_JWT_SECRET", "axis-dev-internal-jwt-secret-change-me"),
+		InternalJWTIssuer:     env("AXIS_INTERNAL_JWT_ISSUER", defaultInternalIssuer),
+		CompanionBaseURL:      env("COMPANION_BASE_URL", "http://localhost:18085"),
+		CompanionAudience:     env("AXIS_COMPANION_AUDIENCE", "companion"),
+		NexusBaseURL:          env("NEXUS_BASE_URL", "http://localhost:18084"),
+		NexusAudience:         env("AXIS_NEXUS_AUDIENCE", "nexus"),
+		AllowedOrigin:         env("AXIS_ALLOWED_ORIGIN", ""),
+		DownstreamTimeout:     durationEnv("AXIS_DOWNSTREAM_TIMEOUT", 10*time.Second),
+		ReadHeaderTimeout:     durationEnv("AXIS_READ_HEADER_TIMEOUT", 5*time.Second),
 	}
 }
 
@@ -123,9 +128,12 @@ func newServer(cfg config) (*server, error) {
 		return nil, err
 	}
 	s.iam = iam
+	if err := s.ensureDevWorkspace(context.Background()); err != nil {
+		return nil, err
+	}
 	provider := firstNonEmpty(cfg.IdentityProvider, cfg.AuthMode)
 	if provider == "clerk" {
-		s.identity = newClerkIdentityAdapter(cfg.ClerkSecretKey, cfg.ClerkAPIBaseURL, s.client, iam, cfg.OwnerOrgID)
+		s.identity = newClerkIdentityAdapterWithProducts(cfg.ClerkSecretKey, cfg.ClerkAPIBaseURL, s.client, iam, cfg.OwnerOrgID, cfg.DevProductSurfaces)
 	}
 	if authModeRequiresOIDC(cfg.AuthMode) {
 		issuer := strings.TrimRight(strings.TrimSpace(cfg.AuthIssuerURL), "/")
@@ -162,6 +170,76 @@ func newServer(cfg config) (*server, error) {
 	return s, nil
 }
 
+func (s *server) ensureDevWorkspace(ctx context.Context) error {
+	if !s.cfg.BootstrapDevWorkspace || strings.TrimSpace(s.cfg.ControlDatabaseURL) == "" {
+		return nil
+	}
+	orgID := firstNonEmpty(strings.TrimSpace(s.cfg.OwnerOrgID), strings.TrimSpace(s.cfg.DevOrgID), defaultOwnerOrgID)
+	userID := strings.TrimSpace(s.cfg.DevUserID)
+	if orgID == "" || userID == "" {
+		return nil
+	}
+	if _, err := s.iam.CreateUser(ctx, IAMUser{
+		ID:         userID,
+		ExternalID: userID,
+		Email:      userID + "@axis.local",
+		Name:       userID,
+		AxisRole:   "owner",
+		Status:     "active",
+	}); err != nil {
+		return fmt.Errorf("bootstrap dev user: %w", err)
+	}
+	if _, err := s.iam.CreateOrg(ctx, IAMOrg{
+		ID:     orgID,
+		Name:   orgID,
+		Slug:   slugify(orgID),
+		Status: "active",
+	}, userID); err != nil {
+		return fmt.Errorf("bootstrap dev org: %w", err)
+	}
+	if _, err := s.iam.UpsertMember(ctx, IAMMember{OrgID: orgID, UserID: userID, Role: "owner", Status: "active"}); err != nil {
+		return fmt.Errorf("bootstrap dev org membership: %w", err)
+	}
+	for _, productSurface := range productSurfacesOrDefault(s.cfg.DevProductSurfaces) {
+		tenant, err := s.iam.CreateTenantWithOwner(ctx, IAMTenant{
+			OrgID:          orgID,
+			ProductSurface: productSurface,
+			Name:           orgID + " / " + productSurface,
+			Status:         "active",
+		}, userID)
+		if err != nil {
+			return fmt.Errorf("bootstrap dev tenant %s: %w", productSurface, err)
+		}
+		if _, err := s.iam.UpsertTenantMember(ctx, IAMTenantMember{TenantID: tenant.ID, UserID: userID, Role: "owner", Status: "active"}); err != nil {
+			return fmt.Errorf("bootstrap dev tenant membership %s: %w", productSurface, err)
+		}
+	}
+	if err := s.iam.SetPlatformRole(ctx, userID, "platform_admin"); err != nil {
+		return fmt.Errorf("bootstrap dev platform role: %w", err)
+	}
+	return nil
+}
+
+func productSurfacesOrDefault(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values)+1)
+	for _, value := range values {
+		productSurface := strings.TrimSpace(value)
+		if productSurface == "" {
+			continue
+		}
+		if _, ok := seen[productSurface]; ok {
+			continue
+		}
+		seen[productSurface] = struct{}{}
+		out = append(out, productSurface)
+	}
+	if len(out) == 0 {
+		return []string{defaultOrgProductSurface}
+	}
+	return out
+}
+
 func (s *server) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -172,19 +250,21 @@ func (s *server) routes() http.Handler {
 	mux.Handle("GET /api/services", s.withAuth(http.HandlerFunc(s.services)))
 	mux.Handle("/api/iam/", s.withAuth(http.HandlerFunc(s.iamAPI)))
 	mux.Handle("/api/control/", s.withAuth(http.HandlerFunc(s.controlAPI)))
-	mux.Handle("/api/employee-profiles", s.withAuth(http.HandlerFunc(s.employeeProfilesAPI)))
-	mux.Handle("/api/employee-profiles/", s.withAuth(http.HandlerFunc(s.employeeProfilesAPI)))
+	mux.Handle("/api/virployee-profiles", s.withAuth(http.HandlerFunc(s.virployeeProfilesAPI)))
+	mux.Handle("/api/virployee-profiles/", s.withAuth(http.HandlerFunc(s.virployeeProfilesAPI)))
 	mux.Handle("/api/prompts/", s.withAuth(http.HandlerFunc(s.promptsAPI)))
 	mux.Handle("/api/agents", s.withAuth(http.HandlerFunc(s.agentsAPI)))
 	mux.Handle("/api/agents/", s.withAuth(http.HandlerFunc(s.agentsAPI)))
-	mux.Handle("/api/virtual-employees", s.withAuth(http.HandlerFunc(s.virtualEmployeesAPI)))
-	mux.Handle("/api/virtual-employees/", s.withAuth(http.HandlerFunc(s.virtualEmployeesAPI)))
+	mux.Handle("/api/virployees", s.withAuth(http.HandlerFunc(s.virployeesDomainAPI)))
+	mux.Handle("/api/virployees/", s.withAuth(http.HandlerFunc(s.virployeesDomainAPI)))
 	mux.Handle("/api/job-roles", s.withAuth(http.HandlerFunc(s.jobRolesAPI)))
 	mux.Handle("/api/job-roles/", s.withAuth(http.HandlerFunc(s.jobRolesAPI)))
 	mux.Handle("/api/capabilities", s.withAuth(http.HandlerFunc(s.capabilitiesAPI)))
 	mux.Handle("/api/capabilities/", s.withAuth(http.HandlerFunc(s.capabilitiesAPI)))
 	mux.Handle("/api/tools", s.withAuth(http.HandlerFunc(s.toolsAPI)))
 	mux.Handle("/api/tools/", s.withAuth(http.HandlerFunc(s.toolsAPI)))
+	mux.Handle("/api/connectors", s.withAuth(http.HandlerFunc(s.connectorsAPI)))
+	mux.Handle("/api/connectors/", s.withAuth(http.HandlerFunc(s.connectorsAPI)))
 	mux.Handle("/api/memories", s.withAuth(http.HandlerFunc(s.memoriesAPI)))
 	mux.Handle("/api/memories/", s.withAuth(http.HandlerFunc(s.memoriesAPI)))
 	mux.Handle("/api/handoffs", s.withAuth(http.HandlerFunc(s.handoffsAPI)))
@@ -369,6 +449,13 @@ func (s *server) session(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+	if hasScope(p.Scopes, "axis:cross_org") || isPlatformAdmin(platformRoles) {
+		tenants, err = s.iam.ListTenants(r.Context(), "")
+		if err != nil {
+			writeStoreError(w, err)
+			return
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"actor_id":       p.Actor,
 		"org_id":         orgID,
@@ -480,6 +567,9 @@ func (s *server) resolveAppContext(r *http.Request, p authn.Principal) (orgID, p
 			message: "request failed",
 			cause:   fmt.Errorf("platform roles lookup failed: %w", perr),
 		}
+	}
+	if hasScope(p.Scopes, "axis:cross_org") {
+		return tenant.OrgID, tenant.ProductSurface, tenant.ID, defaultAdminScopes(), nil
 	}
 	role := ""
 	if !isPlatformAdmin(platformRoles) {
@@ -649,6 +739,21 @@ func env(key, fallback string) string {
 	return fallback
 }
 
+func boolEnv(key string, fallback bool) bool {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+	switch strings.ToLower(raw) {
+	case "1", "true", "yes", "y", "on":
+		return true
+	case "0", "false", "no", "n", "off":
+		return false
+	default:
+		return fallback
+	}
+}
+
 func durationEnv(key string, fallback time.Duration) time.Duration {
 	raw := strings.TrimSpace(os.Getenv(key))
 	if raw == "" {
@@ -682,9 +787,9 @@ func defaultAdminScopes() []string {
 		"axis:agents:read",
 		"axis:agents:write",
 		"axis:agents:admin",
-		"axis:virtual_employees:read",
-		"axis:virtual_employees:write",
-		"axis:virtual_employees:admin",
+		"axis:virployees:read",
+		"axis:virployees:write",
+		"axis:virployees:admin",
 		"axis:iam:purge",
 		"companion:cross_org",
 		"companion:runtime:admin",
@@ -697,14 +802,17 @@ func defaultAdminScopes() []string {
 		"companion:memory:admin",
 		"companion:capabilities:read",
 		"companion:capabilities:admin",
+		"companion:virployees:read",
+		"companion:virployees:write",
+		"companion:virployees:admin",
 		"companion:agents:read",
 		"companion:agents:admin",
 		"companion:products:read",
 		"companion:products:admin",
 		"companion:assist:read",
 		"companion:assist:write",
-		"companion:employee_profiles:read",
-		"companion:employee_profiles:admin",
+		"companion:virployee_profiles:read",
+		"companion:virployee_profiles:admin",
 		"companion:audit:read",
 		"companion:observability:read",
 		"companion:costs:read",

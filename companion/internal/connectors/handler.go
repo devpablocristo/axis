@@ -21,9 +21,15 @@ const (
 )
 
 type connectorUsecase interface {
-	ListConnectors(ctx context.Context) ([]domain.Connector, error)
+	ListConnectorsByLifecycle(ctx context.Context, lifecycle string) ([]domain.Connector, error)
+	ConnectorTypes() []domain.ConnectorType
 	GetConnector(ctx context.Context, id uuid.UUID) (domain.Connector, error)
 	SaveConnector(ctx context.Context, c domain.Connector) (domain.Connector, error)
+	ArchiveConnector(ctx context.Context, id uuid.UUID) (domain.Connector, error)
+	TrashConnector(ctx context.Context, id uuid.UUID) (domain.Connector, error)
+	RestoreConnector(ctx context.Context, id uuid.UUID) (domain.Connector, error)
+	TestConnector(ctx context.Context, id uuid.UUID) error
+	RefreshConnector(ctx context.Context, id uuid.UUID) registry.RefreshResult
 	DeleteConnector(ctx context.Context, id uuid.UUID) error
 	Execute(ctx context.Context, spec domain.ExecutionSpec) (domain.ExecutionResult, error)
 	BuildActionBinding(ctx context.Context, spec domain.ExecutionSpec) (map[string]any, string, error)
@@ -45,16 +51,31 @@ func NewHandler(uc connectorUsecase) *Handler {
 
 // Register registra las rutas de conectores en el mux.
 func (h *Handler) Register(mux *http.ServeMux) {
+	mux.HandleFunc("GET /v1/connectors/types", h.types)
 	mux.HandleFunc("GET /v1/connectors", h.list)
 	mux.HandleFunc("POST /v1/connectors", h.save)
 	mux.HandleFunc("POST /v1/connectors/refresh", h.refresh)
 	mux.HandleFunc("GET /v1/connectors/{id}", h.get)
+	mux.HandleFunc("PATCH /v1/connectors/{id}", h.patch)
 	mux.HandleFunc("DELETE /v1/connectors/{id}", h.delete)
+	mux.HandleFunc("POST /v1/connectors/{id}/archive", h.archive)
+	mux.HandleFunc("POST /v1/connectors/{id}/trash", h.trash)
+	mux.HandleFunc("POST /v1/connectors/{id}/restore", h.restore)
+	mux.HandleFunc("POST /v1/connectors/{id}/test", h.test)
+	mux.HandleFunc("POST /v1/connectors/{id}/refresh", h.refreshOne)
 	mux.HandleFunc("POST /v1/connectors/execute", h.execute)
 	mux.HandleFunc("POST /v1/connectors/action-binding", h.actionBinding)
 	mux.HandleFunc("GET /v1/connectors/{id}/executions", h.listExecutions)
 	mux.HandleFunc("GET /v1/connectors/capabilities", h.capabilities)
 	mux.HandleFunc("GET /v1/connectors/capability-manifests", h.capabilityManifests)
+}
+
+func (h *Handler) types(w http.ResponseWriter, r *http.Request) {
+	if !requireScope(w, r, scopeCompanionConnectorsAdmin, scopeCompanionConnectorsExecute) {
+		return
+	}
+	types := h.uc.ConnectorTypes()
+	httpjson.WriteJSON(w, http.StatusOK, dto.ConnectorTypesResponse{Types: types, Data: types})
 }
 
 func (h *Handler) refresh(w http.ResponseWriter, r *http.Request) {
@@ -71,7 +92,7 @@ func (h *Handler) refresh(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
-	conns, err := h.uc.ListConnectors(r.Context())
+	conns, err := h.uc.ListConnectorsByLifecycle(r.Context(), r.URL.Query().Get("lifecycle"))
 	if err != nil {
 		httpjson.WriteFlatInternalError(w, err, "list connectors failed")
 		return
@@ -83,7 +104,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, dto.ConnectorToResponse(c))
 	}
-	httpjson.WriteJSON(w, http.StatusOK, dto.ConnectorListResponse{Connectors: out})
+	httpjson.WriteJSON(w, http.StatusOK, dto.ConnectorListResponse{Connectors: out, Data: out})
 }
 
 func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
@@ -126,6 +147,10 @@ func (h *Handler) save(w http.ResponseWriter, r *http.Request) {
 		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "name and kind are required")
 		return
 	}
+	enabled := true
+	if body.Enabled != nil {
+		enabled = *body.Enabled
+	}
 	configJSON := body.Config
 	if len(configJSON) == 0 {
 		configJSON = json.RawMessage(`{}`)
@@ -134,14 +159,73 @@ func (h *Handler) save(w http.ResponseWriter, r *http.Request) {
 		OrgID:      orgID,
 		Name:       body.Name,
 		Kind:       body.Kind,
-		Enabled:    body.Enabled,
+		Enabled:    enabled,
+		Status:     body.Status,
 		ConfigJSON: configJSON,
 	})
 	if err != nil {
-		httpjson.WriteFlatInternalError(w, err, "save connector failed")
+		writeConnectorError(w, err)
 		return
 	}
 	httpjson.WriteJSON(w, http.StatusCreated, dto.ConnectorToResponse(conn))
+}
+
+func (h *Handler) patch(w http.ResponseWriter, r *http.Request) {
+	if !requireScope(w, r, scopeCompanionConnectorsAdmin) {
+		return
+	}
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid id")
+		return
+	}
+	current, err := h.uc.GetConnector(r.Context(), id)
+	if err != nil {
+		writeConnectorError(w, err)
+		return
+	}
+	if !canAccessConnectorOrg(r, current) {
+		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "connector org is not allowed for this principal")
+		return
+	}
+	var body dto.SaveConnectorRequest
+	if err := httpjson.DecodeJSON(r, &body); err != nil {
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid json")
+		return
+	}
+	if strings.TrimSpace(body.Name) != "" {
+		current.Name = body.Name
+	}
+	if body.Enabled != nil {
+		current.Enabled = *body.Enabled
+		if *body.Enabled {
+			current.Status = "active"
+		} else {
+			current.Status = "disabled"
+		}
+	}
+	if strings.TrimSpace(body.Status) != "" {
+		switch strings.TrimSpace(strings.ToLower(body.Status)) {
+		case "active":
+			current.Enabled = true
+			current.Status = "active"
+		case "disabled":
+			current.Enabled = false
+			current.Status = "disabled"
+		default:
+			httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "lifecycle status changes must use lifecycle endpoints")
+			return
+		}
+	}
+	if len(body.Config) > 0 {
+		current.ConfigJSON = body.Config
+	}
+	conn, err := h.uc.SaveConnector(r.Context(), current)
+	if err != nil {
+		writeConnectorError(w, err)
+		return
+	}
+	httpjson.WriteJSON(w, http.StatusOK, dto.ConnectorToResponse(conn))
 }
 
 func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
@@ -175,6 +259,95 @@ func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) archive(w http.ResponseWriter, r *http.Request) {
+	h.lifecycle(w, r, h.uc.ArchiveConnector)
+}
+
+func (h *Handler) trash(w http.ResponseWriter, r *http.Request) {
+	h.lifecycle(w, r, h.uc.TrashConnector)
+}
+
+func (h *Handler) restore(w http.ResponseWriter, r *http.Request) {
+	h.lifecycle(w, r, h.uc.RestoreConnector)
+}
+
+func (h *Handler) lifecycle(w http.ResponseWriter, r *http.Request, action func(context.Context, uuid.UUID) (domain.Connector, error)) {
+	if !requireScope(w, r, scopeCompanionConnectorsAdmin) {
+		return
+	}
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid id")
+		return
+	}
+	current, err := h.uc.GetConnector(r.Context(), id)
+	if err != nil {
+		writeConnectorError(w, err)
+		return
+	}
+	if !canAccessConnectorOrg(r, current) {
+		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "connector org is not allowed for this principal")
+		return
+	}
+	conn, err := action(r.Context(), id)
+	if err != nil {
+		writeConnectorError(w, err)
+		return
+	}
+	httpjson.WriteJSON(w, http.StatusOK, dto.ConnectorToResponse(conn))
+}
+
+func (h *Handler) test(w http.ResponseWriter, r *http.Request) {
+	if !requireScope(w, r, scopeCompanionConnectorsAdmin) {
+		return
+	}
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid id")
+		return
+	}
+	current, err := h.uc.GetConnector(r.Context(), id)
+	if err != nil {
+		writeConnectorError(w, err)
+		return
+	}
+	if !canAccessConnectorOrg(r, current) {
+		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "connector org is not allowed for this principal")
+		return
+	}
+	if err := h.uc.TestConnector(r.Context(), id); err != nil {
+		writeConnectorError(w, err)
+		return
+	}
+	httpjson.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "connector_id": id.String()})
+}
+
+func (h *Handler) refreshOne(w http.ResponseWriter, r *http.Request) {
+	if !requireScope(w, r, scopeCompanionConnectorsAdmin) {
+		return
+	}
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid id")
+		return
+	}
+	current, err := h.uc.GetConnector(r.Context(), id)
+	if err != nil {
+		writeConnectorError(w, err)
+		return
+	}
+	if !canAccessConnectorOrg(r, current) {
+		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", "connector org is not allowed for this principal")
+		return
+	}
+	result := h.uc.RefreshConnector(r.Context(), id)
+	httpjson.WriteJSON(w, http.StatusOK, dto.ConnectorRefreshResponse{Results: []dto.ConnectorRefreshResult{{
+		ConnectorID: result.ConnectorID,
+		Refreshed:   result.Refreshed,
+		Error:       result.Error,
+	}}})
 }
 
 func (h *Handler) execute(w http.ResponseWriter, r *http.Request) {
@@ -398,5 +571,22 @@ func capabilityFilterFromRequest(r *http.Request) domain.CapabilityFilter {
 		MaxRiskClass:       strings.TrimSpace(r.URL.Query().Get("max_risk_class")),
 		IncludeWrites:      strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("include_writes")), "true"),
 		EnforcePermissions: !identityctx.HasNoAuthContext(r),
+	}
+}
+
+func writeConnectorError(w http.ResponseWriter, err error) {
+	switch {
+	case IsNotFound(err):
+		httpjson.WriteFlatError(w, http.StatusNotFound, "NOT_FOUND", "connector not found")
+	case IsValidation(err):
+		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", err.Error())
+	case err == ErrDisabled:
+		httpjson.WriteFlatError(w, http.StatusConflict, "CONFLICT", "connector is disabled")
+	case IsConflict(err):
+		httpjson.WriteFlatError(w, http.StatusConflict, "CONFLICT", err.Error())
+	case IsForbidden(err):
+		httpjson.WriteFlatError(w, http.StatusForbidden, "FORBIDDEN", err.Error())
+	default:
+		httpjson.WriteFlatInternalError(w, err, "connector operation failed")
 	}
 }

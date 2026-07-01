@@ -64,9 +64,9 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpjson.WriteJSON(w, http.StatusOK, map[string]any{
-		"capabilities":      records,
-		"data":              capabilities,
-		"manifest_records":  records,
+		"capabilities":       records,
+		"data":               capabilities,
+		"manifest_records":   records,
 		"capability_catalog": capabilities,
 	})
 }

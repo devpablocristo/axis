@@ -4,14 +4,14 @@ Agent Fleet es el modulo tecnico que administra agentes persistentes por
 `org_id` y `product_surface` sin hardcodear verticales ni mover decisiones de
 acciones sensibles fuera de Nexus.
 
-No es el dominio publico de Virtual Employees. Los endpoints `/v1/agents`
+No es el dominio publico de Virployees. Los endpoints `/v1/agents`
 quedan para agentes tecnicos, compatibilidad y runtime. Ver
-`virtual-employees.md` para la entidad publica `VirtualEmployee`.
+`virployees.md` para la entidad publica `Virployee`.
 
 El modelo objetivo ya no trata Agent Fleet como dominio publico. Ver
 `../specs/companion/domain/agents-domain-spec.md` para `Agent` como ejecutor
-tecnico y `../specs/companion/domain/virtual-employees-domain-spec.md` para
-`VirtualEmployee`.
+tecnico y `../specs/companion/domain/virployees-domain-spec.md` para
+`Virployee`.
 
 ## Modelo
 

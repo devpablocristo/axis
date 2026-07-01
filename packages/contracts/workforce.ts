@@ -1,7 +1,7 @@
 export type UUID = string
 export type ISODateTime = string
 
-export type EmployeeStatus =
+export type VirployeeStatus =
   | 'draft'
   | 'active'
   | 'disabled'
@@ -13,7 +13,7 @@ export type EmployeeStatus =
 export type AutonomyLevel = 'A0' | 'A1' | 'A2' | 'A3' | 'A4' | 'A5'
 
 export type JobRoleStatus = 'active' | 'archived'
-export type EmployeeProfileStatus = 'draft' | 'active' | 'disabled' | 'archived' | 'trashed'
+export type VirployeeProfileStatus = 'draft' | 'active' | 'disabled' | 'archived' | 'trashed'
 export type MemoryStatus = 'active' | 'disabled' | 'archived'
 export type TaskStatus = 'open' | 'assigned' | 'running' | 'blocked' | 'done' | 'cancelled'
 export type WatcherStatus = 'active' | 'paused' | 'archived'
@@ -21,12 +21,12 @@ export type HandoffStatus = 'pending' | 'accepted' | 'rejected' | 'cancelled'
 export type CapabilityMode = 'read' | 'write' | 'execute'
 export type RiskClass = 'low' | 'medium' | 'high' | 'critical'
 
-export type VirtualEmployee = {
-  employee_id: UUID
+export type Virployee = {
+  virployee_id: UUID
   tenant_id: UUID
   name: string
   supervisor_user_id: UUID
-  status: EmployeeStatus
+  status: VirployeeStatus
   job_role_id: UUID
   profile_id: UUID
   autonomy: AutonomyLevel
@@ -76,7 +76,7 @@ export type MemoryPolicy = {
   allow_tenant_memory: boolean
 }
 
-export type EmployeeProfile = {
+export type VirployeeProfile = {
   profile_id: UUID
   profile_key: string
   name: string
@@ -85,7 +85,7 @@ export type EmployeeProfile = {
   default_capability_ids: UUID[]
   memory_policy: MemoryPolicy
   llm_config: LLMConfig
-  status: EmployeeProfileStatus
+  status: VirployeeProfileStatus
 }
 
 export type Capability = {
@@ -112,10 +112,41 @@ export type Tool = {
   status: string
 }
 
+export type ConnectorConfigField = {
+  key: string
+  label: string
+  type: 'text' | 'number' | 'select' | 'checkbox' | 'textarea'
+  required?: boolean
+  secret?: boolean
+  default_value?: string
+  options?: string[]
+}
+
+export type ConnectorType = {
+  kind: string
+  name: string
+  description: string
+  config_schema: {
+    fields: ConnectorConfigField[]
+  }
+  supports_test: boolean
+  supports_refresh: boolean
+  status: string
+  capability_source?: string
+}
+
+export type Connector = {
+  connector_id: UUID
+  name: string
+  kind: string
+  enabled: boolean
+  status: 'active' | 'disabled' | 'archived' | 'trash'
+}
+
 export type Memory = {
   memory_id: UUID
   tenant_id: UUID
-  owner_employee_id?: UUID | null
+  owner_virployee_id?: UUID | null
   policy: MemoryPolicy
   status: MemoryStatus
 }
@@ -123,7 +154,7 @@ export type Memory = {
 export type Task = {
   task_id: UUID
   tenant_id: UUID
-  assignee_employee_id?: UUID | null
+  assignee_virployee_id?: UUID | null
   title: string
   description: string
   status: TaskStatus
@@ -132,7 +163,7 @@ export type Task = {
 export type Watcher = {
   watcher_id: UUID
   tenant_id: UUID
-  assignee_employee_id?: UUID | null
+  assignee_virployee_id?: UUID | null
   name: string
   trigger_kind: string
   status: WatcherStatus
@@ -142,8 +173,8 @@ export type Handoff = {
   handoff_id: UUID
   tenant_id: UUID
   task_id?: UUID | null
-  from_employee_id?: UUID | null
-  to_employee_id: UUID
+  from_virployee_id?: UUID | null
+  to_virployee_id: UUID
   reason: string
   status: HandoffStatus
 }

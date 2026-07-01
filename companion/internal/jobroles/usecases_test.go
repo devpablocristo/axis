@@ -33,6 +33,10 @@ func (f *fakeRepo) ListJobRoles(_ context.Context, orgID, productSurface string,
 			if role.Status != "archived" {
 				continue
 			}
+		case LifecycleTrash:
+			if role.Status != "trash" {
+				continue
+			}
 		case LifecycleAll:
 		default:
 			if role.Status != "active" {
@@ -110,6 +114,23 @@ func (f *fakeRepo) ArchiveJobRole(_ context.Context, orgID, productSurface, jobR
 	f.roles[key] = role
 	f.versions[key] = append(f.versions[key], Version{
 		JobRoleID: role.JobRoleID, OrgID: orgID, ProductSurface: productSurface, Version: role.Version, Action: "archive", ChangedBy: actorID, Role: role,
+	})
+	return role, nil
+}
+
+func (f *fakeRepo) TrashJobRole(_ context.Context, orgID, productSurface, jobRoleID, actorID string) (JobRole, error) {
+	role, key, ok := f.getRoleWithKey(orgID, productSurface, jobRoleID)
+	if !ok {
+		return JobRole{}, ErrNotFound
+	}
+	if role.Status == "trash" {
+		return role, nil
+	}
+	role.Status = "trash"
+	role.Version++
+	f.roles[key] = role
+	f.versions[key] = append(f.versions[key], Version{
+		JobRoleID: role.JobRoleID, OrgID: orgID, ProductSurface: productSurface, Version: role.Version, Action: "trash", ChangedBy: actorID, Role: role,
 	})
 	return role, nil
 }
@@ -192,21 +213,23 @@ func TestUpsertJobRoleValidatesRequiredFields(t *testing.T) {
 	}
 }
 
-func TestUpsertJobRoleRejectsArchivedStatus(t *testing.T) {
+func TestUpsertJobRoleRejectsLifecycleStatuses(t *testing.T) {
 	t.Parallel()
 	uc := NewUsecases(newFakeRepo())
 
-	_, err := uc.UpsertJobRole(context.Background(), JobRole{
-		JobRoleID:            "billing-specialist",
-		OrgID:                "org-a",
-		ProductSurface:       "axis",
-		Name:                 "Billing Specialist",
-		Slug:                 "billing-specialist",
-		DefaultAutonomyLevel: "A2",
-		Status:               "archived",
-	})
-	if !errors.Is(err, ErrValidation) {
-		t.Fatalf("expected validation error, got %v", err)
+	for _, status := range []string{"archived", "trash"} {
+		_, err := uc.UpsertJobRole(context.Background(), JobRole{
+			JobRoleID:            "billing-specialist-" + status,
+			OrgID:                "org-a",
+			ProductSurface:       "axis",
+			Name:                 "Billing Specialist",
+			Slug:                 "billing-specialist-" + status,
+			DefaultAutonomyLevel: "A2",
+			Status:               status,
+		})
+		if !errors.Is(err, ErrValidation) {
+			t.Fatalf("expected validation error for %s, got %v", status, err)
+		}
 	}
 }
 
@@ -241,6 +264,38 @@ func TestUpsertJobRoleDoesNotRestoreArchived(t *testing.T) {
 	role := repo.roles[fakeKey("org-a", "axis", "billing-specialist")]
 	if role.Status != "archived" || role.Version != 2 {
 		t.Fatalf("expected archived role to remain unchanged, got %+v", role)
+	}
+}
+
+func TestUpsertJobRoleDoesNotRestoreTrash(t *testing.T) {
+	t.Parallel()
+	repo := newFakeRepo()
+	repo.roles[fakeKey("org-a", "axis", "billing-specialist")] = JobRole{
+		JobRoleID:            "billing-specialist",
+		OrgID:                "org-a",
+		ProductSurface:       "axis",
+		Name:                 "Billing Specialist",
+		Slug:                 "billing-specialist",
+		DefaultAutonomyLevel: "A2",
+		Status:               "trash",
+		Version:              2,
+	}
+	uc := NewUsecases(repo)
+
+	_, err := uc.UpsertJobRole(context.Background(), JobRole{
+		JobRoleID:            "billing-specialist",
+		OrgID:                "org-a",
+		ProductSurface:       "axis",
+		Name:                 "Billing Specialist Updated",
+		Slug:                 "billing-specialist",
+		DefaultAutonomyLevel: "A2",
+	})
+	if !errors.Is(err, ErrConflict) {
+		t.Fatalf("expected conflict updating trashed job role, got %v", err)
+	}
+	role := repo.roles[fakeKey("org-a", "axis", "billing-specialist")]
+	if role.Status != "trash" || role.Version != 2 {
+		t.Fatalf("expected trashed role to remain unchanged, got %+v", role)
 	}
 }
 
@@ -334,6 +389,43 @@ func TestJobRoleLifecycleAndVersions(t *testing.T) {
 	}
 	if len(versions) != 3 {
 		t.Fatalf("expected 3 versions, got %d", len(versions))
+	}
+}
+
+func TestJobRoleTrashLifecycleAndVersions(t *testing.T) {
+	t.Parallel()
+	uc := NewUsecases(newFakeRepo())
+	_, err := uc.UpsertJobRole(context.Background(), JobRole{
+		JobRoleID:            "billing-specialist",
+		OrgID:                "org-a",
+		ProductSurface:       "axis",
+		Name:                 "Billing Specialist",
+		Slug:                 "billing-specialist",
+		DefaultAutonomyLevel: "A2",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	trashed, err := uc.TrashJobRole(context.Background(), "org-a", "axis", "billing-specialist", "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trashed.Status != "trash" {
+		t.Fatalf("expected trashed role, got %+v", trashed)
+	}
+	listed, err := uc.ListJobRoles(context.Background(), "org-a", "axis", "trash", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 1 || listed[0].Status != "trash" {
+		t.Fatalf("expected trash list to include role, got %+v", listed)
+	}
+	restored, err := uc.RestoreJobRole(context.Background(), "org-a", "axis", "billing-specialist", "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restored.Status != "active" {
+		t.Fatalf("expected restored role, got %+v", restored)
 	}
 }
 

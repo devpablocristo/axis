@@ -3,7 +3,7 @@
 ## Proposito
 
 Este spec define `Agent` como entidad tecnica separada de
-`VirtualEmployee`.
+`Virployee`.
 
 Regla:
 
@@ -33,7 +33,7 @@ Modelo objetivo:
 ```text
 Agent
 - agent_id: UUID
-- employee_id: UUID | null
+- virployee_id: UUID | null
 - profile_id: UUID
 - status: AgentStatus
 ```
@@ -47,19 +47,19 @@ AgentStatus: idle, running, disabled, error
 Relaciones:
 
 ```text
-Agent.employee_id -> VirtualEmployee.employee_id | null
-Agent.profile_id -> EmployeeProfile.profile_id
+Agent.virployee_id -> Virployee.virployee_id | null
+Agent.profile_id -> VirployeeProfile.profile_id
 ```
 
 Reglas:
 
-- `employee_id` puede ser null para agents tecnicos no asociados a un employee.
-- Un `VirtualEmployee` puede usar agents internamente, pero no es un Agent.
+- `virployee_id` puede ser null para agents tecnicos no asociados a un employee.
+- Un `Virployee` puede usar agents internamente, pero no es un Agent.
 - `Agent` no debe aparecer como nombre publico cuando el usuario opera
   employees.
 
 Estado actual: existe `companion_agents` y `internal/agentfleet` como storage y
-modulo tecnico de Agents. VirtualEmployee tiene entidad propia.
+modulo tecnico de Agents. Virployee tiene entidad propia.
 
 Brecha: `companion_agents` todavia conserva campos tecnicos historicos
 (`org_id + product_surface`, profile text, allowlists) que deben quedar
@@ -78,5 +78,5 @@ runtime necesita handoff tecnico entre agents, debe ser interno.
 |---|---|---|
 | `agent_id text` | ID textual generado desde nombre. | `agent_id UUID`. |
 | `profile_id text` | Key semantica. | `profile_id UUID`. |
-| `org_id + product_surface` | Tenant implicito. | `employee_id` o `tenant_id` segun entidad. |
+| `org_id + product_surface` | Tenant implicito. | `virployee_id` o `tenant_id` segun entidad. |
 | `metadata_json` | Contiene datos de Employee. | Datos de Employee en entidades fuertes. |

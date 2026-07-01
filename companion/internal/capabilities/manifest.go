@@ -87,17 +87,17 @@ type Manifest struct {
 }
 
 type Capability struct {
-	CapabilityID  string `json:"capability_id"`
-	CapabilityKey string `json:"capability_key"`
-	Name          string `json:"name"`
-	Description   string `json:"description"`
-	Version       string `json:"version"`
-	ProductID     string `json:"product_id,omitempty"`
+	CapabilityID   string `json:"capability_id"`
+	CapabilityKey  string `json:"capability_key"`
+	Name           string `json:"name"`
+	Description    string `json:"description"`
+	Version        string `json:"version"`
+	ProductID      string `json:"product_id,omitempty"`
 	ProductSurface string `json:"product_surface,omitempty"`
-	ToolID        string `json:"tool_id,omitempty"`
-	Mode          string `json:"mode"`
-	RiskClass     string `json:"risk_class"`
-	Status        string `json:"status"`
+	ToolID         string `json:"tool_id,omitempty"`
+	Mode           string `json:"mode"`
+	RiskClass      string `json:"risk_class"`
+	Status         string `json:"status"`
 }
 
 type Tool struct {

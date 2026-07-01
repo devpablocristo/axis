@@ -14,7 +14,7 @@ MemoryEntry = dato recordado dentro de una memoria
 ## Memory
 
 Definicion: contenedor de memoria persistente asignable a un
-`VirtualEmployee`.
+`Virployee`.
 
 Utilidad: permite activar, desactivar y gobernar memoria como entidad fuerte.
 
@@ -33,7 +33,7 @@ Modelo objetivo:
 Memory
 - memory_id: UUID
 - tenant_id: UUID
-- owner_employee_id: UUID
+- owner_virployee_id: UUID
 - policy: MemoryPolicy
 - status: MemoryStatus
 ```
@@ -48,8 +48,8 @@ Relaciones:
 
 ```text
 Memory.tenant_id -> Tenant.tenant_id
-Memory.owner_employee_id -> VirtualEmployee.employee_id
-VirtualEmployee.memory_id -> Memory.memory_id | null
+Memory.owner_virployee_id -> Virployee.virployee_id
+Virployee.memory_id -> Memory.memory_id | null
 MemoryEntry.memory_id -> Memory.memory_id
 ```
 

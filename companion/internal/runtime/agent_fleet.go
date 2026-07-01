@@ -12,8 +12,8 @@ type AgentResolver interface {
 	ResolveRuntimeAgent(ctx context.Context, orgID, productSurface, agentID string) (RuntimeAgentConfig, error)
 }
 
-type EmployeeResolver interface {
-	ResolveRuntimeEmployee(ctx context.Context, tenantID, orgID, productSurface, employeeID string) (RuntimeEmployeeConfig, error)
+type VirployeeResolver interface {
+	ResolveRuntimeVirployee(ctx context.Context, tenantID, orgID, productSurface, virployeeID string) (RuntimeVirployeeConfig, error)
 }
 
 type AgentProfileResolver interface {
@@ -38,8 +38,8 @@ type RuntimeAgentConfig struct {
 	Version             int64          `json:"version,omitempty"`
 }
 
-type RuntimeEmployeeConfig struct {
-	EmployeeID    string        `json:"employee_id"`
+type RuntimeVirployeeConfig struct {
+	VirployeeID   string        `json:"virployee_id"`
 	TenantID      string        `json:"tenant_id"`
 	Name          string        `json:"name,omitempty"`
 	Status        string        `json:"status,omitempty"`
@@ -113,29 +113,29 @@ func applyRuntimeAgent(route AgentRoute, agent RuntimeAgentConfig) (AgentRoute, 
 	return route, nil
 }
 
-func applyRuntimeEmployee(route AgentRoute, employee RuntimeEmployeeConfig) (AgentRoute, *GuardrailEvent) {
-	employee.EmployeeID = strings.TrimSpace(employee.EmployeeID)
-	if employee.EmployeeID == "" {
-		return route, &GuardrailEvent{Type: "virtual_employee", Target: "employee", Reason: "employee_id is required"}
+func applyRuntimeVirployee(route AgentRoute, virployee RuntimeVirployeeConfig) (AgentRoute, *GuardrailEvent) {
+	virployee.VirployeeID = strings.TrimSpace(virployee.VirployeeID)
+	if virployee.VirployeeID == "" {
+		return route, &GuardrailEvent{Type: "virployee", Target: "virployee", Reason: "virployee_id is required"}
 	}
-	if !strings.EqualFold(strings.TrimSpace(employee.Status), "active") {
-		return route, &GuardrailEvent{Type: "virtual_employee", Target: "employee:" + employee.EmployeeID, Reason: "employee is not active"}
+	if !strings.EqualFold(strings.TrimSpace(virployee.Status), "active") {
+		return route, &GuardrailEvent{Type: "virployee", Target: "virployee:" + virployee.VirployeeID, Reason: "virployee is not active"}
 	}
-	profileID := strings.TrimSpace(employee.ProfileID)
+	profileID := strings.TrimSpace(virployee.ProfileID)
 	if profileID == "" || profileID == agentprofiles.UnprofiledProfileID {
-		return route, &GuardrailEvent{Type: "virtual_employee", Target: "employee:" + employee.EmployeeID, Reason: "employee profile is required"}
+		return route, &GuardrailEvent{Type: "virployee", Target: "virployee:" + virployee.VirployeeID, Reason: "virployee profile is required"}
 	}
 	route.Profile.ID = profileID
-	route.Profile.Role = strings.TrimSpace(employee.Name)
-	if employee.MemoryID != "" {
-		route.Profile.MemoryScopeID = strings.TrimSpace(employee.MemoryID)
+	route.Profile.Role = strings.TrimSpace(virployee.Name)
+	if virployee.MemoryID != "" {
+		route.Profile.MemoryScopeID = strings.TrimSpace(virployee.MemoryID)
 	}
-	if employee.Autonomy != "" && autonomyRankRuntime(employee.Autonomy) < autonomyRankRuntime(route.Autonomy) {
-		route.Autonomy = employee.Autonomy
-		route.Profile.MaxAutonomy = employee.Autonomy
+	if virployee.Autonomy != "" && autonomyRankRuntime(virployee.Autonomy) < autonomyRankRuntime(route.Autonomy) {
+		route.Autonomy = virployee.Autonomy
+		route.Profile.MaxAutonomy = virployee.Autonomy
 	}
-	if len(employee.CapabilityIDs) > 0 {
-		route.Profile.AllowedCapabilities = intersectRuntimePatterns(route.Profile.AllowedCapabilities, employee.CapabilityIDs)
+	if len(virployee.CapabilityIDs) > 0 {
+		route.Profile.AllowedCapabilities = intersectRuntimePatterns(route.Profile.AllowedCapabilities, virployee.CapabilityIDs)
 	}
 	return route, nil
 }

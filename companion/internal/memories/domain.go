@@ -23,25 +23,25 @@ const (
 )
 
 type MemoryPolicy struct {
-	EnabledByDefault bool `json:"enabled_by_default"`
-	RetentionDays    int  `json:"retention_days"`
-	AllowUserMemory  bool `json:"allow_user_memory"`
-	AllowTaskMemory  bool `json:"allow_task_memory"`
+	EnabledByDefault  bool `json:"enabled_by_default"`
+	RetentionDays     int  `json:"retention_days"`
+	AllowUserMemory   bool `json:"allow_user_memory"`
+	AllowTaskMemory   bool `json:"allow_task_memory"`
 	AllowTenantMemory bool `json:"allow_tenant_memory"`
 }
 
 type Memory struct {
-	MemoryID        uuid.UUID    `json:"memory_id"`
-	TenantID        uuid.UUID    `json:"tenant_id"`
-	OrgID           string       `json:"org_id,omitempty"`
-	ProductSurface  string       `json:"product_surface,omitempty"`
-	OwnerEmployeeID *uuid.UUID   `json:"owner_employee_id,omitempty"`
-	Policy          MemoryPolicy `json:"policy"`
-	Status          MemoryStatus `json:"status"`
-	CreatedAt       time.Time    `json:"created_at,omitempty"`
-	UpdatedAt       time.Time    `json:"updated_at,omitempty"`
-	ArchivedAt      *time.Time   `json:"archived_at,omitempty"`
-	Version         int          `json:"version,omitempty"`
+	MemoryID         uuid.UUID    `json:"memory_id"`
+	TenantID         uuid.UUID    `json:"tenant_id"`
+	OrgID            string       `json:"org_id,omitempty"`
+	ProductSurface   string       `json:"product_surface,omitempty"`
+	OwnerVirployeeID *uuid.UUID   `json:"owner_virployee_id,omitempty"`
+	Policy           MemoryPolicy `json:"policy"`
+	Status           MemoryStatus `json:"status"`
+	CreatedAt        time.Time    `json:"created_at,omitempty"`
+	UpdatedAt        time.Time    `json:"updated_at,omitempty"`
+	ArchivedAt       *time.Time   `json:"archived_at,omitempty"`
+	Version          int          `json:"version,omitempty"`
 }
 
 type MemoryEntryKind string
@@ -74,10 +74,10 @@ type MemoryEntry struct {
 
 func defaultPolicy() MemoryPolicy {
 	return MemoryPolicy{
-		EnabledByDefault: true,
-		RetentionDays:    365,
-		AllowUserMemory:  true,
-		AllowTaskMemory:  true,
+		EnabledByDefault:  true,
+		RetentionDays:     365,
+		AllowUserMemory:   true,
+		AllowTaskMemory:   true,
 		AllowTenantMemory: true,
 	}
 }

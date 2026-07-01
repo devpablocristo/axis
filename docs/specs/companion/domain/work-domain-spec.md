@@ -3,7 +3,7 @@
 ## Proposito
 
 Este spec define entidades de trabajo que se relacionan con
-`VirtualEmployee`. No componen al employee.
+`Virployee`. No componen al employee.
 
 ## Task
 
@@ -26,7 +26,7 @@ Modelo objetivo:
 Task
 - task_id: UUID
 - tenant_id: UUID
-- assignee_employee_id: UUID | null
+- assignee_virployee_id: UUID | null
 - title: string
 - description: string
 - status: TaskStatus
@@ -42,12 +42,12 @@ Relaciones:
 
 ```text
 Task.tenant_id -> Tenant.tenant_id
-Task.assignee_employee_id -> VirtualEmployee.employee_id | null
+Task.assignee_virployee_id -> Virployee.virployee_id | null
 ```
 
 Estado actual: existen `companion_tasks` y entidades de task con org/product.
 
-Brecha: deben poder apuntar a `employee_id` objetivo en vez de agent o solo
+Brecha: deben poder apuntar a `virployee_id` objetivo en vez de agent o solo
 org/product.
 
 ## Watcher
@@ -70,7 +70,7 @@ Modelo objetivo:
 Watcher
 - watcher_id: UUID
 - tenant_id: UUID
-- assignee_employee_id: UUID | null
+- assignee_virployee_id: UUID | null
 - name: string
 - trigger_kind: WatcherTriggerKind
 - status: WatcherStatus
@@ -87,7 +87,7 @@ Relaciones:
 
 ```text
 Watcher.tenant_id -> Tenant.tenant_id
-Watcher.assignee_employee_id -> VirtualEmployee.employee_id | null
+Watcher.assignee_virployee_id -> Virployee.virployee_id | null
 ```
 
 Estado actual: existen `companion_watchers` con org/product y watcher types.
@@ -115,8 +115,8 @@ Modelo objetivo:
 Handoff
 - handoff_id: UUID
 - tenant_id: UUID
-- from_employee_id: UUID | null
-- to_employee_id: UUID | null
+- from_virployee_id: UUID | null
+- to_virployee_id: UUID | null
 - reason: string
 - status: HandoffStatus
 ```
@@ -131,8 +131,8 @@ Relaciones:
 
 ```text
 Handoff.tenant_id -> Tenant.tenant_id
-Handoff.from_employee_id -> VirtualEmployee.employee_id | null
-Handoff.to_employee_id -> VirtualEmployee.employee_id | null
+Handoff.from_virployee_id -> Virployee.virployee_id | null
+Handoff.to_virployee_id -> Virployee.virployee_id | null
 ```
 
 Estado actual: `companion_agent_handoffs` usa agents.
@@ -144,7 +144,7 @@ agents puede quedar interno.
 
 | Concepto actual | Problema | Modelo objetivo |
 |---|---|---|
-| Tasks con org/product | No apuntan claramente a employee. | `assignee_employee_id`. |
-| Watchers por org/product | No expresan responsable employee. | `assignee_employee_id`. |
+| Tasks con org/product | No apuntan claramente a employee. | `assignee_virployee_id`. |
+| Watchers por org/product | No expresan responsable employee. | `assignee_virployee_id`. |
 | Agent handoffs | Mezclan runtime Agent con dominio operativo. | Employee handoffs publicos; agent handoffs internos. |
 

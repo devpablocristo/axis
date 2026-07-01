@@ -310,7 +310,7 @@ func capabilityToolHandler(kind string, capability connectorsdomain.Capability, 
 		submitBody := nexusclient.SubmitRequestBody{
 			RequesterType:  "agent",
 			RequesterID:    firstNonEmpty(id.CompanionPrincipal, CompanionPrincipal),
-			RequesterName:  "Companion Employee AI",
+			RequesterName:  "Companion Virployee AI",
 			ActionType:     firstNonEmpty(capability.NexusActionType, nexusclient.ActionTypeAgentCapabilityInvoke),
 			TargetSystem:   kind,
 			TargetResource: connID.String(),

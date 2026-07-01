@@ -23,8 +23,8 @@ type ChatInput struct {
 	Message        string
 	Channel        string // "api", "watcher", "whatsapp", product-specific channels, etc.
 	ProductSurface string // opcional: "companion" | "ponti" | "pymes". Afecta routing del agent.
-	TenantID       string // requerido cuando EmployeeID resuelve un Virtual Employee.
-	EmployeeID     string // opcional: Virtual Employee persistente para esta task/conversación.
+	TenantID       string // requerido cuando VirployeeID resuelve un Virployee.
+	VirployeeID    string // opcional: Virployee persistente para esta task/conversación.
 	AgentID        string // opcional legacy: Agent tecnico persistente para esta task/conversación.
 	RouteHint      string // opcional: pista de pantalla/módulo para ruteo operativo.
 	Handoff        json.RawMessage
@@ -34,12 +34,12 @@ type ChatInput struct {
 
 // ChatResult resultado del chat.
 type ChatResult struct {
-	Task      domain.Task
-	Messages  []domain.TaskMessage
-	RunID     string
-	EmployeeID string
-	AgentID   string
-	ToolCalls []OrchestratorToolCall
+	Task        domain.Task
+	Messages    []domain.TaskMessage
+	RunID       string
+	VirployeeID string
+	AgentID     string
+	ToolCalls   []OrchestratorToolCall
 }
 
 // agentConversationContextKey nombre del field en task.context_json que guarda
@@ -47,7 +47,7 @@ type ChatResult struct {
 // conversation_id en mensajes sucesivos del mismo task.
 const agentConversationContextKey = "agent_conversation_id"
 const agentContextKey = "agent_id"
-const employeeContextKey = "employee_id"
+const employeeContextKey = "virployee_id"
 
 // workspaceContextKey nombre del field en task.context_json que guarda el
 // workspace operativo del último chat. Permite reusar el mismo workspace en
@@ -66,7 +66,7 @@ func (u *Usecases) Chat(ctx context.Context, in ChatInput) (ChatResult, error) {
 	in.AuthScopes = append([]string(nil), in.Identity.Scopes...)
 	in.ProductSurface = in.Identity.ProductSurface
 	in.TenantID = strings.TrimSpace(in.TenantID)
-	in.EmployeeID = strings.TrimSpace(in.EmployeeID)
+	in.VirployeeID = strings.TrimSpace(in.VirployeeID)
 	in.AgentID = strings.TrimSpace(in.AgentID)
 
 	var t domain.Task
@@ -85,8 +85,8 @@ func (u *Usecases) Chat(ctx context.Context, in ChatInput) (ChatResult, error) {
 		if in.AgentID == "" {
 			in.AgentID = extractTaskAgentID(t.ContextJSON)
 		}
-		if in.EmployeeID == "" {
-			in.EmployeeID = extractTaskEmployeeID(t.ContextJSON)
+		if in.VirployeeID == "" {
+			in.VirployeeID = extractTaskVirployeeID(t.ContextJSON)
 		}
 	} else if in.ChatID != nil {
 		// Reusar tarea existente a partir del identificador público de conversación.
@@ -100,8 +100,8 @@ func (u *Usecases) Chat(ctx context.Context, in ChatInput) (ChatResult, error) {
 		if in.AgentID == "" {
 			in.AgentID = extractTaskAgentID(t.ContextJSON)
 		}
-		if in.EmployeeID == "" {
-			in.EmployeeID = extractTaskEmployeeID(t.ContextJSON)
+		if in.VirployeeID == "" {
+			in.VirployeeID = extractTaskVirployeeID(t.ContextJSON)
 		}
 	} else {
 		// Crear tarea nueva con el primer mensaje como título
@@ -119,8 +119,8 @@ func (u *Usecases) Chat(ctx context.Context, in ChatInput) (ChatResult, error) {
 				contextJSON = updated
 			}
 		}
-		if in.EmployeeID != "" {
-			if updated, ok := mergeTaskEmployeeID(contextJSON, in.EmployeeID); ok {
+		if in.VirployeeID != "" {
+			if updated, ok := mergeTaskVirployeeID(contextJSON, in.VirployeeID); ok {
 				contextJSON = updated
 			}
 		}
@@ -149,7 +149,7 @@ func (u *Usecases) Chat(ctx context.Context, in ChatInput) (ChatResult, error) {
 	// guardado.
 	convID := u.ensureAgentConversation(ctx, &t, in, newTask)
 	u.ensureTaskAgent(ctx, &t, in.AgentID)
-	u.ensureTaskEmployee(ctx, &t, in.EmployeeID)
+	u.ensureTaskEmployee(ctx, &t, in.VirployeeID)
 
 	// Workspace operativo: si el caller no lo reenvía en este turno, reusamos
 	// el último persistido en task.context_json; si lo reenvía, lo stasheamos
@@ -198,18 +198,18 @@ func (u *Usecases) Chat(ctx context.Context, in ChatInput) (ChatResult, error) {
 				TaskID:         &taskID,
 				ProductSurface: in.ProductSurface,
 				TenantID:       in.TenantID,
-				EmployeeID:     in.EmployeeID,
+				VirployeeID:    in.VirployeeID,
 				AgentID:        in.AgentID,
 			})
 			if runErr != nil {
 				slog.Error("orchestrator failed", "error", runErr)
 				return ChatResult{}, fmt.Errorf("run companion runtime: %w", runErr)
 			} else {
-				in.EmployeeID = result.EmployeeID
+				in.VirployeeID = result.VirployeeID
 				in.AgentID = result.AgentID
 				runID = result.RunID
 				toolCalls = result.ToolCalls
-				u.ensureTaskEmployee(ctx, &t, in.EmployeeID)
+				u.ensureTaskEmployee(ctx, &t, in.VirployeeID)
 				u.ensureTaskAgent(ctx, &t, in.AgentID)
 			}
 			if runErr == nil && result.Reply != "" {
@@ -234,7 +234,7 @@ func (u *Usecases) Chat(ctx context.Context, in ChatInput) (ChatResult, error) {
 		return ChatResult{}, fmt.Errorf("list chat messages: %w", err)
 	}
 
-	return ChatResult{Task: t, Messages: msgs, RunID: runID, EmployeeID: in.EmployeeID, AgentID: in.AgentID, ToolCalls: toolCalls}, nil
+	return ChatResult{Task: t, Messages: msgs, RunID: runID, VirployeeID: in.VirployeeID, AgentID: in.AgentID, ToolCalls: toolCalls}, nil
 }
 
 // ensureAgentConversation obtiene o crea la conversación durable asociada a la
@@ -281,15 +281,15 @@ func (u *Usecases) ensureTaskAgent(ctx context.Context, t *domain.Task, agentID 
 	}
 }
 
-func (u *Usecases) ensureTaskEmployee(ctx context.Context, t *domain.Task, employeeID string) {
-	employeeID = strings.TrimSpace(employeeID)
-	if employeeID == "" || extractTaskEmployeeID(t.ContextJSON) == employeeID {
+func (u *Usecases) ensureTaskEmployee(ctx context.Context, t *domain.Task, virployeeID string) {
+	virployeeID = strings.TrimSpace(virployeeID)
+	if virployeeID == "" || extractTaskVirployeeID(t.ContextJSON) == virployeeID {
 		return
 	}
-	if updated, ok := mergeTaskEmployeeID(t.ContextJSON, employeeID); ok {
+	if updated, ok := mergeTaskVirployeeID(t.ContextJSON, virployeeID); ok {
 		t.ContextJSON = updated
 		if _, err := u.repo.UpdateTask(ctx, *t); err != nil {
-			slog.Error("update task context with employee_id", "error", err, "task_id", t.ID)
+			slog.Error("update task context with virployee_id", "error", err, "task_id", t.ID)
 		}
 	}
 }
@@ -362,7 +362,7 @@ func extractTaskAgentID(raw json.RawMessage) string {
 	return strings.TrimSpace(value)
 }
 
-func extractTaskEmployeeID(raw json.RawMessage) string {
+func extractTaskVirployeeID(raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return ""
 	}
@@ -393,9 +393,9 @@ func mergeTaskAgentID(raw json.RawMessage, agentID string) (json.RawMessage, boo
 	return out, true
 }
 
-func mergeTaskEmployeeID(raw json.RawMessage, employeeID string) (json.RawMessage, bool) {
-	employeeID = strings.TrimSpace(employeeID)
-	if employeeID == "" {
+func mergeTaskVirployeeID(raw json.RawMessage, virployeeID string) (json.RawMessage, bool) {
+	virployeeID = strings.TrimSpace(virployeeID)
+	if virployeeID == "" {
 		return raw, false
 	}
 	holder := map[string]any{}
@@ -404,7 +404,7 @@ func mergeTaskEmployeeID(raw json.RawMessage, employeeID string) (json.RawMessag
 			holder = map[string]any{}
 		}
 	}
-	holder[employeeContextKey] = employeeID
+	holder[employeeContextKey] = virployeeID
 	out, err := json.Marshal(holder)
 	if err != nil {
 		return nil, false

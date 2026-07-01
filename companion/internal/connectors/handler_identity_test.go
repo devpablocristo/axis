@@ -22,11 +22,15 @@ type fakeConnectorHandlerUsecase struct {
 	saved domain.Connector
 }
 
-func (f *fakeConnectorHandlerUsecase) ListConnectors(context.Context) ([]domain.Connector, error) {
+func (f *fakeConnectorHandlerUsecase) ListConnectorsByLifecycle(context.Context, string) ([]domain.Connector, error) {
 	if f.saved.ID == uuid.Nil {
 		return nil, nil
 	}
 	return []domain.Connector{f.saved}, nil
+}
+
+func (f *fakeConnectorHandlerUsecase) ConnectorTypes() []domain.ConnectorType {
+	return []domain.ConnectorType{{Kind: "medmory", Name: "Medmory", Status: "active"}}
 }
 
 func (f *fakeConnectorHandlerUsecase) GetConnector(context.Context, uuid.UUID) (domain.Connector, error) {
@@ -37,8 +41,34 @@ func (f *fakeConnectorHandlerUsecase) SaveConnector(_ context.Context, c domain.
 	c.ID = uuid.New()
 	c.CreatedAt = time.Now().UTC()
 	c.UpdatedAt = c.CreatedAt
+	if c.Status == "" {
+		c.Status = "active"
+	}
 	f.saved = c
 	return c, nil
+}
+
+func (f *fakeConnectorHandlerUsecase) ArchiveConnector(context.Context, uuid.UUID) (domain.Connector, error) {
+	f.saved.Status = "archived"
+	return f.saved, nil
+}
+
+func (f *fakeConnectorHandlerUsecase) TrashConnector(context.Context, uuid.UUID) (domain.Connector, error) {
+	f.saved.Status = "trash"
+	return f.saved, nil
+}
+
+func (f *fakeConnectorHandlerUsecase) RestoreConnector(context.Context, uuid.UUID) (domain.Connector, error) {
+	f.saved.Status = "active"
+	return f.saved, nil
+}
+
+func (f *fakeConnectorHandlerUsecase) TestConnector(context.Context, uuid.UUID) error {
+	return nil
+}
+
+func (f *fakeConnectorHandlerUsecase) RefreshConnector(context.Context, uuid.UUID) registry.RefreshResult {
+	return registry.RefreshResult{ConnectorID: f.saved.Kind, Refreshed: true}
 }
 
 func (f *fakeConnectorHandlerUsecase) DeleteConnector(context.Context, uuid.UUID) error {
@@ -99,6 +129,55 @@ func TestHandlerSaveConnectorAllowsCrossOrgSeed(t *testing.T) {
 	}
 	if body["org_id"] != "medmory-org" {
 		t.Fatalf("expected response org medmory-org, got %v", body["org_id"])
+	}
+}
+
+func TestHandlerConnectorTypesAndLifecycle(t *testing.T) {
+	t.Parallel()
+
+	connectorID := uuid.New()
+	uc := &fakeConnectorHandlerUsecase{saved: domain.Connector{
+		ID:        connectorID,
+		OrgID:     "local-dev-org",
+		Name:      "Medmory",
+		Kind:      "medmory",
+		Enabled:   true,
+		Status:    "active",
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	}}
+	mux := http.NewServeMux()
+	NewHandler(uc).Register(mux)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/connectors/types", nil)
+	req = withConnectorPrincipal(req, []string{scopeCompanionConnectorsAdmin})
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected types 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"kind":"medmory"`) {
+		t.Fatalf("expected medmory connector type, got %s", rec.Body.String())
+	}
+
+	for _, tc := range []struct {
+		path   string
+		status string
+	}{
+		{"/v1/connectors/" + connectorID.String() + "/archive", "archived"},
+		{"/v1/connectors/" + connectorID.String() + "/trash", "trash"},
+		{"/v1/connectors/" + connectorID.String() + "/restore", "active"},
+	} {
+		req = httptest.NewRequest(http.MethodPost, tc.path, nil)
+		req = withConnectorPrincipal(req, []string{scopeCompanionConnectorsAdmin})
+		rec = httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected lifecycle 200 for %s, got %d: %s", tc.path, rec.Code, rec.Body.String())
+		}
+		if !strings.Contains(rec.Body.String(), `"status":"`+tc.status+`"`) {
+			t.Fatalf("expected status %s, got %s", tc.status, rec.Body.String())
+		}
 	}
 }
 

@@ -12,37 +12,37 @@ import (
 
 // CreateWatcherRequest es el request para crear un watcher.
 type CreateWatcherRequest struct {
-	OrgID       string          `json:"org_id"`
-	Name        string          `json:"name"`
-	WatcherType string          `json:"watcher_type"`
-	Config      json.RawMessage `json:"config"`
-	AssigneeEmployeeID string   `json:"assignee_employee_id,omitempty"`
-	Enabled     bool            `json:"enabled"`
+	OrgID               string          `json:"org_id"`
+	Name                string          `json:"name"`
+	WatcherType         string          `json:"watcher_type"`
+	Config              json.RawMessage `json:"config"`
+	AssigneeVirployeeID string          `json:"assignee_virployee_id,omitempty"`
+	Enabled             bool            `json:"enabled"`
 }
 
 // UpdateWatcherRequest es el request para actualizar un watcher.
 type UpdateWatcherRequest struct {
-	Name    *string          `json:"name,omitempty"`
-	Config  *json.RawMessage `json:"config,omitempty"`
-	AssigneeEmployeeID *string `json:"assignee_employee_id,omitempty"`
-	Enabled *bool            `json:"enabled,omitempty"`
+	Name                *string          `json:"name,omitempty"`
+	Config              *json.RawMessage `json:"config,omitempty"`
+	AssigneeVirployeeID *string          `json:"assignee_virployee_id,omitempty"`
+	Enabled             *bool            `json:"enabled,omitempty"`
 }
 
 // --- Responses ---
 
 // WatcherResponse es la representación HTTP de un watcher.
 type WatcherResponse struct {
-	ID          string          `json:"id"`
-	OrgID       string          `json:"org_id"`
-	Name        string          `json:"name"`
-	WatcherType string          `json:"watcher_type"`
-	Config      json.RawMessage `json:"config"`
-	AssigneeEmployeeID string `json:"assignee_employee_id,omitempty"`
-	Enabled     bool            `json:"enabled"`
-	LastRunAt   *string         `json:"last_run_at,omitempty"`
-	LastResult  json.RawMessage `json:"last_result,omitempty"`
-	CreatedAt   string          `json:"created_at"`
-	UpdatedAt   string          `json:"updated_at"`
+	ID                  string          `json:"id"`
+	OrgID               string          `json:"org_id"`
+	Name                string          `json:"name"`
+	WatcherType         string          `json:"watcher_type"`
+	Config              json.RawMessage `json:"config"`
+	AssigneeVirployeeID string          `json:"assignee_virployee_id,omitempty"`
+	Enabled             bool            `json:"enabled"`
+	LastRunAt           *string         `json:"last_run_at,omitempty"`
+	LastResult          json.RawMessage `json:"last_result,omitempty"`
+	CreatedAt           string          `json:"created_at"`
+	UpdatedAt           string          `json:"updated_at"`
 }
 
 // WatcherListResponse es la lista de watchers.
@@ -82,16 +82,16 @@ type RunResultResponse struct {
 // WatcherToResponse convierte un watcher de dominio a DTO.
 func WatcherToResponse(w domain.Watcher) WatcherResponse {
 	resp := WatcherResponse{
-		ID:          w.ID.String(),
-		OrgID:       w.OrgID,
-		Name:        w.Name,
-		WatcherType: string(w.WatcherType),
-		Config:      w.Config,
-		AssigneeEmployeeID: ConfigAssigneeEmployeeID(w.Config),
-		Enabled:     w.Enabled,
-		LastResult:  w.LastResult,
-		CreatedAt:   w.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
-		UpdatedAt:   w.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		ID:                  w.ID.String(),
+		OrgID:               w.OrgID,
+		Name:                w.Name,
+		WatcherType:         string(w.WatcherType),
+		Config:              w.Config,
+		AssigneeVirployeeID: ConfigAssigneeVirployeeID(w.Config),
+		Enabled:             w.Enabled,
+		LastResult:          w.LastResult,
+		CreatedAt:           w.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		UpdatedAt:           w.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
 	if w.LastRunAt != nil {
 		s := w.LastRunAt.Format("2006-01-02T15:04:05Z07:00")
@@ -100,7 +100,7 @@ func WatcherToResponse(w domain.Watcher) WatcherResponse {
 	return resp
 }
 
-func ConfigAssigneeEmployeeID(raw json.RawMessage) string {
+func ConfigAssigneeVirployeeID(raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return ""
 	}
@@ -108,22 +108,22 @@ func ConfigAssigneeEmployeeID(raw json.RawMessage) string {
 	if err := json.Unmarshal(raw, &holder); err != nil {
 		return ""
 	}
-	value, _ := holder["assignee_employee_id"].(string)
+	value, _ := holder["assignee_virployee_id"].(string)
 	return strings.TrimSpace(value)
 }
 
-func WithConfigAssigneeEmployeeID(raw json.RawMessage, employeeID string) json.RawMessage {
-	employeeID = strings.TrimSpace(employeeID)
+func WithConfigAssigneeVirployeeID(raw json.RawMessage, virployeeID string) json.RawMessage {
+	virployeeID = strings.TrimSpace(virployeeID)
 	holder := map[string]any{}
 	if len(raw) > 0 {
 		if err := json.Unmarshal(raw, &holder); err != nil {
 			holder = map[string]any{}
 		}
 	}
-	if employeeID == "" {
-		delete(holder, "assignee_employee_id")
+	if virployeeID == "" {
+		delete(holder, "assignee_virployee_id")
 	} else {
-		holder["assignee_employee_id"] = employeeID
+		holder["assignee_virployee_id"] = virployeeID
 	}
 	out, err := json.Marshal(holder)
 	if err != nil {

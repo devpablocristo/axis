@@ -12,6 +12,7 @@ type Repository interface {
 	GetJobRole(ctx context.Context, orgID, productSurface, jobRoleID string) (JobRole, error)
 	UpsertJobRole(ctx context.Context, role JobRole) (JobRole, error)
 	ArchiveJobRole(ctx context.Context, orgID, productSurface, jobRoleID, actorID string) (JobRole, error)
+	TrashJobRole(ctx context.Context, orgID, productSurface, jobRoleID, actorID string) (JobRole, error)
 	RestoreJobRole(ctx context.Context, orgID, productSurface, jobRoleID, actorID string) (JobRole, error)
 	ListVersions(ctx context.Context, orgID, productSurface, jobRoleID string, limit int) ([]Version, error)
 }
@@ -48,8 +49,8 @@ func (u *Usecases) UpsertJobRole(ctx context.Context, role JobRole) (JobRole, er
 	if err := validateJobRole(role); err != nil {
 		return JobRole{}, fmt.Errorf("%w: org_id, product_surface, name, slug, status and default_autonomy_level are required", err)
 	}
-	if role.Status == "archived" {
-		return JobRole{}, fmt.Errorf("%w: create/update cannot set archived status; use archive endpoint", ErrValidation)
+	if role.Status == "archived" || role.Status == "trash" {
+		return JobRole{}, fmt.Errorf("%w: create/update cannot set lifecycle status; use lifecycle endpoints", ErrValidation)
 	}
 	if role.JobRoleID == "" {
 		existing, err := u.repo.GetJobRole(ctx, role.OrgID, role.ProductSurface, role.Slug)
@@ -65,8 +66,8 @@ func (u *Usecases) UpsertJobRole(ctx context.Context, role JobRole) (JobRole, er
 			return JobRole{}, err
 		}
 		if err == nil {
-			if existing.Status == "archived" {
-				return JobRole{}, fmt.Errorf("%w: job role is archived; restore it before updating", ErrConflict)
+			if existing.Status == "archived" || existing.Status == "trash" {
+				return JobRole{}, fmt.Errorf("%w: job role is not active; restore it before updating", ErrConflict)
 			}
 			role.ID = existing.ID
 			role.JobRoleKey = existing.JobRoleKey
@@ -83,6 +84,16 @@ func (u *Usecases) ArchiveJobRole(ctx context.Context, orgID, productSurface, jo
 		return JobRole{}, fmt.Errorf("%w: org_id, product_surface and job_role_id are required", ErrValidation)
 	}
 	return u.repo.ArchiveJobRole(ctx, orgID, productSurface, jobRoleID, strings.TrimSpace(actorID))
+}
+
+func (u *Usecases) TrashJobRole(ctx context.Context, orgID, productSurface, jobRoleID, actorID string) (JobRole, error) {
+	orgID = strings.TrimSpace(orgID)
+	productSurface = strings.TrimSpace(productSurface)
+	jobRoleID = strings.TrimSpace(jobRoleID)
+	if orgID == "" || productSurface == "" || jobRoleID == "" {
+		return JobRole{}, fmt.Errorf("%w: org_id, product_surface and job_role_id are required", ErrValidation)
+	}
+	return u.repo.TrashJobRole(ctx, orgID, productSurface, jobRoleID, strings.TrimSpace(actorID))
 }
 
 func (u *Usecases) RestoreJobRole(ctx context.Context, orgID, productSurface, jobRoleID, actorID string) (JobRole, error) {

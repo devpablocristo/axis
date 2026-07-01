@@ -8,10 +8,10 @@ describe la implementacion actual ni exige que las tablas actuales ya coincidan.
 La regla central es:
 
 ```text
-VirtualEmployee != Agent
+Virployee != Agent
 ```
 
-`VirtualEmployee` es el trabajador digital persistente. `Agent` es un ejecutor
+`Virployee` es el trabajador digital persistente. `Agent` es un ejecutor
 tecnico cuando el runtime necesita uno.
 
 ## Mapa Conceptual Objetivo
@@ -21,11 +21,11 @@ Organization
 +-- Tenant
     +-- User
     +-- JobRole
-    +-- EmployeeProfile
+    +-- VirployeeProfile
     +-- Capability
     +-- Tool
     +-- Memory
-    +-- VirtualEmployee
+    +-- Virployee
     +-- Task
     +-- Watcher
     +-- Handoff
@@ -34,17 +34,17 @@ Organization
 Relaciones principales:
 
 ```text
-VirtualEmployee.tenant_id -> Tenant.tenant_id
-VirtualEmployee.supervisor_user_id -> User.user_id
-VirtualEmployee.job_role_id -> JobRole.job_role_id
-VirtualEmployee.profile_id -> EmployeeProfile.profile_id
-VirtualEmployee.capability_ids -> Capability.capability_id[]
-VirtualEmployee.memory_id -> Memory.memory_id | null
-Agent.employee_id -> VirtualEmployee.employee_id | null
-Task.assignee_employee_id -> VirtualEmployee.employee_id | null
-Watcher.assignee_employee_id -> VirtualEmployee.employee_id | null
-Handoff.from_employee_id -> VirtualEmployee.employee_id | null
-Handoff.to_employee_id -> VirtualEmployee.employee_id | null
+Virployee.tenant_id -> Tenant.tenant_id
+Virployee.supervisor_user_id -> User.user_id
+Virployee.job_role_id -> JobRole.job_role_id
+Virployee.profile_id -> VirployeeProfile.profile_id
+Virployee.capability_ids -> Capability.capability_id[]
+Virployee.memory_id -> Memory.memory_id | null
+Agent.virployee_id -> Virployee.virployee_id | null
+Task.assignee_virployee_id -> Virployee.virployee_id | null
+Watcher.assignee_virployee_id -> Virployee.virployee_id | null
+Handoff.from_virployee_id -> Virployee.virployee_id | null
+Handoff.to_virployee_id -> Virployee.virployee_id | null
 ```
 
 ## Entidades Fuertes
@@ -55,9 +55,9 @@ Handoff.to_employee_id -> VirtualEmployee.employee_id | null
 | `Product` | Producto/superficie conectable a Axis. | Si | Publica admin |
 | `Tenant` | Instancia de trabajo `Organization x Product`. | Si | Publica admin |
 | `User` | Humano que opera o supervisa. | Si | Publica admin |
-| `VirtualEmployee` | Trabajador digital persistente. | Si | Publica |
+| `Virployee` | Trabajador digital persistente. | Si | Publica |
 | `JobRole` | Puesto de trabajo que puede ocupar un employee. | Si | Publica admin |
-| `EmployeeProfile` | Perfil tecnico/cognitivo reusable. | Si | Admin/dev |
+| `VirployeeProfile` | Perfil tecnico/cognitivo reusable. | Si | Admin/dev |
 | `Capability` | Habilidad reusable por contrato. | Si | Admin/dev |
 | `Tool` | Funcion tecnica invocable. | Si tecnico | Interna/dev |
 | `Memory` | Contenedor de memoria persistente. | Si | Operativa/admin |
@@ -73,8 +73,8 @@ Handoff.to_employee_id -> VirtualEmployee.employee_id | null
 |---|---|---:|---|
 | `Responsibility` | `JobRole` | No | `title`, `description`, `expected_outcome`, `priority` |
 | `SuccessCriterion` | `JobRole` | No | `title`, `description`, `target_value`, `priority` |
-| `LLMConfig` | `EmployeeProfile` | No | `provider`, `model`, `temperature`, `max_tokens` |
-| `MemoryPolicy` | `EmployeeProfile`, `Memory` | No | booleans y `retention_days` |
+| `LLMConfig` | `VirployeeProfile` | No | `provider`, `model`, `temperature`, `max_tokens` |
+| `MemoryPolicy` | `VirployeeProfile`, `Memory` | No | booleans y `retention_days` |
 
 ## Enums Compartidos
 
@@ -83,9 +83,9 @@ OrganizationStatus: active, suspended, archived
 ProductStatus: active, disabled, archived
 TenantStatus: active, suspended, archived
 UserStatus: invited, active, disabled, archived
-EmployeeStatus: draft, active, disabled, suspended, archived, trashed, error
+VirployeeStatus: draft, active, disabled, suspended, archived, trashed, error
 AutonomyLevel: A0, A1, A2, A3, A4, A5
-JobRoleStatus: active, archived
+JobRoleStatus: active, archived, trash
 ProfileStatus: draft, active, archived
 CapabilityStatus: draft, active, deprecated, blocked
 ToolStatus: active, disabled, deprecated
@@ -102,11 +102,11 @@ WatcherTriggerKind: schedule, event, capability
 
 ## Reglas De Diseño
 
-- `VirtualEmployee` no contiene datos duplicados de entidades fuertes.
+- `Virployee` no contiene datos duplicados de entidades fuertes.
 - Toda entidad fuerte se referencia por UUID.
 - Keys humanas viven como `*_key` o `slug`, nunca como `*_id` objetivo.
-- `Agent` no es alias de `VirtualEmployee`.
-- `Tool` no compone `VirtualEmployee` directamente; el employee usa
+- `Agent` no es alias de `Virployee`.
+- `Tool` no compone `Virployee` directamente; el employee usa
   `Capability`.
 - Audit e historial viven fuera del core de cada entidad.
 - Campos flexibles deben convertirse en value objects documentados.
@@ -115,8 +115,8 @@ WatcherTriggerKind: schedule, event, capability
 
 | Concepto actual | Problema | Modelo objetivo |
 |---|---|---|
-| `companion_agents` | Storage tecnico de Agent con campos historicos de runtime. | `Agent` tecnico separado de `VirtualEmployee`. |
-| `agent_profiles` | Nombre publico habla de Agent, no Employee. | `EmployeeProfile` publico; `AgentProfile` queda implementacion actual. |
+| `companion_agents` | Storage tecnico de Agent con campos historicos de runtime. | `Agent` tecnico separado de `Virployee`. |
+| `agent_profiles` | Nombre publico habla de Agent, no Employee. | `VirployeeProfile` publico; `AgentProfile` queda implementacion actual. |
 | `capability_id` text | Es una key semantica, no un ID fuerte. | `capability_id` UUID y `capability_key` string. |
 | `job_role_id` text | Es ID textual/slug operativo. | `job_role_id` UUID y `slug` string. |
 | `memory_scope_id` | Es scope tecnico, no memoria del employee. | `memory_id` UUID hacia `Memory`. |

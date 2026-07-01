@@ -50,7 +50,7 @@ type Profile struct {
 	UpdatedAt           time.Time      `json:"updated_at,omitempty"`
 }
 
-type EmployeeProfile struct {
+type VirployeeProfile struct {
 	ID                   uuid.UUID      `json:"id,omitempty"`
 	ProfileID            string         `json:"profile_id"`
 	ProfileKey           string         `json:"profile_key"`
@@ -95,12 +95,12 @@ type Version struct {
 	SavedAt             time.Time      `json:"saved_at,omitempty"`
 }
 
-func employeeProfileFromProfile(profile Profile) EmployeeProfile {
+func virployeeProfileFromProfile(profile Profile) VirployeeProfile {
 	profileID := profile.ProfileID
 	if profile.ID != uuid.Nil {
 		profileID = profile.ID.String()
 	}
-	return EmployeeProfile{
+	return VirployeeProfile{
 		ID:                  profile.ID,
 		ProfileID:           profileID,
 		ProfileKey:          profile.ProfileID,
@@ -114,7 +114,7 @@ func employeeProfileFromProfile(profile Profile) EmployeeProfile {
 		AllowedTools:        profile.AllowedTools,
 		MemoryPolicy:        profile.MemoryPolicy,
 		LLMConfig:           profile.LLMConfig,
-		Status:              employeeProfileStatus(profile),
+		Status:              virployeeProfileStatus(profile),
 		Enabled:             profile.Enabled,
 		ArchivedAt:          profile.ArchivedAt,
 		TrashedAt:           profile.TrashedAt,
@@ -123,7 +123,7 @@ func employeeProfileFromProfile(profile Profile) EmployeeProfile {
 	}
 }
 
-func employeeProfileStatus(profile Profile) string {
+func virployeeProfileStatus(profile Profile) string {
 	if profile.TrashedAt != nil {
 		return "trashed"
 	}

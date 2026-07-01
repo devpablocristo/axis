@@ -26,10 +26,10 @@ type fakeAgentResolver struct {
 	err     error
 }
 
-type fakeEmployeeResolver struct {
-	resolve  func(context.Context, string, string, string, string) (RuntimeEmployeeConfig, error)
-	employee RuntimeEmployeeConfig
-	err      error
+type fakeVirployeeResolver struct {
+	resolve   func(context.Context, string, string, string, string) (RuntimeVirployeeConfig, error)
+	virployee RuntimeVirployeeConfig
+	err       error
 }
 
 func (f fakeAgentResolver) ResolveRuntimeAgent(ctx context.Context, orgID, productSurface, agentID string) (RuntimeAgentConfig, error) {
@@ -42,14 +42,14 @@ func (f fakeAgentResolver) ResolveRuntimeAgent(ctx context.Context, orgID, produ
 	return f.agent, nil
 }
 
-func (f fakeEmployeeResolver) ResolveRuntimeEmployee(ctx context.Context, tenantID, orgID, productSurface, employeeID string) (RuntimeEmployeeConfig, error) {
+func (f fakeVirployeeResolver) ResolveRuntimeVirployee(ctx context.Context, tenantID, orgID, productSurface, virployeeID string) (RuntimeVirployeeConfig, error) {
 	if f.resolve != nil {
-		return f.resolve(ctx, tenantID, orgID, productSurface, employeeID)
+		return f.resolve(ctx, tenantID, orgID, productSurface, virployeeID)
 	}
 	if f.err != nil {
-		return RuntimeEmployeeConfig{}, f.err
+		return RuntimeVirployeeConfig{}, f.err
 	}
-	return f.employee, nil
+	return f.virployee, nil
 }
 
 func (f *fakeRuntimeControls) GetRuntimePolicy(_ context.Context, orgID string) (TenantRuntimePolicy, error) {

@@ -9,7 +9,7 @@ PermissionBundle ni permisos reales.
 
 Definicion: puesto de trabajo dentro de un tenant.
 
-Utilidad: define la funcion que puede ocupar un `VirtualEmployee`.
+Utilidad: define la funcion que puede ocupar un `Virployee`.
 
 No representa: permisos reales, perfil tecnico, employee concreto ni agente.
 
@@ -38,7 +38,7 @@ JobRole
 Enums:
 
 ```text
-JobRoleStatus: active, archived
+JobRoleStatus: active, archived, trash
 AutonomyLevel: A0, A1, A2, A3, A4, A5
 ```
 
@@ -47,7 +47,7 @@ Relaciones:
 ```text
 JobRole.tenant_id -> Tenant.tenant_id
 JobRole.recommended_capability_ids -> Capability.capability_id[]
-VirtualEmployee.job_role_id -> JobRole.job_role_id
+Virployee.job_role_id -> JobRole.job_role_id
 ```
 
 Estado actual: existe `companion_job_roles` con `id uuid`,
@@ -131,4 +131,3 @@ evaluacion o UI rica.
 | `recommended_capabilities text[]` | Referencia keys, no capabilities fuertes. | `recommended_capability_ids UUID[]`. |
 | `default_permission_bundle_id` | Puede parecer permiso real. | Fuera del core de JobRole v1 o documentado en specs de permisos. |
 | `metadata_json` | Campo generico sin forma de dominio. | Value objects explicitos o eliminado del core. |
-

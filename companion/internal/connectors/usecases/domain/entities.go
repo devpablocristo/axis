@@ -15,9 +15,38 @@ type Connector struct {
 	Name       string
 	Kind       string // pymes, whatsapp, slack, email, calendar, mock
 	Enabled    bool
+	Status     string
 	ConfigJSON json.RawMessage // credenciales/config (sin secretos en claro)
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
+	ArchivedAt *time.Time
+	TrashedAt  *time.Time
+	Version    int
+}
+
+type ConnectorConfigField struct {
+	Key          string   `json:"key"`
+	Label        string   `json:"label"`
+	Type         string   `json:"type"`
+	Required     bool     `json:"required,omitempty"`
+	Secret       bool     `json:"secret,omitempty"`
+	DefaultValue string   `json:"default_value,omitempty"`
+	Options      []string `json:"options,omitempty"`
+}
+
+type ConnectorConfigSchema struct {
+	Fields []ConnectorConfigField `json:"fields"`
+}
+
+type ConnectorType struct {
+	Kind             string                `json:"kind"`
+	Name             string                `json:"name"`
+	Description      string                `json:"description"`
+	ConfigSchema     ConnectorConfigSchema `json:"config_schema"`
+	SupportsTest     bool                  `json:"supports_test"`
+	SupportsRefresh  bool                  `json:"supports_refresh"`
+	Status           string                `json:"status"`
+	CapabilitySource string                `json:"capability_source,omitempty"`
 }
 
 // Capability capacidad que ofrece un conector.

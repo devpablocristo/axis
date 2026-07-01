@@ -1,12 +1,12 @@
 # Job Roles
 
 Ver tambien `domain-model.md` para el mapa rector del dominio de Companion y
-la separacion entre JobRole, IAM Role, EmployeeProfile y PermissionBundle.
+la separacion entre JobRole, IAM Role, VirployeeProfile y PermissionBundle.
 El modelo objetivo detallado esta en
 `../specs/companion/domain/job-roles-domain-spec.md`.
 
 Un `JobRole` es un puesto de trabajo dentro de una customer org y un product
-surface. Define que funcion debe cumplir un Virtual Employee.
+surface. Define que funcion debe cumplir un Virployee.
 
 En Axis:
 
@@ -16,7 +16,7 @@ tenant = org_id + product_surface
 
 ## Concepto
 
-`JobRole` representa el puesto. `VirtualEmployee` representa el trabajador
+`JobRole` representa el puesto. `Virployee` representa el trabajador
 digital que ocupa ese puesto. `Agent` queda como ejecutor tecnico de runtime,
 no como puesto ni perfil laboral.
 
@@ -36,7 +36,6 @@ Campos principales:
 - `product_surface`
 - `name`
 - `slug`
-- `description`
 - `mission`
 - `responsibilities`
 - `recommended_capabilities`
@@ -71,6 +70,7 @@ GET  /v1/job-roles
 GET  /v1/job-roles/{job_role_id}
 PUT  /v1/job-roles/{job_role_id}
 POST /v1/job-roles/{job_role_id}/archive
+POST /v1/job-roles/{job_role_id}/trash
 POST /v1/job-roles/{job_role_id}/restore
 GET  /v1/job-roles/{job_role_id}/versions
 ```
@@ -82,31 +82,33 @@ GET  /api/job-roles
 GET  /api/job-roles/{job_role_id}
 PUT  /api/job-roles/{job_role_id}
 POST /api/job-roles/{job_role_id}/archive
+POST /api/job-roles/{job_role_id}/trash
 POST /api/job-roles/{job_role_id}/restore
 GET  /api/job-roles/{job_role_id}/versions
 ```
 
-No hay delete fisico en v1. El lifecycle soportado es `active` y `archived`.
+No hay delete fisico en v1. El lifecycle estandar soportado es `active`,
+`archived` y `trash`.
 
-## Relacion Con Virtual Employees
+## Relacion Con Virployees
 
-En v1, un Virtual Employee referencia un JobRole mediante:
+En v1, un Virployee referencia un JobRole mediante:
 
 ```text
 job_role_id
 ```
 
-La relacion pertenece al core de `VirtualEmployee`. No autoriza permisos ni
+La relacion pertenece al core de `Virployee`. No autoriza permisos ni
 cambia Runtime.
 
-Al crear o editar un Virtual Employee, Console puede usar el JobRole para
+Al crear o editar un Virployee, Console puede usar el JobRole para
 prellenar defaults seguros como puesto, mision, responsabilidades,
 capabilities recomendadas y autonomia. Esos valores siguen siendo editables.
 
 ## Defaults No Son Permisos
 
-`recommended_capabilities` son recomendaciones para configurar el Virtual
-Employee. No habilitan capabilities por si solas.
+`recommended_capabilities` son recomendaciones para configurar el Virployee. No
+habilitan capabilities por si solas.
 
 `default_permission_bundle_id` es una referencia informativa/default. No otorga
 permisos, no reemplaza IAM Role y no toma decisiones de autorizacion.

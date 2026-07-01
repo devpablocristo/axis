@@ -1,15 +1,15 @@
-# Employee Profiles Domain Spec
+# Virployee Profiles Domain Spec
 
 ## Proposito
 
-Este spec define `EmployeeProfile` como perfil tecnico/cognitivo reusable para
-Virtual Employees.
+Este spec define `VirployeeProfile` como perfil tecnico/cognitivo reusable para
+Virployees.
 
 Nombre actual en el repo: `AgentProfile`.
 
-Nombre objetivo publico: `EmployeeProfile`.
+Nombre objetivo publico: `VirployeeProfile`.
 
-## EmployeeProfile
+## VirployeeProfile
 
 Definicion: plantilla tecnica de comportamiento para un employee.
 
@@ -27,7 +27,7 @@ Audiencia: admin/dev avanzado.
 Modelo objetivo:
 
 ```text
-EmployeeProfile
+VirployeeProfile
 - profile_id: UUID
 - profile_key: string
 - name: string
@@ -49,9 +49,9 @@ ProfileStatus: draft, active, archived
 Relaciones:
 
 ```text
-VirtualEmployee.profile_id -> EmployeeProfile.profile_id
-EmployeeProfile.default_capability_ids -> Capability.capability_id[]
-Agent.profile_id -> EmployeeProfile.profile_id
+Virployee.profile_id -> VirployeeProfile.profile_id
+VirployeeProfile.default_capability_ids -> Capability.capability_id[]
+Agent.profile_id -> VirployeeProfile.profile_id
 ```
 
 Estado actual: existe `agent_profiles` con `id uuid`, `profile_id text`,
@@ -129,7 +129,7 @@ Brecha: documentar y validar la forma.
 
 | Concepto actual | Problema | Modelo objetivo |
 |---|---|---|
-| `AgentProfile` | Nombre arrastra Agent al dominio publico. | `EmployeeProfile`. |
+| `AgentProfile` | Nombre arrastra Agent al dominio publico. | `VirployeeProfile`. |
 | `profile_id text` | Es key semantica. | `profile_id UUID`; `profile_key string`. |
 | `allowed_tools` | Expone tools directo en perfil publico. | Preferir `default_capability_ids`. |
 | `allowed_capabilities text[]` | Referencia keys textuales. | `default_capability_ids UUID[]`. |

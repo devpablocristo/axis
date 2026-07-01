@@ -10,18 +10,18 @@ digital.
 Ver tambien los specs objetivo en `../specs/companion/domain/`:
 
 - `workforce-domain-spec.md`: mapa rector de Workforce.
-- `virtual-employees-domain-spec.md`: modelo objetivo de `VirtualEmployee`.
+- `virployees-domain-spec.md`: modelo objetivo de `Virployee`.
 - `identity-and-tenancy-domain-spec.md`: `Organization`, `Product`, `Tenant`
   y `User`.
 - `job-roles-domain-spec.md`: `JobRole`, `Responsibility` y criterios.
-- `employee-profiles-domain-spec.md`: modelo publico objetivo de perfiles.
+- `virployee-profiles-domain-spec.md`: modelo publico objetivo de perfiles.
 - `capabilities-and-tools-domain-spec.md`: separacion `Capability` vs `Tool`.
 - `memory-domain-spec.md`: `Memory` vs `MemoryEntry`.
 - `agents-domain-spec.md`: `Agent` como ejecutor tecnico separado.
 - `work-domain-spec.md`: `Task`, `Watcher` y `Handoff`.
 - `audit-domain-spec.md`: historial fuera del core.
 
-No todo debe ser Virtual Employee. No todo debe ser Agent. Cada entidad existe
+No todo debe ser Virployee. No todo debe ser Agent. Cada entidad existe
 solo si resuelve un problema distinto.
 
 ## Principio Rector Del Dominio
@@ -30,9 +30,9 @@ Regla conceptual:
 
 ```text
 JobRole define que funcion existe.
-VirtualEmployee ocupa esa funcion.
+Virployee ocupa esa funcion.
 Agent ejecuta tecnicamente.
-EmployeeProfile configura como ejecuta.
+VirployeeProfile configura como ejecuta.
 Capability define que sabe hacer.
 Tool ejecuta una funcion concreta.
 Task es el trabajo.
@@ -58,7 +58,7 @@ sin conocer detalles del runtime.
 - `Tenant / Workspace`
 - `Product`
 - `ProductInstallation`
-- `VirtualEmployee`
+- `Virployee`
 - `JobRole`
 - `Responsibility`
 - `Task`
@@ -71,7 +71,7 @@ sin conocer detalles del runtime.
 Son conceptos visibles para admins, operadores o developers avanzados porque
 configuran, gobiernan o explican la operacion.
 
-- `EmployeeProfile`
+- `VirployeeProfile`
 - `Capability`
 - `Connector`
 - `AssistPack`
@@ -85,7 +85,7 @@ configuran, gobiernan o explican la operacion.
 
 ### Entidades Tecnicas Internas
 
-Son piezas de implementacion. Pueden aparecer en logs, APIs legacy o tooling,
+Son piezas de implementacion. Pueden aparecer en logs, APIs compatibilidad tecnica o tooling,
 pero no deberian ser el lenguaje principal del usuario final.
 
 - `Agent`
@@ -107,11 +107,11 @@ pero no deberian ser el lenguaje principal del usuario final.
 | Tenant / Workspace | Contexto `org_id + product_surface` | Define donde trabaja la IA | Axis/BFF/Companion | Si | Publica admin | Existe como `axis_tenants`; nombre tenant es historico |
 | Product | Superficie o producto conectado | Declara una integracion de dominio | Companion | Si | Admin/dev | Existe |
 | ProductInstallation | Instalacion de Product en Organization | Configura conexion org-producto | Companion | Si | Admin/dev | Existe |
-| VirtualEmployee | Trabajador digital persistente dentro de un tenant | Recurso principal que recibe trabajo | Companion | Si | Publica | Existe como wrapper v1 sobre Agent |
+| Virployee | Trabajador digital persistente dentro de un tenant | Recurso principal que recibe trabajo | Companion | Si | Publica | Existe como wrapper v1 sobre Agent |
 | JobRole | Puesto de trabajo dentro de un tenant | Define mision, responsabilidades y defaults | Companion | Si | Publica admin | Existe |
 | Responsibility | Obligacion estable de un JobRole | Explica deberes esperados | Embebida en JobRole | No v1 | Publica dentro de JobRole | Existe embebida |
-| Agent | Unidad tecnica de ejecucion IA | Identidad runtime, autonomia, estado y compatibilidad | Companion | Si tecnico | Interna/legacy | Existe en modulo tecnico de agents |
-| EmployeeProfile | Plantilla tecnica de comportamiento | Prompt, modelo, limites y allowlists | Companion | Si | Admin/dev avanzado | Existe |
+| Agent | Unidad tecnica de ejecucion IA | Identidad runtime, autonomia, estado y compatibilidad | Companion | Si tecnico | Interna/compatibilidad tecnica | Existe en modulo tecnico de agents |
+| VirployeeProfile | Plantilla tecnica de comportamiento | Prompt, modelo, limites y allowlists | Companion | Si | Admin/dev avanzado | Existe |
 | Capability | Habilidad reusable declarada por contrato | Describe que puede hacerse | Companion | Si | Admin/dev avanzado | Existe |
 | Tool | Funcion tecnica invocable | Ejecuta una operacion concreta | Runtime/MCP/Connector | No como negocio | Interna/dev | Existe |
 | Connector | Adaptador a producto o sistema externo | Ejecuta capabilities contra sistemas reales | Companion | Si tecnico | Admin/dev | Existe |
@@ -177,7 +177,7 @@ conexion, estado y configuracion por org. No es el producto global.
 
 Ejemplo: Pymes instalado para `acme`.
 
-### VirtualEmployee
+### Virployee
 
 Trabajador digital persistente dentro de un tenant. Tiene identidad, ocupa un
 JobRole, recibe trabajo y usa recursos disponibles para cumplir una funcion.
@@ -212,7 +212,7 @@ No debe ser el lenguaje principal de producto para usuarios finales.
 
 Ejemplo: row interno en `companion_agents`.
 
-### EmployeeProfile
+### VirployeeProfile
 
 Plantilla tecnica de comportamiento: prompt, modelo, limites, tools y
 capabilities permitidas. No es JobRole, no es puesto de trabajo, no es perfil
@@ -312,7 +312,7 @@ Interaccion conversacional entre humano, empleado digital y sistema. Mantiene
 continuidad, mensajes y contexto. No debe reemplazar Task cuando hay trabajo
 auditable.
 
-Ejemplo: conversacion con un VirtualEmployee.
+Ejemplo: conversacion con un Virployee.
 
 ### Handoff
 
@@ -411,7 +411,7 @@ Ejemplo: token API de un producto.
 
 El usuario final deberia ver conceptos de trabajo, no maquinaria interna:
 
-- `VirtualEmployee`
+- `Virployee`
 - `JobRole`
 - `Task`
 - `Memory` relevante
@@ -422,7 +422,7 @@ El usuario final deberia ver conceptos de trabajo, no maquinaria interna:
 
 Un admin o developer avanzado puede ver configuracion y governance:
 
-- `EmployeeProfile`
+- `VirployeeProfile`
 - `Capability`
 - `Connector`
 - `RuntimePolicy`
@@ -456,9 +456,9 @@ Organization
     ├── Department / Area
     │   └── JobRole
     │       └── Responsibility[]
-    ├── VirtualEmployee
+    ├── Virployee
     │   ├── occupies JobRole
-    │   ├── uses Agent / EmployeeProfile internally
+    │   ├── uses Agent / VirployeeProfile internally
     │   ├── has Memory
     │   ├── receives Tasks
     │   └── may use Capabilities
@@ -492,7 +492,7 @@ Nexus
 - `Product / ProductInstallation`: base multi-producto.
 - `Organization / Tenant`: aislamiento y contexto de trabajo.
 - `JobRole`: puesto de trabajo separado de permisos.
-- `VirtualEmployee`: concepto publico, aunque v1 use modulo tecnico de agents.
+- `Virployee`: concepto publico, aunque v1 use modulo tecnico de agents.
 
 ## Entidades Con Nombres Confusos
 
@@ -500,7 +500,7 @@ Nexus
 - `Tenant`: historico; conceptualmente es `Workspace` o `Work Context`.
 - `Role`: palabra sobrecargada entre IAM Role, business role y JobRole.
 - `Job`: infraestructura tecnica, no puesto de trabajo.
-- `EmployeeProfile`: plantilla tecnica, no perfil laboral.
+- `VirployeeProfile`: plantilla tecnica, no perfil laboral.
 - `BusinessModel.roles`: contexto descriptivo, no JobRole operativo.
 
 ## Entidades Que Faltan
@@ -518,7 +518,7 @@ Nexus
 Por ahora no se recomienda crear:
 
 - `Responsibility` con CRUD propio.
-- tabla `virtual_employees`.
+- tabla `virployees`.
 - `Multi-agent Employee`.
 - `KPI` como entidad fuerte.
 - `Department` CRUD.
@@ -533,8 +533,8 @@ compuestos.
 
 - `JobRole` NO es `IAM Role`.
 - `Job` NO es `JobRole`.
-- `EmployeeProfile` NO es `JobRole`.
-- `Agent` NO es `VirtualEmployee`.
+- `VirployeeProfile` NO es `JobRole`.
+- `Agent` NO es `Virployee`.
 - `Tool` NO es `Capability`.
 - `Memory` NO es truth transaccional.
 - `JobRole` puede sugerir defaults, pero NO autoriza acciones.
@@ -553,8 +553,8 @@ compuestos.
 - `product_surface`: producto o superficie conectada.
 - `tenant`: termino historico; en Companion significa `org_id +
   product_surface`.
-- `VirtualEmployee`: trabajador digital persistente.
-- `JobRole`: puesto que ocupa un VirtualEmployee.
+- `Virployee`: trabajador digital persistente.
+- `JobRole`: puesto que ocupa un Virployee.
 - `Agent`: implementacion tecnica de ejecucion.
 - `Capability`: habilidad reusable.
 - `Tool`: funcion invocable.

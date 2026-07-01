@@ -35,10 +35,19 @@ func (r *PostgresRepository) SaveConnector(ctx context.Context, c domain.Connect
 		c.ConfigJSON = json.RawMessage(`{}`)
 	}
 
+	if c.Status == "" {
+		if c.Enabled {
+			c.Status = ConnectorStatusActive
+		} else {
+			c.Status = ConnectorStatusDisabled
+		}
+	}
+	c.Version = 1
+
 	_, err := r.db.Pool().Exec(ctx, `
-		INSERT INTO companion_connectors (id, org_id, name, kind, enabled, config_json, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-	`, c.ID, c.OrgID, c.Name, c.Kind, c.Enabled, c.ConfigJSON, c.CreatedAt, c.UpdatedAt)
+		INSERT INTO companion_connectors (id, org_id, name, kind, enabled, status, config_json, created_at, updated_at, version)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+	`, c.ID, c.OrgID, c.Name, c.Kind, c.Enabled, c.Status, c.ConfigJSON, c.CreatedAt, c.UpdatedAt, c.Version)
 	if err != nil {
 		return domain.Connector{}, fmt.Errorf("insert connector: %w", err)
 	}
@@ -48,7 +57,7 @@ func (r *PostgresRepository) SaveConnector(ctx context.Context, c domain.Connect
 // GetConnector obtiene un conector por ID.
 func (r *PostgresRepository) GetConnector(ctx context.Context, id uuid.UUID) (domain.Connector, error) {
 	row := r.db.Pool().QueryRow(ctx, `
-		SELECT id, org_id, name, kind, enabled, config_json, created_at, updated_at
+		SELECT id, org_id, name, kind, enabled, status, config_json, created_at, updated_at, archived_at, trashed_at, version
 		FROM companion_connectors WHERE id = $1
 	`, id)
 	c, err := scanConnector(row)
@@ -61,12 +70,26 @@ func (r *PostgresRepository) GetConnector(ctx context.Context, id uuid.UUID) (do
 	return c, nil
 }
 
-// ListConnectors lista todos los conectores.
 func (r *PostgresRepository) ListConnectors(ctx context.Context) ([]domain.Connector, error) {
-	rows, err := r.db.Pool().Query(ctx, `
-		SELECT id, org_id, name, kind, enabled, config_json, created_at, updated_at
-		FROM companion_connectors ORDER BY created_at ASC
-	`)
+	return r.ListConnectorsByLifecycle(ctx, ConnectorStatusActive)
+}
+
+// ListConnectorsByLifecycle lista todos los conectores filtrados por lifecycle.
+func (r *PostgresRepository) ListConnectorsByLifecycle(ctx context.Context, lifecycle string) ([]domain.Connector, error) {
+	query := `
+		SELECT id, org_id, name, kind, enabled, status, config_json, created_at, updated_at, archived_at, trashed_at, version
+		FROM companion_connectors`
+	switch lifecycle {
+	case ConnectorStatusArchived:
+		query += ` WHERE status = 'archived'`
+	case ConnectorStatusTrash:
+		query += ` WHERE status = 'trash'`
+	case "all":
+	default:
+		query += ` WHERE status NOT IN ('archived', 'trash')`
+	}
+	query += ` ORDER BY created_at ASC`
+	rows, err := r.db.Pool().Query(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("list connectors: %w", err)
 	}
@@ -86,18 +109,58 @@ func (r *PostgresRepository) ListConnectors(ctx context.Context) ([]domain.Conne
 // UpdateConnector actualiza un conector.
 func (r *PostgresRepository) UpdateConnector(ctx context.Context, c domain.Connector) (domain.Connector, error) {
 	c.UpdatedAt = time.Now().UTC()
-	tag, err := r.db.Pool().Exec(ctx, `
+	row := r.db.Pool().QueryRow(ctx, `
 		UPDATE companion_connectors
-		SET org_id = $2, name = $3, enabled = $4, config_json = $5, updated_at = $6
-		WHERE id = $1
-	`, c.ID, c.OrgID, c.Name, c.Enabled, c.ConfigJSON, c.UpdatedAt)
+		SET name = $2,
+		    enabled = $3,
+		    status = $4,
+		    config_json = $5,
+		    updated_at = $6,
+		    version = version + 1
+		WHERE id = $1 AND status NOT IN ('archived', 'trash')
+		RETURNING id, org_id, name, kind, enabled, status, config_json, created_at, updated_at, archived_at, trashed_at, version
+	`, c.ID, c.Name, c.Enabled, c.Status, c.ConfigJSON, c.UpdatedAt)
+	updated, err := scanConnector(row)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			if _, getErr := r.GetConnector(ctx, c.ID); getErr == nil {
+				return domain.Connector{}, ErrConflict
+			}
+			return domain.Connector{}, ErrNotFound
+		}
 		return domain.Connector{}, fmt.Errorf("update connector: %w", err)
 	}
-	if tag.RowsAffected() == 0 {
-		return domain.Connector{}, ErrNotFound
+	return updated, nil
+}
+
+func (r *PostgresRepository) SetConnectorStatus(ctx context.Context, id uuid.UUID, status string) (domain.Connector, error) {
+	current, err := r.GetConnector(ctx, id)
+	if err != nil {
+		return domain.Connector{}, err
 	}
-	return c, nil
+	if current.Status == status {
+		return current, nil
+	}
+	enabled := status == ConnectorStatusActive
+	row := r.db.Pool().QueryRow(ctx, `
+		UPDATE companion_connectors
+		SET status = $2,
+		    enabled = $3,
+		    archived_at = CASE WHEN $2 = 'archived' THEN now() WHEN $2 = 'trash' THEN archived_at ELSE NULL END,
+		    trashed_at = CASE WHEN $2 = 'trash' THEN now() ELSE NULL END,
+		    updated_at = now(),
+		    version = version + 1
+		WHERE id = $1
+		RETURNING id, org_id, name, kind, enabled, status, config_json, created_at, updated_at, archived_at, trashed_at, version
+	`, id, status, enabled)
+	updated, err := scanConnector(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.Connector{}, ErrNotFound
+		}
+		return domain.Connector{}, fmt.Errorf("set connector status: %w", err)
+	}
+	return updated, nil
 }
 
 // DeleteConnector elimina un conector.
@@ -245,7 +308,7 @@ type rowScanner interface {
 func scanConnector(row rowScanner) (domain.Connector, error) {
 	var c domain.Connector
 	var configRaw []byte
-	err := row.Scan(&c.ID, &c.OrgID, &c.Name, &c.Kind, &c.Enabled, &configRaw, &c.CreatedAt, &c.UpdatedAt)
+	err := row.Scan(&c.ID, &c.OrgID, &c.Name, &c.Kind, &c.Enabled, &c.Status, &configRaw, &c.CreatedAt, &c.UpdatedAt, &c.ArchivedAt, &c.TrashedAt, &c.Version)
 	if err != nil {
 		return domain.Connector{}, err
 	}

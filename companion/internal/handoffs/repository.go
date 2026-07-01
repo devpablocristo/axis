@@ -34,15 +34,15 @@ func (r *PostgresRepository) SetAuditRecorder(recorder commonaudit.Recorder) {
 }
 
 const handoffColumns = `
-	handoff_id, tenant_id, org_id, product_surface, task_id, from_employee_id,
-	to_employee_id, reason, status, created_by, created_at, updated_at, resolved_at`
+	handoff_id, tenant_id, org_id, product_surface, task_id, from_virployee_id,
+	to_virployee_id, reason, status, created_by, created_at, updated_at, resolved_at`
 
 func (r *PostgresRepository) List(ctx context.Context, tenantID, orgID, productSurface string, status Status, limit int) ([]Handoff, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
 	query := `SELECT ` + handoffColumns + `
-		FROM companion_employee_handoffs
+		FROM companion_virployee_handoffs
 		WHERE tenant_id = $1 AND org_id = $2 AND product_surface = $3`
 	args := []any{tenantID, strings.TrimSpace(orgID), strings.TrimSpace(productSurface)}
 	if status != "" {
@@ -53,7 +53,7 @@ func (r *PostgresRepository) List(ctx context.Context, tenantID, orgID, productS
 	query += fmt.Sprintf(" ORDER BY updated_at DESC LIMIT $%d", len(args))
 	rows, err := r.db.Pool().Query(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("list employee handoffs: %w", err)
+		return nil, fmt.Errorf("list virployee handoffs: %w", err)
 	}
 	defer rows.Close()
 	out := make([]Handoff, 0)
@@ -69,7 +69,7 @@ func (r *PostgresRepository) List(ctx context.Context, tenantID, orgID, productS
 
 func (r *PostgresRepository) Get(ctx context.Context, tenantID, orgID, productSurface, handoffID string) (Handoff, error) {
 	row := r.db.Pool().QueryRow(ctx, `SELECT `+handoffColumns+`
-		FROM companion_employee_handoffs
+		FROM companion_virployee_handoffs
 		WHERE tenant_id = $1 AND org_id = $2 AND product_surface = $3 AND handoff_id = $4
 	`, tenantID, strings.TrimSpace(orgID), strings.TrimSpace(productSurface), strings.TrimSpace(handoffID))
 	handoff, err := scanHandoff(row)
@@ -77,7 +77,7 @@ func (r *PostgresRepository) Get(ctx context.Context, tenantID, orgID, productSu
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Handoff{}, ErrNotFound
 		}
-		return Handoff{}, fmt.Errorf("get employee handoff: %w", err)
+		return Handoff{}, fmt.Errorf("get virployee handoff: %w", err)
 	}
 	return handoff, nil
 }
@@ -89,30 +89,30 @@ func (r *PostgresRepository) Create(ctx context.Context, handoff Handoff) (Hando
 	}
 	tx, err := r.db.Pool().Begin(ctx)
 	if err != nil {
-		return Handoff{}, fmt.Errorf("begin employee handoff create: %w", err)
+		return Handoff{}, fmt.Errorf("begin virployee handoff create: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	if err := r.validateEmployees(ctx, tx, handoff); err != nil {
+	if err := r.validateVirployees(ctx, tx, handoff); err != nil {
 		return Handoff{}, err
 	}
 	row := tx.QueryRow(ctx, `
-		INSERT INTO companion_employee_handoffs (
-			tenant_id, org_id, product_surface, task_id, from_employee_id,
-			to_employee_id, reason, status, created_by
+		INSERT INTO companion_virployee_handoffs (
+			tenant_id, org_id, product_surface, task_id, from_virployee_id,
+			to_virployee_id, reason, status, created_by
 		)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
 		RETURNING `+handoffColumns+`
-	`, handoff.TenantID, handoff.OrgID, handoff.ProductSurface, handoff.TaskID, handoff.FromEmployeeID,
-		handoff.ToEmployeeID, handoff.Reason, handoff.Status, handoff.CreatedBy)
+	`, handoff.TenantID, handoff.OrgID, handoff.ProductSurface, handoff.TaskID, handoff.FromVirployeeID,
+		handoff.ToVirployeeID, handoff.Reason, handoff.Status, handoff.CreatedBy)
 	created, err := scanHandoff(row)
 	if err != nil {
-		return Handoff{}, fmt.Errorf("create employee handoff: %w", err)
+		return Handoff{}, fmt.Errorf("create virployee handoff: %w", err)
 	}
 	if err := r.recordAudit(ctx, tx, created, "created"); err != nil {
 		return Handoff{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return Handoff{}, fmt.Errorf("commit employee handoff create: %w", err)
+		return Handoff{}, fmt.Errorf("commit virployee handoff create: %w", err)
 	}
 	return created, nil
 }
@@ -124,10 +124,10 @@ func (r *PostgresRepository) Update(ctx context.Context, handoff Handoff) (Hando
 	}
 	tx, err := r.db.Pool().Begin(ctx)
 	if err != nil {
-		return Handoff{}, fmt.Errorf("begin employee handoff update: %w", err)
+		return Handoff{}, fmt.Errorf("begin virployee handoff update: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	if err := r.validateEmployees(ctx, tx, handoff); err != nil {
+	if err := r.validateVirployees(ctx, tx, handoff); err != nil {
 		return Handoff{}, err
 	}
 	resolvedExpr := "resolved_at"
@@ -135,10 +135,10 @@ func (r *PostgresRepository) Update(ctx context.Context, handoff Handoff) (Hando
 		resolvedExpr = "COALESCE(resolved_at, now())"
 	}
 	row := tx.QueryRow(ctx, `
-		UPDATE companion_employee_handoffs
+		UPDATE companion_virployee_handoffs
 		SET task_id = $5,
-		    from_employee_id = $6,
-		    to_employee_id = $7,
+		    from_virployee_id = $6,
+		    to_virployee_id = $7,
 		    reason = $8,
 		    status = $9,
 		    updated_at = now(),
@@ -146,13 +146,13 @@ func (r *PostgresRepository) Update(ctx context.Context, handoff Handoff) (Hando
 		WHERE tenant_id = $1 AND org_id = $2 AND product_surface = $3 AND handoff_id = $4
 		RETURNING `+handoffColumns+`
 	`, handoff.TenantID, handoff.OrgID, handoff.ProductSurface, handoff.HandoffID, handoff.TaskID,
-		handoff.FromEmployeeID, handoff.ToEmployeeID, handoff.Reason, handoff.Status)
+		handoff.FromVirployeeID, handoff.ToVirployeeID, handoff.Reason, handoff.Status)
 	updated, err := scanHandoff(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Handoff{}, ErrNotFound
 		}
-		return Handoff{}, fmt.Errorf("update employee handoff: %w", err)
+		return Handoff{}, fmt.Errorf("update virployee handoff: %w", err)
 	}
 	if updated.Status == StatusAccepted && updated.TaskID != nil {
 		if err := assignTask(ctx, tx, updated); err != nil {
@@ -163,28 +163,28 @@ func (r *PostgresRepository) Update(ctx context.Context, handoff Handoff) (Hando
 		return Handoff{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return Handoff{}, fmt.Errorf("commit employee handoff update: %w", err)
+		return Handoff{}, fmt.Errorf("commit virployee handoff update: %w", err)
 	}
 	return updated, nil
 }
 
-func (r *PostgresRepository) validateEmployees(ctx context.Context, tx pgx.Tx, handoff Handoff) error {
-	for _, employeeID := range []*uuid.UUID{handoff.FromEmployeeID, &handoff.ToEmployeeID} {
-		if employeeID == nil || *employeeID == uuid.Nil {
+func (r *PostgresRepository) validateVirployees(ctx context.Context, tx pgx.Tx, handoff Handoff) error {
+	for _, virployeeID := range []*uuid.UUID{handoff.FromVirployeeID, &handoff.ToVirployeeID} {
+		if virployeeID == nil || *virployeeID == uuid.Nil {
 			continue
 		}
 		var ok bool
 		if err := tx.QueryRow(ctx, `
 			SELECT EXISTS (
-				SELECT 1 FROM companion_virtual_employees
+				SELECT 1 FROM companion_virployees
 				WHERE id = $1 AND tenant_id = $2 AND org_id = $3 AND product_surface = $4
 				  AND status NOT IN ('archived', 'trashed')
 			)
-		`, *employeeID, handoff.TenantID, handoff.OrgID, handoff.ProductSurface).Scan(&ok); err != nil {
-			return fmt.Errorf("validate handoff employee: %w", err)
+		`, *virployeeID, handoff.TenantID, handoff.OrgID, handoff.ProductSurface).Scan(&ok); err != nil {
+			return fmt.Errorf("validate handoff virployee: %w", err)
 		}
 		if !ok {
-			return fmt.Errorf("%w: employee does not belong to this tenant", ErrValidation)
+			return fmt.Errorf("%w: virployee does not belong to this tenant", ErrValidation)
 		}
 	}
 	return nil
@@ -194,10 +194,10 @@ func assignTask(ctx context.Context, tx pgx.Tx, handoff Handoff) error {
 	tag, err := tx.Exec(ctx, `
 		UPDATE companion_tasks
 		SET assigned_to = $1,
-		    context_json = jsonb_set(COALESCE(context_json, '{}'::jsonb), '{assignee_employee_id}', to_jsonb($1::text), true),
+		    context_json = jsonb_set(COALESCE(context_json, '{}'::jsonb), '{assignee_virployee_id}', to_jsonb($1::text), true),
 		    updated_at = now()
 		WHERE id = $2 AND org_id = $3
-	`, handoff.ToEmployeeID.String(), *handoff.TaskID, handoff.OrgID)
+	`, handoff.ToVirployeeID.String(), *handoff.TaskID, handoff.OrgID)
 	if err != nil {
 		return fmt.Errorf("assign handoff task: %w", err)
 	}
@@ -232,8 +232,8 @@ func scanHandoff(row scanner) (Handoff, error) {
 		&handoff.OrgID,
 		&handoff.ProductSurface,
 		&handoff.TaskID,
-		&handoff.FromEmployeeID,
-		&handoff.ToEmployeeID,
+		&handoff.FromVirployeeID,
+		&handoff.ToVirployeeID,
 		&handoff.Reason,
 		&handoff.Status,
 		&handoff.CreatedBy,

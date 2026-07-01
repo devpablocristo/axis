@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"time"
 
@@ -26,7 +27,9 @@ type Repository interface {
 	SaveConnector(ctx context.Context, c domain.Connector) (domain.Connector, error)
 	GetConnector(ctx context.Context, id uuid.UUID) (domain.Connector, error)
 	ListConnectors(ctx context.Context) ([]domain.Connector, error)
+	ListConnectorsByLifecycle(ctx context.Context, lifecycle string) ([]domain.Connector, error)
 	UpdateConnector(ctx context.Context, c domain.Connector) (domain.Connector, error)
+	SetConnectorStatus(ctx context.Context, id uuid.UUID, status string) (domain.Connector, error)
 	DeleteConnector(ctx context.Context, id uuid.UUID) error
 
 	SaveExecution(ctx context.Context, r domain.ExecutionResult) error
@@ -59,6 +62,13 @@ type NexusExecutionIntent struct {
 }
 
 const toolIntentSchemaVersion = "tool_intent.v1"
+
+const (
+	ConnectorStatusActive   = "active"
+	ConnectorStatusDisabled = "disabled"
+	ConnectorStatusArchived = "archived"
+	ConnectorStatusTrash    = "trash"
+)
 
 // NexusRequestMeta es el subconjunto de Nexus usado para validar grants.
 type NexusRequestMeta struct {
@@ -119,11 +129,36 @@ func (uc *Usecases) SetDynamicConnectorRegistrar(registrar func(context.Context)
 
 // ListConnectors lista conectores registrados con su estado en DB.
 func (uc *Usecases) ListConnectors(ctx context.Context) ([]domain.Connector, error) {
-	conns, err := uc.repo.ListConnectors(ctx)
+	return uc.ListConnectorsByLifecycle(ctx, ConnectorStatusActive)
+}
+
+func (uc *Usecases) ListConnectorsByLifecycle(ctx context.Context, lifecycle string) ([]domain.Connector, error) {
+	conns, err := uc.repo.ListConnectorsByLifecycle(ctx, normalizeConnectorLifecycle(lifecycle))
 	if err != nil {
 		return nil, fmt.Errorf("list connectors: %w", err)
 	}
 	return conns, nil
+}
+
+func (uc *Usecases) ConnectorTypes() []domain.ConnectorType {
+	types := make([]domain.ConnectorType, 0, len(uc.registry.List())+1)
+	seen := map[string]struct{}{}
+	for _, conn := range uc.registry.List() {
+		kind := strings.TrimSpace(conn.Kind())
+		if kind == "" {
+			kind = strings.TrimSpace(conn.ID())
+		}
+		if kind == "" {
+			continue
+		}
+		seen[kind] = struct{}{}
+		types = append(types, connectorTypeFor(kind, conn))
+	}
+	if _, ok := seen["product-envelope-v1"]; !ok {
+		types = append(types, productEnvelopeConnectorType())
+	}
+	sort.Slice(types, func(i, j int) bool { return types[i].Kind < types[j].Kind })
+	return types
 }
 
 // GetConnector obtiene un conector por ID.
@@ -137,10 +172,247 @@ func (uc *Usecases) GetConnector(ctx context.Context, id uuid.UUID) (domain.Conn
 
 // SaveConnector crea o actualiza un conector.
 func (uc *Usecases) SaveConnector(ctx context.Context, c domain.Connector) (domain.Connector, error) {
+	c = normalizeConnector(c)
+	if err := uc.validateConnector(c); err != nil {
+		return domain.Connector{}, err
+	}
 	if c.ID == uuid.Nil {
 		return uc.repo.SaveConnector(ctx, c)
 	}
+	current, err := uc.repo.GetConnector(ctx, c.ID)
+	if err != nil {
+		return domain.Connector{}, err
+	}
+	if current.Status == ConnectorStatusArchived || current.Status == ConnectorStatusTrash {
+		return domain.Connector{}, fmt.Errorf("%w: connector is not editable in current status", ErrConflict)
+	}
+	c.Kind = current.Kind
+	c.OrgID = current.OrgID
 	return uc.repo.UpdateConnector(ctx, c)
+}
+
+func (uc *Usecases) validateConnector(c domain.Connector) error {
+	if strings.TrimSpace(c.Name) == "" {
+		return fmt.Errorf("%w: name is required", ErrValidation)
+	}
+	if strings.TrimSpace(c.OrgID) == "" {
+		return fmt.Errorf("%w: customer org context is required", ErrValidation)
+	}
+	if strings.TrimSpace(c.Kind) == "" {
+		return fmt.Errorf("%w: kind is required", ErrValidation)
+	}
+	if c.Status == ConnectorStatusArchived || c.Status == ConnectorStatusTrash {
+		return fmt.Errorf("%w: create/update cannot set archived or trash status", ErrValidation)
+	}
+	switch c.Status {
+	case ConnectorStatusActive, ConnectorStatusDisabled:
+	default:
+		return fmt.Errorf("%w: invalid connector status", ErrValidation)
+	}
+	if err := validateConnectorConfig(c.ConfigJSON); err != nil {
+		return err
+	}
+	if uc.connectorType(c.Kind) == nil {
+		return fmt.Errorf("%w: unknown connector kind", ErrValidation)
+	}
+	if c.Kind == "product-envelope-v1" {
+		var cfg map[string]any
+		_ = json.Unmarshal(c.ConfigJSON, &cfg)
+		if strings.TrimSpace(rawConfigString(cfg["base_url"])) == "" {
+			return fmt.Errorf("%w: base_url is required for product-envelope-v1", ErrValidation)
+		}
+		if strings.TrimSpace(rawConfigString(cfg["secret_ref"])) == "" {
+			return fmt.Errorf("%w: secret_ref is required for product-envelope-v1", ErrValidation)
+		}
+	}
+	return nil
+}
+
+func (uc *Usecases) connectorType(kind string) *domain.ConnectorType {
+	kind = strings.TrimSpace(kind)
+	for _, candidate := range uc.ConnectorTypes() {
+		if candidate.Kind == kind {
+			next := candidate
+			return &next
+		}
+	}
+	return nil
+}
+
+func normalizeConnector(c domain.Connector) domain.Connector {
+	c.OrgID = strings.TrimSpace(c.OrgID)
+	c.Name = strings.TrimSpace(c.Name)
+	c.Kind = strings.TrimSpace(c.Kind)
+	c.Status = strings.TrimSpace(strings.ToLower(c.Status))
+	if c.Status == "" {
+		if c.Enabled {
+			c.Status = ConnectorStatusActive
+		} else {
+			c.Status = ConnectorStatusDisabled
+		}
+	}
+	if c.Status == ConnectorStatusActive {
+		c.Enabled = true
+	}
+	if c.Status == ConnectorStatusDisabled || c.Status == ConnectorStatusArchived || c.Status == ConnectorStatusTrash {
+		c.Enabled = false
+	}
+	if len(c.ConfigJSON) == 0 {
+		c.ConfigJSON = json.RawMessage(`{}`)
+	}
+	return c
+}
+
+func normalizeConnectorLifecycle(value string) string {
+	switch strings.TrimSpace(strings.ToLower(value)) {
+	case ConnectorStatusArchived:
+		return ConnectorStatusArchived
+	case ConnectorStatusTrash, "trashed":
+		return ConnectorStatusTrash
+	case "all":
+		return "all"
+	default:
+		return ConnectorStatusActive
+	}
+}
+
+func connectorTypeFor(kind string, conn registry.Connector) domain.ConnectorType {
+	description := "Connector registrado en runtime."
+	if _, ok := conn.(registry.Refresher); ok {
+		description = "Connector registrado en runtime con discovery/refresh de capabilities."
+	}
+	return domain.ConnectorType{
+		Kind:             kind,
+		Name:             strings.Title(strings.ReplaceAll(kind, "-", " ")),
+		Description:      description,
+		ConfigSchema:     productEnvelopeConfigSchema(),
+		SupportsTest:     true,
+		SupportsRefresh:  supportsConnectorRefresh(conn),
+		Status:           ConnectorStatusActive,
+		CapabilitySource: "registry",
+	}
+}
+
+func productEnvelopeConnectorType() domain.ConnectorType {
+	return domain.ConnectorType{
+		Kind:             "product-envelope-v1",
+		Name:             "Product envelope v1",
+		Description:      "Connector generico para productos que publican capability manifests y ejecutan capability_execution.v1.",
+		ConfigSchema:     productEnvelopeConfigSchema(),
+		SupportsTest:     true,
+		SupportsRefresh:  true,
+		Status:           ConnectorStatusActive,
+		CapabilitySource: "product",
+	}
+}
+
+func productEnvelopeConfigSchema() domain.ConnectorConfigSchema {
+	return domain.ConnectorConfigSchema{Fields: []domain.ConnectorConfigField{
+		{Key: "base_url", Label: "Base URL", Type: "text", Required: true},
+		{Key: "secret_ref", Label: "Secret ref", Type: "text", Required: true, Secret: true},
+		{Key: "auth_type", Label: "Auth type", Type: "select", Required: true, DefaultValue: "bearer", Options: []string{"bearer", "none", "custom"}},
+		{Key: "discovery_path", Label: "Discovery path", Type: "text", DefaultValue: "/api/v1/capabilities"},
+		{Key: "execute_path", Label: "Execute path", Type: "text", DefaultValue: "/api/v1/capability-executions"},
+		{Key: "external_tenant_id", Label: "External tenant ID", Type: "text"},
+		{Key: "timeout_ms", Label: "Timeout ms", Type: "number", DefaultValue: "10000"},
+	}}
+}
+
+func supportsConnectorRefresh(conn registry.Connector) bool {
+	_, ok := conn.(registry.Refresher)
+	return ok
+}
+
+func validateConnectorConfig(raw json.RawMessage) error {
+	if len(raw) == 0 {
+		return nil
+	}
+	var cfg map[string]any
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return fmt.Errorf("%w: config must be a JSON object", ErrValidation)
+	}
+	if cfg == nil {
+		return nil
+	}
+	for key := range cfg {
+		normalized := strings.ToLower(strings.TrimSpace(key))
+		if normalized == "secret_ref" {
+			continue
+		}
+		for _, token := range []string{"password", "passwd", "secret", "token", "api_key", "apikey", "authorization", "private_key", "client_secret"} {
+			if strings.Contains(normalized, token) {
+				return fmt.Errorf("%w: config must reference secrets with secret_ref", ErrValidation)
+			}
+		}
+	}
+	return nil
+}
+
+func rawConfigString(value any) string {
+	switch typed := value.(type) {
+	case nil:
+		return ""
+	case string:
+		return typed
+	default:
+		return fmt.Sprint(typed)
+	}
+}
+
+func (uc *Usecases) ArchiveConnector(ctx context.Context, id uuid.UUID) (domain.Connector, error) {
+	return uc.repo.SetConnectorStatus(ctx, id, ConnectorStatusArchived)
+}
+
+func (uc *Usecases) TrashConnector(ctx context.Context, id uuid.UUID) (domain.Connector, error) {
+	return uc.repo.SetConnectorStatus(ctx, id, ConnectorStatusTrash)
+}
+
+func (uc *Usecases) RestoreConnector(ctx context.Context, id uuid.UUID) (domain.Connector, error) {
+	return uc.repo.SetConnectorStatus(ctx, id, ConnectorStatusActive)
+}
+
+func (uc *Usecases) RefreshConnector(ctx context.Context, id uuid.UUID) registry.RefreshResult {
+	connector, err := uc.repo.GetConnector(ctx, id)
+	if err != nil {
+		return registry.RefreshResult{ConnectorID: id.String(), Refreshed: false, Error: err.Error()}
+	}
+	if connector.Status == ConnectorStatusArchived || connector.Status == ConnectorStatusTrash || !connector.Enabled {
+		return registry.RefreshResult{ConnectorID: connector.Kind, Refreshed: false, Error: ErrDisabled.Error()}
+	}
+	registered, ok := uc.registry.Get(connector.Kind)
+	if !ok {
+		return registry.RefreshResult{ConnectorID: connector.Kind, Refreshed: false, Error: ErrNotFound.Error()}
+	}
+	refresher, ok := registered.(registry.Refresher)
+	if !ok {
+		return registry.RefreshResult{ConnectorID: connector.Kind, Refreshed: true}
+	}
+	err = refresher.Refresh(ctx)
+	result := registry.RefreshResult{ConnectorID: connector.Kind, Refreshed: err == nil}
+	if err != nil {
+		result.Error = err.Error()
+	}
+	return result
+}
+
+func (uc *Usecases) TestConnector(ctx context.Context, id uuid.UUID) error {
+	connector, err := uc.repo.GetConnector(ctx, id)
+	if err != nil {
+		return err
+	}
+	if connector.Status == ConnectorStatusArchived || connector.Status == ConnectorStatusTrash || !connector.Enabled {
+		return ErrDisabled
+	}
+	if err := validateConnectorConfig(connector.ConfigJSON); err != nil {
+		return err
+	}
+	if _, ok := uc.registry.Get(connector.Kind); ok {
+		return nil
+	}
+	if connector.Kind == "product-envelope-v1" {
+		return nil
+	}
+	return ErrNotFound
 }
 
 // DeleteConnector elimina un conector.

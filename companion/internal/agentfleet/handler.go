@@ -301,7 +301,7 @@ func agentPathID(r *http.Request) string {
 	if value := strings.TrimSpace(r.PathValue("agent_id")); value != "" {
 		return value
 	}
-	return strings.TrimSpace(r.PathValue("employee_id"))
+	return strings.TrimSpace(r.PathValue("virployee_id"))
 }
 
 func agentWriteAllowed(w http.ResponseWriter, r *http.Request) bool {

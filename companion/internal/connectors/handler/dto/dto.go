@@ -12,13 +12,18 @@ import (
 // ConnectorResponse respuesta de un conector.
 type ConnectorResponse struct {
 	ID        string          `json:"id"`
+	ConnectorID string        `json:"connector_id"`
 	OrgID     string          `json:"org_id,omitempty"`
 	Name      string          `json:"name"`
 	Kind      string          `json:"kind"`
 	Enabled   bool            `json:"enabled"`
+	Status    string          `json:"status"`
 	Config    json.RawMessage `json:"config"`
 	CreatedAt string          `json:"created_at"`
 	UpdatedAt string          `json:"updated_at"`
+	ArchivedAt string         `json:"archived_at,omitempty"`
+	TrashedAt  string         `json:"trashed_at,omitempty"`
+	Version   int             `json:"version"`
 }
 
 // ConnectorRefreshResult reporta el resultado de refresh por connector.
@@ -36,6 +41,12 @@ type ConnectorRefreshResponse struct {
 // ConnectorListResponse lista de conectores.
 type ConnectorListResponse struct {
 	Connectors []ConnectorResponse `json:"connectors"`
+	Data       []ConnectorResponse `json:"data"`
+}
+
+type ConnectorTypesResponse struct {
+	Types []domain.ConnectorType `json:"types"`
+	Data  []domain.ConnectorType `json:"data"`
 }
 
 // ExecuteRequest petición para ejecutar una operación.
@@ -98,24 +109,37 @@ type CapabilityManifestListResponse struct {
 
 // SaveConnectorRequest petición para guardar un conector.
 type SaveConnectorRequest struct {
-	Name    string          `json:"name"`
-	Kind    string          `json:"kind"`
-	Enabled bool            `json:"enabled"`
-	Config  json.RawMessage `json:"config,omitempty"`
+	Name    string           `json:"name"`
+	Kind    string           `json:"kind"`
+	Enabled *bool            `json:"enabled,omitempty"`
+	Status  string           `json:"status,omitempty"`
+	Config  json.RawMessage  `json:"config,omitempty"`
 }
 
 // ConnectorToResponse convierte entidad a DTO.
 func ConnectorToResponse(c domain.Connector) ConnectorResponse {
 	return ConnectorResponse{
-		ID:        c.ID.String(),
-		OrgID:     c.OrgID,
-		Name:      c.Name,
-		Kind:      c.Kind,
-		Enabled:   c.Enabled,
-		Config:    MaskConnectorConfig(c.ConfigJSON),
-		CreatedAt: c.CreatedAt.UTC().Format(time.RFC3339),
-		UpdatedAt: c.UpdatedAt.UTC().Format(time.RFC3339),
+		ID:          c.ID.String(),
+		ConnectorID: c.ID.String(),
+		OrgID:       c.OrgID,
+		Name:        c.Name,
+		Kind:        c.Kind,
+		Enabled:     c.Enabled,
+		Status:      c.Status,
+		Config:      MaskConnectorConfig(c.ConfigJSON),
+		CreatedAt:   c.CreatedAt.UTC().Format(time.RFC3339),
+		UpdatedAt:   c.UpdatedAt.UTC().Format(time.RFC3339),
+		ArchivedAt:  optionalTime(c.ArchivedAt),
+		TrashedAt:   optionalTime(c.TrashedAt),
+		Version:      c.Version,
 	}
+}
+
+func optionalTime(value *time.Time) string {
+	if value == nil || value.IsZero() {
+		return ""
+	}
+	return value.UTC().Format(time.RFC3339)
 }
 
 func MaskConnectorConfig(raw json.RawMessage) json.RawMessage {

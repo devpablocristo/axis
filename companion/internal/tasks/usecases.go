@@ -99,8 +99,8 @@ type OrchestratorInput struct {
 	Messages       []domain.TaskMessage
 	TaskID         *uuid.UUID // opcional: vincula el trace a una task
 	ProductSurface string     // opcional: "companion" (default) | "ponti" | "pymes" — afecta routing
-	TenantID       string     // requerido si EmployeeID resuelve un Virtual Employee
-	EmployeeID     string     // opcional: Virtual Employee persistente que toma ownership de la ejecución
+	TenantID       string     // requerido si VirployeeID resuelve un Virployee
+	VirployeeID    string     // opcional: Virployee persistente que toma ownership de la ejecución
 	AgentID        string     // opcional legacy: Agent tecnico persistente
 }
 
@@ -116,11 +116,11 @@ type OrchestratorToolCall struct {
 
 // OrchestratorResult resultado del runtime.
 type OrchestratorResult struct {
-	Reply     string
-	RunID     string
-	EmployeeID string
-	AgentID   string
-	ToolCalls []OrchestratorToolCall
+	Reply       string
+	RunID       string
+	VirployeeID string
+	AgentID     string
+	ToolCalls   []OrchestratorToolCall
 }
 
 // Usecases lógica de tareas e integración con Nexus.

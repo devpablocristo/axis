@@ -99,16 +99,16 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	t, err := h.uc.Create(r.Context(), CreateTaskInput{
-		OrgID:       identity.CustomerOrgID,
-		Title:       body.Title,
-		Goal:        body.Goal,
-		Priority:    body.Priority,
-		CreatedBy:   createdBy,
-		AssignedTo:  body.AssignedTo,
-		AssigneeEmployeeID: body.AssigneeEmployeeID,
-		Channel:     body.Channel,
-		Summary:     body.Summary,
-		ContextJSON: body.ContextJSON,
+		OrgID:               identity.CustomerOrgID,
+		Title:               body.Title,
+		Goal:                body.Goal,
+		Priority:            body.Priority,
+		CreatedBy:           createdBy,
+		AssignedTo:          body.AssignedTo,
+		AssigneeVirployeeID: body.AssigneeVirployeeID,
+		Channel:             body.Channel,
+		Summary:             body.Summary,
+		ContextJSON:         body.ContextJSON,
 	})
 	if err != nil {
 		httpjson.WriteFlatInternalError(w, err, "create task failed")
@@ -728,7 +728,7 @@ func (h *Handler) chat(w http.ResponseWriter, r *http.Request) {
 		Channel:        body.Channel,
 		ProductSurface: identity.ProductSurface,
 		TenantID:       body.TenantID,
-		EmployeeID:     body.EmployeeID,
+		VirployeeID:    body.VirployeeID,
 		AgentID:        body.AgentID,
 		Identity:       identity,
 	})

@@ -41,6 +41,8 @@ func (r *PostgresRepository) ListJobRoles(ctx context.Context, orgID, productSur
 	switch lifecycle {
 	case LifecycleArchived:
 		query += ` AND status = 'archived'`
+	case LifecycleTrash:
+		query += ` AND status = 'trash'`
 	case LifecycleAll:
 	default:
 		query += ` AND status = 'active'`
@@ -163,6 +165,10 @@ func (r *PostgresRepository) ArchiveJobRole(ctx context.Context, orgID, productS
 	return r.updateLifecycle(ctx, orgID, productSurface, jobRoleID, actorID, "archived", "archive")
 }
 
+func (r *PostgresRepository) TrashJobRole(ctx context.Context, orgID, productSurface, jobRoleID, actorID string) (JobRole, error) {
+	return r.updateLifecycle(ctx, orgID, productSurface, jobRoleID, actorID, "trash", "trash")
+}
+
 func (r *PostgresRepository) RestoreJobRole(ctx context.Context, orgID, productSurface, jobRoleID, actorID string) (JobRole, error) {
 	return r.updateLifecycle(ctx, orgID, productSurface, jobRoleID, actorID, "active", "restore")
 }
@@ -192,7 +198,11 @@ func (r *PostgresRepository) updateLifecycle(ctx context.Context, orgID, product
 	row := tx.QueryRow(ctx, `
 		UPDATE companion_job_roles
 		SET status = $4,
-		    archived_at = CASE WHEN $4 = 'archived' THEN now() ELSE NULL END,
+		    archived_at = CASE
+		        WHEN $4 = 'archived' THEN now()
+		        WHEN $4 = 'trash' THEN archived_at
+		        ELSE NULL
+		    END,
 		    updated_at = now(),
 		    version = version + 1
 		WHERE org_id = $1 AND product_surface = $2 AND `+predicate+`

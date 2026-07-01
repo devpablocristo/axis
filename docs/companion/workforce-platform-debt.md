@@ -1,6 +1,6 @@
 # Workforce, platform y deudas tecnicas
 
-Este documento fija el limite despues de separar `VirtualEmployee` de `Agent`.
+Este documento fija el limite despues de separar `Virployee` de `Agent`.
 
 El backlog operativo y la brecha contra specs viven en
 `workforce-implementation-gap.md`.
@@ -11,11 +11,11 @@ El backlog operativo y la brecha contra specs viven en
 
 No debe tener conceptos como:
 
-- `VirtualEmployee`
+- `Virployee`
 - `JobRole`
 - `Capability`
 - `Handoff`
-- `EmployeeProfile`
+- `VirployeeProfile`
 
 `platform` solo aporta primitivas reutilizables:
 
@@ -38,9 +38,9 @@ modulo este taggeado/publicado. No commitear `replace` local para esto.
 
 Resource types publicos:
 
-- `virtual_employee`
+- `virployee`
 - `job_role`
-- `employee_profile`
+- `virployee_profile`
 - `memory`
 - `task`
 - `watcher`
@@ -58,7 +58,7 @@ Esto no reemplaza Nexus evidence ni approvals.
 
 ## Handoffs publicos
 
-Los handoffs publicos son Employee -> Employee.
+Los handoffs publicos son Virployee -> Virployee.
 
 Endpoints recomendados:
 
@@ -79,9 +79,9 @@ No usan `from_agent_id` ni `to_agent_id`.
 Los handoffs tecnicos de `/v1/agents/handoffs` quedan solo para runtime tecnico
 hasta retirarlos.
 
-## EmployeeProfile
+## VirployeeProfile
 
-El nombre publico correcto es `EmployeeProfile`.
+El nombre publico correcto es `VirployeeProfile`.
 
 `AgentProfile` solo puede quedar como resto tecnico pendiente de migracion
 fisica. No debe aparecer en nuevas superficies publicas de Workforce.
@@ -89,13 +89,13 @@ fisica. No debe aparecer en nuevas superficies publicas de Workforce.
 Endpoints recomendados:
 
 ```text
-/v1/employee-profiles
-/api/employee-profiles
+/v1/virployee-profiles
+/api/virployee-profiles
 ```
 
 ## Deuda que queda
 
-- Renombrar fisicamente `agent_profiles` a `companion_employee_profiles` y
+- Renombrar fisicamente `agent_profiles` a `companion_virployee_profiles` y
   retirar el nombre viejo del codigo productivo.
 - Publicar/taggear `platform/lifecycle/go v0.3.0` y despues cambiar Axis de
   `lifecycle.ArchiveAudit` a `lifecycle.AuditEvent`.

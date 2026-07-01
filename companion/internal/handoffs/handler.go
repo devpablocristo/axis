@@ -14,11 +14,15 @@ import (
 )
 
 const (
-	scopeHandoffRead  = "companion:agents:read"
-	scopeHandoffAdmin = "companion:agents:admin"
-	scopeRuntimeAdmin = "companion:runtime:admin"
-	scopeCrossOrg     = "companion:cross_org"
-	defaultSurface    = "axis-console"
+	scopeHandoffRead        = "companion:virployees:read"
+	scopeHandoffWrite       = "companion:virployees:write"
+	scopeHandoffAdmin       = "companion:virployees:admin"
+	scopeAxisVirployeeRead  = "axis:virployees:read"
+	scopeAxisVirployeeWrite = "axis:virployees:write"
+	scopeAxisVirployeeAdmin = "axis:virployees:admin"
+	scopeRuntimeAdmin       = "companion:runtime:admin"
+	scopeCrossOrg           = "companion:cross_org"
+	defaultSurface          = "axis-console"
 )
 
 type Handler struct {
@@ -37,7 +41,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
-	tenantID, orgID, surface, _, ok := handoffRequestContext(w, r, scopeHandoffRead, scopeHandoffAdmin, scopeRuntimeAdmin, scopeCrossOrg)
+	tenantID, orgID, surface, _, ok := handoffRequestContext(w, r, scopeHandoffRead, scopeHandoffAdmin, scopeAxisVirployeeRead, scopeAxisVirployeeAdmin, scopeRuntimeAdmin, scopeCrossOrg)
 	if !ok {
 		return
 	}
@@ -59,7 +63,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
-	tenantID, orgID, surface, actorID, ok := handoffRequestContext(w, r, scopeHandoffAdmin, scopeRuntimeAdmin)
+	tenantID, orgID, surface, actorID, ok := handoffRequestContext(w, r, scopeHandoffWrite, scopeHandoffAdmin, scopeAxisVirployeeWrite, scopeAxisVirployeeAdmin, scopeRuntimeAdmin)
 	if !ok {
 		return
 	}
@@ -81,7 +85,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
-	tenantID, orgID, surface, _, ok := handoffRequestContext(w, r, scopeHandoffRead, scopeHandoffAdmin, scopeRuntimeAdmin, scopeCrossOrg)
+	tenantID, orgID, surface, _, ok := handoffRequestContext(w, r, scopeHandoffRead, scopeHandoffAdmin, scopeAxisVirployeeRead, scopeAxisVirployeeAdmin, scopeRuntimeAdmin, scopeCrossOrg)
 	if !ok {
 		return
 	}
@@ -94,7 +98,7 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
-	tenantID, orgID, surface, actorID, ok := handoffRequestContext(w, r, scopeHandoffAdmin, scopeRuntimeAdmin)
+	tenantID, orgID, surface, actorID, ok := handoffRequestContext(w, r, scopeHandoffWrite, scopeHandoffAdmin, scopeAxisVirployeeWrite, scopeAxisVirployeeAdmin, scopeRuntimeAdmin)
 	if !ok {
 		return
 	}

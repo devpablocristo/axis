@@ -54,7 +54,7 @@ func (s *server) auditEventsAPI(w http.ResponseWriter, r *http.Request) {
 		writeAppContextError(w, err)
 		return
 	}
-	readScopes := []string{"axis:virtual_employees:read", "axis:virtual_employees:admin", "axis:agents:read", "axis:agents:admin", "companion:audit:read", "companion:runtime:admin"}
+	readScopes := []string{"axis:virployees:read", "axis:virployees:admin", "companion:virployees:read", "companion:virployees:admin", "companion:audit:read", "companion:runtime:admin"}
 	if !requireScope(w, authn.Principal{Scopes: scopes}, readScopes...) {
 		return
 	}
@@ -98,8 +98,8 @@ func (s *server) forwardCompanionRequest(w http.ResponseWriter, r *http.Request,
 }
 
 func handoffRoute(method string, parts []string) (string, string, []string, bool) {
-	readScopes := []string{"axis:virtual_employees:read", "axis:virtual_employees:admin", "axis:agents:read", "axis:agents:admin"}
-	writeScopes := []string{"axis:virtual_employees:write", "axis:virtual_employees:admin", "axis:agents:write", "axis:agents:admin"}
+	readScopes := []string{"axis:virployees:read", "axis:virployees:admin", "companion:virployees:read", "companion:virployees:admin"}
+	writeScopes := []string{"axis:virployees:write", "axis:virployees:admin", "companion:virployees:write", "companion:virployees:admin"}
 	if len(parts) == 0 {
 		switch method {
 		case http.MethodGet:

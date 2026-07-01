@@ -61,18 +61,18 @@ func TestOrchestrator_LoadsAgentProfilePrompt(t *testing.T) {
 	}
 }
 
-func TestOrchestrator_LoadsVirtualEmployeeProfilePrompt(t *testing.T) {
+func TestOrchestrator_LoadsVirployeeProfilePrompt(t *testing.T) {
 	t.Parallel()
 
 	provider := &fakeLLMProvider{responses: []ChatResponse{{Text: "ok"}}}
 	orch := NewOrchestrator(provider, &ToolKit{Handlers: map[string]ToolHandler{}}, ContextPorts{})
-	orch.SetEmployeeResolver(fakeEmployeeResolver{employee: RuntimeEmployeeConfig{
-		EmployeeID: "11111111-1111-4111-8111-111111111111",
-		TenantID:   "22222222-2222-4222-8222-222222222222",
-		Name:       "Billing Employee",
-		Status:     "active",
-		ProfileID:  "axis.ops.billing.v1",
-		Autonomy:   AutonomyA2,
+	orch.SetVirployeeResolver(fakeVirployeeResolver{virployee: RuntimeVirployeeConfig{
+		VirployeeID: "11111111-1111-4111-8111-111111111111",
+		TenantID:    "22222222-2222-4222-8222-222222222222",
+		Name:        "Billing Virployee",
+		Status:      "active",
+		ProfileID:   "axis.ops.billing.v1",
+		Autonomy:    AutonomyA2,
 	}})
 	orch.SetAgentProfileResolver(fakeAgentProfileResolver{profile: RuntimeAgentProfileConfig{
 		ProfileID:    "axis.ops.billing.v1",
@@ -84,11 +84,11 @@ func TestOrchestrator_LoadsVirtualEmployeeProfilePrompt(t *testing.T) {
 	}})
 
 	result, err := orch.Run(context.Background(), RunInput{
-		UserID:     "user-1",
-		OrgID:      "org-1",
-		TenantID:   "22222222-2222-4222-8222-222222222222",
-		EmployeeID: "11111111-1111-4111-8111-111111111111",
-		Message:    "explica cuotas",
+		UserID:      "user-1",
+		OrgID:       "org-1",
+		TenantID:    "22222222-2222-4222-8222-222222222222",
+		VirployeeID: "11111111-1111-4111-8111-111111111111",
+		Message:     "explica cuotas",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -96,36 +96,36 @@ func TestOrchestrator_LoadsVirtualEmployeeProfilePrompt(t *testing.T) {
 	if provider.callCount != 1 {
 		t.Fatalf("expected provider call, got %d", provider.callCount)
 	}
-	if result.Trace.IdentityChain.EmployeeID != "11111111-1111-4111-8111-111111111111" {
-		t.Fatalf("expected employee identity, got %+v", result.Trace.IdentityChain)
+	if result.Trace.IdentityChain.VirployeeID != "11111111-1111-4111-8111-111111111111" {
+		t.Fatalf("expected virployee identity, got %+v", result.Trace.IdentityChain)
 	}
 	if result.Trace.IdentityChain.AgentID != "" {
-		t.Fatalf("expected no agent identity for employee run, got %+v", result.Trace.IdentityChain)
+		t.Fatalf("expected no agent identity for virployee run, got %+v", result.Trace.IdentityChain)
 	}
 	if result.Trace.AutonomyLevel != AutonomyA1 {
 		t.Fatalf("expected profile to cap autonomy to A1, got %s", result.Trace.AutonomyLevel)
 	}
 }
 
-func TestOrchestrator_RejectsDisabledVirtualEmployeeBeforeProvider(t *testing.T) {
+func TestOrchestrator_RejectsDisabledVirployeeBeforeProvider(t *testing.T) {
 	t.Parallel()
 
 	provider := &fakeLLMProvider{responses: []ChatResponse{{Text: "should not run"}}}
 	orch := NewOrchestrator(provider, &ToolKit{Handlers: map[string]ToolHandler{}}, ContextPorts{})
-	orch.SetEmployeeResolver(fakeEmployeeResolver{employee: RuntimeEmployeeConfig{
-		EmployeeID: "11111111-1111-4111-8111-111111111111",
-		TenantID:   "22222222-2222-4222-8222-222222222222",
-		Status:     "disabled",
-		ProfileID:  "axis.ops.billing.v1",
-		Autonomy:   AutonomyA2,
+	orch.SetVirployeeResolver(fakeVirployeeResolver{virployee: RuntimeVirployeeConfig{
+		VirployeeID: "11111111-1111-4111-8111-111111111111",
+		TenantID:    "22222222-2222-4222-8222-222222222222",
+		Status:      "disabled",
+		ProfileID:   "axis.ops.billing.v1",
+		Autonomy:    AutonomyA2,
 	}})
 
 	result, err := orch.Run(context.Background(), RunInput{
-		UserID:     "user-1",
-		OrgID:      "org-1",
-		TenantID:   "22222222-2222-4222-8222-222222222222",
-		EmployeeID: "11111111-1111-4111-8111-111111111111",
-		Message:    "hola",
+		UserID:      "user-1",
+		OrgID:       "org-1",
+		TenantID:    "22222222-2222-4222-8222-222222222222",
+		VirployeeID: "11111111-1111-4111-8111-111111111111",
+		Message:     "hola",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -133,8 +133,8 @@ func TestOrchestrator_RejectsDisabledVirtualEmployeeBeforeProvider(t *testing.T)
 	if provider.callCount != 0 {
 		t.Fatalf("expected provider not called, got %d", provider.callCount)
 	}
-	if len(result.Trace.GuardrailEvents) != 1 || result.Trace.GuardrailEvents[0].Type != "virtual_employee" {
-		t.Fatalf("expected virtual employee guardrail, got %+v", result.Trace.GuardrailEvents)
+	if len(result.Trace.GuardrailEvents) != 1 || result.Trace.GuardrailEvents[0].Type != "virployee" {
+		t.Fatalf("expected virployee guardrail, got %+v", result.Trace.GuardrailEvents)
 	}
 }
 

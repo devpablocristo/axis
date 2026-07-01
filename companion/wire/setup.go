@@ -38,7 +38,7 @@ import (
 	"github.com/devpablocristo/companion/internal/secrets"
 	"github.com/devpablocristo/companion/internal/securityevals"
 	"github.com/devpablocristo/companion/internal/tasks"
-	"github.com/devpablocristo/companion/internal/virtualemployees"
+	"github.com/devpablocristo/companion/internal/virployees"
 	"github.com/devpablocristo/companion/internal/watchers"
 	"github.com/devpablocristo/companion/internal/watchers/pymesclient"
 	"github.com/devpablocristo/platform/authn/go/internaljwt"
@@ -70,8 +70,8 @@ type agentRuntimeResolver struct {
 	uc *agentfleet.Usecases
 }
 
-type employeeRuntimeResolver struct {
-	uc *virtualemployees.Usecases
+type virployeeRuntimeResolver struct {
+	uc *virployees.Usecases
 }
 
 type agentProfileRuntimeResolver struct {
@@ -211,28 +211,28 @@ func (r agentRuntimeResolver) ResolveRuntimeAgent(ctx context.Context, orgID, pr
 	}, nil
 }
 
-func (r employeeRuntimeResolver) ResolveRuntimeEmployee(ctx context.Context, tenantID, orgID, productSurface, employeeID string) (runtime.RuntimeEmployeeConfig, error) {
-	employee, err := r.uc.GetEmployee(ctx, tenantID, orgID, productSurface, employeeID)
+func (r virployeeRuntimeResolver) ResolveRuntimeVirployee(ctx context.Context, tenantID, orgID, productSurface, virployeeID string) (runtime.RuntimeVirployeeConfig, error) {
+	virployee, err := r.uc.GetVirployee(ctx, tenantID, orgID, productSurface, virployeeID)
 	if err != nil {
-		return runtime.RuntimeEmployeeConfig{}, err
+		return runtime.RuntimeVirployeeConfig{}, err
 	}
-	capabilityIDs := make([]string, 0, len(employee.CapabilityIDs))
-	for _, id := range employee.CapabilityIDs {
+	capabilityIDs := make([]string, 0, len(virployee.CapabilityIDs))
+	for _, id := range virployee.CapabilityIDs {
 		if id != uuid.Nil {
 			capabilityIDs = append(capabilityIDs, id.String())
 		}
 	}
 	memoryID := ""
-	if employee.MemoryID != nil && *employee.MemoryID != uuid.Nil {
-		memoryID = employee.MemoryID.String()
+	if virployee.MemoryID != nil && *virployee.MemoryID != uuid.Nil {
+		memoryID = virployee.MemoryID.String()
 	}
-	return runtime.RuntimeEmployeeConfig{
-		EmployeeID:    employee.EmployeeID.String(),
-		TenantID:      employee.TenantID.String(),
-		Name:          employee.Name,
-		Status:        string(employee.Status),
-		ProfileID:     employee.ProfileID.String(),
-		Autonomy:      runtime.AutonomyLevel(employee.Autonomy),
+	return runtime.RuntimeVirployeeConfig{
+		VirployeeID:   virployee.VirployeeID.String(),
+		TenantID:      virployee.TenantID.String(),
+		Name:          virployee.Name,
+		Status:        string(virployee.Status),
+		ProfileID:     virployee.ProfileID.String(),
+		Autonomy:      runtime.AutonomyLevel(virployee.Autonomy),
 		CapabilityIDs: capabilityIDs,
 		MemoryID:      memoryID,
 	}, nil
@@ -725,10 +725,10 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	jobRoleRepo.SetAuditRecorder(auditRepo)
 	jobRoleUC := jobroles.NewUsecases(jobRoleRepo)
 	jobRoleHandler := jobroles.NewHandler(jobRoleUC)
-	virtualEmployeeRepo := virtualemployees.NewPostgresRepository(db)
-	virtualEmployeeRepo.SetAuditRecorder(auditRepo)
-	virtualEmployeeUC := virtualemployees.NewUsecases(virtualEmployeeRepo)
-	virtualEmployeeHandler := virtualemployees.NewHandler(virtualEmployeeUC)
+	virployeeRepo := virployees.NewPostgresRepository(db)
+	virployeeRepo.SetAuditRecorder(auditRepo)
+	virployeeUC := virployees.NewUsecases(virployeeRepo)
+	virployeeHandler := virployees.NewHandler(virployeeUC)
 	handoffRepo := handoffs.NewPostgresRepository(db)
 	handoffRepo.SetAuditRecorder(auditRepo)
 	handoffUC := handoffs.NewUsecases(handoffRepo)
@@ -820,7 +820,7 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	orchestrator.SetCostLedger(observabilityRepo)
 	orchestrator.SetRuntimeControls(runtimeControlsRepo)
 	orchestrator.SetAgentResolver(agentRuntimeResolver{uc: agentUC})
-	orchestrator.SetEmployeeResolver(employeeRuntimeResolver{uc: virtualEmployeeUC})
+	orchestrator.SetVirployeeResolver(virployeeRuntimeResolver{uc: virployeeUC})
 	orchestrator.SetAgentProfileResolver(agentProfileRuntimeResolver{uc: agentProfileUC})
 	orchestrator.SetProductInstallationGuard(productGuard)
 	orchestrator.SetRateLimiter(productRateLimiter)
@@ -905,7 +905,7 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	businessHandler.Register(mux)
 	productHandler.Register(mux)
 	agentHandler.Register(mux)
-	virtualEmployeeHandler.Register(mux)
+	virployeeHandler.Register(mux)
 	handoffHandler.Register(mux)
 	agentProfileHandler.Register(mux)
 	jobRoleHandler.Register(mux)

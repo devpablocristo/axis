@@ -15,16 +15,16 @@ import (
 )
 
 type CreateTaskInput struct {
-	OrgID       string
-	Title       string
-	Goal        string
-	Priority    string
-	CreatedBy   string
-	AssignedTo  string
-	AssigneeEmployeeID string
-	Channel     string
-	Summary     string
-	ContextJSON json.RawMessage
+	OrgID               string
+	Title               string
+	Goal                string
+	Priority            string
+	CreatedBy           string
+	AssignedTo          string
+	AssigneeVirployeeID string
+	Channel             string
+	Summary             string
+	ContextJSON         json.RawMessage
 }
 
 func (u *Usecases) Create(ctx context.Context, in CreateTaskInput) (domain.Task, error) {
@@ -49,7 +49,7 @@ func (u *Usecases) Create(ctx context.Context, in CreateTaskInput) (domain.Task,
 	if len(t.ContextJSON) == 0 {
 		t.ContextJSON = json.RawMessage(`{}`)
 	}
-	if updated, ok := mergeTaskEmployeeID(t.ContextJSON, in.AssigneeEmployeeID); ok {
+	if updated, ok := mergeTaskVirployeeID(t.ContextJSON, in.AssigneeVirployeeID); ok {
 		t.ContextJSON = updated
 	}
 	out, err := u.repo.CreateTask(ctx, t)

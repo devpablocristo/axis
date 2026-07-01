@@ -1,9 +1,10 @@
-import { Activity, Bot, CheckCircle2, DatabaseZap, FileClock, FileText, GitPullRequestArrow, KeyRound, Layers3, ListChecks, MessageSquareText, Play, Power, RefreshCw, ShieldCheck, Sparkles, UsersRound } from 'lucide-react'
+import { Activity, Bot, CheckCircle2, DatabaseZap, FileClock, FileText, GitPullRequestArrow, KeyRound, Layers3, ListChecks, MessageSquareText, Play, Power, ShieldCheck, Sparkles, UsersRound } from 'lucide-react'
 import { ChatWorkspace, type ChatAdapter, type ChatConversationDetail, type ChatConversationSummary, type ChatRequest } from '@devpablocristo/platform-chat-ui'
 import '@devpablocristo/platform-chat-ui/styles.css'
 import type { ReactNode } from 'react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ActionType, AgentRun, Approval, AxisSession, AxisTenantView, BusinessModel, CapabilityRecord, CompanionAgent, CompanionJob, CompanionTask, CostSummary, Delegation, MemoryConflict, MemoryReview, MemorySummary, NexusRequest, ObservabilityEvent, Policy, Product, ProductInstallation, RunTrace, RuntimePolicy, SecurityEvalReport, ServiceHealth, axisFetch, getHealth, getSession, listIAMTenants, type AxisFetchInit } from './api'
+import { AdminConnectors } from './AdminConnectors'
 import { AgentsControlCenter } from './AgentsControlCenter'
 import { ControlPlane } from './ControlPlane'
 import { IAMControlCenter } from './IAMControlCenter'
@@ -11,7 +12,7 @@ import { PromptsControlCenter } from './PromptScreens'
 import { type LoadState, empty, load } from './lib/load'
 import { deriveTenantId, preferred, workspaceOrgs as deriveWorkspaceOrgs, workspaceProducts as deriveWorkspaceProducts } from './lib/tenant'
 
-type RouteArea = 'home' | 'chat' | 'prompts' | 'agents' | 'iam' | 'operations' | 'nexus' | 'platform' | 'control'
+type RouteArea = 'home' | 'chat' | 'prompts' | 'agents' | 'iam' | 'operations' | 'nexus' | 'platform' | 'admin' | 'control'
 
 type Route = {
   area: RouteArea
@@ -30,17 +31,6 @@ const knownProducts = [
   { productSurface: 'agro', label: 'Agro' },
 ]
 
-const knownProductTenants = [
-  {
-    accountName: 'Acme',
-    productSurface: 'pymes',
-    productLabel: 'Pymes',
-    tenantName: 'Bikeman',
-    externalTenantId: 'bikeman',
-    status: 'Activo',
-  },
-]
-
 type ProductOption = {
   productSurface: string
   label: string
@@ -50,7 +40,6 @@ type ProductOption = {
 export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
   const [orgId, setOrgId] = useState(localStorage.getItem('axis.org_id') || 'cristo.tech')
   const [productSurface, setProductSurface] = useState(localStorage.getItem('axis.product_surface') || 'axis')
-  const [externalTenantId, setExternalTenantId] = useState(localStorage.getItem('axis.external_tenant_id') || 'bikeman')
   const [route, setRoute] = useState<Route>(() => parseCurrentRoute())
   const [session, setSession] = useState<LoadState<AxisSession | null>>(empty(null))
   const [axisOrgs, setAxisOrgs] = useState<LoadState<AxisTenantView[]>>(empty([]))
@@ -76,7 +65,6 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
   const [costs, setCosts] = useState<LoadState<CostSummary | null>>(empty(null))
   const [securityReports, setSecurityReports] = useState<LoadState<SecurityEvalReport[]>>(empty([]))
   const [businessModel, setBusinessModel] = useState<LoadState<BusinessModel | null>>(empty(null))
-  const [actionMessage, setActionMessage] = useState('')
 
   // Active tenant = the (org, product) pair resolved against the user's tenants.
   // Derived synchronously (NOT useState) so it's always current in the same
@@ -124,7 +112,6 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
     localStorage.setItem('axis.org_id', effectiveOrgId)
     localStorage.setItem('axis.tenant_id', effectiveTenantId)
     localStorage.setItem('axis.product_surface', effectiveProductSurface)
-    localStorage.setItem('axis.external_tenant_id', externalTenantId)
     const productInit = productHeaders(effectiveProductSurface, effectiveTenantId)
     const tenantInit: AxisFetchInit = { tenantId: effectiveTenantId }
     const scopedLoads = effectiveTenantId ? [
@@ -158,16 +145,14 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
       load(setHealth, () => getHealth(), null),
       ...scopedLoads,
     ])
-  }, [externalTenantId, orgId, productSurface])
+  }, [orgId, productSurface])
 
   const runAction = useCallback(async (label: string, fn: () => Promise<unknown>) => {
-    setActionMessage(`${label}: running`)
     try {
       await fn()
-      setActionMessage(`${label}: done`)
       await refresh()
     } catch (error) {
-      setActionMessage(`${label}: ${error instanceof Error ? error.message : 'failed'}`)
+      console.error(`${label}: ${error instanceof Error ? error.message : 'failed'}`)
     }
   }, [refresh])
 
@@ -221,13 +206,6 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
     if (next) setProductSurface(next)
   }, [workspaceProducts, productSurface])
 
-  const tenantOptions = useMemo(() => buildTenantOptions(productSurface), [productSurface])
-
-  useEffect(() => {
-    if (tenantOptions.some((tenant) => tenant.externalTenantId === externalTenantId)) return
-    setExternalTenantId(tenantOptions[0]?.externalTenantId ?? '')
-  }, [externalTenantId, tenantOptions])
-
   useEffect(() => {
     const syncRoute = () => setRoute(parseCurrentRoute())
     window.addEventListener('popstate', syncRoute)
@@ -252,10 +230,8 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
   }, [axisOrgs.data, orgId, session.data?.orgs])
   const selectedOrgOption = orgOptions.find((item) => item.id === orgId)
   const selectedProductOption = productOptions.find((item) => item.productSurface === productSurface)
-  const selectedTenantOption = tenantOptions.find((item) => item.externalTenantId === externalTenantId)
-  const simpleControlHeader = route.area === 'agents' || route.area === 'chat' || route.area === 'prompts' || route.area === 'control'
-  const showGlobalContext = route.area !== 'iam' && !simpleControlHeader
   const canViewIAM = Boolean(session.data?.scopes?.some((scope) => scope === 'axis:orgs:admin' || scope === 'axis:users:admin'))
+  const canViewAdmin = Boolean(session.data?.scopes?.some((scope) => scope === 'companion:connectors:admin' || scope === 'companion:runtime:admin'))
   const canViewControl = Boolean(session.data?.platform_roles?.some((role) => role === 'platform_admin' || role === 'owner'))
   const title = pageTitle(route)
   const chatAdapter = useMemo<ChatAdapter>(() => axisChatAdapter(orgId, productSurface, tenantId), [orgId, productSurface, tenantId])
@@ -278,11 +254,12 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
           <button type="button" className={route.area === 'home' ? 'active' : ''} onClick={() => navigate({ area: 'home', screen: 'summary' })}><Activity aria-hidden="true" />Inicio</button>
           <button type="button" className={route.area === 'chat' ? 'active' : ''} onClick={() => navigate({ area: 'chat', screen: 'workspace' })}><MessageSquareText aria-hidden="true" />Chat</button>
           <button type="button" className={route.area === 'prompts' ? 'active' : ''} onClick={() => navigate({ area: 'prompts', screen: 'product' })}><FileText aria-hidden="true" />Prompts</button>
-          <button type="button" className={route.area === 'agents' ? 'active' : ''} onClick={() => navigate({ area: 'agents', screen: 'list' })}><Bot aria-hidden="true" />Virtual Employees</button>
+          <button type="button" className={route.area === 'agents' ? 'active' : ''} onClick={() => navigate({ area: 'agents', screen: 'list' })}><Bot aria-hidden="true" />Virployees</button>
           {canViewIAM && <button type="button" className={route.area === 'iam' ? 'active' : ''} onClick={() => navigate({ area: 'iam', screen: 'internal' })}><KeyRound aria-hidden="true" />IAM</button>}
           <button type="button" className={route.area === 'operations' ? 'active' : ''} onClick={() => navigate({ area: 'operations', screen: 'runs' })}><Activity aria-hidden="true" />Operación</button>
           <button type="button" className={route.area === 'nexus' ? 'active' : ''} onClick={() => navigate({ area: 'nexus', screen: 'approvals' })}><GitPullRequestArrow aria-hidden="true" />Nexus</button>
           <button type="button" className={route.area === 'platform' ? 'active' : ''} onClick={() => navigate({ area: 'platform', screen: 'runtime' })}><KeyRound aria-hidden="true" />Plataforma</button>
+          {canViewAdmin && <button type="button" className={route.area === 'admin' ? 'active' : ''} onClick={() => navigate({ area: 'admin', screen: 'connectors' })}><DatabaseZap aria-hidden="true" />Admin</button>}
           {canViewControl && <button type="button" className={route.area === 'control' ? 'active' : ''} onClick={() => navigate({ area: 'control', screen: 'home' })}><Layers3 aria-hidden="true" />Control Plane</button>}
         </nav>
       </aside>
@@ -291,71 +268,38 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
         <header className="topbar">
           <div>
             <h1>{title}</h1>
-            {route.area !== 'iam' && !simpleControlHeader && <p>{session.data?.actor_id ?? 'local-dev-admin'}</p>}
           </div>
-          {(showGlobalContext || authSlot) && (
-            <div className="toolbar">
-              {showGlobalContext && (
-                <>
-                  <label>
-                    <span>Tenant</span>
-                    <select value={externalTenantId} onChange={(event) => setExternalTenantId(event.target.value)}>
-                      {tenantOptions.map((tenant) => (
-                        <option key={tenant.externalTenantId} value={tenant.externalTenantId}>
-                          {tenant.tenantName} · {tenant.status}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </>
-              )}
-              {showGlobalContext && (
-                <button type="button" onClick={() => void refresh()} aria-label="Refresh">
-                  <RefreshCw aria-hidden="true" />
-                </button>
-              )}
-              {(session.data?.tenants?.length ?? 0) > 0 && (
-                <>
-                  <label className="topbar-org">
-                    <span>Org</span>
-                    <select value={orgId} onChange={(event) => setOrgId(event.target.value)}>
-                      {workspaceOrgs.map((o) => (
-                        <option key={o} value={o}>{o}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="topbar-org">
-                    <span>Producto</span>
-                    <select value={productSurface} onChange={(event) => setProductSurface(event.target.value)}>
-                      {workspaceProducts.map((p) => (
-                        <option key={p} value={p}>{p}</option>
-                      ))}
-                    </select>
-                  </label>
-                </>
-              )}
-              {authSlot && <div className="auth-slot">{authSlot}</div>}
-            </div>
-          )}
+          <div className="toolbar">
+            {(session.data?.tenants?.length ?? 0) > 0 && (
+              <>
+                <label className="topbar-org">
+                  <span>Org</span>
+                  <select value={orgId} onChange={(event) => setOrgId(event.target.value)}>
+                    {workspaceOrgs.map((o) => (
+                      <option key={o} value={o}>{o}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="topbar-org">
+                  <span>Producto</span>
+                  <select value={productSurface} onChange={(event) => setProductSurface(event.target.value)}>
+                    {workspaceProducts.map((p) => (
+                      <option key={p} value={p}>{p}</option>
+                    ))}
+                  </select>
+                </label>
+              </>
+            )}
+            {authSlot && <div className="auth-slot">{authSlot}</div>}
+          </div>
         </header>
-
-        {showGlobalContext && (
-          <section className="health-row">
-            <HealthPill label="BFF" value="ok" />
-            <HealthPill label="Plataforma IA" value={health.data?.companion ?? health.error ?? 'loading'} />
-            <HealthPill label="Nexus" value={health.data?.nexus ?? health.error ?? 'loading'} />
-            <span className="scope-pill"><b>Producto</b>{selectedProductOption ? `${selectedProductOption.label} · ${selectedProductOption.status}` : productSurface}</span>
-            <span className="scope-pill">{session.data?.auth_method ?? 'dev'}</span>
-            {actionMessage && <span className="scope-pill">{actionMessage}</span>}
-          </section>
-        )}
 
         {route.area === 'home' && (
           <section className="page-section">
             <div className="metrics-grid">
               <Metric icon={<CheckCircle2 />} label="Aprobaciones" value={approvals.data.length} tone="green" />
               <Metric icon={<FileClock />} label="Requests" value={requests.data.length} tone="blue" />
-              <Metric icon={<Sparkles />} label="Virtual Employees" value={agents.data.length} tone="violet" />
+              <Metric icon={<Sparkles />} label="Virployees" value={agents.data.length} tone="violet" />
               <Metric icon={<DatabaseZap />} label="Capabilities" value={capabilities.data.length} tone="amber" />
             </div>
             <div className="screen-grid two">
@@ -365,8 +309,7 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
                   ['axis_account_id', orgId],
                   ['producto', selectedProductOption?.label ?? productSurface],
                   ['product_surface', productSurface],
-                  ['tenant', selectedTenantOption?.tenantName ?? externalTenantId],
-                  ['external_tenant_id', selectedTenantOption?.externalTenantId ?? '-'],
+                  ['tenant_id', tenantId || '-'],
                   ['estado', selectedProductOption?.status ?? '-'],
                 ]} />
               </Panel>
@@ -536,6 +479,21 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
           </section>
         )}
 
+        {route.area === 'admin' && canViewAdmin && (
+          <>
+            <ScreenNav items={[
+              ['connectors', 'Connectors']
+            ]} base="admin" active={route.screen} onNavigate={navigate} />
+            {route.screen === 'connectors' && (
+              <AdminConnectors orgId={orgId} tenantId={tenantId} />
+            )}
+          </>
+        )}
+
+        {route.area === 'admin' && !canViewAdmin && (
+          <section className="empty-state">No tenés permisos para administrar Axis.</section>
+        )}
+
         {route.area === 'agents' && (
           <AgentsControlCenter orgId={orgId} tenantId={tenantId} productSurface={productSurface} />
         )}
@@ -692,6 +650,7 @@ function parseRoutePath(path: string): Route {
     operations: ['runs', 'traces', 'memory', 'jobs', 'observability', 'cost', 'security'],
     nexus: ['approvals', 'requests', 'policies', 'action-types', 'delegations', 'risk'],
     platform: ['runtime', 'capabilities', 'business', 'health'],
+    admin: ['connectors'],
     control: ['home']
   }
   const normalizedScreen = normalizeRouteScreen(area, screenRaw)
@@ -703,8 +662,8 @@ function normalizeRouteArea(value: string): RouteArea {
   if (value === 'overview') return 'home'
   if (value === 'companion') return 'platform'
   if (value === 'access') return 'nexus'
-  if (value === 'virtual-employees') return 'agents'
-  if (value === 'home' || value === 'chat' || value === 'prompts' || value === 'agents' || value === 'iam' || value === 'operations' || value === 'nexus' || value === 'platform' || value === 'control') {
+  if (value === 'virployees') return 'agents'
+  if (value === 'home' || value === 'chat' || value === 'prompts' || value === 'agents' || value === 'iam' || value === 'operations' || value === 'nexus' || value === 'platform' || value === 'admin' || value === 'control') {
     return value
   }
   return 'home'
@@ -713,7 +672,7 @@ function normalizeRouteArea(value: string): RouteArea {
 function normalizeRouteScreen(area: RouteArea, value: string | undefined) {
   if (!value) return ''
   if (area === 'prompts' && value === 'assist-packs') return 'product'
-  if (area === 'prompts' && value === 'employee-profiles') return 'agents'
+  if (area === 'prompts' && value === 'virployee-profiles') return 'agents'
   if (area === 'platform' && value === 'control') return 'runtime'
   if (area === 'platform' && value === 'tasks') return 'runtime'
   if (area === 'operations' && value === 'billing-agent') return 'runs'
@@ -735,7 +694,7 @@ function routePath(route: Route) {
     return '/prompts'
   }
   if (route.area === 'agents') {
-    return '/virtual-employees'
+    return '/virployees'
   }
   if (route.area === 'iam') {
     return '/iam'
@@ -755,11 +714,13 @@ function pageTitle(route: Route) {
     case 'nexus':
       return 'Nexus'
     case 'agents':
-      return 'Virtual Employees'
+      return 'Virployees'
     case 'iam':
       return 'IAM'
     case 'platform':
       return 'Plataforma IA'
+    case 'admin':
+      return 'Admin'
     case 'prompts':
       return 'Prompts'
     case 'operations':
@@ -790,11 +751,6 @@ function Metric(props: { icon: ReactNode; label: string; value: number; tone: st
       <strong>{props.value}</strong>
     </article>
   )
-}
-
-function HealthPill(props: { label: string; value: string }) {
-  const ok = props.value === 'ok'
-  return <span className={`health ${ok ? 'ok' : 'warn'}`}><b>{props.label}</b>{props.value}</span>
 }
 
 function Panel<T>(props: { title: string; icon: ReactNode; state: LoadState<T>; children: ReactNode }) {
@@ -918,21 +874,6 @@ function buildProductOptions(products: Product[], installations: ProductInstalla
       status,
     }
   })
-}
-
-function buildTenantOptions(productSurface: string) {
-  const tenants = knownProductTenants.filter((tenant) => tenant.productSurface === productSurface)
-  if (tenants.length > 0) return tenants
-  return [
-    {
-      accountName: '',
-      productSurface,
-      productLabel: productSurface,
-      tenantName: 'Sin tenant',
-      externalTenantId: 'none',
-      status: '-',
-    },
-  ]
 }
 
 function axisChatAdapter(orgId: string, productSurface: string, tenantId: string): ChatAdapter {

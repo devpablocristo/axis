@@ -9,7 +9,7 @@ Responsabilidades:
 - Firmar Bearer JWT interno para `companion` y `nexus`.
 - Exponer `/api/companion/*`, `/api/nexus/*`, `/api/session`,
   `/api/services`, `/healthz` y `/readyz`.
-- Exponer superficies Console especificas como `/api/virtual-employees`,
+- Exponer superficies Console especificas como `/api/virployees`,
   `/api/agent-profiles` y `/api/job-roles` como proxies acotados a Companion.
 
 El browser nunca llama directo a `companion` ni `nexus`.
@@ -29,9 +29,15 @@ Tenant y usuarios externos, ver `docs/iam-axis-clerk-model.md`.
 ## Job Roles
 
 `/api/job-roles` es la superficie BFF para administrar puestos de trabajo de
-Virtual Employees desde Console. El BFF no implementa dominio propio: resuelve
+Virployees desde Console. El BFF no implementa dominio propio: resuelve
 `org_id + product_surface`, firma el token interno y forwardea a
 `/v1/job-roles` en Companion.
 
 JobRole no es IAM Role ni PermissionBundle. En v1 reutiliza scopes operativos
 de Agents y no autoriza acciones.
+
+## Connectors
+
+`/api/connectors` es la superficie BFF para administrar connectors desde
+Console. El BFF no define schemas de configuracion: forwardea a Companion y
+Console renderiza formularios desde `/api/connectors/types`.

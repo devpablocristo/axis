@@ -192,7 +192,7 @@ func TestDevProxyCompanionCrossOrgScopeIsAccepted(t *testing.T) {
 	}
 }
 
-func TestEmployeeProfilesLegacyEndpointReadsCompanionProfiles(t *testing.T) {
+func TestVirployeeProfilesEndpointReadsCompanionProfiles(t *testing.T) {
 	var gotPath, gotAuth string
 	downstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.String()
@@ -202,13 +202,13 @@ func TestEmployeeProfilesLegacyEndpointReadsCompanionProfiles(t *testing.T) {
 	}))
 	defer downstream.Close()
 
-	srv, err := newTestServer(downstream.URL, []string{"companion:employee_profiles:read"})
+	srv, err := newTestServer(downstream.URL, []string{"companion:virployee_profiles:read"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	tenantID := seedTenantForActor(t, srv, "org-a", "axis", "admin")
 
-	req := httptest.NewRequest(http.MethodGet, "/api/employee-profiles?include_archived=false", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/virployee-profiles?include_archived=false", nil)
 	req.Header.Set("X-Tenant-ID", tenantID)
 	rec := httptest.NewRecorder()
 	srv.routes().ServeHTTP(rec, req)
@@ -216,8 +216,8 @@ func TestEmployeeProfilesLegacyEndpointReadsCompanionProfiles(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	if gotPath != "/v1/employee-profiles?include_archived=false" {
-		t.Fatalf("expected companion employee profiles path, got %q", gotPath)
+	if gotPath != "/v1/virployee-profiles?include_archived=false" {
+		t.Fatalf("expected companion virployee profiles path, got %q", gotPath)
 	}
 	if !strings.HasPrefix(gotAuth, "Bearer ") {
 		t.Fatalf("expected bearer token, got %q", gotAuth)
@@ -239,7 +239,7 @@ func TestEmployeeProfilesLegacyEndpointReadsCompanionProfiles(t *testing.T) {
 	}
 }
 
-func TestEmployeeProfilesLegacyEndpointWritesCompanionProfiles(t *testing.T) {
+func TestVirployeeProfilesEndpointWritesCompanionProfiles(t *testing.T) {
 	var requests []string
 	var gotAuth string
 	var gotBody string
@@ -252,15 +252,15 @@ func TestEmployeeProfilesLegacyEndpointWritesCompanionProfiles(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		switch {
-		case r.Method == http.MethodPatch && r.URL.Path == "/v1/employee-profiles/axis.ops.support.v1":
+		case r.Method == http.MethodPatch && r.URL.Path == "/v1/virployee-profiles/axis.ops.support.v1":
 			_, _ = w.Write([]byte(`{"profile_id":"axis.ops.support.v1","family_id":"axis.ops.support","version_label":"v1","name":"Support Agent","system_prompt":"Help users.","max_autonomy":"A1","enabled":true}`))
-		case r.Method == http.MethodPost && r.URL.Path == "/v1/employee-profiles/axis.ops.support.v1/archive":
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/virployee-profiles/axis.ops.support.v1/archive":
 			_, _ = w.Write([]byte(`{"profile_id":"axis.ops.support.v1","family_id":"axis.ops.support","version_label":"v1","name":"Support Agent","system_prompt":"Help users.","max_autonomy":"A1","enabled":true,"archived_at":"2026-06-22T00:00:00Z"}`))
-		case r.Method == http.MethodPost && r.URL.Path == "/v1/employee-profiles/axis.ops.support.v1/trash":
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/virployee-profiles/axis.ops.support.v1/trash":
 			_, _ = w.Write([]byte(`{"profile_id":"axis.ops.support.v1","family_id":"axis.ops.support","version_label":"v1","name":"Support Agent","system_prompt":"Help users.","max_autonomy":"A1","enabled":true,"trashed_at":"2026-06-22T00:00:00Z"}`))
-		case r.Method == http.MethodPost && r.URL.Path == "/v1/employee-profiles/axis.ops.support.v1/restore":
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/virployee-profiles/axis.ops.support.v1/restore":
 			_, _ = w.Write([]byte(`{"profile_id":"axis.ops.support.v1","family_id":"axis.ops.support","version_label":"v1","name":"Support Agent","system_prompt":"Help users.","max_autonomy":"A1","enabled":true}`))
-		case r.Method == http.MethodDelete && r.URL.Path == "/v1/employee-profiles/axis.ops.support.v1/purge":
+		case r.Method == http.MethodDelete && r.URL.Path == "/v1/virployee-profiles/axis.ops.support.v1/purge":
 			w.WriteHeader(http.StatusNoContent)
 		default:
 			http.NotFound(w, r)
@@ -268,7 +268,7 @@ func TestEmployeeProfilesLegacyEndpointWritesCompanionProfiles(t *testing.T) {
 	}))
 	defer downstream.Close()
 
-	srv, err := newTestServer(downstream.URL, []string{"companion:employee_profiles:admin"})
+	srv, err := newTestServer(downstream.URL, []string{"companion:virployee_profiles:admin"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -277,7 +277,7 @@ func TestEmployeeProfilesLegacyEndpointWritesCompanionProfiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	req := httptest.NewRequest(http.MethodPatch, "/api/employee-profiles/axis.ops.support.v1", strings.NewReader(`{"family_id":"axis.ops.support","version_label":"v1","name":"Support Agent","system_prompt":"Help users.","max_autonomy":"A1"}`))
+	req := httptest.NewRequest(http.MethodPatch, "/api/virployee-profiles/axis.ops.support.v1", strings.NewReader(`{"family_id":"axis.ops.support","version_label":"v1","name":"Support Agent","system_prompt":"Help users.","max_autonomy":"A1"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Tenant-ID", tenantID)
 	rec := httptest.NewRecorder()
@@ -293,9 +293,9 @@ func TestEmployeeProfilesLegacyEndpointWritesCompanionProfiles(t *testing.T) {
 	}
 
 	for _, path := range []string{
-		"/api/employee-profiles/axis.ops.support.v1/archive",
-		"/api/employee-profiles/axis.ops.support.v1/trash",
-		"/api/employee-profiles/axis.ops.support.v1/restore",
+		"/api/virployee-profiles/axis.ops.support.v1/archive",
+		"/api/virployee-profiles/axis.ops.support.v1/trash",
+		"/api/virployee-profiles/axis.ops.support.v1/restore",
 	} {
 		req = httptest.NewRequest(http.MethodPost, path, nil)
 		req.Header.Set("X-Tenant-ID", tenantID)
@@ -305,7 +305,7 @@ func TestEmployeeProfilesLegacyEndpointWritesCompanionProfiles(t *testing.T) {
 			t.Fatalf("expected profile action 200 for %s, got %d body=%s", path, rec.Code, rec.Body.String())
 		}
 	}
-	req = httptest.NewRequest(http.MethodDelete, "/api/employee-profiles/axis.ops.support.v1/purge", nil)
+	req = httptest.NewRequest(http.MethodDelete, "/api/virployee-profiles/axis.ops.support.v1/purge", nil)
 	req.Header.Set("X-Tenant-ID", tenantID)
 	rec = httptest.NewRecorder()
 	srv.routes().ServeHTTP(rec, req)
@@ -314,24 +314,24 @@ func TestEmployeeProfilesLegacyEndpointWritesCompanionProfiles(t *testing.T) {
 	}
 
 	want := []string{
-		"PATCH /v1/employee-profiles/axis.ops.support.v1",
-		"POST /v1/employee-profiles/axis.ops.support.v1/archive",
-		"POST /v1/employee-profiles/axis.ops.support.v1/trash",
-		"POST /v1/employee-profiles/axis.ops.support.v1/restore",
-		"DELETE /v1/employee-profiles/axis.ops.support.v1/purge",
+		"PATCH /v1/virployee-profiles/axis.ops.support.v1",
+		"POST /v1/virployee-profiles/axis.ops.support.v1/archive",
+		"POST /v1/virployee-profiles/axis.ops.support.v1/trash",
+		"POST /v1/virployee-profiles/axis.ops.support.v1/restore",
+		"DELETE /v1/virployee-profiles/axis.ops.support.v1/purge",
 	}
 	if strings.Join(requests, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("unexpected downstream requests:\n%s", strings.Join(requests, "\n"))
 	}
 }
 
-func TestEmployeeProfilesLegacyEndpointRejectsMemberWrites(t *testing.T) {
+func TestVirployeeProfilesEndpointRejectsMemberWrites(t *testing.T) {
 	srv, err := newTestServer("http://127.0.0.1:1", orgMemberScopes())
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	req := httptest.NewRequest(http.MethodPatch, "/api/employee-profiles/axis.ops.support.v1", strings.NewReader(`{"family_id":"axis.ops.support","version_label":"v1","name":"Support Agent","system_prompt":"Help users.","max_autonomy":"A1"}`))
+	req := httptest.NewRequest(http.MethodPatch, "/api/virployee-profiles/axis.ops.support.v1", strings.NewReader(`{"family_id":"axis.ops.support","version_label":"v1","name":"Support Agent","system_prompt":"Help users.","max_autonomy":"A1"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	srv.routes().ServeHTTP(rec, req)
@@ -341,7 +341,7 @@ func TestEmployeeProfilesLegacyEndpointRejectsMemberWrites(t *testing.T) {
 	}
 }
 
-func TestEmployeeProfilesEndpointProxiesPublicSurface(t *testing.T) {
+func TestVirployeeProfilesEndpointProxiesPublicSurface(t *testing.T) {
 	var requests []string
 	var gotAuth string
 	var gotBody string
@@ -354,13 +354,13 @@ func TestEmployeeProfilesEndpointProxiesPublicSurface(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/v1/employee-profiles":
-			_, _ = w.Write([]byte(`{"employee_profiles":[{"profile_id":"11111111-1111-4111-8111-111111111111","profile_key":"axis.ops.billing.v1","name":"Billing","system_prompt":"prompt","max_autonomy":"A1","status":"active","enabled":true}]}`))
-		case r.Method == http.MethodPost && r.URL.Path == "/v1/employee-profiles":
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/virployee-profiles":
+			_, _ = w.Write([]byte(`{"virployee_profiles":[{"profile_id":"11111111-1111-4111-8111-111111111111","profile_key":"axis.ops.billing.v1","name":"Billing","system_prompt":"prompt","max_autonomy":"A1","status":"active","enabled":true}]}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/virployee-profiles":
 			_, _ = w.Write([]byte(`{"profile_id":"11111111-1111-4111-8111-111111111111","profile_key":"employee.support.v1","name":"Support","system_prompt":"Help.","max_autonomy":"A1","status":"active","enabled":true}`))
-		case r.Method == http.MethodPatch && r.URL.Path == "/v1/employee-profiles/11111111-1111-4111-8111-111111111111":
+		case r.Method == http.MethodPatch && r.URL.Path == "/v1/virployee-profiles/11111111-1111-4111-8111-111111111111":
 			_, _ = w.Write([]byte(`{"profile_id":"11111111-1111-4111-8111-111111111111","profile_key":"employee.support.v1","name":"Support 2","system_prompt":"Help.","max_autonomy":"A1","status":"active","enabled":true}`))
-		case r.Method == http.MethodPost && r.URL.Path == "/v1/employee-profiles/11111111-1111-4111-8111-111111111111/status":
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/virployee-profiles/11111111-1111-4111-8111-111111111111/status":
 			_, _ = w.Write([]byte(`{"profile_id":"11111111-1111-4111-8111-111111111111","profile_key":"employee.support.v1","name":"Support","system_prompt":"Help.","max_autonomy":"A1","status":"archived","enabled":true}`))
 		default:
 			http.NotFound(w, r)
@@ -368,7 +368,7 @@ func TestEmployeeProfilesEndpointProxiesPublicSurface(t *testing.T) {
 	}))
 	defer downstream.Close()
 
-	srv, err := newTestServer(downstream.URL, []string{"companion:employee_profiles:admin"})
+	srv, err := newTestServer(downstream.URL, []string{"companion:virployee_profiles:admin"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -383,10 +383,10 @@ func TestEmployeeProfilesEndpointProxiesPublicSurface(t *testing.T) {
 		body   string
 		code   int
 	}{
-		{http.MethodGet, "/api/employee-profiles?lifecycle=all", "", http.StatusOK},
-		{http.MethodPost, "/api/employee-profiles", `{"name":"Support","system_prompt":"Help."}`, http.StatusOK},
-		{http.MethodPatch, "/api/employee-profiles/11111111-1111-4111-8111-111111111111", `{"name":"Support 2","system_prompt":"Help."}`, http.StatusOK},
-		{http.MethodPost, "/api/employee-profiles/11111111-1111-4111-8111-111111111111/status", `{"status":"archived"}`, http.StatusOK},
+		{http.MethodGet, "/api/virployee-profiles?lifecycle=all", "", http.StatusOK},
+		{http.MethodPost, "/api/virployee-profiles", `{"name":"Support","system_prompt":"Help."}`, http.StatusOK},
+		{http.MethodPatch, "/api/virployee-profiles/11111111-1111-4111-8111-111111111111", `{"name":"Support 2","system_prompt":"Help."}`, http.StatusOK},
+		{http.MethodPost, "/api/virployee-profiles/11111111-1111-4111-8111-111111111111/status", `{"status":"archived"}`, http.StatusOK},
 	} {
 		req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
 		req.Header.Set("Content-Type", "application/json")
@@ -408,10 +408,10 @@ func TestEmployeeProfilesEndpointProxiesPublicSurface(t *testing.T) {
 		t.Fatalf("unexpected downstream claims: %#v", claims)
 	}
 	want := []string{
-		"GET /v1/employee-profiles?lifecycle=all",
-		"POST /v1/employee-profiles",
-		"PATCH /v1/employee-profiles/11111111-1111-4111-8111-111111111111",
-		"POST /v1/employee-profiles/11111111-1111-4111-8111-111111111111/status",
+		"GET /v1/virployee-profiles?lifecycle=all",
+		"POST /v1/virployee-profiles",
+		"PATCH /v1/virployee-profiles/11111111-1111-4111-8111-111111111111",
+		"POST /v1/virployee-profiles/11111111-1111-4111-8111-111111111111/status",
 	}
 	if strings.Join(requests, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("unexpected downstream requests:\n%s", strings.Join(requests, "\n"))
@@ -469,8 +469,10 @@ func TestJobRolesEndpointWritesCompanionJobRoles(t *testing.T) {
 			_, _ = w.Write([]byte(`{"job_role_id":"billing-specialist","org_id":"org-a","product_surface":"axis","name":"Billing Specialist","slug":"billing-specialist","default_autonomy_level":"A2","status":"active","version":1}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/job-roles/billing-specialist/archive":
 			_, _ = w.Write([]byte(`{"job_role_id":"billing-specialist","status":"archived","version":2}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/job-roles/billing-specialist/trash":
+			_, _ = w.Write([]byte(`{"job_role_id":"billing-specialist","status":"trash","version":3}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/job-roles/billing-specialist/restore":
-			_, _ = w.Write([]byte(`{"job_role_id":"billing-specialist","status":"active","version":3}`))
+			_, _ = w.Write([]byte(`{"job_role_id":"billing-specialist","status":"active","version":4}`))
 		default:
 			http.NotFound(w, r)
 		}
@@ -499,6 +501,7 @@ func TestJobRolesEndpointWritesCompanionJobRoles(t *testing.T) {
 	}
 	for _, path := range []string{
 		"/api/job-roles/billing-specialist/archive",
+		"/api/job-roles/billing-specialist/trash",
 		"/api/job-roles/billing-specialist/restore",
 	} {
 		req = httptest.NewRequest(http.MethodPost, path, nil)
@@ -512,6 +515,7 @@ func TestJobRolesEndpointWritesCompanionJobRoles(t *testing.T) {
 	want := []string{
 		"PUT /v1/job-roles/billing-specialist",
 		"POST /v1/job-roles/billing-specialist/archive",
+		"POST /v1/job-roles/billing-specialist/trash",
 		"POST /v1/job-roles/billing-specialist/restore",
 	}
 	if strings.Join(requests, "\n") != strings.Join(want, "\n") {
@@ -639,6 +643,124 @@ func TestCatalogEndpointsRejectMemberWrites(t *testing.T) {
 		if rec.Code != http.StatusForbidden {
 			t.Fatalf("expected 403 for %s, got %d body=%s", path, rec.Code, rec.Body.String())
 		}
+	}
+}
+
+func TestConnectorsEndpointProxiesLifecycleAndActions(t *testing.T) {
+	var requests []string
+	var gotAuth string
+	var gotTenant string
+	var gotBody string
+	downstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.Method+" "+r.URL.String())
+		gotAuth = r.Header.Get("Authorization")
+		gotTenant = r.Header.Get("X-Tenant-ID")
+		if r.Body != nil {
+			body, _ := io.ReadAll(r.Body)
+			gotBody = string(body)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/connectors/types":
+			_, _ = w.Write([]byte(`{"types":[{"kind":"product-envelope-v1","name":"Product envelope","config_schema":{"fields":[{"key":"base_url","label":"Base URL","type":"text","required":true}]}}]}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/connectors":
+			_, _ = w.Write([]byte(`{"data":[{"connector_id":"11111111-1111-4111-8111-111111111111","org_id":"org-a","name":"Medmory","kind":"product-envelope-v1","enabled":true,"status":"active","config":{}}]}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/connectors":
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"connector_id":"11111111-1111-4111-8111-111111111111","org_id":"org-a","name":"Medmory","kind":"product-envelope-v1","enabled":true,"status":"active","config":{}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/connectors/11111111-1111-4111-8111-111111111111":
+			_, _ = w.Write([]byte(`{"connector_id":"11111111-1111-4111-8111-111111111111","org_id":"org-a","name":"Medmory","kind":"product-envelope-v1","enabled":true,"status":"active","config":{}}`))
+		case r.Method == http.MethodPatch && r.URL.Path == "/v1/connectors/11111111-1111-4111-8111-111111111111":
+			_, _ = w.Write([]byte(`{"connector_id":"11111111-1111-4111-8111-111111111111","org_id":"org-a","name":"Medmory Prod","kind":"product-envelope-v1","enabled":true,"status":"active","config":{}}`))
+		case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/v1/connectors/11111111-1111-4111-8111-111111111111/"):
+			_, _ = w.Write([]byte(`{"connector_id":"11111111-1111-4111-8111-111111111111","org_id":"org-a","name":"Medmory","kind":"product-envelope-v1","enabled":true,"status":"active","config":{}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/connectors/11111111-1111-4111-8111-111111111111/executions":
+			_, _ = w.Write([]byte(`{"executions":[]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer downstream.Close()
+
+	srv, err := newTestServer(downstream.URL, defaultAdminScopes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tenantID := seedTenantForActor(t, srv, "org-a", "medmory", "admin")
+
+	body := `{"name":"Medmory","kind":"product-envelope-v1","enabled":true,"config":{"base_url":"https://medmory.local","secret_ref":"medmory-token"}}`
+	for _, tc := range []struct {
+		method string
+		path   string
+		body   string
+		code   int
+	}{
+		{http.MethodGet, "/api/connectors/types", "", http.StatusOK},
+		{http.MethodGet, "/api/connectors?lifecycle=archived", "", http.StatusOK},
+		{http.MethodPost, "/api/connectors", body, http.StatusCreated},
+		{http.MethodGet, "/api/connectors/11111111-1111-4111-8111-111111111111", "", http.StatusOK},
+		{http.MethodPatch, "/api/connectors/11111111-1111-4111-8111-111111111111", strings.Replace(body, "Medmory", "Medmory Prod", 1), http.StatusOK},
+		{http.MethodPost, "/api/connectors/11111111-1111-4111-8111-111111111111/archive", "", http.StatusOK},
+		{http.MethodPost, "/api/connectors/11111111-1111-4111-8111-111111111111/trash", "", http.StatusOK},
+		{http.MethodPost, "/api/connectors/11111111-1111-4111-8111-111111111111/restore", "", http.StatusOK},
+		{http.MethodPost, "/api/connectors/11111111-1111-4111-8111-111111111111/test", "", http.StatusOK},
+		{http.MethodPost, "/api/connectors/11111111-1111-4111-8111-111111111111/refresh", "", http.StatusOK},
+		{http.MethodGet, "/api/connectors/11111111-1111-4111-8111-111111111111/executions", "", http.StatusOK},
+	} {
+		req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Tenant-ID", tenantID)
+		rec := httptest.NewRecorder()
+		srv.routes().ServeHTTP(rec, req)
+		if rec.Code != tc.code {
+			t.Fatalf("expected %d for %s %s, got %d body=%s", tc.code, tc.method, tc.path, rec.Code, rec.Body.String())
+		}
+	}
+	if !strings.HasPrefix(gotAuth, "Bearer ") {
+		t.Fatalf("expected bearer token, got %q", gotAuth)
+	}
+	if gotTenant != tenantID {
+		t.Fatalf("expected tenant header %q, got %q", tenantID, gotTenant)
+	}
+	claims := decodeClaims(t, strings.TrimPrefix(gotAuth, "Bearer "))
+	if claims["org_id"] != "org-a" || claims["tenant_id"] != tenantID || claims["product_surface"] != "medmory" {
+		t.Fatalf("unexpected downstream claims: %#v", claims)
+	}
+	if !strings.Contains(gotBody, `"name":"Medmory Prod"`) {
+		t.Fatalf("expected latest forwarded patch body, got %q", gotBody)
+	}
+	want := []string{
+		"GET /v1/connectors/types",
+		"GET /v1/connectors?lifecycle=archived",
+		"POST /v1/connectors",
+		"GET /v1/connectors/11111111-1111-4111-8111-111111111111",
+		"PATCH /v1/connectors/11111111-1111-4111-8111-111111111111",
+		"POST /v1/connectors/11111111-1111-4111-8111-111111111111/archive",
+		"POST /v1/connectors/11111111-1111-4111-8111-111111111111/trash",
+		"POST /v1/connectors/11111111-1111-4111-8111-111111111111/restore",
+		"POST /v1/connectors/11111111-1111-4111-8111-111111111111/test",
+		"POST /v1/connectors/11111111-1111-4111-8111-111111111111/refresh",
+		"GET /v1/connectors/11111111-1111-4111-8111-111111111111/executions",
+	}
+	if strings.Join(requests, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("unexpected downstream requests:\n%s", strings.Join(requests, "\n"))
+	}
+}
+
+func TestConnectorsEndpointRejectsMemberWrites(t *testing.T) {
+	srv, err := newTestServer("http://127.0.0.1:1", orgMemberScopes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tenantID := seedTenantForActor(t, srv, "org-a", "axis", "member")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/connectors", strings.NewReader(`{"name":"Medmory","kind":"product-envelope-v1","config":{}}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Tenant-ID", tenantID)
+	rec := httptest.NewRecorder()
+	srv.routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d body=%s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -845,7 +967,7 @@ func TestPromptsEndpointSanitizesTransportError(t *testing.T) {
 	}
 }
 
-func TestPromptsEndpointAdaptsEmployeeProfilePrompts(t *testing.T) {
+func TestPromptsEndpointAdaptsVirployeeProfilePrompts(t *testing.T) {
 	var requests []string
 	var gotBody string
 	downstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -856,15 +978,15 @@ func TestPromptsEndpointAdaptsEmployeeProfilePrompts(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/v1/employee-profiles":
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/virployee-profiles":
 			_, _ = w.Write([]byte(`{"profiles":[{"profile_id":"axis.ops.billing.v1","name":"Billing Agent","family_id":"axis.ops.billing","version_label":"v1","system_prompt":"old","max_autonomy":"A1","enabled":true}]}`))
-		case r.Method == http.MethodPatch && r.URL.Path == "/v1/employee-profiles/axis.ops.billing.v1":
+		case r.Method == http.MethodPatch && r.URL.Path == "/v1/virployee-profiles/axis.ops.billing.v1":
 			_, _ = w.Write([]byte(`{"profile_id":"axis.ops.billing.v1","name":"Billing Agent","family_id":"axis.ops.billing","version_label":"v2","system_prompt":"new","max_autonomy":"A1","enabled":true}`))
-		case r.Method == http.MethodPost && r.URL.Path == "/v1/employee-profiles/axis.ops.billing.v1/restore":
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/virployee-profiles/axis.ops.billing.v1/restore":
 			_, _ = w.Write([]byte(`{"profile_id":"axis.ops.billing.v1","name":"Billing Agent","family_id":"axis.ops.billing","version_label":"v2","system_prompt":"new","max_autonomy":"A1","enabled":true}`))
-		case r.Method == http.MethodPost && r.URL.Path == "/v1/employee-profiles/axis.ops.billing.v1/trash":
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/virployee-profiles/axis.ops.billing.v1/trash":
 			_, _ = w.Write([]byte(`{"profile_id":"axis.ops.billing.v1","name":"Billing Agent","family_id":"axis.ops.billing","version_label":"v2","system_prompt":"new","max_autonomy":"A1","enabled":true}`))
-		case r.Method == http.MethodDelete && r.URL.Path == "/v1/employee-profiles/axis.ops.billing.v1/purge":
+		case r.Method == http.MethodDelete && r.URL.Path == "/v1/virployee-profiles/axis.ops.billing.v1/purge":
 			w.WriteHeader(http.StatusNoContent)
 		default:
 			http.NotFound(w, r)
@@ -872,7 +994,7 @@ func TestPromptsEndpointAdaptsEmployeeProfilePrompts(t *testing.T) {
 	}))
 	defer downstream.Close()
 
-	srv, err := newTestServer(downstream.URL, []string{"axis:agents:admin", "companion:employee_profiles:read"})
+	srv, err := newTestServer(downstream.URL, []string{"axis:agents:admin", "companion:virployee_profiles:read"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -881,69 +1003,69 @@ func TestPromptsEndpointAdaptsEmployeeProfilePrompts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/prompts/employee-profiles?lifecycle=all", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/prompts/virployee-profiles?lifecycle=all", nil)
 	req.Header.Set("X-Tenant-ID", tenantID)
 	rec := httptest.NewRecorder()
 	srv.routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
-		t.Fatalf("expected employee profile prompt list 200, got %d body=%s", rec.Code, rec.Body.String())
+		t.Fatalf("expected virployee profile prompt list 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
 
-	req = httptest.NewRequest(http.MethodPut, "/api/prompts/employee-profiles/axis.ops.billing.v1/system-prompt", strings.NewReader(`{"system_prompt":"new"}`))
+	req = httptest.NewRequest(http.MethodPut, "/api/prompts/virployee-profiles/axis.ops.billing.v1/system-prompt", strings.NewReader(`{"system_prompt":"new"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Tenant-ID", tenantID)
 	rec = httptest.NewRecorder()
 	srv.routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
-		t.Fatalf("expected employee profile prompt update 200, got %d body=%s", rec.Code, rec.Body.String())
+		t.Fatalf("expected virployee profile prompt update 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
 	if gotBody != `{"system_prompt":"new"}` {
 		t.Fatalf("expected forwarded profile body, got %q", gotBody)
 	}
 
-	req = httptest.NewRequest(http.MethodPost, "/api/prompts/employee-profiles/axis.ops.billing.v1/restore", nil)
+	req = httptest.NewRequest(http.MethodPost, "/api/prompts/virployee-profiles/axis.ops.billing.v1/restore", nil)
 	req.Header.Set("X-Tenant-ID", tenantID)
 	rec = httptest.NewRecorder()
 	srv.routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
-		t.Fatalf("expected employee profile prompt restore 200, got %d body=%s", rec.Code, rec.Body.String())
+		t.Fatalf("expected virployee profile prompt restore 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
 
-	req = httptest.NewRequest(http.MethodPost, "/api/prompts/employee-profiles/axis.ops.billing.v1/trash", nil)
+	req = httptest.NewRequest(http.MethodPost, "/api/prompts/virployee-profiles/axis.ops.billing.v1/trash", nil)
 	req.Header.Set("X-Tenant-ID", tenantID)
 	rec = httptest.NewRecorder()
 	srv.routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
-		t.Fatalf("expected employee profile prompt trash 200, got %d body=%s", rec.Code, rec.Body.String())
+		t.Fatalf("expected virployee profile prompt trash 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
 
-	req = httptest.NewRequest(http.MethodDelete, "/api/prompts/employee-profiles/axis.ops.billing.v1/purge", nil)
+	req = httptest.NewRequest(http.MethodDelete, "/api/prompts/virployee-profiles/axis.ops.billing.v1/purge", nil)
 	req.Header.Set("X-Tenant-ID", tenantID)
 	rec = httptest.NewRecorder()
 	srv.routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusNoContent {
-		t.Fatalf("expected employee profile prompt purge 204, got %d body=%s", rec.Code, rec.Body.String())
+		t.Fatalf("expected virployee profile prompt purge 204, got %d body=%s", rec.Code, rec.Body.String())
 	}
 
 	want := []string{
-		"GET /v1/employee-profiles?lifecycle=all",
-		"PATCH /v1/employee-profiles/axis.ops.billing.v1",
-		"POST /v1/employee-profiles/axis.ops.billing.v1/restore",
-		"POST /v1/employee-profiles/axis.ops.billing.v1/trash",
-		"DELETE /v1/employee-profiles/axis.ops.billing.v1/purge",
+		"GET /v1/virployee-profiles?lifecycle=all",
+		"PATCH /v1/virployee-profiles/axis.ops.billing.v1",
+		"POST /v1/virployee-profiles/axis.ops.billing.v1/restore",
+		"POST /v1/virployee-profiles/axis.ops.billing.v1/trash",
+		"DELETE /v1/virployee-profiles/axis.ops.billing.v1/purge",
 	}
 	if strings.Join(requests, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("unexpected downstream requests:\n%s", strings.Join(requests, "\n"))
 	}
 }
 
-func TestEmployeeProfilesLegacyEndpointSanitizesTransportError(t *testing.T) {
-	srv, err := newTestServer("http://127.0.0.1:1", []string{"companion:employee_profiles:read"})
+func TestVirployeeProfilesEndpointSanitizesTransportError(t *testing.T) {
+	srv, err := newTestServer("http://127.0.0.1:1", []string{"companion:virployee_profiles:read"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	tenantID := seedTenantForActor(t, srv, "org-a", "axis", "admin")
-	req := httptest.NewRequest(http.MethodGet, "/api/employee-profiles", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/virployee-profiles", nil)
 	req.Header.Set("X-Tenant-ID", tenantID)
 	rec := httptest.NewRecorder()
 
@@ -983,13 +1105,13 @@ func TestAgentsEndpointSanitizesCompanionError(t *testing.T) {
 	}
 }
 
-func TestVirtualEmployeesEndpointSanitizesCompanionError(t *testing.T) {
+func TestVirployeesEndpointSanitizesCompanionError(t *testing.T) {
 	srv, err := newTestServer("http://127.0.0.1:1", defaultAdminScopes())
 	if err != nil {
 		t.Fatal(err)
 	}
 	tenantID := seedTenantForActor(t, srv, "org-a", "axis", "admin")
-	req := httptest.NewRequest(http.MethodGet, "/api/virtual-employees", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/virployees", nil)
 	req.Header.Set("X-Tenant-ID", tenantID)
 	rec := httptest.NewRecorder()
 
@@ -1000,10 +1122,10 @@ func TestVirtualEmployeesEndpointSanitizesCompanionError(t *testing.T) {
 	}
 	body := rec.Body.String()
 	if !strings.Contains(body, "DOWNSTREAM_UNAVAILABLE") {
-		t.Fatalf("expected virtual employees error code, got %s", body)
+		t.Fatalf("expected virployees error code, got %s", body)
 	}
 	if !strings.Contains(body, "downstream request failed") {
-		t.Fatalf("expected sanitized companion virtual employees error, got %s", body)
+		t.Fatalf("expected sanitized companion virployees error, got %s", body)
 	}
 	if strings.Contains(body, "127.0.0.1") || strings.Contains(body, "connect") {
 		t.Fatalf("transport details leaked in body: %s", body)
@@ -1046,6 +1168,33 @@ func TestSessionReturnsSelectedOrgForCrossOrgPrincipal(t *testing.T) {
 	}
 	if body["org_id"] != "org-b" {
 		t.Fatalf("expected org-b, got %#v", body["org_id"])
+	}
+}
+
+func TestSessionReturnsTenantsForCrossOrgPrincipal(t *testing.T) {
+	srv, err := newTestServer("http://127.0.0.1:1", []string{"axis:cross_org"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedTenant(t, srv, "org-a", "axis")
+	seedTenant(t, srv, "org-b", "medmory")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/session", nil)
+	req.Header.Set("X-Axis-Org-ID", "org-a")
+	rec := httptest.NewRecorder()
+	srv.routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Tenants []IAMTenant `json:"tenants"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Tenants) != 2 {
+		t.Fatalf("expected cross-org session tenants, got %#v", body.Tenants)
 	}
 }
 
@@ -1120,7 +1269,7 @@ func TestSimpleIAMTenantsProductsAndUsers(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Modelo nuevo: crear user con tenant_id=<org> lo agrega al tenant 'axis' del
-	// org (no a un legacy org-member). OrgID = el org; TenantID = su tenant 'axis'
+	// org (no a un org-member historico). OrgID = el org; TenantID = su tenant 'axis'
 	// (≠ org id); Scope = tenant; Role = admin.
 	if userBody.Item.OrgID != tenantBody.Item.ID || userBody.Item.Role != "admin" || userBody.Item.Scope != "tenant" {
 		t.Fatalf("expected tenant admin user in org's 'axis' tenant, got %#v", userBody.Item)
@@ -1362,7 +1511,7 @@ func TestAgentsCRUDARByOrg(t *testing.T) {
 	}
 }
 
-func TestVirtualEmployeesPublicContractProxiesCleanPayload(t *testing.T) {
+func TestVirployeesPublicContractProxiesCleanPayload(t *testing.T) {
 	var requests []string
 	var gotAuth string
 	var gotTenant string
@@ -1377,15 +1526,15 @@ func TestVirtualEmployeesPublicContractProxiesCleanPayload(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/v1/virtual-employees":
-			_, _ = w.Write([]byte(`{"data":[{"employee_id":"11111111-1111-4111-8111-111111111111","tenant_id":"22222222-2222-4222-8222-222222222222","name":"Billing Employee","supervisor_user_id":"33333333-3333-4333-8333-333333333333","status":"active","job_role_id":"44444444-4444-4444-8444-444444444444","profile_id":"55555555-5555-4555-8555-555555555555","autonomy":"A2","capability_ids":[]} ]}`))
-		case r.Method == http.MethodPost && r.URL.Path == "/v1/virtual-employees":
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/virployees":
+			_, _ = w.Write([]byte(`{"data":[{"virployee_id":"11111111-1111-4111-8111-111111111111","tenant_id":"22222222-2222-4222-8222-222222222222","name":"Billing Employee","supervisor_user_id":"33333333-3333-4333-8333-333333333333","status":"active","job_role_id":"44444444-4444-4444-8444-444444444444","profile_id":"55555555-5555-4555-8555-555555555555","autonomy":"A2","capability_ids":[]} ]}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/virployees":
 			w.WriteHeader(http.StatusCreated)
-			_, _ = w.Write([]byte(`{"employee_id":"11111111-1111-4111-8111-111111111111","tenant_id":"22222222-2222-4222-8222-222222222222","name":"Billing Employee","supervisor_user_id":"33333333-3333-4333-8333-333333333333","status":"active","job_role_id":"44444444-4444-4444-8444-444444444444","profile_id":"55555555-5555-4555-8555-555555555555","autonomy":"A2","capability_ids":[]}`))
-		case r.Method == http.MethodPatch && r.URL.Path == "/v1/virtual-employees/11111111-1111-4111-8111-111111111111":
-			_, _ = w.Write([]byte(`{"employee_id":"11111111-1111-4111-8111-111111111111","tenant_id":"22222222-2222-4222-8222-222222222222","name":"Billing Lead","supervisor_user_id":"33333333-3333-4333-8333-333333333333","status":"active","job_role_id":"44444444-4444-4444-8444-444444444444","profile_id":"55555555-5555-4555-8555-555555555555","autonomy":"A3","capability_ids":[]}`))
-		case r.Method == http.MethodPost && r.URL.Path == "/v1/virtual-employees/11111111-1111-4111-8111-111111111111/status":
-			_, _ = w.Write([]byte(`{"employee_id":"11111111-1111-4111-8111-111111111111","tenant_id":"22222222-2222-4222-8222-222222222222","name":"Billing Employee","supervisor_user_id":"33333333-3333-4333-8333-333333333333","status":"archived","job_role_id":"44444444-4444-4444-8444-444444444444","profile_id":"55555555-5555-4555-8555-555555555555","autonomy":"A2","capability_ids":[]}`))
+			_, _ = w.Write([]byte(`{"virployee_id":"11111111-1111-4111-8111-111111111111","tenant_id":"22222222-2222-4222-8222-222222222222","name":"Billing Employee","supervisor_user_id":"33333333-3333-4333-8333-333333333333","status":"active","job_role_id":"44444444-4444-4444-8444-444444444444","profile_id":"55555555-5555-4555-8555-555555555555","autonomy":"A2","capability_ids":[]}`))
+		case r.Method == http.MethodPatch && r.URL.Path == "/v1/virployees/11111111-1111-4111-8111-111111111111":
+			_, _ = w.Write([]byte(`{"virployee_id":"11111111-1111-4111-8111-111111111111","tenant_id":"22222222-2222-4222-8222-222222222222","name":"Billing Lead","supervisor_user_id":"33333333-3333-4333-8333-333333333333","status":"active","job_role_id":"44444444-4444-4444-8444-444444444444","profile_id":"55555555-5555-4555-8555-555555555555","autonomy":"A3","capability_ids":[]}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/virployees/11111111-1111-4111-8111-111111111111/status":
+			_, _ = w.Write([]byte(`{"virployee_id":"11111111-1111-4111-8111-111111111111","tenant_id":"22222222-2222-4222-8222-222222222222","name":"Billing Employee","supervisor_user_id":"33333333-3333-4333-8333-333333333333","status":"archived","job_role_id":"44444444-4444-4444-8444-444444444444","profile_id":"55555555-5555-4555-8555-555555555555","autonomy":"A2","capability_ids":[]}`))
 		default:
 			http.NotFound(w, r)
 		}
@@ -1405,10 +1554,10 @@ func TestVirtualEmployeesPublicContractProxiesCleanPayload(t *testing.T) {
 		body   string
 		code   int
 	}{
-		{http.MethodPost, "/api/virtual-employees", cleanCreateBody, http.StatusCreated},
-		{http.MethodGet, "/api/virtual-employees?lifecycle=all", "", http.StatusOK},
-		{http.MethodPatch, "/api/virtual-employees/11111111-1111-4111-8111-111111111111", strings.Replace(cleanCreateBody, "Billing Employee", "Billing Lead", 1), http.StatusOK},
-		{http.MethodPost, "/api/virtual-employees/11111111-1111-4111-8111-111111111111/archive", "", http.StatusOK},
+		{http.MethodPost, "/api/virployees", cleanCreateBody, http.StatusCreated},
+		{http.MethodGet, "/api/virployees?lifecycle=all", "", http.StatusOK},
+		{http.MethodPatch, "/api/virployees/11111111-1111-4111-8111-111111111111", strings.Replace(cleanCreateBody, "Billing Employee", "Billing Lead", 1), http.StatusOK},
+		{http.MethodPost, "/api/virployees/11111111-1111-4111-8111-111111111111/archive", "", http.StatusOK},
 	} {
 		req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
 		req.Header.Set("Content-Type", "application/json")
@@ -1433,10 +1582,10 @@ func TestVirtualEmployeesPublicContractProxiesCleanPayload(t *testing.T) {
 		t.Fatalf("expected archive action to translate to status payload, got %q", gotBody)
 	}
 	want := []string{
-		"POST /v1/virtual-employees",
-		"GET /v1/virtual-employees?lifecycle=all",
-		"PATCH /v1/virtual-employees/11111111-1111-4111-8111-111111111111",
-		"POST /v1/virtual-employees/11111111-1111-4111-8111-111111111111/status",
+		"POST /v1/virployees",
+		"GET /v1/virployees?lifecycle=all",
+		"PATCH /v1/virployees/11111111-1111-4111-8111-111111111111",
+		"POST /v1/virployees/11111111-1111-4111-8111-111111111111/status",
 	}
 	if strings.Join(requests, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("unexpected downstream requests:\n%s", strings.Join(requests, "\n"))
@@ -1479,14 +1628,14 @@ func TestAgentsOrgAdminAndMemberPermissions(t *testing.T) {
 	}
 }
 
-func TestVirtualEmployeesOrgAdminAndMemberPermissions(t *testing.T) {
+func TestVirployeesOrgAdminAndMemberPermissions(t *testing.T) {
 	downstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
-		case r.Method == http.MethodPost && r.URL.Path == "/v1/virtual-employees":
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/virployees":
 			w.WriteHeader(http.StatusCreated)
-			_, _ = w.Write([]byte(`{"employee_id":"11111111-1111-4111-8111-111111111111","tenant_id":"22222222-2222-4222-8222-222222222222","name":"Ops Employee","supervisor_user_id":"33333333-3333-4333-8333-333333333333","status":"active","job_role_id":"44444444-4444-4444-8444-444444444444","profile_id":"55555555-5555-4555-8555-555555555555","autonomy":"A1","capability_ids":[]}`))
-		case r.Method == http.MethodGet && r.URL.Path == "/v1/virtual-employees":
+			_, _ = w.Write([]byte(`{"virployee_id":"11111111-1111-4111-8111-111111111111","tenant_id":"22222222-2222-4222-8222-222222222222","name":"Ops Employee","supervisor_user_id":"33333333-3333-4333-8333-333333333333","status":"active","job_role_id":"44444444-4444-4444-8444-444444444444","profile_id":"55555555-5555-4555-8555-555555555555","autonomy":"A1","capability_ids":[]}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/virployees":
 			_, _ = w.Write([]byte(`{"data":[]}`))
 		default:
 			http.NotFound(w, r)
@@ -1499,7 +1648,7 @@ func TestVirtualEmployeesOrgAdminAndMemberPermissions(t *testing.T) {
 	}
 	tenantID := seedTenantForActor(t, adminSrv, "org-a", "axis", "admin")
 
-	req := httptest.NewRequest(http.MethodPost, "/api/virtual-employees", strings.NewReader(`{"name":"Ops Employee","supervisor_user_id":"33333333-3333-4333-8333-333333333333","job_role_id":"44444444-4444-4444-8444-444444444444","profile_id":"55555555-5555-4555-8555-555555555555","autonomy":"A1","capability_ids":[]}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/virployees", strings.NewReader(`{"name":"Ops Employee","supervisor_user_id":"33333333-3333-4333-8333-333333333333","job_role_id":"44444444-4444-4444-8444-444444444444","profile_id":"55555555-5555-4555-8555-555555555555","autonomy":"A1","capability_ids":[]}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Tenant-ID", tenantID)
 	rec := httptest.NewRecorder()
@@ -1509,7 +1658,7 @@ func TestVirtualEmployeesOrgAdminAndMemberPermissions(t *testing.T) {
 	}
 
 	otherTenantID := seedTenant(t, adminSrv, "org-b", "axis")
-	req = httptest.NewRequest(http.MethodGet, "/api/virtual-employees", nil)
+	req = httptest.NewRequest(http.MethodGet, "/api/virployees", nil)
 	req.Header.Set("X-Tenant-ID", otherTenantID)
 	rec = httptest.NewRecorder()
 	adminSrv.routes().ServeHTTP(rec, req)
@@ -1522,12 +1671,12 @@ func TestVirtualEmployeesOrgAdminAndMemberPermissions(t *testing.T) {
 		t.Fatal(err)
 	}
 	memberTenantID := seedTenantForActor(t, memberSrv, "org-a", "axis", "member")
-	req = httptest.NewRequest(http.MethodGet, "/api/virtual-employees", nil)
+	req = httptest.NewRequest(http.MethodGet, "/api/virployees", nil)
 	req.Header.Set("X-Tenant-ID", memberTenantID)
 	rec = httptest.NewRecorder()
 	memberSrv.routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusForbidden {
-		t.Fatalf("expected member virtual employees 403, got %d body=%s", rec.Code, rec.Body.String())
+		t.Fatalf("expected member virployees 403, got %d body=%s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -1589,8 +1738,8 @@ func TestDefaultAdminScopesIncludePromptManagement(t *testing.T) {
 	for _, scope := range []string{
 		"companion:assist:read",
 		"companion:assist:write",
-		"companion:employee_profiles:read",
-		"companion:employee_profiles:admin",
+		"companion:virployee_profiles:read",
+		"companion:virployee_profiles:admin",
 		"companion:products:read",
 		"companion:products:admin",
 	} {
@@ -1733,7 +1882,29 @@ func TestResolveAppContextDerivesScopesFromTenantMembership(t *testing.T) {
 	}
 }
 
-// TestResolveAppContextRequiresTenant verifies the legacy app-plane org path has
+func TestResolveAppContextAllowsCrossOrgScopeWithoutTenantMembership(t *testing.T) {
+	srv, err := newTestServer("http://127.0.0.1:1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tenantID := seedTenant(t, srv, "org-b", "medmory")
+	p := authn.Principal{Actor: "admin-user", OrgID: "org-a", Scopes: []string{"axis:cross_org"}}
+	req := httptest.NewRequest(http.MethodGet, "/api/virployees", nil)
+	req.Header.Set("X-Tenant-ID", tenantID)
+
+	orgID, productSurface, resolvedTenant, scopes, err := srv.resolveAppContext(req, p)
+	if err != nil {
+		t.Fatalf("resolveAppContext: %v", err)
+	}
+	if orgID != "org-b" || productSurface != "medmory" || resolvedTenant != tenantID {
+		t.Fatalf("expected target tenant context, got org=%q product=%q tenant=%q", orgID, productSurface, resolvedTenant)
+	}
+	if !hasScope(scopes, "axis:virployees:admin") {
+		t.Fatalf("expected cross-org admin scopes, got %#v", scopes)
+	}
+}
+
+// TestResolveAppContextRequiresTenant verifies the app-plane org path historico has
 // been removed: no X-Tenant-ID means no proxied Companion/Nexus request.
 func TestResolveAppContextRequiresTenant(t *testing.T) {
 	srv, err := newTestServer("http://127.0.0.1:1", nil)
@@ -1805,7 +1976,7 @@ func TestManualAppContextHandlersSurfaceStoreErrorAsStable500(t *testing.T) {
 		path string
 	}{
 		{name: "prompts", path: "/api/prompts/assist-packs"},
-		{name: "employee profiles", path: "/api/employee-profiles"},
+		{name: "virployee profiles", path: "/api/virployee-profiles"},
 		{name: "job roles", path: "/api/job-roles"},
 		{name: "capabilities", path: "/api/capabilities"},
 		{name: "tools", path: "/api/tools"},
@@ -2272,7 +2443,7 @@ func allCompanionAgentRequestsUsePrefix(requests []string, prefix string) bool {
 	return true
 }
 
-func assertVirtualEmployeeMetadata(t *testing.T, metadata map[string]any) {
+func assertVirployeeMetadata(t *testing.T, metadata map[string]any) {
 	t.Helper()
 	if metadataString(metadata, "job_title") != "Finance Coordinator" {
 		t.Fatalf("expected job_title metadata, got %#v", metadata)

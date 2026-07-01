@@ -27,7 +27,7 @@ func (r *PostgresRepository) SetAuditRecorder(recorder commonaudit.Recorder) {
 }
 
 const memoryColumnsSQL = `
-	id, tenant_id, org_id, product_surface, owner_employee_id, policy_json,
+	id, tenant_id, org_id, product_surface, owner_virployee_id, policy_json,
 	status, created_at, updated_at, archived_at, version`
 
 const selectMemorySQL = `
@@ -82,12 +82,12 @@ func (r *PostgresRepository) CreateMemory(ctx context.Context, memory Memory, ac
 	row := r.db.Pool().QueryRow(ctx, `
 		WITH inserted AS (
 			INSERT INTO companion_memories
-				(tenant_id, org_id, product_surface, owner_employee_id, policy_json, status)
+				(tenant_id, org_id, product_surface, owner_virployee_id, policy_json, status)
 			VALUES ($1, $2, $3, $4, $5, $6)
 			RETURNING `+memoryColumnsSQL+`
 		)
 		SELECT * FROM inserted
-	`, memory.TenantID, memory.OrgID, memory.ProductSurface, memory.OwnerEmployeeID, policy, memory.Status)
+	`, memory.TenantID, memory.OrgID, memory.ProductSurface, memory.OwnerVirployeeID, policy, memory.Status)
 	created, err := scanMemory(row)
 	if err != nil {
 		return Memory{}, fmt.Errorf("create memory: %w", err)
@@ -106,7 +106,7 @@ func (r *PostgresRepository) UpdateMemory(ctx context.Context, memory Memory, ac
 	row := r.db.Pool().QueryRow(ctx, `
 		WITH updated AS (
 			UPDATE companion_memories
-			SET owner_employee_id = $5,
+			SET owner_virployee_id = $5,
 			    policy_json = $6,
 			    status = $7,
 			    updated_at = now(),
@@ -115,7 +115,7 @@ func (r *PostgresRepository) UpdateMemory(ctx context.Context, memory Memory, ac
 			RETURNING `+memoryColumnsSQL+`
 		)
 		SELECT * FROM updated
-	`, memory.TenantID, memory.OrgID, memory.ProductSurface, memory.MemoryID, memory.OwnerEmployeeID, policy, memory.Status)
+	`, memory.TenantID, memory.OrgID, memory.ProductSurface, memory.MemoryID, memory.OwnerVirployeeID, policy, memory.Status)
 	updated, err := scanMemory(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -230,7 +230,7 @@ func scanMemory(row scanner) (Memory, error) {
 		&memory.TenantID,
 		&memory.OrgID,
 		&memory.ProductSurface,
-		&memory.OwnerEmployeeID,
+		&memory.OwnerVirployeeID,
 		&policy,
 		&memory.Status,
 		&memory.CreatedAt,
