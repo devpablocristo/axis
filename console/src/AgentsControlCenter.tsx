@@ -1181,7 +1181,7 @@ function formatProfile(profile: string): string {
 }
 
 function formatTenant(agent: AxisAgentView, orgNameById: Map<string, string>, productSurface: string): string {
-  const orgId = agent.org_id?.trim()
+  const orgId = agent.org_id?.trim() ?? ''
   const org = orgNameById.get(orgId) ?? orgId
   const product = productSurface.trim()
   if (org && product) return `${org} / ${product}`

@@ -221,6 +221,9 @@ describe('AgentsControlCenter as Virployees surface', () => {
     })
     const props = crudPageProps.at(-1) as {
       formFields: Array<{ key: string; label: string }>
+      supportsTrash?: boolean
+      trashEmptyState?: string
+      toolbarActions: Array<{ label: string }>
       dataSource: {
         create: (values: Record<string, string | boolean>) => Promise<void>
       }
