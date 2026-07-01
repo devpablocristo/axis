@@ -11,7 +11,7 @@ COPY nexus/ ./
 
 RUN CGO_ENABLED=0 go build -o /out/nexus ./cmd/api
 
-FROM alpine:3.23
+FROM alpine:3.24
 RUN apk add --no-cache ca-certificates wget
 COPY --from=builder /out/nexus /usr/local/bin/nexus
 EXPOSE 8080

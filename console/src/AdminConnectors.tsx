@@ -23,6 +23,7 @@ import {
 
 type CrudLifecycleView = 'active' | 'archived' | 'trash'
 type ConnectorCrudRow = AxisConnectorView & { id: string }
+type ConnectorFormField = NonNullable<CrudPageProps<ConnectorCrudRow>['formFields']>[number]
 type ConnectorBulkAction = 'archive' | 'trash' | 'restore'
 
 const CrudPage = PlatformCrudPage as unknown as <T extends { id: string }>(
@@ -379,7 +380,7 @@ function configFieldKey(key: string): string {
   return `config.${key}`
 }
 
-function crudFieldType(type: AxisConnectorConfigField['type']) {
+function crudFieldType(type: AxisConnectorConfigField['type']): ConnectorFormField['type'] {
   if (type === 'textarea' || type === 'select' || type === 'checkbox' || type === 'number') return type
   return 'text'
 }
