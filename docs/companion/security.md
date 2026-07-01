@@ -67,7 +67,7 @@ delegacion legitima por JWT, requiere un diseno explicito, no un bypass.
 
 ## Scopes
 
-Endpoints sensibles usan scopes: tasks, connectors, watchers y
+Endpoints sensibles usan scopes: tasks, watchers y
 nexus-assist. El API key admin de dev incluye todos los scopes necesarios.
 
 ## Customer org isolation
@@ -78,7 +78,6 @@ nexus-assist. El API key admin de dev incluye todos los scopes necesarios.
 - Un principal con `org_id` no puede acceder tasks con `org_id` vacío.
 - Watcher alerts preservan `OrgID`.
 - Memory valida scope contra usuario/org/task.
-- Connector executions rechazan connectors globales con `org_id` vacío.
 - Runtime tools requieren customer org/user/scopes antes de exponerse al LLM.
 - Cross-org directo en Companion requiere `companion:cross_org`; el BFF puede
   seleccionar org con `X-Axis-Org-ID` y enviar un JWT interno ya acotado.
@@ -111,7 +110,7 @@ check rojo.
 
 ## Secret handling
 
-Evidence de connector executions sanitiza claves sensibles conocidas. No se
+Evidence operativa sanitiza claves sensibles conocidas. No se
 deben registrar API keys, bearer tokens ni payloads sensibles sin redacción.
 
 Product installations no guardan secretos planos. `api_key_ref`, `oauth2` y

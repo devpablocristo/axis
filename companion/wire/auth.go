@@ -24,8 +24,6 @@ func init() {
 		Scopes: []string{
 			"companion:tasks:read",
 			"companion:tasks:write",
-			"companion:connectors:execute",
-			"companion:connectors:admin",
 			"companion:capabilities:read",
 			"companion:capabilities:admin",
 			"companion:watchers:read",

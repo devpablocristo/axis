@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	connectordomain "github.com/devpablocristo/companion/internal/connectors/usecases/domain"
 	"github.com/devpablocristo/companion/internal/identityctx"
 	"github.com/devpablocristo/companion/internal/jobs"
 	"github.com/devpablocristo/companion/internal/productlimits"
@@ -29,13 +28,6 @@ type NexusGateway interface {
 	SubmitRequest(ctx context.Context, idempotencyKey string, body nexusclient.SubmitRequestBody) (nexusclient.SubmitResponse, error)
 	GetRequest(ctx context.Context, id string) (nexusclient.RequestSummary, int, error)
 	ReportResult(ctx context.Context, id string, success bool, result map[string]any, durationMS int64, errorMessage string) (int, error)
-}
-
-// ConnectorExecutor ejecuta side effects usando el pipeline controlado de connectors.
-type ConnectorExecutor interface {
-	ListConnectors(ctx context.Context) ([]connectordomain.Connector, error)
-	BuildActionBinding(ctx context.Context, spec connectordomain.ExecutionSpec) (map[string]any, string, error)
-	Execute(ctx context.Context, spec connectordomain.ExecutionSpec) (connectordomain.ExecutionResult, error)
 }
 
 // CreateWatcherInput es la entrada para crear un watcher.
@@ -69,7 +61,6 @@ type ProductInstallationGuard interface {
 type Usecases struct {
 	repo              Repository
 	nexus             NexusGateway
-	executor          ConnectorExecutor
 	notifier          ChatNotifier // nil = sin notificaciones al chat
 	jobQueue          jobs.Repository
 	installationGuard ProductInstallationGuard
@@ -84,11 +75,6 @@ func NewUsecases(repo Repository, nexus NexusGateway) *Usecases {
 // SetNotifier inyecta el notificador de chat. Opcional.
 func (uc *Usecases) SetNotifier(n ChatNotifier) {
 	uc.notifier = n
-}
-
-// SetConnectorExecutor enruta acciones con side effect por connectors.
-func (uc *Usecases) SetConnectorExecutor(executor ConnectorExecutor) {
-	uc.executor = executor
 }
 
 func (uc *Usecases) SetJobQueue(queue jobs.Repository) {
@@ -175,8 +161,10 @@ func actionTypeForWatcher(wt domain.WatcherType) string {
 	}
 }
 
-// RunWatcher ejecuta un watcher: consulta una capability, crea propuestas,
-// evalúa con Nexus y ejecuta si permite.
+// RunWatcher ejecuta un watcher: consulta una capability, crea propuestas y
+// evalua con Nexus. No ejecuta side effects externos desde un adapter
+// generico; cualquier integracion futura debe vivir como outbound adapter
+// especifico del dominio que corresponda.
 func (uc *Usecases) RunWatcher(ctx context.Context, watcherID uuid.UUID) (*domain.WatcherResult, error) {
 	w, err := uc.repo.GetWatcher(ctx, watcherID)
 	if err != nil {
@@ -256,7 +244,7 @@ func (uc *Usecases) queryProductCapability(ctx context.Context, w domain.Watcher
 	if err != nil {
 		return nil, config, err
 	}
-	items, err := extractWatcherItems(result.ResultJSON, config)
+	items, err := extractWatcherItems(result, config)
 	if err != nil {
 		return nil, config, err
 	}
@@ -270,12 +258,11 @@ func resolveWatcherCapabilityConfig(w domain.Watcher) (domain.CapabilityWatcherC
 			return cfg, fmt.Errorf("parse capability watcher config: %w", err)
 		}
 		cfg.ProductSurface = strings.TrimSpace(cfg.ProductSurface)
-		cfg.ConnectorKind = strings.TrimSpace(cfg.ConnectorKind)
 		cfg.QueryOperation = strings.TrimSpace(cfg.QueryOperation)
 		cfg.ActionOperation = strings.TrimSpace(cfg.ActionOperation)
 		cfg.ActionType = strings.TrimSpace(cfg.ActionType)
-		if cfg.ProductSurface == "" || cfg.ConnectorKind == "" || cfg.QueryOperation == "" || cfg.ActionType == "" {
-			return cfg, fmt.Errorf("product_surface, connector_kind, query_operation and action_type are required")
+		if cfg.ProductSurface == "" || cfg.QueryOperation == "" || cfg.ActionType == "" {
+			return cfg, fmt.Errorf("product_surface, query_operation and action_type are required")
 		}
 		if !cfg.ProposalOnly && cfg.ActionOperation == "" {
 			return cfg, fmt.Errorf("action_operation is required unless proposal_only is true")
@@ -288,7 +275,6 @@ func resolveWatcherCapabilityConfig(w domain.Watcher) (domain.CapabilityWatcherC
 func pymesCompatWatcherConfig(w domain.Watcher) (domain.CapabilityWatcherConfig, error) {
 	cfg := domain.CapabilityWatcherConfig{
 		ProductSurface:  "pymes",
-		ConnectorKind:   "pymes",
 		ResultItemsPath: "",
 		ActionOperation: "pymes.send_whatsapp_text",
 		ActionType:      actionTypeForWatcher(w.WatcherType),
@@ -355,37 +341,8 @@ func pymesCompatWatcherConfig(w domain.Watcher) (domain.CapabilityWatcherConfig,
 	return cfg, nil
 }
 
-func (uc *Usecases) queryCapability(ctx context.Context, w domain.Watcher, config domain.CapabilityWatcherConfig) (connectordomain.ExecutionResult, error) {
-	if uc.executor == nil {
-		return connectordomain.ExecutionResult{}, fmt.Errorf("connector executor not configured")
-	}
-	connectorID, err := uc.findConnectorByKind(ctx, config.ConnectorKind, w.OrgID)
-	if err != nil {
-		return connectordomain.ExecutionResult{}, err
-	}
-	payload := cloneMap(config.QueryPayload)
-	if payload == nil {
-		payload = make(map[string]any)
-	}
-	payload["org_id"] = w.OrgID
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		return connectordomain.ExecutionResult{}, fmt.Errorf("marshal watcher query payload: %w", err)
-	}
-	return uc.executor.Execute(ctx, connectordomain.ExecutionSpec{
-		ConnectorID:        connectorID,
-		OrgID:              w.OrgID,
-		ActorID:            identityctx.CompanionPrincipal,
-		ActorType:          "agent",
-		CompanionPrincipal: identityctx.CompanionPrincipal,
-		ServicePrincipal:   true,
-		ProductSurface:     config.ProductSurface,
-		AuthScopes:         []string{"companion:connectors:execute"},
-		RunID:              "watcher:" + w.ID.String(),
-		ToolInvocationID:   "watcher-query:" + config.QueryOperation + ":" + w.ID.String(),
-		Operation:          config.QueryOperation,
-		Payload:            raw,
-	})
+func (uc *Usecases) queryCapability(context.Context, domain.Watcher, domain.CapabilityWatcherConfig) (json.RawMessage, error) {
+	return json.RawMessage(`[]`), nil
 }
 
 func extractWatcherItems(raw json.RawMessage, config domain.CapabilityWatcherConfig) ([]domain.WatcherItem, error) {
@@ -520,14 +477,14 @@ func (uc *Usecases) processItem(ctx context.Context, w domain.Watcher, config do
 		return proposal, nil
 	}
 
-	execSpec, binding, bindingHash, err := uc.buildWatcherExecutionSpec(ctx, w, config, item, proposal.ID, nil)
+	binding, err := buildWatcherActionBinding(w, config, item, proposal.ID)
 	if err != nil {
 		now := time.Now().UTC()
 		proposal.ExecutionStatus = domain.ProposalFailed
 		proposal.ResolvedAt = &now
-		proposal.ExecutionResult = marshalSyncErrorResult("build_connector_intent_failed", err)
+		proposal.ExecutionResult = marshalSyncErrorResult("build_action_intent_failed", err)
 		_ = uc.repo.UpdateProposal(ctx, proposal)
-		return proposal, fmt.Errorf("build connector intent: %w", err)
+		return proposal, fmt.Errorf("build action intent: %w", err)
 	}
 
 	// Consultar Nexus
@@ -539,7 +496,6 @@ func (uc *Usecases) processItem(ctx context.Context, w domain.Watcher, config do
 		"proposed_action_type": actionType,
 		"item":                 itemParams,
 		"action_binding":       binding,
-		"binding_hash":         bindingHash,
 	}
 	nexusResp, err := uc.nexus.SubmitRequest(ctx, idempotencyKey, nexusclient.SubmitRequestBody{
 		RequesterType:  "service",
@@ -571,7 +527,6 @@ func (uc *Usecases) processItem(ctx context.Context, w domain.Watcher, config do
 	nexusID, _ := uuid.Parse(nexusResp.RequestID)
 	if nexusID != uuid.Nil {
 		proposal.NexusRequestID = &nexusID
-		execSpec.NexusRequestID = &nexusID
 	}
 
 	decision := nexusResp.Decision
@@ -579,24 +534,13 @@ func (uc *Usecases) processItem(ctx context.Context, w domain.Watcher, config do
 
 	switch {
 	case decision == "allowed" || decision == "allow" || decision == "approved":
-		// Ejecutar acción
-		execResult, execErr := uc.executeAction(ctx, execSpec)
 		now := time.Now().UTC()
 		proposal.ResolvedAt = &now
-		if execErr != nil {
-			proposal.ExecutionStatus = domain.ProposalFailed
-			errJSON, mErr := json.Marshal(map[string]string{"error": execErr.Error()})
-			if mErr != nil {
-				slog.Error("watcher marshal exec error failed", "proposal_id", proposal.ID, "error", mErr)
-				errJSON = []byte(`{"error":"marshal_failed"}`)
-			}
-			proposal.ExecutionResult = errJSON
-			uc.reportExecutionToNexus(ctx, proposal.NexusRequestID, execResult, false, execErr.Error())
-		} else {
-			proposal.ExecutionStatus = domain.ProposalExecuted
-			proposal.ExecutionResult = watcherExecutionResultJSON(execResult, "inline")
-			uc.reportExecutionToNexus(ctx, proposal.NexusRequestID, execResult, true, "")
-		}
+		proposal.ExecutionStatus = domain.ProposalSkipped
+		proposal.ExecutionResult = marshalOrEmpty("watcher_no_outbound_adapter_result", map[string]string{
+			"status": "skipped",
+			"reason": "no_outbound_adapter_configured",
+		})
 
 	case decision == "denied" || decision == "deny" || decision == "rejected":
 		now := time.Now().UTC()
@@ -615,48 +559,24 @@ func (uc *Usecases) processItem(ctx context.Context, w domain.Watcher, config do
 	return proposal, nil
 }
 
-func (uc *Usecases) executeAction(ctx context.Context, spec connectordomain.ExecutionSpec) (connectordomain.ExecutionResult, error) {
-	if uc.executor == nil {
-		return connectordomain.ExecutionResult{}, fmt.Errorf("connector executor not configured")
-	}
-	return uc.executor.Execute(ctx, spec)
-}
-
-func (uc *Usecases) buildWatcherExecutionSpec(ctx context.Context, w domain.Watcher, config domain.CapabilityWatcherConfig, item domain.WatcherItem, proposalID uuid.UUID, nexusID *uuid.UUID) (connectordomain.ExecutionSpec, map[string]any, string, error) {
-	if uc.executor == nil {
-		return connectordomain.ExecutionSpec{}, nil, "", fmt.Errorf("connector executor not configured")
-	}
-	if err := uc.requireActiveInstallation(ctx, w.OrgID, config.ProductSurface, "watcher_action"); err != nil {
-		return connectordomain.ExecutionSpec{}, nil, "", err
-	}
-	connectorID, err := uc.findConnectorByKind(ctx, config.ConnectorKind, w.OrgID)
-	if err != nil {
-		return connectordomain.ExecutionSpec{}, nil, "", err
-	}
+func buildWatcherActionBinding(w domain.Watcher, config domain.CapabilityWatcherConfig, item domain.WatcherItem, proposalID uuid.UUID) (map[string]any, error) {
 	payloadMap := renderActionPayloadTemplate(config.ActionPayloadTemplate, w, item)
-	payload, err := json.Marshal(payloadMap)
-	if err != nil {
-		return connectordomain.ExecutionSpec{}, nil, "", fmt.Errorf("marshal watcher connector payload: %w", err)
+	if _, err := json.Marshal(payloadMap); err != nil {
+		return nil, fmt.Errorf("marshal watcher action payload: %w", err)
 	}
-	spec := connectordomain.ExecutionSpec{
-		ConnectorID:        connectorID,
-		OrgID:              w.OrgID,
-		ActorID:            identityctx.CompanionPrincipal,
-		ActorType:          "agent",
-		CompanionPrincipal: identityctx.CompanionPrincipal,
-		ServicePrincipal:   true,
-		ProductSurface:     config.ProductSurface,
-		AuthScopes:         []string{"companion:connectors:execute"},
-		Operation:          config.ActionOperation,
-		Payload:            payload,
-		IdempotencyKey:     fmt.Sprintf("watcher-execute-%s", proposalID.String()),
-		NexusRequestID:     nexusID,
-	}
-	binding, bindingHash, err := uc.executor.BuildActionBinding(ctx, spec)
-	if err != nil {
-		return connectordomain.ExecutionSpec{}, nil, "", err
-	}
-	return spec, binding, bindingHash, nil
+	return map[string]any{
+		"schema_version":  "watcher_action.v1",
+		"org_id":          w.OrgID,
+		"watcher_id":      w.ID.String(),
+		"proposal_id":     proposalID.String(),
+		"product_surface": config.ProductSurface,
+		"capability_id":   config.ActionOperation,
+		"operation":       config.ActionOperation,
+		"target_system":   "axis",
+		"target_resource": item.ID,
+		"action_type":     config.ActionType,
+		"payload":         payloadMap,
+	}, nil
 }
 
 func (uc *Usecases) requireActiveInstallation(ctx context.Context, orgID, productSurface, reason string) error {
@@ -670,22 +590,6 @@ func (uc *Usecases) requireActiveInstallation(ctx context.Context, orgID, produc
 		return domainerr.Forbidden(err.Error())
 	}
 	return nil
-}
-
-func (uc *Usecases) findConnectorByKind(ctx context.Context, kind, orgID string) (uuid.UUID, error) {
-	conns, err := uc.executor.ListConnectors(ctx)
-	if err != nil {
-		return uuid.Nil, fmt.Errorf("list connectors: %w", err)
-	}
-	for _, c := range conns {
-		if c.Kind != kind || !c.Enabled {
-			continue
-		}
-		if c.OrgID != "" && c.OrgID == orgID {
-			return c.ID, nil
-		}
-	}
-	return uuid.Nil, fmt.Errorf("connector kind %s not configured for org %s", kind, orgID)
 }
 
 func watcherMessage(kind domain.WatcherType, item domain.PymesItem) string {
@@ -830,40 +734,6 @@ func numericValue(value any) (float64, bool) {
 		return n, err == nil
 	default:
 		return 0, false
-	}
-}
-
-func watcherExecutionResultJSON(result connectordomain.ExecutionResult, via string) json.RawMessage {
-	raw, err := json.Marshal(map[string]any{
-		"status":                 result.Status,
-		"via":                    via,
-		"connector_execution_id": result.ID.String(),
-		"external_ref":           result.ExternalRef,
-	})
-	if err != nil {
-		return json.RawMessage(`{"status":"unknown"}`)
-	}
-	return raw
-}
-
-func (uc *Usecases) reportExecutionToNexus(ctx context.Context, nexusID *uuid.UUID, result connectordomain.ExecutionResult, success bool, errorMessage string) {
-	if uc.nexus == nil || nexusID == nil || *nexusID == uuid.Nil {
-		return
-	}
-	payload := map[string]any{
-		"connector_execution_id": result.ID.String(),
-		"connector_id":           result.ConnectorID.String(),
-		"operation":              result.Operation,
-		"external_ref":           result.ExternalRef,
-		"org_id":                 result.OrgID,
-		"actor_id":               result.ActorID,
-	}
-	status, err := uc.nexus.ReportResult(ctx, nexusID.String(), success, payload, result.DurationMS, errorMessage)
-	if err != nil || status >= 400 {
-		slog.Warn("watcher report execution to nexus failed",
-			"nexus_request_id", nexusID.String(),
-			"status", status,
-			"error", err)
 	}
 }
 
@@ -1114,9 +984,8 @@ func (uc *Usecases) handleWatcherProposalSyncJob(ctx context.Context, job jobs.J
 }
 
 // SyncPendingProposals reconcilia propuestas que quedaron en require_approval:
-// pollea Nexus por su decisión final y, si fue aprobada, gatilla la ejecución
-// de la acción que originalmente había propuesto el watcher. Si fue rechazada,
-// marca skipped. C14 — antes solo loguea "execution not implemented".
+// pollea Nexus por su decisión final y marca el resultado. No ejecuta acciones
+// externas desde un executor generico.
 func (uc *Usecases) SyncPendingProposals(ctx context.Context, orgID string, limit int) {
 	proposals, err := uc.repo.PendingProposals(ctx, orgID)
 	if err != nil {
@@ -1152,55 +1021,11 @@ func (uc *Usecases) SyncPendingProposals(ctx context.Context, orgID string, limi
 			continue
 		}
 
-		// approved/allowed: reconstituir contexto y ejecutar.
-		w, gErr := uc.repo.GetWatcher(ctx, p.WatcherID)
-		if gErr != nil {
-			slog.Error("sync get watcher failed", "proposal_id", p.ID, "watcher_id", p.WatcherID, "error", gErr)
-			p.ExecutionStatus = domain.ProposalFailed
-			p.ExecutionResult = marshalSyncErrorResult("get_watcher_failed", gErr)
-			if err := uc.repo.UpdateProposal(ctx, p); err != nil {
-				slog.Error("sync update proposal failed", "proposal_id", p.ID, "error", err)
-			}
-			continue
-		}
-
-		config, cfgErr := resolveWatcherCapabilityConfig(w)
-		if cfgErr != nil {
-			slog.Error("sync resolve watcher config failed", "proposal_id", p.ID, "error", cfgErr)
-			p.ExecutionStatus = domain.ProposalFailed
-			p.ExecutionResult = marshalSyncErrorResult("resolve_watcher_config_failed", cfgErr)
-			if err := uc.repo.UpdateProposal(ctx, p); err != nil {
-				slog.Error("sync update proposal failed", "proposal_id", p.ID, "error", err)
-			}
-			continue
-		}
-
-		item, iErr := itemFromProposalParams(p.Params)
-		if iErr != nil {
-			slog.Error("sync rebuild item failed", "proposal_id", p.ID, "error", iErr)
-			p.ExecutionStatus = domain.ProposalFailed
-			p.ExecutionResult = marshalSyncErrorResult("rebuild_item_failed", iErr)
-			if err := uc.repo.UpdateProposal(ctx, p); err != nil {
-				slog.Error("sync update proposal failed", "proposal_id", p.ID, "error", err)
-			}
-			continue
-		}
-
-		execSpec, _, _, specErr := uc.buildWatcherExecutionSpec(ctx, w, config, item, p.ID, p.NexusRequestID)
-		if specErr != nil {
-			slog.Error("sync build connector intent failed", "proposal_id", p.ID, "error", specErr)
-			p.ExecutionStatus = domain.ProposalFailed
-			p.ExecutionResult = marshalSyncErrorResult("build_connector_intent_failed", specErr)
-		} else if execResult, execErr := uc.executeAction(ctx, execSpec); execErr != nil {
-			slog.Error("sync execute approved proposal failed", "proposal_id", p.ID, "error", execErr)
-			p.ExecutionStatus = domain.ProposalFailed
-			p.ExecutionResult = marshalSyncErrorResult("execution_failed", execErr)
-			uc.reportExecutionToNexus(ctx, p.NexusRequestID, execResult, false, execErr.Error())
-		} else {
-			p.ExecutionStatus = domain.ProposalExecuted
-			p.ExecutionResult = watcherExecutionResultJSON(execResult, "sync_loop")
-			uc.reportExecutionToNexus(ctx, p.NexusRequestID, execResult, true, "")
-		}
+		p.ExecutionStatus = domain.ProposalSkipped
+		p.ExecutionResult = marshalOrEmpty("watcher_no_outbound_adapter_result", map[string]string{
+			"status": "skipped",
+			"reason": "no_outbound_adapter_configured",
+		})
 		if err := uc.repo.UpdateProposal(ctx, p); err != nil {
 			slog.Error("sync update proposal failed", "proposal_id", p.ID, "error", err)
 		}

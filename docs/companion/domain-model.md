@@ -73,7 +73,7 @@ configuran, gobiernan o explican la operacion.
 
 - `VirployeeProfile`
 - `Capability`
-- `Connector`
+- `Adapter`
 - `AssistPack`
 - `RuntimePolicy`
 - `Policy`
@@ -113,8 +113,7 @@ pero no deberian ser el lenguaje principal del usuario final.
 | Agent | Unidad tecnica de ejecucion IA | Identidad runtime, autonomia, estado y compatibilidad | Companion | Si tecnico | Interna/compatibilidad tecnica | Existe en modulo tecnico de agents |
 | VirployeeProfile | Plantilla tecnica de comportamiento | Prompt, modelo, limites y allowlists | Companion | Si | Admin/dev avanzado | Existe |
 | Capability | Habilidad reusable declarada por contrato | Describe que puede hacerse | Companion | Si | Admin/dev avanzado | Existe |
-| Tool | Funcion tecnica invocable | Ejecuta una operacion concreta | Runtime/MCP/Connector | No como negocio | Interna/dev | Existe |
-| Connector | Adaptador a producto o sistema externo | Ejecuta capabilities contra sistemas reales | Companion | Si tecnico | Admin/dev | Existe |
+| Tool | Funcion tecnica invocable | Ejecuta una operacion concreta | Runtime/MCP | No como negocio | Interna/dev | Existe |
 | Task | Trabajo concreto asignable y auditable | Unidad operativa de trabajo | Companion | Si | Publica/operativa | Existe |
 | Job | Ejecucion background o programada | Retry, async y scheduling tecnico | Companion | No usuario | Interna | Existe |
 | Watcher | Observador proactivo | Detecta eventos/condiciones y crea trabajo | Companion | Si tecnico | Admin avanzado | Existe |
@@ -223,25 +222,18 @@ Ejemplo: `axis.ops.billing.v1`.
 ### Capability
 
 Habilidad reusable declarada por contrato. Explica que se puede hacer de forma
-estable, auditable y reusable. No ejecuta por si misma; necesita tools y
-connectors.
+estable, auditable y reusable. No ejecuta por si misma; necesita tools o un
+adapter tecnico especifico si Axis consume otro servicio.
 
 Ejemplo: `billing.invoice.read`.
 
 ### Tool
 
-Funcion tecnica invocable por Runtime, MCP o connectors. Es granular y
+Funcion tecnica invocable por Runtime o MCP. Es granular y
 ejecutable. No debe reemplazar Capability: Tool es como se ejecuta, Capability
 es que habilidad representa.
 
 Ejemplo: `billing_read_invoice`.
-
-### Connector
-
-Adaptador a un producto o sistema externo. Implementa o expone tools y
-capabilities contra una API real.
-
-Ejemplo: connector para Pymes.
 
 ### Task
 
@@ -424,7 +416,6 @@ Un admin o developer avanzado puede ver configuracion y governance:
 
 - `VirployeeProfile`
 - `Capability`
-- `Connector`
 - `RuntimePolicy`
 - `AssistPack`
 - `Evals`
@@ -472,7 +463,6 @@ Organization
 Product
 └── Capabilities
     └── Tools
-        └── Connectors
 
 Nexus
 ├── Policies
@@ -484,7 +474,6 @@ Nexus
 
 - `Task`: unidad de trabajo concreta.
 - `Capability`: habilidad reusable por contrato.
-- `Connector`: adapter tecnico a productos/sistemas.
 - `Memory`: contexto persistente con scope.
 - `RuntimePolicy`: governance tecnico.
 - `Watcher`: proactividad.

@@ -10,7 +10,6 @@ import (
 
 	"github.com/google/uuid"
 
-	connectordomain "github.com/devpablocristo/companion/internal/connectors/usecases/domain"
 	"github.com/devpablocristo/companion/internal/nexusclient"
 	domain "github.com/devpablocristo/companion/internal/tasks/usecases/domain"
 )
@@ -79,23 +78,6 @@ type TaskPlanCompensationOutput struct {
 	NexusBindingHash    string
 	ApprovalRequired    bool
 	ApprovalUnavailable bool
-}
-
-type ExecuteTaskPlanCompensationInput struct {
-	NexusRequestID string
-}
-
-type TaskPlanCompensationExecutionOutput struct {
-	Plan             domain.TaskPlan
-	Step             domain.TaskPlanStep
-	Status           string
-	Reason           string
-	Compensation     map[string]any
-	NexusRequestID   string
-	NexusStatus      string
-	Execution        connectordomain.ExecutionResult
-	Verification     domain.TaskVerificationResult
-	ApprovalRequired bool
 }
 
 type taskExecutionGraphRepository interface {
@@ -343,34 +325,30 @@ func (u *Usecases) PrepareTaskPlanCompensation(ctx context.Context, taskID, step
 
 	var submitOut nexusclient.SubmitResponse
 	if supported {
-		if u.executor == nil {
+		operation := firstNonEmptyString(
+			strings.TrimSpace(fmt.Sprint(compensation["operation"])),
+			strings.TrimSpace(fmt.Sprint(compensation["capability_id"])),
+			strings.TrimSpace(step.Capability),
+		)
+		if operation == "" {
 			checkpoint["status"] = "compensation_contract_invalid"
-			checkpoint["error"] = "task execution is not configured"
-			updated, updateErr := u.recordCompensationCheckpoint(ctx, taskID, domain.TaskPlanStatusBlocked, checkpoint, "configure connector execution before compensation", "compensation execution is not configured")
-			if updateErr != nil {
-				return TaskPlanCompensationOutput{}, updateErr
-			}
-			return TaskPlanCompensationOutput{Plan: updated, Step: step, Status: "compensation_contract_invalid", Reason: reason, Compensation: compensation, ApprovalRequired: true, ApprovalUnavailable: true}, nil
-		}
-		spec, specErr := compensationExecutionSpec(t, step, compensation, reason, nil)
-		if specErr != nil {
-			checkpoint["status"] = "compensation_contract_invalid"
-			checkpoint["error"] = specErr.Error()
-			updated, updateErr := u.recordCompensationCheckpoint(ctx, taskID, domain.TaskPlanStatusBlocked, checkpoint, "fix compensation contract", "compensation contract invalid: "+specErr.Error())
+			checkpoint["error"] = "compensation operation is required"
+			updated, updateErr := u.recordCompensationCheckpoint(ctx, taskID, domain.TaskPlanStatusBlocked, checkpoint, "fix compensation contract", "compensation contract invalid: operation is required")
 			if updateErr != nil {
 				return TaskPlanCompensationOutput{}, updateErr
 			}
 			return TaskPlanCompensationOutput{Plan: updated, Step: step, Status: "compensation_contract_invalid", Reason: reason, Compensation: compensation, ApprovalRequired: true}, nil
 		}
-		binding, bindingHash, bindingErr := u.executor.BuildActionBinding(ctx, spec)
-		if bindingErr != nil {
-			checkpoint["status"] = "compensation_contract_invalid"
-			checkpoint["error"] = bindingErr.Error()
-			updated, updateErr := u.recordCompensationCheckpoint(ctx, taskID, domain.TaskPlanStatusBlocked, checkpoint, "fix compensation contract", "compensation action binding failed: "+bindingErr.Error())
-			if updateErr != nil {
-				return TaskPlanCompensationOutput{}, updateErr
-			}
-			return TaskPlanCompensationOutput{Plan: updated, Step: step, Status: "compensation_contract_invalid", Reason: reason, Compensation: compensation, ApprovalRequired: true}, nil
+		binding := map[string]any{
+			"target_system":   "axis",
+			"target_resource": operation,
+			"capability_id":   operation,
+			"task_id":         taskID.String(),
+			"plan_step_id":    step.ID.String(),
+			"step_key":        step.StepKey,
+		}
+		if payload, ok := compensation["payload"]; ok {
+			binding["payload"] = payload
 		}
 		if u.nexus == nil {
 			checkpoint["status"] = "approval_unavailable"
@@ -399,11 +377,10 @@ func (u *Usecases) PrepareTaskPlanCompensation(ctx context.Context, taskID, step
 			"step_key":             step.StepKey,
 			"reason":               reason,
 			"compensation":         compensation,
-			"compensation_payload": json.RawMessage(spec.Payload),
+			"compensation_payload": compensation["payload"],
 			"original_tool":        step.ToolName,
 			"original_status":      step.Status,
 			"action_binding":       binding,
-			"action_binding_hash":  bindingHash,
 		}
 		if step.EvidenceJSON != nil {
 			params["step_evidence"] = json.RawMessage(step.EvidenceJSON)
@@ -471,145 +448,6 @@ func (u *Usecases) PrepareTaskPlanCompensation(ctx context.Context, taskID, step
 	}, nil
 }
 
-func (u *Usecases) ExecuteTaskPlanCompensation(ctx context.Context, taskID, stepID uuid.UUID, in ExecuteTaskPlanCompensationInput) (TaskPlanCompensationExecutionOutput, error) {
-	var out TaskPlanCompensationExecutionOutput
-	if u.executor == nil {
-		return out, fmt.Errorf("task execution is not configured")
-	}
-	if u.nexus == nil {
-		return out, fmt.Errorf("nexus is not configured")
-	}
-	t, err := u.repo.GetTaskByID(ctx, taskID)
-	if err != nil {
-		return out, err
-	}
-	plan, err := u.repo.GetTaskPlan(ctx, taskID)
-	if err != nil {
-		return out, err
-	}
-	step, ok := findTaskPlanStep(plan, stepID)
-	if !ok {
-		return out, ErrNotFound
-	}
-	action, reason, compensation, err := u.latestCompensationAction(ctx, taskID, stepID, strings.TrimSpace(in.NexusRequestID))
-	if err != nil {
-		return out, err
-	}
-	nexusRequestID, err := compensationNexusRequestID(action, in.NexusRequestID)
-	if err != nil {
-		return out, err
-	}
-	sum, statusCode, err := u.nexus.GetRequest(ctx, nexusRequestID.String())
-	if err != nil {
-		return out, fmt.Errorf("nexus get compensation request: %w", err)
-	}
-	if statusCode == nexusHTTPStatusNotFound {
-		return out, fmt.Errorf("nexus compensation request not found")
-	}
-	nexusStatus := normalizeNexusStatus(sum.Status)
-	if !isApprovedNexusStatus(nexusStatus) {
-		return out, u.nexusBlockedError(nexusRequestID.String(), nexusStatus, "execute_compensation")
-	}
-
-	spec, err := compensationExecutionSpec(t, step, compensation, reason, &nexusRequestID)
-	if err != nil {
-		return out, err
-	}
-	result, execErr := u.executor.Execute(ctx, spec)
-	if execErr != nil {
-		result = connectordomain.ExecutionResult{
-			ID:             uuid.New(),
-			ConnectorID:    spec.ConnectorID,
-			OrgID:          spec.OrgID,
-			ActorID:        spec.ActorID,
-			Operation:      spec.Operation,
-			Status:         connectordomain.ExecFailure,
-			Payload:        spec.Payload,
-			ResultJSON:     json.RawMessage(`{}`),
-			ErrorMessage:   execErr.Error(),
-			Retryable:      true,
-			IdempotencyKey: spec.IdempotencyKey,
-			TaskID:         spec.TaskID,
-			NexusRequestID: spec.NexusRequestID,
-			CreatedAt:      time.Now().UTC(),
-		}
-	}
-	if result.CreatedAt.IsZero() {
-		result.CreatedAt = time.Now().UTC()
-	}
-	u.reportExecutionToNexus(ctx, &nexusRequestID, result)
-	verification := verifyExecutionResult(result)
-	status := "compensation_executed"
-	planStatus := domain.TaskPlanStatusCompleted
-	nextAction := "compensation executed"
-	blocker := ""
-	if result.Status != connectordomain.ExecSuccess || verification.Status != domain.VerificationStatusVerified {
-		status = "compensation_failed"
-		planStatus = domain.TaskPlanStatusFailed
-		nextAction = "review failed compensation"
-		blocker = firstNonEmptyString(result.ErrorMessage, verification.Summary, "compensation execution failed")
-	}
-
-	payload := buildConnectorExecutionPayload(result)
-	if _, insertErr := u.repo.InsertAction(ctx, domain.TaskAction{
-		TaskID:         taskID,
-		ActionType:     TaskActionExecuteComp,
-		Payload:        payload,
-		NexusRequestID: &nexusRequestID,
-		ErrorMessage:   result.ErrorMessage,
-	}); insertErr != nil {
-		slog.Warn("companion execute compensation action failed", "task_id", taskID.String(), "error", insertErr)
-	}
-	artifactKind := TaskArtifactConnectorExecution
-	if result.Status != connectordomain.ExecSuccess {
-		artifactKind = TaskArtifactExecutionError
-	}
-	if _, artifactErr := u.repo.InsertArtifact(ctx, domain.TaskArtifact{
-		TaskID:  taskID,
-		Kind:    artifactKind,
-		URI:     result.ExternalRef,
-		Payload: payload,
-	}); artifactErr != nil {
-		slog.Warn("companion execute compensation artifact failed", "task_id", taskID.String(), "error", artifactErr)
-	}
-
-	checkpoint := map[string]any{
-		"source":           "execute_task_plan_compensation",
-		"status":           status,
-		"step_id":          step.ID.String(),
-		"step_key":         step.StepKey,
-		"reason":           reason,
-		"nexus_request_id": nexusRequestID.String(),
-		"nexus_status":     nexusStatus,
-		"compensation":     compensation,
-		"execution":        json.RawMessage(payload),
-		"verification":     buildVerificationPayload(result, verification),
-		"approval_passed":  true,
-	}
-	updated, err := u.RecordTaskPlanCheckpoint(ctx, taskID, RecordTaskPlanCheckpointInput{
-		Status:         planStatus,
-		CheckpointJSON: marshalOrEmpty("task_plan_compensation_execution_checkpoint", checkpoint),
-		NextAction:     nextAction,
-		Blocker:        blocker,
-	})
-	if err != nil {
-		return out, err
-	}
-	u.syncTaskMemory(ctx, taskID, "execute_compensation")
-	return TaskPlanCompensationExecutionOutput{
-		Plan:             updated,
-		Step:             step,
-		Status:           status,
-		Reason:           reason,
-		Compensation:     compensation,
-		NexusRequestID:   nexusRequestID.String(),
-		NexusStatus:      nexusStatus,
-		Execution:        result,
-		Verification:     verification,
-		ApprovalRequired: true,
-	}, nil
-}
-
 func (u *Usecases) recordCompensationCheckpoint(ctx context.Context, taskID uuid.UUID, status string, checkpoint map[string]any, nextAction, blocker string) (domain.TaskPlan, error) {
 	updated, err := u.RecordTaskPlanCheckpoint(ctx, taskID, RecordTaskPlanCheckpointInput{
 		Status:         status,
@@ -649,56 +487,6 @@ func findTaskPlanStep(plan domain.TaskPlan, stepID uuid.UUID) (domain.TaskPlanSt
 	return domain.TaskPlanStep{}, false
 }
 
-func (u *Usecases) latestCompensationAction(ctx context.Context, taskID, stepID uuid.UUID, requestedNexusID string) (domain.TaskAction, string, map[string]any, error) {
-	actions, err := u.repo.ListActionsByTaskID(ctx, taskID)
-	if err != nil {
-		return domain.TaskAction{}, "", nil, err
-	}
-	requestedNexusID = strings.TrimSpace(requestedNexusID)
-	for i := len(actions) - 1; i >= 0; i-- {
-		action := actions[i]
-		if action.ActionType != TaskActionPrepareComp {
-			continue
-		}
-		payload := map[string]any{}
-		if len(action.Payload) > 0 {
-			_ = json.Unmarshal(action.Payload, &payload)
-		}
-		if strings.TrimSpace(fmt.Sprint(payload["step_id"])) != stepID.String() {
-			continue
-		}
-		actionNexusID := strings.TrimSpace(fmt.Sprint(payload["nexus_request_id"]))
-		if action.NexusRequestID != nil {
-			actionNexusID = action.NexusRequestID.String()
-		}
-		if requestedNexusID != "" && actionNexusID != requestedNexusID {
-			continue
-		}
-		compensation, _ := mapAnyFrom(payload["compensation"])
-		if len(compensation) == 0 {
-			return domain.TaskAction{}, "", nil, fmt.Errorf("prepared compensation action has no compensation payload")
-		}
-		return action, strings.TrimSpace(fmt.Sprint(payload["reason"])), compensation, nil
-	}
-	return domain.TaskAction{}, "", nil, ErrNotFound
-}
-
-func compensationNexusRequestID(action domain.TaskAction, override string) (uuid.UUID, error) {
-	if id, err := uuid.Parse(strings.TrimSpace(override)); err == nil && id != uuid.Nil {
-		return id, nil
-	}
-	if action.NexusRequestID != nil && *action.NexusRequestID != uuid.Nil {
-		return *action.NexusRequestID, nil
-	}
-	var payload map[string]any
-	if len(action.Payload) > 0 && json.Unmarshal(action.Payload, &payload) == nil {
-		if id, err := uuid.Parse(strings.TrimSpace(fmt.Sprint(payload["nexus_request_id"]))); err == nil && id != uuid.Nil {
-			return id, nil
-		}
-	}
-	return uuid.Nil, fmt.Errorf("prepared compensation has no nexus_request_id")
-}
-
 func compensationFromTaskPlanStepEvidence(raw json.RawMessage) (map[string]any, bool) {
 	var evidence map[string]any
 	if len(raw) == 0 || json.Unmarshal(raw, &evidence) != nil {
@@ -717,91 +505,6 @@ func compensationFromTaskPlanStepEvidence(raw json.RawMessage) (map[string]any, 
 		return compensation, true
 	}
 	return map[string]any{"supported": false}, false
-}
-
-func compensationExecutionSpec(t domain.Task, step domain.TaskPlanStep, compensation map[string]any, reason string, nexusRequestID *uuid.UUID) (connectordomain.ExecutionSpec, error) {
-	originalBinding := originalActionBindingFromTaskPlanStepEvidence(step.EvidenceJSON)
-	connectorIDRaw := firstNonEmptyString(
-		strings.TrimSpace(fmt.Sprint(compensation["connector_id"])),
-		stringFromBinding(originalBinding, "connector_id", ""),
-	)
-	connectorID, err := uuid.Parse(connectorIDRaw)
-	if err != nil || connectorID == uuid.Nil {
-		return connectordomain.ExecutionSpec{}, fmt.Errorf("valid compensation connector_id is required")
-	}
-	operation := firstNonEmptyString(
-		strings.TrimSpace(fmt.Sprint(compensation["operation"])),
-		strings.TrimSpace(fmt.Sprint(compensation["capability_id"])),
-	)
-	if operation == "" {
-		return connectordomain.ExecutionSpec{}, fmt.Errorf("compensation operation is required")
-	}
-	payload := compensationExecutionPayload(t, step, compensation, reason, originalBinding)
-	return connectordomain.ExecutionSpec{
-		ConnectorID:        connectorID,
-		OrgID:              t.OrgID,
-		ActorID:            CompanionRequesterID,
-		ActorType:          "agent",
-		CompanionPrincipal: CompanionRequesterID,
-		OnBehalfOf:         executionOnBehalfOf(t),
-		ServicePrincipal:   true,
-		ProductSurface:     firstNonEmptyString(stringFromBinding(originalBinding, "product_surface", ""), "companion"),
-		RunID:              t.ID.String(),
-		ToolInvocationID:   "compensation:" + step.ID.String(),
-		Operation:          operation,
-		Payload:            payload,
-		IdempotencyKey:     defaultCompensationIdempotencyKey(t.ID, step.ID),
-		TaskID:             &t.ID,
-		NexusRequestID:     nexusRequestID,
-	}, nil
-}
-
-func compensationExecutionPayload(t domain.Task, step domain.TaskPlanStep, compensation map[string]any, reason string, originalBinding map[string]any) json.RawMessage {
-	payload := map[string]any{
-		"org_id":                  t.OrgID,
-		"task_id":                 t.ID.String(),
-		"plan_step_id":            step.ID.String(),
-		"step_key":                step.StepKey,
-		"reason":                  reason,
-		"compensation":            compensation,
-		"original_tool_name":      step.ToolName,
-		"original_action_binding": originalBinding,
-	}
-	if supplied, ok := mapAnyFrom(compensation["payload"]); ok {
-		payload = cloneAnyMap(supplied)
-		payload["org_id"] = t.OrgID
-		payload["task_id"] = t.ID.String()
-		payload["plan_step_id"] = step.ID.String()
-		if reason != "" {
-			payload["reason"] = reason
-		}
-	}
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		return json.RawMessage(`{}`)
-	}
-	return raw
-}
-
-func originalActionBindingFromTaskPlanStepEvidence(raw json.RawMessage) map[string]any {
-	var evidence map[string]any
-	if len(raw) == 0 || json.Unmarshal(raw, &evidence) != nil {
-		return nil
-	}
-	if binding, ok := mapAnyFrom(evidence["action_binding"]); ok {
-		return cloneAnyMap(binding)
-	}
-	if toolResult, ok := mapAnyFrom(evidence["tool_result"]); ok {
-		if binding, ok := mapAnyFrom(toolResult["action_binding"]); ok {
-			return cloneAnyMap(binding)
-		}
-		if innerEvidence, ok := mapAnyFrom(toolResult["evidence"]); ok {
-			if binding, ok := mapAnyFrom(innerEvidence["action_binding"]); ok {
-				return cloneAnyMap(binding)
-			}
-		}
-	}
-	return nil
 }
 
 func mapAnyFrom(value any) (map[string]any, bool) {

@@ -22,30 +22,23 @@ El runtime filtra los schemas antes de enviarlos al modelo.
 - Prompt injection en args se rechaza antes de ejecutar la tool.
 - Tools de memoria no caen en scopes globales.
 - Tools que consultan Nexus no sustituyen decisions de Nexus.
-- La configuración runtime de la customer org puede filtrar tools, connectors
-  y capabilities antes de que el LLM las vea o las ejecute.
+- La configuración runtime de la customer org puede filtrar tools y capabilities
+  antes de que el LLM las vea o las ejecute.
 
 ## Acciones sensibles
 
-Las writes/side effects deben ejecutarse por connectors/capabilities y pasar por
-Nexus antes de ejecutar. El runtime no debe tener tools directas para approve,
-reject o writes sensibles sin gate.
-
-Los connectors pertenecen a una customer org: una fila `org_id=''` no autoriza
-ejecución de trabajo.
-Los templates estáticos del registry solo publican schemas.
-
-Las capabilities publicadas por connectors son la fuente de tools específicas
-por producto. Pymes y Ponti son adapters/configuración; el runtime común no debe
-asumir un negocio concreto como default conceptual.
+Las writes/side effects deben pasar por Nexus antes de ejecutar. El runtime no
+debe tener tools directas para approve, reject o writes sensibles sin gate.
+Cuando Axis necesita consumir un servicio externo, esa salida debe vivir como
+adapter tecnico en codigo del dominio correspondiente.
 
 ## Capability manifests
 
 Cada capability se normaliza a `capability_manifest.v1` antes de exponerse al
-LLM, enviarse a Nexus o ejecutarse por connectors. El manifest canónico incluye:
+LLM o enviarse a Nexus. El manifest canónico incluye:
 
 - identidad versionada: `capability_id`, `version`, `owner`, `product_surface`,
-  `connector`;
+  y metadatos del producto;
 - contrato: `input_schema`, `output_schema`, `evidence_schema`,
   `required_evidence`, preconditions y postconditions;
 - control operativo: `action_type`, `risk_level`, `side_effect_type`,
@@ -54,13 +47,10 @@ LLM, enviarse a Nexus o ejecutarse por connectors. El manifest canónico incluye
   idempotency mode y rollback/compensation strategy.
 
 El loader de manifests nuevos es estricto: schemas con `required` apuntando a
-propiedades inexistentes se rechazan. Para compatibilidad, los connectors historical
-que solo declaran `required` se adaptan a schemas completos antes de registrarse.
+propiedades inexistentes se rechazan.
 
 Endpoint operativo:
 
-- `GET /v1/connectors/capability-manifests`: devuelve los manifests efectivos
-  filtrados por identidad, scopes, riesgo e `include_writes`.
 - `POST /v1/capabilities`: importa manualmente un manifest como `draft`.
 - `POST /v1/capabilities/import-source`: importa manifests desde una fuente JSON
   generica como `draft`.

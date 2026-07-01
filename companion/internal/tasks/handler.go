@@ -39,9 +39,6 @@ type taskUsecase interface {
 	ListTaskExecutionGraph(ctx context.Context, taskID uuid.UUID, limit int) ([]domain.TaskExecutionGraphEvent, error)
 	UpdateTaskPlanStep(ctx context.Context, taskID, stepID uuid.UUID, in UpdateTaskPlanStepInput) (domain.TaskPlan, error)
 	RecordTaskPlanCheckpoint(ctx context.Context, taskID uuid.UUID, in RecordTaskPlanCheckpointInput) (domain.TaskPlan, error)
-	SetExecutionPlan(ctx context.Context, taskID uuid.UUID, in SetExecutionPlanInput) (domain.TaskExecutionPlan, error)
-	ExecuteTask(ctx context.Context, taskID uuid.UUID) (ExecuteTaskOutput, error)
-	RetryTask(ctx context.Context, taskID uuid.UUID) (ExecuteTaskOutput, error)
 	SyncTaskNexus(ctx context.Context, taskID uuid.UUID) (domain.Task, error)
 	Chat(ctx context.Context, in ChatInput) (ChatResult, error)
 }
@@ -65,9 +62,6 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/tasks/{id}/graph", h.executionGraph)
 	mux.HandleFunc("PATCH /v1/tasks/{id}/plan/steps/{step_id}", h.updatePlanStep)
 	mux.HandleFunc("POST /v1/tasks/{id}/plan/checkpoint", h.recordPlanCheckpoint)
-	mux.HandleFunc("PUT /v1/tasks/{id}/execution-plan", h.setExecutionPlan)
-	mux.HandleFunc("POST /v1/tasks/{id}/execute", h.execute)
-	mux.HandleFunc("POST /v1/tasks/{id}/retry", h.retry)
 	mux.HandleFunc("POST /v1/tasks/{id}/sync", h.syncNexus)
 	mux.HandleFunc("POST /v1/chat", h.chat)
 	mux.HandleFunc("POST /v1/agent-runs", h.createAgentRun)
@@ -214,14 +208,8 @@ func (h *Handler) getByID(w http.ResponseWriter, r *http.Request) {
 	if detail.NexusSync != nil {
 		resp.NexusSync = tasksdto.NexusSyncToResponse(*detail.NexusSync)
 	}
-	if detail.ExecutionPlan != nil {
-		resp.ExecutionPlan = tasksdto.ExecutionPlanToResponse(*detail.ExecutionPlan)
-	}
 	if detail.DurablePlan != nil {
 		resp.DurablePlan = tasksdto.TaskPlanToResponse(*detail.DurablePlan)
-	}
-	if detail.ExecutionState != nil {
-		resp.ExecutionState = tasksdto.ExecutionStateToResponse(*detail.ExecutionState)
 	}
 	httpjson.WriteJSON(w, http.StatusOK, resp)
 }
@@ -547,127 +535,6 @@ func (h *Handler) recordPlanCheckpoint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpjson.WriteJSON(w, http.StatusOK, tasksdto.TaskPlanToResponse(plan))
-}
-
-func (h *Handler) setExecutionPlan(w http.ResponseWriter, r *http.Request) {
-	if !requireScope(w, r, scopeCompanionTasksWrite) {
-		return
-	}
-	id, err := uuid.Parse(r.PathValue("id"))
-	if err != nil {
-		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid id")
-		return
-	}
-	if !h.authorizeTaskOrg(w, r, id) {
-		return
-	}
-	var body tasksdto.SetExecutionPlanRequest
-	if err := httpjson.DecodeJSON(r, &body); err != nil {
-		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid json")
-		return
-	}
-	connectorID, err := uuid.Parse(body.ConnectorID)
-	if err != nil {
-		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid connector_id")
-		return
-	}
-	plan, err := h.uc.SetExecutionPlan(r.Context(), id, SetExecutionPlanInput{
-		ConnectorID:    connectorID,
-		Operation:      body.Operation,
-		Payload:        body.Payload,
-		IdempotencyKey: body.IdempotencyKey,
-	})
-	if err != nil {
-		if IsNotFound(err) {
-			httpjson.WriteFlatError(w, http.StatusNotFound, "NOT_FOUND", "task not found")
-			return
-		}
-		if IsInvalidTaskState(err) {
-			httpjson.WriteFlatError(w, http.StatusConflict, "CONFLICT", "invalid task state")
-			return
-		}
-		httpjson.WriteFlatInternalError(w, err, "set execution plan failed")
-		return
-	}
-	httpjson.WriteJSON(w, http.StatusOK, tasksdto.ExecutionPlanToResponse(plan))
-}
-
-func (h *Handler) execute(w http.ResponseWriter, r *http.Request) {
-	if !requireScope(w, r, scopeCompanionTasksWrite) {
-		return
-	}
-	if !requireScope(w, r, scopeCompanionConnectorsExecute) {
-		return
-	}
-	id, err := uuid.Parse(r.PathValue("id"))
-	if err != nil {
-		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid id")
-		return
-	}
-	if !h.authorizeTaskOrg(w, r, id) {
-		return
-	}
-	out, err := h.uc.ExecuteTask(r.Context(), id)
-	if err != nil {
-		if IsNotFound(err) {
-			httpjson.WriteFlatError(w, http.StatusNotFound, "NOT_FOUND", "task not found")
-			return
-		}
-		if writeNexusBlocked(w, err) {
-			return
-		}
-		if IsInvalidTaskState(err) {
-			httpjson.WriteFlatError(w, http.StatusConflict, "CONFLICT", "invalid task state")
-			return
-		}
-		httpjson.WriteFlatInternalError(w, err, "execute task failed")
-		return
-	}
-	httpjson.WriteJSON(w, http.StatusOK, tasksdto.ExecuteTaskResponse{
-		Task:           tasksdto.TaskToResponse(out.Task),
-		Plan:           *tasksdto.ExecutionPlanToResponse(out.Plan),
-		Execution:      tasksdto.ExecutionResultToResponse(out.Execution),
-		ExecutionState: tasksdto.ExecutionStateToResponse(out.ExecutionState),
-	})
-}
-
-func (h *Handler) retry(w http.ResponseWriter, r *http.Request) {
-	if !requireScope(w, r, scopeCompanionTasksWrite) {
-		return
-	}
-	if !requireScope(w, r, scopeCompanionConnectorsExecute) {
-		return
-	}
-	id, err := uuid.Parse(r.PathValue("id"))
-	if err != nil {
-		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid id")
-		return
-	}
-	if !h.authorizeTaskOrg(w, r, id) {
-		return
-	}
-	out, err := h.uc.RetryTask(r.Context(), id)
-	if err != nil {
-		if IsNotFound(err) {
-			httpjson.WriteFlatError(w, http.StatusNotFound, "NOT_FOUND", "task not found")
-			return
-		}
-		if writeNexusBlocked(w, err) {
-			return
-		}
-		if IsInvalidTaskState(err) {
-			httpjson.WriteFlatError(w, http.StatusConflict, "CONFLICT", "invalid task state")
-			return
-		}
-		httpjson.WriteFlatInternalError(w, err, "retry task failed")
-		return
-	}
-	httpjson.WriteJSON(w, http.StatusOK, tasksdto.ExecuteTaskResponse{
-		Task:           tasksdto.TaskToResponse(out.Task),
-		Plan:           *tasksdto.ExecutionPlanToResponse(out.Plan),
-		Execution:      tasksdto.ExecutionResultToResponse(out.Execution),
-		ExecutionState: tasksdto.ExecutionStateToResponse(out.ExecutionState),
-	})
 }
 
 func (h *Handler) chat(w http.ResponseWriter, r *http.Request) {

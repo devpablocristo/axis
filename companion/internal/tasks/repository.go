@@ -38,14 +38,10 @@ type Repository interface {
 	LatestProposeNexusRequestID(ctx context.Context, taskID uuid.UUID) (uuid.UUID, error)
 	GetNexusSyncState(ctx context.Context, taskID uuid.UUID) (domain.TaskNexusSyncState, error)
 	UpsertNexusSyncState(ctx context.Context, s domain.TaskNexusSyncState) (domain.TaskNexusSyncState, error)
-	GetExecutionPlan(ctx context.Context, taskID uuid.UUID) (domain.TaskExecutionPlan, error)
-	UpsertExecutionPlan(ctx context.Context, plan domain.TaskExecutionPlan) (domain.TaskExecutionPlan, error)
 	GetTaskPlan(ctx context.Context, taskID uuid.UUID) (domain.TaskPlan, error)
 	UpsertTaskPlan(ctx context.Context, plan domain.TaskPlan) (domain.TaskPlan, error)
 	UpdateTaskPlan(ctx context.Context, plan domain.TaskPlan) (domain.TaskPlan, error)
 	UpdateTaskPlanStep(ctx context.Context, step domain.TaskPlanStep) (domain.TaskPlanStep, error)
-	GetExecutionState(ctx context.Context, taskID uuid.UUID) (domain.TaskExecutionState, error)
-	UpsertExecutionState(ctx context.Context, state domain.TaskExecutionState) (domain.TaskExecutionState, error)
 
 	InsertMessage(ctx context.Context, m domain.TaskMessage) (domain.TaskMessage, error)
 	ListMessagesByTaskID(ctx context.Context, taskID uuid.UUID) ([]domain.TaskMessage, error)
@@ -305,48 +301,6 @@ func (r *PostgresRepository) UpsertNexusSyncState(ctx context.Context, s domain.
 	return s, nil
 }
 
-func (r *PostgresRepository) GetExecutionPlan(ctx context.Context, taskID uuid.UUID) (domain.TaskExecutionPlan, error) {
-	row := r.db.Pool().QueryRow(ctx, `
-		SELECT task_id, connector_id, operation, payload, idempotency_key, created_at, updated_at
-		FROM companion_task_execution_plans
-		WHERE task_id = $1
-	`, taskID)
-	plan, err := scanExecutionPlan(row)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return domain.TaskExecutionPlan{}, ErrNotFound
-		}
-		return domain.TaskExecutionPlan{}, fmt.Errorf("get execution plan: %w", err)
-	}
-	return plan, nil
-}
-
-func (r *PostgresRepository) UpsertExecutionPlan(ctx context.Context, plan domain.TaskExecutionPlan) (domain.TaskExecutionPlan, error) {
-	now := time.Now().UTC()
-	if len(plan.Payload) == 0 {
-		plan.Payload = json.RawMessage(`{}`)
-	}
-	if plan.CreatedAt.IsZero() {
-		plan.CreatedAt = now
-	}
-	plan.UpdatedAt = now
-	_, err := r.db.Pool().Exec(ctx, `
-		INSERT INTO companion_task_execution_plans (
-			task_id, connector_id, operation, payload, idempotency_key, created_at, updated_at
-		) VALUES ($1,$2,$3,$4,$5,$6,$7)
-		ON CONFLICT (task_id) DO UPDATE SET
-			connector_id = EXCLUDED.connector_id,
-			operation = EXCLUDED.operation,
-			payload = EXCLUDED.payload,
-			idempotency_key = EXCLUDED.idempotency_key,
-			updated_at = EXCLUDED.updated_at
-	`, plan.TaskID, plan.ConnectorID, plan.Operation, plan.Payload, plan.IdempotencyKey, plan.CreatedAt, plan.UpdatedAt)
-	if err != nil {
-		return domain.TaskExecutionPlan{}, fmt.Errorf("upsert execution plan: %w", err)
-	}
-	return plan, nil
-}
-
 func (r *PostgresRepository) GetTaskPlan(ctx context.Context, taskID uuid.UUID) (domain.TaskPlan, error) {
 	row := r.db.Pool().QueryRow(ctx, `
 		SELECT task_id, org_id, objective, status, strategy, assumptions_json, constraints_json,
@@ -596,61 +550,6 @@ func (r *PostgresRepository) ListTaskExecutionGraph(ctx context.Context, taskID 
 	return out, rows.Err()
 }
 
-func (r *PostgresRepository) GetExecutionState(ctx context.Context, taskID uuid.UUID) (domain.TaskExecutionState, error) {
-	row := r.db.Pool().QueryRow(ctx, `
-		SELECT task_id, last_execution_id, last_execution_status, retryable, retry_count,
-		       last_error, last_attempted_at, verification_result, created_at, updated_at
-		FROM companion_task_execution_state
-		WHERE task_id = $1
-	`, taskID)
-	state, err := scanExecutionState(row)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return domain.TaskExecutionState{}, ErrNotFound
-		}
-		return domain.TaskExecutionState{}, fmt.Errorf("get execution state: %w", err)
-	}
-	return state, nil
-}
-
-func (r *PostgresRepository) UpsertExecutionState(ctx context.Context, state domain.TaskExecutionState) (domain.TaskExecutionState, error) {
-	now := time.Now().UTC()
-	if len(state.VerificationResult.Details) == 0 {
-		state.VerificationResult.Details = json.RawMessage(`{}`)
-	}
-	if state.VerificationResult.CheckedAt.IsZero() {
-		state.VerificationResult.CheckedAt = now
-	}
-	if state.CreatedAt.IsZero() {
-		state.CreatedAt = now
-	}
-	state.UpdatedAt = now
-	verificationJSON, err := marshalVerificationResult(state.VerificationResult)
-	if err != nil {
-		return domain.TaskExecutionState{}, fmt.Errorf("marshal verification result: %w", err)
-	}
-	_, err = r.db.Pool().Exec(ctx, `
-		INSERT INTO companion_task_execution_state (
-			task_id, last_execution_id, last_execution_status, retryable, retry_count,
-			last_error, last_attempted_at, verification_result, created_at, updated_at
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-		ON CONFLICT (task_id) DO UPDATE SET
-			last_execution_id = EXCLUDED.last_execution_id,
-			last_execution_status = EXCLUDED.last_execution_status,
-			retryable = EXCLUDED.retryable,
-			retry_count = EXCLUDED.retry_count,
-			last_error = EXCLUDED.last_error,
-			last_attempted_at = EXCLUDED.last_attempted_at,
-			verification_result = EXCLUDED.verification_result,
-			updated_at = EXCLUDED.updated_at
-	`, state.TaskID, state.LastExecutionID, state.LastExecutionStatus, state.Retryable, state.RetryCount,
-		state.LastError, state.LastAttemptedAt, verificationJSON, state.CreatedAt, state.UpdatedAt)
-	if err != nil {
-		return domain.TaskExecutionState{}, fmt.Errorf("upsert execution state: %w", err)
-	}
-	return state, nil
-}
-
 func (r *PostgresRepository) InsertMessage(ctx context.Context, m domain.TaskMessage) (domain.TaskMessage, error) {
 	now := time.Now().UTC()
 	if m.ID == uuid.Nil {
@@ -862,27 +761,6 @@ func scanNexusSyncState(row rowScanner) (domain.TaskNexusSyncState, error) {
 	return s, nil
 }
 
-func scanExecutionPlan(row rowScanner) (domain.TaskExecutionPlan, error) {
-	var plan domain.TaskExecutionPlan
-	var payloadRaw []byte
-	err := row.Scan(
-		&plan.TaskID,
-		&plan.ConnectorID,
-		&plan.Operation,
-		&payloadRaw,
-		&plan.IdempotencyKey,
-		&plan.CreatedAt,
-		&plan.UpdatedAt,
-	)
-	if err != nil {
-		return domain.TaskExecutionPlan{}, err
-	}
-	if payloadRaw != nil {
-		plan.Payload = json.RawMessage(payloadRaw)
-	}
-	return plan, nil
-}
-
 func scanTaskPlan(row rowScanner) (domain.TaskPlan, error) {
 	var plan domain.TaskPlan
 	var assumptionsRaw, constraintsRaw, checkpointRaw []byte
@@ -969,65 +847,4 @@ func normalizeTaskPlanStepJSON(step *domain.TaskPlanStep) {
 	if len(step.EvidenceJSON) == 0 {
 		step.EvidenceJSON = json.RawMessage(`{}`)
 	}
-}
-
-func scanExecutionState(row rowScanner) (domain.TaskExecutionState, error) {
-	var state domain.TaskExecutionState
-	var verificationRaw []byte
-	err := row.Scan(
-		&state.TaskID,
-		&state.LastExecutionID,
-		&state.LastExecutionStatus,
-		&state.Retryable,
-		&state.RetryCount,
-		&state.LastError,
-		&state.LastAttemptedAt,
-		&verificationRaw,
-		&state.CreatedAt,
-		&state.UpdatedAt,
-	)
-	if err != nil {
-		return domain.TaskExecutionState{}, err
-	}
-	if len(verificationRaw) > 0 {
-		verification, unmarshalErr := unmarshalVerificationResult(verificationRaw)
-		if unmarshalErr != nil {
-			return domain.TaskExecutionState{}, unmarshalErr
-		}
-		state.VerificationResult = verification
-	}
-	return state, nil
-}
-
-func marshalVerificationResult(result domain.TaskVerificationResult) ([]byte, error) {
-	if len(result.Details) == 0 {
-		result.Details = json.RawMessage(`{}`)
-	}
-	return json.Marshal(map[string]any{
-		"status":     result.Status,
-		"summary":    result.Summary,
-		"checked_at": result.CheckedAt,
-		"details":    json.RawMessage(result.Details),
-	})
-}
-
-func unmarshalVerificationResult(raw []byte) (domain.TaskVerificationResult, error) {
-	var payload struct {
-		Status    string          `json:"status"`
-		Summary   string          `json:"summary"`
-		CheckedAt time.Time       `json:"checked_at"`
-		Details   json.RawMessage `json:"details"`
-	}
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		return domain.TaskVerificationResult{}, fmt.Errorf("unmarshal verification result: %w", err)
-	}
-	if len(payload.Details) == 0 {
-		payload.Details = json.RawMessage(`{}`)
-	}
-	return domain.TaskVerificationResult{
-		Status:    payload.Status,
-		Summary:   payload.Summary,
-		CheckedAt: payload.CheckedAt,
-		Details:   payload.Details,
-	}, nil
 }

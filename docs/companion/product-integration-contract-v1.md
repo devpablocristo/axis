@@ -16,7 +16,7 @@ hardcode vertical.
 `companion` es una superficie interna de Axis. No requiere una
 `product_installation` externa. Cualquier `product_surface != companion` debe
 resolver una instalacion activa para `org_id + product_surface` antes de usar
-runtime, capabilities, connector executions, watchers o memory writes.
+runtime, capabilities, watchers o memory writes.
 
 ## Identity Context
 
@@ -127,7 +127,7 @@ Reglas:
 - Resolver una instalacion exige `org_id + product_surface`.
 - Sin instalacion activa, Axis falla cerrado.
 - `ProductInstallationGuard` bloquea runtime runs, runtime capability tools,
-  connector executions, watcher query/action, memory writes y jobs de memoria
+  watcher query/action, memory writes y jobs de memoria
   con superficie externa.
 - Los bloqueos se registran como observability event
   `event_type=guardrail`, `event_name=product_installation_required`.
@@ -220,7 +220,7 @@ Runtime policy soporta control por producto mediante:
 Axis aplica rate limits por `org_id + product_surface` en areas separadas:
 
 - runtime/chat;
-- connector execution;
+- capability execution;
 - watchers;
 - eval runs.
 
@@ -394,103 +394,17 @@ Ponti no se implementa en esta fase. Cuando avance, Ponti debe:
 - empezar read-only;
 - delegar writes sensibles a Nexus.
 
-## Anexo (aditivo, post-freeze): Generic Product Connector — envelope `capability_execution.v1`
+## Anexo: servicios externos consumiendo Axis
 
-Este anexo es aditivo al contrato congelado; no modifica ninguna seccion
-anterior. Define como un producto se conecta a Companion sin codigo vertical
-en Axis: el `ProductConnector` generico descubre el manifest del producto y
-ejecuta cualquier capability posteando un envelope unico. Un producto puede
-publicar nuevas capabilities sin cambios de codigo en Axis.
+Los servicios externos no se administran como entidad generica en Axis. Para consumir Axis, un servicio llama al endpoint HTTP del dominio que necesita, autenticado con el mecanismo correspondiente y gobernado por Nexus cuando la accion sea sensible.
 
-### Habilitacion
+Ejemplo conceptual:
 
-- Flag global: `COMPANION_PRODUCT_CONNECTOR_GENERIC=true` (default local on).
-- Por instalacion (`config` de la product installation):
-
-```json
-{
-  "connector_mode": "envelope.v1",
-  "discovery_path": "/api/v1/capabilities",
-  "execute_path": "/api/v1/capability-executions"
-}
+```text
+Servicio externo -> endpoint HTTP del dominio -> usecase -> Nexus si aplica
 ```
 
-- `connector_mode=envelope.v1` es obligatorio; `discovery_path` y
-  `execute_path` son opcionales (defaults mostrados).
-- Companion registra un connector generico por cada producto activo con al
-  menos una instalacion habilitada en modo envelope. Los connectors legacy solo
-  deben quedar como rollback explicito; Ponti legacy requiere
-  `COMPANION_LEGACY_PONTI_CONNECTOR_ENABLED=true` y gana si comparte
-  `product_surface`.
-- La auth hacia el producto se resuelve POR CALL desde la instalacion de
-  `org_id + product_surface`: `base_url` + bearer token resuelto del
-  `secret_ref` (esquema `env:` en dev). No hay credencial global por env.
-  Sin instalacion activa, Companion falla cerrado.
-
-### Discovery
-
-`GET {base_url}{discovery_path}` debe responder
-`{ "items": [<capability_manifest.v1>, ...] }`. Companion fusiona los
-manifests cuyo `product` coincide con el `product_surface` y normaliza cada
-tool a una capability del registry (mismo puente que el connector Ponti:
-mode/side-effect/risk/governance/idempotency). Cache con TTL de 5 minutos;
-`POST /v1/connectors/refresh` fuerza re-discovery.
-
-### Ejecucion
-
-`POST {base_url}{execute_path}` con headers `Authorization: Bearer <secret>`,
-`X-Tenant-Id: <external_tenant_id|org_id>` y, si aplica,
-`X-Nexus-Request-ID: <uuid>` (mismo esquema que el connector Ponti). Body:
-
-```json
-{
-  "schema_version": "capability_execution.v1",
-  "operation": "agro.workorder.draft",
-  "executor_ref": "agro-backend.workorder.draft",
-  "payload": { "work_type": "spray", "workspace": { "project_id": 10 } },
-  "workspace": { "project_id": 10 },
-  "idempotency_key": "idem-1",
-  "task_id": "<uuid>",
-  "run_id": "run-7",
-  "nexus_request_id": "<uuid>",
-  "actor": {
-    "actor_id": "user-456",
-    "actor_type": "human",
-    "on_behalf_of": "user-456",
-    "product_surface": "agro"
-  },
-  "org_id": "org-123"
-}
-```
-
-- `payload` es el input JSON de la capability, verbatim.
-- `workspace` se extrae de `payload.workspace` cuando existe; sigue siendo
-  JSON opaco para Axis.
-- `executor_ref` proviene del manifest descubierto.
-- `nexus_request_id` solo se envia en writes ya aprobados por Nexus.
-
-Respuesta esperada:
-
-```json
-{
-  "status": "success | partial | failure",
-  "external_ref": "agro:exec:42",
-  "result": {},
-  "evidence": {},
-  "error": "mensaje cuando status != success"
-}
-```
-
-- `status` vacio se interpreta como `success`; cualquier otro valor no
-  reconocido mapea a `failure`.
-- `result` llega verbatim al `result_json` de la ejecucion.
-- `evidence` del producto se mergea con el evidence canonico de identidad de
-  Axis (`org_id`, `customer_org_id`, `actor_id`, `actor_type`,
-  `companion_principal`, `on_behalf_of`, `service_principal`,
-  `product_surface`, `capability_operation`, `workspace`, `source_ref`,
-  `captured_at`). Las claves canonicas SIEMPRE ganan: el producto no puede
-  pisar la atribucion. La sanitizacion de claves sensibles existente
-  (payload/result) sigue aplicando en la capa de connectors.
+Si Axis necesita consumir otro servicio, esa salida vive como outbound adapter tecnico en codigo del dominio que lo requiere.
 
 ### Auth de producto hacia Axis (JWT per-producto)
 

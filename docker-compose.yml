@@ -98,7 +98,7 @@ services:
     environment:
       PORT: "8080"
       DATABASE_URL: "postgres://postgres:postgres@companion-postgres:5432/companion?sslmode=disable"
-      COMPANION_API_KEYS: "admin=${COMPANION_ADMIN_API_KEY:-companion-admin-dev-key}|service_principal=true|org_id=${AXIS_DEV_ORG_ID:-axis}|scopes=companion:tasks:read+companion:tasks:write+companion:connectors:execute+companion:connectors:admin+companion:capabilities:read+companion:capabilities:admin+companion:watchers:read+companion:watchers:write+companion:watchers:execute+companion:memory:read+companion:memory:write+companion:memory:admin+companion:agents:read+companion:agents:admin+companion:nexus:read+companion:nexus:admin+companion:nexus-assist:read+companion:nexus-assist:admin+companion:assist:read+companion:assist:write+companion:products:read+companion:products:admin+companion:ops:read+companion:observability:read+companion:costs:read+companion:evals:admin+companion:runtime:admin+companion:mcp:execute+companion:cross_org,argos=${COMPANION_ARGOS_API_KEY:-argos-companion-dev-key}|service_principal=true|org_id=${ARGOS_ORG_ID:-argos-local-org}|scopes=companion:assist:read+companion:assist:write"
+      COMPANION_API_KEYS: "admin=${COMPANION_ADMIN_API_KEY:-companion-admin-dev-key}|service_principal=true|org_id=${AXIS_DEV_ORG_ID:-axis}|scopes=companion:tasks:read+companion:tasks:write+companion:capabilities:read+companion:capabilities:admin+companion:watchers:read+companion:watchers:write+companion:watchers:execute+companion:memory:read+companion:memory:write+companion:memory:admin+companion:agents:read+companion:agents:admin+companion:nexus:read+companion:nexus:admin+companion:nexus-assist:read+companion:nexus-assist:admin+companion:assist:read+companion:assist:write+companion:products:read+companion:products:admin+companion:ops:read+companion:observability:read+companion:costs:read+companion:evals:admin+companion:runtime:admin+companion:mcp:execute+companion:cross_org,argos=${COMPANION_ARGOS_API_KEY:-argos-companion-dev-key}|service_principal=true|org_id=${ARGOS_ORG_ID:-argos-local-org}|scopes=companion:assist:read+companion:assist:write"
       COMPANION_INTERNAL_JWT_SECRET: "${AXIS_INTERNAL_JWT_SECRET:-axis-dev-internal-jwt-secret-change-me}"
       COMPANION_INTERNAL_JWT_ISSUER: "${AXIS_INTERNAL_JWT_ISSUER:-axis-bff}"
       COMPANION_INTERNAL_JWT_AUDIENCE: "${COMPANION_INTERNAL_JWT_AUDIENCE:-companion}"
@@ -129,13 +129,6 @@ services:
       COMPANION_DEFAULT_AUTONOMY_LEVEL: "${COMPANION_DEFAULT_AUTONOMY_LEVEL:-A2}"
       COMPANION_WATCHER_INTERVAL_SEC: "${COMPANION_WATCHER_INTERVAL_SEC:-0}"
       COMPANION_WATCHER_SYNC_INTERVAL_SEC: "${COMPANION_WATCHER_SYNC_INTERVAL_SEC:-0}"
-      PYMES_BASE_URL: "${PYMES_BASE_URL:-}"
-      PYMES_API_KEY: "${PYMES_API_KEY:-}"
-      PONTI_BASE_URL: "${PONTI_BASE_URL:-}"
-      PONTI_API_KEY: "${PONTI_API_KEY:-}"
-      COMPANION_LEGACY_PONTI_CONNECTOR_ENABLED: "${COMPANION_LEGACY_PONTI_CONNECTOR_ENABLED:-false}"
-      # ProductConnector genérico (envelope capability_execution.v1), default local on.
-      COMPANION_PRODUCT_CONNECTOR_GENERIC: "${COMPANION_PRODUCT_CONNECTOR_GENERIC:-true}"
     volumes:
       # ADC (Application Default Credentials) del host. Read-only para que el
       # container pueda leer pero no modificar las credenciales del dev. El

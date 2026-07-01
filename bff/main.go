@@ -263,8 +263,6 @@ func (s *server) routes() http.Handler {
 	mux.Handle("/api/capabilities/", s.withAuth(http.HandlerFunc(s.capabilitiesAPI)))
 	mux.Handle("/api/tools", s.withAuth(http.HandlerFunc(s.toolsAPI)))
 	mux.Handle("/api/tools/", s.withAuth(http.HandlerFunc(s.toolsAPI)))
-	mux.Handle("/api/connectors", s.withAuth(http.HandlerFunc(s.connectorsAPI)))
-	mux.Handle("/api/connectors/", s.withAuth(http.HandlerFunc(s.connectorsAPI)))
 	mux.Handle("/api/memories", s.withAuth(http.HandlerFunc(s.memoriesAPI)))
 	mux.Handle("/api/memories/", s.withAuth(http.HandlerFunc(s.memoriesAPI)))
 	mux.Handle("/api/handoffs", s.withAuth(http.HandlerFunc(s.handoffsAPI)))
@@ -795,8 +793,6 @@ func defaultAdminScopes() []string {
 		"companion:runtime:admin",
 		"companion:tasks:read",
 		"companion:tasks:write",
-		"companion:connectors:execute",
-		"companion:connectors:admin",
 		"companion:memory:read",
 		"companion:memory:write",
 		"companion:memory:admin",

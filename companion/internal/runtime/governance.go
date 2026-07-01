@@ -41,8 +41,6 @@ type OrgControlPlaneSettings struct {
 	DeniedTools            []string                        `json:"denied_tools,omitempty"`
 	AllowedCapabilities    []string                        `json:"allowed_capabilities,omitempty"`
 	DeniedCapabilities     []string                        `json:"denied_capabilities,omitempty"`
-	AllowedConnectors      []string                        `json:"allowed_connectors,omitempty"`
-	DeniedConnectors       []string                        `json:"denied_connectors,omitempty"`
 	AllowedModels          []string                        `json:"allowed_models,omitempty"`
 	MonthlyCostBudgetCents int64                           `json:"monthly_cost_budget_cents,omitempty"`
 	ProductPolicies        map[string]ProductRuntimePolicy `json:"product_policies,omitempty"`
@@ -52,7 +50,6 @@ type OrgControlPlaneSettings struct {
 	Memory                 OrgMemoryPolicy                 `json:"memory,omitempty"`
 	AgentKillSwitches      map[string]bool                 `json:"agent_kill_switches,omitempty"`
 	ToolKillSwitches       map[string]bool                 `json:"tool_kill_switches,omitempty"`
-	ConnectorKillSwitches  map[string]bool                 `json:"connector_kill_switches,omitempty"`
 	DataIsolation          OrgDataIsolationPolicy          `json:"data_isolation,omitempty"`
 	Observability          OrgObservabilitySettings        `json:"observability,omitempty"`
 	Embedding              OrgEmbeddingSettings            `json:"embedding,omitempty"`
@@ -218,8 +215,6 @@ func normalizeOrgControlPlaneSettings(settings OrgControlPlaneSettings) OrgContr
 	settings.DeniedTools = normalizeStringList(settings.DeniedTools)
 	settings.AllowedCapabilities = normalizeStringList(settings.AllowedCapabilities)
 	settings.DeniedCapabilities = normalizeStringList(settings.DeniedCapabilities)
-	settings.AllowedConnectors = normalizeStringList(settings.AllowedConnectors)
-	settings.DeniedConnectors = normalizeStringList(settings.DeniedConnectors)
 	settings.AllowedModels = normalizeStringList(settings.AllowedModels)
 	settings.ProductPolicies = normalizeProductRuntimePolicies(settings.ProductPolicies)
 	settings.MaxRiskClass = strings.TrimSpace(settings.MaxRiskClass)
@@ -229,7 +224,6 @@ func normalizeOrgControlPlaneSettings(settings OrgControlPlaneSettings) OrgContr
 	settings.ApprovalThresholds = normalizeStringMap(settings.ApprovalThresholds)
 	settings.AgentKillSwitches = normalizeBoolMap(settings.AgentKillSwitches)
 	settings.ToolKillSwitches = normalizeBoolMap(settings.ToolKillSwitches)
-	settings.ConnectorKillSwitches = normalizeBoolMap(settings.ConnectorKillSwitches)
 	if settings.DataIsolation.Mode == "" {
 		settings.DataIsolation.Mode = "strict_org"
 	}

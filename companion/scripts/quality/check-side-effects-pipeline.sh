@@ -7,12 +7,9 @@ matches="$(
   cd "$ROOT" && \
     git grep -nE '\.SendWhatsApp(Text|Template)\(' -- '*.go' ':!internal/watchers/pymesclient/*' ':!*_test.go' || true
 )"
-matches="$(
-  printf "%s\n" "$matches" | grep -v '^internal/connectors/registry/' || true
-)"
 
 if [ -n "$matches" ]; then
-  echo "ERROR: product side effects must go through ConnectorExecution + Nexus:" >&2
+  echo "ERROR: product side effects must go through an explicit outbound adapter and Nexus:" >&2
   echo "$matches" >&2
   exit 1
 fi

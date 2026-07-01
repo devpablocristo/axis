@@ -20,7 +20,7 @@ Cada agente tiene:
 - `agent_id`, nombre visible, rol y `profile_id`;
 - estado `active` o `disabled`;
 - autonomía máxima `A0`..`A5`;
-- allowlists de tools, capabilities y connectors;
+- allowlists de tools y capabilities;
 - `memory_scope_id` y política de memoria compartida;
 - límites operativos, SLA y metadata;
 - versión y audit trail.

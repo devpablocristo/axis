@@ -77,7 +77,6 @@ func TestGatewaySubmitsReadToolToNexusAndAllowsExecution(t *testing.T) {
 		"product_surface",
 		"run_id",
 		"tool_invocation_id",
-		"connector_id",
 		"capability_id",
 		"operation",
 		"target_system",

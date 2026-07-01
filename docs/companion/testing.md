@@ -4,11 +4,11 @@
 
 - Unit: FSM de tasks, decision mapping Nexus, authz, memory validation, agent
   routing y tool policy.
-- Integration: repositories Postgres, migrations, tasks, memory, connectors y
+- Integration: repositories Postgres, migrations, tasks, memory y
   run traces.
 - Contract: Nexus mock para `allow`, `deny`, `require_approval`, `approved`,
   `rejected`, `executed`, evidence y result reporting.
-- Multi-tenant: acceso cruzado denegado para tasks, memory, connectors,
+- Multi-tenant: acceso cruzado denegado para tasks, memory,
   watchers y traces.
 - Security: prompt injection, scopes, body limits, secret masking.
 - Regression: smoke scripts Companion + Nexus.

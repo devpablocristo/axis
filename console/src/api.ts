@@ -152,45 +152,6 @@ export type AxisJobRoleView = {
   version?: number
 }
 
-export type AxisConnectorConfigField = {
-  key: string
-  label: string
-  type: 'text' | 'number' | 'select' | 'checkbox' | 'textarea'
-  required?: boolean
-  secret?: boolean
-  default_value?: string
-  options?: string[]
-}
-
-export type AxisConnectorTypeView = {
-  kind: string
-  name: string
-  description: string
-  config_schema: {
-    fields: AxisConnectorConfigField[]
-  }
-  supports_test: boolean
-  supports_refresh: boolean
-  status: string
-  capability_source?: string
-}
-
-export type AxisConnectorView = {
-  id: string
-  connector_id?: string
-  org_id?: string
-  name: string
-  kind: string
-  enabled: boolean
-  status: string
-  config?: Record<string, unknown>
-  created_at?: string
-  updated_at?: string
-  archived_at?: string
-  trashed_at?: string
-  version?: number
-}
-
 export async function listVirployees(orgId: string, lifecycle: 'active' | 'archived' | 'trashed' | 'all' = 'active', tenantId?: string): Promise<AxisAgentView[]> {
   const payload = await axisFetch<{ virployees?: AxisAgentView[]; data?: AxisAgentView[]; items?: AxisAgentView[] }>(
     `/api/virployees?lifecycle=${encodeURIComponent(lifecycle)}`,
@@ -369,8 +330,6 @@ export type RuntimePolicy = {
     max_risk_class?: string
     allowed_capabilities?: string[]
     denied_capabilities?: string[]
-    allowed_connectors?: string[]
-    denied_connectors?: string[]
     embedding?: {
       provider?: string
       model?: string
@@ -395,7 +354,6 @@ export type CompanionAgent = {
   status: string
   max_autonomy: string
   allowed_capabilities?: string[]
-  allowed_connectors?: string[]
 }
 
 export type CapabilityRecord = {
@@ -413,12 +371,11 @@ export type CapabilityRecord = {
   status: string
   source?: string
   manifest?: {
-    capability_id: string
-    product_surface?: string
-    version: string
-    display_name: string
-    connector: string
-    risk_level: string
+	    capability_id: string
+	    product_surface?: string
+	    version: string
+	    display_name: string
+	    risk_level: string
     side_effect_type: string
     approval_required: boolean
     cost_class: string
@@ -428,11 +385,10 @@ export type CapabilityRecord = {
 
 export type ToolRecord = {
   tool_id: string
-  tool_key: string
-  name: string
-  description?: string
-  connector_id?: string | null
-  product_surface?: string
+	  tool_key: string
+	  name: string
+	  description?: string
+	  product_surface?: string
   operation?: string
   side_effect?: boolean
   status: string
@@ -808,86 +764,6 @@ export async function restoreJobRole(orgId: string, jobRoleId: string, tenantId?
   })
 }
 
-export type ConnectorLifecycle = 'active' | 'archived' | 'trash' | 'all'
-
-export async function listConnectorTypes(orgId: string, tenantId?: string): Promise<AxisConnectorTypeView[]> {
-  const payload = await axisFetch<{ types?: AxisConnectorTypeView[]; data?: AxisConnectorTypeView[] }>('/api/connectors/types', orgId, { tenantId })
-  return payload.types ?? payload.data ?? []
-}
-
-export async function listConnectors(orgId: string, lifecycle: ConnectorLifecycle = 'active', tenantId?: string): Promise<AxisConnectorView[]> {
-  const payload = await axisFetch<{ connectors?: AxisConnectorView[]; data?: AxisConnectorView[] }>(
-    `/api/connectors?lifecycle=${encodeURIComponent(lifecycle)}`,
-    orgId,
-    { tenantId },
-  )
-  return (payload.connectors ?? payload.data ?? []).map(normalizeConnector)
-}
-
-export async function createConnector(orgId: string, input: Partial<AxisConnectorView>, tenantId?: string): Promise<AxisConnectorView> {
-  const payload = await axisFetch<AxisConnectorView>('/api/connectors', orgId, {
-    method: 'POST',
-    tenantId,
-    body: JSON.stringify(input),
-  })
-  return normalizeConnector(payload)
-}
-
-export async function updateConnector(orgId: string, connectorId: string, input: Partial<AxisConnectorView>, tenantId?: string): Promise<AxisConnectorView> {
-  const payload = await axisFetch<AxisConnectorView>(`/api/connectors/${encodeURIComponent(connectorId)}`, orgId, {
-    method: 'PATCH',
-    tenantId,
-    body: JSON.stringify(input),
-  })
-  return normalizeConnector(payload)
-}
-
-export async function archiveConnector(orgId: string, connectorId: string, tenantId?: string): Promise<AxisConnectorView> {
-  return connectorLifecycleAction(orgId, connectorId, 'archive', tenantId)
-}
-
-export async function trashConnector(orgId: string, connectorId: string, tenantId?: string): Promise<AxisConnectorView> {
-  return connectorLifecycleAction(orgId, connectorId, 'trash', tenantId)
-}
-
-export async function restoreConnector(orgId: string, connectorId: string, tenantId?: string): Promise<AxisConnectorView> {
-  return connectorLifecycleAction(orgId, connectorId, 'restore', tenantId)
-}
-
-export async function testConnector(orgId: string, connectorId: string, tenantId?: string): Promise<unknown> {
-  return axisFetch<unknown>(`/api/connectors/${encodeURIComponent(connectorId)}/test`, orgId, {
-    method: 'POST',
-    tenantId,
-    body: '{}',
-  })
-}
-
-export async function refreshConnector(orgId: string, connectorId: string, tenantId?: string): Promise<unknown> {
-  return axisFetch<unknown>(`/api/connectors/${encodeURIComponent(connectorId)}/refresh`, orgId, {
-    method: 'POST',
-    tenantId,
-    body: '{}',
-  })
-}
-
-async function connectorLifecycleAction(orgId: string, connectorId: string, action: 'archive' | 'trash' | 'restore', tenantId?: string): Promise<AxisConnectorView> {
-  const payload = await axisFetch<AxisConnectorView>(`/api/connectors/${encodeURIComponent(connectorId)}/${action}`, orgId, {
-    method: 'POST',
-    tenantId,
-    body: '{}',
-  })
-  return normalizeConnector(payload)
-}
-
-function normalizeConnector(connector: AxisConnectorView): AxisConnectorView {
-  const connectorId = connector.connector_id || connector.id
-  return {
-    ...connector,
-    id: connectorId,
-    connector_id: connectorId,
-    config: connector.config ?? {},
-  }
-}
 
 export function axisCrudHttpClient(orgId: string, tenantId?: string) {
   return {

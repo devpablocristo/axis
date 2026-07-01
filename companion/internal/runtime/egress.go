@@ -63,7 +63,7 @@ func unsafeEgressReason(candidate string) string {
 		return ""
 	}
 	if strings.HasPrefix(strings.ToLower(candidate), "file://") {
-		return "file URLs are not allowed for connector egress"
+		return "file URLs are not allowed for external egress"
 	}
 	parsed, err := url.Parse(candidate)
 	if err != nil || parsed.Hostname() == "" {
@@ -72,18 +72,18 @@ func unsafeEgressReason(candidate string) string {
 	switch strings.ToLower(parsed.Scheme) {
 	case "http", "https":
 	default:
-		return fmt.Sprintf("scheme %q is not allowed for connector egress", parsed.Scheme)
+		return fmt.Sprintf("scheme %q is not allowed for external egress", parsed.Scheme)
 	}
 	host := strings.ToLower(parsed.Hostname())
 	if host == "localhost" || strings.HasSuffix(host, ".localhost") || host == "metadata.google.internal" || strings.HasSuffix(host, ".internal") {
-		return "internal host is not allowed for connector egress"
+		return "internal host is not allowed for external egress"
 	}
 	ip := net.ParseIP(host)
 	if ip == nil {
 		return ""
 	}
 	if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsPrivate() || ip.IsUnspecified() {
-		return "private or metadata network address is not allowed for connector egress"
+		return "private or metadata network address is not allowed for external egress"
 	}
 	return ""
 }

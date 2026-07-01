@@ -79,7 +79,7 @@ installation_payload="$(jq -n \
     secret_ref: $secret_ref,
     enabled: true,
     config: {
-      connector_mode: "envelope.v1",
+      integration_mode: "envelope.v1",
       discovery_path: $discovery_path,
       execute_path: $execute_path
     }
@@ -91,14 +91,11 @@ api PUT "/v1/products/${PRODUCT_SURFACE}" "$product_payload" >/dev/null
 echo "Registering installation: ${PRODUCT_ORG_ID} + ${PRODUCT_SURFACE}"
 api PUT "/v1/product-installations/${PRODUCT_SURFACE}?org_id=${PRODUCT_ORG_ID}" "$installation_payload" >/dev/null
 
-echo "Refreshing connectors"
-api POST "/v1/connectors/refresh" '{}' >/dev/null || true
-
 cat <<EOF
 Product installation seeded.
 product_surface=$PRODUCT_SURFACE
 org_id=$PRODUCT_ORG_ID
 external_tenant_id=$PRODUCT_EXTERNAL_TENANT_ID
 base_url=$PRODUCT_BASE_URL
-connector_mode=envelope.v1
+integration_mode=envelope.v1
 EOF

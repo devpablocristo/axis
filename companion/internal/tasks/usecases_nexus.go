@@ -1,7 +1,6 @@
 package tasks
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -14,7 +13,6 @@ import (
 	"github.com/devpablocristo/platform/errors/go/domainerr"
 	"github.com/google/uuid"
 
-	connectordomain "github.com/devpablocristo/companion/internal/connectors/usecases/domain"
 	"github.com/devpablocristo/companion/internal/nexusclient"
 	domain "github.com/devpablocristo/companion/internal/tasks/usecases/domain"
 )
@@ -89,16 +87,6 @@ func nexusSnapshotChanged(prev *domain.TaskNexusSyncState, next domain.TaskNexus
 		prev.LastError != next.LastError
 }
 
-func executionPlanChanged(prev *domain.TaskExecutionPlan, next domain.TaskExecutionPlan) bool {
-	if prev == nil {
-		return next.ConnectorID != uuid.Nil || next.Operation != "" || len(next.Payload) > 0 || next.IdempotencyKey != ""
-	}
-	return prev.ConnectorID != next.ConnectorID ||
-		prev.Operation != next.Operation ||
-		!bytes.Equal(prev.Payload, next.Payload) ||
-		prev.IdempotencyKey != next.IdempotencyKey
-}
-
 func isApprovedNexusStatus(status string) bool {
 	switch normalizeNexusStatus(status) {
 	case "allowed", "approved", "executed":
@@ -108,34 +96,10 @@ func isApprovedNexusStatus(status string) bool {
 	}
 }
 
-func (u *Usecases) getExecutionPlan(ctx context.Context, taskID uuid.UUID) (*domain.TaskExecutionPlan, error) {
-	plan, err := u.repo.GetExecutionPlan(ctx, taskID)
-	if err == nil {
-		return &plan, nil
-	}
-	if domainerr.IsNotFound(err) {
-		return nil, nil
-	}
-	return nil, err
-}
-
-func (u *Usecases) getExecutionState(ctx context.Context, taskID uuid.UUID) (*domain.TaskExecutionState, error) {
-	state, err := u.repo.GetExecutionState(ctx, taskID)
-	if err == nil {
-		return &state, nil
-	}
-	if domainerr.IsNotFound(err) {
-		return nil, nil
-	}
-	return nil, err
-}
-
 type taskMemorySnapshot struct {
-	Task           domain.Task
-	NexusSync      *domain.TaskNexusSyncState
-	ExecutionPlan  *domain.TaskExecutionPlan
-	DurablePlan    *domain.TaskPlan
-	ExecutionState *domain.TaskExecutionState
+	Task        domain.Task
+	NexusSync   *domain.TaskNexusSyncState
+	DurablePlan *domain.TaskPlan
 }
 
 func (u *Usecases) loadTaskMemorySnapshot(ctx context.Context, taskID uuid.UUID) (taskMemorySnapshot, error) {
@@ -155,23 +119,9 @@ func (u *Usecases) loadTaskMemorySnapshot(ctx context.Context, taskID uuid.UUID)
 		return taskMemorySnapshot{}, err
 	}
 
-	executionPlan, err := u.repo.GetExecutionPlan(ctx, taskID)
-	if err == nil {
-		snapshot.ExecutionPlan = &executionPlan
-	} else if !domainerr.IsNotFound(err) {
-		return taskMemorySnapshot{}, err
-	}
-
 	durablePlan, err := u.repo.GetTaskPlan(ctx, taskID)
 	if err == nil {
 		snapshot.DurablePlan = &durablePlan
-	} else if !domainerr.IsNotFound(err) {
-		return taskMemorySnapshot{}, err
-	}
-
-	executionState, err := u.repo.GetExecutionState(ctx, taskID)
-	if err == nil {
-		snapshot.ExecutionState = &executionState
 	} else if !domainerr.IsNotFound(err) {
 		return taskMemorySnapshot{}, err
 	}
@@ -185,23 +135,14 @@ func nextTaskStep(snapshot taskMemorySnapshot) string {
 	}
 	switch snapshot.Task.Status {
 	case domain.TaskStatusNew, domain.TaskStatusInvestigating:
-		if snapshot.ExecutionPlan == nil {
-			return "define execution plan and propose to nexus"
-		}
 		return "propose to nexus"
 	case domain.TaskStatusWaitingForApproval:
 		return "wait for nexus resolution or sync from nexus"
 	case domain.TaskStatusWaitingForInput:
-		if snapshot.ExecutionPlan != nil {
-			return "execute the approved task manually"
-		}
 		return "provide the missing execution input"
 	case domain.TaskStatusExecuting, domain.TaskStatusVerifying:
 		return "observe execution and verification"
 	case domain.TaskStatusFailed:
-		if snapshot.ExecutionState != nil && snapshot.ExecutionState.Retryable && isApprovedNexusStatus(snapshot.Task.NexusStatus) {
-			return "inspect failure and retry execution"
-		}
 		if snapshot.Task.NexusStatus == "rejected" || snapshot.Task.NexusStatus == "denied" {
 			return "inspect nexus decision and adjust the task"
 		}
@@ -234,29 +175,17 @@ func buildTaskSummary(snapshot taskMemorySnapshot) string {
 		}
 		return fmt.Sprintf("%s is waiting for Nexus approval.", prefix)
 	case domain.TaskStatusWaitingForInput:
-		if snapshot.ExecutionPlan != nil {
-			return fmt.Sprintf("%s is approved and ready for manual execution via %s.", prefix, snapshot.ExecutionPlan.Operation)
-		}
 		return fmt.Sprintf("%s is approved and waiting for additional input.", prefix)
 	case domain.TaskStatusExecuting:
-		return fmt.Sprintf("%s is executing the configured connector action.", prefix)
+		return fmt.Sprintf("%s is executing.", prefix)
 	case domain.TaskStatusVerifying:
 		return fmt.Sprintf("%s finished execution and is being verified.", prefix)
 	case domain.TaskStatusDone:
-		if snapshot.ExecutionState != nil && snapshot.ExecutionState.VerificationResult.Status == domain.VerificationStatusVerified {
-			return fmt.Sprintf("%s completed successfully and the latest execution was verified.", prefix)
-		}
 		if isApprovedNexusStatus(snapshot.Task.NexusStatus) {
 			return fmt.Sprintf("%s completed successfully after Nexus resolved %s.", prefix, formatStatusForMemory(snapshot.Task.NexusStatus))
 		}
 		return fmt.Sprintf("%s completed successfully.", prefix)
 	case domain.TaskStatusFailed:
-		if snapshot.ExecutionState != nil && snapshot.ExecutionState.LastError != "" {
-			if snapshot.ExecutionState.Retryable {
-				return fmt.Sprintf("%s failed during execution. Retry is available. Last error: %s.", prefix, snapshot.ExecutionState.LastError)
-			}
-			return fmt.Sprintf("%s failed during execution. Last error: %s.", prefix, snapshot.ExecutionState.LastError)
-		}
 		if snapshot.Task.NexusStatus != "" {
 			return fmt.Sprintf("%s failed because Nexus resolved %s.", prefix, formatStatusForMemory(snapshot.Task.NexusStatus))
 		}
@@ -318,15 +247,6 @@ func buildTaskFactsPayload(snapshot taskMemorySnapshot, reason string) json.RawM
 			"last_error":           snapshot.NexusSync.LastError,
 		}
 	}
-	if snapshot.ExecutionPlan != nil {
-		payload["execution_plan"] = map[string]any{
-			"connector_id":    snapshot.ExecutionPlan.ConnectorID.String(),
-			"operation":       snapshot.ExecutionPlan.Operation,
-			"payload":         json.RawMessage(snapshot.ExecutionPlan.Payload),
-			"idempotency_key": snapshot.ExecutionPlan.IdempotencyKey,
-			"updated_at":      snapshot.ExecutionPlan.UpdatedAt.UTC().Format(time.RFC3339),
-		}
-	}
 	if snapshot.DurablePlan != nil {
 		steps := make([]map[string]any, 0, len(snapshot.DurablePlan.Steps))
 		for _, step := range snapshot.DurablePlan.Steps {
@@ -354,19 +274,6 @@ func buildTaskFactsPayload(snapshot taskMemorySnapshot, reason string) json.RawM
 			"checkpoint":  json.RawMessage(snapshot.DurablePlan.CheckpointJSON),
 			"steps":       steps,
 			"updated_at":  snapshot.DurablePlan.UpdatedAt.UTC().Format(time.RFC3339),
-		}
-	}
-	if snapshot.ExecutionState != nil {
-		payload["execution"] = map[string]any{
-			"last_execution_id":       snapshot.ExecutionState.LastExecutionID.String(),
-			"last_execution_status":   snapshot.ExecutionState.LastExecutionStatus,
-			"retryable":               snapshot.ExecutionState.Retryable,
-			"retry_count":             snapshot.ExecutionState.RetryCount,
-			"last_error":              snapshot.ExecutionState.LastError,
-			"last_attempted_at":       snapshot.ExecutionState.LastAttemptedAt.UTC().Format(time.RFC3339),
-			"verification_status":     snapshot.ExecutionState.VerificationResult.Status,
-			"verification_summary":    snapshot.ExecutionState.VerificationResult.Summary,
-			"verification_checked_at": snapshot.ExecutionState.VerificationResult.CheckedAt.UTC().Format(time.RFC3339),
 		}
 	}
 	return marshalOrEmpty("task_facts", payload)
@@ -537,11 +444,7 @@ func (u *Usecases) syncTaskWithNexus(ctx context.Context, t domain.Task, origin 
 	nextState.ConsecutiveFailures = 0
 	nextState.NextCheckAt = nextNexusSyncAt(now, u.nexusSyncIntervalOrDefault(), 0)
 
-	plan, planErr := u.getExecutionPlan(ctx, t.ID)
-	if planErr != nil {
-		return domain.Task{}, prevState, planErr
-	}
-	ev, apply := eventFromNexusRequestStatusWithExecutionPlan(sum.Status, plan != nil)
+	ev, apply := eventFromNexusRequestStatus(sum.Status)
 	if apply {
 		appliedEvent = ev
 		t, err = u.applyTaskEvent(ctx, t, ev)
@@ -621,41 +524,32 @@ func (u *Usecases) Propose(ctx context.Context, taskID uuid.UUID, in ProposeInpu
 		return domain.Task{}, zeroA, zeroSub, ErrInvalidTaskState
 	}
 
-	plan, err := u.repo.GetExecutionPlan(ctx, taskID)
-	if err != nil {
-		if domainerr.IsNotFound(err) {
-			return domain.Task{}, zeroA, zeroSub, fmt.Errorf("execution plan is required before propose")
-		}
-		return domain.Task{}, zeroA, zeroSub, err
+	targetSystem := strings.TrimSpace(in.TargetSystem)
+	if targetSystem == "" {
+		targetSystem = "axis"
 	}
-	if u.executor == nil {
-		return domain.Task{}, zeroA, zeroSub, fmt.Errorf("task execution is not configured")
+	targetResource := strings.TrimSpace(in.TargetResource)
+	if targetResource == "" {
+		targetResource = t.ID.String()
 	}
-	idempotencyKey := plan.IdempotencyKey
-	if idempotencyKey == "" {
-		idempotencyKey = defaultExecutionIdempotencyKey(t.ID, nil)
+	binding := map[string]any{
+		"target_system":   targetSystem,
+		"target_resource": targetResource,
+		"org_id":          t.OrgID,
+		"task_id":         taskID.String(),
+		"task_title":      t.Title,
 	}
-	binding, bindingHash, err := u.executor.BuildActionBinding(ctx, connectordomain.ExecutionSpec{
-		ConnectorID:        plan.ConnectorID,
-		OrgID:              t.OrgID,
-		ActorID:            executionActorID(t),
-		ActorType:          executionActorType(t),
-		CompanionPrincipal: CompanionRequesterID,
-		OnBehalfOf:         executionOnBehalfOf(t),
-		ServicePrincipal:   true,
-		ProductSurface:     "companion",
-		Operation:          plan.Operation,
-		Payload:            plan.Payload,
-		IdempotencyKey:     idempotencyKey,
-		TaskID:             &t.ID,
-	})
-	if err != nil {
-		return domain.Task{}, zeroA, zeroSub, fmt.Errorf("build action binding: %w", err)
+	if in.Note != "" {
+		binding["note"] = in.Note
+	}
+	if in.SessionID != "" {
+		binding["session_id"] = in.SessionID
 	}
 
 	payload := map[string]any{
-		"note":         in.Note,
-		"binding_hash": bindingHash,
+		"note":            in.Note,
+		"target_system":   targetSystem,
+		"target_resource": targetResource,
 	}
 	pj := marshalOrEmpty("propose_action_payload", payload)
 	action, err := u.repo.InsertAction(ctx, domain.TaskAction{
@@ -668,12 +562,11 @@ func (u *Usecases) Propose(ctx context.Context, taskID uuid.UUID, in ProposeInpu
 	}
 
 	nexusMeta := map[string]any{
-		"origin":       "companion",
-		"task_id":      taskID.String(),
-		"proposed_by":  CompanionRequesterID,
-		"human_owner":  t.CreatedBy,
-		"action_id":    action.ID.String(),
-		"binding_hash": bindingHash,
+		"origin":      "companion",
+		"task_id":     taskID.String(),
+		"proposed_by": CompanionRequesterID,
+		"human_owner": t.CreatedBy,
+		"action_id":   action.ID.String(),
 	}
 	if in.SessionID != "" {
 		nexusMeta["session_id"] = in.SessionID
@@ -748,7 +641,7 @@ func (u *Usecases) Propose(ctx context.Context, taskID uuid.UUID, in ProposeInpu
 		return domain.Task{}, action, zeroSub, err
 	}
 
-	ev, evErr := eventFromSubmitResponseWithExecutionPlan(submitOut, true)
+	ev, evErr := eventFromSubmitResponse(submitOut)
 	if evErr != nil {
 		slog.Error("companion propose unexpected nexus status",
 			"task_id", taskID.String(),

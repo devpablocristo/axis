@@ -28,7 +28,7 @@ func (r *PostgresRepository) ListAgents(ctx context.Context, orgID, productSurfa
 	query := `
 		SELECT org_id, product_surface, agent_id, display_name, role, profile_id, status,
 		       lifecycle_status, origin_kind, review_status,
-		       max_autonomy, allowed_tools, allowed_capabilities, allowed_connectors,
+		       max_autonomy, allowed_tools, allowed_capabilities,
 		       memory_scope_id, shared_memory_policy, limits_json, sla_json, metadata_json,
 		       version, created_by, created_at, updated_at
 		FROM companion_agents
@@ -58,7 +58,7 @@ func (r *PostgresRepository) GetAgent(ctx context.Context, orgID, productSurface
 	row := r.db.Pool().QueryRow(ctx, `
 		SELECT org_id, product_surface, agent_id, display_name, role, profile_id, status,
 		       lifecycle_status, origin_kind, review_status,
-		       max_autonomy, allowed_tools, allowed_capabilities, allowed_connectors,
+		       max_autonomy, allowed_tools, allowed_capabilities,
 		       memory_scope_id, shared_memory_policy, limits_json, sla_json, metadata_json,
 		       version, created_by, created_at, updated_at
 		FROM companion_agents
@@ -98,10 +98,10 @@ func (r *PostgresRepository) SaveAgent(ctx context.Context, agent Agent) (Agent,
 		INSERT INTO companion_agents
 			(org_id, product_surface, agent_id, display_name, role, profile_id, status,
 			 lifecycle_status, origin_kind, review_status,
-			 max_autonomy, allowed_tools, allowed_capabilities, allowed_connectors,
+			 max_autonomy, allowed_tools, allowed_capabilities,
 			 memory_scope_id, shared_memory_policy, limits_json, sla_json, metadata_json,
 			 version, created_by, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,1,$20,$21,$21)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,1,$19,$20,$20)
 		ON CONFLICT (org_id, product_surface, agent_id)
 		DO UPDATE SET
 			display_name = EXCLUDED.display_name,
@@ -114,7 +114,6 @@ func (r *PostgresRepository) SaveAgent(ctx context.Context, agent Agent) (Agent,
 			max_autonomy = EXCLUDED.max_autonomy,
 			allowed_tools = EXCLUDED.allowed_tools,
 			allowed_capabilities = EXCLUDED.allowed_capabilities,
-			allowed_connectors = EXCLUDED.allowed_connectors,
 			memory_scope_id = EXCLUDED.memory_scope_id,
 			shared_memory_policy = EXCLUDED.shared_memory_policy,
 			limits_json = EXCLUDED.limits_json,
@@ -124,12 +123,12 @@ func (r *PostgresRepository) SaveAgent(ctx context.Context, agent Agent) (Agent,
 			updated_at = EXCLUDED.updated_at
 		RETURNING org_id, product_surface, agent_id, display_name, role, profile_id, status,
 		          lifecycle_status, origin_kind, review_status,
-		          max_autonomy, allowed_tools, allowed_capabilities, allowed_connectors,
+		          max_autonomy, allowed_tools, allowed_capabilities,
 		          memory_scope_id, shared_memory_policy, limits_json, sla_json, metadata_json,
 		          version, created_by, created_at, updated_at
 	`, agent.OrgID, agent.ProductSurface, agent.AgentID, agent.DisplayName, agent.Role, agent.ProfileID,
 		agent.Status, agent.LifecycleStatus, agent.OriginKind, agent.ReviewStatus,
-		agent.MaxAutonomy, agent.AllowedTools, agent.AllowedCapabilities, agent.AllowedConnectors,
+		agent.MaxAutonomy, agent.AllowedTools, agent.AllowedCapabilities,
 		agent.MemoryScopeID, sharedMemory, limits, sla, metadata, agent.CreatedBy, now)
 	saved, err := scanAgent(row)
 	if err != nil {
@@ -166,7 +165,7 @@ func (r *PostgresRepository) DisableAgent(ctx context.Context, orgID, productSur
 		WHERE org_id = $1 AND product_surface = $2 AND agent_id = $3
 		RETURNING org_id, product_surface, agent_id, display_name, role, profile_id, status,
 		          lifecycle_status, origin_kind, review_status,
-		          max_autonomy, allowed_tools, allowed_capabilities, allowed_connectors,
+		          max_autonomy, allowed_tools, allowed_capabilities,
 		          memory_scope_id, shared_memory_policy, limits_json, sla_json, metadata_json,
 		          version, created_by, created_at, updated_at
 	`, strings.TrimSpace(orgID), defaultSurface(productSurface), strings.TrimSpace(agentID))
@@ -212,7 +211,7 @@ func (r *PostgresRepository) SetAgentLifecycle(ctx context.Context, orgID, produ
 		WHERE org_id = $1 AND product_surface = $2 AND agent_id = $3
 		RETURNING org_id, product_surface, agent_id, display_name, role, profile_id, status,
 		          lifecycle_status, origin_kind, review_status,
-		          max_autonomy, allowed_tools, allowed_capabilities, allowed_connectors,
+		          max_autonomy, allowed_tools, allowed_capabilities,
 		          memory_scope_id, shared_memory_policy, limits_json, sla_json, metadata_json,
 		          version, created_by, created_at, updated_at
 	`, strings.TrimSpace(orgID), defaultSurface(productSurface), strings.TrimSpace(agentID), strings.TrimSpace(lifecycleStatus), strings.TrimSpace(status), strings.TrimSpace(reviewStatus))
@@ -255,7 +254,7 @@ func (r *PostgresRepository) DeleteAgent(ctx context.Context, orgID, productSurf
 	agent, err := scanAgent(tx.QueryRow(ctx, `
 		SELECT org_id, product_surface, agent_id, display_name, role, profile_id, status,
 		       lifecycle_status, origin_kind, review_status,
-		       max_autonomy, allowed_tools, allowed_capabilities, allowed_connectors,
+		       max_autonomy, allowed_tools, allowed_capabilities,
 		       memory_scope_id, shared_memory_policy, limits_json, sla_json, metadata_json,
 		       version, created_by, created_at, updated_at
 		FROM companion_agents
@@ -407,18 +406,16 @@ func scanAgent(row scanRow) (Agent, error) {
 		createdAt, updatedAt         time.Time
 		allowedTools                 []string
 		allowedCapabilities          []string
-		allowedConnectors            []string
 	)
 	if err := row.Scan(&agent.OrgID, &agent.ProductSurface, &agent.AgentID, &agent.DisplayName, &agent.Role, &agent.ProfileID,
 		&agent.Status, &agent.LifecycleStatus, &agent.OriginKind, &agent.ReviewStatus,
-		&agent.MaxAutonomy, &allowedTools, &allowedCapabilities, &allowedConnectors,
+		&agent.MaxAutonomy, &allowedTools, &allowedCapabilities,
 		&agent.MemoryScopeID, &sharedRaw, &limitsRaw, &slaRaw, &metadataRaw, &agent.Version, &agent.CreatedBy,
 		&createdAt, &updatedAt); err != nil {
 		return Agent{}, err
 	}
 	agent.AllowedTools = normalizeList(allowedTools)
 	agent.AllowedCapabilities = normalizeList(allowedCapabilities)
-	agent.AllowedConnectors = normalizeList(allowedConnectors)
 	agent.SharedMemoryPolicy = unmarshalMap(sharedRaw)
 	agent.Limits = unmarshalMap(limitsRaw)
 	agent.SLA = unmarshalMap(slaRaw)

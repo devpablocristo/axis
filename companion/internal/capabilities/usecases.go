@@ -361,7 +361,7 @@ func (uc *Usecases) RunConformance(ctx context.Context, in ConformanceInput) (Co
 		Errors:       errs,
 		Evidence: map[string]any{
 			"schema_version":     manifest.SchemaVersion,
-			"connector":          manifest.Connector,
+			"capability_id":      manifest.CapabilityID,
 			"risk_level":         manifest.RiskLevel,
 			"side_effect_type":   manifest.SideEffectType,
 			"nexus_action_type":  manifest.NexusActionType,
@@ -413,10 +413,9 @@ func toolFromRecord(record ManifestRecord) Tool {
 	}
 	return Tool{
 		ToolID:        id,
-		ToolKey:       strings.Trim(strings.TrimSpace(manifest.Connector)+"."+strings.TrimSpace(manifest.CapabilityID), "."),
+		ToolKey:       strings.TrimSpace(manifest.CapabilityID),
 		Name:          manifest.DisplayName,
 		Description:   manifest.Description,
-		ConnectorKey:  manifest.Connector,
 		Operation:     manifest.CapabilityID,
 		SideEffect:    manifest.SideEffectType != SideEffectRead || manifest.ActionType != ActionTypeRead,
 		Status:        toolStatusFromManifestStatus(record.Status),

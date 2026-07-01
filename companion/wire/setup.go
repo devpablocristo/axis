@@ -20,9 +20,6 @@ import (
 	commonaudit "github.com/devpablocristo/companion/internal/audit"
 	"github.com/devpablocristo/companion/internal/business"
 	"github.com/devpablocristo/companion/internal/capabilities"
-	"github.com/devpablocristo/companion/internal/connectors"
-	"github.com/devpablocristo/companion/internal/connectors/registry"
-	connectordomain "github.com/devpablocristo/companion/internal/connectors/usecases/domain"
 	"github.com/devpablocristo/companion/internal/handoffs"
 	"github.com/devpablocristo/companion/internal/jobroles"
 	"github.com/devpablocristo/companion/internal/jobs"
@@ -35,16 +32,14 @@ import (
 	"github.com/devpablocristo/companion/internal/productlimits"
 	"github.com/devpablocristo/companion/internal/products"
 	"github.com/devpablocristo/companion/internal/runtime"
-	"github.com/devpablocristo/companion/internal/secrets"
 	"github.com/devpablocristo/companion/internal/securityevals"
 	"github.com/devpablocristo/companion/internal/tasks"
 	"github.com/devpablocristo/companion/internal/virployees"
+	virployeehttp "github.com/devpablocristo/companion/internal/virployees/inbound/http"
 	"github.com/devpablocristo/companion/internal/watchers"
-	"github.com/devpablocristo/companion/internal/watchers/pymesclient"
 	"github.com/devpablocristo/platform/authn/go/internaljwt"
 	"github.com/devpablocristo/platform/config/go/envconfig"
 	sharedpostgres "github.com/devpablocristo/platform/databases/postgres/go"
-	"github.com/devpablocristo/platform/errors/go/domainerr"
 	"github.com/devpablocristo/platform/http/go/health"
 
 	memdomain "github.com/devpablocristo/companion/internal/memory/usecases/domain"
@@ -106,11 +101,6 @@ type productGuardObservabilityRecorder struct {
 	recorder runtime.ObservabilityRecorder
 }
 
-type connectorProductRuntimeController struct {
-	controls runtime.RuntimeControls
-	costs    runtime.CostLedger
-}
-
 func (r productGuardObservabilityRecorder) RecordProductInstallationGuardrail(ctx context.Context, event products.GuardrailEvent) error {
 	if r.recorder == nil {
 		return nil
@@ -136,57 +126,6 @@ func (r productGuardObservabilityRecorder) RecordProductInstallationGuardrail(ct
 	})
 }
 
-func (c connectorProductRuntimeController) EnforceProductConnectorExecution(ctx context.Context, orgID, productSurface string) error {
-	if c.controls == nil {
-		return nil
-	}
-	policy, err := c.controls.GetRuntimePolicy(ctx, orgID)
-	if err != nil {
-		if errors.Is(err, runtime.ErrRuntimePolicyNotFound) {
-			return nil
-		}
-		return fmt.Errorf("runtime policy lookup failed: %w", err)
-	}
-	productSurface = strings.TrimSpace(strings.ToLower(productSurface))
-	if productSurface == "" {
-		productSurface = runtime.DefaultProductSurface
-	}
-	if len(policy.AllowedProductSurfaces) > 0 && !stringListContainsFold(policy.AllowedProductSurfaces, productSurface) {
-		return domainerr.Forbidden(fmt.Sprintf("product surface %q is not allowed for this customer org", productSurface))
-	}
-	productPolicy, ok := policy.ControlPlane.ProductPolicies[productSurface]
-	if !ok {
-		return nil
-	}
-	if productPolicy.Denied {
-		return domainerr.Forbidden(fmt.Sprintf("product surface %q is denied by customer org policy", productSurface))
-	}
-	if c.costs == nil || (productPolicy.MonthlyCostBudgetCents <= 0 && productPolicy.MonthlyToolCallBudget <= 0) {
-		return nil
-	}
-	summary, err := c.costs.GetCostSummary(ctx, orgID, productSurface, time.Now().UTC().Format("2006-01"), 1)
-	if err != nil {
-		return fmt.Errorf("product cost summary lookup failed: %w", err)
-	}
-	if productPolicy.MonthlyCostBudgetCents > 0 && summary.EstimatedCostCents >= productPolicy.MonthlyCostBudgetCents {
-		return domainerr.Forbidden("monthly product cost budget exhausted")
-	}
-	if productPolicy.MonthlyToolCallBudget > 0 && summary.ToolCalls >= productPolicy.MonthlyToolCallBudget {
-		return domainerr.Forbidden("monthly product tool call budget exhausted")
-	}
-	return nil
-}
-
-func stringListContainsFold(values []string, want string) bool {
-	want = strings.TrimSpace(strings.ToLower(want))
-	for _, value := range values {
-		if strings.TrimSpace(strings.ToLower(value)) == want {
-			return true
-		}
-	}
-	return false
-}
-
 func (r agentRuntimeResolver) ResolveRuntimeAgent(ctx context.Context, orgID, productSurface, agentID string) (runtime.RuntimeAgentConfig, error) {
 	agent, err := r.uc.GetAgent(ctx, orgID, productSurface, agentID)
 	if err != nil {
@@ -202,7 +141,6 @@ func (r agentRuntimeResolver) ResolveRuntimeAgent(ctx context.Context, orgID, pr
 		MaxAutonomy:         runtime.AutonomyLevel(agent.MaxAutonomy),
 		AllowedTools:        append([]string(nil), agent.AllowedTools...),
 		AllowedCapabilities: append([]string(nil), agent.AllowedCapabilities...),
-		AllowedConnectors:   append([]string(nil), agent.AllowedConnectors...),
 		MemoryScopeID:       agent.MemoryScopeID,
 		SharedMemoryPolicy:  agent.SharedMemoryPolicy,
 		Limits:              agent.Limits,
@@ -437,26 +375,27 @@ func (a taskPlannerAdapter) PrepareTaskPlanCompensation(ctx context.Context, tas
 }
 
 func (a taskPlannerAdapter) ExecuteTaskPlanCompensation(ctx context.Context, taskID, stepID uuid.UUID, in runtime.PlannerExecuteTaskPlanCompensationInput) (runtime.PlannerTaskPlanCompensationExecutionResult, error) {
-	out, err := a.uc.ExecuteTaskPlanCompensation(ctx, taskID, stepID, tasks.ExecuteTaskPlanCompensationInput{
-		NexusRequestID: in.NexusRequestID,
-	})
+	plan, err := a.uc.GetTaskPlan(ctx, taskID)
 	if err != nil {
 		return runtime.PlannerTaskPlanCompensationExecutionResult{}, err
 	}
+	step := taskdomain.TaskPlanStep{ID: stepID, TaskID: taskID, Status: taskdomain.TaskPlanStepStatusBlocked}
+	for _, candidate := range plan.Steps {
+		if candidate.ID == stepID {
+			step = candidate
+			break
+		}
+	}
 	return runtime.PlannerTaskPlanCompensationExecutionResult{
-		Plan:                out.Plan,
-		Step:                out.Step,
-		Status:              out.Status,
-		Reason:              out.Reason,
-		Compensation:        out.Compensation,
-		NexusRequestID:      out.NexusRequestID,
-		NexusStatus:         out.NexusStatus,
-		ExecutionID:         out.Execution.ID.String(),
-		ExecutionStatus:     out.Execution.Status,
-		VerificationStatus:  out.Verification.Status,
-		VerificationSummary: out.Verification.Summary,
-		ExternalRef:         out.Execution.ExternalRef,
-		ApprovalRequired:    out.ApprovalRequired,
+		Plan:                plan,
+		Step:                step,
+		Status:              "execution_unavailable",
+		Reason:              "no outbound adapter configured",
+		NexusRequestID:      strings.TrimSpace(in.NexusRequestID),
+		ExecutionStatus:     "skipped",
+		VerificationStatus:  "skipped",
+		VerificationSummary: "No outbound adapter is configured for task plan compensation execution.",
+		ApprovalRequired:    true,
 	}, nil
 }
 
@@ -519,66 +458,6 @@ func jobTimeout() time.Duration {
 	return envconfig.Duration("COMPANION_JOB_TIMEOUT_SEC", 5*time.Minute)
 }
 
-func activeManifestRegistry(ctx context.Context, uc *capabilities.Usecases) *capabilities.Registry {
-	records, err := uc.ListManifests(ctx, capabilities.ManifestFilter{Status: capabilities.ManifestStatusActive, Limit: 500})
-	if err != nil {
-		slog.Error("load active capability manifests", "error", err)
-		return nil
-	}
-	manifests := make([]capabilities.Manifest, 0, len(records))
-	for _, record := range records {
-		manifests = append(manifests, record.Manifest)
-	}
-	registry, err := capabilities.NewRegistry(manifests)
-	if err != nil {
-		slog.Error("build active capability manifest registry", "error", err)
-		return nil
-	}
-	return registry
-}
-
-// registerEnvelopeProductConnectors registra un ProductConnector genérico por
-// cada producto activo con al menos una instalación habilitada cuyo config
-// declare connector_mode=envelope.v1. Solo corre con
-// COMPANION_PRODUCT_CONNECTOR_GENERIC=true. Los connectors legacy registrados
-// explicitamente como rollback ganan: no se pisan.
-func registerEnvelopeProductConnectors(ctx context.Context, connReg *registry.Registry, productUC *products.Usecases) {
-	productList, err := productUC.ListProducts(ctx)
-	if err != nil {
-		slog.Error("list products for generic product connectors", "error", err)
-		return
-	}
-	for _, product := range productList {
-		if product.Status != products.ProductStatusActive {
-			continue
-		}
-		installations, err := productUC.ListInstallationsByProduct(ctx, product.ProductSurface)
-		if err != nil {
-			slog.Error("list installations for generic product connector",
-				"product_surface", product.ProductSurface, "error", err)
-			continue
-		}
-		hasEnvelope := false
-		for _, installation := range installations {
-			if installation.Enabled && registry.IsEnvelopeInstallation(installation) {
-				hasEnvelope = true
-				break
-			}
-		}
-		if !hasEnvelope {
-			continue
-		}
-		if _, exists := connReg.Get(product.ProductSurface); exists {
-			slog.Warn("generic product connector skipped: connector already registered",
-				"product_surface", product.ProductSurface)
-			continue
-		}
-		client := registry.NewProductClient(product.ProductSurface, productUC)
-		connReg.Register(registry.NewProductConnector(client))
-		slog.Info("generic product connector registered", "product_surface", product.ProductSurface)
-	}
-}
-
 // defaultAutonomyLevel lee el nivel de autonomía base del runtime desde env
 // (COMPANION_DEFAULT_AUTONOMY_LEVEL). Acepta A0..A5; cualquier otro valor causa
 // fail-fast en boot para evitar arrancar con configuración ambigua. Default A2.
@@ -605,10 +484,6 @@ type Config struct {
 	ProductJWTKeys      string
 	NexusBaseURL        string
 	NexusAPIKey         string
-	PymesBaseURL        string
-	PymesAPIKey         string
-	PontiBaseURL        string
-	PontiAPIKey         string
 	LLMProvider         string
 	LLMModel            string
 	LLMVertexProject    string
@@ -638,39 +513,17 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 
 	nexusGateway := newNexusGateway(cfg.NexusBaseURL, cfg.NexusAPIKey)
 	rc := nexusGateway.client
-	pymesClient := pymesclient.NewClient(cfg.PymesBaseURL, cfg.PymesAPIKey)
-
-	// Connectors module
-	connReg := registry.NewRegistry()
-	connReg.Register(registry.NewMockConnector())
-	if cfg.PymesBaseURL != "" {
-		connReg.Register(registry.NewPymesConnector(pymesClient))
-	}
-	if cfg.PontiBaseURL != "" && envconfig.Bool("COMPANION_LEGACY_PONTI_CONNECTOR_ENABLED", false) {
-		pontiClient := registry.NewPontiClient(cfg.PontiBaseURL, cfg.PontiAPIKey)
-		connReg.Register(registry.NewPontiConnector(pontiClient))
-		slog.Warn("legacy Ponti connector registered; prefer ProductConnector envelope.v1",
-			"product_surface", "ponti")
-	}
-	connRepo := connectors.NewPostgresRepository(db)
-	nexusChecker := connectors.NewNexusCheckerAdapter(func(c context.Context, id uuid.UUID) (connectors.NexusRequestMeta, int, error) {
-		return nexusGateway.GetRequestMeta(c, id.String())
-	})
-	connUC := connectors.NewUsecases(connRepo, connReg, nexusChecker)
-	connHandler := connectors.NewHandler(connUC)
 	auditRepo := commonaudit.NewPostgresRepository(db)
 	auditHandler := commonaudit.NewHandler(auditRepo)
 
 	repo := tasks.NewPostgresRepository(db)
 	uc := tasks.NewUsecases(repo, nexusGateway)
 	uc.SetNexusSyncInterval(nexusSyncInterval())
-	uc.SetExecutor(connUC)
 	h := tasks.NewHandler(uc)
 
 	// Watchers module
 	watcherRepo := watchers.NewPostgresRepository(db)
 	watcherUC := watchers.NewUsecases(watcherRepo, nexusGateway)
-	watcherUC.SetConnectorExecutor(connUC)
 	watcherHandler := watchers.NewHandler(watcherUC)
 	jobRepo := jobs.NewPostgresRepository(db)
 	watcherUC.SetJobQueue(jobRepo)
@@ -700,20 +553,8 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	productRepo := products.NewPostgresRepository(db)
 	productUC := products.NewUsecases(productRepo)
 	productHandler := products.NewHandler(productUC)
-	// ProductConnector genérico (envelope capability_execution.v1), detrás de
-	// flag. Ponti legacy solo existe como rollback explícito y gana si se
-	// habilita con COMPANION_LEGACY_PONTI_CONNECTOR_ENABLED=true.
-	if envconfig.Bool("COMPANION_PRODUCT_CONNECTOR_GENERIC", false) {
-		productUC.WithSecretResolver(secrets.NewEnvResolver())
-		connUC.SetDynamicConnectorRegistrar(func(c context.Context) {
-			registerEnvelopeProductConnectors(c, connReg, productUC)
-		})
-		registerEnvelopeProductConnectors(ctx, connReg, productUC)
-	}
 	productGuard := products.NewInstallationGuard(productUC)
 	productRateLimiter := productlimits.NewMemoryLimiter()
-	connUC.SetProductInstallationGuard(productGuard)
-	connUC.SetRateLimiter(productRateLimiter)
 	watcherUC.SetProductInstallationGuard(productGuard)
 	watcherUC.SetRateLimiter(productRateLimiter)
 	memUC.WithProductInstallationGuard(productGuard)
@@ -728,7 +569,7 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	virployeeRepo := virployees.NewPostgresRepository(db)
 	virployeeRepo.SetAuditRecorder(auditRepo)
 	virployeeUC := virployees.NewUsecases(virployeeRepo)
-	virployeeHandler := virployees.NewHandler(virployeeUC)
+	virployeeHandler := virployeehttp.NewHandler(virployeeUC)
 	handoffRepo := handoffs.NewPostgresRepository(db)
 	handoffRepo.SetAuditRecorder(auditRepo)
 	handoffUC := handoffs.NewUsecases(handoffRepo)
@@ -759,34 +600,11 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	toolkit := runtime.NewToolKit(rc, memUC, watcherUC)
 	runtimeControlsRepo := runtime.NewPostgresRuntimeControlsRepository(db)
 
-	// Bridge LLM ↔ connectors: expone cada capability declarada por los
-	// connector types registrados como runtime tool (LLM-callable). Reads van
-	// directo al executor; writes controlled pasan por Nexus antes de ejecutar.
-	connectorViews := make([]runtime.ConnectorTypeView, 0)
-	for _, c := range connReg.List() {
-		connectorViews = append(connectorViews, c)
-	}
 	capabilityRepo := capabilities.NewPostgresRepository(db)
 	capabilityUC := capabilities.NewUsecases(capabilityRepo).
 		WithProductRegistry(productUC).
 		WithManifestSourceFetcher(capabilities.NewHTTPManifestSourceFetcher())
-	if generatedManifests, err := connUC.CapabilityManifests(connectordomain.CapabilityFilter{IncludeWrites: true}); err == nil {
-		if err := capabilityUC.SyncGenerated(ctx, generatedManifests); err != nil {
-			slog.Error("sync generated capability manifests", "error", err)
-		}
-	} else {
-		slog.Error("load generated capability manifests", "error", err)
-	}
 	capabilityHandler := capabilities.NewHandler(capabilityUC)
-	activeCapabilityRegistry := activeManifestRegistry(ctx, capabilityUC)
-	runtime.RegisterConnectorCapabilities(toolkit, runtime.CapabilityBridgeDeps{
-		Connectors:        connectorViews,
-		Executor:          connUC,
-		Submitter:         nexusGateway,
-		Controls:          runtimeControlsRepo,
-		ManifestRegistry:  activeCapabilityRegistry,
-		InstallationGuard: productGuard,
-	})
 	runtime.RegisterTaskPlannerTools(toolkit, taskPlannerAdapter{uc: uc})
 	contextPorts := runtime.ContextPorts{
 		NexusClient: rc,
@@ -824,7 +642,6 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	orchestrator.SetAgentProfileResolver(agentProfileRuntimeResolver{uc: agentProfileUC})
 	orchestrator.SetProductInstallationGuard(productGuard)
 	orchestrator.SetRateLimiter(productRateLimiter)
-	connUC.SetProductRuntimeController(connectorProductRuntimeController{controls: runtimeControlsRepo, costs: observabilityRepo})
 	traceHandler := runtime.NewTraceHandler(traceRepo)
 	observabilityHandler := runtime.NewObservabilityHandler(observabilityRepo)
 	runtimeControlsHandler := runtime.NewRuntimeControlsHandler(runtimeControlsRepo)
@@ -910,7 +727,6 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	agentProfileHandler.Register(mux)
 	jobRoleHandler.Register(mux)
 	chatHandler.Register(mux)
-	connHandler.Register(mux)
 	capabilityHandler.Register(mux)
 	traceHandler.Register(mux)
 	observabilityHandler.Register(mux)
@@ -922,11 +738,6 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	mcpHandler.Register(mux)
 	auditHandler.Register(mux)
 	assistHandler.Register(mux)
-
-	// Seed conectores por defecto
-	if err := connUC.SeedDefaultConnectors(ctx); err != nil {
-		slog.Error("seed default connectors", "error", err)
-	}
 
 	authMW, err := newAuthMiddleware(cfg.APIKeys, cfg.AuthIssuerURL, cfg.AuthAudience, internaljwt.Config{
 		Secret:   cfg.InternalJWTSecret,

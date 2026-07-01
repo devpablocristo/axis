@@ -1,9 +1,7 @@
 -- Planner durable v1.
 --
 -- companion_task_plans modela el plan cognitivo del empleado IA: objetivo,
--- estrategia, checkpoint actual, next_action y blockers. No reemplaza al
--- companion_task_execution_plans, que sigue modelando una ejecución concreta
--- de connector.
+-- estrategia, checkpoint actual, next_action y blockers.
 
 CREATE TABLE IF NOT EXISTS companion_task_plans (
     task_id          UUID PRIMARY KEY REFERENCES companion_tasks (id) ON DELETE CASCADE,

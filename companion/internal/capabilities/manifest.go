@@ -11,8 +11,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-
-	connectordomain "github.com/devpablocristo/companion/internal/connectors/usecases/domain"
 )
 
 const (
@@ -59,7 +57,6 @@ type Manifest struct {
 	Description          string         `json:"description"`
 	Owner                string         `json:"owner"`
 	ProductSurface       string         `json:"product_surface"`
-	Connector            string         `json:"connector"`
 	ActionType           string         `json:"action_type"`
 	RiskLevel            string         `json:"risk_level"`
 	SideEffectType       string         `json:"side_effect_type"`
@@ -105,8 +102,6 @@ type Tool struct {
 	ToolKey       string `json:"tool_key"`
 	Name          string `json:"name"`
 	Description   string `json:"description"`
-	ConnectorID   string `json:"connector_id,omitempty"`
-	ConnectorKey  string `json:"connector_key,omitempty"`
 	Operation     string `json:"operation"`
 	SideEffect    bool   `json:"side_effect"`
 	Status        string `json:"status"`
@@ -140,7 +135,7 @@ func NewRegistry(manifests []Manifest) (*Registry, error) {
 		if _, exists := reg.byIDVersion[key]; exists {
 			return nil, fmt.Errorf("%w: %s", ErrDuplicateManifest, key)
 		}
-		opKey := operationKey(normalized.Connector, normalized.CapabilityID)
+		opKey := operationKey(normalized.CapabilityID)
 		opVersionKey := opKey + "@" + normalized.Version
 		if existing, exists := byOperationVersion[opVersionKey]; exists {
 			return nil, fmt.Errorf("%w: operation %s already owned by %s@%s", ErrDuplicateManifest, opVersionKey, existing.CapabilityID, existing.Version)
@@ -153,13 +148,10 @@ func NewRegistry(manifests []Manifest) (*Registry, error) {
 		reg.manifests = append(reg.manifests, normalized)
 	}
 	sort.Slice(reg.manifests, func(i, j int) bool {
-		if reg.manifests[i].Connector == reg.manifests[j].Connector {
-			if reg.manifests[i].CapabilityID == reg.manifests[j].CapabilityID {
-				return reg.manifests[i].Version < reg.manifests[j].Version
-			}
-			return reg.manifests[i].CapabilityID < reg.manifests[j].CapabilityID
+		if reg.manifests[i].CapabilityID == reg.manifests[j].CapabilityID {
+			return reg.manifests[i].Version < reg.manifests[j].Version
 		}
-		return reg.manifests[i].Connector < reg.manifests[j].Connector
+		return reg.manifests[i].CapabilityID < reg.manifests[j].CapabilityID
 	})
 	return reg, nil
 }
@@ -210,11 +202,11 @@ func (r *Registry) Lookup(capabilityID, version string) (Manifest, bool) {
 	return manifest, ok
 }
 
-func (r *Registry) LookupOperation(connector, operation string) (Manifest, bool) {
+func (r *Registry) LookupOperation(operation string) (Manifest, bool) {
 	if r == nil {
 		return Manifest{}, false
 	}
-	manifest, ok := r.byOperation[operationKey(connector, operation)]
+	manifest, ok := r.byOperation[operationKey(operation)]
 	return manifest, ok
 }
 
@@ -230,7 +222,6 @@ func (m Manifest) Normalize() Manifest {
 	m.Description = strings.TrimSpace(m.Description)
 	m.Owner = strings.TrimSpace(m.Owner)
 	m.ProductSurface = strings.TrimSpace(m.ProductSurface)
-	m.Connector = strings.TrimSpace(m.Connector)
 	m.ActionType = strings.ToLower(firstNonEmpty(m.ActionType, ActionTypeRead))
 	m.RiskLevel = strings.ToLower(firstNonEmpty(m.RiskLevel, RiskLow))
 	m.SideEffectType = strings.ToLower(firstNonEmpty(m.SideEffectType, SideEffectRead))
@@ -259,7 +250,7 @@ func (m Manifest) Normalize() Manifest {
 	}
 	m.ObservabilityTags = cleanList(m.ObservabilityTags)
 	if len(m.ObservabilityTags) == 0 {
-		m.ObservabilityTags = []string{"connector:" + m.Connector, "risk:" + m.RiskLevel, "action:" + m.ActionType}
+		m.ObservabilityTags = []string{"capability:" + m.CapabilityID, "risk:" + m.RiskLevel, "action:" + m.ActionType}
 	}
 	if m.InputSchema == nil {
 		m.InputSchema = map[string]any{"type": "object", "properties": map[string]any{}}
@@ -282,7 +273,6 @@ func (m Manifest) Validate() error {
 		"description":      m.Description,
 		"owner":            m.Owner,
 		"product_surface":  m.ProductSurface,
-		"connector":        m.Connector,
 		"action_type":      m.ActionType,
 		"risk_level":       m.RiskLevel,
 		"side_effect_type": m.SideEffectType,
@@ -348,103 +338,6 @@ func (m Manifest) Validate() error {
 	return nil
 }
 
-func (m Manifest) ToConnectorCapability() connectordomain.Capability {
-	sideEffect := m.SideEffectType != SideEffectRead || m.ActionType == ActionTypeWrite
-	return connectordomain.Capability{
-		ID:                    m.CapabilityID,
-		Version:               m.Version,
-		Status:                connectordomain.CapabilityStatusActive,
-		DisplayName:           m.DisplayName,
-		Description:           m.Description,
-		Owner:                 m.Owner,
-		OwnerDomain:           m.Owner,
-		PublishedFrom:         connectordomain.CapabilityPublishedFromProduct,
-		Product:               m.ProductSurface,
-		ProductSurface:        m.ProductSurface,
-		Connector:             m.Connector,
-		Operation:             m.CapabilityID,
-		ActionType:            m.ActionType,
-		Mode:                  m.ActionType,
-		SideEffectType:        m.SideEffectType,
-		SideEffectClass:       m.SideEffectType,
-		SideEffect:            sideEffect,
-		ReadOnly:              !sideEffect,
-		RiskClass:             m.RiskLevel,
-		TenantScope:           connectordomain.TenantScope{Mode: connectordomain.TenantScopeSingleTenant, Resolver: connectordomain.TenantScopeResolverUser},
-		AuthMode:              connectordomain.AuthMode{Type: m.AuthMode},
-		RequiredScopes:        append([]string(nil), m.RequiredScopes...),
-		RequiresNexusApproval: m.ApprovalRequired,
-		ApprovalPolicy:        connectordomain.ApprovalPolicy{Required: m.ApprovalRequired},
-		InputSchema:           cloneMap(m.InputSchema),
-		OutputSchema:          cloneMap(m.OutputSchema),
-		EvidenceSchema:        cloneMap(m.EvidenceSchema),
-		EvidenceFields:        append([]string(nil), m.RequiredEvidence...),
-		EvidenceRequired:      append([]string(nil), m.RequiredEvidence...),
-		Idempotency:           connectordomain.IdempotencyContract{Required: m.IdempotencyMode == IdempotencyRequired},
-		IdempotencyMode:       m.IdempotencyMode,
-		Rollback:              connectordomain.RollbackContract{Supported: m.RollbackSupported, CapabilityID: m.RollbackCapabilityID},
-		CompensationStrategy:  m.CompensationStrategy,
-		NexusActionType:       m.NexusActionType,
-		TenantConfigurable:    m.TenantConfigurable,
-		EnabledByDefault:      m.EnabledByDefault,
-		RateLimitClass:        m.RateLimitClass,
-		CostClass:             m.CostClass,
-		Timeout:               m.Timeout,
-		Retries:               connectordomain.RetryPolicy{MaxAttempts: m.Retries.MaxAttempts, Backoff: m.Retries.Backoff},
-		Postconditions:        append([]string(nil), m.Postconditions...),
-		Preconditions:         append([]string(nil), m.Preconditions...),
-		ObservabilityTags:     append([]string(nil), m.ObservabilityTags...),
-	}
-}
-
-func FromConnectorCapability(connector, kind string, capability connectordomain.Capability) (Manifest, error) {
-	c := capability.Normalized(connector, kind)
-	inputSchema := repairHistoricalSchema(c.InputSchema)
-	outputSchema := repairHistoricalSchema(c.OutputSchema)
-	evidenceSchema := repairHistoricalEvidenceSchema(c.EvidenceSchema, c.EvidenceRequired)
-	actionType := firstNonEmpty(c.ActionType, c.Mode)
-	sideEffectType := firstNonEmpty(c.SideEffectType, c.SideEffectClass)
-	manifest := Manifest{
-		SchemaVersion:        SchemaVersion,
-		CapabilityID:         firstNonEmpty(c.ID, c.Operation),
-		Version:              firstNonEmpty(c.Version, "1.0.0"),
-		DisplayName:          firstNonEmpty(c.DisplayName, strings.ReplaceAll(firstNonEmpty(c.ID, c.Operation), ".", " ")),
-		Description:          firstNonEmpty(c.Description, "Capability "+firstNonEmpty(c.ID, c.Operation)+" on "+kind+" connector."),
-		Owner:                firstNonEmpty(c.Owner, c.OwnerDomain, kind),
-		ProductSurface:       firstNonEmpty(c.ProductSurface, c.Product, kind, "companion"),
-		Connector:            firstNonEmpty(c.Connector, kind, connector),
-		ActionType:           actionType,
-		RiskLevel:            firstNonEmpty(c.RiskClass, RiskLow),
-		SideEffectType:       sideEffectType,
-		AuthMode:             firstNonEmpty(c.AuthMode.Type, connectordomain.AuthModeHybrid),
-		RequiredScopes:       append([]string(nil), c.RequiredScopes...),
-		InputSchema:          inputSchema,
-		OutputSchema:         outputSchema,
-		EvidenceSchema:       evidenceSchema,
-		RequiredEvidence:     append([]string(nil), c.EvidenceRequired...),
-		IdempotencyMode:      firstNonEmpty(c.IdempotencyMode, idempotencyMode(c)),
-		RollbackSupported:    c.Rollback.Supported,
-		RollbackCapabilityID: c.Rollback.CapabilityID,
-		CompensationStrategy: firstNonEmpty(c.CompensationStrategy, compensationStrategy(c)),
-		NexusActionType:      c.NexusActionType,
-		ApprovalRequired:     c.NeedsNexusApproval(),
-		TenantConfigurable:   true,
-		EnabledByDefault:     true,
-		RateLimitClass:       firstNonEmpty(c.RateLimitClass, "standard"),
-		CostClass:            firstNonEmpty(c.CostClass, "low"),
-		Timeout:              firstNonEmpty(c.Timeout, "30s"),
-		Retries:              RetryPolicy{MaxAttempts: c.Retries.MaxAttempts, Backoff: c.Retries.Backoff},
-		Postconditions:       append([]string(nil), c.Postconditions...),
-		Preconditions:        append([]string(nil), c.Preconditions...),
-		ObservabilityTags:    append([]string(nil), c.ObservabilityTags...),
-	}
-	manifest = manifest.Normalize()
-	if err := manifest.Validate(); err != nil {
-		return Manifest{}, err
-	}
-	return manifest, nil
-}
-
 func decodeManifestFile(raw []byte) ([]Manifest, error) {
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 {
@@ -499,45 +392,6 @@ func validateRequiredEvidence(required []string, schema map[string]any) error {
 	return nil
 }
 
-func repairHistoricalSchema(schema map[string]any) map[string]any {
-	out := cloneMap(schema)
-	if len(out) == 0 {
-		out = map[string]any{"type": "object", "properties": map[string]any{}}
-	}
-	if _, ok := out["type"]; !ok {
-		out["type"] = "object"
-	}
-	props, _ := out["properties"].(map[string]any)
-	if props == nil {
-		props = map[string]any{}
-	}
-	if required, ok := requiredKeys(out["required"]); ok {
-		for _, key := range required {
-			if _, exists := props[key]; !exists {
-				props[key] = map[string]any{"type": "string"}
-			}
-		}
-	}
-	out["properties"] = props
-	return out
-}
-
-func repairHistoricalEvidenceSchema(schema map[string]any, evidence []string) map[string]any {
-	out := repairHistoricalSchema(schema)
-	props, _ := out["properties"].(map[string]any)
-	for _, key := range evidence {
-		key = strings.TrimSpace(key)
-		if key == "" {
-			continue
-		}
-		if _, ok := props[key]; !ok {
-			props[key] = map[string]any{"type": "string"}
-		}
-	}
-	out["properties"] = props
-	return out
-}
-
 func requiredKeys(raw any) ([]string, bool) {
 	switch values := raw.(type) {
 	case nil:
@@ -559,26 +413,12 @@ func requiredKeys(raw any) ([]string, bool) {
 	}
 }
 
-func idempotencyMode(capability connectordomain.Capability) string {
-	if capability.Idempotency.Required || capability.HasSideEffect() {
-		return IdempotencyRequired
-	}
-	return IdempotencyNone
-}
-
-func compensationStrategy(capability connectordomain.Capability) string {
-	if capability.Rollback.Supported {
-		return "capability"
-	}
-	return "none"
-}
-
 func keyFor(capabilityID, version string) string {
 	return strings.TrimSpace(capabilityID) + "@" + strings.TrimSpace(version)
 }
 
-func operationKey(connector, operation string) string {
-	return strings.TrimSpace(connector) + ":" + strings.TrimSpace(operation)
+func operationKey(operation string) string {
+	return strings.TrimSpace(operation)
 }
 
 func firstNonEmpty(values ...string) string {

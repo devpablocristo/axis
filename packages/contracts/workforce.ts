@@ -106,41 +106,9 @@ export type Tool = {
   tool_key: string
   name: string
   description: string
-  connector_id?: UUID | null
   operation: string
   side_effect: boolean
   status: string
-}
-
-export type ConnectorConfigField = {
-  key: string
-  label: string
-  type: 'text' | 'number' | 'select' | 'checkbox' | 'textarea'
-  required?: boolean
-  secret?: boolean
-  default_value?: string
-  options?: string[]
-}
-
-export type ConnectorType = {
-  kind: string
-  name: string
-  description: string
-  config_schema: {
-    fields: ConnectorConfigField[]
-  }
-  supports_test: boolean
-  supports_refresh: boolean
-  status: string
-  capability_source?: string
-}
-
-export type Connector = {
-  connector_id: UUID
-  name: string
-  kind: string
-  enabled: boolean
-  status: 'active' | 'disabled' | 'archived' | 'trash'
 }
 
 export type Memory = {

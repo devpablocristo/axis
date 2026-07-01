@@ -11,8 +11,6 @@ export type CompanionAdminRuntimePolicy = {
     max_risk_class?: string
     allowed_capabilities?: string[]
     denied_capabilities?: string[]
-    allowed_connectors?: string[]
-    denied_connectors?: string[]
     embedding?: {
       provider?: string
       model?: string
@@ -36,7 +34,6 @@ export type CompanionAdminCapabilityRecord = {
     capability_id: string
     version: string
     display_name: string
-    connector: string
     risk_level: string
     side_effect_type: string
     approval_required: boolean

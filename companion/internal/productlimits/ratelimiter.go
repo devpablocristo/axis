@@ -12,11 +12,10 @@ import (
 const (
 	DefaultProductSurface = "companion"
 
-	AreaRuntime            = "runtime"
-	AreaConnectorExecution = "connector_execution"
-	AreaWatcher            = "watcher"
-	AreaEval               = "eval"
-	AreaMCP                = "mcp"
+	AreaRuntime = "runtime"
+	AreaWatcher = "watcher"
+	AreaEval    = "eval"
+	AreaMCP     = "mcp"
 )
 
 type Key struct {
@@ -83,8 +82,6 @@ func DefaultLimit(area string) Limit {
 	switch strings.TrimSpace(area) {
 	case AreaRuntime:
 		return Limit{Max: 120, Window: time.Minute}
-	case AreaConnectorExecution:
-		return Limit{Max: 600, Window: time.Minute}
 	case AreaWatcher:
 		return Limit{Max: 300, Window: time.Minute}
 	case AreaEval:

@@ -55,14 +55,6 @@ func TestEventFromNexusRequestStatus(t *testing.T) {
 	}
 }
 
-func TestEventFromNexusRequestStatusWithExecutionPlan(t *testing.T) {
-	t.Parallel()
-	ev, ok := eventFromNexusRequestStatusWithExecutionPlan("approved", true)
-	if !ok || ev != evNexusResolvedAllowAwaitInput {
-		t.Fatalf("approved with execution plan: got %q %v", ev, ok)
-	}
-}
-
 // TestFSMContract_HandlesAllNexusStatuses garantiza que el FSM de
 // Companion mapea TODOS los statuses canónicos publicados por Nexus en
 // nexusclient.KnownStatuses. Si Nexus agrega un status nuevo, la

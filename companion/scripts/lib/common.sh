@@ -155,24 +155,3 @@ companion_put() {
 
 pass() { green "PASS: $1"; }
 fail() { red "FAIL: $1" >&2; exit 1; }
-
-# ensure_mock_connector imprime el id de un connector kind=mock enabled.
-# Si no existe en la org del caller, lo crea via POST /v1/connectors.
-# Necesario desde migration 0015 (tenant_fail_closed_constraints), que
-# desactivó el connector global histórico y no agregó seed por org.
-ensure_mock_connector() {
-  local list id
-  list=$(companion_get "/v1/connectors") || return 1
-  id=$(printf '%s' "$list" | python3 -c "
-import json, sys
-data = json.load(sys.stdin).get('connectors') or []
-conn = next((c for c in data if c.get('kind') == 'mock' and c.get('enabled')), None)
-print(conn['id'] if conn else '')
-")
-  if [ -z "$id" ]; then
-    local created
-    created=$(companion_post "/v1/connectors" '{"name":"mock","kind":"mock","enabled":true}') || return 1
-    id=$(printf '%s' "$created" | json_get 'id')
-  fi
-  printf '%s' "$id"
-}

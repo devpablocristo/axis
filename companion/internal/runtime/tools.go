@@ -38,7 +38,6 @@ type ToolMetadata struct {
 	CapabilityID          string   `json:"capability_id,omitempty"`
 	CapabilityVersion     string   `json:"capability_version,omitempty"`
 	Product               string   `json:"product,omitempty"`
-	ConnectorKind         string   `json:"connector_kind,omitempty"`
 	ActionType            string   `json:"action_type,omitempty"`
 	SideEffectClass       string   `json:"side_effect_class,omitempty"`
 	RiskClass             string   `json:"risk_class,omitempty"`

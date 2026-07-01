@@ -18,7 +18,7 @@
     "secret_ref": "env:PONTI_API_KEY",
     "enabled": true,
     "config": {
-      "connector_mode": "envelope.v1",
+      "integration_mode": "envelope.v1",
       "discovery_path": "/api/v1/capabilities",
       "execute_path": "/api/v1/capability-executions"
     }
@@ -44,7 +44,6 @@
       "description": "Read aggregated Ponti operational insights.",
       "owner": "ponti",
       "product_surface": "ponti",
-      "connector": "ponti",
       "action_type": "read",
       "risk_level": "low",
       "side_effect_type": "read",
@@ -105,7 +104,6 @@
       "description": "Create a Ponti work order draft after Nexus approval.",
       "owner": "ponti",
       "product_surface": "ponti",
-      "connector": "ponti",
       "action_type": "write",
       "risk_level": "medium",
       "side_effect_type": "write",

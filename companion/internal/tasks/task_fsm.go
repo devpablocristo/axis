@@ -60,16 +60,9 @@ func buildCompanionTaskFSM() *fsm.Machine[string, string] {
 }
 
 func eventFromSubmitResponse(sub nexusclient.SubmitResponse) (string, error) {
-	return eventFromSubmitResponseWithExecutionPlan(sub, false)
-}
-
-func eventFromSubmitResponseWithExecutionPlan(sub nexusclient.SubmitResponse, hasExecutionPlan bool) (string, error) {
 	s := normalizeNexusStatus(sub.Status)
 	switch s {
 	case "allowed", "approved", "executed":
-		if hasExecutionPlan {
-			return evNexusResolvedAllowAwaitInput, nil
-		}
 		return evNexusResolvedAllow, nil
 	case "denied", "rejected":
 		return evNexusResolvedDeny, nil
@@ -82,18 +75,11 @@ func eventFromSubmitResponseWithExecutionPlan(sub nexusclient.SubmitResponse, ha
 
 // eventFromNexusRequestStatus mapea estado HTTP de Nexus a evento FSM; apply=false = sin cambio.
 func eventFromNexusRequestStatus(status string) (event string, apply bool) {
-	return eventFromNexusRequestStatusWithExecutionPlan(status, false)
-}
-
-func eventFromNexusRequestStatusWithExecutionPlan(status string, hasExecutionPlan bool) (event string, apply bool) {
 	s := normalizeNexusStatus(status)
 	switch s {
 	case "pending_approval", "pending", "evaluated":
 		return "", false
 	case "allowed", "approved", "executed":
-		if hasExecutionPlan {
-			return evNexusResolvedAllowAwaitInput, true
-		}
 		return evNexusResolvedAllow, true
 	case "denied", "rejected", "expired", "failed", "cancelled":
 		return evNexusResolvedDeny, true

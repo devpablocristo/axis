@@ -64,7 +64,6 @@ URL por defecto: `http://localhost:18085`.
 - `companion/agents.md`
 - `companion/virployees.md`
 - `companion/job-roles.md`
-- `companion/connectors.md`
 - `companion/workforce-platform-debt.md`
 - `companion/workforce-implementation-gap.md`
 - `companion/tools.md`

@@ -88,9 +88,7 @@ func (u *Usecases) ListInstallations(ctx context.Context, orgID string) ([]Insta
 }
 
 // ListInstallationsByProduct lista las instalaciones de un producto a través
-// de todas las orgs. Lo usa el wiring del ProductConnector genérico para
-// detectar productos con instalaciones `connector_mode=envelope.v1` y para
-// resolver la instalación de discovery del manifest.
+// de todas las orgs.
 func (u *Usecases) ListInstallationsByProduct(ctx context.Context, productSurface string) ([]Installation, error) {
 	productSurface = normalizeProductSurface(productSurface)
 	if !validProductSurface(productSurface) {

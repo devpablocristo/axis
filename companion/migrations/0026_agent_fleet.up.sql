@@ -12,7 +12,6 @@ CREATE TABLE IF NOT EXISTS companion_agents (
     max_autonomy          TEXT NOT NULL DEFAULT 'A2',
     allowed_tools         TEXT[] NOT NULL DEFAULT '{}',
     allowed_capabilities  TEXT[] NOT NULL DEFAULT '{}',
-    allowed_connectors    TEXT[] NOT NULL DEFAULT '{}',
     memory_scope_id       TEXT NOT NULL DEFAULT '',
     shared_memory_policy  JSONB NOT NULL DEFAULT '{}'::jsonb,
     limits_json           JSONB NOT NULL DEFAULT '{}'::jsonb,

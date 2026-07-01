@@ -71,7 +71,7 @@ campos de dominio o specs de contrato versionados.
 
 ## Tool
 
-Definicion: funcion tecnica invocable por runtime, connector o MCP.
+Definicion: funcion tecnica invocable por runtime o MCP.
 
 Utilidad: ejecuta una operacion concreta.
 
@@ -79,7 +79,7 @@ No representa: habilidad de negocio reusable, employee, permiso ni policy.
 
 Tipo: entidad fuerte tecnica.
 
-CRUD objetivo: si tecnico, normalmente derivado de connectors/manifests.
+CRUD objetivo: si tecnico, normalmente derivado de manifests o codigo.
 
 Audiencia: interna/dev.
 
@@ -91,7 +91,6 @@ Tool
 - tool_key: string
 - name: string
 - description: string
-- connector_id: UUID | null
 - operation: string
 - side_effect: boolean
 - status: ToolStatus
@@ -107,10 +106,9 @@ Relaciones:
 
 ```text
 Capability.tool_id -> Tool.tool_id | null
-Tool.connector_id -> Connector.connector_id | null
 ```
 
-Estado actual: tools existen como funciones del runtime/connectors/MCP, no
+Estado actual: tools existen como funciones del runtime/MCP, no
 como entidad publica clara.
 
 Brecha: si se exponen como entidad, deben tener ID propio y no ser campos
@@ -124,4 +122,3 @@ sueltos dentro de Employee.
 | `allowed_tools` en agents/profiles | Mezcla implementacion tecnica con dominio employee. | Employee usa `capability_ids`; tools quedan tecnicas. |
 | `manifest_json` | Contrato flexible sin forma de dominio en este spec. | Campos fuertes o contrato versionado documentado. |
 | Tool runtime | No tiene frontera clara de entidad. | `Tool` tecnico con `tool_id` y `tool_key`. |
-

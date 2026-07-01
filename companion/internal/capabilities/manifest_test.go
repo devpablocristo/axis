@@ -4,8 +4,6 @@ import (
 	"errors"
 	"testing"
 	"testing/fstest"
-
-	connectordomain "github.com/devpablocristo/companion/internal/connectors/usecases/domain"
 )
 
 func validManifest() Manifest {
@@ -17,12 +15,11 @@ func validManifest() Manifest {
 		Description:        "Creates an invoice in an external billing system.",
 		Owner:              "billing",
 		ProductSurface:     "billing",
-		Connector:          "billing",
 		ActionType:         ActionTypeWrite,
 		RiskLevel:          RiskHigh,
 		SideEffectType:     SideEffectWrite,
 		AuthMode:           "delegated_user",
-		RequiredScopes:     []string{"companion:connectors:execute"},
+		RequiredScopes:     []string{"companion:capabilities:admin"},
 		InputSchema:        objectSchema("org_id", "customer_id"),
 		OutputSchema:       objectSchema("invoice_id"),
 		EvidenceSchema:     objectSchema("invoice_id", "external_ref"),
@@ -38,7 +35,7 @@ func validManifest() Manifest {
 		Retries:            RetryPolicy{MaxAttempts: 2, Backoff: "exponential"},
 		Preconditions:      []string{"customer_org_context"},
 		Postconditions:     []string{"invoice_id"},
-		ObservabilityTags:  []string{"connector:billing"},
+		ObservabilityTags:  []string{"capability:billing.invoice.create"},
 	}
 }
 
@@ -56,7 +53,7 @@ func TestRegistryAcceptsVersionedManifestsAndIndexesLatestOperation(t *testing.T
 	if got := reg.All(); len(got) != 2 {
 		t.Fatalf("expected both versions, got %d", len(got))
 	}
-	latest, ok := reg.LookupOperation("billing", "billing.invoice.create")
+	latest, ok := reg.LookupOperation("billing.invoice.create")
 	if !ok {
 		t.Fatal("expected operation lookup")
 	}
@@ -101,12 +98,11 @@ func TestLoadFSLoadsManifestSetsStrictly(t *testing.T) {
 				"description":"Reads one customer record.",
 				"owner":"crm",
 				"product_surface":"crm",
-				"connector":"crm",
 				"action_type":"read",
 				"risk_level":"low",
 				"side_effect_type":"read",
 				"auth_mode":"delegated_user",
-				"required_scopes":["companion:connectors:execute"],
+				"required_scopes":["companion:capabilities:read"],
 				"input_schema":{"type":"object","required":["org_id"],"properties":{"org_id":{"type":"string"}}},
 				"output_schema":{"type":"object","properties":{"customer":{"type":"object"}}},
 				"evidence_schema":{"type":"object","properties":{"customer":{"type":"object"}}},
@@ -123,7 +119,7 @@ func TestLoadFSLoadsManifestSetsStrictly(t *testing.T) {
 				"retries":{"max_attempts":1,"backoff":"none"},
 				"postconditions":["customer"],
 				"preconditions":["customer_org_context"],
-				"observability_tags":["connector:crm"]
+				"observability_tags":["capability:crm.customer.lookup"]
 			}
 		]
 	}`
@@ -133,37 +129,6 @@ func TestLoadFSLoadsManifestSetsStrictly(t *testing.T) {
 	}
 	if got := reg.All(); len(got) != 1 || got[0].CapabilityID != "crm.customer.lookup" {
 		t.Fatalf("unexpected loaded manifests %+v", got)
-	}
-}
-
-func TestFromConnectorCapabilityRepairsHistoricalSchemas(t *testing.T) {
-	t.Parallel()
-	manifest, err := FromConnectorCapability("mock", "mock", connectordomain.Capability{
-		Operation:             "mock.write",
-		Mode:                  connectordomain.CapabilityModeWrite,
-		SideEffect:            true,
-		RiskClass:             connectordomain.RiskClassMedium,
-		RequiresNexusApproval: true,
-		RequiredScopes:        []string{"companion:connectors:execute"},
-		InputSchema: map[string]any{
-			"type":     "object",
-			"required": []string{"message"},
-		},
-		EvidenceFields: []string{"external_ref"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if manifest.NexusActionType != DefaultInvokeActionType || !manifest.ApprovalRequired {
-		t.Fatalf("expected approved write defaults, got %+v", manifest)
-	}
-	props := manifest.InputSchema["properties"].(map[string]any)
-	if _, ok := props["message"]; !ok {
-		t.Fatalf("expected historical required field to be materialized, got %+v", manifest.InputSchema)
-	}
-	evidenceProps := manifest.EvidenceSchema["properties"].(map[string]any)
-	if _, ok := evidenceProps["external_ref"]; !ok {
-		t.Fatalf("expected evidence schema to include historical field, got %+v", manifest.EvidenceSchema)
 	}
 }
 

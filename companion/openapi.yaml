@@ -614,125 +614,6 @@ paths:
         - $ref: "#/components/parameters/UUIDPath"
       responses:
         "204": { description: Deleted }
-  /v1/connectors:
-    get:
-      summary: Lista connectors
-      parameters:
-        - in: query
-          name: lifecycle
-          schema: { type: string, enum: [active, archived, trash, all], default: active }
-      responses:
-        "200":
-          description: Connector list
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  connectors:
-                    type: array
-                    items: { $ref: "#/components/schemas/Connector" }
-                  data:
-                    type: array
-                    items: { $ref: "#/components/schemas/Connector" }
-    post:
-      summary: Crea connector config
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: "#/components/schemas/ConnectorInput" }
-      responses:
-        "201":
-          description: Connector created
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/Connector" }
-  /v1/connectors/types:
-    get:
-      summary: Lista connector types disponibles
-      description: Fuente canonica para renderizar formularios de Connector sin hardcodear campos en Console.
-      responses:
-        "200":
-          description: Connector type list
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  types:
-                    type: array
-                    items: { $ref: "#/components/schemas/ConnectorType" }
-                  data:
-                    type: array
-                    items: { $ref: "#/components/schemas/ConnectorType" }
-  /v1/connectors/refresh:
-    post:
-      summary: Refresca connectors default
-      responses:
-        "200": { description: Refreshed }
-  /v1/connectors/execute:
-    post:
-      summary: Ejecuta una capability
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { type: object }
-      responses:
-        "200": { description: Execution result }
-        "403": { description: Forbidden or nexus denied }
-  /v1/connectors/action-binding:
-    post:
-      summary: Calcula el action binding Nexus para una capability
-      description: Requiere `companion:connectors:execute`.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { type: object }
-      responses:
-        "200":
-          description: Action binding for Nexus
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [action_binding, binding_hash]
-                properties:
-                  action_binding:
-                    type: object
-                    additionalProperties: true
-                  binding_hash:
-                    type: string
-        "403": { description: Forbidden }
-  /v1/connectors/capabilities:
-    get:
-      summary: Lista capabilities disponibles
-      responses:
-        "200": { description: Capability list }
-  /v1/connectors/capability-manifests:
-    get:
-      summary: Lista manifests versionados de capabilities
-      parameters:
-        - in: query
-          name: include_writes
-          schema: { type: boolean, default: false }
-        - in: query
-          name: max_risk_class
-          schema: { type: string, enum: [low, medium, high, critical] }
-      responses:
-        "200":
-          description: Capability manifest list
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [capabilities]
-                properties:
-                  capabilities:
-                    type: array
-                    items: { $ref: "#/components/schemas/CapabilityManifest" }
   /v1/capabilities:
     get:
       summary: Lista capabilities
@@ -948,92 +829,6 @@ paths:
           schema: { type: string }
       responses:
         "200": { description: Capability manifest blocked }
-  /v1/connectors/{id}:
-    get:
-      summary: Obtiene connector
-      parameters:
-        - $ref: "#/components/parameters/UUIDPath"
-      responses:
-        "200":
-          description: Connector
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/Connector" }
-    patch:
-      summary: Actualiza connector config sin cambiar lifecycle
-      parameters:
-        - $ref: "#/components/parameters/UUIDPath"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: "#/components/schemas/ConnectorInput" }
-      responses:
-        "200":
-          description: Connector updated
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/Connector" }
-    delete:
-      summary: Borra connector
-      parameters:
-        - $ref: "#/components/parameters/UUIDPath"
-      responses:
-        "204": { description: Deleted }
-  /v1/connectors/{id}/archive:
-    post:
-      summary: Archiva connector
-      parameters:
-        - $ref: "#/components/parameters/UUIDPath"
-      responses:
-        "200":
-          description: Connector archived
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/Connector" }
-  /v1/connectors/{id}/trash:
-    post:
-      summary: Mueve connector a papelera
-      parameters:
-        - $ref: "#/components/parameters/UUIDPath"
-      responses:
-        "200":
-          description: Connector trashed
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/Connector" }
-  /v1/connectors/{id}/restore:
-    post:
-      summary: Restaura connector
-      parameters:
-        - $ref: "#/components/parameters/UUIDPath"
-      responses:
-        "200":
-          description: Connector restored
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/Connector" }
-  /v1/connectors/{id}/test:
-    post:
-      summary: Valida configuracion del connector sin ejecutar side effects
-      parameters:
-        - $ref: "#/components/parameters/UUIDPath"
-      responses:
-        "200": { description: Connector test result }
-  /v1/connectors/{id}/refresh:
-    post:
-      summary: Refresca capabilities del connector
-      parameters:
-        - $ref: "#/components/parameters/UUIDPath"
-      responses:
-        "200": { description: Connector refresh result }
-  /v1/connectors/{id}/executions:
-    get:
-      summary: Lista ejecuciones de connector
-      parameters:
-        - $ref: "#/components/parameters/UUIDPath"
-      responses:
-        "200": { description: Execution list }
   /v1/watchers:
     get:
       summary: Lista watchers por customer org
@@ -1237,7 +1032,7 @@ paths:
               schema: { $ref: "#/components/schemas/MCPRuntimePolicy" }
     put:
       summary: Actualiza solo los controles MCP de la política runtime
-      description: Requiere `companion:runtime:admin` o `companion:cross_org`. Preserva modelos, budgets, autonomy, memory, connectors y otros campos no-MCP.
+      description: Requiere `companion:runtime:admin` o `companion:cross_org`. Preserva modelos, budgets, autonomy, memory y otros campos no-MCP.
       requestBody:
         required: true
         content:
@@ -2419,69 +2214,6 @@ components:
         config:
           type: object
           additionalProperties: true
-    Connector:
-      type: object
-      required: [connector_id, id, name, kind, enabled, status]
-      properties:
-        id: { type: string, format: uuid }
-        connector_id: { type: string, format: uuid }
-        org_id: { type: string }
-        name: { type: string }
-        kind: { type: string }
-        enabled: { type: boolean }
-        status: { type: string, enum: [active, disabled, archived, trash] }
-        config:
-          type: object
-          additionalProperties: true
-        created_at: { type: string, format: date-time }
-        updated_at: { type: string, format: date-time }
-        archived_at: { type: string, format: date-time }
-        trashed_at: { type: string, format: date-time }
-        version: { type: integer }
-    ConnectorInput:
-      type: object
-      properties:
-        name: { type: string }
-        kind: { type: string }
-        enabled: { type: boolean }
-        status: { type: string, enum: [active, disabled] }
-        config:
-          type: object
-          additionalProperties: true
-          description: Config validada contra ConnectorType.config_schema; secrets deben referenciarse con secret_ref.
-    ConnectorType:
-      type: object
-      required: [kind, name, config_schema, supports_test, supports_refresh, status]
-      properties:
-        kind: { type: string }
-        name: { type: string }
-        description: { type: string }
-        supports_test: { type: boolean }
-        supports_refresh: { type: boolean }
-        status: { type: string, enum: [active, disabled] }
-        capability_source: { type: string }
-        config_schema:
-          $ref: "#/components/schemas/ConnectorConfigSchema"
-    ConnectorConfigSchema:
-      type: object
-      required: [fields]
-      properties:
-        fields:
-          type: array
-          items: { $ref: "#/components/schemas/ConnectorConfigField" }
-    ConnectorConfigField:
-      type: object
-      required: [key, label, type]
-      properties:
-        key: { type: string }
-        label: { type: string }
-        type: { type: string, enum: [text, number, select, checkbox, textarea] }
-        required: { type: boolean }
-        secret: { type: boolean }
-        default_value: { type: string }
-        options:
-          type: array
-          items: { type: string }
     MCPJSONRPCRequest:
       type: object
       required: [jsonrpc, method]
@@ -2818,14 +2550,9 @@ components:
           description: Strong public UUID. In v1 it is derived from the backing capability manifest record.
         tool_key:
           type: string
-          description: Technical key derived from connector and operation.
+          description: Technical key derived from the capability operation.
         name: { type: string }
         description: { type: string }
-        connector_id:
-          type: string
-          format: uuid
-          description: Target model field; omitted while connectors still expose key identity.
-        connector_key: { type: string }
         operation: { type: string }
         side_effect: { type: boolean }
         status: { type: string, enum: [active, disabled, deprecated] }
@@ -3185,10 +2912,9 @@ components:
         enabled: { type: boolean }
     CapabilityWatcherConfig:
       type: object
-      required: [product_surface, connector_kind, query_operation, action_operation, action_type]
+      required: [product_surface, query_operation, action_operation, action_type]
       properties:
         product_surface: { type: string }
-        connector_kind: { type: string }
         query_operation: { type: string }
         query_payload: { type: object, additionalProperties: true }
         result_items_path:
@@ -3276,12 +3002,6 @@ components:
           type: array
           items: { type: string }
         denied_capabilities:
-          type: array
-          items: { type: string }
-        allowed_connectors:
-          type: array
-          items: { type: string }
-        denied_connectors:
           type: array
           items: { type: string }
         allowed_models:
@@ -3469,9 +3189,6 @@ components:
           type: array
           items: { type: string }
         allowed_capabilities:
-          type: array
-          items: { type: string }
-        allowed_connectors:
           type: array
           items: { type: string }
         memory_scope_id: { type: string }

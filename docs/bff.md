@@ -36,8 +36,8 @@ Virployees desde Console. El BFF no implementa dominio propio: resuelve
 JobRole no es IAM Role ni PermissionBundle. En v1 reutiliza scopes operativos
 de Agents y no autoriza acciones.
 
-## Connectors
+## Adapters
 
-`/api/connectors` es la superficie BFF para administrar connectors desde
-Console. El BFF no define schemas de configuracion: forwardea a Companion y
-Console renderiza formularios desde `/api/connectors/types`.
+El BFF no expone un CRUD generico de adapters. Cuando un servicio externo
+consume Axis, entra por la API del dominio correspondiente. Cuando Axis consume
+otro servicio, el client vive como adapter tecnico en codigo.

@@ -199,7 +199,6 @@ func actionBinding(tool ToolDefinition, identity InvocationContext, arguments ma
 		"product_surface":    identity.ProductSurface,
 		"run_id":             runID,
 		"tool_invocation_id": toolInvocationID,
-		"connector_id":       TargetSystemAxisMCP,
 		"capability_id":      tool.Name,
 		"operation":          tool.Name,
 		"target_system":      TargetSystemAxisMCP,

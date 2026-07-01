@@ -36,7 +36,6 @@ type AssignmentInput struct {
 	ProductSurface string   `json:"product_surface,omitempty"`
 	Intent         string   `json:"intent,omitempty"`
 	CapabilityID   string   `json:"capability_id,omitempty"`
-	Connector      string   `json:"connector,omitempty"`
 	RequiredTools  []string `json:"required_tools,omitempty"`
 }
 
@@ -310,9 +309,6 @@ func agentAssignmentMatches(agent Agent, in AssignmentInput) []string {
 	var matches []string
 	if value := strings.TrimSpace(in.CapabilityID); value != "" && listAllows(agent.AllowedCapabilities, value) {
 		matches = append(matches, "capability:"+value)
-	}
-	if value := strings.TrimSpace(in.Connector); value != "" && listAllows(agent.AllowedConnectors, value) {
-		matches = append(matches, "connector:"+value)
 	}
 	for _, tool := range in.RequiredTools {
 		if listAllows(agent.AllowedTools, tool) {

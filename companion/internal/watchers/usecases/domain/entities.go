@@ -84,7 +84,6 @@ type PymesItem = WatcherItem
 
 type CapabilityWatcherConfig struct {
 	ProductSurface        string           `json:"product_surface"`
-	ConnectorKind         string           `json:"connector_kind"`
 	QueryOperation        string           `json:"query_operation"`
 	QueryPayload          map[string]any   `json:"query_payload,omitempty"`
 	ResultItemsPath       string           `json:"result_items_path,omitempty"`

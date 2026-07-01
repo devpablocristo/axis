@@ -30,7 +30,6 @@ type RuntimeAgentConfig struct {
 	MaxAutonomy         AutonomyLevel  `json:"max_autonomy,omitempty"`
 	AllowedTools        []string       `json:"allowed_tools,omitempty"`
 	AllowedCapabilities []string       `json:"allowed_capabilities,omitempty"`
-	AllowedConnectors   []string       `json:"allowed_connectors,omitempty"`
 	MemoryScopeID       string         `json:"memory_scope_id,omitempty"`
 	SharedMemoryPolicy  map[string]any `json:"shared_memory_policy,omitempty"`
 	Limits              map[string]any `json:"limits,omitempty"`

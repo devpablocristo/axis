@@ -90,9 +90,7 @@ type TaskDetail struct {
 	Artifacts           []domain.TaskArtifact      `json:"artifacts"`
 	LinkedNexusRequests []LinkedNexusRequest       `json:"linked_nexus_requests"`
 	NexusSync           *domain.TaskNexusSyncState `json:"nexus_sync,omitempty"`
-	ExecutionPlan       *domain.TaskExecutionPlan  `json:"execution_plan,omitempty"`
 	DurablePlan         *domain.TaskPlan           `json:"durable_plan,omitempty"`
-	ExecutionState      *domain.TaskExecutionState `json:"execution_state,omitempty"`
 }
 
 func (u *Usecases) GetDetail(ctx context.Context, id uuid.UUID) (TaskDetail, error) {
@@ -120,23 +118,11 @@ func (u *Usecases) GetDetail(ctx context.Context, id uuid.UUID) (TaskDetail, err
 	} else if !domainerr.IsNotFound(stateErr) {
 		return out, stateErr
 	}
-	plan, planErr := u.repo.GetExecutionPlan(ctx, id)
-	if planErr == nil {
-		out.ExecutionPlan = &plan
-	} else if !domainerr.IsNotFound(planErr) {
-		return out, planErr
-	}
 	durablePlan, durablePlanErr := u.repo.GetTaskPlan(ctx, id)
 	if durablePlanErr == nil {
 		out.DurablePlan = &durablePlan
 	} else if !domainerr.IsNotFound(durablePlanErr) {
 		return out, durablePlanErr
-	}
-	executionState, executionStateErr := u.repo.GetExecutionState(ctx, id)
-	if executionStateErr == nil {
-		out.ExecutionState = &executionState
-	} else if !domainerr.IsNotFound(executionStateErr) {
-		return out, executionStateErr
 	}
 	seen := make(map[uuid.UUID]struct{})
 	for _, a := range out.Actions {

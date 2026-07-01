@@ -502,7 +502,6 @@ func (o *Orchestrator) Run(ctx context.Context, in RunInput) (RunResult, error) 
 				"duration_ms":        durationMS,
 				"capability_id":      metadata.CapabilityID,
 				"capability_version": metadata.CapabilityVersion,
-				"connector_kind":     metadata.ConnectorKind,
 				"risk_class":         metadata.RiskClass,
 				"side_effect":        metadata.SideEffectClass,
 				"requires_nexus":     metadata.RequiresNexusApproval,

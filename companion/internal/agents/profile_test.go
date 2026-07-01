@@ -9,7 +9,7 @@ func TestResolveUsesGenericProductProfile(t *testing.T) {
 		"demo",
 		"general.assist",
 		"A2",
-		[]string{"companion:connectors:execute"},
+		[]string{"companion:capabilities:read"},
 		[]string{"remember", "demo_orders_search", "pymes_customers_search"},
 	)
 
@@ -34,7 +34,7 @@ func TestResolveKeepsPymesCompatibilityThroughGenericProfile(t *testing.T) {
 		"pymes",
 		"general.assist",
 		"A2",
-		[]string{"companion:connectors:execute"},
+		[]string{"companion:capabilities:read"},
 		[]string{"remember", "recall", "pymes_customers_search"},
 	)
 

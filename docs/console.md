@@ -17,8 +17,6 @@ presentar Agents como recurso principal salvo en contextos internos o compatibil
 
 ## Admin
 
-Console muestra `Admin > Connectors` para administrar conectores con el mismo
-CRUD/lifecycle que Virployees: Activos, Archivados y Papelera.
-
-Los formularios de Connectors se renderizan desde `/api/connectors/types`; la
-UI no mantiene una copia propia de los campos de configuracion.
+Console no expone un CRUD generico de adapters. Los servicios externos consumen
+Axis por endpoints del dominio correspondiente y Axis consume servicios externos
+mediante clients tecnicos en codigo.

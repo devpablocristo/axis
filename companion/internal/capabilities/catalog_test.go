@@ -11,7 +11,6 @@ func TestUsecasesExposeCapabilityAndToolDomainViews(t *testing.T) {
 	manifest := validReadManifest()
 	manifest.CapabilityID = "billing.invoice.read"
 	manifest.DisplayName = "Read invoice"
-	manifest.Connector = "stripe"
 	record, err := repo.UpsertManifest(context.Background(), ManifestRecord{
 		Manifest: manifest,
 		Status:   ManifestStatusActive,
@@ -37,7 +36,7 @@ func TestUsecasesExposeCapabilityAndToolDomainViews(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if tool.ToolID != record.ID.String() || tool.ToolKey != "stripe.billing.invoice.read" {
+	if tool.ToolID != record.ID.String() || tool.ToolKey != "billing.invoice.read" {
 		t.Fatalf("expected derived tool view, got %+v", tool)
 	}
 	if tool.CapabilityID != capability.CapabilityID || tool.CapabilityKey != capability.CapabilityKey || tool.Status != "active" {

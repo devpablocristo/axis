@@ -126,7 +126,6 @@ type SLA struct {
 
 type ToolRef struct {
 	ID         string `json:"id"`
-	Connector  string `json:"connector,omitempty"`
 	Capability string `json:"capability,omitempty"`
 }
 

@@ -10,9 +10,8 @@ import (
 )
 
 const (
-	scopeCompanionTasksRead         = "companion:tasks:read"
-	scopeCompanionTasksWrite        = "companion:tasks:write"
-	scopeCompanionConnectorsExecute = "companion:connectors:execute"
+	scopeCompanionTasksRead  = "companion:tasks:read"
+	scopeCompanionTasksWrite = "companion:tasks:write"
 )
 
 func requireScope(w http.ResponseWriter, r *http.Request, scopes ...string) bool {

@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	connectors "github.com/devpablocristo/companion/internal/connectors"
 	"github.com/devpablocristo/companion/internal/nexusclient"
 )
 
@@ -53,45 +52,11 @@ func (g *nexusGateway) GetRequest(ctx context.Context, id string) (nexusclient.R
 	return g.client.GetRequest(ctx, id)
 }
 
-func (g *nexusGateway) GetRequestMeta(ctx context.Context, id string) (connectors.NexusRequestMeta, int, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, g.baseURL+"/v1/requests/"+id, nil)
-	if err != nil {
-		return connectors.NexusRequestMeta{}, 0, fmt.Errorf("build nexus get request: %w", err)
-	}
-	req.Header.Set("X-API-Key", g.apiKey)
-	resp, err := g.http.Do(req)
-	if err != nil {
-		return connectors.NexusRequestMeta{}, 0, fmt.Errorf("get nexus request: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return connectors.NexusRequestMeta{}, resp.StatusCode, nil
-	}
-	var body struct {
-		Status        string         `json:"status"`
-		OrgID         string         `json:"org_id"`
-		BindingHash   string         `json:"binding_hash"`
-		ActionBinding map[string]any `json:"action_binding"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return connectors.NexusRequestMeta{}, resp.StatusCode, fmt.Errorf("decode nexus get response: %w", err)
-	}
-	return connectors.NexusRequestMeta{
-		Status:        body.Status,
-		OrgID:         body.OrgID,
-		BindingHash:   body.BindingHash,
-		ActionBinding: body.ActionBinding,
-	}, resp.StatusCode, nil
-}
-
 func (g *nexusGateway) ReportResult(ctx context.Context, id string, success bool, result map[string]any, durationMS int64, errorMessage string) (int, error) {
 	payload := map[string]any{
 		"success":     success,
 		"result":      result,
 		"duration_ms": durationMS,
-	}
-	if resultID, _ := result["connector_execution_id"].(string); strings.TrimSpace(resultID) != "" {
-		payload["result_id"] = strings.TrimSpace(resultID)
 	}
 	if strings.TrimSpace(errorMessage) != "" {
 		payload["error_message"] = errorMessage

@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
-
-	connectorsdomain "github.com/devpablocristo/companion/internal/connectors/usecases/domain"
 )
 
 type fakeRuntimeControls struct {
@@ -451,41 +449,6 @@ func TestApplyRuntimePolicy_RejectsDisabledProfile(t *testing.T) {
 	}
 }
 
-func TestValidateCapabilityControlPlane_FailsClosedWithoutPolicy(t *testing.T) {
-	t.Parallel()
-
-	reader := &missingPolicyReader{}
-	event := validateCapabilityControlPlane(context.Background(), reader, "org-1", "demo_update", "demo", connectorsCapability("demo.update", "medium", true))
-	if event == nil || event.Target != "policy" {
-		t.Fatalf("expected missing policy to fail closed, got %+v", event)
-	}
-}
-
-func TestValidateCapabilityControlPlane_RejectsDeniedAndRiskyCapability(t *testing.T) {
-	t.Parallel()
-
-	reader := &fakePolicyReader{policy: TenantRuntimePolicy{
-		OrgID:       "org-1",
-		Enabled:     true,
-		MaxAutonomy: AutonomyA2,
-		ControlPlane: OrgControlPlaneSettings{
-			AllowedConnectors:  []string{"demo"},
-			DeniedCapabilities: []string{"demo.delete"},
-			MaxRiskClass:       "medium",
-			ApprovalThresholds: map[string]string{"medium": "require_approval"},
-		},
-	}}
-	if event := validateCapabilityControlPlane(context.Background(), reader, "org-1", "demo_delete", "demo", connectorsCapability("demo.delete", "medium", true)); event == nil {
-		t.Fatal("expected denied capability to be rejected")
-	}
-	if event := validateCapabilityControlPlane(context.Background(), reader, "org-1", "demo_admin", "demo", connectorsCapability("demo.admin", "critical", true)); event == nil || event.Target != "risk:critical" {
-		t.Fatalf("expected critical risk to be rejected, got %+v", event)
-	}
-	if event := validateCapabilityControlPlane(context.Background(), reader, "org-1", "demo_read", "demo", connectorsCapability("demo.read", "medium", false)); event == nil || event.Target != "approval_threshold" {
-		t.Fatalf("expected threshold to reject ungated medium capability, got %+v", event)
-	}
-}
-
 type missingPolicyReader struct{}
 
 func (missingPolicyReader) GetRuntimePolicy(context.Context, string) (TenantRuntimePolicy, error) {
@@ -498,22 +461,6 @@ type fakePolicyReader struct {
 
 func (f *fakePolicyReader) GetRuntimePolicy(context.Context, string) (TenantRuntimePolicy, error) {
 	return f.policy, nil
-}
-
-func connectorsCapability(operation, risk string, approval bool) connectorsdomain.Capability {
-	mode := connectorsdomain.CapabilityModeRead
-	if approval {
-		mode = connectorsdomain.CapabilityModeWrite
-	}
-	return connectorsdomain.Capability{
-		ID:                    operation,
-		Version:               "1.0.0",
-		Operation:             operation,
-		Mode:                  mode,
-		ReadOnly:              mode == connectorsdomain.CapabilityModeRead,
-		RiskClass:             risk,
-		RequiresNexusApproval: approval,
-	}
 }
 
 func findRuntimeEvent(events []ObservabilityEvent, eventType, eventName string) *ObservabilityEvent {

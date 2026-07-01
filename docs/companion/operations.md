@@ -157,9 +157,8 @@ local obligatorio sigue siendo `bash scripts/evals/run-security-evals.sh`.
   agrega contratos reales al mismo gate sin convertir Ponti/Medmory en defaults
   hardcodeados de Axis.
 - `scripts/onboarding/seed-product-installation.sh` registra cualquier producto
-  externo con `connector_mode=envelope.v1` usando env vars como
-  `PRODUCT_SURFACE`, `PRODUCT_ORG_ID`, `PRODUCT_BASE_URL` y
-  `PRODUCT_SECRET_REF`.
+  externo usando env vars como `PRODUCT_SURFACE`, `PRODUCT_ORG_ID`,
+  `PRODUCT_BASE_URL` y `PRODUCT_SECRET_REF`.
 
 Los evals de producto son no bloqueantes al inicio; el reporte mantiene
 thresholds por producto para convertirlos en gate cuando el producto tenga

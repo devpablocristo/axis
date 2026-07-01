@@ -1,4 +1,4 @@
-package virployees
+package httpadapter
 
 import (
 	"encoding/json"
@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/devpablocristo/companion/internal/identityctx"
+	"github.com/devpablocristo/companion/internal/virployees"
 	"github.com/devpablocristo/platform/http/go/httpjson"
 	"github.com/google/uuid"
 )
@@ -24,10 +25,10 @@ const (
 )
 
 type Handler struct {
-	uc *Usecases
+	uc *virployees.Usecases
 }
 
-func NewHandler(uc *Usecases) *Handler {
+func NewHandler(uc *virployees.Usecases) *Handler {
 	return &Handler{uc: uc}
 }
 
@@ -57,7 +58,7 @@ func (h *Handler) createVirployee(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var body Virployee
+	var body virployees.Virployee
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid json body")
 		return
@@ -91,7 +92,7 @@ func (h *Handler) updateVirployee(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var body Virployee
+	var body virployees.Virployee
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid json body")
 		return
@@ -119,7 +120,7 @@ func (h *Handler) setVirployeeStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Status VirployeeStatus `json:"status"`
+		Status virployees.VirployeeStatus `json:"status"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", "invalid json body")
@@ -175,16 +176,16 @@ func requestTenantID(r *http.Request) (uuid.UUID, error) {
 		}
 		return uuid.Parse(raw)
 	}
-	return uuid.Nil, ErrValidation
+	return uuid.Nil, virployees.ErrValidation
 }
 
 func writeVirployeeError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, ErrValidation):
+	case errors.Is(err, virployees.ErrValidation):
 		httpjson.WriteFlatError(w, http.StatusBadRequest, "VALIDATION", err.Error())
-	case errors.Is(err, ErrNotFound):
+	case errors.Is(err, virployees.ErrNotFound):
 		httpjson.WriteFlatError(w, http.StatusNotFound, "NOT_FOUND", "virployee not found")
-	case errors.Is(err, ErrConflict):
+	case errors.Is(err, virployees.ErrConflict):
 		httpjson.WriteFlatError(w, http.StatusConflict, "CONFLICT", err.Error())
 	default:
 		httpjson.WriteFlatInternalError(w, err, "virployee request failed")

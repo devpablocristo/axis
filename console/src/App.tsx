@@ -1,10 +1,9 @@
-import { Activity, Bot, CheckCircle2, DatabaseZap, FileClock, FileText, GitPullRequestArrow, KeyRound, Layers3, ListChecks, MessageSquareText, Play, Power, ShieldCheck, Sparkles, UsersRound } from 'lucide-react'
+import { Activity, Bot, CheckCircle2, FileClock, FileText, GitPullRequestArrow, KeyRound, Layers3, ListChecks, MessageSquareText, Play, Power, ShieldCheck, Sparkles, UsersRound } from 'lucide-react'
 import { ChatWorkspace, type ChatAdapter, type ChatConversationDetail, type ChatConversationSummary, type ChatRequest } from '@devpablocristo/platform-chat-ui'
 import '@devpablocristo/platform-chat-ui/styles.css'
 import type { ReactNode } from 'react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ActionType, AgentRun, Approval, AxisSession, AxisTenantView, BusinessModel, CapabilityRecord, CompanionAgent, CompanionJob, CompanionTask, CostSummary, Delegation, MemoryConflict, MemoryReview, MemorySummary, NexusRequest, ObservabilityEvent, Policy, Product, ProductInstallation, RunTrace, RuntimePolicy, SecurityEvalReport, ServiceHealth, axisFetch, getHealth, getSession, listIAMTenants, type AxisFetchInit } from './api'
-import { AdminConnectors } from './AdminConnectors'
 import { AgentsControlCenter } from './AgentsControlCenter'
 import { ControlPlane } from './ControlPlane'
 import { IAMControlCenter } from './IAMControlCenter'
@@ -12,7 +11,7 @@ import { PromptsControlCenter } from './PromptScreens'
 import { type LoadState, empty, load } from './lib/load'
 import { deriveTenantId, preferred, workspaceOrgs as deriveWorkspaceOrgs, workspaceProducts as deriveWorkspaceProducts } from './lib/tenant'
 
-type RouteArea = 'home' | 'chat' | 'prompts' | 'agents' | 'iam' | 'operations' | 'nexus' | 'platform' | 'admin' | 'control'
+type RouteArea = 'home' | 'chat' | 'prompts' | 'agents' | 'iam' | 'operations' | 'nexus' | 'platform' | 'control'
 
 type Route = {
   area: RouteArea
@@ -231,7 +230,6 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
   const selectedOrgOption = orgOptions.find((item) => item.id === orgId)
   const selectedProductOption = productOptions.find((item) => item.productSurface === productSurface)
   const canViewIAM = Boolean(session.data?.scopes?.some((scope) => scope === 'axis:orgs:admin' || scope === 'axis:users:admin'))
-  const canViewAdmin = Boolean(session.data?.scopes?.some((scope) => scope === 'companion:connectors:admin' || scope === 'companion:runtime:admin'))
   const canViewControl = Boolean(session.data?.platform_roles?.some((role) => role === 'platform_admin' || role === 'owner'))
   const title = pageTitle(route)
   const chatAdapter = useMemo<ChatAdapter>(() => axisChatAdapter(orgId, productSurface, tenantId), [orgId, productSurface, tenantId])
@@ -259,7 +257,6 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
           <button type="button" className={route.area === 'operations' ? 'active' : ''} onClick={() => navigate({ area: 'operations', screen: 'runs' })}><Activity aria-hidden="true" />Operación</button>
           <button type="button" className={route.area === 'nexus' ? 'active' : ''} onClick={() => navigate({ area: 'nexus', screen: 'approvals' })}><GitPullRequestArrow aria-hidden="true" />Nexus</button>
           <button type="button" className={route.area === 'platform' ? 'active' : ''} onClick={() => navigate({ area: 'platform', screen: 'runtime' })}><KeyRound aria-hidden="true" />Plataforma</button>
-          {canViewAdmin && <button type="button" className={route.area === 'admin' ? 'active' : ''} onClick={() => navigate({ area: 'admin', screen: 'connectors' })}><DatabaseZap aria-hidden="true" />Admin</button>}
           {canViewControl && <button type="button" className={route.area === 'control' ? 'active' : ''} onClick={() => navigate({ area: 'control', screen: 'home' })}><Layers3 aria-hidden="true" />Control Plane</button>}
         </nav>
       </aside>
@@ -479,21 +476,6 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
           </section>
         )}
 
-        {route.area === 'admin' && canViewAdmin && (
-          <>
-            <ScreenNav items={[
-              ['connectors', 'Connectors']
-            ]} base="admin" active={route.screen} onNavigate={navigate} />
-            {route.screen === 'connectors' && (
-              <AdminConnectors orgId={orgId} tenantId={tenantId} />
-            )}
-          </>
-        )}
-
-        {route.area === 'admin' && !canViewAdmin && (
-          <section className="empty-state">No tenés permisos para administrar Axis.</section>
-        )}
-
         {route.area === 'agents' && (
           <AgentsControlCenter orgId={orgId} tenantId={tenantId} productSurface={productSurface} />
         )}
@@ -650,7 +632,6 @@ function parseRoutePath(path: string): Route {
     operations: ['runs', 'traces', 'memory', 'jobs', 'observability', 'cost', 'security'],
     nexus: ['approvals', 'requests', 'policies', 'action-types', 'delegations', 'risk'],
     platform: ['runtime', 'capabilities', 'business', 'health'],
-    admin: ['connectors'],
     control: ['home']
   }
   const normalizedScreen = normalizeRouteScreen(area, screenRaw)
@@ -663,7 +644,7 @@ function normalizeRouteArea(value: string): RouteArea {
   if (value === 'companion') return 'platform'
   if (value === 'access') return 'nexus'
   if (value === 'virployees') return 'agents'
-  if (value === 'home' || value === 'chat' || value === 'prompts' || value === 'agents' || value === 'iam' || value === 'operations' || value === 'nexus' || value === 'platform' || value === 'admin' || value === 'control') {
+  if (value === 'home' || value === 'chat' || value === 'prompts' || value === 'agents' || value === 'iam' || value === 'operations' || value === 'nexus' || value === 'platform' || value === 'control') {
     return value
   }
   return 'home'
@@ -719,8 +700,6 @@ function pageTitle(route: Route) {
       return 'IAM'
     case 'platform':
       return 'Plataforma IA'
-    case 'admin':
-      return 'Admin'
     case 'prompts':
       return 'Prompts'
     case 'operations':

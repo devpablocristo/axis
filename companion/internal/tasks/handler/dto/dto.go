@@ -5,7 +5,6 @@ import (
 	"strings"
 	"time"
 
-	connectordomain "github.com/devpablocristo/companion/internal/connectors/usecases/domain"
 	"github.com/devpablocristo/companion/internal/nexusclient"
 	domain "github.com/devpablocristo/companion/internal/tasks/usecases/domain"
 	contracts "github.com/devpablocristo/platform/contracts/ai/go"
@@ -89,32 +88,6 @@ type NexusSyncStateResponse struct {
 	NextCheckAt         string `json:"next_check_at"`
 }
 
-type TaskExecutionPlanResponse struct {
-	ConnectorID    string          `json:"connector_id"`
-	Operation      string          `json:"operation"`
-	Payload        json.RawMessage `json:"payload,omitempty"`
-	IdempotencyKey string          `json:"idempotency_key,omitempty"`
-	CreatedAt      string          `json:"created_at"`
-	UpdatedAt      string          `json:"updated_at"`
-}
-
-type TaskVerificationResultResponse struct {
-	Status    string          `json:"status"`
-	Summary   string          `json:"summary,omitempty"`
-	CheckedAt string          `json:"checked_at"`
-	Details   json.RawMessage `json:"details,omitempty"`
-}
-
-type TaskExecutionStateResponse struct {
-	LastExecutionID     string                         `json:"last_execution_id"`
-	LastExecutionStatus string                         `json:"last_execution_status"`
-	Retryable           bool                           `json:"retryable"`
-	RetryCount          int                            `json:"retry_count"`
-	LastError           string                         `json:"last_error,omitempty"`
-	LastAttemptedAt     string                         `json:"last_attempted_at"`
-	VerificationResult  TaskVerificationResultResponse `json:"verification_result"`
-}
-
 type TaskPlanResponse struct {
 	Objective   string                 `json:"objective"`
 	Status      string                 `json:"status"`
@@ -159,9 +132,7 @@ type TaskDetailResponse struct {
 	Artifacts           []ArtifactResponse           `json:"artifacts"`
 	LinkedNexusRequests []LinkedNexusRequestResponse `json:"linked_nexus_requests"`
 	NexusSync           *NexusSyncStateResponse      `json:"nexus_sync,omitempty"`
-	ExecutionPlan       *TaskExecutionPlanResponse   `json:"execution_plan,omitempty"`
 	DurablePlan         *TaskPlanResponse            `json:"durable_plan,omitempty"`
-	ExecutionState      *TaskExecutionStateResponse  `json:"execution_state,omitempty"`
 }
 
 type AddMessageRequest struct {
@@ -276,13 +247,6 @@ type ProposeResponse struct {
 	} `json:"nexus_submit"`
 }
 
-type SetExecutionPlanRequest struct {
-	ConnectorID    string          `json:"connector_id"`
-	Operation      string          `json:"operation"`
-	Payload        json.RawMessage `json:"payload,omitempty"`
-	IdempotencyKey string          `json:"idempotency_key,omitempty"`
-}
-
 type SetTaskPlanRequest struct {
 	Objective   string                   `json:"objective,omitempty"`
 	Status      string                   `json:"status,omitempty"`
@@ -328,32 +292,6 @@ type RecordTaskPlanCheckpointRequest struct {
 	Checkpoint json.RawMessage `json:"checkpoint,omitempty"`
 	NextAction string          `json:"next_action,omitempty"`
 	Blocker    string          `json:"blocker,omitempty"`
-}
-
-type ExecuteTaskResponse struct {
-	Task           TaskResponse                `json:"task"`
-	Plan           TaskExecutionPlanResponse   `json:"plan"`
-	Execution      ExecutionResultResponse     `json:"execution"`
-	ExecutionState *TaskExecutionStateResponse `json:"execution_state,omitempty"`
-}
-
-type ExecutionResultResponse struct {
-	ID             string          `json:"id"`
-	ConnectorID    string          `json:"connector_id"`
-	OrgID          string          `json:"org_id,omitempty"`
-	ActorID        string          `json:"actor_id,omitempty"`
-	Operation      string          `json:"operation"`
-	Status         string          `json:"status"`
-	ExternalRef    string          `json:"external_ref"`
-	Payload        json.RawMessage `json:"payload,omitempty"`
-	Result         json.RawMessage `json:"result,omitempty"`
-	Evidence       json.RawMessage `json:"evidence,omitempty"`
-	ErrorMessage   string          `json:"error_message,omitempty"`
-	Retryable      bool            `json:"retryable"`
-	DurationMS     int64           `json:"duration_ms"`
-	IdempotencyKey string          `json:"idempotency_key,omitempty"`
-	NexusRequestID *string         `json:"nexus_request_id,omitempty"`
-	CreatedAt      string          `json:"created_at"`
 }
 
 func TaskToResponse(t domain.Task) TaskResponse {
@@ -632,17 +570,6 @@ func NexusSyncToResponse(s domain.TaskNexusSyncState) *NexusSyncStateResponse {
 	}
 }
 
-func ExecutionPlanToResponse(plan domain.TaskExecutionPlan) *TaskExecutionPlanResponse {
-	return &TaskExecutionPlanResponse{
-		ConnectorID:    plan.ConnectorID.String(),
-		Operation:      plan.Operation,
-		Payload:        plan.Payload,
-		IdempotencyKey: plan.IdempotencyKey,
-		CreatedAt:      plan.CreatedAt.UTC().Format(time.RFC3339),
-		UpdatedAt:      plan.UpdatedAt.UTC().Format(time.RFC3339),
-	}
-}
-
 func TaskPlanToResponse(plan domain.TaskPlan) *TaskPlanResponse {
 	steps := make([]TaskPlanStepResponse, 0, len(plan.Steps))
 	for _, step := range plan.Steps {
@@ -693,52 +620,5 @@ func TaskPlanStepToResponse(step domain.TaskPlanStep) TaskPlanStepResponse {
 		CreatedAt:       step.CreatedAt.UTC().Format(time.RFC3339),
 		UpdatedAt:       step.UpdatedAt.UTC().Format(time.RFC3339),
 		CompletedAt:     completedAt,
-	}
-}
-
-func VerificationResultToResponse(result domain.TaskVerificationResult) TaskVerificationResultResponse {
-	return TaskVerificationResultResponse{
-		Status:    result.Status,
-		Summary:   result.Summary,
-		CheckedAt: result.CheckedAt.UTC().Format(time.RFC3339),
-		Details:   result.Details,
-	}
-}
-
-func ExecutionStateToResponse(state domain.TaskExecutionState) *TaskExecutionStateResponse {
-	return &TaskExecutionStateResponse{
-		LastExecutionID:     state.LastExecutionID.String(),
-		LastExecutionStatus: state.LastExecutionStatus,
-		Retryable:           state.Retryable,
-		RetryCount:          state.RetryCount,
-		LastError:           state.LastError,
-		LastAttemptedAt:     state.LastAttemptedAt.UTC().Format(time.RFC3339),
-		VerificationResult:  VerificationResultToResponse(state.VerificationResult),
-	}
-}
-
-func ExecutionResultToResponse(result connectordomain.ExecutionResult) ExecutionResultResponse {
-	var nexusRequestID *string
-	if result.NexusRequestID != nil {
-		s := result.NexusRequestID.String()
-		nexusRequestID = &s
-	}
-	return ExecutionResultResponse{
-		ID:             result.ID.String(),
-		ConnectorID:    result.ConnectorID.String(),
-		OrgID:          result.OrgID,
-		ActorID:        result.ActorID,
-		Operation:      result.Operation,
-		Status:         result.Status,
-		ExternalRef:    result.ExternalRef,
-		Payload:        result.Payload,
-		Result:         result.ResultJSON,
-		Evidence:       result.EvidenceJSON,
-		ErrorMessage:   result.ErrorMessage,
-		Retryable:      result.Retryable,
-		DurationMS:     result.DurationMS,
-		IdempotencyKey: result.IdempotencyKey,
-		NexusRequestID: nexusRequestID,
-		CreatedAt:      result.CreatedAt.UTC().Format(time.RFC3339),
 	}
 }

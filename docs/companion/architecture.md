@@ -20,7 +20,6 @@ Nexus decide decisiones sensibles; los productos exponen capacidades de dominio.
 | `internal/capabilities` | Manifests versionados, validación estricta y registry canónico |
 | `internal/jobs` | Queue durable, workers, leases, retries y DLQ |
 | `internal/runtime` | LLM orchestration, prompt, tool calling, control plane, observability y traces |
-| `internal/connectors` | Registry de connectors, capabilities, idempotencia y evidence |
 | `internal/memory` | Memoria por scope `task/org/user` con TTL y cuota |
 | `internal/watchers` | Automatizaciones proactivas sobre capabilities de producto |
 | `internal/nexus_assist` | Helpers IA para explicar/proponer sobre Nexus |
@@ -32,9 +31,7 @@ Nexus decide decisiones sensibles; los productos exponen capacidades de dominio.
   ejecuta tools permitidas y guarda respuesta/traces.
 - Task nexus: task -> propose -> Nexus `SubmitRequest` -> sync -> estado
   Companion.
-- Execution: execution plan -> validación de nexus -> connector capability
-  -> evidence/result -> task verification.
-- Capability registry: connector/product manifest -> validación
+- Capability registry: product manifest -> validación
   `capability_manifest.v1` -> runtime tool schema + action binding Nexus +
   planner metadata.
 - Org control plane: `GET/PUT /v1/runtime/policy` administra límites
@@ -42,8 +39,8 @@ Nexus decide decisiones sensibles; los productos exponen capacidades de dominio.
   perfiles, models, tools y capability manifests antes de actuar.
 - Memory: upsert/find/get/delete por scope; runtime solo recuerda si tiene
   identidad válida.
-- Watchers: consultan capabilities read del producto, crean proposals,
-  consultan Nexus y ejecutan side effects vía connectors.
+- Watchers: consultan capabilities read del producto, crean proposals y
+  consultan Nexus.
 - Jobs: loops periódicos encolan `watcher.run` y
   `watcher.proposals.sync`; workers toman leases, ejecutan handlers, registran
   evidence, reintentan con backoff o mandan a DLQ.
@@ -58,7 +55,7 @@ Nexus decide decisiones sensibles; los productos exponen capacidades de dominio.
   fallar cerrado.
 - Product installation guard: `companion` es superficie interna; cualquier
   superficie externa requiere instalacion activa antes de runtime runs,
-  capability tools, connector execution, watchers y memory writes.
+  capability tools, watchers y memory writes.
 - Virployees / Agents: producto y Console usan Virployees como
   concepto publico; modulo tecnico de agents queda como modulo tecnico de agents. `/v1/chat`
   todavia puede seleccionar `agent_id`; las superficies nuevas de workforce usan
@@ -70,8 +67,8 @@ Nexus decide decisiones sensibles; los productos exponen capacidades de dominio.
 ## Persistencia
 
 Postgres guarda tasks, messages, actions, artifacts, nexus sync state,
-execution plans/state, watchers/proposals, memory entries, connectors/executions
-y run traces. `companion_jobs` y `companion_job_events` guardan ejecución
+watchers/proposals, memory entries y run traces. `companion_jobs` y
+`companion_job_events` guardan ejecución
 durable de trabajos operativos. `companion_observability_events` guarda el
 ledger redacted para replay. `companion_business_models` guarda el modelo
 empresarial activo y sus versiones. `companion_agents` y
@@ -93,7 +90,7 @@ recibe schemas autorizados para la customer org/scopes presentes.
 La política runtime se versiona con `settings_version` y `control_plane_json`.
 Cada update queda registrado en `companion_runtime_policy_audit`. La
 configuración por organización puede limitar profiles, agents, tools,
-capabilities, connectors, models, autonomy, budgets, retention, memoria,
+capabilities, models, autonomy, budgets, retention, memoria,
 observabilidad, kill switches y riesgo máximo. Las actions críticas siguen
 dependiendo de Nexus; Companion solo reduce o bloquea superficie de ejecución
 cuando la organización no autoriza una capability.

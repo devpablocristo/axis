@@ -89,13 +89,7 @@ auditable.
 - Requiere base de datos, Nexus base URL, API keys e internal JWT secret.
 - Para productos externos, requiere una installation activa
   `org_id + product_surface`, manifests conformes y referencias de secrets.
-- El conector Ponti existe como adapter especifico. Si se habilita, requiere
-  `PONTI_BASE_URL` y la secret `PONTI_API_KEY`; el valor real vive fuera del
-  repo.
 - Sus watchers pueden apagarse con intervalos `0` durante incidentes.
-- Si un conector queda sin manifest luego de un rollback o deploy, correr
-  `POST /v1/connectors/refresh` y luego el smoke/read-only del producto
-  afectado.
 - Validar `mcp-smoke` y `platform-nightly` si el cambio tocó MCP, runtime,
   observability, products, capabilities o Nexus integration.
 

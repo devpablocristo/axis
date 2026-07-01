@@ -68,7 +68,7 @@ func DetectAdversarialContent(input string) []ThreatFinding {
 	}
 	if containsAny(normalized,
 		"tool output says ignore",
-		"connector says bypass",
+		"adapter says bypass",
 		"malicious tool output",
 	) {
 		add("tool_poisoning", "high", "malicious tool output pattern")

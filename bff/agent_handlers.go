@@ -30,7 +30,6 @@ type companionAgent struct {
 	MaxAutonomy         string         `json:"max_autonomy"`
 	AllowedTools        []string       `json:"allowed_tools,omitempty"`
 	AllowedCapabilities []string       `json:"allowed_capabilities,omitempty"`
-	AllowedConnectors   []string       `json:"allowed_connectors,omitempty"`
 	MemoryScopeID       string         `json:"memory_scope_id,omitempty"`
 	SharedMemoryPolicy  map[string]any `json:"shared_memory_policy,omitempty"`
 	Limits              map[string]any `json:"limits,omitempty"`
@@ -529,13 +528,11 @@ func viewToCompanionAgent(input IAMAgent, orgID string, productSurface string, a
 	if trimmed := firstNonEmpty(input.ValidationStatus, input.ReviewStatus); trimmed != "" {
 		reviewStatus = trimmed
 	}
-	allowedConnectors := []string(nil)
 	sharedMemoryPolicy := map[string]any(nil)
 	limits := map[string]any(nil)
 	sla := map[string]any(nil)
 	metadata := input.Metadata
 	if existing != nil {
-		allowedConnectors = cleanStringList(existing.AllowedConnectors)
 		sharedMemoryPolicy = existing.SharedMemoryPolicy
 		limits = existing.Limits
 		sla = existing.SLA
@@ -557,7 +554,6 @@ func viewToCompanionAgent(input IAMAgent, orgID string, productSurface string, a
 		MaxAutonomy:         normalizeAutonomy(input.Autonomy),
 		AllowedTools:        cleanStringList(input.Tools),
 		AllowedCapabilities: cleanStringList(input.Capabilities),
-		AllowedConnectors:   allowedConnectors,
 		MemoryScopeID:       memoryScopeID,
 		SharedMemoryPolicy:  sharedMemoryPolicy,
 		Limits:              limits,

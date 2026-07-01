@@ -577,12 +577,11 @@ func TestOrchestrator_BlocksPlanStepWhenEvidenceContractMissing(t *testing.T) {
 		return `{"result":{"ok":true}}`, nil
 	})
 	toolkit.setMetadata("pymes_customers_search", ToolMetadata{
-		Operation:        "pymes.customers.search",
-		CapabilityID:     "pymes.customers.search",
-		Product:          "pymes",
-		ConnectorKind:    "pymes",
-		EvidenceRequired: []string{"items"},
-	})
+			Operation:        "pymes.customers.search",
+			CapabilityID:     "pymes.customers.search",
+			Product:          "pymes",
+			EvidenceRequired: []string{"items"},
+		})
 	RegisterTaskPlannerTools(toolkit, planner)
 	provider := &fakeLLMProvider{
 		responses: []ChatResponse{
@@ -654,7 +653,7 @@ func TestOrchestrator_RetriesFailedDurablePlanStep(t *testing.T) {
 				ToolCalls: []LLMToolCall{{
 					ID:   "tc-retry-step",
 					Name: "execute_task_plan_step",
-					Args: json.RawMessage(fmt.Sprintf(`{"step_id":%q,"retry":true,"retry_reason":"transient connector failure"}`, stepID.String())),
+					Args: json.RawMessage(fmt.Sprintf(`{"step_id":%q,"retry":true,"retry_reason":"transient external failure"}`, stepID.String())),
 				}},
 			},
 			{Text: "retry ejecutado"},
@@ -679,7 +678,7 @@ func TestOrchestrator_RetriesFailedDurablePlanStep(t *testing.T) {
 		t.Fatalf("expected retry to finish done, got %+v", last)
 	}
 	evidence := string(last.EvidenceJSON)
-	for _, want := range []string{`"retry":true`, `"attempt_number":2`, "retry-2", "transient connector failure"} {
+	for _, want := range []string{`"retry":true`, `"attempt_number":2`, "retry-2", "transient external failure"} {
 		if !strings.Contains(evidence, want) {
 			t.Fatalf("expected retry evidence to include %q, got %s", want, evidence)
 		}
@@ -845,7 +844,7 @@ func TestRouteAgent_usesPontiRouteHint(t *testing.T) {
 		},
 		Handlers: map[string]ToolHandler{},
 	}
-	identity := BuildIdentityChain("user-1", "org-1", "ponti", "companion:connectors:execute")
+	identity := BuildIdentityChain("user-1", "org-1", "ponti", "companion:capabilities:read")
 
 	route := RouteAgentWithContext(
 		"Resumí los informes económicos de la campaña",

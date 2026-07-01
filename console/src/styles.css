@@ -1141,10 +1141,6 @@ tbody tr:hover {
   display: none;
 }
 
-.connectors-crud .crud-page-shell__header-actions > .actions-row > .actions-row > button:nth-last-child(-n + 2) {
-  display: none;
-}
-
 .handoffs-crud .crud-page-shell__header-actions > .actions-row > .actions-row > button:nth-last-child(1) {
   display: none;
 }

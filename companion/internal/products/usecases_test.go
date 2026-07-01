@@ -271,14 +271,14 @@ func TestInstallationGuardBlocksExternalWithoutActiveInstallation(t *testing.T) 
 	recorder := &fakeGuardRecorder{}
 	guard := NewInstallationGuard(uc).WithRecorder(recorder)
 
-	err := guard.RequireActiveInstallation(context.Background(), "org-a", "ponti", "connector_execution")
+	err := guard.RequireActiveInstallation(context.Background(), "org-a", "ponti", "external_execution")
 	if !errors.Is(err, ErrInstallationRequired) || !errors.Is(err, ErrInstallationNotFound) {
 		t.Fatalf("expected installation-required/not-found error, got %v", err)
 	}
 	if len(recorder.events) != 1 {
 		t.Fatalf("expected one guardrail event, got %+v", recorder.events)
 	}
-	if recorder.events[0].OrgID != "org-a" || recorder.events[0].ProductSurface != "ponti" || recorder.events[0].Reason != "connector_execution" {
+	if recorder.events[0].OrgID != "org-a" || recorder.events[0].ProductSurface != "ponti" || recorder.events[0].Reason != "external_execution" {
 		t.Fatalf("unexpected guardrail event: %+v", recorder.events[0])
 	}
 }

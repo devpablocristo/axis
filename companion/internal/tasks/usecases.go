@@ -8,7 +8,6 @@ import (
 
 	"github.com/google/uuid"
 
-	connectordomain "github.com/devpablocristo/companion/internal/connectors/usecases/domain"
 	"github.com/devpablocristo/companion/internal/identityctx"
 	"github.com/devpablocristo/companion/internal/nexusclient"
 	domain "github.com/devpablocristo/companion/internal/tasks/usecases/domain"
@@ -23,9 +22,6 @@ const (
 	TaskActionInvestigate      = "investigate"
 	TaskActionPropose          = "propose"
 	TaskActionSyncNexus        = "sync_nexus"
-	TaskActionSetExecutionPlan = "set_execution_plan"
-	TaskActionExecuteConnector = "execute_connector"
-	TaskActionRetryExecution   = "retry_execution"
 	TaskActionVerifyExecution  = "verify_execution"
 	TaskActionSetDurablePlan   = "set_durable_plan"
 	TaskActionUpdatePlanStep   = "update_plan_step"
@@ -33,8 +29,6 @@ const (
 	TaskActionPrepareComp      = "prepare_compensation"
 	TaskActionExecuteComp      = "execute_compensation"
 
-	TaskArtifactConnectorExecution    = "connector_execution"
-	TaskArtifactExecutionError        = "connector_execution_error"
 	TaskArtifactExecutionVerification = "execution_verification"
 
 	taskMemoryCurrentKey  = "current"
@@ -61,12 +55,6 @@ type nexusGateway interface {
 	SubmitRequest(ctx context.Context, idempotencyKey string, body nexusclient.SubmitRequestBody) (nexusclient.SubmitResponse, error)
 	GetRequest(ctx context.Context, id string) (nexusclient.RequestSummary, int, error)
 	ReportResult(ctx context.Context, id string, success bool, result map[string]any, durationMS int64, errorMessage string) (int, error)
-}
-
-type taskExecutor interface {
-	GetConnector(ctx context.Context, id uuid.UUID) (connectordomain.Connector, error)
-	BuildActionBinding(ctx context.Context, spec connectordomain.ExecutionSpec) (map[string]any, string, error)
-	Execute(ctx context.Context, spec connectordomain.ExecutionSpec) (connectordomain.ExecutionResult, error)
 }
 
 type taskMemoryWriter interface {
@@ -128,7 +116,6 @@ type Usecases struct {
 	repo              Repository
 	nexus             nexusGateway
 	orchestrator      ChatOrchestrator // opcional en tests; productivo usa Gemini
-	executor          taskExecutor
 	taskMemory        taskMemoryWriter
 	agentMemory       agentMemoryWriter
 	nexusSyncInterval time.Duration
@@ -145,10 +132,6 @@ func NewUsecases(repo Repository, nexus nexusGateway) *Usecases {
 // SetOrchestrator inyecta el runtime del compañero. Opcional: si no se llama, Chat solo persiste.
 func (u *Usecases) SetOrchestrator(o ChatOrchestrator) {
 	u.orchestrator = o
-}
-
-func (u *Usecases) SetExecutor(executor taskExecutor) {
-	u.executor = executor
 }
 
 func (u *Usecases) SetTaskMemory(writer taskMemoryWriter) {

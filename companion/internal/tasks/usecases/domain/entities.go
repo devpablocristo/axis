@@ -88,17 +88,6 @@ type TaskNexusSyncState struct {
 	UpdatedAt           time.Time
 }
 
-// TaskExecutionPlan snapshot persistido del plan de ejecución manual de una tarea.
-type TaskExecutionPlan struct {
-	TaskID         uuid.UUID
-	ConnectorID    uuid.UUID
-	Operation      string
-	Payload        json.RawMessage
-	IdempotencyKey string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-}
-
 const (
 	TaskPlanStatusDraft     = "draft"
 	TaskPlanStatusActive    = "active"
@@ -116,8 +105,8 @@ const (
 	TaskPlanStepStatusSkipped = "skipped"
 )
 
-// TaskPlan es el plan cognitivo durable de una task. No reemplaza a
-// TaskExecutionPlan: este modela objetivo, pasos, checkpoints y bloqueos.
+// TaskPlan es el plan cognitivo durable de una task. Modela objetivo, pasos,
+// checkpoints y bloqueos; no ejecuta side effects externos por si mismo.
 type TaskPlan struct {
 	TaskID          uuid.UUID
 	OrgID           string
@@ -157,33 +146,6 @@ type TaskPlanStep struct {
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 	CompletedAt     *time.Time
-}
-
-const (
-	VerificationStatusVerified = "verified"
-	VerificationStatusFailed   = "failed"
-)
-
-// TaskVerificationResult representa el resultado persistido de la verificación posterior a ejecutar.
-type TaskVerificationResult struct {
-	Status    string
-	Summary   string
-	CheckedAt time.Time
-	Details   json.RawMessage
-}
-
-// TaskExecutionState resume el último intento de ejecución de una tarea.
-type TaskExecutionState struct {
-	TaskID              uuid.UUID
-	LastExecutionID     uuid.UUID
-	LastExecutionStatus string
-	Retryable           bool
-	RetryCount          int
-	LastError           string
-	LastAttemptedAt     time.Time
-	VerificationResult  TaskVerificationResult
-	CreatedAt           time.Time
-	UpdatedAt           time.Time
 }
 
 type TaskExecutionGraphEvent struct {

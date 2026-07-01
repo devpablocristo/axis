@@ -218,7 +218,6 @@ func validManifest() capabilities.Manifest {
 		Description:        "Read demo summary",
 		Owner:              "axis",
 		ProductSurface:     "demo",
-		Connector:          "demo",
 		ActionType:         capabilities.ActionTypeRead,
 		RiskLevel:          capabilities.RiskLow,
 		SideEffectType:     capabilities.SideEffectRead,

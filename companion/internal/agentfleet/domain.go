@@ -50,7 +50,6 @@ type Agent struct {
 	MaxAutonomy         string         `json:"max_autonomy"`
 	AllowedTools        []string       `json:"allowed_tools,omitempty"`
 	AllowedCapabilities []string       `json:"allowed_capabilities,omitempty"`
-	AllowedConnectors   []string       `json:"allowed_connectors,omitempty"`
 	MemoryScopeID       string         `json:"memory_scope_id,omitempty"`
 	SharedMemoryPolicy  map[string]any `json:"shared_memory_policy,omitempty"`
 	Limits              map[string]any `json:"limits,omitempty"`
@@ -124,7 +123,6 @@ func normalizeAgent(agent Agent) Agent {
 	}
 	agent.AllowedTools = normalizeList(agent.AllowedTools)
 	agent.AllowedCapabilities = normalizeList(agent.AllowedCapabilities)
-	agent.AllowedConnectors = normalizeList(agent.AllowedConnectors)
 	agent.MemoryScopeID = strings.TrimSpace(agent.MemoryScopeID)
 	agent.CreatedBy = strings.TrimSpace(agent.CreatedBy)
 	if agent.SharedMemoryPolicy == nil {
