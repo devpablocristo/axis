@@ -1,7 +1,10 @@
 {
     "folders": [
         {
-            "path": "."
+            "path": "v1"
+        },
+        {
+            "path": "v2"
         }
     ],
     "settings": {

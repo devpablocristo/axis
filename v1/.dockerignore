@@ -1,0 +1,9 @@
+.git
+**/.git
+**/.DS_Store
+**/node_modules
+**/dist
+**/coverage
+**/*.log
+companion/console
+nexus/console

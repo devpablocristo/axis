@@ -1,0 +1,103 @@
+services:
+  companion-v2-postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${COMPANION_V2_POSTGRES_DB:-companion_v2}
+      POSTGRES_USER: ${COMPANION_V2_POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${COMPANION_V2_POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "${COMPANION_V2_POSTGRES_PORT:-15437}:5432"
+    volumes:
+      - companion-v2-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  bff-v2-postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${BFF_V2_POSTGRES_DB:-bff_v2}
+      POSTGRES_USER: ${BFF_V2_POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${BFF_V2_POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "${BFF_V2_POSTGRES_PORT:-15438}:5432"
+    volumes:
+      - bff-v2-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  companion-v2:
+    build:
+      context: .
+      dockerfile: Dockerfile.companion
+    restart: unless-stopped
+    environment:
+      PORT: "8080"
+      COMPANION_V2_ENV: ${COMPANION_V2_ENV:-development}
+      COMPANION_V2_RUN_MIGRATIONS: ${COMPANION_V2_RUN_MIGRATIONS:-true}
+      COMPANION_V2_CORS_ORIGINS: ${COMPANION_V2_CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
+      COMPANION_V2_DATABASE_URL: postgres://${COMPANION_V2_POSTGRES_USER:-postgres}:${COMPANION_V2_POSTGRES_PASSWORD:-postgres}@companion-v2-postgres:5432/${COMPANION_V2_POSTGRES_DB:-companion_v2}?sslmode=disable
+    ports:
+      - "${COMPANION_V2_PORT:-18086}:8080"
+    depends_on:
+      companion-v2-postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/readyz >/dev/null 2>&1 || exit 1"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  bff-v2:
+    build:
+      context: .
+      dockerfile: Dockerfile.bff
+    restart: unless-stopped
+    environment:
+      PORT: "8080"
+      BFF_V2_ENV: ${BFF_V2_ENV:-development}
+      BFF_V2_RUN_MIGRATIONS: ${BFF_V2_RUN_MIGRATIONS:-true}
+      BFF_V2_CORS_ORIGINS: ${BFF_V2_CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
+      BFF_V2_COMPANION_BASE_URL: ${BFF_V2_COMPANION_BASE_URL:-http://companion-v2:8080}
+      BFF_V2_DEV_ACTOR_ID: ${BFF_V2_DEV_ACTOR_ID:-dev-user}
+      BFF_V2_DEV_ACTOR_EMAIL: ${BFF_V2_DEV_ACTOR_EMAIL:-dev@example.local}
+      BFF_V2_DEV_ACTOR_NAME: ${BFF_V2_DEV_ACTOR_NAME:-Dev User}
+      BFF_V2_DEV_ORG_ID: ${BFF_V2_DEV_ORG_ID:-dev-org}
+      BFF_V2_DATABASE_URL: postgres://${BFF_V2_POSTGRES_USER:-postgres}:${BFF_V2_POSTGRES_PASSWORD:-postgres}@bff-v2-postgres:5432/${BFF_V2_POSTGRES_DB:-bff_v2}?sslmode=disable
+    ports:
+      - "${BFF_V2_PORT:-18080}:8080"
+    depends_on:
+      bff-v2-postgres:
+        condition: service_healthy
+      companion-v2:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/readyz >/dev/null 2>&1 || exit 1"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  console-v2:
+    build:
+      context: .
+      dockerfile: Dockerfile.console
+    restart: unless-stopped
+    environment:
+      AXIS_BFF_BASE_URL: ${AXIS_CONSOLE_BFF_BASE_URL:-http://bff-v2:8080}
+      VITE_HMR_CLIENT_PORT: ${AXIS_CONSOLE_PORT:-5173}
+    ports:
+      - "${AXIS_CONSOLE_PORT:-5173}:5173"
+    depends_on:
+      bff-v2:
+        condition: service_healthy
+
+volumes:
+  companion-v2-postgres-data:
+  bff-v2-postgres-data:

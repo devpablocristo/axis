@@ -1,0 +1,122 @@
+package gateway
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+
+	"github.com/gin-gonic/gin"
+
+	tenantdomain "github.com/devpablocristo/bff-v2/internal/tenancy/usecases/domain"
+	"github.com/devpablocristo/platform/errors/go/domainerr"
+	"github.com/google/uuid"
+)
+
+func TestGatewayRequiresTenant(t *testing.T) {
+	router := gatewayTestRouter(t, &fakeGatewayTenancy{}, "http://127.0.0.1:1")
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/virployees", nil)
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestGatewayRejectsTenantWithoutMembership(t *testing.T) {
+	tenantID := uuid.New()
+	router := gatewayTestRouter(t, &fakeGatewayTenancy{err: domainerr.Forbidden("principal is not a member of the requested tenant")}, "http://127.0.0.1:1")
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/virployees", nil)
+	req.Header.Set("X-Tenant-ID", tenantID.String())
+	req.Header.Set("X-Actor-ID", "user-a")
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestGatewayForwardsVirployeesWithResolvedTenantHeaders(t *testing.T) {
+	tenantID := uuid.New()
+	var gotPath string
+	var gotTenant string
+	var gotOrg string
+	var gotProduct string
+	var gotActor string
+	downstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotTenant = r.Header.Get("X-Tenant-ID")
+		gotOrg = r.Header.Get("X-Axis-Org-ID")
+		gotProduct = r.Header.Get("X-Product-Surface")
+		gotActor = r.Header.Get("X-Actor-ID")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer downstream.Close()
+
+	router := gatewayTestRouter(t, &fakeGatewayTenancy{
+		tenant: tenantdomain.Tenant{
+			ID:             tenantID,
+			OrgID:          "org-a",
+			ProductSurface: "axis",
+			Name:           "Org A / axis",
+			Status:         tenantdomain.StatusActive,
+			CreatedAt:      time.Now().UTC(),
+			UpdatedAt:      time.Now().UTC(),
+		},
+		member: tenantdomain.TenantMember{
+			TenantID: tenantID,
+			UserID:   "user-a",
+			Role:     tenantdomain.RoleAdmin,
+			Status:   tenantdomain.StatusActive,
+		},
+	}, downstream.URL)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/virployees?view=active", nil)
+	req.Header.Set("X-Tenant-ID", tenantID.String())
+	req.Header.Set("X-Actor-ID", "user-a")
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected downstream status, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if gotPath != "/v1/virployees" {
+		t.Fatalf("expected /v1/virployees, got %q", gotPath)
+	}
+	if gotTenant != tenantID.String() || gotOrg != "org-a" || gotProduct != "axis" || gotActor != "user-a" {
+		t.Fatalf("unexpected forwarded headers tenant=%q org=%q product=%q actor=%q", gotTenant, gotOrg, gotProduct, gotActor)
+	}
+}
+
+func gatewayTestRouter(t *testing.T, tenancy TenancyPort, companionURL string) *gin.Engine {
+	t.Helper()
+	uc, err := NewUseCases(tenancy, companionURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	NewHandler(uc, Options{DefaultPrincipalID: "dev-user"}).Routes(router.Group("/api"))
+	return router
+}
+
+type fakeGatewayTenancy struct {
+	tenant tenantdomain.Tenant
+	member tenantdomain.TenantMember
+	err    error
+}
+
+func (f *fakeGatewayTenancy) ResolveAccess(context.Context, string, string) (tenantdomain.Tenant, tenantdomain.TenantMember, error) {
+	if f.err != nil {
+		return tenantdomain.Tenant{}, tenantdomain.TenantMember{}, f.err
+	}
+	return f.tenant, f.member, nil
+}

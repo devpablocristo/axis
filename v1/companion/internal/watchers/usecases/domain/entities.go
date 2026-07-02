@@ -1,0 +1,130 @@
+// Package domain contiene las entidades de dominio del módulo watchers.
+package domain
+
+import (
+	"encoding/json"
+	"time"
+
+	"github.com/google/uuid"
+)
+
+// WatcherType define qué observa el watcher.
+type WatcherType string
+
+const (
+	WatcherCapability              WatcherType = "capability"
+	WatcherStaleWorkOrders         WatcherType = "stale_work_orders"
+	WatcherUnconfirmedAppointments WatcherType = "unconfirmed_appointments"
+	WatcherLowStock                WatcherType = "low_stock"
+	WatcherInactiveCustomers       WatcherType = "inactive_customers"
+	WatcherRevenueDrop             WatcherType = "revenue_drop"
+)
+
+// Watcher observa una condición del negocio y propone acciones.
+type Watcher struct {
+	ID          uuid.UUID
+	OrgID       string
+	Name        string
+	WatcherType WatcherType
+	Config      json.RawMessage
+	Enabled     bool
+	LastRunAt   *time.Time
+	LastResult  json.RawMessage
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+// Proposal es una acción propuesta por un watcher.
+type Proposal struct {
+	ID              uuid.UUID
+	WatcherID       uuid.UUID
+	OrgID           string
+	ActionType      string
+	TargetResource  string
+	Params          json.RawMessage
+	Reason          string
+	NexusRequestID  *uuid.UUID
+	NexusDecision   *string
+	ExecutionStatus string
+	ExecutionResult json.RawMessage
+	CreatedAt       time.Time
+	ResolvedAt      *time.Time
+}
+
+// Estados de ejecución de propuestas.
+const (
+	ProposalPending  = "pending"
+	ProposalExecuted = "executed"
+	ProposalFailed   = "failed"
+	ProposalSkipped  = "skipped"
+)
+
+// WatcherResult es el resultado de ejecutar un watcher.
+type WatcherResult struct {
+	Found    int `json:"found"`
+	Proposed int `json:"proposed"`
+	Executed int `json:"executed"`
+}
+
+// WatcherItem representa un item genérico devuelto por una capability de producto.
+type WatcherItem struct {
+	ID        string          `json:"id"`
+	Type      string          `json:"type"`
+	Name      string          `json:"name"`
+	Status    string          `json:"status"`
+	Phone     string          `json:"phone"`
+	PartyID   string          `json:"party_id"`
+	Metadata  json.RawMessage `json:"metadata"`
+	UpdatedAt string          `json:"updated_at"`
+}
+
+// PymesItem mantiene compatibilidad con watchers creados antes del modelo
+// genérico por capability.
+type PymesItem = WatcherItem
+
+type CapabilityWatcherConfig struct {
+	ProductSurface        string           `json:"product_surface"`
+	QueryOperation        string           `json:"query_operation"`
+	QueryPayload          map[string]any   `json:"query_payload,omitempty"`
+	ResultItemsPath       string           `json:"result_items_path,omitempty"`
+	Condition             WatcherCondition `json:"condition,omitempty"`
+	ActionOperation       string           `json:"action_operation"`
+	ActionPayloadTemplate map[string]any   `json:"action_payload_template,omitempty"`
+	ActionType            string           `json:"action_type"`
+	ProposalOnly          bool             `json:"proposal_only,omitempty"`
+}
+
+type WatcherCondition struct {
+	Path     string `json:"path,omitempty"`
+	Operator string `json:"operator,omitempty"`
+	Value    any    `json:"value,omitempty"`
+}
+
+// RevenueComparison contiene la comparación de facturación mensual.
+type RevenueComparison struct {
+	CurrentMonth  float64 `json:"current_month"`
+	PreviousMonth float64 `json:"previous_month"`
+	DropPercent   float64 `json:"drop_percent"`
+}
+
+// Tipos de configuración por watcher.
+
+type StaleWorkOrdersConfig struct {
+	ThresholdDays int `json:"threshold_days"`
+}
+
+type UnconfirmedAppointmentsConfig struct {
+	HoursBeforeAppointment int `json:"hours_before_appointment"`
+}
+
+type LowStockConfig struct {
+	ThresholdUnits int `json:"threshold_units"`
+}
+
+type InactiveCustomersConfig struct {
+	ThresholdMonths int `json:"threshold_months"`
+}
+
+type RevenueDropConfig struct {
+	ThresholdPercent float64 `json:"threshold_percent"`
+}

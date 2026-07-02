@@ -1,0 +1,133 @@
+# Job Roles
+
+Ver tambien `domain-model.md` para el mapa rector del dominio de Companion y
+la separacion entre JobRole, IAM Role, VirployeeProfile y PermissionBundle.
+El modelo objetivo detallado esta en
+`../specs/companion/domain/job-roles-domain-spec.md`.
+
+Un `JobRole` es un puesto de trabajo dentro de una customer org y un product
+surface. Define que funcion debe cumplir un Virployee.
+
+En Axis:
+
+```text
+tenant = org_id + product_surface
+```
+
+## Concepto
+
+`JobRole` representa el puesto. `Virployee` representa el trabajador
+digital que ocupa ese puesto. `Agent` queda como ejecutor tecnico de runtime,
+no como puesto ni perfil laboral.
+
+En el modelo objetivo, `JobRole.job_role_id` es UUID y las capabilities
+recomendadas se referencian por `recommended_capability_ids`. La implementacion
+v1 todavia usa `job_role_id` textual y `recommended_capabilities` como keys.
+
+`JobRole` no es un IAM Role, Account Role ni PermissionBundle. Puede sugerir
+defaults, pero no autoriza acciones directamente.
+
+## Modelo V1
+
+Campos principales:
+
+- `job_role_id`
+- `org_id`
+- `product_surface`
+- `name`
+- `slug`
+- `mission`
+- `responsibilities`
+- `recommended_capabilities`
+- `default_autonomy_level`
+- `default_permission_bundle_id`
+- `success_criteria`
+- `default_sla_policy`
+- `default_memory_policy`
+- `status`
+- `metadata`
+- `created_by`
+- `created_at`
+- `updated_at`
+- `archived_at`
+- `version`
+
+`Responsibility` vive embebida dentro de `JobRole`:
+
+- `title`
+- `description`
+- `expected_outcome`
+- `priority`
+
+No existe CRUD propio de responsibilities en v1.
+
+## APIs
+
+Companion expone:
+
+```text
+GET  /v1/job-roles
+GET  /v1/job-roles/{job_role_id}
+PUT  /v1/job-roles/{job_role_id}
+POST /v1/job-roles/{job_role_id}/archive
+POST /v1/job-roles/{job_role_id}/trash
+POST /v1/job-roles/{job_role_id}/restore
+GET  /v1/job-roles/{job_role_id}/versions
+```
+
+BFF expone la superficie para Console:
+
+```text
+GET  /api/job-roles
+GET  /api/job-roles/{job_role_id}
+PUT  /api/job-roles/{job_role_id}
+POST /api/job-roles/{job_role_id}/archive
+POST /api/job-roles/{job_role_id}/trash
+POST /api/job-roles/{job_role_id}/restore
+GET  /api/job-roles/{job_role_id}/versions
+```
+
+No hay delete fisico en v1. El lifecycle estandar soportado es `active`,
+`archived` y `trash`.
+
+## Relacion Con Virployees
+
+En v1, un Virployee referencia un JobRole mediante:
+
+```text
+job_role_id
+```
+
+La relacion pertenece al core de `Virployee`. No autoriza permisos ni
+cambia Runtime.
+
+Al crear o editar un Virployee, Console puede usar el JobRole para
+prellenar defaults seguros como puesto, mision, responsabilidades,
+capabilities recomendadas y autonomia. Esos valores siguen siendo editables.
+
+## Defaults No Son Permisos
+
+`recommended_capabilities` son recomendaciones para configurar el Virployee. No
+habilitan capabilities por si solas.
+
+`default_permission_bundle_id` es una referencia informativa/default. No otorga
+permisos, no reemplaza IAM Role y no toma decisiones de autorizacion.
+
+`default_sla_policy` y `default_memory_policy` son datos de configuracion v1.
+No cambian Runtime ni Memory automaticamente.
+
+## Fuera De V1
+
+Todavia no existe:
+
+- CRUD de Responsibility.
+- Role CRUD.
+- Department como entidad.
+- KPIs propios.
+- SLA avanzado.
+- Permission enforcement desde JobRole.
+- Multi-role employee.
+- Multi-agent employee.
+- FK fuerte con modulo tecnico de agents.
+- Cambio de Runtime.
+- Cambio de Capabilities, Tools, Jobs, Watchers o Memory.

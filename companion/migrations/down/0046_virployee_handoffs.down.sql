@@ -1,5 +1,0 @@
-DROP INDEX IF EXISTS idx_companion_virployee_handoffs_task;
-DROP INDEX IF EXISTS idx_companion_virployee_handoffs_to_virployee;
-DROP INDEX IF EXISTS idx_companion_virployee_handoffs_org_surface_status;
-DROP INDEX IF EXISTS idx_companion_virployee_handoffs_tenant_status;
-DROP TABLE IF EXISTS companion_virployee_handoffs;
