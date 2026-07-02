@@ -73,6 +73,7 @@ Public representation:
   "role": "sales_assistant",
   "description": "Helps with commercial follow-up.",
   "supervisor_user_id": "uuid",
+  "autonomy": "A1",
   "state": "active",
   "created_at": "2026-07-02T12:00:00Z",
   "updated_at": "2026-07-02T12:00:00Z",
@@ -90,6 +91,9 @@ Fields:
 - `description`: optional, trimmed.
 - `supervisor_user_id`: required UUID reference to the human responsible for
   the Virployee. It is stored as an opaque reference in this version.
+- `autonomy`: optional input, defaults to `A1`. Accepted values are `A0`,
+  `A1`, `A2`, `A3`, `A4` and `A5`. In this version it is persisted as
+  configuration only; it does not enforce runtime permissions.
 - `created_at`: resource metadata; server-generated timestamp.
 - `updated_at`: resource metadata; server-generated timestamp.
 - `state`: derived from lifecycle metadata. It is never accepted as input.
@@ -193,6 +197,7 @@ Required columns:
 - `role text not null`
 - `description text not null default ''`
 - `supervisor_user_id uuid not null`
+- `autonomy text not null default 'A1'`
 - `created_at timestamptz not null`
 - `updated_at timestamptz not null`
 - `archived_at timestamptz null`
@@ -243,7 +248,8 @@ Request:
   "name": "Sales Assistant",
   "role": "sales_assistant",
   "description": "Helps with commercial follow-up.",
-  "supervisor_user_id": "11111111-1111-4111-8111-111111111111"
+  "supervisor_user_id": "11111111-1111-4111-8111-111111111111",
+  "autonomy": "A1"
 }
 ```
 
@@ -256,6 +262,7 @@ Response: `201 Created`
   "role": "sales_assistant",
   "description": "Helps with commercial follow-up.",
   "supervisor_user_id": "11111111-1111-4111-8111-111111111111",
+  "autonomy": "A1",
   "state": "active",
   "created_at": "2026-07-02T12:00:00Z",
   "updated_at": "2026-07-02T12:00:00Z",
@@ -270,6 +277,8 @@ Validation:
 - `name` is required.
 - `role` is required.
 - `supervisor_user_id` is required and must be a UUID.
+- `autonomy` is optional. Empty or omitted values default to `A1`.
+- `autonomy` must be one of `A0`, `A1`, `A2`, `A3`, `A4` or `A5`.
 - Unknown fields should be rejected if the HTTP helper supports it without
   custom parsing.
 
@@ -356,7 +365,8 @@ Request:
   "name": "Sales Assistant",
   "role": "sales_assistant",
   "description": "Updated description.",
-  "supervisor_user_id": "11111111-1111-4111-8111-111111111111"
+  "supervisor_user_id": "11111111-1111-4111-8111-111111111111",
+  "autonomy": "A2"
 }
 ```
 

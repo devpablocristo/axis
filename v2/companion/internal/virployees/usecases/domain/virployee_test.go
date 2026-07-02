@@ -15,12 +15,27 @@ func TestNormalizeCreateInput(t *testing.T) {
 		Role:             " sales_assistant ",
 		Description:      "  Helps  ",
 		SupervisorUserID: " " + supervisorID.String() + " ",
+		Autonomy:         " A2 ",
 	})
 	if err != nil {
 		t.Fatalf("NormalizeCreateInput: %v", err)
 	}
-	if got.Name != "Sales Assistant" || got.Role != "sales_assistant" || got.Description != "Helps" || got.SupervisorUserID != supervisorID {
+	if got.Name != "Sales Assistant" || got.Role != "sales_assistant" || got.Description != "Helps" || got.SupervisorUserID != supervisorID || got.Autonomy != AutonomyA2 {
 		t.Fatalf("unexpected normalized input: %+v", got)
+	}
+}
+
+func TestNormalizeCreateInputDefaultsAutonomy(t *testing.T) {
+	got, err := NormalizeCreateInput(CreateInput{
+		Name:             "name",
+		Role:             "role",
+		SupervisorUserID: uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("NormalizeCreateInput: %v", err)
+	}
+	if got.Autonomy != AutonomyA1 {
+		t.Fatalf("expected default autonomy A1, got %s", got.Autonomy)
 	}
 }
 
@@ -36,6 +51,9 @@ func TestNormalizeCreateInputRequiresNameRoleAndSupervisor(t *testing.T) {
 	}
 	if _, err := NormalizeCreateInput(CreateInput{Name: "name", Role: "role", SupervisorUserID: "not-a-uuid"}); !domainerr.IsValidation(err) {
 		t.Fatalf("expected validation for invalid supervisor_user_id, got %v", err)
+	}
+	if _, err := NormalizeCreateInput(CreateInput{Name: "name", Role: "role", SupervisorUserID: uuid.NewString(), Autonomy: "A9"}); !domainerr.IsValidation(err) {
+		t.Fatalf("expected validation for invalid autonomy, got %v", err)
 	}
 }
 

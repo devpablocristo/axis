@@ -9,6 +9,7 @@ type CreateVirployeeRequest struct {
 	Role             string `json:"role" binding:"required"`
 	Description      string `json:"description"`
 	SupervisorUserID string `json:"supervisor_user_id" binding:"required"`
+	Autonomy         string `json:"autonomy"`
 }
 
 func (r CreateVirployeeRequest) ToDomain() domain.CreateInput {
@@ -17,6 +18,7 @@ func (r CreateVirployeeRequest) ToDomain() domain.CreateInput {
 		Role:             r.Role,
 		Description:      r.Description,
 		SupervisorUserID: r.SupervisorUserID,
+		Autonomy:         r.Autonomy,
 	}
 }
 
@@ -25,6 +27,7 @@ type UpdateVirployeeRequest struct {
 	Role             string `json:"role" binding:"required"`
 	Description      string `json:"description"`
 	SupervisorUserID string `json:"supervisor_user_id" binding:"required"`
+	Autonomy         string `json:"autonomy"`
 }
 
 func (r UpdateVirployeeRequest) ToDomain() domain.UpdateInput {
@@ -33,6 +36,7 @@ func (r UpdateVirployeeRequest) ToDomain() domain.UpdateInput {
 		Role:             r.Role,
 		Description:      r.Description,
 		SupervisorUserID: r.SupervisorUserID,
+		Autonomy:         r.Autonomy,
 	}
 }
 

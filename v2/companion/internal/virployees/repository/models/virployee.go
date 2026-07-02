@@ -14,6 +14,7 @@ type Virployee struct {
 	Role             string
 	Description      string
 	SupervisorUserID uuid.UUID
+	Autonomy         domain.AutonomyLevel
 
 	CreatedAt time.Time
 	UpdatedAt time.Time
@@ -30,6 +31,7 @@ func (m Virployee) ToDomain() domain.Virployee {
 		Role:             m.Role,
 		Description:      m.Description,
 		SupervisorUserID: m.SupervisorUserID,
+		Autonomy:         m.Autonomy,
 		CreatedAt:        m.CreatedAt,
 		UpdatedAt:        m.UpdatedAt,
 		ArchivedAt:       nullTimePtr(m.ArchivedAt),

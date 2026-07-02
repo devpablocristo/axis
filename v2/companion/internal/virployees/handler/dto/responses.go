@@ -12,6 +12,7 @@ type VirployeeResponse struct {
 	Role             string     `json:"role"`
 	Description      string     `json:"description"`
 	SupervisorUserID string     `json:"supervisor_user_id"`
+	Autonomy         string     `json:"autonomy"`
 	State            string     `json:"state"`
 	CreatedAt        time.Time  `json:"created_at"`
 	UpdatedAt        time.Time  `json:"updated_at"`
@@ -31,6 +32,7 @@ func VirployeeFromDomain(v domain.Virployee) VirployeeResponse {
 		Role:             v.Role,
 		Description:      v.Description,
 		SupervisorUserID: v.SupervisorUserID.String(),
+		Autonomy:         string(v.Autonomy),
 		State:            string(v.State()),
 		CreatedAt:        v.CreatedAt,
 		UpdatedAt:        v.UpdatedAt,

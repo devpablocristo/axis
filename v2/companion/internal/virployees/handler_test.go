@@ -2,6 +2,7 @@ package virployees
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -24,6 +25,29 @@ func TestHandlerCreateValidation(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandlerCreateReturnsAutonomy(t *testing.T) {
+	router := testRouter(&handlerFakeUseCases{})
+	rec := httptest.NewRecorder()
+	body := `{"name":"Ops","role":"ops","supervisor_user_id":"` + uuid.NewString() + `","autonomy":"A2"}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/virployees", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		Autonomy string `json:"autonomy"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Autonomy != "A2" {
+		t.Fatalf("expected autonomy A2, got %q", payload.Autonomy)
 	}
 }
 
@@ -86,7 +110,7 @@ func (f *handlerFakeUseCases) Create(_ context.Context, input domain.CreateInput
 	if err != nil {
 		return domain.Virployee{}, err
 	}
-	return domain.Virployee{ID: uuid.New(), Name: normalized.Name, Role: normalized.Role, SupervisorUserID: normalized.SupervisorUserID}, nil
+	return domain.Virployee{ID: uuid.New(), Name: normalized.Name, Role: normalized.Role, SupervisorUserID: normalized.SupervisorUserID, Autonomy: normalized.Autonomy}, nil
 }
 
 func (f *handlerFakeUseCases) ListActive(context.Context) ([]domain.Virployee, error) {
@@ -102,7 +126,7 @@ func (f *handlerFakeUseCases) ListTrash(context.Context) ([]domain.Virployee, er
 }
 
 func (f *handlerFakeUseCases) Get(_ context.Context, id uuid.UUID) (domain.Virployee, error) {
-	return domain.Virployee{ID: id, Name: "Ops", Role: "ops", SupervisorUserID: uuid.New()}, nil
+	return domain.Virployee{ID: id, Name: "Ops", Role: "ops", SupervisorUserID: uuid.New(), Autonomy: domain.AutonomyA1}, nil
 }
 
 func (f *handlerFakeUseCases) Update(_ context.Context, id uuid.UUID, input domain.UpdateInput) (domain.Virployee, error) {
@@ -110,7 +134,7 @@ func (f *handlerFakeUseCases) Update(_ context.Context, id uuid.UUID, input doma
 	if err != nil {
 		return domain.Virployee{}, err
 	}
-	return domain.Virployee{ID: id, Name: normalized.Name, Role: normalized.Role, SupervisorUserID: normalized.SupervisorUserID}, nil
+	return domain.Virployee{ID: id, Name: normalized.Name, Role: normalized.Role, SupervisorUserID: normalized.SupervisorUserID, Autonomy: normalized.Autonomy}, nil
 }
 
 func (f *handlerFakeUseCases) Archive(_ context.Context, _ uuid.UUID, actor, _ string) error {

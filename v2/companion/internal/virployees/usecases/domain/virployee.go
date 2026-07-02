@@ -16,12 +16,24 @@ const (
 	StateTrashed  State = "trashed"
 )
 
+type AutonomyLevel string
+
+const (
+	AutonomyA0 AutonomyLevel = "A0"
+	AutonomyA1 AutonomyLevel = "A1"
+	AutonomyA2 AutonomyLevel = "A2"
+	AutonomyA3 AutonomyLevel = "A3"
+	AutonomyA4 AutonomyLevel = "A4"
+	AutonomyA5 AutonomyLevel = "A5"
+)
+
 type Virployee struct {
 	ID               uuid.UUID
 	Name             string
 	Role             string
 	Description      string
 	SupervisorUserID uuid.UUID
+	Autonomy         AutonomyLevel
 
 	CreatedAt time.Time
 	UpdatedAt time.Time
@@ -36,6 +48,7 @@ type CreateInput struct {
 	Role             string
 	Description      string
 	SupervisorUserID string
+	Autonomy         string
 }
 
 type UpdateInput struct {
@@ -43,6 +56,7 @@ type UpdateInput struct {
 	Role             string
 	Description      string
 	SupervisorUserID string
+	Autonomy         string
 }
 
 type NormalizedCreateInput struct {
@@ -50,6 +64,7 @@ type NormalizedCreateInput struct {
 	Role             string
 	Description      string
 	SupervisorUserID uuid.UUID
+	Autonomy         AutonomyLevel
 }
 
 type NormalizedUpdateInput struct {
@@ -57,6 +72,7 @@ type NormalizedUpdateInput struct {
 	Role             string
 	Description      string
 	SupervisorUserID uuid.UUID
+	Autonomy         AutonomyLevel
 }
 
 func (v Virployee) State() State {
@@ -75,11 +91,16 @@ func NormalizeCreateInput(in CreateInput) (NormalizedCreateInput, error) {
 	if err != nil {
 		return NormalizedCreateInput{}, err
 	}
+	autonomy, err := normalizeAutonomy(in.Autonomy)
+	if err != nil {
+		return NormalizedCreateInput{}, err
+	}
 	out := NormalizedCreateInput{
 		Name:             strings.TrimSpace(in.Name),
 		Role:             strings.TrimSpace(in.Role),
 		Description:      strings.TrimSpace(in.Description),
 		SupervisorUserID: supervisorID,
+		Autonomy:         autonomy,
 	}
 	if out.Name == "" {
 		return NormalizedCreateInput{}, domainerr.Validation("name is required")
@@ -95,11 +116,16 @@ func NormalizeUpdateInput(in UpdateInput) (NormalizedUpdateInput, error) {
 	if err != nil {
 		return NormalizedUpdateInput{}, err
 	}
+	autonomy, err := normalizeAutonomy(in.Autonomy)
+	if err != nil {
+		return NormalizedUpdateInput{}, err
+	}
 	out := NormalizedUpdateInput{
 		Name:             strings.TrimSpace(in.Name),
 		Role:             strings.TrimSpace(in.Role),
 		Description:      strings.TrimSpace(in.Description),
 		SupervisorUserID: supervisorID,
+		Autonomy:         autonomy,
 	}
 	if out.Name == "" {
 		return NormalizedUpdateInput{}, domainerr.Validation("name is required")
@@ -108,6 +134,27 @@ func NormalizeUpdateInput(in UpdateInput) (NormalizedUpdateInput, error) {
 		return NormalizedUpdateInput{}, domainerr.Validation("role is required")
 	}
 	return out, nil
+}
+
+func normalizeAutonomy(raw string) (AutonomyLevel, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return AutonomyA1, nil
+	}
+	level := AutonomyLevel(raw)
+	if !validAutonomy(level) {
+		return "", domainerr.Validation("autonomy must be one of A0, A1, A2, A3, A4, A5")
+	}
+	return level, nil
+}
+
+func validAutonomy(level AutonomyLevel) bool {
+	switch level {
+	case AutonomyA0, AutonomyA1, AutonomyA2, AutonomyA3, AutonomyA4, AutonomyA5:
+		return true
+	default:
+		return false
+	}
 }
 
 func parseRequiredUUID(raw, field string) (uuid.UUID, error) {

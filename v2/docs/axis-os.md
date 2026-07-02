@@ -51,5 +51,5 @@ BFF currently forwards that context to Companion with:
 - Governance/Nexus is deferred.
 - Companion tenancy storage is deferred; BFF validates tenancy before forwarding.
 - Virployees remain the first workforce primitive.
-- Runtime, tasks, capabilities, autonomy, and memory are future Companion
-  modules.
+- Runtime, tasks, capabilities, autonomy enforcement, and memory are future
+  Companion modules.

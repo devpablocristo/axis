@@ -29,10 +29,10 @@ func (r *Repository) Create(ctx context.Context, tenantID string, input domain.N
 	id := uuid.New()
 	now := time.Now().UTC()
 	row := r.pool.QueryRow(ctx, `
-		INSERT INTO virployees (id, tenant_id, name, role, description, supervisor_user_id, created_at, updated_at)
-		VALUES ($1::uuid, $2, $3, $4, $5, $6::uuid, $7, $7)
-		RETURNING id::text, name, role, description, supervisor_user_id::text, created_at, updated_at, archived_at, trashed_at, purge_after
-	`, id.String(), tenantID, input.Name, input.Role, input.Description, input.SupervisorUserID.String(), now)
+		INSERT INTO virployees (id, tenant_id, name, role, description, supervisor_user_id, autonomy, created_at, updated_at)
+		VALUES ($1::uuid, $2, $3, $4, $5, $6::uuid, $7, $8, $8)
+		RETURNING id::text, name, role, description, supervisor_user_id::text, autonomy, created_at, updated_at, archived_at, trashed_at, purge_after
+	`, id.String(), tenantID, input.Name, input.Role, input.Description, input.SupervisorUserID.String(), string(input.Autonomy), now)
 	return scanVirployee(row)
 }
 
@@ -50,7 +50,7 @@ func (r *Repository) List(ctx context.Context, tenantID string, state domain.Sta
 	}
 
 	rows, err := r.pool.Query(ctx, fmt.Sprintf(`
-		SELECT id::text, name, role, description, supervisor_user_id::text, created_at, updated_at, archived_at, trashed_at, purge_after
+		SELECT id::text, name, role, description, supervisor_user_id::text, autonomy, created_at, updated_at, archived_at, trashed_at, purge_after
 		FROM virployees
 		WHERE %s
 		ORDER BY created_at DESC, id DESC
@@ -76,7 +76,7 @@ func (r *Repository) List(ctx context.Context, tenantID string, state domain.Sta
 
 func (r *Repository) Get(ctx context.Context, tenantID string, id uuid.UUID) (domain.Virployee, error) {
 	row := r.pool.QueryRow(ctx, `
-		SELECT id::text, name, role, description, supervisor_user_id::text, created_at, updated_at, archived_at, trashed_at, purge_after
+		SELECT id::text, name, role, description, supervisor_user_id::text, autonomy, created_at, updated_at, archived_at, trashed_at, purge_after
 		FROM virployees
 		WHERE tenant_id = $1 AND id = $2::uuid AND trashed_at IS NULL
 	`, tenantID, id.String())
@@ -86,13 +86,13 @@ func (r *Repository) Get(ctx context.Context, tenantID string, id uuid.UUID) (do
 func (r *Repository) Update(ctx context.Context, tenantID string, id uuid.UUID, input domain.NormalizedUpdateInput) (domain.Virployee, error) {
 	row := r.pool.QueryRow(ctx, `
 		UPDATE virployees
-		SET name = $3, role = $4, description = $5, supervisor_user_id = $6::uuid, updated_at = $7
+		SET name = $3, role = $4, description = $5, supervisor_user_id = $6::uuid, autonomy = $7, updated_at = $8
 		WHERE tenant_id = $1
 			AND id = $2::uuid
 			AND archived_at IS NULL
 			AND trashed_at IS NULL
-		RETURNING id::text, name, role, description, supervisor_user_id::text, created_at, updated_at, archived_at, trashed_at, purge_after
-	`, tenantID, id.String(), input.Name, input.Role, input.Description, input.SupervisorUserID.String(), time.Now().UTC())
+		RETURNING id::text, name, role, description, supervisor_user_id::text, autonomy, created_at, updated_at, archived_at, trashed_at, purge_after
+	`, tenantID, id.String(), input.Name, input.Role, input.Description, input.SupervisorUserID.String(), string(input.Autonomy), time.Now().UTC())
 	item, err := scanVirployee(row)
 	if err == nil {
 		return item, nil
@@ -216,6 +216,7 @@ type scanner interface {
 func scanVirployee(row scanner) (domain.Virployee, error) {
 	var idText string
 	var supervisorUserIDText string
+	var autonomyText string
 	var model models.Virployee
 	err := row.Scan(
 		&idText,
@@ -223,6 +224,7 @@ func scanVirployee(row scanner) (domain.Virployee, error) {
 		&model.Role,
 		&model.Description,
 		&supervisorUserIDText,
+		&autonomyText,
 		&model.CreatedAt,
 		&model.UpdatedAt,
 		&model.ArchivedAt,
@@ -245,6 +247,7 @@ func scanVirployee(row scanner) (domain.Virployee, error) {
 	}
 	model.ID = id
 	model.SupervisorUserID = supervisorUserID
+	model.Autonomy = domain.AutonomyLevel(autonomyText)
 	return model.ToDomain(), nil
 }
 

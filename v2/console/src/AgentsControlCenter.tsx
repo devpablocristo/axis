@@ -6,6 +6,7 @@ import {
 } from '@devpablocristo/platform-crud-ui'
 import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import {
+  type VirployeeAutonomy,
   type Virployee,
   archiveVirployee,
   createVirployee,
@@ -24,6 +25,12 @@ type AgentsControlCenterProps = {
   tenantId: string
   principalId: string
 }
+
+const AUTONOMY_OPTIONS: Array<{ label: string; value: VirployeeAutonomy }> = [
+  { label: 'A1', value: 'A1' },
+  { label: 'A2', value: 'A2' },
+  { label: 'A3', value: 'A3' },
+]
 
 const CrudPage = PlatformCrudPage as unknown as <T extends { id: string }>(
   props: CrudPageProps<T>,
@@ -203,6 +210,7 @@ function virployeeColumns(
     selectionColumn<Virployee>(selectedIds, onToggle),
     { key: 'name', header: 'Nombre' },
     { key: 'role', header: 'Role' },
+    { key: 'autonomy', header: 'Autonomía' },
     { key: 'supervisor_user_id', header: 'Supervisor', render: (value) => shortId(String(value ?? '')) },
     { key: 'state', header: 'Estado', render: (value) => formatState(String(value ?? '')) },
     { key: 'updated_at', header: 'Actualizado', render: (value) => formatDate(String(value ?? '')) },
@@ -213,6 +221,13 @@ function virployeeFormFields(): CrudPageProps<Virployee>['formFields'] {
   return [
     { key: 'name', label: 'Nombre', required: true },
     { key: 'role', label: 'Role', required: true },
+    {
+      key: 'autonomy',
+      label: 'Autonomía',
+      type: 'select' as const,
+      options: AUTONOMY_OPTIONS,
+      placeholder: 'A1 por defecto',
+    },
     {
       key: 'supervisor_user_id',
       label: 'Supervisor User ID',
@@ -228,6 +243,7 @@ function virployeeToFormValues(row: Virployee): CrudFormValues {
   return {
     name: row.name,
     role: row.role,
+    autonomy: row.autonomy ?? 'A1',
     description: row.description ?? '',
     supervisor_user_id: row.supervisor_user_id,
   }
@@ -239,6 +255,7 @@ function virployeePayload(values: CrudFormValues) {
     role: stringValue(values.role),
     description: stringValue(values.description),
     supervisor_user_id: stringValue(values.supervisor_user_id),
+    autonomy: autonomyValue(values.autonomy),
   }
 }
 
@@ -255,6 +272,7 @@ function virployeeSearchText(row: Virployee): string {
     row.id,
     row.name,
     row.role,
+    row.autonomy,
     row.description,
     row.supervisor_user_id,
     row.state,
@@ -341,6 +359,15 @@ function lifecycleToolbarActions(view: CrudLifecycleView, onChange: (view: CrudL
 
 function stringValue(value: CrudFormValues[string]): string {
   return String(value ?? '').trim()
+}
+
+function autonomyValue(value: CrudFormValues[string]): VirployeeAutonomy {
+  const autonomy = stringValue(value)
+  return isAutonomy(autonomy) ? autonomy : 'A1'
+}
+
+function isAutonomy(value: string): value is VirployeeAutonomy {
+  return ['A0', 'A1', 'A2', 'A3', 'A4', 'A5'].includes(value)
 }
 
 function isUUID(value: string): boolean {

@@ -30,6 +30,7 @@ export type Session = {
 }
 
 export type VirployeeState = 'active' | 'archived' | 'trashed'
+export type VirployeeAutonomy = 'A0' | 'A1' | 'A2' | 'A3' | 'A4' | 'A5'
 
 export type Virployee = {
   id: string
@@ -37,6 +38,7 @@ export type Virployee = {
   role: string
   description: string
   supervisor_user_id: string
+  autonomy: VirployeeAutonomy
   state: VirployeeState
   created_at: string
   updated_at: string
@@ -50,6 +52,7 @@ export type VirployeeInput = {
   role: string
   description: string
   supervisor_user_id: string
+  autonomy: VirployeeAutonomy
 }
 
 type ListResponse = {

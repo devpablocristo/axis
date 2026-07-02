@@ -22,11 +22,12 @@ func TestUseCasesCreateAndListActive(t *testing.T) {
 		Name:             " Sales Assistant ",
 		Role:             " sales_assistant ",
 		SupervisorUserID: " " + supervisorID.String() + " ",
+		Autonomy:         "A2",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if created.Name != "Sales Assistant" || created.Role != "sales_assistant" || created.SupervisorUserID != supervisorID {
+	if created.Name != "Sales Assistant" || created.Role != "sales_assistant" || created.SupervisorUserID != supervisorID || created.Autonomy != domain.AutonomyA2 {
 		t.Fatalf("unexpected create output: %+v", created)
 	}
 
@@ -129,6 +130,7 @@ func (r *fakeRepo) Create(_ context.Context, _ string, input domain.NormalizedCr
 		Role:             input.Role,
 		Description:      input.Description,
 		SupervisorUserID: input.SupervisorUserID,
+		Autonomy:         input.Autonomy,
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	}
@@ -166,6 +168,7 @@ func (r *fakeRepo) Update(_ context.Context, _ string, id uuid.UUID, input domai
 	row.Role = input.Role
 	row.Description = input.Description
 	row.SupervisorUserID = input.SupervisorUserID
+	row.Autonomy = input.Autonomy
 	row.UpdatedAt = time.Now().UTC()
 	r.rows[id] = row
 	return row, nil
