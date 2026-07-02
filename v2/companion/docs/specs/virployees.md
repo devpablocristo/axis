@@ -105,6 +105,20 @@ These fields are not audit records. Audit is the append-only event history of
 who performed an action and when. Metadata/lifecycle fields describe the current
 resource row.
 
+Autonomy definitions:
+
+The scale is cumulative: a higher level includes the lower levels. For example,
+`A3` includes `A0`, `A1`, `A2` and `A3`, but does not include `A4`.
+
+| Level | Name | Definition |
+| --- | --- | --- |
+| `A0` | Conversation | Can hold conversation and read contextual information, without recommending or preparing actions. |
+| `A1` | Recommendation | Can read, analyze and recommend actions. |
+| `A2` | Draft | Can prepare plans or executable drafts, without external side effects. |
+| `A3` | Limited execution | Can execute low-risk writes that are reversible, idempotent and scoped to the tenant. |
+| `A4` | Governed execution | Can attempt medium-risk actions only with prior approval or a controlled playbook. |
+| `A5` | Broad autonomy | Reserved for broad multi-product autonomy; not enabled by default. |
+
 Initial states:
 
 - New Virployees start as `active`.
