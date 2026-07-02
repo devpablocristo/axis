@@ -119,6 +119,39 @@ The scale is cumulative: a higher level includes the lower levels. For example,
 | `A4` | Governed execution | Can attempt medium-risk actions only with prior approval or a controlled playbook. |
 | `A5` | Broad autonomy | Reserved for broad multi-product autonomy; not enabled by default. |
 
+Action classes:
+
+Action classes are Companion domain vocabulary. They describe what kind of
+action a Virployee is trying to perform. Future capabilities/runtime will map
+their operations to one action class before execution. Nexus still owns
+sensitive approvals and policy decisions.
+
+| Class | Required autonomy | Approval | Enabled | Definition |
+| --- | --- | --- | --- | --- |
+| `observe` | `A0` | no | yes | Read context and hold conversation without recommending, drafting or executing actions. |
+| `recommend` | `A1` | no | yes | Analyze context and recommend actions without preparing executable output. |
+| `draft` | `A2` | no | yes | Prepare plans or executable drafts without external side effects. |
+| `write_low` | `A3` | no | yes | Execute low-risk writes that are reversible, idempotent and scoped to the tenant. |
+| `write_medium` | `A4` | yes | yes | Attempt medium-risk writes only through approval or a controlled playbook. |
+| `write_high` | `A5` | yes | no | Reserved for high-risk or broad-impact actions; not enabled by default. |
+
+Autonomy decisions:
+
+Companion can evaluate an autonomy level against an action class without
+executing anything. The decision is pure domain context and can later be used by
+runtime, logs, traces or UI.
+
+```json
+{
+  "allowed": false,
+  "requires_approval": false,
+  "autonomy": "A2",
+  "action_class": "write_low",
+  "required_autonomy": "A3",
+  "reason": "A2 does not allow write_low; required A3"
+}
+```
+
 Initial states:
 
 - New Virployees start as `active`.
