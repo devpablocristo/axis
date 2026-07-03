@@ -1,11 +1,13 @@
 export type LifecycleTimestamp = string | null
+export type TenantState = 'active' | 'archived' | 'trashed'
 
 export type Tenant = {
   id: string
   org_id: string
+  org_name: string
   product_surface: string
-  name: string
   status: string
+  state: TenantState
   created_at: string
   updated_at: string
   archived_at: LifecycleTimestamp
@@ -16,7 +18,6 @@ export type Tenant = {
 export type AxisUser = {
   id: string
   email: string
-  name: string
   status: string
 }
 
@@ -27,6 +28,21 @@ export type Session = {
   auth_method: string
   user: AxisUser
   tenants: Tenant[]
+}
+
+export type Product = {
+  product_surface: string
+  name: string
+}
+
+export type TenantInput = {
+  org_id?: string
+  org_name?: string
+  product_surface: string
+}
+
+export type TenantUpdateInput = {
+  org_name: string
 }
 
 export type VirployeeState = 'active' | 'archived' | 'trashed'
@@ -90,12 +106,47 @@ export type JobRoleInput = {
   mission: string
 }
 
+export type UserState = 'active' | 'archived' | 'trashed' | 'pending'
+export type TenantUserRole = 'owner' | 'admin' | 'member'
+export type TenantUserKind = 'user' | 'invitation'
+
+export type TenantUser = {
+  id: string
+  kind: TenantUserKind
+  email: string
+  role: TenantUserRole
+  tenant_id: string
+  state: UserState
+  created_at: string
+  updated_at: string
+  archived_at: LifecycleTimestamp
+  trashed_at: LifecycleTimestamp
+  purge_after: LifecycleTimestamp
+}
+
+export type TenantUserInput = {
+  email: string
+  role: TenantUserRole
+}
+
 type VirployeesListResponse = {
   data: Virployee[]
 }
 
 type JobRolesListResponse = {
   data: JobRole[]
+}
+
+type UsersListResponse = {
+  data: TenantUser[]
+}
+
+type TenantsListResponse = {
+  data: Tenant[]
+}
+
+type ProductsListResponse = {
+  data: Product[]
 }
 
 type AutonomyLevelsResponse = {
@@ -110,6 +161,14 @@ export type AxisFetchInit = {
   headers?: Record<string, string>
 }
 
+type AxisAuthTokenGetter = () => string | null | undefined | Promise<string | null | undefined>
+
+let axisAuthTokenGetter: AxisAuthTokenGetter | null = null
+
+export function setAxisAuthTokenGetter(getter: AxisAuthTokenGetter | null) {
+  axisAuthTokenGetter = getter
+}
+
 export async function axisFetch<T>(path: string, init: AxisFetchInit = {}): Promise<T> {
   const headers = new Headers(init.headers)
   if (init.body !== undefined) {
@@ -120,6 +179,10 @@ export async function axisFetch<T>(path: string, init: AxisFetchInit = {}): Prom
   }
   if (init.principalId) {
     headers.set('X-Actor-ID', init.principalId)
+  }
+  const token = await resolveAxisAuthToken()
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`)
   }
 
   const response = await fetch(path, {
@@ -139,6 +202,70 @@ export async function axisFetch<T>(path: string, init: AxisFetchInit = {}): Prom
 
 export function getSession(): Promise<Session> {
   return axisFetch<Session>('/api/session')
+}
+
+export function listTenants(
+  lifecycle: 'active' | 'archived' | 'trash',
+  principalId: string,
+): Promise<Tenant[]> {
+  const path =
+    lifecycle === 'active'
+      ? '/api/tenants'
+      : `/api/tenants?lifecycle=${encodeURIComponent(lifecycle)}`
+  return axisFetch<TenantsListResponse>(path, { principalId }).then((payload) => payload.data ?? [])
+}
+
+export function listProducts(principalId: string): Promise<Product[]> {
+  return axisFetch<ProductsListResponse>('/api/products', { principalId }).then((payload) => payload.data ?? [])
+}
+
+export function createTenant(input: TenantInput, principalId: string): Promise<Tenant> {
+  return axisFetch<Tenant>('/api/tenants', {
+    method: 'POST',
+    principalId,
+    body: input,
+  })
+}
+
+export function updateTenant(id: string, input: TenantUpdateInput, principalId: string): Promise<Tenant> {
+  return axisFetch<Tenant>(`/api/tenants/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    principalId,
+    body: input,
+  })
+}
+
+export function archiveTenant(id: string, principalId: string): Promise<void> {
+  return tenantLifecycleAction(id, 'archive', principalId)
+}
+
+export function unarchiveTenant(id: string, principalId: string): Promise<void> {
+  return tenantLifecycleAction(id, 'unarchive', principalId)
+}
+
+export function trashTenant(id: string, principalId: string): Promise<void> {
+  return tenantLifecycleAction(id, 'trash', principalId)
+}
+
+export function restoreTenant(id: string, principalId: string): Promise<void> {
+  return tenantLifecycleAction(id, 'restore', principalId)
+}
+
+export function purgeTenant(id: string, principalId: string): Promise<void> {
+  return axisFetch<void>(`/api/tenants/${encodeURIComponent(id)}/purge`, {
+    method: 'DELETE',
+    principalId,
+  })
+}
+
+async function resolveAxisAuthToken(): Promise<string> {
+  if (!axisAuthTokenGetter) return ''
+  try {
+    return (await axisAuthTokenGetter())?.trim() ?? ''
+  } catch (error) {
+    console.error('axis_console_v2_auth_token_failed', error)
+    return ''
+  }
 }
 
 export function listVirployees(
@@ -271,6 +398,67 @@ export function purgeJobRole(id: string, tenantId: string, principalId: string):
   })
 }
 
+export function listUsers(
+  lifecycle: 'active' | 'archived' | 'trash',
+  tenantId: string,
+  principalId: string,
+): Promise<TenantUser[]> {
+  const path =
+    lifecycle === 'active'
+      ? '/api/users'
+      : lifecycle === 'archived'
+        ? '/api/users?lifecycle=archived'
+        : '/api/users?lifecycle=trash'
+  return axisFetch<UsersListResponse>(path, { tenantId, principalId }).then((payload) => payload.data ?? [])
+}
+
+export function createUser(input: TenantUserInput, tenantId: string, principalId: string): Promise<TenantUser> {
+  return axisFetch<TenantUser>('/api/users', {
+    method: 'POST',
+    tenantId,
+    principalId,
+    body: input,
+  })
+}
+
+export function updateUser(
+  id: string,
+  input: TenantUserInput,
+  tenantId: string,
+  principalId: string,
+): Promise<TenantUser> {
+  return axisFetch<TenantUser>(`/api/users/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    tenantId,
+    principalId,
+    body: input,
+  })
+}
+
+export function archiveUser(id: string, tenantId: string, principalId: string): Promise<void> {
+  return lifecycleAction('users', id, 'archive', tenantId, principalId)
+}
+
+export function unarchiveUser(id: string, tenantId: string, principalId: string): Promise<void> {
+  return lifecycleAction('users', id, 'unarchive', tenantId, principalId)
+}
+
+export function trashUser(id: string, tenantId: string, principalId: string): Promise<void> {
+  return lifecycleAction('users', id, 'trash', tenantId, principalId)
+}
+
+export function restoreUser(id: string, tenantId: string, principalId: string): Promise<void> {
+  return lifecycleAction('users', id, 'restore', tenantId, principalId)
+}
+
+export function purgeUser(id: string, tenantId: string, principalId: string): Promise<void> {
+  return axisFetch<void>(`/api/users/${encodeURIComponent(id)}/purge`, {
+    method: 'DELETE',
+    tenantId,
+    principalId,
+  })
+}
+
 async function responseErrorMessage(response: Response): Promise<string> {
   let fallback = `Request failed with ${response.status}`
   try {
@@ -283,7 +471,7 @@ async function responseErrorMessage(response: Response): Promise<string> {
 }
 
 function lifecycleAction(
-  resource: 'virployees' | 'job-roles',
+  resource: 'virployees' | 'job-roles' | 'users',
   id: string,
   action: string,
   tenantId: string,
@@ -292,6 +480,14 @@ function lifecycleAction(
   return axisFetch<void>(`/api/${resource}/${encodeURIComponent(id)}/${action}`, {
     method: 'POST',
     tenantId,
+    principalId,
+    body: { reason: 'console' },
+  })
+}
+
+function tenantLifecycleAction(id: string, action: string, principalId: string): Promise<void> {
+  return axisFetch<void>(`/api/tenants/${encodeURIComponent(id)}/${action}`, {
+    method: 'POST',
     principalId,
     body: { reason: 'console' },
   })

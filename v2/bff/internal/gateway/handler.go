@@ -1,7 +1,9 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
@@ -9,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	gatewaydomain "github.com/devpablocristo/bff-v2/internal/gateway/usecases/domain"
+	"github.com/devpablocristo/platform/errors/go/domainerr"
 	ginmw "github.com/devpablocristo/platform/http/gin/go"
 )
 
@@ -17,9 +20,14 @@ type UseCasesPort interface {
 	TargetURL(requestPath, rawQuery string) string
 }
 
+type SupervisorValidatorPort interface {
+	EnsureActive(ctx context.Context, tenantID, userID string) error
+}
+
 type Options struct {
-	DefaultPrincipalID string
-	Client             *http.Client
+	DefaultPrincipalID  string
+	Client              *http.Client
+	SupervisorValidator SupervisorValidatorPort
 }
 
 type Handler struct {
@@ -56,6 +64,10 @@ func (h *Handler) ForwardCompanion(c *gin.Context) {
 		ginmw.Respond(c, err)
 		return
 	}
+	if err := h.validateVirployeeSupervisor(c, resolved); err != nil {
+		ginmw.Respond(c, err)
+		return
+	}
 
 	req, err := http.NewRequestWithContext(
 		c.Request.Context(),
@@ -88,6 +100,43 @@ func (h *Handler) ForwardCompanion(c *gin.Context) {
 	}
 	c.Status(resp.StatusCode)
 	_, _ = io.Copy(c.Writer, resp.Body)
+}
+
+func (h *Handler) validateVirployeeSupervisor(c *gin.Context, resolved gatewaydomain.ResolvedContext) error {
+	if h.options.SupervisorValidator == nil || !requiresSupervisorValidation(c.Request.Method, c.Request.URL.Path) {
+		return nil
+	}
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		return domainerr.Validation("invalid request body")
+	}
+	c.Request.Body = io.NopCloser(bytes.NewReader(body))
+
+	var payload struct {
+		SupervisorUserID string `json:"supervisor_user_id"`
+	}
+	if len(bytes.TrimSpace(body)) > 0 {
+		if err := json.Unmarshal(body, &payload); err != nil {
+			return domainerr.Validation("invalid request body")
+		}
+	}
+	if err := h.options.SupervisorValidator.EnsureActive(c.Request.Context(), resolved.TenantID, payload.SupervisorUserID); err != nil {
+		return err
+	}
+	c.Request.Body = io.NopCloser(bytes.NewReader(body))
+	return nil
+}
+
+func requiresSupervisorValidation(method, requestPath string) bool {
+	if method != http.MethodPost && method != http.MethodPut {
+		return false
+	}
+	path := strings.Trim(strings.TrimPrefix(requestPath, "/api"), "/")
+	parts := strings.Split(path, "/")
+	if method == http.MethodPost {
+		return len(parts) == 1 && parts[0] == "virployees"
+	}
+	return len(parts) == 2 && parts[0] == "virployees" && parts[1] != ""
 }
 
 func (h *Handler) principalID(c *gin.Context) string {

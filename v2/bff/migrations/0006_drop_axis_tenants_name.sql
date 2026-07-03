@@ -1,0 +1,1 @@
+ALTER TABLE axis_tenants DROP COLUMN IF EXISTS name;

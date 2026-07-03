@@ -8,12 +8,14 @@ import (
 )
 
 type User struct {
-	ID        string
-	Email     string
-	Name      string
-	Status    string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID             string
+	Provider       string
+	ProviderUserID string
+	Email          string
+	Status         string
+	SyncedAt       sql.NullTime
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 
 	ArchivedAt sql.NullTime
 	TrashedAt  sql.NullTime
@@ -22,15 +24,17 @@ type User struct {
 
 func (m User) ToDomain() domain.User {
 	return domain.User{
-		ID:         m.ID,
-		Email:      m.Email,
-		Name:       m.Name,
-		Status:     m.Status,
-		CreatedAt:  m.CreatedAt,
-		UpdatedAt:  m.UpdatedAt,
-		ArchivedAt: nullTimePtr(m.ArchivedAt),
-		TrashedAt:  nullTimePtr(m.TrashedAt),
-		PurgeAfter: nullTimePtr(m.PurgeAfter),
+		ID:             m.ID,
+		Provider:       m.Provider,
+		ProviderUserID: m.ProviderUserID,
+		Email:          m.Email,
+		Status:         m.Status,
+		SyncedAt:       nullTimePtr(m.SyncedAt),
+		CreatedAt:      m.CreatedAt,
+		UpdatedAt:      m.UpdatedAt,
+		ArchivedAt:     nullTimePtr(m.ArchivedAt),
+		TrashedAt:      nullTimePtr(m.TrashedAt),
+		PurgeAfter:     nullTimePtr(m.PurgeAfter),
 	}
 }
 

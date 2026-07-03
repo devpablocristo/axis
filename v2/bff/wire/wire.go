@@ -10,9 +10,13 @@ import (
 	cfg "github.com/devpablocristo/bff-v2/cmd/config"
 	"github.com/devpablocristo/bff-v2/internal/gateway"
 	"github.com/devpablocristo/bff-v2/internal/identity"
+	clerkprovider "github.com/devpablocristo/bff-v2/internal/identity/provider/clerk"
+	devprovider "github.com/devpablocristo/bff-v2/internal/identity/provider/dev"
 	"github.com/devpablocristo/bff-v2/internal/infra/migrations"
 	"github.com/devpablocristo/bff-v2/internal/session"
 	"github.com/devpablocristo/bff-v2/internal/tenancy"
+	"github.com/devpablocristo/bff-v2/internal/users"
+	authnoidc "github.com/devpablocristo/platform/authn/go/oidc"
 	postgres "github.com/devpablocristo/platform/databases/postgres/go"
 	ginmw "github.com/devpablocristo/platform/http/gin/go"
 )
@@ -51,16 +55,31 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 
 	identityRepo := identity.NewRepository(db.Pool())
 	identityUC := identity.NewUseCases(identityRepo)
+	identityProvider, orgProvider, invitationProvider := identityProviders(config)
+	var tokenVerifier session.TokenVerifierPort
+	if config.IdentityProvider == "clerk" && config.ClerkIssuerURL != "" {
+		tokenVerifier = authnoidc.NewDiscoveryClient(config.ClerkIssuerURL)
+	}
 
 	tenancyRepo := tenancy.NewRepository(db.Pool())
-	tenancyUC := tenancy.NewUseCases(tenancyRepo)
+	tenancyUC := tenancy.NewUseCases(tenancyRepo, orgProvider)
+
+	usersRepo := users.NewRepository(db.Pool())
+	usersUC := users.NewUseCases(
+		usersRepo,
+		tenancyUC,
+		identityUC,
+		identityProvider,
+		orgProvider,
+		invitationProvider,
+		users.Options{InvitationRedirectURL: config.ClerkInviteRedirectURL},
+	)
 
 	sessionUC := session.NewUseCases(identityUC, tenancyUC, session.Defaults{
 		PrincipalID:    config.DevPrincipalID,
 		PrincipalEmail: config.DevPrincipalEmail,
-		PrincipalName:  config.DevPrincipalName,
 		OrgID:          config.DevOrgID,
-	})
+	}, tokenVerifier, orgProvider)
 	sessionHandler := session.NewHandler(sessionUC)
 
 	gatewayUC, err := gateway.NewUseCases(tenancyUC, config.CompanionBaseURL)
@@ -69,7 +88,8 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		return nil, err
 	}
 	gatewayHandler := gateway.NewHandler(gatewayUC, gateway.Options{
-		DefaultPrincipalID: config.DevPrincipalID,
+		DefaultPrincipalID:  config.DevPrincipalID,
+		SupervisorValidator: usersUC,
 	})
 
 	gin.SetMode(gin.ReleaseMode)
@@ -83,7 +103,6 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 			"Content-Type",
 			"X-Actor-ID",
 			"X-Actor-Email",
-			"X-Actor-Name",
 			"X-Axis-Org-ID",
 			"X-Tenant-ID",
 		},
@@ -91,8 +110,12 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	ginmw.RegisterHealthEndpoints(router, db.Ping)
 
 	api := router.Group("/api")
+	identity.NewWebhookHandler(identityUC, tenancyUC, config.ClerkWebhookSecret).Routes(api)
 	sessionHandler.Routes(api)
 	tenancy.NewHandler(tenancyUC, tenancy.HandlerOptions{
+		DefaultPrincipalID: config.DevPrincipalID,
+	}).Routes(api)
+	users.NewHandler(usersUC, users.HandlerOptions{
 		DefaultPrincipalID: config.DevPrincipalID,
 	}).Routes(api)
 	gatewayHandler.Routes(api)
@@ -108,6 +131,23 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		Router: router,
 		Server: server,
 	}, nil
+}
+
+func identityProviders(config cfg.Config) (
+	identity.IdentityProviderPort,
+	identity.OrgProviderPort,
+	identity.InvitationProviderPort,
+) {
+	if config.IdentityProvider == "clerk" {
+		provider := clerkprovider.NewProvider(clerkprovider.Config{
+			SecretKey:         config.ClerkSecretKey,
+			BaseURL:           config.ClerkAPIBaseURL,
+			InviteRedirectURL: config.ClerkInviteRedirectURL,
+		})
+		return provider, provider, provider
+	}
+	provider := devprovider.NewProvider()
+	return provider, provider, provider
 }
 
 func (d *Dependencies) Close() {

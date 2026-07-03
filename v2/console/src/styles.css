@@ -633,6 +633,20 @@ button:disabled,
   grid-column: 1 / -1;
 }
 
+.tenants-control .crud-form {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+}
+
+.tenants-control .crud-form-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.tenants-control .crud-form > .actions-row {
+  align-self: end;
+  padding-bottom: 0;
+}
+
 .virployee-autonomy-help-host {
   position: fixed;
   z-index: 2147483647;
@@ -860,6 +874,10 @@ tbody tr:hover {
   }
 
   .axis-crud-host .crud-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .tenants-control .crud-form {
     grid-template-columns: 1fr;
   }
 

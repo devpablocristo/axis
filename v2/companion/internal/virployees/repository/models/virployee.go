@@ -13,7 +13,7 @@ type Virployee struct {
 	Name             string
 	JobRoleID        uuid.UUID
 	Description      string
-	SupervisorUserID uuid.UUID
+	SupervisorUserID string
 	Autonomy         domain.AutonomyLevel
 
 	CreatedAt time.Time

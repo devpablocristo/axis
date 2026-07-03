@@ -30,9 +30,9 @@ func (r *Repository) Create(ctx context.Context, tenantID string, input domain.N
 	now := time.Now().UTC()
 	row := r.pool.QueryRow(ctx, `
 		INSERT INTO virployees (id, tenant_id, name, job_role_id, description, supervisor_user_id, autonomy, created_at, updated_at)
-		VALUES ($1::uuid, $2, $3, $4::uuid, $5, $6::uuid, $7, $8, $8)
+		VALUES ($1::uuid, $2, $3, $4::uuid, $5, $6, $7, $8, $8)
 		RETURNING id::text, name, job_role_id::text, description, supervisor_user_id::text, autonomy, created_at, updated_at, archived_at, trashed_at, purge_after
-	`, id.String(), tenantID, input.Name, input.JobRoleID.String(), input.Description, input.SupervisorUserID.String(), string(input.Autonomy), now)
+	`, id.String(), tenantID, input.Name, input.JobRoleID.String(), input.Description, input.SupervisorUserID, string(input.Autonomy), now)
 	return scanVirployee(row)
 }
 
@@ -86,13 +86,13 @@ func (r *Repository) Get(ctx context.Context, tenantID string, id uuid.UUID) (do
 func (r *Repository) Update(ctx context.Context, tenantID string, id uuid.UUID, input domain.NormalizedUpdateInput) (domain.Virployee, error) {
 	row := r.pool.QueryRow(ctx, `
 		UPDATE virployees
-		SET name = $3, job_role_id = $4::uuid, description = $5, supervisor_user_id = $6::uuid, autonomy = $7, updated_at = $8
+		SET name = $3, job_role_id = $4::uuid, description = $5, supervisor_user_id = $6, autonomy = $7, updated_at = $8
 		WHERE tenant_id = $1
 			AND id = $2::uuid
 			AND archived_at IS NULL
 			AND trashed_at IS NULL
 		RETURNING id::text, name, job_role_id::text, description, supervisor_user_id::text, autonomy, created_at, updated_at, archived_at, trashed_at, purge_after
-	`, tenantID, id.String(), input.Name, input.JobRoleID.String(), input.Description, input.SupervisorUserID.String(), string(input.Autonomy), time.Now().UTC())
+	`, tenantID, id.String(), input.Name, input.JobRoleID.String(), input.Description, input.SupervisorUserID, string(input.Autonomy), time.Now().UTC())
 	item, err := scanVirployee(row)
 	if err == nil {
 		return item, nil
@@ -246,13 +246,9 @@ func scanVirployee(row scanner) (domain.Virployee, error) {
 	if err != nil {
 		return domain.Virployee{}, err
 	}
-	supervisorUserID, err := uuid.Parse(supervisorUserIDText)
-	if err != nil {
-		return domain.Virployee{}, err
-	}
 	model.ID = id
 	model.JobRoleID = jobRoleID
-	model.SupervisorUserID = supervisorUserID
+	model.SupervisorUserID = supervisorUserIDText
 	model.Autonomy = domain.AutonomyLevel(autonomyText)
 	return model.ToDomain(), nil
 }

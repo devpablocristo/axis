@@ -29,10 +29,10 @@ func (h *Handler) Routes(router gin.IRouter) {
 
 func (h *Handler) Get(c *gin.Context) {
 	out, err := h.ucs.Resolve(c.Request.Context(), sessiondomain.ResolveInput{
-		PrincipalID: c.GetHeader("X-Actor-ID"),
-		Email:       c.GetHeader("X-Actor-Email"),
-		Name:        c.GetHeader("X-Actor-Name"),
-		OrgID:       c.GetHeader("X-Axis-Org-ID"),
+		PrincipalID:   c.GetHeader("X-Actor-ID"),
+		Email:         c.GetHeader("X-Actor-Email"),
+		OrgID:         c.GetHeader("X-Axis-Org-ID"),
+		Authorization: c.GetHeader("Authorization"),
 	})
 	if err != nil {
 		ginmw.Respond(c, err)

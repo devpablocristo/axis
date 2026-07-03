@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -65,7 +66,6 @@ func TestGatewayForwardsVirployeesWithResolvedTenantHeaders(t *testing.T) {
 			ID:             tenantID,
 			OrgID:          "org-a",
 			ProductSurface: "axis",
-			Name:           "Org A / axis",
 			Status:         tenantdomain.StatusActive,
 			CreatedAt:      time.Now().UTC(),
 			UpdatedAt:      time.Now().UTC(),
@@ -96,6 +96,51 @@ func TestGatewayForwardsVirployeesWithResolvedTenantHeaders(t *testing.T) {
 	}
 }
 
+func TestGatewayValidatesVirployeeSupervisorBeforeForwarding(t *testing.T) {
+	tenantID := uuid.New()
+	calls := 0
+	downstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer downstream.Close()
+
+	validator := &fakeSupervisorValidator{err: domainerr.Validation("supervisor_user_id must reference an active tenant user")}
+	router := gatewayTestRouterWithSupervisor(t, &fakeGatewayTenancy{
+		tenant: tenantdomain.Tenant{
+			ID:             tenantID,
+			OrgID:          "org-a",
+			ProductSurface: "axis",
+			Status:         tenantdomain.StatusActive,
+			CreatedAt:      time.Now().UTC(),
+			UpdatedAt:      time.Now().UTC(),
+		},
+		member: tenantdomain.TenantMember{
+			TenantID: tenantID,
+			UserID:   "user-a",
+			Role:     tenantdomain.RoleAdmin,
+			Status:   tenantdomain.StatusActive,
+		},
+	}, downstream.URL, validator)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/virployees", strings.NewReader(`{"name":"Ops","supervisor_user_id":"missing-user"}`))
+	req.Header.Set("X-Tenant-ID", tenantID.String())
+	req.Header.Set("X-Actor-ID", "user-a")
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if calls != 0 {
+		t.Fatalf("expected downstream not to be called, got %d calls", calls)
+	}
+	if validator.lastTenantID != tenantID.String() || validator.lastUserID != "missing-user" {
+		t.Fatalf("unexpected supervisor validation tenant=%q user=%q", validator.lastTenantID, validator.lastUserID)
+	}
+}
+
 func TestGatewayForwardsVirployeeAutonomyLevels(t *testing.T) {
 	tenantID := uuid.New()
 	var gotPath string
@@ -116,7 +161,6 @@ func TestGatewayForwardsVirployeeAutonomyLevels(t *testing.T) {
 			ID:             tenantID,
 			OrgID:          "org-a",
 			ProductSurface: "axis",
-			Name:           "Org A / axis",
 			Status:         tenantdomain.StatusActive,
 			CreatedAt:      time.Now().UTC(),
 			UpdatedAt:      time.Now().UTC(),
@@ -176,7 +220,6 @@ func TestGatewayForwardsJobRolesWithResolvedTenantHeaders(t *testing.T) {
 			ID:             tenantID,
 			OrgID:          "org-a",
 			ProductSurface: "axis",
-			Name:           "Org A / axis",
 			Status:         tenantdomain.StatusActive,
 			CreatedAt:      time.Now().UTC(),
 			UpdatedAt:      time.Now().UTC(),
@@ -208,6 +251,10 @@ func TestGatewayForwardsJobRolesWithResolvedTenantHeaders(t *testing.T) {
 }
 
 func gatewayTestRouter(t *testing.T, tenancy TenancyPort, companionURL string) *gin.Engine {
+	return gatewayTestRouterWithSupervisor(t, tenancy, companionURL, nil)
+}
+
+func gatewayTestRouterWithSupervisor(t *testing.T, tenancy TenancyPort, companionURL string, supervisor SupervisorValidatorPort) *gin.Engine {
 	t.Helper()
 	uc, err := NewUseCases(tenancy, companionURL)
 	if err != nil {
@@ -215,7 +262,7 @@ func gatewayTestRouter(t *testing.T, tenancy TenancyPort, companionURL string) *
 	}
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	NewHandler(uc, Options{DefaultPrincipalID: "dev-user"}).Routes(router.Group("/api"))
+	NewHandler(uc, Options{DefaultPrincipalID: "dev-user", SupervisorValidator: supervisor}).Routes(router.Group("/api"))
 	return router
 }
 
@@ -230,4 +277,16 @@ func (f *fakeGatewayTenancy) ResolveAccess(context.Context, string, string) (ten
 		return tenantdomain.Tenant{}, tenantdomain.TenantMember{}, f.err
 	}
 	return f.tenant, f.member, nil
+}
+
+type fakeSupervisorValidator struct {
+	lastTenantID string
+	lastUserID   string
+	err          error
+}
+
+func (f *fakeSupervisorValidator) EnsureActive(_ context.Context, tenantID, userID string) error {
+	f.lastTenantID = tenantID
+	f.lastUserID = userID
+	return f.err
 }

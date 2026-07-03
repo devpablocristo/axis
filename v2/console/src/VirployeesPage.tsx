@@ -7,12 +7,14 @@ import {
 import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import {
   type JobRole,
+  type TenantUser,
   type VirployeeAutonomy,
   type VirployeeAutonomyLevel,
   type Virployee,
   archiveVirployee,
   createVirployee,
   listJobRoles,
+  listUsers,
   listVirployeeAutonomyLevels,
   listVirployees,
   purgeVirployee,
@@ -139,10 +141,18 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
   const [autonomyLevels, setAutonomyLevels] = useState<VirployeeAutonomyLevel[]>(FALLBACK_AUTONOMY_LEVELS)
   const [jobRoles, setJobRoles] = useState<JobRole[]>([])
   const [jobRolesError, setJobRolesError] = useState('')
+  const [users, setUsers] = useState<TenantUser[]>([])
+  const [usersError, setUsersError] = useState('')
   const isActive = Boolean(tenantId && principalId)
   const jobRoleByID = useMemo(() => {
     return new Map(jobRoles.map((jobRole) => [jobRole.id, jobRole]))
   }, [jobRoles])
+  const userByID = useMemo(() => {
+    return new Map(users.map((user) => [user.id, user]))
+  }, [users])
+  const activeSupervisorUsers = useMemo(() => {
+    return users.filter((user) => user.kind !== 'invitation' && user.state === 'active')
+  }, [users])
   const autonomyByLevel = useMemo(() => {
     return new Map(autonomyLevels.map((level) => [level.level, level]))
   }, [autonomyLevels])
@@ -158,6 +168,12 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
       value: jobRole.id,
     }))
   }, [jobRoles])
+  const supervisorOptions = useMemo(() => {
+    return activeSupervisorUsers.map((user) => ({
+      label: userLabel(user),
+      value: user.id,
+    }))
+  }, [activeSupervisorUsers])
 
   const dataSource: NonNullable<CrudPageProps<Virployee>['dataSource']> = useMemo(() => ({
     list: ({ view }) => isActive ? listVirployees(view, tenantId, principalId) : Promise.resolve([]),
@@ -198,6 +214,8 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
     setActionError('')
     setJobRoles([])
     setJobRolesError('')
+    setUsers([])
+    setUsersError('')
   }, [lifecycleView, tenantId])
 
   useEffect(() => {
@@ -217,6 +235,29 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
         if (cancelled) return
         setJobRoles([])
         setJobRolesError(error instanceof Error ? error.message : 'Could not load Job Roles')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [isActive, principalId, reloadVersion, tenantId])
+
+  useEffect(() => {
+    if (!isActive) {
+      setUsers([])
+      setUsersError('')
+      return
+    }
+    let cancelled = false
+    listUsers('active', tenantId, principalId)
+      .then((items) => {
+        if (cancelled) return
+        setUsers(items)
+        setUsersError('')
+      })
+      .catch((error) => {
+        if (cancelled) return
+        setUsers([])
+        setUsersError(error instanceof Error ? error.message : 'Could not load Users')
       })
     return () => {
       cancelled = true
@@ -456,9 +497,9 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
         labelPlural="virployees"
         labelPluralCap="Virployees"
         createLabel="New"
-        columns={virployeeColumns(selectedIds, toggleSelected, autonomyByLevel, jobRoleByID)}
-        formFields={virployeeFormFields(autonomyOptions, jobRoleOptions)}
-        searchText={(row) => virployeeSearchText(row, autonomyByLevel, jobRoleByID)}
+        columns={virployeeColumns(selectedIds, toggleSelected, autonomyByLevel, jobRoleByID, userByID)}
+        formFields={virployeeFormFields(autonomyOptions, jobRoleOptions, supervisorOptions)}
+        searchText={(row) => virployeeSearchText(row, autonomyByLevel, jobRoleByID, userByID)}
         toFormValues={(row) => virployeeToFormValues(row)}
         isValid={isValidVirployeeForm}
         emptyState="No virployees"
@@ -481,8 +522,12 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
             />
             {actionError ? <p role="alert" className="iam-control__inline-error">{actionError}</p> : null}
             {jobRolesError ? <p role="alert" className="iam-control__inline-error">{jobRolesError}</p> : null}
+            {usersError ? <p role="alert" className="iam-control__inline-error">{usersError}</p> : null}
             {!jobRolesError && jobRoles.length === 0 ? (
               <p className="iam-control__inline-note">Create a Job Role before creating Virployees.</p>
+            ) : null}
+            {!usersError && activeSupervisorUsers.length === 0 ? (
+              <p className="iam-control__inline-note">Create a User before assigning a supervisor.</p>
             ) : null}
           </div>
         )}
@@ -533,13 +578,14 @@ function virployeeColumns(
   onToggle: (id: string, checked: boolean) => void,
   autonomyByLevel: ReadonlyMap<VirployeeAutonomy, VirployeeAutonomyLevel>,
   jobRoleByID?: ReadonlyMap<string, JobRole>,
+  userByID?: ReadonlyMap<string, TenantUser>,
 ): CrudPageProps<Virployee>['columns'] {
   return [
     selectionColumn<Virployee>(selectedIds, onToggle),
     { key: 'name', header: 'Name' },
     { key: 'job_role_id', header: 'Job Role', render: (value) => jobRoleName(String(value ?? ''), jobRoleByID) },
     { key: 'autonomy', header: 'Autonomy', render: (value) => formatAutonomy(String(value ?? ''), autonomyByLevel) },
-    { key: 'supervisor_user_id', header: 'Supervisor', render: (value) => shortId(String(value ?? '')) },
+    { key: 'supervisor_user_id', header: 'Supervisor', render: (value) => supervisorName(String(value ?? ''), userByID) },
     { key: 'state', header: 'State', render: (value) => formatState(String(value ?? '')) },
     { key: 'updated_at', header: 'Updated', render: (value) => formatDate(String(value ?? '')) },
   ]
@@ -548,6 +594,7 @@ function virployeeColumns(
 function virployeeFormFields(
   autonomyOptions: Array<{ label: string; value: string }>,
   jobRoleOptions: Array<{ label: string; value: string }>,
+  supervisorOptions: Array<{ label: string; value: string }>,
 ): CrudPageProps<Virployee>['formFields'] {
   return [
     { key: 'name', label: 'Name' },
@@ -567,8 +614,10 @@ function virployeeFormFields(
     },
     {
       key: 'supervisor_user_id',
-      label: 'Supervisor User ID',
-      placeholder: 'Example: 11111111-1111-4111-8111-111111111111',
+      label: 'Supervisor',
+      type: 'select' as const,
+      placeholder: supervisorOptions.length > 0 ? 'Select...' : 'Create a User first',
+      options: supervisorOptions,
       fullWidth: true,
     },
     { key: 'description', label: 'Description (optional)', type: 'textarea' as const, rows: 3, fullWidth: true },
@@ -599,7 +648,7 @@ function isValidVirployeeForm(values: CrudFormValues): boolean {
   return (
     stringValue(values.name).length > 0 &&
     stringValue(values.job_role_id).length > 0 &&
-    isUUID(stringValue(values.supervisor_user_id))
+    stringValue(values.supervisor_user_id).length > 0
   )
 }
 
@@ -607,8 +656,10 @@ function virployeeSearchText(
   row: Virployee,
   autonomyByLevel: ReadonlyMap<VirployeeAutonomy, VirployeeAutonomyLevel>,
   jobRoleByID: ReadonlyMap<string, JobRole>,
+  userByID: ReadonlyMap<string, TenantUser>,
 ): string {
   const jobRole = jobRoleByID.get(row.job_role_id)
+  const supervisor = userByID.get(row.supervisor_user_id)
   return [
     row.id,
     row.name,
@@ -619,6 +670,7 @@ function virployeeSearchText(
     formatAutonomy(row.autonomy, autonomyByLevel),
     row.description,
     row.supervisor_user_id,
+    supervisor?.email,
     row.state,
   ].join(' ')
 }
@@ -716,6 +768,17 @@ function jobRoleName(id: string, jobRoleByID?: ReadonlyMap<string, JobRole>): st
   return jobRole?.name ?? shortId(id)
 }
 
+function supervisorName(id: string, userByID?: ReadonlyMap<string, TenantUser>): string {
+  if (!id) return '-'
+  const user = userByID?.get(id)
+  return user ? userLabel(user) : shortId(id)
+}
+
+function userLabel(user: TenantUser): string {
+  const email = stringValue(user.email)
+  return email || user.id
+}
+
 function isAutonomy(value: string): value is VirployeeAutonomy {
   return ['A0', 'A1', 'A2', 'A3', 'A4', 'A5'].includes(value)
 }
@@ -727,10 +790,6 @@ function formatAutonomy(
   if (!isAutonomy(value)) return value || '-'
   const definition = autonomyByLevel.get(value)
   return definition ? `${value} - ${definition.name}` : value
-}
-
-function isUUID(value: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
 }
 
 function shortId(value: string): string {

@@ -9,10 +9,10 @@ import (
 )
 
 type ResolveInput struct {
-	PrincipalID string
-	Email       string
-	Name        string
-	OrgID       string
+	PrincipalID   string
+	Email         string
+	OrgID         string
+	Authorization string
 }
 
 type Session struct {
@@ -27,7 +27,6 @@ func NormalizeResolveInput(in ResolveInput) (ResolveInput, error) {
 	out := ResolveInput{
 		PrincipalID: strings.TrimSpace(in.PrincipalID),
 		Email:       strings.TrimSpace(in.Email),
-		Name:        strings.TrimSpace(in.Name),
 		OrgID:       strings.TrimSpace(in.OrgID),
 	}
 	if out.PrincipalID == "" {
@@ -38,9 +37,6 @@ func NormalizeResolveInput(in ResolveInput) (ResolveInput, error) {
 	}
 	if out.Email == "" {
 		out.Email = out.PrincipalID
-	}
-	if out.Name == "" {
-		out.Name = out.Email
 	}
 	return out, nil
 }

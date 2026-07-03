@@ -1,0 +1,2 @@
+ALTER TABLE axis_users
+    DROP COLUMN IF EXISTS name;

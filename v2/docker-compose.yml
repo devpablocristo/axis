@@ -76,13 +76,19 @@ services:
       BFF_V2_RUN_MIGRATIONS: ${BFF_V2_RUN_MIGRATIONS:-true}
       BFF_V2_CORS_ORIGINS: ${BFF_V2_CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
       BFF_V2_COMPANION_BASE_URL: ${BFF_V2_COMPANION_BASE_URL:-http://companion-v2:8080}
+      BFF_V2_IDENTITY_PROVIDER: ${BFF_V2_IDENTITY_PROVIDER:-dev}
+      BFF_V2_CLERK_SECRET_KEY: ${BFF_V2_CLERK_SECRET_KEY:-${BFF_V2_CLERK_SECRET:-}}
+      BFF_V2_CLERK_API_BASE_URL: ${BFF_V2_CLERK_API_BASE_URL:-https://api.clerk.com/v1}
+      BFF_V2_CLERK_ISSUER_URL: ${BFF_V2_CLERK_ISSUER_URL:-}
+      BFF_V2_CLERK_WEBHOOK_SECRET: ${BFF_V2_CLERK_WEBHOOK_SECRET:-}
+      BFF_V2_CLERK_INVITE_REDIRECT_URL: ${BFF_V2_CLERK_INVITE_REDIRECT_URL:-}
       BFF_V2_DEV_ACTOR_ID: ${BFF_V2_DEV_ACTOR_ID:-dev-user}
       BFF_V2_DEV_ACTOR_EMAIL: ${BFF_V2_DEV_ACTOR_EMAIL:-dev@example.local}
-      BFF_V2_DEV_ACTOR_NAME: ${BFF_V2_DEV_ACTOR_NAME:-Dev User}
       BFF_V2_DEV_ORG_ID: ${BFF_V2_DEV_ORG_ID:-dev-org}
       BFF_V2_DATABASE_URL: postgres://${BFF_V2_POSTGRES_USER:-postgres}:${BFF_V2_POSTGRES_PASSWORD:-postgres}@bff-v2-postgres:5432/${BFF_V2_POSTGRES_DB:-bff_v2}?sslmode=disable
     volumes:
       - ./bff:/src/bff
+      - ../../platform:/platform:ro
       - ./air.bff.toml:/src/air.bff.toml:ro
       - ./bff/migrations:/src/migrations:ro
       - bff-v2-go-mod-cache:/go/pkg/mod
@@ -107,6 +113,8 @@ services:
     restart: unless-stopped
     environment:
       AXIS_BFF_BASE_URL: ${AXIS_CONSOLE_BFF_BASE_URL:-http://bff-v2:8080}
+      VITE_CLERK_PUBLISHABLE_KEY: ${VITE_CLERK_PUBLISHABLE_KEY:-}
+      VITE_CLERK_JWT_TEMPLATE: ${VITE_CLERK_JWT_TEMPLATE:-axis-bff}
       VITE_HMR_CLIENT_PORT: ${AXIS_CONSOLE_PORT:-5173}
     volumes:
       - ./console:/app

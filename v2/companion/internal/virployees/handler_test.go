@@ -18,7 +18,7 @@ import (
 func TestHandlerCreateValidation(t *testing.T) {
 	router := testRouter(&handlerFakeUseCases{})
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/v1/virployees", strings.NewReader(`{"name":"","job_role_id":"`+uuid.NewString()+`","supervisor_user_id":"`+uuid.NewString()+`"}`))
+	req := httptest.NewRequest(http.MethodPost, "/v1/virployees", strings.NewReader(`{"name":"","job_role_id":"`+uuid.NewString()+`","supervisor_user_id":"dev-user"}`))
 	req.Header.Set("Content-Type", "application/json")
 
 	router.ServeHTTP(rec, req)
@@ -32,7 +32,7 @@ func TestHandlerCreateReturnsAutonomy(t *testing.T) {
 	router := testRouter(&handlerFakeUseCases{})
 	rec := httptest.NewRecorder()
 	jobRoleID := uuid.New()
-	body := `{"name":"Ops","job_role_id":"` + jobRoleID.String() + `","supervisor_user_id":"` + uuid.NewString() + `","autonomy":"A2"}`
+	body := `{"name":"Ops","job_role_id":"` + jobRoleID.String() + `","supervisor_user_id":"dev-user","autonomy":"A2"}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/virployees", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Tenant-ID", "tenant-1")
@@ -180,7 +180,7 @@ func (f *handlerFakeUseCases) ListTrash(context.Context, string) ([]domain.Virpl
 }
 
 func (f *handlerFakeUseCases) Get(_ context.Context, _ string, id uuid.UUID) (domain.Virployee, error) {
-	return domain.Virployee{ID: id, Name: "Ops", JobRoleID: uuid.New(), SupervisorUserID: uuid.New(), Autonomy: domain.AutonomyA1}, nil
+	return domain.Virployee{ID: id, Name: "Ops", JobRoleID: uuid.New(), SupervisorUserID: "dev-user", Autonomy: domain.AutonomyA1}, nil
 }
 
 func (f *handlerFakeUseCases) Update(_ context.Context, _ string, id uuid.UUID, input domain.UpdateInput) (domain.Virployee, error) {

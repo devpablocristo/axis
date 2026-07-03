@@ -9,11 +9,15 @@ import (
 )
 
 type Org struct {
-	ID        string
-	Name      string
-	Status    string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID            string
+	Provider      string
+	ProviderOrgID string
+	Name          string
+	Slug          string
+	Status        string
+	SyncedAt      sql.NullTime
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 
 	ArchivedAt sql.NullTime
 	TrashedAt  sql.NullTime
@@ -23,8 +27,8 @@ type Org struct {
 type Tenant struct {
 	ID             uuid.UUID
 	OrgID          string
+	OrgName        string
 	ProductSurface string
-	Name           string
 	Status         string
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
@@ -49,14 +53,18 @@ type TenantMember struct {
 
 func (m Org) ToDomain() domain.Org {
 	return domain.Org{
-		ID:         m.ID,
-		Name:       m.Name,
-		Status:     m.Status,
-		CreatedAt:  m.CreatedAt,
-		UpdatedAt:  m.UpdatedAt,
-		ArchivedAt: nullTimePtr(m.ArchivedAt),
-		TrashedAt:  nullTimePtr(m.TrashedAt),
-		PurgeAfter: nullTimePtr(m.PurgeAfter),
+		ID:            m.ID,
+		Provider:      m.Provider,
+		ProviderOrgID: m.ProviderOrgID,
+		Name:          m.Name,
+		Slug:          m.Slug,
+		Status:        m.Status,
+		SyncedAt:      nullTimePtr(m.SyncedAt),
+		CreatedAt:     m.CreatedAt,
+		UpdatedAt:     m.UpdatedAt,
+		ArchivedAt:    nullTimePtr(m.ArchivedAt),
+		TrashedAt:     nullTimePtr(m.TrashedAt),
+		PurgeAfter:    nullTimePtr(m.PurgeAfter),
 	}
 }
 
@@ -64,8 +72,8 @@ func (m Tenant) ToDomain() domain.Tenant {
 	return domain.Tenant{
 		ID:             m.ID,
 		OrgID:          m.OrgID,
+		OrgName:        m.OrgName,
 		ProductSurface: m.ProductSurface,
-		Name:           m.Name,
 		Status:         m.Status,
 		CreatedAt:      m.CreatedAt,
 		UpdatedAt:      m.UpdatedAt,

@@ -18,23 +18,25 @@ type SessionResponse struct {
 }
 
 type UserResponse struct {
-	ID         string     `json:"id"`
-	Email      string     `json:"email"`
-	Name       string     `json:"name"`
-	Status     string     `json:"status"`
-	CreatedAt  time.Time  `json:"created_at"`
-	UpdatedAt  time.Time  `json:"updated_at"`
-	ArchivedAt *time.Time `json:"archived_at"`
-	TrashedAt  *time.Time `json:"trashed_at"`
-	PurgeAfter *time.Time `json:"purge_after"`
+	ID             string     `json:"id"`
+	Provider       string     `json:"provider"`
+	ProviderUserID string     `json:"provider_user_id"`
+	Email          string     `json:"email"`
+	Status         string     `json:"status"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
+	ArchivedAt     *time.Time `json:"archived_at"`
+	TrashedAt      *time.Time `json:"trashed_at"`
+	PurgeAfter     *time.Time `json:"purge_after"`
 }
 
 type TenantResponse struct {
 	ID             string     `json:"id"`
 	OrgID          string     `json:"org_id"`
+	OrgName        string     `json:"org_name"`
 	ProductSurface string     `json:"product_surface"`
-	Name           string     `json:"name"`
 	Status         string     `json:"status"`
+	State          string     `json:"state"`
 	CreatedAt      time.Time  `json:"created_at"`
 	UpdatedAt      time.Time  `json:"updated_at"`
 	ArchivedAt     *time.Time `json:"archived_at"`
@@ -59,15 +61,16 @@ func SessionFromDomain(session sessiondomain.Session) SessionResponse {
 
 func UserFromDomain(user userdomain.User) UserResponse {
 	return UserResponse{
-		ID:         user.ID,
-		Email:      user.Email,
-		Name:       user.Name,
-		Status:     user.Status,
-		CreatedAt:  user.CreatedAt,
-		UpdatedAt:  user.UpdatedAt,
-		ArchivedAt: user.ArchivedAt,
-		TrashedAt:  user.TrashedAt,
-		PurgeAfter: user.PurgeAfter,
+		ID:             user.ID,
+		Provider:       user.Provider,
+		ProviderUserID: user.ProviderUserID,
+		Email:          user.Email,
+		Status:         user.Status,
+		CreatedAt:      user.CreatedAt,
+		UpdatedAt:      user.UpdatedAt,
+		ArchivedAt:     user.ArchivedAt,
+		TrashedAt:      user.TrashedAt,
+		PurgeAfter:     user.PurgeAfter,
 	}
 }
 
@@ -75,9 +78,10 @@ func TenantFromDomain(tenant tenantdomain.Tenant) TenantResponse {
 	return TenantResponse{
 		ID:             tenant.ID.String(),
 		OrgID:          tenant.OrgID,
+		OrgName:        tenant.OrgName,
 		ProductSurface: tenant.ProductSurface,
-		Name:           tenant.Name,
 		Status:         tenant.Status,
+		State:          tenant.State(),
 		CreatedAt:      tenant.CreatedAt,
 		UpdatedAt:      tenant.UpdatedAt,
 		ArchivedAt:     tenant.ArchivedAt,

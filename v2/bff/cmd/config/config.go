@@ -14,26 +14,40 @@ type Config struct {
 	MaxBodyBytes     int64
 	CORSOrigins      []string
 	CompanionBaseURL string
+	IdentityProvider string
+
+	ClerkSecretKey         string
+	ClerkAPIBaseURL        string
+	ClerkIssuerURL         string
+	ClerkWebhookSecret     string
+	ClerkInviteRedirectURL string
 
 	DevPrincipalID    string
 	DevPrincipalEmail string
-	DevPrincipalName  string
 	DevOrgID          string
 }
 
 func Load() Config {
 	return Config{
-		Environment:       envconfig.NormalizeEnv(envconfig.Get("BFF_V2_ENV", "development")),
-		Port:              envconfig.Get("PORT", "18080"),
-		DatabaseURL:       envconfig.Get("BFF_V2_DATABASE_URL", envconfig.Get("DATABASE_URL", "")),
-		RunMigrations:     envconfig.Bool("BFF_V2_RUN_MIGRATIONS", true),
-		MaxBodyBytes:      int64(envconfig.Int("BFF_V2_MAX_BODY_BYTES", 1<<20)),
-		CORSOrigins:       splitCSV(envconfig.Get("BFF_V2_CORS_ORIGINS", "")),
-		CompanionBaseURL:  strings.TrimRight(envconfig.Get("BFF_V2_COMPANION_BASE_URL", "http://127.0.0.1:18086"), "/"),
-		DevPrincipalID:    envconfig.Get("BFF_V2_DEV_PRINCIPAL_ID", envconfig.Get("BFF_V2_DEV_ACTOR_ID", "dev-user")),
-		DevPrincipalEmail: envconfig.Get("BFF_V2_DEV_PRINCIPAL_EMAIL", envconfig.Get("BFF_V2_DEV_ACTOR_EMAIL", "dev@example.local")),
-		DevPrincipalName:  envconfig.Get("BFF_V2_DEV_PRINCIPAL_NAME", envconfig.Get("BFF_V2_DEV_ACTOR_NAME", "Dev User")),
-		DevOrgID:          envconfig.Get("BFF_V2_DEV_ORG_ID", "dev-org"),
+		Environment:      envconfig.NormalizeEnv(envconfig.Get("BFF_V2_ENV", "development")),
+		Port:             envconfig.Get("PORT", "18080"),
+		DatabaseURL:      envconfig.Get("BFF_V2_DATABASE_URL", envconfig.Get("DATABASE_URL", "")),
+		RunMigrations:    envconfig.Bool("BFF_V2_RUN_MIGRATIONS", true),
+		MaxBodyBytes:     int64(envconfig.Int("BFF_V2_MAX_BODY_BYTES", 1<<20)),
+		CORSOrigins:      splitCSV(envconfig.Get("BFF_V2_CORS_ORIGINS", "")),
+		CompanionBaseURL: strings.TrimRight(envconfig.Get("BFF_V2_COMPANION_BASE_URL", "http://127.0.0.1:18086"), "/"),
+		IdentityProvider: strings.TrimSpace(strings.ToLower(envconfig.Get("BFF_V2_IDENTITY_PROVIDER", "dev"))),
+		ClerkSecretKey:   envconfig.Get("BFF_V2_CLERK_SECRET_KEY", envconfig.Get("BFF_V2_CLERK_SECRET", envconfig.Get("CLERK_SECRET_KEY", ""))),
+		ClerkAPIBaseURL:  strings.TrimRight(envconfig.Get("BFF_V2_CLERK_API_BASE_URL", "https://api.clerk.com/v1"), "/"),
+		ClerkIssuerURL:   strings.TrimRight(envconfig.Get("BFF_V2_CLERK_ISSUER_URL", envconfig.Get("CLERK_ISSUER_URL", "")), "/"),
+		ClerkWebhookSecret: envconfig.Get(
+			"BFF_V2_CLERK_WEBHOOK_SECRET",
+			envconfig.Get("CLERK_WEBHOOK_SECRET", ""),
+		),
+		ClerkInviteRedirectURL: envconfig.Get("BFF_V2_CLERK_INVITE_REDIRECT_URL", ""),
+		DevPrincipalID:         envconfig.Get("BFF_V2_DEV_PRINCIPAL_ID", envconfig.Get("BFF_V2_DEV_ACTOR_ID", "dev-user")),
+		DevPrincipalEmail:      envconfig.Get("BFF_V2_DEV_PRINCIPAL_EMAIL", envconfig.Get("BFF_V2_DEV_ACTOR_EMAIL", "dev@example.local")),
+		DevOrgID:               envconfig.Get("BFF_V2_DEV_ORG_ID", "dev-org"),
 	}
 }
 

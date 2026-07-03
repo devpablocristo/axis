@@ -13,6 +13,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@clerk/clerk-react": "^5.61.8",
     "@devpablocristo/platform-crud-ui": "^0.4.2",
     "@vitejs/plugin-react": "^6.0.3",
     "lucide-react": "^1.21.0",

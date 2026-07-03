@@ -16,13 +16,13 @@ func TestUseCasesCreateAndListActive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	supervisorID := uuid.New()
+	supervisorID := "dev-user"
 	jobRoleID := uuid.New()
 
 	created, err := uc.Create(context.Background(), "tenant-1", domain.CreateInput{
 		Name:             " Sales Assistant ",
 		JobRoleID:        jobRoleID.String(),
-		SupervisorUserID: " " + supervisorID.String() + " ",
+		SupervisorUserID: " " + supervisorID + " ",
 		Autonomy:         "A2",
 	})
 	if err != nil {
@@ -53,7 +53,7 @@ func TestUseCasesCreateDefaultsAutonomyToA1AndValidatesJobRole(t *testing.T) {
 	created, err := uc.Create(context.Background(), "tenant-1", domain.CreateInput{
 		Name:             "Ops",
 		JobRoleID:        jobRoleID.String(),
-		SupervisorUserID: uuid.NewString(),
+		SupervisorUserID: "dev-user",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -77,7 +77,7 @@ func TestUseCasesCreateFailsWhenJobRoleIsNotActive(t *testing.T) {
 	_, err = uc.Create(context.Background(), "tenant-1", domain.CreateInput{
 		Name:             "Ops",
 		JobRoleID:        jobRoleID.String(),
-		SupervisorUserID: uuid.NewString(),
+		SupervisorUserID: "dev-user",
 	})
 	if !domainerr.IsConflict(err) {
 		t.Fatalf("expected conflict for inactive job role, got %v", err)
@@ -90,7 +90,7 @@ func TestUseCasesLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := uc.Create(context.Background(), "tenant-1", domain.CreateInput{Name: "Ops", JobRoleID: uuid.NewString(), SupervisorUserID: uuid.NewString()})
+	created, err := uc.Create(context.Background(), "tenant-1", domain.CreateInput{Name: "Ops", JobRoleID: uuid.NewString(), SupervisorUserID: "dev-user"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,14 +134,14 @@ func TestUseCasesUpdateArchivedOrTrashedFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := uc.Create(context.Background(), "tenant-1", domain.CreateInput{Name: "Ops", JobRoleID: uuid.NewString(), SupervisorUserID: uuid.NewString()})
+	created, err := uc.Create(context.Background(), "tenant-1", domain.CreateInput{Name: "Ops", JobRoleID: uuid.NewString(), SupervisorUserID: "dev-user"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := uc.Archive(context.Background(), "tenant-1", created.ID, "", ""); err != nil {
 		t.Fatal(err)
 	}
-	_, err = uc.Update(context.Background(), "tenant-1", created.ID, domain.UpdateInput{Name: "New", JobRoleID: uuid.NewString(), SupervisorUserID: uuid.NewString()})
+	_, err = uc.Update(context.Background(), "tenant-1", created.ID, domain.UpdateInput{Name: "New", JobRoleID: uuid.NewString(), SupervisorUserID: "dev-user"})
 	if !domainerr.IsConflict(err) {
 		t.Fatalf("expected conflict updating archived, got %v", err)
 	}

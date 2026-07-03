@@ -3,18 +3,30 @@ package dto
 import "github.com/devpablocristo/bff-v2/internal/tenancy/usecases/domain"
 
 type CreateTenantRequest struct {
-	OrgID          string `json:"org_id" binding:"required"`
+	OrgID          string `json:"org_id"`
+	OrgName        string `json:"org_name"`
 	ProductSurface string `json:"product_surface" binding:"required"`
-	Name           string `json:"name"`
-	OwnerUserID    string `json:"owner_user_id"`
 }
 
-func (r CreateTenantRequest) ToDomain() domain.CreateTenantInput {
+func (r CreateTenantRequest) ToDomain(principalID string) domain.CreateTenantInput {
 	return domain.CreateTenantInput{
 		OrgID:          r.OrgID,
+		OrgName:        r.OrgName,
 		ProductSurface: r.ProductSurface,
-		Name:           r.Name,
-		OwnerUserID:    r.OwnerUserID,
+		PrincipalID:    principalID,
+		OwnerUserID:    principalID,
+	}
+}
+
+type UpdateTenantRequest struct {
+	OrgName string `json:"org_name" binding:"required"`
+}
+
+func (r UpdateTenantRequest) ToDomain(tenantID, principalID string) domain.UpdateTenantInput {
+	return domain.UpdateTenantInput{
+		TenantID:    tenantID,
+		OrgName:     r.OrgName,
+		PrincipalID: principalID,
 	}
 }
 

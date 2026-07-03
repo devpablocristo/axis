@@ -21,7 +21,7 @@ type Virployee struct {
 	Name             string
 	JobRoleID        uuid.UUID
 	Description      string
-	SupervisorUserID uuid.UUID
+	SupervisorUserID string
 	Autonomy         AutonomyLevel
 
 	CreatedAt time.Time
@@ -52,7 +52,7 @@ type NormalizedCreateInput struct {
 	Name             string
 	JobRoleID        uuid.UUID
 	Description      string
-	SupervisorUserID uuid.UUID
+	SupervisorUserID string
 	Autonomy         AutonomyLevel
 }
 
@@ -60,7 +60,7 @@ type NormalizedUpdateInput struct {
 	Name             string
 	JobRoleID        uuid.UUID
 	Description      string
-	SupervisorUserID uuid.UUID
+	SupervisorUserID string
 	Autonomy         AutonomyLevel
 }
 
@@ -76,7 +76,7 @@ func (v Virployee) State() State {
 }
 
 func NormalizeCreateInput(in CreateInput) (NormalizedCreateInput, error) {
-	supervisorID, err := parseRequiredUUID(in.SupervisorUserID, "supervisor_user_id")
+	supervisorID, err := parseRequiredString(in.SupervisorUserID, "supervisor_user_id")
 	if err != nil {
 		return NormalizedCreateInput{}, err
 	}
@@ -102,7 +102,7 @@ func NormalizeCreateInput(in CreateInput) (NormalizedCreateInput, error) {
 }
 
 func NormalizeUpdateInput(in UpdateInput) (NormalizedUpdateInput, error) {
-	supervisorID, err := parseRequiredUUID(in.SupervisorUserID, "supervisor_user_id")
+	supervisorID, err := parseRequiredString(in.SupervisorUserID, "supervisor_user_id")
 	if err != nil {
 		return NormalizedUpdateInput{}, err
 	}
@@ -137,4 +137,12 @@ func parseRequiredUUID(raw, field string) (uuid.UUID, error) {
 		return uuid.Nil, domainerr.Validation(field + " must be a valid UUID")
 	}
 	return id, nil
+}
+
+func parseRequiredString(raw, field string) (string, error) {
+	out := strings.TrimSpace(raw)
+	if out == "" {
+		return "", domainerr.Validation(field + " is required")
+	}
+	return out, nil
 }

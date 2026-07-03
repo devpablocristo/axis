@@ -49,7 +49,7 @@ func VirployeeFromDomain(v domain.Virployee) VirployeeResponse {
 		Name:             v.Name,
 		JobRoleID:        v.JobRoleID.String(),
 		Description:      v.Description,
-		SupervisorUserID: v.SupervisorUserID.String(),
+		SupervisorUserID: v.SupervisorUserID,
 		Autonomy:         string(v.Autonomy),
 		State:            string(v.State()),
 		CreatedAt:        v.CreatedAt,

@@ -36,7 +36,7 @@ func (u *UseCases) Resolve(ctx context.Context, input gatewaydomain.ResolveInput
 		return gatewaydomain.ResolvedContext{}, err
 	}
 	return gatewaydomain.ResolvedContext{
-		PrincipalID:    normalized.PrincipalID,
+		PrincipalID:    member.UserID,
 		TenantID:       tenant.ID.String(),
 		OrgID:          tenant.OrgID,
 		ProductSurface: tenant.ProductSurface,

@@ -69,7 +69,7 @@ Public representation:
   "name": "Sales Assistant",
   "job_role_id": "uuid",
   "description": "Helps with commercial follow-up.",
-  "supervisor_user_id": "uuid",
+  "supervisor_user_id": "dev-user",
   "autonomy": "A1",
   "state": "active",
   "created_at": "2026-07-02T12:00:00Z",
@@ -87,8 +87,9 @@ Fields:
 - `job_role_id`: required UUID reference to an active Job Role in the same
   tenant. It replaces the old free-text `role`.
 - `description`: optional, trimmed.
-- `supervisor_user_id`: required UUID reference to the human responsible for
-  the Virployee. It is stored as an opaque reference in this version.
+- `supervisor_user_id`: required opaque string reference to the human
+  responsible for the Virployee. BFF validates it against tenant Users before
+  forwarding requests; Companion only stores the reference.
 - `autonomy`: optional input. If empty, it defaults to global `A1`. Accepted
   values are `A0`, `A1`, `A2`, `A3`, `A4` and `A5`. In this version it is
   persisted as configuration only; it does not enforce runtime permissions.
@@ -238,7 +239,7 @@ Required columns:
 - `name text not null`
 - `job_role_id uuid not null references job_roles(id)`
 - `description text not null default ''`
-- `supervisor_user_id uuid not null`
+- `supervisor_user_id text not null`
 - `autonomy text not null default 'A1'`
 - `created_at timestamptz not null`
 - `updated_at timestamptz not null`
@@ -333,7 +334,7 @@ Request:
   "name": "Sales Assistant",
   "job_role_id": "22222222-2222-4222-8222-222222222222",
   "description": "Helps with commercial follow-up.",
-  "supervisor_user_id": "11111111-1111-4111-8111-111111111111",
+  "supervisor_user_id": "dev-user",
   "autonomy": ""
 }
 ```
@@ -346,7 +347,7 @@ Response: `201 Created`
   "name": "Sales Assistant",
   "job_role_id": "22222222-2222-4222-8222-222222222222",
   "description": "Helps with commercial follow-up.",
-  "supervisor_user_id": "11111111-1111-4111-8111-111111111111",
+  "supervisor_user_id": "dev-user",
   "autonomy": "A1",
   "state": "active",
   "created_at": "2026-07-02T12:00:00Z",
@@ -362,7 +363,7 @@ Validation:
 - `name` is required.
 - `job_role_id` is required, must be a UUID and must reference an active Job
   Role in the same tenant.
-- `supervisor_user_id` is required and must be a UUID.
+- `supervisor_user_id` is required, trimmed and must be non-empty.
 - `autonomy` is optional. Empty or omitted values default to `A1`.
 - `autonomy` must be one of `A0`, `A1`, `A2`, `A3`, `A4` or `A5`.
 - Unknown fields should be rejected if the HTTP helper supports it without
@@ -384,7 +385,7 @@ Response: `200 OK`
       "name": "Sales Assistant",
       "job_role_id": "22222222-2222-4222-8222-222222222222",
       "description": "Helps with commercial follow-up.",
-      "supervisor_user_id": "11111111-1111-4111-8111-111111111111",
+      "supervisor_user_id": "dev-user",
       "autonomy": "A1",
       "state": "active",
       "created_at": "2026-07-02T12:00:00Z",
@@ -452,7 +453,7 @@ Request:
   "name": "Sales Assistant",
   "job_role_id": "22222222-2222-4222-8222-222222222222",
   "description": "Updated description.",
-  "supervisor_user_id": "11111111-1111-4111-8111-111111111111",
+  "supervisor_user_id": "dev-user",
   "autonomy": "A2"
 }
 ```

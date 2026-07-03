@@ -148,7 +148,7 @@ contracts exist in `companion`.
 ## Decision Summary
 
 - `role` is not the final Virployee work model; `job_role_id` replaces it.
-- `supervisor_user_id` entered the v2 API as an opaque UUID reference to the
+- `supervisor_user_id` entered the v2 API as an opaque string reference to the
   responsible human.
 - `autonomy` enters the core now with safe default `A1`.
 - `profile_id`, `capability_ids` and `memory_id` are deferred core concepts.

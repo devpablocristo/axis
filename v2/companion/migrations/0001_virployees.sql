@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS virployees (
     name text NOT NULL,
     job_role_id uuid NOT NULL REFERENCES job_roles(id),
     description text NOT NULL DEFAULT '',
-    supervisor_user_id uuid NOT NULL,
+    supervisor_user_id text NOT NULL,
     autonomy text NOT NULL DEFAULT 'A1',
     created_at timestamptz NOT NULL,
     updated_at timestamptz NOT NULL,
