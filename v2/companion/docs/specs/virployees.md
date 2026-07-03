@@ -282,6 +282,48 @@ GET /healthz
 GET /readyz
 ```
 
+### Autonomy Levels
+
+```text
+GET /v1/virployees/autonomy-levels
+```
+
+Response: `200 OK`
+
+```json
+{
+  "data": [
+    {
+      "level": "A1",
+      "name": "Recommendation",
+      "description": "Can read, analyze and recommend actions.",
+      "allowed_action_classes": [
+        {
+          "class": "observe",
+          "name": "Observe",
+          "description": "Read context and hold conversation without recommending, drafting or executing actions.",
+          "requires_approval": false
+        },
+        {
+          "class": "recommend",
+          "name": "Recommend",
+          "description": "Analyze context and recommend actions without preparing executable output.",
+          "requires_approval": false
+        }
+      ]
+    }
+  ]
+}
+```
+
+Rules:
+
+- Return all backend-supported autonomy levels, `A0` through `A5`.
+- `allowed_action_classes` is derived from the cumulative autonomy rules.
+- This endpoint is static domain metadata; it does not create or mutate data.
+- Console currently shows only `A0` through `A3`. `A4` and `A5` remain valid in
+  the backend for future governance/runtime phases.
+
 ### Create
 
 ```text
@@ -346,6 +388,7 @@ Response: `200 OK`
       "role": "sales_assistant",
       "description": "Helps with commercial follow-up.",
       "supervisor_user_id": "11111111-1111-4111-8111-111111111111",
+      "autonomy": "A1",
       "state": "active",
       "created_at": "2026-07-02T12:00:00Z",
       "updated_at": "2026-07-02T12:00:00Z",

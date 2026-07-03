@@ -5,11 +5,14 @@ import {
   type CrudPageProps,
 } from '@devpablocristo/platform-crud-ui'
 import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
+import { createPortal } from 'react-dom'
 import {
   type VirployeeAutonomy,
+  type VirployeeAutonomyLevel,
   type Virployee,
   archiveVirployee,
   createVirployee,
+  listVirployeeAutonomyLevels,
   listVirployees,
   purgeVirployee,
   restoreVirployee,
@@ -21,23 +24,109 @@ import {
 type CrudLifecycleView = 'active' | 'archived' | 'trash'
 type BulkAction = 'archive' | 'trash' | 'restore' | 'purge'
 
-type AgentsControlCenterProps = {
+type VirployeesPageProps = {
   tenantId: string
   principalId: string
 }
 
-const AUTONOMY_OPTIONS: Array<{ label: string; value: VirployeeAutonomy }> = [
-  { label: 'A0', value: 'A0' },
-  { label: 'A1', value: 'A1' },
-  { label: 'A2', value: 'A2' },
-  { label: 'A3', value: 'A3' },
+const VISIBLE_AUTONOMY_LEVELS: VirployeeAutonomy[] = ['A0', 'A1', 'A2', 'A3']
+
+const FALLBACK_AUTONOMY_LEVELS: VirployeeAutonomyLevel[] = [
+  {
+    level: 'A0',
+    name: 'Conversation',
+    description: 'Can hold conversation and read contextual information.',
+    allowed_action_classes: [
+      {
+        class: 'observe',
+        name: 'Observe',
+        description: 'Read context and hold conversation.',
+        requires_approval: false,
+      },
+    ],
+  },
+  {
+    level: 'A1',
+    name: 'Recommendation',
+    description: 'Can read, analyze and recommend actions.',
+    allowed_action_classes: [
+      {
+        class: 'observe',
+        name: 'Observe',
+        description: 'Read context and hold conversation.',
+        requires_approval: false,
+      },
+      {
+        class: 'recommend',
+        name: 'Recommend',
+        description: 'Analyze context and recommend actions.',
+        requires_approval: false,
+      },
+    ],
+  },
+  {
+    level: 'A2',
+    name: 'Draft',
+    description: 'Can prepare plans or executable drafts.',
+    allowed_action_classes: [
+      {
+        class: 'observe',
+        name: 'Observe',
+        description: 'Read context and hold conversation.',
+        requires_approval: false,
+      },
+      {
+        class: 'recommend',
+        name: 'Recommend',
+        description: 'Analyze context and recommend actions.',
+        requires_approval: false,
+      },
+      {
+        class: 'draft',
+        name: 'Draft',
+        description: 'Prepare plans or executable drafts.',
+        requires_approval: false,
+      },
+    ],
+  },
+  {
+    level: 'A3',
+    name: 'Limited execution',
+    description: 'Can execute low-risk reversible writes.',
+    allowed_action_classes: [
+      {
+        class: 'observe',
+        name: 'Observe',
+        description: 'Read context and hold conversation.',
+        requires_approval: false,
+      },
+      {
+        class: 'recommend',
+        name: 'Recommend',
+        description: 'Analyze context and recommend actions.',
+        requires_approval: false,
+      },
+      {
+        class: 'draft',
+        name: 'Draft',
+        description: 'Prepare plans or executable drafts.',
+        requires_approval: false,
+      },
+      {
+        class: 'write_low',
+        name: 'Low-risk write',
+        description: 'Execute low-risk reversible writes.',
+        requires_approval: false,
+      },
+    ],
+  },
 ]
 
 const CrudPage = PlatformCrudPage as unknown as <T extends { id: string }>(
   props: CrudPageProps<T>,
 ) => ReactElement
 
-export function AgentsControlCenter({ tenantId, principalId }: AgentsControlCenterProps) {
+export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
   const rootRef = useRef<HTMLElement | null>(null)
   const [lifecycleView, setLifecycleView] = useState<CrudLifecycleView>('active')
   const [selectedIds, setSelectedIds] = useState<string[]>([])
@@ -45,7 +134,20 @@ export function AgentsControlCenter({ tenantId, principalId }: AgentsControlCent
   const [bulkBusy, setBulkBusy] = useState(false)
   const [reloadVersion, setReloadVersion] = useState(0)
   const [actionError, setActionError] = useState('')
+  const [autonomyLevels, setAutonomyLevels] = useState<VirployeeAutonomyLevel[]>(FALLBACK_AUTONOMY_LEVELS)
+  const [autonomyHelpHost, setAutonomyHelpHost] = useState<HTMLElement | null>(null)
+  const [selectedAutonomy, setSelectedAutonomy] = useState<VirployeeAutonomy>('A1')
+  const [usesDefaultAutonomy, setUsesDefaultAutonomy] = useState(true)
   const isActive = Boolean(tenantId && principalId)
+  const autonomyByLevel = useMemo(() => {
+    return new Map(autonomyLevels.map((level) => [level.level, level]))
+  }, [autonomyLevels])
+  const autonomyOptions = useMemo(() => {
+    return autonomyLevels.map((level) => ({
+      label: `${level.level} - ${level.name}`,
+      value: level.level,
+    }))
+  }, [autonomyLevels])
 
   const dataSource: NonNullable<CrudPageProps<Virployee>['dataSource']> = useMemo(() => ({
     list: ({ view }) => isActive ? listVirployees(view, tenantId, principalId) : Promise.resolve([]),
@@ -85,6 +187,26 @@ export function AgentsControlCenter({ tenantId, principalId }: AgentsControlCent
   }, [lifecycleView, tenantId])
 
   useEffect(() => {
+    if (!isActive) {
+      setAutonomyLevels(FALLBACK_AUTONOMY_LEVELS)
+      return
+    }
+    let cancelled = false
+    listVirployeeAutonomyLevels(tenantId, principalId)
+      .then((levels) => {
+        if (cancelled) return
+        const visible = levels.filter((level) => VISIBLE_AUTONOMY_LEVELS.includes(level.level))
+        setAutonomyLevels(visible.length > 0 ? visible : FALLBACK_AUTONOMY_LEVELS)
+      })
+      .catch(() => {
+        if (!cancelled) setAutonomyLevels(FALLBACK_AUTONOMY_LEVELS)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [isActive, principalId, tenantId])
+
+  useEffect(() => {
     if (!createRequested) return
     const handle = window.setTimeout(() => {
       const buttons = Array.from(
@@ -97,6 +219,57 @@ export function AgentsControlCenter({ tenantId, principalId }: AgentsControlCent
     }, 0)
     return () => window.clearTimeout(handle)
   }, [createRequested, reloadVersion])
+
+  useEffect(() => {
+    const root = rootRef.current
+    if (!root) return
+
+    const syncAutonomyHelp = () => {
+      const select = root.querySelector<HTMLSelectElement>('#crud-field-autonomy')
+      if (!select) {
+        setAutonomyHelpHost(null)
+        setSelectedAutonomy('A1')
+        setUsesDefaultAutonomy(true)
+        return
+      }
+      const raw = select.value.trim()
+      setSelectedAutonomy(isAutonomy(raw) ? raw : 'A1')
+      setUsesDefaultAutonomy(raw === '')
+
+      const fieldGroup = select.closest('.form-group')
+      if (!fieldGroup) {
+        setAutonomyHelpHost(null)
+        return
+      }
+      let host = root.querySelector<HTMLElement>('#virployee-autonomy-help-host')
+      if (!host) {
+        host = document.createElement('div')
+        host.id = 'virployee-autonomy-help-host'
+        host.className = 'virployee-autonomy-help-host full-width'
+      }
+      if (host.previousElementSibling !== fieldGroup) {
+        fieldGroup.insertAdjacentElement('afterend', host)
+      }
+      setAutonomyHelpHost(host)
+    }
+
+    const handleChange = (event: Event) => {
+      const target = event.target
+      if (target instanceof HTMLSelectElement && target.id === 'crud-field-autonomy') {
+        syncAutonomyHelp()
+      }
+    }
+
+    const observer = new MutationObserver(syncAutonomyHelp)
+    observer.observe(root, { childList: true, subtree: true })
+    root.addEventListener('change', handleChange)
+    syncAutonomyHelp()
+
+    return () => {
+      observer.disconnect()
+      root.removeEventListener('change', handleChange)
+    }
+  }, [lifecycleView, reloadVersion, tenantId])
 
   const toggleSelected = (id: string, checked: boolean) => {
     setSelectedIds((current) => (
@@ -174,9 +347,9 @@ export function AgentsControlCenter({ tenantId, principalId }: AgentsControlCent
         labelPlural="virployees"
         labelPluralCap="Virployees"
         createLabel="New"
-        columns={virployeeColumns(selectedIds, toggleSelected)}
-        formFields={virployeeFormFields()}
-        searchText={virployeeSearchText}
+        columns={virployeeColumns(selectedIds, toggleSelected, autonomyByLevel)}
+        formFields={virployeeFormFields(autonomyOptions)}
+        searchText={(row) => virployeeSearchText(row, autonomyByLevel)}
         toFormValues={virployeeToFormValues}
         isValid={isValidVirployeeForm}
         emptyState="No virployees"
@@ -199,6 +372,13 @@ export function AgentsControlCenter({ tenantId, principalId }: AgentsControlCent
         toolbarActions={lifecycleToolbarActions(lifecycleView, setExternalLifecycleView)}
         featureFlags={{ csvToolbar: false }}
       />
+      {autonomyHelpHost ? createPortal(
+        <AutonomyDetails
+          definition={autonomyByLevel.get(selectedAutonomy)}
+          usesDefault={usesDefaultAutonomy}
+        />,
+        autonomyHelpHost,
+      ) : null}
     </section>
   )
 }
@@ -206,19 +386,23 @@ export function AgentsControlCenter({ tenantId, principalId }: AgentsControlCent
 function virployeeColumns(
   selectedIds: string[],
   onToggle: (id: string, checked: boolean) => void,
+  autonomyByLevel: ReadonlyMap<VirployeeAutonomy, VirployeeAutonomyLevel>,
 ): CrudPageProps<Virployee>['columns'] {
   return [
     selectionColumn<Virployee>(selectedIds, onToggle),
     { key: 'name', header: 'Name' },
     { key: 'role', header: 'Role' },
-    { key: 'autonomy', header: 'Autonomy' },
+    { key: 'autonomy', header: 'Autonomy', render: (value) => formatAutonomy(String(value ?? ''), autonomyByLevel) },
     { key: 'supervisor_user_id', header: 'Supervisor', render: (value) => shortId(String(value ?? '')) },
     { key: 'state', header: 'State', render: (value) => formatState(String(value ?? '')) },
     { key: 'updated_at', header: 'Updated', render: (value) => formatDate(String(value ?? '')) },
   ]
 }
 
-function virployeeFormFields(): CrudPageProps<Virployee>['formFields'] {
+function virployeeFormFields(
+  autonomyOptions: Array<{ label: string; value: string }>,
+): CrudPageProps<Virployee>['formFields'] {
+  const defaultAutonomy = autonomyOptions.find((option) => option.value === 'A1')?.label ?? 'A1 - Recommendation'
   return [
     { key: 'name', label: 'Name' },
     { key: 'role', label: 'Role' },
@@ -226,7 +410,8 @@ function virployeeFormFields(): CrudPageProps<Virployee>['formFields'] {
       key: 'autonomy',
       label: 'Autonomy (optional)',
       type: 'select' as const,
-      options: AUTONOMY_OPTIONS,
+      placeholder: `Default: ${defaultAutonomy}`,
+      options: autonomyOptions,
     },
     {
       key: 'supervisor_user_id',
@@ -236,6 +421,34 @@ function virployeeFormFields(): CrudPageProps<Virployee>['formFields'] {
     },
     { key: 'description', label: 'Description (optional)', type: 'textarea' as const, rows: 3, fullWidth: true },
   ]
+}
+
+function AutonomyDetails(props: {
+  definition: VirployeeAutonomyLevel | undefined
+  usesDefault: boolean
+}) {
+  const definition = props.definition ?? FALLBACK_AUTONOMY_LEVELS[1]
+  return (
+    <div className="virployee-autonomy-help">
+      <div className="virployee-autonomy-help__header">
+        <strong>{definition.level} - {definition.name}</strong>
+        {props.usesDefault ? <span>Default</span> : null}
+      </div>
+      <p>{definition.description}</p>
+      <div className="virployee-autonomy-help__actions" aria-label="Allowed action classes">
+        <span>Allowed:</span>
+        {definition.allowed_action_classes.length > 0 ? (
+          definition.allowed_action_classes.map((action) => (
+            <span key={action.class} className="virployee-autonomy-help__chip">
+              {action.name}
+            </span>
+          ))
+        ) : (
+          <span className="virployee-autonomy-help__empty">None</span>
+        )}
+      </div>
+    </div>
+  )
 }
 
 function virployeeToFormValues(row: Virployee): CrudFormValues {
@@ -266,12 +479,16 @@ function isValidVirployeeForm(values: CrudFormValues): boolean {
   )
 }
 
-function virployeeSearchText(row: Virployee): string {
+function virployeeSearchText(
+  row: Virployee,
+  autonomyByLevel: ReadonlyMap<VirployeeAutonomy, VirployeeAutonomyLevel>,
+): string {
   return [
     row.id,
     row.name,
     row.role,
     row.autonomy,
+    formatAutonomy(row.autonomy, autonomyByLevel),
     row.description,
     row.supervisor_user_id,
     row.state,
@@ -367,6 +584,15 @@ function autonomyValue(value: CrudFormValues[string]): VirployeeAutonomy {
 
 function isAutonomy(value: string): value is VirployeeAutonomy {
   return ['A0', 'A1', 'A2', 'A3', 'A4', 'A5'].includes(value)
+}
+
+function formatAutonomy(
+  value: string,
+  autonomyByLevel: ReadonlyMap<VirployeeAutonomy, VirployeeAutonomyLevel>,
+): string {
+  if (!isAutonomy(value)) return value || '-'
+  const definition = autonomyByLevel.get(value)
+  return definition ? `${value} - ${definition.name}` : value
 }
 
 function isUUID(value: string): boolean {

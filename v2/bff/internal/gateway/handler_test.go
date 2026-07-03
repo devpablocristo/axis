@@ -96,6 +96,60 @@ func TestGatewayForwardsVirployeesWithResolvedTenantHeaders(t *testing.T) {
 	}
 }
 
+func TestGatewayForwardsVirployeeAutonomyLevels(t *testing.T) {
+	tenantID := uuid.New()
+	var gotPath string
+	var gotQuery string
+	var gotTenant string
+	downstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotQuery = r.URL.RawQuery
+		gotTenant = r.Header.Get("X-Tenant-ID")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"data":[]}`))
+	}))
+	defer downstream.Close()
+
+	router := gatewayTestRouter(t, &fakeGatewayTenancy{
+		tenant: tenantdomain.Tenant{
+			ID:             tenantID,
+			OrgID:          "org-a",
+			ProductSurface: "axis",
+			Name:           "Org A / axis",
+			Status:         tenantdomain.StatusActive,
+			CreatedAt:      time.Now().UTC(),
+			UpdatedAt:      time.Now().UTC(),
+		},
+		member: tenantdomain.TenantMember{
+			TenantID: tenantID,
+			UserID:   "user-a",
+			Role:     tenantdomain.RoleAdmin,
+			Status:   tenantdomain.StatusActive,
+		},
+	}, downstream.URL)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/virployees/autonomy-levels?scope=all", nil)
+	req.Header.Set("X-Tenant-ID", tenantID.String())
+	req.Header.Set("X-Actor-ID", "user-a")
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected downstream status, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if gotPath != "/v1/virployees/autonomy-levels" {
+		t.Fatalf("expected /v1/virployees/autonomy-levels, got %q", gotPath)
+	}
+	if gotQuery != "scope=all" {
+		t.Fatalf("expected query to be forwarded, got %q", gotQuery)
+	}
+	if gotTenant != tenantID.String() {
+		t.Fatalf("expected resolved tenant header, got %q", gotTenant)
+	}
+}
+
 func gatewayTestRouter(t *testing.T, tenancy TenancyPort, companionURL string) *gin.Engine {
 	t.Helper()
 	uc, err := NewUseCases(tenancy, companionURL)

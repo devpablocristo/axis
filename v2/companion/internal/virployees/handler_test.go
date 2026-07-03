@@ -51,6 +51,52 @@ func TestHandlerCreateReturnsAutonomy(t *testing.T) {
 	}
 }
 
+func TestHandlerListsAutonomyLevels(t *testing.T) {
+	router := testRouter(&handlerFakeUseCases{})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/virployees/autonomy-levels", nil)
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		Data []struct {
+			Level                string `json:"level"`
+			Name                 string `json:"name"`
+			AllowedActionClasses []struct {
+				Class            string `json:"class"`
+				RequiresApproval bool   `json:"requires_approval"`
+			} `json:"allowed_action_classes"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Data) != 6 {
+		t.Fatalf("expected 6 autonomy levels, got %d", len(payload.Data))
+	}
+	if payload.Data[0].Level != "A0" || payload.Data[0].Name != "Conversation" {
+		t.Fatalf("unexpected first autonomy level: %+v", payload.Data[0])
+	}
+	var a3Actions []struct {
+		Class            string `json:"class"`
+		RequiresApproval bool   `json:"requires_approval"`
+	}
+	for _, item := range payload.Data {
+		if item.Level == "A3" {
+			a3Actions = item.AllowedActionClasses
+		}
+	}
+	if len(a3Actions) != 4 {
+		t.Fatalf("expected A3 to allow 4 action classes, got %+v", a3Actions)
+	}
+	if a3Actions[len(a3Actions)-1].Class != "write_low" || a3Actions[len(a3Actions)-1].RequiresApproval {
+		t.Fatalf("unexpected A3 last action: %+v", a3Actions[len(a3Actions)-1])
+	}
+}
+
 func TestHandlerRoutesLifecycle(t *testing.T) {
 	fake := &handlerFakeUseCases{}
 	router := testRouter(fake)

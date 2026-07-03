@@ -45,6 +45,7 @@ func (h *Handler) Routes(router gin.IRouter) {
 		group.GET("", h.ListActive)
 		group.GET("/"+paths.SegmentArchived, h.ListArchived)
 		group.GET("/trash", h.ListTrash)
+		group.GET("/autonomy-levels", h.ListAutonomyLevels)
 		group.GET("/:virployee_id", h.Get)
 		group.PUT("/:virployee_id", h.Update)
 		group.POST("/:virployee_id/"+paths.SegmentArchive, h.Archive)
@@ -53,6 +54,10 @@ func (h *Handler) Routes(router gin.IRouter) {
 		group.POST("/:virployee_id/"+paths.SegmentRestore, h.Restore)
 		group.DELETE("/:virployee_id/purge", h.Purge)
 	}
+}
+
+func (h *Handler) ListAutonomyLevels(c *gin.Context) {
+	ginmw.WriteJSON(c, http.StatusOK, dto.ListAutonomyLevelsFromDomain(domain.AutonomyDefinitions()))
 }
 
 func (h *Handler) Create(c *gin.Context) {

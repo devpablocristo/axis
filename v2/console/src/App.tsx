@@ -1,6 +1,6 @@
 import { Bot, RefreshCw, ShieldCheck } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { AgentsControlCenter } from './AgentsControlCenter'
+import { VirployeesPage } from './VirployeesPage'
 import { getSession, type Session, type Tenant } from './api'
 
 type LoadState<T> = {
@@ -131,7 +131,7 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
         ) : selectedTenant == null ? (
           <section className="empty-state">No active tenant matches the selected combination.</section>
         ) : (
-          <AgentsControlCenter tenantId={selectedTenant.id} principalId={principalId} />
+          <VirployeesPage tenantId={selectedTenant.id} principalId={principalId} />
         )}
       </main>
     </div>

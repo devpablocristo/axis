@@ -32,6 +32,20 @@ export type Session = {
 export type VirployeeState = 'active' | 'archived' | 'trashed'
 export type VirployeeAutonomy = 'A0' | 'A1' | 'A2' | 'A3' | 'A4' | 'A5'
 
+export type VirployeeAutonomyActionClass = {
+  class: string
+  name: string
+  description: string
+  requires_approval: boolean
+}
+
+export type VirployeeAutonomyLevel = {
+  level: VirployeeAutonomy
+  name: string
+  description: string
+  allowed_action_classes: VirployeeAutonomyActionClass[]
+}
+
 export type Virployee = {
   id: string
   name: string
@@ -57,6 +71,10 @@ export type VirployeeInput = {
 
 type ListResponse = {
   data: Virployee[]
+}
+
+type AutonomyLevelsResponse = {
+  data: VirployeeAutonomyLevel[]
 }
 
 export type AxisFetchInit = {
@@ -110,6 +128,14 @@ export function listVirployees(
         ? '/api/virployees/archived'
         : '/api/virployees/trash'
   return axisFetch<ListResponse>(path, { tenantId, principalId }).then((payload) => payload.data ?? [])
+}
+
+export function listVirployeeAutonomyLevels(
+  tenantId: string,
+  principalId: string,
+): Promise<VirployeeAutonomyLevel[]> {
+  return axisFetch<AutonomyLevelsResponse>('/api/virployees/autonomy-levels', { tenantId, principalId })
+    .then((payload) => payload.data ?? [])
 }
 
 export function createVirployee(input: VirployeeInput, tenantId: string, principalId: string): Promise<Virployee> {
