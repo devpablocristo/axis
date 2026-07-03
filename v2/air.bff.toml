@@ -1,0 +1,17 @@
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  cmd = "cd bff && CGO_ENABLED=0 go build -o ../tmp/bff-v2 ./cmd/api"
+  bin = "./tmp/bff-v2"
+  full_bin = "./tmp/bff-v2"
+  include_dir = ["bff"]
+  include_ext = ["go", "sql", "yaml", "yml"]
+  exclude_dir = ["tmp", "docs", "bff/tmp"]
+  delay = 1000
+
+[log]
+  time = false
+
+[misc]
+  clean_on_exit = true

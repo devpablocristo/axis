@@ -119,9 +119,13 @@ textarea:focus-visible {
   text-align: left;
 }
 
-.nav button:hover,
 .nav button.active {
   background: #243242;
+  color: #ffffff;
+}
+
+.nav button:hover:not(:disabled) {
+  background: #2c3b4d;
   color: #ffffff;
 }
 
@@ -256,6 +260,27 @@ button:disabled,
   background: #f3f6f8;
   color: #94a1b0;
   cursor: not-allowed;
+}
+
+.sidebar .nav button.active {
+  border-color: transparent;
+  background: #243242;
+  color: #ffffff;
+}
+
+.sidebar .nav button:hover:not(:disabled) {
+  border-color: transparent;
+  background: #2c3b4d;
+  color: #ffffff;
+}
+
+.sidebar .nav button.active:hover:not(:disabled) {
+  background: #34475c;
+}
+
+.sidebar .nav button:hover:not(:disabled) svg,
+.sidebar .nav button.active svg {
+  color: #ffffff;
 }
 
 .btn-primary,

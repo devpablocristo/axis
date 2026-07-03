@@ -23,7 +23,7 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
       setSession((current) => ({
         data: current.data,
         loading: false,
-        error: error instanceof Error ? error.message : 'No se pudo cargar la sesión',
+        error: error instanceof Error ? error.message : 'Could not load the session',
       }))
     }
   }, [])
@@ -92,7 +92,7 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
         <header className="topbar">
           <div>
             <h1>Virployees</h1>
-            <p className="axis-muted">principal: {principalId || 'cargando'}</p>
+            <p className="axis-muted">principal: {principalId || 'loading'}</p>
           </div>
           <div className="toolbar">
             {tenants.length > 0 ? (
@@ -106,7 +106,7 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
                   </select>
                 </label>
                 <label className="topbar-org">
-                  <span>Producto</span>
+                  <span>Product</span>
                   <select value={productSurface} onChange={(event) => setProductSurface(event.target.value)}>
                     {workspaceProducts.map((product) => (
                       <option key={product} value={product}>{product}</option>
@@ -115,7 +115,7 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
                 </label>
               </>
             ) : null}
-            <button type="button" onClick={() => void refresh()} disabled={session.loading} title="Refrescar sesión">
+            <button type="button" onClick={() => void refresh()} disabled={session.loading} title="Refresh session">
               <RefreshCw aria-hidden="true" />
             </button>
             {authSlot ? <div className="auth-slot">{authSlot}</div> : null}
@@ -127,9 +127,9 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
         {session.loading && !session.data ? (
           <div className="spinner" />
         ) : tenants.length === 0 ? (
-          <section className="empty-state">No hay tenants disponibles para este usuario.</section>
+          <section className="empty-state">No tenants are available for this user.</section>
         ) : selectedTenant == null ? (
-          <section className="empty-state">No hay tenant activo para la combinación seleccionada.</section>
+          <section className="empty-state">No active tenant matches the selected combination.</section>
         ) : (
           <AgentsControlCenter tenantId={selectedTenant.id} principalId={principalId} />
         )}

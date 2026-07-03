@@ -1,6 +1,6 @@
 import {
   CrudPage as PlatformCrudPage,
-  crudStringsEs,
+  defaultCrudStrings,
   type CrudFormValues,
   type CrudPageProps,
 } from '@devpablocristo/platform-crud-ui'
@@ -27,6 +27,7 @@ type AgentsControlCenterProps = {
 }
 
 const AUTONOMY_OPTIONS: Array<{ label: string; value: VirployeeAutonomy }> = [
+  { label: 'A0', value: 'A0' },
   { label: 'A1', value: 'A1' },
   { label: 'A2', value: 'A2' },
   { label: 'A3', value: 'A3' },
@@ -91,7 +92,7 @@ export function AgentsControlCenter({ tenantId, principalId }: AgentsControlCent
           '.crud-page-shell__header-actions > .actions-row > .actions-row > button',
         ) ?? [],
       )
-      buttons.find((button) => button.textContent?.trim() === 'Nuevo')?.click()
+      buttons.find((button) => button.textContent?.trim() === 'New')?.click()
       setCreateRequested(false)
     }, 0)
     return () => window.clearTimeout(handle)
@@ -134,7 +135,7 @@ export function AgentsControlCenter({ tenantId, principalId }: AgentsControlCent
       clearSelected()
       setReloadVersion((current) => current + 1)
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : 'No se pudo ejecutar la acción')
+      setActionError(error instanceof Error ? error.message : 'Could not run the action')
     } finally {
       setBulkBusy(false)
     }
@@ -143,7 +144,7 @@ export function AgentsControlCenter({ tenantId, principalId }: AgentsControlCent
   if (!isActive) {
     return (
       <section className="page-section">
-        <div className="empty-state">Seleccioná un tenant activo para administrar Virployees.</div>
+        <div className="empty-state">Select an active tenant to manage Virployees.</div>
       </section>
     )
   }
@@ -153,11 +154,11 @@ export function AgentsControlCenter({ tenantId, principalId }: AgentsControlCent
       <CrudPage<Virployee>
         key={`virployees-${tenantId}-${lifecycleView}-${reloadVersion}`}
         dataSource={dataSource}
-        stringsBase={crudStringsEs}
+        stringsBase={defaultCrudStrings}
         strings={{
-          actionTrash: 'Papelera',
-          actionPurge: 'Eliminar definitivo',
-          confirmWord: 'eliminar',
+          actionTrash: 'Trash',
+          actionPurge: 'Delete permanently',
+          confirmWord: 'delete',
         }}
         initialView={lifecycleView}
         supportsArchived
@@ -172,16 +173,16 @@ export function AgentsControlCenter({ tenantId, principalId }: AgentsControlCent
         label="virployee"
         labelPlural="virployees"
         labelPluralCap="Virployees"
-        createLabel="Nuevo"
+        createLabel="New"
         columns={virployeeColumns(selectedIds, toggleSelected)}
         formFields={virployeeFormFields()}
         searchText={virployeeSearchText}
         toFormValues={virployeeToFormValues}
         isValid={isValidVirployeeForm}
-        emptyState="Sin virployees"
-        archivedEmptyState="Sin virployees archivados"
-        trashEmptyState="Sin virployees en papelera"
-        searchPlaceholder="Buscar virployees"
+        emptyState="No virployees"
+        archivedEmptyState="No archived virployees"
+        trashEmptyState="No virployees in trash"
+        searchPlaceholder="Search virployees"
         listHeaderInlineSlot={() => (
           <div className="iam-control__lead-stack">
             <CreateAndBulkActions
@@ -208,34 +209,32 @@ function virployeeColumns(
 ): CrudPageProps<Virployee>['columns'] {
   return [
     selectionColumn<Virployee>(selectedIds, onToggle),
-    { key: 'name', header: 'Nombre' },
+    { key: 'name', header: 'Name' },
     { key: 'role', header: 'Role' },
-    { key: 'autonomy', header: 'Autonomía' },
+    { key: 'autonomy', header: 'Autonomy' },
     { key: 'supervisor_user_id', header: 'Supervisor', render: (value) => shortId(String(value ?? '')) },
-    { key: 'state', header: 'Estado', render: (value) => formatState(String(value ?? '')) },
-    { key: 'updated_at', header: 'Actualizado', render: (value) => formatDate(String(value ?? '')) },
+    { key: 'state', header: 'State', render: (value) => formatState(String(value ?? '')) },
+    { key: 'updated_at', header: 'Updated', render: (value) => formatDate(String(value ?? '')) },
   ]
 }
 
 function virployeeFormFields(): CrudPageProps<Virployee>['formFields'] {
   return [
-    { key: 'name', label: 'Nombre', required: true },
-    { key: 'role', label: 'Role', required: true },
+    { key: 'name', label: 'Name' },
+    { key: 'role', label: 'Role' },
     {
       key: 'autonomy',
-      label: 'Autonomía',
+      label: 'Autonomy (optional)',
       type: 'select' as const,
       options: AUTONOMY_OPTIONS,
-      placeholder: 'A1 por defecto',
     },
     {
       key: 'supervisor_user_id',
       label: 'Supervisor User ID',
-      required: true,
-      placeholder: 'Ej: 11111111-1111-4111-8111-111111111111',
+      placeholder: 'Example: 11111111-1111-4111-8111-111111111111',
       fullWidth: true,
     },
-    { key: 'description', label: 'Descripción', type: 'textarea' as const, rows: 3, fullWidth: true },
+    { key: 'description', label: 'Description (optional)', type: 'textarea' as const, rows: 3, fullWidth: true },
   ]
 }
 
@@ -291,7 +290,7 @@ function selectionColumn<T extends { id: string }>(
     render: (_value: unknown, row: T) => (
       <input
         type="checkbox"
-        aria-label={`Seleccionar ${row.id}`}
+        aria-label={`Select ${row.id}`}
         checked={selectedIds.includes(row.id)}
         onClick={(event) => event.stopPropagation()}
         onChange={(event) => onToggle(row.id, event.currentTarget.checked)}
@@ -318,42 +317,42 @@ function CreateAndBulkActions(props: {
           disabled={props.busy && props.selectedCount === 0}
           onClick={props.onCreate}
         >
-          Nuevo
+          New
         </button>
         {props.view === 'active' ? (
           <>
-            <button type="button" disabled={actionsDisabled} onClick={() => props.onBulkAction('archive')}>Archivar</button>
-            <button type="button" disabled={actionsDisabled} onClick={() => props.onBulkAction('trash')}>Papelera</button>
+            <button type="button" disabled={actionsDisabled} onClick={() => props.onBulkAction('archive')}>Archive</button>
+            <button type="button" disabled={actionsDisabled} onClick={() => props.onBulkAction('trash')}>Trash</button>
           </>
         ) : null}
         {props.view === 'archived' ? (
-          <button type="button" disabled={actionsDisabled} onClick={() => props.onBulkAction('restore')}>Restaurar</button>
+          <button type="button" disabled={actionsDisabled} onClick={() => props.onBulkAction('restore')}>Restore</button>
         ) : null}
         {props.view === 'trash' ? (
           <>
-            <button type="button" disabled={actionsDisabled} onClick={() => props.onBulkAction('restore')}>Restaurar</button>
+            <button type="button" disabled={actionsDisabled} onClick={() => props.onBulkAction('restore')}>Restore</button>
             <button
               type="button"
               className="iam-control__danger-button"
               disabled={actionsDisabled}
               onClick={() => props.onBulkAction('purge')}
             >
-              Eliminar
+              Delete
             </button>
           </>
         ) : null}
-        <button type="button" disabled={actionsDisabled} onClick={props.onClear}>Limpiar</button>
+        <button type="button" disabled={actionsDisabled} onClick={props.onClear}>Clear</button>
       </div>
-      <span className="iam-control__selected-count">{props.selectedCount} seleccionados</span>
+      <span className="iam-control__selected-count">{props.selectedCount} selected</span>
     </div>
   )
 }
 
 function lifecycleToolbarActions(view: CrudLifecycleView, onChange: (view: CrudLifecycleView) => void) {
   return [
-    { id: 'active', label: 'Activos', kind: view === 'active' ? 'primary' as const : 'secondary' as const, onClick: () => onChange('active') },
-    { id: 'archived', label: 'Archivados', kind: view === 'archived' ? 'primary' as const : 'secondary' as const, onClick: () => onChange('archived') },
-    { id: 'trash', label: 'Papelera', kind: view === 'trash' ? 'primary' as const : 'secondary' as const, onClick: () => onChange('trash') },
+    { id: 'active', label: 'Active', kind: view === 'active' ? 'primary' as const : 'secondary' as const, onClick: () => onChange('active') },
+    { id: 'archived', label: 'Archived', kind: view === 'archived' ? 'primary' as const : 'secondary' as const, onClick: () => onChange('archived') },
+    { id: 'trash', label: 'Trash', kind: view === 'trash' ? 'primary' as const : 'secondary' as const, onClick: () => onChange('trash') },
   ]
 }
 
@@ -380,9 +379,9 @@ function shortId(value: string): string {
 }
 
 function formatState(value: string): string {
-  if (value === 'active') return 'Activo'
-  if (value === 'archived') return 'Archivado'
-  if (value === 'trashed') return 'Papelera'
+  if (value === 'active') return 'Active'
+  if (value === 'archived') return 'Archived'
+  if (value === 'trashed') return 'Trash'
   return value || '-'
 }
 
@@ -390,5 +389,5 @@ function formatDate(value: string): string {
   if (!value) return '-'
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' })
+  return date.toLocaleString('en-US', { dateStyle: 'short', timeStyle: 'short' })
 }

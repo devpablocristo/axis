@@ -1,3 +1,12 @@
+FROM golang:1.26-alpine AS dev
+
+RUN apk add --no-cache ca-certificates git wget
+RUN GOBIN=/usr/local/bin go install github.com/air-verse/air@latest
+WORKDIR /src
+ENV CGO_ENABLED=0
+
+EXPOSE 8080
+
 FROM golang:1.26-alpine AS build
 
 WORKDIR /src

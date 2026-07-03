@@ -37,6 +37,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.companion
+      target: dev
+    command: ["air", "-c", "air.companion.toml"]
     restart: unless-stopped
     environment:
       PORT: "8080"
@@ -44,6 +46,12 @@ services:
       COMPANION_V2_RUN_MIGRATIONS: ${COMPANION_V2_RUN_MIGRATIONS:-true}
       COMPANION_V2_CORS_ORIGINS: ${COMPANION_V2_CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
       COMPANION_V2_DATABASE_URL: postgres://${COMPANION_V2_POSTGRES_USER:-postgres}:${COMPANION_V2_POSTGRES_PASSWORD:-postgres}@companion-v2-postgres:5432/${COMPANION_V2_POSTGRES_DB:-companion_v2}?sslmode=disable
+    volumes:
+      - ./companion:/src/companion
+      - ./air.companion.toml:/src/air.companion.toml:ro
+      - ./companion/migrations:/src/migrations:ro
+      - companion-v2-go-mod-cache:/go/pkg/mod
+      - companion-v2-go-build-cache:/root/.cache/go-build
     ports:
       - "${COMPANION_V2_PORT:-18086}:8080"
     depends_on:
@@ -59,6 +67,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.bff
+      target: dev
+    command: ["air", "-c", "air.bff.toml"]
     restart: unless-stopped
     environment:
       PORT: "8080"
@@ -71,6 +81,12 @@ services:
       BFF_V2_DEV_ACTOR_NAME: ${BFF_V2_DEV_ACTOR_NAME:-Dev User}
       BFF_V2_DEV_ORG_ID: ${BFF_V2_DEV_ORG_ID:-dev-org}
       BFF_V2_DATABASE_URL: postgres://${BFF_V2_POSTGRES_USER:-postgres}:${BFF_V2_POSTGRES_PASSWORD:-postgres}@bff-v2-postgres:5432/${BFF_V2_POSTGRES_DB:-bff_v2}?sslmode=disable
+    volumes:
+      - ./bff:/src/bff
+      - ./air.bff.toml:/src/air.bff.toml:ro
+      - ./bff/migrations:/src/migrations:ro
+      - bff-v2-go-mod-cache:/go/pkg/mod
+      - bff-v2-go-build-cache:/root/.cache/go-build
     ports:
       - "${BFF_V2_PORT:-18080}:8080"
     depends_on:
@@ -92,6 +108,9 @@ services:
     environment:
       AXIS_BFF_BASE_URL: ${AXIS_CONSOLE_BFF_BASE_URL:-http://bff-v2:8080}
       VITE_HMR_CLIENT_PORT: ${AXIS_CONSOLE_PORT:-5173}
+    volumes:
+      - ./console:/app
+      - console-v2-node-modules:/app/node_modules
     ports:
       - "${AXIS_CONSOLE_PORT:-5173}:5173"
     depends_on:
@@ -101,3 +120,8 @@ services:
 volumes:
   companion-v2-postgres-data:
   bff-v2-postgres-data:
+  companion-v2-go-mod-cache:
+  companion-v2-go-build-cache:
+  bff-v2-go-mod-cache:
+  bff-v2-go-build-cache:
+  console-v2-node-modules:

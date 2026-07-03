@@ -5,7 +5,7 @@ class ConsoleErrorBoundary extends Component<{ children: ReactNode }, { message:
   state = { message: '' }
 
   static getDerivedStateFromError(error: unknown) {
-    return { message: error instanceof Error ? error.message : 'Error inesperado al cargar Console' }
+    return { message: error instanceof Error ? error.message : 'Unexpected error while loading Console' }
   }
 
   componentDidCatch(error: unknown, info: ErrorInfo) {
@@ -20,7 +20,7 @@ class ConsoleErrorBoundary extends Component<{ children: ReactNode }, { message:
             <ShieldLogo />
             <h1>Axis Console</h1>
             <p>{this.state.message}</p>
-            <button type="button" onClick={() => window.location.reload()}>Recargar</button>
+            <button type="button" onClick={() => window.location.reload()}>Reload</button>
           </section>
         </main>
       )
