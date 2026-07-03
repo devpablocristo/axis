@@ -19,7 +19,7 @@ const (
 type Virployee struct {
 	ID               uuid.UUID
 	Name             string
-	Role             string
+	JobRoleID        uuid.UUID
 	Description      string
 	SupervisorUserID uuid.UUID
 	Autonomy         AutonomyLevel
@@ -34,7 +34,7 @@ type Virployee struct {
 
 type CreateInput struct {
 	Name             string
-	Role             string
+	JobRoleID        string
 	Description      string
 	SupervisorUserID string
 	Autonomy         string
@@ -42,7 +42,7 @@ type CreateInput struct {
 
 type UpdateInput struct {
 	Name             string
-	Role             string
+	JobRoleID        string
 	Description      string
 	SupervisorUserID string
 	Autonomy         string
@@ -50,7 +50,7 @@ type UpdateInput struct {
 
 type NormalizedCreateInput struct {
 	Name             string
-	Role             string
+	JobRoleID        uuid.UUID
 	Description      string
 	SupervisorUserID uuid.UUID
 	Autonomy         AutonomyLevel
@@ -58,7 +58,7 @@ type NormalizedCreateInput struct {
 
 type NormalizedUpdateInput struct {
 	Name             string
-	Role             string
+	JobRoleID        uuid.UUID
 	Description      string
 	SupervisorUserID uuid.UUID
 	Autonomy         AutonomyLevel
@@ -80,22 +80,23 @@ func NormalizeCreateInput(in CreateInput) (NormalizedCreateInput, error) {
 	if err != nil {
 		return NormalizedCreateInput{}, err
 	}
+	jobRoleID, err := parseRequiredUUID(in.JobRoleID, "job_role_id")
+	if err != nil {
+		return NormalizedCreateInput{}, err
+	}
 	autonomy, err := normalizeAutonomy(in.Autonomy)
 	if err != nil {
 		return NormalizedCreateInput{}, err
 	}
 	out := NormalizedCreateInput{
 		Name:             strings.TrimSpace(in.Name),
-		Role:             strings.TrimSpace(in.Role),
+		JobRoleID:        jobRoleID,
 		Description:      strings.TrimSpace(in.Description),
 		SupervisorUserID: supervisorID,
 		Autonomy:         autonomy,
 	}
 	if out.Name == "" {
 		return NormalizedCreateInput{}, domainerr.Validation("name is required")
-	}
-	if out.Role == "" {
-		return NormalizedCreateInput{}, domainerr.Validation("role is required")
 	}
 	return out, nil
 }
@@ -105,22 +106,23 @@ func NormalizeUpdateInput(in UpdateInput) (NormalizedUpdateInput, error) {
 	if err != nil {
 		return NormalizedUpdateInput{}, err
 	}
+	jobRoleID, err := parseRequiredUUID(in.JobRoleID, "job_role_id")
+	if err != nil {
+		return NormalizedUpdateInput{}, err
+	}
 	autonomy, err := normalizeAutonomy(in.Autonomy)
 	if err != nil {
 		return NormalizedUpdateInput{}, err
 	}
 	out := NormalizedUpdateInput{
 		Name:             strings.TrimSpace(in.Name),
-		Role:             strings.TrimSpace(in.Role),
+		JobRoleID:        jobRoleID,
 		Description:      strings.TrimSpace(in.Description),
 		SupervisorUserID: supervisorID,
 		Autonomy:         autonomy,
 	}
 	if out.Name == "" {
 		return NormalizedUpdateInput{}, domainerr.Validation("name is required")
-	}
-	if out.Role == "" {
-		return NormalizedUpdateInput{}, domainerr.Validation("role is required")
 	}
 	return out, nil
 }

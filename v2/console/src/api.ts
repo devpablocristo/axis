@@ -49,7 +49,7 @@ export type VirployeeAutonomyLevel = {
 export type Virployee = {
   id: string
   name: string
-  role: string
+  job_role_id: string
   description: string
   supervisor_user_id: string
   autonomy: VirployeeAutonomy
@@ -63,14 +63,39 @@ export type Virployee = {
 
 export type VirployeeInput = {
   name: string
-  role: string
+  job_role_id: string
   description: string
   supervisor_user_id: string
-  autonomy: VirployeeAutonomy
+  autonomy: VirployeeAutonomy | ''
 }
 
-type ListResponse = {
+export type JobRoleState = 'active' | 'archived' | 'trashed'
+
+export type JobRole = {
+  id: string
+  tenant_id: string
+  name: string
+  slug: string
+  mission: string
+  state: JobRoleState
+  created_at: string
+  updated_at: string
+  archived_at: LifecycleTimestamp
+  trashed_at: LifecycleTimestamp
+  purge_after: LifecycleTimestamp
+}
+
+export type JobRoleInput = {
+  name: string
+  mission: string
+}
+
+type VirployeesListResponse = {
   data: Virployee[]
+}
+
+type JobRolesListResponse = {
+  data: JobRole[]
 }
 
 type AutonomyLevelsResponse = {
@@ -127,7 +152,7 @@ export function listVirployees(
       : lifecycle === 'archived'
         ? '/api/virployees/archived'
         : '/api/virployees/trash'
-  return axisFetch<ListResponse>(path, { tenantId, principalId }).then((payload) => payload.data ?? [])
+  return axisFetch<VirployeesListResponse>(path, { tenantId, principalId }).then((payload) => payload.data ?? [])
 }
 
 export function listVirployeeAutonomyLevels(
@@ -162,23 +187,84 @@ export function updateVirployee(
 }
 
 export function archiveVirployee(id: string, tenantId: string, principalId: string): Promise<void> {
-  return lifecycleAction(id, 'archive', tenantId, principalId)
+  return lifecycleAction('virployees', id, 'archive', tenantId, principalId)
 }
 
 export function unarchiveVirployee(id: string, tenantId: string, principalId: string): Promise<void> {
-  return lifecycleAction(id, 'unarchive', tenantId, principalId)
+  return lifecycleAction('virployees', id, 'unarchive', tenantId, principalId)
 }
 
 export function trashVirployee(id: string, tenantId: string, principalId: string): Promise<void> {
-  return lifecycleAction(id, 'trash', tenantId, principalId)
+  return lifecycleAction('virployees', id, 'trash', tenantId, principalId)
 }
 
 export function restoreVirployee(id: string, tenantId: string, principalId: string): Promise<void> {
-  return lifecycleAction(id, 'restore', tenantId, principalId)
+  return lifecycleAction('virployees', id, 'restore', tenantId, principalId)
 }
 
 export function purgeVirployee(id: string, tenantId: string, principalId: string): Promise<void> {
   return axisFetch<void>(`/api/virployees/${encodeURIComponent(id)}/purge`, {
+    method: 'DELETE',
+    tenantId,
+    principalId,
+  })
+}
+
+export function listJobRoles(
+  lifecycle: 'active' | 'archived' | 'trash',
+  tenantId: string,
+  principalId: string,
+): Promise<JobRole[]> {
+  const path =
+    lifecycle === 'active'
+      ? '/api/job-roles'
+      : lifecycle === 'archived'
+        ? '/api/job-roles?lifecycle=archived'
+        : '/api/job-roles?lifecycle=trash'
+  return axisFetch<JobRolesListResponse>(path, { tenantId, principalId }).then((payload) => payload.data ?? [])
+}
+
+export function createJobRole(input: JobRoleInput, tenantId: string, principalId: string): Promise<JobRole> {
+  return axisFetch<JobRole>('/api/job-roles', {
+    method: 'POST',
+    tenantId,
+    principalId,
+    body: input,
+  })
+}
+
+export function updateJobRole(
+  id: string,
+  input: JobRoleInput,
+  tenantId: string,
+  principalId: string,
+): Promise<JobRole> {
+  return axisFetch<JobRole>(`/api/job-roles/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    tenantId,
+    principalId,
+    body: input,
+  })
+}
+
+export function archiveJobRole(id: string, tenantId: string, principalId: string): Promise<void> {
+  return lifecycleAction('job-roles', id, 'archive', tenantId, principalId)
+}
+
+export function unarchiveJobRole(id: string, tenantId: string, principalId: string): Promise<void> {
+  return lifecycleAction('job-roles', id, 'unarchive', tenantId, principalId)
+}
+
+export function trashJobRole(id: string, tenantId: string, principalId: string): Promise<void> {
+  return lifecycleAction('job-roles', id, 'trash', tenantId, principalId)
+}
+
+export function restoreJobRole(id: string, tenantId: string, principalId: string): Promise<void> {
+  return lifecycleAction('job-roles', id, 'restore', tenantId, principalId)
+}
+
+export function purgeJobRole(id: string, tenantId: string, principalId: string): Promise<void> {
+  return axisFetch<void>(`/api/job-roles/${encodeURIComponent(id)}/purge`, {
     method: 'DELETE',
     tenantId,
     principalId,
@@ -196,8 +282,14 @@ async function responseErrorMessage(response: Response): Promise<string> {
   return fallback
 }
 
-function lifecycleAction(id: string, action: string, tenantId: string, principalId: string): Promise<void> {
-  return axisFetch<void>(`/api/virployees/${encodeURIComponent(id)}/${action}`, {
+function lifecycleAction(
+  resource: 'virployees' | 'job-roles',
+  id: string,
+  action: string,
+  tenantId: string,
+  principalId: string,
+): Promise<void> {
+  return axisFetch<void>(`/api/${resource}/${encodeURIComponent(id)}/${action}`, {
     method: 'POST',
     tenantId,
     principalId,

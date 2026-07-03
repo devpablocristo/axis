@@ -1,4 +1,4 @@
-package virployees
+package jobroles
 
 import (
 	"context"
@@ -10,19 +10,18 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
-	"github.com/devpablocristo/companion-v2/internal/virployees/handler/dto"
-	"github.com/devpablocristo/companion-v2/internal/virployees/usecases/domain"
+	"github.com/devpablocristo/companion-v2/internal/jobroles/handler/dto"
+	"github.com/devpablocristo/companion-v2/internal/jobroles/usecases/domain"
 	ginmw "github.com/devpablocristo/platform/http/gin/go"
-	"github.com/devpablocristo/platform/lifecycle/go/paths"
 )
 
 type UseCasesPort interface {
-	Create(context.Context, string, domain.CreateInput) (domain.Virployee, error)
-	ListActive(context.Context, string) ([]domain.Virployee, error)
-	ListArchived(context.Context, string) ([]domain.Virployee, error)
-	ListTrash(context.Context, string) ([]domain.Virployee, error)
-	Get(context.Context, string, uuid.UUID) (domain.Virployee, error)
-	Update(context.Context, string, uuid.UUID, domain.UpdateInput) (domain.Virployee, error)
+	Create(context.Context, string, domain.CreateInput) (domain.JobRole, error)
+	ListActive(context.Context, string) ([]domain.JobRole, error)
+	ListArchived(context.Context, string) ([]domain.JobRole, error)
+	ListTrash(context.Context, string) ([]domain.JobRole, error)
+	Get(context.Context, string, uuid.UUID) (domain.JobRole, error)
+	Update(context.Context, string, uuid.UUID, domain.UpdateInput) (domain.JobRole, error)
 	Archive(context.Context, string, uuid.UUID, string, string) error
 	Unarchive(context.Context, string, uuid.UUID, string, string) error
 	Trash(context.Context, string, uuid.UUID, string, string) error
@@ -39,29 +38,22 @@ func NewHandler(ucs UseCasesPort) *Handler {
 }
 
 func (h *Handler) Routes(router gin.IRouter) {
-	group := router.Group("/virployees")
+	group := router.Group("/job-roles")
 	{
 		group.POST("", h.Create)
-		group.GET("", h.ListActive)
-		group.GET("/"+paths.SegmentArchived, h.ListArchived)
-		group.GET("/trash", h.ListTrash)
-		group.GET("/autonomy-levels", h.ListAutonomyLevels)
-		group.GET("/:virployee_id", h.Get)
-		group.PUT("/:virployee_id", h.Update)
-		group.POST("/:virployee_id/"+paths.SegmentArchive, h.Archive)
-		group.POST("/:virployee_id/unarchive", h.Unarchive)
-		group.POST("/:virployee_id/trash", h.Trash)
-		group.POST("/:virployee_id/"+paths.SegmentRestore, h.Restore)
-		group.DELETE("/:virployee_id/purge", h.Purge)
+		group.GET("", h.List)
+		group.GET("/:job_role_id", h.Get)
+		group.PUT("/:job_role_id", h.Update)
+		group.POST("/:job_role_id/archive", h.Archive)
+		group.POST("/:job_role_id/unarchive", h.Unarchive)
+		group.POST("/:job_role_id/trash", h.Trash)
+		group.POST("/:job_role_id/restore", h.Restore)
+		group.DELETE("/:job_role_id/purge", h.Purge)
 	}
 }
 
-func (h *Handler) ListAutonomyLevels(c *gin.Context) {
-	ginmw.WriteJSON(c, http.StatusOK, dto.ListAutonomyLevelsFromDomain(domain.AutonomyDefinitions()))
-}
-
 func (h *Handler) Create(c *gin.Context) {
-	var req dto.CreateVirployeeRequest
+	var req dto.CreateJobRoleRequest
 	if err := ginmw.BindJSON(c, &req); err != nil {
 		return
 	}
@@ -70,38 +62,29 @@ func (h *Handler) Create(c *gin.Context) {
 		ginmw.Respond(c, err)
 		return
 	}
-	ginmw.WriteCreated(c, dto.VirployeeFromDomain(out))
+	ginmw.WriteCreated(c, dto.JobRoleFromDomain(out))
 }
 
-func (h *Handler) ListActive(c *gin.Context) {
-	out, err := h.ucs.ListActive(c.Request.Context(), tenantID(c))
+func (h *Handler) List(c *gin.Context) {
+	var out []domain.JobRole
+	var err error
+	switch strings.ToLower(strings.TrimSpace(c.Query("lifecycle"))) {
+	case "archived":
+		out, err = h.ucs.ListArchived(c.Request.Context(), tenantID(c))
+	case "trash", "trashed":
+		out, err = h.ucs.ListTrash(c.Request.Context(), tenantID(c))
+	default:
+		out, err = h.ucs.ListActive(c.Request.Context(), tenantID(c))
+	}
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
 	}
-	ginmw.WriteJSON(c, http.StatusOK, dto.ListVirployeesFromDomain(out))
-}
-
-func (h *Handler) ListArchived(c *gin.Context) {
-	out, err := h.ucs.ListArchived(c.Request.Context(), tenantID(c))
-	if err != nil {
-		ginmw.Respond(c, err)
-		return
-	}
-	ginmw.WriteJSON(c, http.StatusOK, dto.ListVirployeesFromDomain(out))
-}
-
-func (h *Handler) ListTrash(c *gin.Context) {
-	out, err := h.ucs.ListTrash(c.Request.Context(), tenantID(c))
-	if err != nil {
-		ginmw.Respond(c, err)
-		return
-	}
-	ginmw.WriteJSON(c, http.StatusOK, dto.ListVirployeesFromDomain(out))
+	ginmw.WriteJSON(c, http.StatusOK, dto.ListJobRolesFromDomain(out))
 }
 
 func (h *Handler) Get(c *gin.Context) {
-	id, ok := ginmw.ParseUUIDParam(c, "virployee_id")
+	id, ok := ginmw.ParseUUIDParam(c, "job_role_id")
 	if !ok {
 		return
 	}
@@ -110,15 +93,15 @@ func (h *Handler) Get(c *gin.Context) {
 		ginmw.Respond(c, err)
 		return
 	}
-	ginmw.WriteJSON(c, http.StatusOK, dto.VirployeeFromDomain(out))
+	ginmw.WriteJSON(c, http.StatusOK, dto.JobRoleFromDomain(out))
 }
 
 func (h *Handler) Update(c *gin.Context) {
-	id, ok := ginmw.ParseUUIDParam(c, "virployee_id")
+	id, ok := ginmw.ParseUUIDParam(c, "job_role_id")
 	if !ok {
 		return
 	}
-	var req dto.UpdateVirployeeRequest
+	var req dto.UpdateJobRoleRequest
 	if err := ginmw.BindJSON(c, &req); err != nil {
 		return
 	}
@@ -127,7 +110,7 @@ func (h *Handler) Update(c *gin.Context) {
 		ginmw.Respond(c, err)
 		return
 	}
-	ginmw.WriteJSON(c, http.StatusOK, dto.VirployeeFromDomain(out))
+	ginmw.WriteJSON(c, http.StatusOK, dto.JobRoleFromDomain(out))
 }
 
 func (h *Handler) Archive(c *gin.Context) {
@@ -150,8 +133,11 @@ func (h *Handler) Purge(c *gin.Context) {
 	h.lifecycleAction(c, h.ucs.Purge)
 }
 
-func (h *Handler) lifecycleAction(c *gin.Context, fn func(context.Context, string, uuid.UUID, string, string) error) {
-	id, ok := ginmw.ParseUUIDParam(c, "virployee_id")
+func (h *Handler) lifecycleAction(
+	c *gin.Context,
+	fn func(context.Context, string, uuid.UUID, string, string) error,
+) {
+	id, ok := ginmw.ParseUUIDParam(c, "job_role_id")
 	if !ok {
 		return
 	}

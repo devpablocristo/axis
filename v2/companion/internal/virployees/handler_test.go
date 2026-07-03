@@ -18,7 +18,7 @@ import (
 func TestHandlerCreateValidation(t *testing.T) {
 	router := testRouter(&handlerFakeUseCases{})
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/v1/virployees", strings.NewReader(`{"name":"","role":"ops","supervisor_user_id":"`+uuid.NewString()+`"}`))
+	req := httptest.NewRequest(http.MethodPost, "/v1/virployees", strings.NewReader(`{"name":"","job_role_id":"`+uuid.NewString()+`","supervisor_user_id":"`+uuid.NewString()+`"}`))
 	req.Header.Set("Content-Type", "application/json")
 
 	router.ServeHTTP(rec, req)
@@ -31,9 +31,11 @@ func TestHandlerCreateValidation(t *testing.T) {
 func TestHandlerCreateReturnsAutonomy(t *testing.T) {
 	router := testRouter(&handlerFakeUseCases{})
 	rec := httptest.NewRecorder()
-	body := `{"name":"Ops","role":"ops","supervisor_user_id":"` + uuid.NewString() + `","autonomy":"A2"}`
+	jobRoleID := uuid.New()
+	body := `{"name":"Ops","job_role_id":"` + jobRoleID.String() + `","supervisor_user_id":"` + uuid.NewString() + `","autonomy":"A2"}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/virployees", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Tenant-ID", "tenant-1")
 
 	router.ServeHTTP(rec, req)
 
@@ -41,10 +43,14 @@ func TestHandlerCreateReturnsAutonomy(t *testing.T) {
 		t.Fatalf("expected 201, got %d body=%s", rec.Code, rec.Body.String())
 	}
 	var payload struct {
-		Autonomy string `json:"autonomy"`
+		JobRoleID string `json:"job_role_id"`
+		Autonomy  string `json:"autonomy"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode response: %v", err)
+	}
+	if payload.JobRoleID != jobRoleID.String() {
+		t.Fatalf("expected job_role_id %s, got %q", jobRoleID, payload.JobRoleID)
 	}
 	if payload.Autonomy != "A2" {
 		t.Fatalf("expected autonomy A2, got %q", payload.Autonomy)
@@ -149,66 +155,73 @@ func testRouter(ucs UseCasesPort) *gin.Engine {
 type handlerFakeUseCases struct {
 	lastAction string
 	lastActor  string
+	lastTenant string
 }
 
-func (f *handlerFakeUseCases) Create(_ context.Context, input domain.CreateInput) (domain.Virployee, error) {
+func (f *handlerFakeUseCases) Create(_ context.Context, tenantID string, input domain.CreateInput) (domain.Virployee, error) {
+	f.lastTenant = tenantID
 	normalized, err := domain.NormalizeCreateInput(input)
 	if err != nil {
 		return domain.Virployee{}, err
 	}
-	return domain.Virployee{ID: uuid.New(), Name: normalized.Name, Role: normalized.Role, SupervisorUserID: normalized.SupervisorUserID, Autonomy: normalized.Autonomy}, nil
+	return domain.Virployee{ID: uuid.New(), Name: normalized.Name, JobRoleID: normalized.JobRoleID, SupervisorUserID: normalized.SupervisorUserID, Autonomy: normalized.Autonomy}, nil
 }
 
-func (f *handlerFakeUseCases) ListActive(context.Context) ([]domain.Virployee, error) {
+func (f *handlerFakeUseCases) ListActive(context.Context, string) ([]domain.Virployee, error) {
 	return []domain.Virployee{}, nil
 }
 
-func (f *handlerFakeUseCases) ListArchived(context.Context) ([]domain.Virployee, error) {
+func (f *handlerFakeUseCases) ListArchived(context.Context, string) ([]domain.Virployee, error) {
 	return []domain.Virployee{}, nil
 }
 
-func (f *handlerFakeUseCases) ListTrash(context.Context) ([]domain.Virployee, error) {
+func (f *handlerFakeUseCases) ListTrash(context.Context, string) ([]domain.Virployee, error) {
 	return []domain.Virployee{}, nil
 }
 
-func (f *handlerFakeUseCases) Get(_ context.Context, id uuid.UUID) (domain.Virployee, error) {
-	return domain.Virployee{ID: id, Name: "Ops", Role: "ops", SupervisorUserID: uuid.New(), Autonomy: domain.AutonomyA1}, nil
+func (f *handlerFakeUseCases) Get(_ context.Context, _ string, id uuid.UUID) (domain.Virployee, error) {
+	return domain.Virployee{ID: id, Name: "Ops", JobRoleID: uuid.New(), SupervisorUserID: uuid.New(), Autonomy: domain.AutonomyA1}, nil
 }
 
-func (f *handlerFakeUseCases) Update(_ context.Context, id uuid.UUID, input domain.UpdateInput) (domain.Virployee, error) {
+func (f *handlerFakeUseCases) Update(_ context.Context, _ string, id uuid.UUID, input domain.UpdateInput) (domain.Virployee, error) {
 	normalized, err := domain.NormalizeUpdateInput(input)
 	if err != nil {
 		return domain.Virployee{}, err
 	}
-	return domain.Virployee{ID: id, Name: normalized.Name, Role: normalized.Role, SupervisorUserID: normalized.SupervisorUserID, Autonomy: normalized.Autonomy}, nil
+	return domain.Virployee{ID: id, Name: normalized.Name, JobRoleID: normalized.JobRoleID, SupervisorUserID: normalized.SupervisorUserID, Autonomy: normalized.Autonomy}, nil
 }
 
-func (f *handlerFakeUseCases) Archive(_ context.Context, _ uuid.UUID, actor, _ string) error {
+func (f *handlerFakeUseCases) Archive(_ context.Context, tenantID string, _ uuid.UUID, actor, _ string) error {
 	f.lastAction = "archive"
 	f.lastActor = actor
+	f.lastTenant = tenantID
 	return nil
 }
 
-func (f *handlerFakeUseCases) Unarchive(_ context.Context, _ uuid.UUID, actor, _ string) error {
+func (f *handlerFakeUseCases) Unarchive(_ context.Context, tenantID string, _ uuid.UUID, actor, _ string) error {
 	f.lastAction = "unarchive"
 	f.lastActor = actor
+	f.lastTenant = tenantID
 	return nil
 }
 
-func (f *handlerFakeUseCases) Trash(_ context.Context, _ uuid.UUID, actor, _ string) error {
+func (f *handlerFakeUseCases) Trash(_ context.Context, tenantID string, _ uuid.UUID, actor, _ string) error {
 	f.lastAction = "trash"
 	f.lastActor = actor
+	f.lastTenant = tenantID
 	return nil
 }
 
-func (f *handlerFakeUseCases) Restore(_ context.Context, _ uuid.UUID, actor, _ string) error {
+func (f *handlerFakeUseCases) Restore(_ context.Context, tenantID string, _ uuid.UUID, actor, _ string) error {
 	f.lastAction = "restore"
 	f.lastActor = actor
+	f.lastTenant = tenantID
 	return nil
 }
 
-func (f *handlerFakeUseCases) Purge(_ context.Context, _ uuid.UUID, actor, _ string) error {
+func (f *handlerFakeUseCases) Purge(_ context.Context, tenantID string, _ uuid.UUID, actor, _ string) error {
 	f.lastAction = "purge"
 	f.lastActor = actor
+	f.lastTenant = tenantID
 	return nil
 }

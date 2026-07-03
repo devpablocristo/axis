@@ -17,26 +17,70 @@ func TestUseCasesCreateAndListActive(t *testing.T) {
 		t.Fatal(err)
 	}
 	supervisorID := uuid.New()
+	jobRoleID := uuid.New()
 
-	created, err := uc.Create(context.Background(), domain.CreateInput{
+	created, err := uc.Create(context.Background(), "tenant-1", domain.CreateInput{
 		Name:             " Sales Assistant ",
-		Role:             " sales_assistant ",
+		JobRoleID:        jobRoleID.String(),
 		SupervisorUserID: " " + supervisorID.String() + " ",
 		Autonomy:         "A2",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if created.Name != "Sales Assistant" || created.Role != "sales_assistant" || created.SupervisorUserID != supervisorID || created.Autonomy != domain.AutonomyA2 {
+	if created.Name != "Sales Assistant" || created.JobRoleID != jobRoleID || created.SupervisorUserID != supervisorID || created.Autonomy != domain.AutonomyA2 {
 		t.Fatalf("unexpected create output: %+v", created)
 	}
 
-	active, err := uc.ListActive(context.Background())
+	active, err := uc.ListActive(context.Background(), "tenant-1")
 	if err != nil {
 		t.Fatalf("ListActive: %v", err)
 	}
 	if len(active) != 1 || active[0].ID != created.ID {
 		t.Fatalf("unexpected active list: %+v", active)
+	}
+}
+
+func TestUseCasesCreateDefaultsAutonomyToA1AndValidatesJobRole(t *testing.T) {
+	repo := newFakeRepo()
+	jobRoleID := uuid.New()
+	reader := &fakeJobRoleReader{}
+	uc, err := NewUseCases(repo, reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	created, err := uc.Create(context.Background(), "tenant-1", domain.CreateInput{
+		Name:             "Ops",
+		JobRoleID:        jobRoleID.String(),
+		SupervisorUserID: uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if created.Autonomy != domain.AutonomyA1 {
+		t.Fatalf("expected default autonomy A1, got %s", created.Autonomy)
+	}
+	if reader.lastTenant != "tenant-1" || reader.lastID != jobRoleID {
+		t.Fatalf("expected job role validation, got tenant=%q id=%s", reader.lastTenant, reader.lastID)
+	}
+}
+
+func TestUseCasesCreateFailsWhenJobRoleIsNotActive(t *testing.T) {
+	repo := newFakeRepo()
+	jobRoleID := uuid.New()
+	uc, err := NewUseCases(repo, &fakeJobRoleReader{err: domainerr.Conflict("job role is not active")})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = uc.Create(context.Background(), "tenant-1", domain.CreateInput{
+		Name:             "Ops",
+		JobRoleID:        jobRoleID.String(),
+		SupervisorUserID: uuid.NewString(),
+	})
+	if !domainerr.IsConflict(err) {
+		t.Fatalf("expected conflict for inactive job role, got %v", err)
 	}
 }
 
@@ -46,40 +90,40 @@ func TestUseCasesLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := uc.Create(context.Background(), domain.CreateInput{Name: "Ops", Role: "ops", SupervisorUserID: uuid.NewString()})
+	created, err := uc.Create(context.Background(), "tenant-1", domain.CreateInput{Name: "Ops", JobRoleID: uuid.NewString(), SupervisorUserID: uuid.NewString()})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if err := uc.Archive(context.Background(), created.ID, "", ""); err != nil {
+	if err := uc.Archive(context.Background(), "tenant-1", created.ID, "", ""); err != nil {
 		t.Fatalf("Archive: %v", err)
 	}
 	assertListLen(t, uc.ListActive, 0)
 	assertListLen(t, uc.ListArchived, 1)
 
-	if err := uc.Unarchive(context.Background(), created.ID, "", ""); err != nil {
+	if err := uc.Unarchive(context.Background(), "tenant-1", created.ID, "", ""); err != nil {
 		t.Fatalf("Unarchive: %v", err)
 	}
 	assertListLen(t, uc.ListActive, 1)
 
-	if err := uc.Trash(context.Background(), created.ID, "", ""); err != nil {
+	if err := uc.Trash(context.Background(), "tenant-1", created.ID, "", ""); err != nil {
 		t.Fatalf("Trash: %v", err)
 	}
 	assertListLen(t, uc.ListActive, 0)
 	assertListLen(t, uc.ListTrash, 1)
 
-	if err := uc.Restore(context.Background(), created.ID, "", ""); err != nil {
+	if err := uc.Restore(context.Background(), "tenant-1", created.ID, "", ""); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
 	assertListLen(t, uc.ListActive, 1)
 
-	if err := uc.Trash(context.Background(), created.ID, "", ""); err != nil {
+	if err := uc.Trash(context.Background(), "tenant-1", created.ID, "", ""); err != nil {
 		t.Fatalf("Trash again: %v", err)
 	}
-	if err := uc.Purge(context.Background(), created.ID, "", ""); err != nil {
+	if err := uc.Purge(context.Background(), "tenant-1", created.ID, "", ""); err != nil {
 		t.Fatalf("Purge: %v", err)
 	}
-	if _, err := uc.Get(context.Background(), created.ID); !domainerr.IsNotFound(err) {
+	if _, err := uc.Get(context.Background(), "tenant-1", created.ID); !domainerr.IsNotFound(err) {
 		t.Fatalf("expected not found after purge, got %v", err)
 	}
 }
@@ -90,22 +134,22 @@ func TestUseCasesUpdateArchivedOrTrashedFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := uc.Create(context.Background(), domain.CreateInput{Name: "Ops", Role: "ops", SupervisorUserID: uuid.NewString()})
+	created, err := uc.Create(context.Background(), "tenant-1", domain.CreateInput{Name: "Ops", JobRoleID: uuid.NewString(), SupervisorUserID: uuid.NewString()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := uc.Archive(context.Background(), created.ID, "", ""); err != nil {
+	if err := uc.Archive(context.Background(), "tenant-1", created.ID, "", ""); err != nil {
 		t.Fatal(err)
 	}
-	_, err = uc.Update(context.Background(), created.ID, domain.UpdateInput{Name: "New", Role: "new", SupervisorUserID: uuid.NewString()})
+	_, err = uc.Update(context.Background(), "tenant-1", created.ID, domain.UpdateInput{Name: "New", JobRoleID: uuid.NewString(), SupervisorUserID: uuid.NewString()})
 	if !domainerr.IsConflict(err) {
 		t.Fatalf("expected conflict updating archived, got %v", err)
 	}
 }
 
-func assertListLen(t *testing.T, fn func(context.Context) ([]domain.Virployee, error), want int) {
+func assertListLen(t *testing.T, fn func(context.Context, string) ([]domain.Virployee, error), want int) {
 	t.Helper()
-	got, err := fn(context.Background())
+	got, err := fn(context.Background(), "tenant-1")
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -127,7 +171,7 @@ func (r *fakeRepo) Create(_ context.Context, _ string, input domain.NormalizedCr
 	row := domain.Virployee{
 		ID:               uuid.New(),
 		Name:             input.Name,
-		Role:             input.Role,
+		JobRoleID:        input.JobRoleID,
 		Description:      input.Description,
 		SupervisorUserID: input.SupervisorUserID,
 		Autonomy:         input.Autonomy,
@@ -165,7 +209,7 @@ func (r *fakeRepo) Update(_ context.Context, _ string, id uuid.UUID, input domai
 		return domain.Virployee{}, domainerr.Conflict("virployee is not active")
 	}
 	row.Name = input.Name
-	row.Role = input.Role
+	row.JobRoleID = input.JobRoleID
 	row.Description = input.Description
 	row.SupervisorUserID = input.SupervisorUserID
 	row.Autonomy = input.Autonomy
@@ -243,4 +287,19 @@ func (r *fakeRepo) State(_ context.Context, _ string, id uuid.UUID) (domain.Stat
 		return "", domainerr.NotFoundf("virployee", id.String())
 	}
 	return row.State(), nil
+}
+
+type fakeJobRoleReader struct {
+	lastTenant string
+	lastID     uuid.UUID
+	err        error
+}
+
+func (r *fakeJobRoleReader) EnsureActive(_ context.Context, tenantID string, id uuid.UUID) error {
+	r.lastTenant = tenantID
+	r.lastID = id
+	if r.err != nil {
+		return r.err
+	}
+	return nil
 }

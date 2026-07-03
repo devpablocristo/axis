@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Companion v2 starts by modeling and managing Virployees.
+Companion v2 starts by modeling Job Roles and managing Virployees.
 
 A Virployee is a digital employee definition. In this first version, the API
 only creates, reads, updates and manages the lifecycle of Virployees. It does
@@ -26,18 +26,15 @@ In scope:
 - Trash and restore.
 - Purge permanently.
 
-Out of scope for this first version:
+Out of scope for this version:
 
-- Tenants as public API.
 - Authentication and authorization.
 - Tasks.
 - Runtime execution.
 - LLM providers.
 - Memory.
 - Tools and capabilities.
-- Job roles.
 - Profiles.
-- Supervisors.
 - Nexus, BFF, Console or any Axis v1 dependency.
 
 ## Architecture Rules
@@ -70,7 +67,7 @@ Public representation:
 {
   "id": "uuid",
   "name": "Sales Assistant",
-  "role": "sales_assistant",
+  "job_role_id": "uuid",
   "description": "Helps with commercial follow-up.",
   "supervisor_user_id": "uuid",
   "autonomy": "A1",
@@ -87,13 +84,14 @@ Fields:
 
 - `id`: server-generated UUID.
 - `name`: required, trimmed, non-empty.
-- `role`: required, trimmed, non-empty.
+- `job_role_id`: required UUID reference to an active Job Role in the same
+  tenant. It replaces the old free-text `role`.
 - `description`: optional, trimmed.
 - `supervisor_user_id`: required UUID reference to the human responsible for
   the Virployee. It is stored as an opaque reference in this version.
-- `autonomy`: optional input, defaults to `A1`. Accepted values are `A0`,
-  `A1`, `A2`, `A3`, `A4` and `A5`. In this version it is persisted as
-  configuration only; it does not enforce runtime permissions.
+- `autonomy`: optional input. If empty, it defaults to global `A1`. Accepted
+  values are `A0`, `A1`, `A2`, `A3`, `A4` and `A5`. In this version it is
+  persisted as configuration only; it does not enforce runtime permissions.
 - `created_at`: resource metadata; server-generated timestamp.
 - `updated_at`: resource metadata; server-generated timestamp.
 - `state`: derived from lifecycle metadata. It is never accepted as input.
@@ -217,18 +215,15 @@ If lifecycle requires an actor internally, read `X-Actor-ID`. If missing, use
 
 ## Tenancy
 
-Tenants are intentionally not part of the public API in this first version.
-
-If `platform/lifecycle` or the repository needs a tenant/scope value internally,
-use a fixed internal value:
+Companion reads `X-Tenant-ID` as request context for Job Roles and Virployees.
+If the header is missing, direct local/dev calls fall back to:
 
 ```text
 default
 ```
 
-Do not expose `tenant_id` in requests or responses. Do not require `X-Tenant-ID`
-yet. Multi-tenancy will be designed separately after the Virployee model is
-clear.
+BFF v2 is responsible for validating tenant membership before forwarding
+requests to Companion. Companion does not import BFF code.
 
 ## Persistence
 
@@ -241,7 +236,7 @@ Required columns:
 - `id uuid primary key`
 - `tenant_id text not null default 'default'`
 - `name text not null`
-- `role text not null`
+- `job_role_id uuid not null references job_roles(id)`
 - `description text not null default ''`
 - `supervisor_user_id uuid not null`
 - `autonomy text not null default 'A1'`
@@ -255,8 +250,9 @@ Indexes:
 
 - `(tenant_id, archived_at, trashed_at)`
 - `(tenant_id, id)`
+- `(job_role_id)`
 
-`tenant_id` is technical-only in this version.
+`tenant_id` scopes both Virployees and Job Roles.
 
 ### lifecycle audit
 
@@ -335,10 +331,10 @@ Request:
 ```json
 {
   "name": "Sales Assistant",
-  "role": "sales_assistant",
+  "job_role_id": "22222222-2222-4222-8222-222222222222",
   "description": "Helps with commercial follow-up.",
   "supervisor_user_id": "11111111-1111-4111-8111-111111111111",
-  "autonomy": "A1"
+  "autonomy": ""
 }
 ```
 
@@ -348,7 +344,7 @@ Response: `201 Created`
 {
   "id": "uuid",
   "name": "Sales Assistant",
-  "role": "sales_assistant",
+  "job_role_id": "22222222-2222-4222-8222-222222222222",
   "description": "Helps with commercial follow-up.",
   "supervisor_user_id": "11111111-1111-4111-8111-111111111111",
   "autonomy": "A1",
@@ -364,7 +360,8 @@ Response: `201 Created`
 Validation:
 
 - `name` is required.
-- `role` is required.
+- `job_role_id` is required, must be a UUID and must reference an active Job
+  Role in the same tenant.
 - `supervisor_user_id` is required and must be a UUID.
 - `autonomy` is optional. Empty or omitted values default to `A1`.
 - `autonomy` must be one of `A0`, `A1`, `A2`, `A3`, `A4` or `A5`.
@@ -385,7 +382,7 @@ Response: `200 OK`
     {
       "id": "uuid",
       "name": "Sales Assistant",
-      "role": "sales_assistant",
+      "job_role_id": "22222222-2222-4222-8222-222222222222",
       "description": "Helps with commercial follow-up.",
       "supervisor_user_id": "11111111-1111-4111-8111-111111111111",
       "autonomy": "A1",
@@ -453,7 +450,7 @@ Request:
 ```json
 {
   "name": "Sales Assistant",
-  "role": "sales_assistant",
+  "job_role_id": "22222222-2222-4222-8222-222222222222",
   "description": "Updated description.",
   "supervisor_user_id": "11111111-1111-4111-8111-111111111111",
   "autonomy": "A2"

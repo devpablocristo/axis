@@ -1,5 +1,6 @@
-import { Bot, RefreshCw, ShieldCheck } from 'lucide-react'
+import { Bot, BriefcaseBusiness, RefreshCw, ShieldCheck } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { JobRolesPage } from './JobRolesPage'
 import { VirployeesPage } from './VirployeesPage'
 import { getSession, type Session, type Tenant } from './api'
 
@@ -13,6 +14,7 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
   const [session, setSession] = useState<LoadState<Session>>({ data: null, loading: true, error: '' })
   const [orgId, setOrgId] = useState(localStorage.getItem('axis.v2.org_id') || '')
   const [productSurface, setProductSurface] = useState(localStorage.getItem('axis.v2.product_surface') || '')
+  const [activePage, setActivePage] = useState<'virployees' | 'job-roles'>('virployees')
 
   const refresh = useCallback(async () => {
     setSession((current) => ({ data: current.data, loading: true, error: '' }))
@@ -81,9 +83,21 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
           </div>
         </div>
         <nav className="nav">
-          <button type="button" className="active">
+          <button
+            type="button"
+            className={activePage === 'virployees' ? 'active' : ''}
+            onClick={() => setActivePage('virployees')}
+          >
             <Bot aria-hidden="true" />
             Virployees
+          </button>
+          <button
+            type="button"
+            className={activePage === 'job-roles' ? 'active' : ''}
+            onClick={() => setActivePage('job-roles')}
+          >
+            <BriefcaseBusiness aria-hidden="true" />
+            Job Roles
           </button>
         </nav>
       </aside>
@@ -91,7 +105,7 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
       <main className="workspace">
         <header className="topbar">
           <div>
-            <h1>Virployees</h1>
+            <h1>{activePage === 'virployees' ? 'Virployees' : 'Job Roles'}</h1>
             <p className="axis-muted">principal: {principalId || 'loading'}</p>
           </div>
           <div className="toolbar">
@@ -130,6 +144,8 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
           <section className="empty-state">No tenants are available for this user.</section>
         ) : selectedTenant == null ? (
           <section className="empty-state">No active tenant matches the selected combination.</section>
+        ) : activePage === 'job-roles' ? (
+          <JobRolesPage tenantId={selectedTenant.id} principalId={principalId} />
         ) : (
           <VirployeesPage tenantId={selectedTenant.id} principalId={principalId} />
         )}

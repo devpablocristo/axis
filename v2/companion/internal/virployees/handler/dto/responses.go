@@ -9,7 +9,7 @@ import (
 type VirployeeResponse struct {
 	ID               string     `json:"id"`
 	Name             string     `json:"name"`
-	Role             string     `json:"role"`
+	JobRoleID        string     `json:"job_role_id"`
 	Description      string     `json:"description"`
 	SupervisorUserID string     `json:"supervisor_user_id"`
 	Autonomy         string     `json:"autonomy"`
@@ -47,7 +47,7 @@ func VirployeeFromDomain(v domain.Virployee) VirployeeResponse {
 	return VirployeeResponse{
 		ID:               v.ID.String(),
 		Name:             v.Name,
-		Role:             v.Role,
+		JobRoleID:        v.JobRoleID.String(),
 		Description:      v.Description,
 		SupervisorUserID: v.SupervisorUserID.String(),
 		Autonomy:         string(v.Autonomy),

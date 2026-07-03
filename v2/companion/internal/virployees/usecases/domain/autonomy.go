@@ -92,7 +92,7 @@ func (level AutonomyLevel) Allows(required AutonomyLevel) bool {
 	return levelRank >= requiredRank
 }
 
-func normalizeAutonomy(raw string) (AutonomyLevel, error) {
+func NormalizeAutonomy(raw string) (AutonomyLevel, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return AutonomyA1, nil
@@ -102,6 +102,10 @@ func normalizeAutonomy(raw string) (AutonomyLevel, error) {
 		return "", domainerr.Validation("autonomy must be one of A0, A1, A2, A3, A4, A5")
 	}
 	return level, nil
+}
+
+func normalizeAutonomy(raw string) (AutonomyLevel, error) {
+	return NormalizeAutonomy(raw)
 }
 
 func validAutonomy(level AutonomyLevel) bool {

@@ -11,7 +11,7 @@ import (
 type Virployee struct {
 	ID               uuid.UUID
 	Name             string
-	Role             string
+	JobRoleID        uuid.UUID
 	Description      string
 	SupervisorUserID uuid.UUID
 	Autonomy         domain.AutonomyLevel
@@ -28,7 +28,7 @@ func (m Virployee) ToDomain() domain.Virployee {
 	return domain.Virployee{
 		ID:               m.ID,
 		Name:             m.Name,
-		Role:             m.Role,
+		JobRoleID:        m.JobRoleID,
 		Description:      m.Description,
 		SupervisorUserID: m.SupervisorUserID,
 		Autonomy:         m.Autonomy,

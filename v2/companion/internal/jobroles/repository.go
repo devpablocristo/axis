@@ -1,4 +1,4 @@
-package virployees
+package jobroles
 
 import (
 	"context"
@@ -11,8 +11,8 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/devpablocristo/companion-v2/internal/virployees/repository/models"
-	"github.com/devpablocristo/companion-v2/internal/virployees/usecases/domain"
+	"github.com/devpablocristo/companion-v2/internal/jobroles/repository/models"
+	"github.com/devpablocristo/companion-v2/internal/jobroles/usecases/domain"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
 	"github.com/google/uuid"
 )
@@ -25,18 +25,21 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 	return &Repository{pool: pool}
 }
 
-func (r *Repository) Create(ctx context.Context, tenantID string, input domain.NormalizedCreateInput) (domain.Virployee, error) {
+func (r *Repository) Create(ctx context.Context, tenantID string, input domain.NormalizedCreateInput) (domain.JobRole, error) {
 	id := uuid.New()
 	now := time.Now().UTC()
 	row := r.pool.QueryRow(ctx, `
-		INSERT INTO virployees (id, tenant_id, name, job_role_id, description, supervisor_user_id, autonomy, created_at, updated_at)
-		VALUES ($1::uuid, $2, $3, $4::uuid, $5, $6::uuid, $7, $8, $8)
-		RETURNING id::text, name, job_role_id::text, description, supervisor_user_id::text, autonomy, created_at, updated_at, archived_at, trashed_at, purge_after
-	`, id.String(), tenantID, input.Name, input.JobRoleID.String(), input.Description, input.SupervisorUserID.String(), string(input.Autonomy), now)
-	return scanVirployee(row)
+		INSERT INTO job_roles (
+			id, tenant_id, name, slug, mission, created_at, updated_at
+		)
+		VALUES ($1::uuid, $2, $3, $4, $5, $6, $6)
+		RETURNING id::text, tenant_id, name, slug, mission,
+			created_at, updated_at, archived_at, trashed_at, purge_after
+	`, id.String(), tenantID, input.Name, input.Slug, input.Mission, now)
+	return scanJobRole(row)
 }
 
-func (r *Repository) List(ctx context.Context, tenantID string, state domain.State) ([]domain.Virployee, error) {
+func (r *Repository) List(ctx context.Context, tenantID string, state domain.State) ([]domain.JobRole, error) {
 	where := "tenant_id = $1 AND archived_at IS NULL AND trashed_at IS NULL"
 	switch state {
 	case domain.StateActive, "":
@@ -50,19 +53,20 @@ func (r *Repository) List(ctx context.Context, tenantID string, state domain.Sta
 	}
 
 	rows, err := r.pool.Query(ctx, fmt.Sprintf(`
-		SELECT id::text, name, job_role_id::text, description, supervisor_user_id::text, autonomy, created_at, updated_at, archived_at, trashed_at, purge_after
-		FROM virployees
+		SELECT id::text, tenant_id, name, slug, mission,
+			created_at, updated_at, archived_at, trashed_at, purge_after
+		FROM job_roles
 		WHERE %s
-		ORDER BY created_at DESC, id DESC
+		ORDER BY name ASC, id ASC
 	`, where), tenantID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	out := []domain.Virployee{}
+	out := []domain.JobRole{}
 	for rows.Next() {
-		item, err := scanVirployee(rows)
+		item, err := scanJobRole(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -74,45 +78,53 @@ func (r *Repository) List(ctx context.Context, tenantID string, state domain.Sta
 	return out, nil
 }
 
-func (r *Repository) Get(ctx context.Context, tenantID string, id uuid.UUID) (domain.Virployee, error) {
+func (r *Repository) Get(ctx context.Context, tenantID string, id uuid.UUID) (domain.JobRole, error) {
 	row := r.pool.QueryRow(ctx, `
-		SELECT id::text, name, job_role_id::text, description, supervisor_user_id::text, autonomy, created_at, updated_at, archived_at, trashed_at, purge_after
-		FROM virployees
+		SELECT id::text, tenant_id, name, slug, mission,
+			created_at, updated_at, archived_at, trashed_at, purge_after
+		FROM job_roles
 		WHERE tenant_id = $1 AND id = $2::uuid AND trashed_at IS NULL
 	`, tenantID, id.String())
-	return scanVirployee(row)
+	return scanJobRole(row)
 }
 
-func (r *Repository) Update(ctx context.Context, tenantID string, id uuid.UUID, input domain.NormalizedUpdateInput) (domain.Virployee, error) {
+func (r *Repository) Update(ctx context.Context, tenantID string, id uuid.UUID, input domain.NormalizedUpdateInput) (domain.JobRole, error) {
 	row := r.pool.QueryRow(ctx, `
-		UPDATE virployees
-		SET name = $3, job_role_id = $4::uuid, description = $5, supervisor_user_id = $6::uuid, autonomy = $7, updated_at = $8
+		UPDATE job_roles
+		SET name = $3,
+			slug = $4,
+			mission = $5,
+			updated_at = $6
 		WHERE tenant_id = $1
 			AND id = $2::uuid
 			AND archived_at IS NULL
 			AND trashed_at IS NULL
-		RETURNING id::text, name, job_role_id::text, description, supervisor_user_id::text, autonomy, created_at, updated_at, archived_at, trashed_at, purge_after
-	`, tenantID, id.String(), input.Name, input.JobRoleID.String(), input.Description, input.SupervisorUserID.String(), string(input.Autonomy), time.Now().UTC())
-	item, err := scanVirployee(row)
+		RETURNING id::text, tenant_id, name, slug, mission,
+			created_at, updated_at, archived_at, trashed_at, purge_after
+	`, tenantID, id.String(), input.Name, input.Slug, input.Mission, time.Now().UTC())
+	item, err := scanJobRole(row)
 	if err == nil {
 		return item, nil
 	}
+	if mapped := mapJobRoleConflict(err); mapped != nil {
+		return domain.JobRole{}, mapped
+	}
 	if !domainerr.IsNotFound(err) {
-		return domain.Virployee{}, err
+		return domain.JobRole{}, err
 	}
 	state, stateErr := r.State(ctx, tenantID, id)
 	if stateErr != nil {
-		return domain.Virployee{}, stateErr
+		return domain.JobRole{}, stateErr
 	}
 	if state != domain.StateActive {
-		return domain.Virployee{}, domainerr.Conflict("virployee is not active")
+		return domain.JobRole{}, domainerr.Conflict("job role is not active")
 	}
-	return domain.Virployee{}, err
+	return domain.JobRole{}, err
 }
 
 func (r *Repository) SoftDelete(ctx context.Context, tenantID string, resourceID uuid.UUID, at time.Time) error {
 	tag, err := r.pool.Exec(ctx, `
-		UPDATE virployees
+		UPDATE job_roles
 		SET archived_at = $3, updated_at = $3
 		WHERE tenant_id = $1
 			AND id = $2::uuid
@@ -124,7 +136,7 @@ func (r *Repository) SoftDelete(ctx context.Context, tenantID string, resourceID
 
 func (r *Repository) Restore(ctx context.Context, tenantID string, resourceID uuid.UUID) error {
 	tag, err := r.pool.Exec(ctx, `
-		UPDATE virployees
+		UPDATE job_roles
 		SET archived_at = NULL, updated_at = $3
 		WHERE tenant_id = $1
 			AND id = $2::uuid
@@ -136,7 +148,7 @@ func (r *Repository) Restore(ctx context.Context, tenantID string, resourceID uu
 
 func (r *Repository) HardDelete(ctx context.Context, tenantID string, resourceID uuid.UUID) error {
 	tag, err := r.pool.Exec(ctx, `
-		DELETE FROM virployees
+		DELETE FROM job_roles
 		WHERE tenant_id = $1 AND id = $2::uuid
 	`, tenantID, resourceID.String())
 	return r.lifecycleResult(ctx, tenantID, resourceID, tag, err)
@@ -152,7 +164,7 @@ func (r *Repository) IsArchived(ctx context.Context, tenantID string, resourceID
 
 func (r *Repository) Trash(ctx context.Context, tenantID string, resourceID uuid.UUID, at time.Time, purgeAfter *time.Time) error {
 	tag, err := r.pool.Exec(ctx, `
-		UPDATE virployees
+		UPDATE job_roles
 		SET archived_at = NULL, trashed_at = $3, purge_after = $4, updated_at = $3
 		WHERE tenant_id = $1
 			AND id = $2::uuid
@@ -163,7 +175,7 @@ func (r *Repository) Trash(ctx context.Context, tenantID string, resourceID uuid
 
 func (r *Repository) RestoreTrashed(ctx context.Context, tenantID string, resourceID uuid.UUID) error {
 	tag, err := r.pool.Exec(ctx, `
-		UPDATE virployees
+		UPDATE job_roles
 		SET trashed_at = NULL, purge_after = NULL, updated_at = $3
 		WHERE tenant_id = $1
 			AND id = $2::uuid
@@ -177,11 +189,11 @@ func (r *Repository) State(ctx context.Context, tenantID string, resourceID uuid
 	var trashedAt sql.NullTime
 	err := r.pool.QueryRow(ctx, `
 		SELECT archived_at, trashed_at
-		FROM virployees
+		FROM job_roles
 		WHERE tenant_id = $1 AND id = $2::uuid
 	`, tenantID, resourceID.String()).Scan(&archivedAt, &trashedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return "", domainerr.NotFoundf("virployee", resourceID.String())
+		return "", domainerr.NotFoundf("job_role", resourceID.String())
 	}
 	if err != nil {
 		return "", err
@@ -213,19 +225,15 @@ type scanner interface {
 	Scan(dest ...any) error
 }
 
-func scanVirployee(row scanner) (domain.Virployee, error) {
+func scanJobRole(row scanner) (domain.JobRole, error) {
 	var idText string
-	var jobRoleIDText string
-	var supervisorUserIDText string
-	var autonomyText string
-	var model models.Virployee
+	var model models.JobRole
 	err := row.Scan(
 		&idText,
+		&model.TenantID,
 		&model.Name,
-		&jobRoleIDText,
-		&model.Description,
-		&supervisorUserIDText,
-		&autonomyText,
+		&model.Slug,
+		&model.Mission,
 		&model.CreatedAt,
 		&model.UpdatedAt,
 		&model.ArchivedAt,
@@ -233,27 +241,16 @@ func scanVirployee(row scanner) (domain.Virployee, error) {
 		&model.PurgeAfter,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return domain.Virployee{}, domainerr.NotFound("virployee not found")
+		return domain.JobRole{}, domainerr.NotFound("job role not found")
 	}
 	if err != nil {
-		return domain.Virployee{}, mapVirployeeStorageError(err)
+		return domain.JobRole{}, mapJobRoleConflict(err)
 	}
 	id, err := uuid.Parse(idText)
 	if err != nil {
-		return domain.Virployee{}, err
-	}
-	jobRoleID, err := uuid.Parse(jobRoleIDText)
-	if err != nil {
-		return domain.Virployee{}, err
-	}
-	supervisorUserID, err := uuid.Parse(supervisorUserIDText)
-	if err != nil {
-		return domain.Virployee{}, err
+		return domain.JobRole{}, err
 	}
 	model.ID = id
-	model.JobRoleID = jobRoleID
-	model.SupervisorUserID = supervisorUserID
-	model.Autonomy = domain.AutonomyLevel(autonomyText)
 	return model.ToDomain(), nil
 }
 
@@ -264,12 +261,13 @@ func nullableTime(value *time.Time) any {
 	return value.UTC()
 }
 
-func mapVirployeeStorageError(err error) error {
+func mapJobRoleConflict(err error) error {
+	if err == nil {
+		return nil
+	}
 	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == "23503" {
-		return domainerr.Validation("job_role_id must reference an existing job role")
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		return domainerr.Conflict("job role slug already exists")
 	}
 	return err
 }
-
-var _ RepositoryPort = (*Repository)(nil)

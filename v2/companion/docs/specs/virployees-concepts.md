@@ -5,8 +5,8 @@
 This document decides which concepts belong to the next Virployee model in
 `companion`.
 
-The current v2 API is a good technical base, but `name + role + description`
-is not enough domain to represent a digital employee. A Virployee must have
+The first v2 API was a good technical base, but `name + role + description`
+was not enough domain to represent a digital employee. A Virployee must have
 identity, human responsibility, a work function and minimum execution safety.
 
 This is a design decision document only. It does not change the current REST
@@ -37,12 +37,12 @@ Evaluation criteria:
 |---|---:|---:|---:|---:|---:|---|---|
 | `id` | yes | no | no | no | yes | `core` | Server-generated UUID. Public identity of the Virployee. |
 | `name` | yes | no | no | no | yes | `core` | Required in `POST`. Human-readable display name. |
-| `role` | partial | partial | no | no | yes | `metadata` | Temporary bootstrap field only. It must not become the final work model. Replace with `job_role_id`. |
+| `role` | partial | partial | no | no | yes | `out` | Removed from the new public Virployee API. `job_role_id` is the work-function reference. |
 | `description` | partial | partial | no | no | yes | `metadata` | Optional note for humans. It must not carry mission, responsibilities or permissions. |
 | `supervisor_user_id` | yes | no | no | yes | yes | `core` | Required opaque string in v2.1. It names the responsible human, not the creator and not auth. |
 | `status` | yes | yes | yes | yes | yes | `core` | Add operational status separate from lifecycle. Values: `draft`, `active`, `disabled`, `suspended`, `error`. Default `draft`. |
 | lifecycle `state` | no | no | no | partial | yes | `metadata` | Keep as technical lifecycle derived from timestamps: `active`, `archived`, `trashed`. Do not use it as operational readiness. |
-| `job_role_id` | yes | yes | partial | partial | yes | `core` | Required opaque UUID in v2.1. Replaces `role` as the work-function reference. Validate format only until Job Roles exist. |
+| `job_role_id` | yes | yes | partial | partial | yes | `core` | Required UUID in v2.1. Replaces `role` as the work-function reference and must point to an active Job Role in the same tenant. |
 | `profile_id` | no | no | yes | yes | partial | `deferred-core` | Essential later, but wait for Virployee Profiles. Do not accept fake runtime profile references yet. |
 | `autonomy` | no | partial | yes | yes | yes | `core` | Optional in `POST`, default `A1`. Values: `A0` to `A5`. This is the minimum runtime safety control. |
 | `capability_ids` | no | yes | yes | yes | partial | `deferred-core` | Essential later, but wait for Capability design. Do not store opaque capability lists before the registry contract is clear. |
@@ -81,8 +81,8 @@ Metadata
 - purge_after: timestamp | null
 ```
 
-`role` does not survive as a domain concept. It may remain during migration as
-a compatibility/bootstrap field, but new design must use `job_role_id`.
+`role` does not survive as a domain concept in new payloads. New design uses
+`job_role_id`.
 
 `status` and lifecycle are separate:
 
@@ -125,7 +125,7 @@ Server-generated or server-derived fields:
 References stored as opaque values in v2.1:
 
 - `supervisor_user_id`: opaque string; no auth or user module yet.
-- `job_role_id`: UUID; no Job Roles module validation yet.
+- `job_role_id`: UUID; must reference an active Job Role in the same tenant.
 
 References intentionally not stored yet:
 

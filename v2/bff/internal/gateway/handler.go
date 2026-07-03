@@ -37,11 +37,17 @@ func NewHandler(ucs UseCasesPort, options Options) *Handler {
 }
 
 func (h *Handler) Routes(router gin.IRouter) {
-	router.Any("/virployees", h.ForwardVirployees)
-	router.Any("/virployees/*path", h.ForwardVirployees)
+	router.Any("/job-roles", h.ForwardCompanion)
+	router.Any("/job-roles/*path", h.ForwardCompanion)
+	router.Any("/virployees", h.ForwardCompanion)
+	router.Any("/virployees/*path", h.ForwardCompanion)
 }
 
 func (h *Handler) ForwardVirployees(c *gin.Context) {
+	h.ForwardCompanion(c)
+}
+
+func (h *Handler) ForwardCompanion(c *gin.Context) {
 	resolved, err := h.ucs.Resolve(c.Request.Context(), gatewaydomain.ResolveInput{
 		TenantID:    c.GetHeader("X-Tenant-ID"),
 		PrincipalID: h.principalID(c),

@@ -5,13 +5,14 @@ import {
   type CrudPageProps,
 } from '@devpablocristo/platform-crud-ui'
 import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
-import { createPortal } from 'react-dom'
 import {
+  type JobRole,
   type VirployeeAutonomy,
   type VirployeeAutonomyLevel,
   type Virployee,
   archiveVirployee,
   createVirployee,
+  listJobRoles,
   listVirployeeAutonomyLevels,
   listVirployees,
   purgeVirployee,
@@ -131,14 +132,17 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
   const [lifecycleView, setLifecycleView] = useState<CrudLifecycleView>('active')
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [createRequested, setCreateRequested] = useState(false)
+  const [createOpen, setCreateOpen] = useState(false)
   const [bulkBusy, setBulkBusy] = useState(false)
   const [reloadVersion, setReloadVersion] = useState(0)
   const [actionError, setActionError] = useState('')
   const [autonomyLevels, setAutonomyLevels] = useState<VirployeeAutonomyLevel[]>(FALLBACK_AUTONOMY_LEVELS)
-  const [autonomyHelpHost, setAutonomyHelpHost] = useState<HTMLElement | null>(null)
-  const [selectedAutonomy, setSelectedAutonomy] = useState<VirployeeAutonomy>('A1')
-  const [usesDefaultAutonomy, setUsesDefaultAutonomy] = useState(true)
+  const [jobRoles, setJobRoles] = useState<JobRole[]>([])
+  const [jobRolesError, setJobRolesError] = useState('')
   const isActive = Boolean(tenantId && principalId)
+  const jobRoleByID = useMemo(() => {
+    return new Map(jobRoles.map((jobRole) => [jobRole.id, jobRole]))
+  }, [jobRoles])
   const autonomyByLevel = useMemo(() => {
     return new Map(autonomyLevels.map((level) => [level.level, level]))
   }, [autonomyLevels])
@@ -148,11 +152,18 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
       value: level.level,
     }))
   }, [autonomyLevels])
+  const jobRoleOptions = useMemo(() => {
+    return jobRoles.map((jobRole) => ({
+      label: jobRole.name,
+      value: jobRole.id,
+    }))
+  }, [jobRoles])
 
   const dataSource: NonNullable<CrudPageProps<Virployee>['dataSource']> = useMemo(() => ({
     list: ({ view }) => isActive ? listVirployees(view, tenantId, principalId) : Promise.resolve([]),
     create: async (values) => {
       await createVirployee(virployeePayload(values), tenantId, principalId)
+      setCreateOpen(false)
       setReloadVersion((current) => current + 1)
     },
     update: async (row, values) => {
@@ -183,8 +194,34 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
 
   useEffect(() => {
     setSelectedIds([])
+    setCreateOpen(false)
     setActionError('')
+    setJobRoles([])
+    setJobRolesError('')
   }, [lifecycleView, tenantId])
+
+  useEffect(() => {
+    if (!isActive) {
+      setJobRoles([])
+      setJobRolesError('')
+      return
+    }
+    let cancelled = false
+    listJobRoles('active', tenantId, principalId)
+      .then((items) => {
+        if (cancelled) return
+        setJobRoles(items)
+        setJobRolesError('')
+      })
+      .catch((error) => {
+        if (cancelled) return
+        setJobRoles([])
+        setJobRolesError(error instanceof Error ? error.message : 'Could not load Job Roles')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [isActive, principalId, reloadVersion, tenantId])
 
   useEffect(() => {
     if (!isActive) {
@@ -214,7 +251,12 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
           '.crud-page-shell__header-actions > .actions-row > .actions-row > button',
         ) ?? [],
       )
-      buttons.find((button) => button.textContent?.trim() === 'New')?.click()
+      const newButton = buttons.find((button) => button.textContent?.trim() === 'New')
+      if (newButton) {
+        newButton.click()
+      } else {
+        setCreateOpen(false)
+      }
       setCreateRequested(false)
     }, 0)
     return () => window.clearTimeout(handle)
@@ -223,53 +265,119 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
   useEffect(() => {
     const root = rootRef.current
     if (!root) return
+    const syncCreateOpen = () => {
+      const title = root.querySelector<HTMLElement>('.crud-form-card .card-header h2')
+      setCreateOpen(title?.textContent?.trim().toLowerCase().startsWith('new ') ?? false)
+    }
+    syncCreateOpen()
+    const observer = new MutationObserver(syncCreateOpen)
+    observer.observe(root, { childList: true, subtree: true })
+    return () => observer.disconnect()
+  }, [tenantId, lifecycleView, reloadVersion])
+
+  useEffect(() => {
+    const root = rootRef.current
+    if (!root) return
+    let bubbleVisible = false
 
     const syncAutonomyHelp = () => {
       const select = root.querySelector<HTMLSelectElement>('#crud-field-autonomy')
       if (!select) {
-        setAutonomyHelpHost(null)
-        setSelectedAutonomy('A1')
-        setUsesDefaultAutonomy(true)
+        hideAutonomyBubble()
         return
       }
       const raw = select.value.trim()
-      setSelectedAutonomy(isAutonomy(raw) ? raw : 'A1')
-      setUsesDefaultAutonomy(raw === '')
-
-      const fieldGroup = select.closest('.form-group')
-      if (!fieldGroup) {
-        setAutonomyHelpHost(null)
-        return
-      }
-      let host = root.querySelector<HTMLElement>('#virployee-autonomy-help-host')
+      let host = document.querySelector<HTMLElement>('#virployee-autonomy-help-host')
       if (!host) {
         host = document.createElement('div')
         host.id = 'virployee-autonomy-help-host'
-        host.className = 'virployee-autonomy-help-host full-width'
+        host.className = 'virployee-autonomy-help-host'
+        document.body.appendChild(host)
       }
-      if (host.previousElementSibling !== fieldGroup) {
-        fieldGroup.insertAdjacentElement('afterend', host)
-      }
-      setAutonomyHelpHost(host)
+      const selectedAutonomy = isAutonomy(raw) ? raw : 'A1'
+      const definition = autonomyByLevel.get(selectedAutonomy) ?? FALLBACK_AUTONOMY_LEVELS[1]
+      host.innerHTML = autonomyBubbleMarkup(definition, raw === '')
+      positionAutonomyBubble(select, host)
+      host.style.display = bubbleVisible ? 'block' : 'none'
+    }
+
+    const showAutonomyBubble = () => {
+      bubbleVisible = true
+      syncAutonomyHelp()
+    }
+
+    const hideAutonomyBubble = () => {
+      bubbleVisible = false
+      const host = document.querySelector<HTMLElement>('#virployee-autonomy-help-host')
+      if (host) host.style.display = 'none'
+    }
+
+    const isAutonomySelectEvent = (event: Event) => {
+      const target = event.target
+      return target instanceof HTMLSelectElement && target.id === 'crud-field-autonomy'
     }
 
     const handleChange = (event: Event) => {
-      const target = event.target
-      if (target instanceof HTMLSelectElement && target.id === 'crud-field-autonomy') {
+      if (isAutonomySelectEvent(event)) {
         syncAutonomyHelp()
+      }
+    }
+
+    const handleFocusIn = (event: Event) => {
+      if (isAutonomySelectEvent(event)) {
+        showAutonomyBubble()
+      }
+    }
+
+    const handleFocusOut = (event: Event) => {
+      if (!isAutonomySelectEvent(event)) return
+      window.setTimeout(() => {
+        if (document.activeElement?.id !== 'crud-field-autonomy') {
+          hideAutonomyBubble()
+        }
+      }, 120)
+    }
+
+    const handlePointerOver = (event: Event) => {
+      if (isAutonomySelectEvent(event)) {
+        showAutonomyBubble()
+      }
+    }
+
+    const handlePointerOut = (event: Event) => {
+      if (!isAutonomySelectEvent(event)) return
+      if (document.activeElement?.id !== 'crud-field-autonomy') {
+        hideAutonomyBubble()
       }
     }
 
     const observer = new MutationObserver(syncAutonomyHelp)
     observer.observe(root, { childList: true, subtree: true })
     root.addEventListener('change', handleChange)
+    root.addEventListener('input', handleChange)
+    root.addEventListener('keyup', handleChange)
+    root.addEventListener('mouseup', handleChange)
+    root.addEventListener('focusin', handleFocusIn)
+    root.addEventListener('focusout', handleFocusOut)
+    root.addEventListener('mouseover', handlePointerOver)
+    root.addEventListener('mouseout', handlePointerOut)
+    const interval = window.setInterval(syncAutonomyHelp, 200)
     syncAutonomyHelp()
 
     return () => {
       observer.disconnect()
       root.removeEventListener('change', handleChange)
+      root.removeEventListener('input', handleChange)
+      root.removeEventListener('keyup', handleChange)
+      root.removeEventListener('mouseup', handleChange)
+      root.removeEventListener('focusin', handleFocusIn)
+      root.removeEventListener('focusout', handleFocusOut)
+      root.removeEventListener('mouseover', handlePointerOver)
+      root.removeEventListener('mouseout', handlePointerOut)
+      window.clearInterval(interval)
+      hideAutonomyBubble()
     }
-  }, [lifecycleView, reloadVersion, tenantId])
+  }, [autonomyByLevel, lifecycleView, reloadVersion, tenantId])
 
   const toggleSelected = (id: string, checked: boolean) => {
     setSelectedIds((current) => (
@@ -281,6 +389,7 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
 
   const setExternalLifecycleView = (view: CrudLifecycleView) => {
     setLifecycleView(view)
+    setCreateOpen(false)
     clearSelected()
     setActionError('')
   }
@@ -347,10 +456,10 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
         labelPlural="virployees"
         labelPluralCap="Virployees"
         createLabel="New"
-        columns={virployeeColumns(selectedIds, toggleSelected, autonomyByLevel)}
-        formFields={virployeeFormFields(autonomyOptions)}
-        searchText={(row) => virployeeSearchText(row, autonomyByLevel)}
-        toFormValues={virployeeToFormValues}
+        columns={virployeeColumns(selectedIds, toggleSelected, autonomyByLevel, jobRoleByID)}
+        formFields={virployeeFormFields(autonomyOptions, jobRoleOptions)}
+        searchText={(row) => virployeeSearchText(row, autonomyByLevel, jobRoleByID)}
+        toFormValues={(row) => virployeeToFormValues(row)}
         isValid={isValidVirployeeForm}
         emptyState="No virployees"
         archivedEmptyState="No archived virployees"
@@ -361,37 +470,74 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
             <CreateAndBulkActions
               selectedCount={selectedIds.length}
               view={lifecycleView}
+              createOpen={createOpen}
               busy={bulkBusy || !isActive}
-              onCreate={() => setCreateRequested(true)}
+              onCreate={() => {
+                setCreateOpen(true)
+                setCreateRequested(true)
+              }}
               onClear={clearSelected}
               onBulkAction={(action) => void applyBulkAction(action)}
             />
             {actionError ? <p role="alert" className="iam-control__inline-error">{actionError}</p> : null}
+            {jobRolesError ? <p role="alert" className="iam-control__inline-error">{jobRolesError}</p> : null}
+            {!jobRolesError && jobRoles.length === 0 ? (
+              <p className="iam-control__inline-note">Create a Job Role before creating Virployees.</p>
+            ) : null}
           </div>
         )}
-        toolbarActions={lifecycleToolbarActions(lifecycleView, setExternalLifecycleView)}
+        toolbarActions={lifecycleToolbarActions(lifecycleView, createOpen, setExternalLifecycleView)}
         featureFlags={{ csvToolbar: false }}
       />
-      {autonomyHelpHost ? createPortal(
-        <AutonomyDetails
-          definition={autonomyByLevel.get(selectedAutonomy)}
-          usesDefault={usesDefaultAutonomy}
-        />,
-        autonomyHelpHost,
-      ) : null}
     </section>
   )
+}
+
+function positionAutonomyBubble(select: HTMLSelectElement, host: HTMLElement) {
+  const rect = select.getBoundingClientRect()
+  const viewportPadding = 10
+  const width = Math.min(Math.max(rect.width, 320), window.innerWidth - viewportPadding * 2)
+  const left = Math.min(Math.max(rect.left, viewportPadding), window.innerWidth - width - viewportPadding)
+  const top = Math.max(rect.top, viewportPadding)
+  host.style.left = `${left}px`
+  host.style.top = `${top}px`
+  host.style.width = `${width}px`
+}
+
+function autonomyBubbleMarkup(definition: VirployeeAutonomyLevel, usesDefault: boolean): string {
+  const allowedActions = definition.allowed_action_classes.map((action) => action.name).join(', ') || 'None'
+  return `
+    <div class="virployee-autonomy-bubble">
+      <div class="virployee-autonomy-bubble__title">
+        <span class="virployee-autonomy-bubble__level">${escapeHTML(definition.level)}</span>
+        <strong>${escapeHTML(definition.name)}</strong>
+        ${usesDefault ? '<span class="virployee-autonomy-bubble__default">Default</span>' : ''}
+      </div>
+      <p><span>Meaning</span>${escapeHTML(definition.description)}</p>
+      <p><span>Allows</span>${escapeHTML(allowedActions)}</p>
+    </div>
+  `
+}
+
+function escapeHTML(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;')
 }
 
 function virployeeColumns(
   selectedIds: string[],
   onToggle: (id: string, checked: boolean) => void,
   autonomyByLevel: ReadonlyMap<VirployeeAutonomy, VirployeeAutonomyLevel>,
+  jobRoleByID?: ReadonlyMap<string, JobRole>,
 ): CrudPageProps<Virployee>['columns'] {
   return [
     selectionColumn<Virployee>(selectedIds, onToggle),
     { key: 'name', header: 'Name' },
-    { key: 'role', header: 'Role' },
+    { key: 'job_role_id', header: 'Job Role', render: (value) => jobRoleName(String(value ?? ''), jobRoleByID) },
     { key: 'autonomy', header: 'Autonomy', render: (value) => formatAutonomy(String(value ?? ''), autonomyByLevel) },
     { key: 'supervisor_user_id', header: 'Supervisor', render: (value) => shortId(String(value ?? '')) },
     { key: 'state', header: 'State', render: (value) => formatState(String(value ?? '')) },
@@ -401,16 +547,22 @@ function virployeeColumns(
 
 function virployeeFormFields(
   autonomyOptions: Array<{ label: string; value: string }>,
+  jobRoleOptions: Array<{ label: string; value: string }>,
 ): CrudPageProps<Virployee>['formFields'] {
-  const defaultAutonomy = autonomyOptions.find((option) => option.value === 'A1')?.label ?? 'A1 - Recommendation'
   return [
     { key: 'name', label: 'Name' },
-    { key: 'role', label: 'Role' },
+    {
+      key: 'job_role_id',
+      label: 'Job Role',
+      type: 'select' as const,
+      placeholder: jobRoleOptions.length > 0 ? 'Select...' : 'Create a Job Role first',
+      options: jobRoleOptions,
+    },
     {
       key: 'autonomy',
       label: 'Autonomy (optional)',
       type: 'select' as const,
-      placeholder: `Default: ${defaultAutonomy}`,
+      placeholder: 'Default: A1 - Recommendation',
       options: autonomyOptions,
     },
     {
@@ -423,38 +575,10 @@ function virployeeFormFields(
   ]
 }
 
-function AutonomyDetails(props: {
-  definition: VirployeeAutonomyLevel | undefined
-  usesDefault: boolean
-}) {
-  const definition = props.definition ?? FALLBACK_AUTONOMY_LEVELS[1]
-  return (
-    <div className="virployee-autonomy-help">
-      <div className="virployee-autonomy-help__header">
-        <strong>{definition.level} - {definition.name}</strong>
-        {props.usesDefault ? <span>Default</span> : null}
-      </div>
-      <p>{definition.description}</p>
-      <div className="virployee-autonomy-help__actions" aria-label="Allowed action classes">
-        <span>Allowed:</span>
-        {definition.allowed_action_classes.length > 0 ? (
-          definition.allowed_action_classes.map((action) => (
-            <span key={action.class} className="virployee-autonomy-help__chip">
-              {action.name}
-            </span>
-          ))
-        ) : (
-          <span className="virployee-autonomy-help__empty">None</span>
-        )}
-      </div>
-    </div>
-  )
-}
-
 function virployeeToFormValues(row: Virployee): CrudFormValues {
   return {
     name: row.name,
-    role: row.role,
+    job_role_id: row.job_role_id,
     autonomy: row.autonomy ?? 'A1',
     description: row.description ?? '',
     supervisor_user_id: row.supervisor_user_id,
@@ -464,7 +588,7 @@ function virployeeToFormValues(row: Virployee): CrudFormValues {
 function virployeePayload(values: CrudFormValues) {
   return {
     name: stringValue(values.name),
-    role: stringValue(values.role),
+    job_role_id: stringValue(values.job_role_id),
     description: stringValue(values.description),
     supervisor_user_id: stringValue(values.supervisor_user_id),
     autonomy: autonomyValue(values.autonomy),
@@ -474,7 +598,7 @@ function virployeePayload(values: CrudFormValues) {
 function isValidVirployeeForm(values: CrudFormValues): boolean {
   return (
     stringValue(values.name).length > 0 &&
-    stringValue(values.role).length > 0 &&
+    stringValue(values.job_role_id).length > 0 &&
     isUUID(stringValue(values.supervisor_user_id))
   )
 }
@@ -482,11 +606,15 @@ function isValidVirployeeForm(values: CrudFormValues): boolean {
 function virployeeSearchText(
   row: Virployee,
   autonomyByLevel: ReadonlyMap<VirployeeAutonomy, VirployeeAutonomyLevel>,
+  jobRoleByID: ReadonlyMap<string, JobRole>,
 ): string {
+  const jobRole = jobRoleByID.get(row.job_role_id)
   return [
     row.id,
     row.name,
-    row.role,
+    row.job_role_id,
+    jobRole?.name,
+    jobRole?.slug,
     row.autonomy,
     formatAutonomy(row.autonomy, autonomyByLevel),
     row.description,
@@ -519,6 +647,7 @@ function selectionColumn<T extends { id: string }>(
 function CreateAndBulkActions(props: {
   selectedCount: number
   view: CrudLifecycleView
+  createOpen: boolean
   busy: boolean
   onCreate: () => void
   onClear: () => void
@@ -530,27 +659,26 @@ function CreateAndBulkActions(props: {
       <div className="iam-control__bulk-buttons">
         <button
           type="button"
-          className="iam-control__new-button"
-          disabled={props.busy && props.selectedCount === 0}
+          className={`btn-sm ${props.createOpen ? 'btn-primary' : 'btn-secondary'} iam-control__new-button`}
           onClick={props.onCreate}
         >
           New
         </button>
         {props.view === 'active' ? (
           <>
-            <button type="button" disabled={actionsDisabled} onClick={() => props.onBulkAction('archive')}>Archive</button>
-            <button type="button" disabled={actionsDisabled} onClick={() => props.onBulkAction('trash')}>Trash</button>
+            <button type="button" className="btn-sm btn-secondary" disabled={actionsDisabled} onClick={() => props.onBulkAction('archive')}>Archive</button>
+            <button type="button" className="btn-sm btn-secondary" disabled={actionsDisabled} onClick={() => props.onBulkAction('trash')}>Trash</button>
           </>
         ) : null}
         {props.view === 'archived' ? (
-          <button type="button" disabled={actionsDisabled} onClick={() => props.onBulkAction('restore')}>Restore</button>
+          <button type="button" className="btn-sm btn-secondary" disabled={actionsDisabled} onClick={() => props.onBulkAction('restore')}>Restore</button>
         ) : null}
         {props.view === 'trash' ? (
           <>
-            <button type="button" disabled={actionsDisabled} onClick={() => props.onBulkAction('restore')}>Restore</button>
+            <button type="button" className="btn-sm btn-secondary" disabled={actionsDisabled} onClick={() => props.onBulkAction('restore')}>Restore</button>
             <button
               type="button"
-              className="iam-control__danger-button"
+              className="btn-sm btn-danger iam-control__danger-button"
               disabled={actionsDisabled}
               onClick={() => props.onBulkAction('purge')}
             >
@@ -558,18 +686,18 @@ function CreateAndBulkActions(props: {
             </button>
           </>
         ) : null}
-        <button type="button" disabled={actionsDisabled} onClick={props.onClear}>Clear</button>
+        <button type="button" className="btn-sm btn-secondary" disabled={actionsDisabled} onClick={props.onClear}>Clear</button>
       </div>
       <span className="iam-control__selected-count">{props.selectedCount} selected</span>
     </div>
   )
 }
 
-function lifecycleToolbarActions(view: CrudLifecycleView, onChange: (view: CrudLifecycleView) => void) {
+function lifecycleToolbarActions(view: CrudLifecycleView, createOpen: boolean, onChange: (view: CrudLifecycleView) => void) {
   return [
-    { id: 'active', label: 'Active', kind: view === 'active' ? 'primary' as const : 'secondary' as const, onClick: () => onChange('active') },
-    { id: 'archived', label: 'Archived', kind: view === 'archived' ? 'primary' as const : 'secondary' as const, onClick: () => onChange('archived') },
-    { id: 'trash', label: 'Trash', kind: view === 'trash' ? 'primary' as const : 'secondary' as const, onClick: () => onChange('trash') },
+    { id: 'active', label: 'Active', kind: !createOpen && view === 'active' ? 'primary' as const : 'secondary' as const, onClick: () => onChange('active') },
+    { id: 'archived', label: 'Archived', kind: !createOpen && view === 'archived' ? 'primary' as const : 'secondary' as const, onClick: () => onChange('archived') },
+    { id: 'trash', label: 'Trash', kind: !createOpen && view === 'trash' ? 'primary' as const : 'secondary' as const, onClick: () => onChange('trash') },
   ]
 }
 
@@ -577,9 +705,15 @@ function stringValue(value: CrudFormValues[string]): string {
   return String(value ?? '').trim()
 }
 
-function autonomyValue(value: CrudFormValues[string]): VirployeeAutonomy {
+function autonomyValue(value: CrudFormValues[string]): VirployeeAutonomy | '' {
   const autonomy = stringValue(value)
-  return isAutonomy(autonomy) ? autonomy : 'A1'
+  return isAutonomy(autonomy) ? autonomy : ''
+}
+
+function jobRoleName(id: string, jobRoleByID?: ReadonlyMap<string, JobRole>): string {
+  if (!id) return '-'
+  const jobRole = jobRoleByID?.get(id)
+  return jobRole?.name ?? shortId(id)
 }
 
 function isAutonomy(value: string): value is VirployeeAutonomy {
