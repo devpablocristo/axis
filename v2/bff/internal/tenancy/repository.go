@@ -93,6 +93,7 @@ func (r *Repository) CreateTenant(ctx context.Context, input domain.NormalizedCr
 			org_id,
 			(SELECT name FROM axis_orgs WHERE axis_orgs.id = axis_tenants.org_id),
 			product_surface,
+			COALESCE((SELECT name FROM axis_products WHERE axis_products.product_surface = axis_tenants.product_surface), product_surface),
 			status,
 			created_at,
 			updated_at,
@@ -118,9 +119,10 @@ func (r *Repository) HasOtherOrgTenants(ctx context.Context, orgID string, exclu
 
 func (r *Repository) TenantByID(ctx context.Context, id uuid.UUID) (domain.Tenant, error) {
 	row := r.pool.QueryRow(ctx, `
-		SELECT t.id, t.org_id, o.name, t.product_surface, t.status, t.created_at, t.updated_at, t.archived_at, t.trashed_at, t.purge_after
+		SELECT t.id, t.org_id, o.name, t.product_surface, COALESCE(p.name, t.product_surface), t.status, t.created_at, t.updated_at, t.archived_at, t.trashed_at, t.purge_after
 		FROM axis_tenants t
 		JOIN axis_orgs o ON o.id = t.org_id
+		LEFT JOIN axis_products p ON p.product_surface = t.product_surface
 		WHERE t.id = $1::uuid
 	`, id.String())
 	return scanTenant(row)
@@ -128,6 +130,33 @@ func (r *Repository) TenantByID(ctx context.Context, id uuid.UUID) (domain.Tenan
 
 func (r *Repository) ListForPrincipal(ctx context.Context, userID string) ([]domain.Tenant, error) {
 	return r.ListForPrincipalLifecycle(ctx, userID, domain.StateActive)
+}
+
+func (r *Repository) ListLifecycle(ctx context.Context, lifecycle string) ([]domain.Tenant, error) {
+	where := "t.archived_at IS NULL AND t.trashed_at IS NULL"
+	switch domain.NormalizeState(lifecycle) {
+	case domain.StateActive:
+		where = "t.archived_at IS NULL AND t.trashed_at IS NULL"
+	case domain.StateArchived:
+		where = "t.archived_at IS NOT NULL AND t.trashed_at IS NULL"
+	case domain.StateTrashed:
+		where = "t.trashed_at IS NOT NULL"
+	default:
+		return nil, domainerr.Validation("invalid lifecycle state")
+	}
+	rows, err := r.pool.Query(ctx, fmt.Sprintf(`
+		SELECT t.id, t.org_id, o.name, t.product_surface, COALESCE(p.name, t.product_surface), t.status, t.created_at, t.updated_at, t.archived_at, t.trashed_at, t.purge_after
+		FROM axis_tenants t
+		JOIN axis_orgs o ON o.id = t.org_id
+		LEFT JOIN axis_products p ON p.product_surface = t.product_surface
+		WHERE %s
+		ORDER BY o.name, t.product_surface
+	`, where))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanTenants(rows)
 }
 
 func (r *Repository) ListForPrincipalLifecycle(ctx context.Context, userID, lifecycle string) ([]domain.Tenant, error) {
@@ -143,9 +172,10 @@ func (r *Repository) ListForPrincipalLifecycle(ctx context.Context, userID, life
 		return nil, domainerr.Validation("invalid lifecycle state")
 	}
 	rows, err := r.pool.Query(ctx, fmt.Sprintf(`
-		SELECT t.id, t.org_id, o.name, t.product_surface, t.status, t.created_at, t.updated_at, t.archived_at, t.trashed_at, t.purge_after
+		SELECT t.id, t.org_id, o.name, t.product_surface, COALESCE(p.name, t.product_surface), t.status, t.created_at, t.updated_at, t.archived_at, t.trashed_at, t.purge_after
 		FROM axis_tenants t
 		JOIN axis_orgs o ON o.id = t.org_id
+		LEFT JOIN axis_products p ON p.product_surface = t.product_surface
 		JOIN axis_tenant_members m ON m.tenant_id = t.id
 		JOIN axis_users u ON u.id = m.user_id
 		WHERE (m.user_id::text = $1 OR u.provider_user_id = $1)
@@ -164,9 +194,10 @@ func (r *Repository) ListForPrincipalLifecycle(ctx context.Context, userID, life
 
 func (r *Repository) List(ctx context.Context, orgID string) ([]domain.Tenant, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT t.id, t.org_id, o.name, t.product_surface, t.status, t.created_at, t.updated_at, t.archived_at, t.trashed_at, t.purge_after
+		SELECT t.id, t.org_id, o.name, t.product_surface, COALESCE(p.name, t.product_surface), t.status, t.created_at, t.updated_at, t.archived_at, t.trashed_at, t.purge_after
 		FROM axis_tenants t
 		JOIN axis_orgs o ON o.id = t.org_id
+		LEFT JOIN axis_products p ON p.product_surface = t.product_surface
 		WHERE ($1 = '' OR t.org_id::text = $1) AND t.archived_at IS NULL AND t.trashed_at IS NULL
 		ORDER BY org_id, product_surface
 	`, orgID)
@@ -245,7 +276,11 @@ func (r *Repository) UpsertMember(ctx context.Context, input domain.NormalizedAd
 		INSERT INTO axis_tenant_members (tenant_id, user_id, role, status, created_at, updated_at)
 		VALUES ($1::uuid, $2, $3, 'active', $4, $4)
 		ON CONFLICT (tenant_id, user_id) DO UPDATE SET
-			role = EXCLUDED.role,
+			role = CASE
+				WHEN axis_tenant_members.role = 'owner' AND EXCLUDED.role <> 'owner'
+					THEN axis_tenant_members.role
+				ELSE EXCLUDED.role
+			END,
 			status = 'active',
 			updated_at = EXCLUDED.updated_at,
 			archived_at = NULL,
@@ -264,6 +299,27 @@ func (r *Repository) TenantMembership(ctx context.Context, tenantID uuid.UUID, u
 		WHERE m.tenant_id = $1::uuid AND (m.user_id::text = $2 OR u.provider_user_id = $2)
 	`, tenantID.String(), userID)
 	return scanMember(row)
+}
+
+func (r *Repository) PrincipalHasOwnerRole(ctx context.Context, userID string) (bool, error) {
+	var exists bool
+	err := r.pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM axis_tenant_members m
+			JOIN axis_users u ON u.id = m.user_id
+			JOIN axis_tenants t ON t.id = m.tenant_id
+			WHERE (m.user_id::text = $1 OR u.provider_user_id = $1)
+				AND m.role = 'owner'
+				AND m.status = 'active'
+				AND m.archived_at IS NULL
+				AND m.trashed_at IS NULL
+				AND t.status = 'active'
+				AND t.archived_at IS NULL
+				AND t.trashed_at IS NULL
+		)
+	`, strings.TrimSpace(userID)).Scan(&exists)
+	return exists, err
 }
 
 func (r *Repository) DeactivateUserMemberships(ctx context.Context, userID string) error {
@@ -333,6 +389,7 @@ func scanTenant(row scanner) (domain.Tenant, error) {
 		&model.OrgID,
 		&model.OrgName,
 		&model.ProductSurface,
+		&model.ProductName,
 		&model.Status,
 		&model.CreatedAt,
 		&model.UpdatedAt,

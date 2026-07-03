@@ -6,6 +6,7 @@ export type Tenant = {
   org_id: string
   org_name: string
   product_surface: string
+  product_name: string
   status: string
   state: TenantState
   created_at: string
@@ -30,9 +31,42 @@ export type Session = {
   tenants: Tenant[]
 }
 
+export type AxisOrg = {
+  id: string
+  name: string
+  provider: string
+  provider_org_id: string
+  status: string
+  state: TenantState
+  tenant_count: number
+  has_tenants: boolean
+  created_at: string
+  updated_at: string
+  archived_at: LifecycleTimestamp
+  trashed_at: LifecycleTimestamp
+  purge_after: LifecycleTimestamp
+}
+
+export type OrgInput = {
+  name: string
+}
+
 export type Product = {
+  id: string
   product_surface: string
   name: string
+  status: string
+  state: TenantState
+  created_at: string
+  updated_at: string
+  archived_at: LifecycleTimestamp
+  trashed_at: LifecycleTimestamp
+  purge_after: LifecycleTimestamp
+}
+
+export type ProductInput = {
+  name: string
+  product_surface?: string
 }
 
 export type TenantInput = {
@@ -145,6 +179,10 @@ type TenantsListResponse = {
   data: Tenant[]
 }
 
+type OrgsListResponse = {
+  data: AxisOrg[]
+}
+
 type ProductsListResponse = {
   data: Product[]
 }
@@ -215,8 +253,104 @@ export function listTenants(
   return axisFetch<TenantsListResponse>(path, { principalId }).then((payload) => payload.data ?? [])
 }
 
-export function listProducts(principalId: string): Promise<Product[]> {
-  return axisFetch<ProductsListResponse>('/api/products', { principalId }).then((payload) => payload.data ?? [])
+export function listOrgs(
+  lifecycle: 'active' | 'archived' | 'trash',
+  principalId: string,
+): Promise<AxisOrg[]> {
+  const path =
+    lifecycle === 'active'
+      ? '/api/orgs'
+      : `/api/orgs?lifecycle=${encodeURIComponent(lifecycle)}`
+  return axisFetch<OrgsListResponse>(path, { principalId }).then((payload) => payload.data ?? [])
+}
+
+export function createOrg(input: OrgInput, principalId: string): Promise<AxisOrg> {
+  return axisFetch<AxisOrg>('/api/orgs', {
+    method: 'POST',
+    principalId,
+    body: input,
+  })
+}
+
+export function updateOrg(id: string, input: OrgInput, principalId: string): Promise<AxisOrg> {
+  return axisFetch<AxisOrg>(`/api/orgs/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    principalId,
+    body: input,
+  })
+}
+
+export function archiveOrg(id: string, principalId: string): Promise<void> {
+  return orgLifecycleAction(id, 'archive', principalId)
+}
+
+export function unarchiveOrg(id: string, principalId: string): Promise<void> {
+  return orgLifecycleAction(id, 'unarchive', principalId)
+}
+
+export function trashOrg(id: string, principalId: string): Promise<void> {
+  return orgLifecycleAction(id, 'trash', principalId)
+}
+
+export function restoreOrg(id: string, principalId: string): Promise<void> {
+  return orgLifecycleAction(id, 'restore', principalId)
+}
+
+export function purgeOrg(id: string, principalId: string): Promise<void> {
+  return axisFetch<void>(`/api/orgs/${encodeURIComponent(id)}/purge`, {
+    method: 'DELETE',
+    principalId,
+  })
+}
+
+export function listProducts(
+  lifecycle: 'active' | 'archived' | 'trash',
+  principalId: string,
+): Promise<Product[]> {
+  const path =
+    lifecycle === 'active'
+      ? '/api/products'
+      : `/api/products?lifecycle=${encodeURIComponent(lifecycle)}`
+  return axisFetch<ProductsListResponse>(path, { principalId }).then((payload) => payload.data ?? [])
+}
+
+export function createProduct(input: ProductInput, principalId: string): Promise<Product> {
+  return axisFetch<Product>('/api/products', {
+    method: 'POST',
+    principalId,
+    body: input,
+  })
+}
+
+export function updateProduct(id: string, input: ProductInput, principalId: string): Promise<Product> {
+  return axisFetch<Product>(`/api/products/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    principalId,
+    body: { name: input.name },
+  })
+}
+
+export function archiveProduct(id: string, principalId: string): Promise<void> {
+  return productLifecycleAction(id, 'archive', principalId)
+}
+
+export function unarchiveProduct(id: string, principalId: string): Promise<void> {
+  return productLifecycleAction(id, 'unarchive', principalId)
+}
+
+export function trashProduct(id: string, principalId: string): Promise<void> {
+  return productLifecycleAction(id, 'trash', principalId)
+}
+
+export function restoreProduct(id: string, principalId: string): Promise<void> {
+  return productLifecycleAction(id, 'restore', principalId)
+}
+
+export function purgeProduct(id: string, principalId: string): Promise<void> {
+  return axisFetch<void>(`/api/products/${encodeURIComponent(id)}/purge`, {
+    method: 'DELETE',
+    principalId,
+  })
 }
 
 export function createTenant(input: TenantInput, principalId: string): Promise<Tenant> {
@@ -487,6 +621,22 @@ function lifecycleAction(
 
 function tenantLifecycleAction(id: string, action: string, principalId: string): Promise<void> {
   return axisFetch<void>(`/api/tenants/${encodeURIComponent(id)}/${action}`, {
+    method: 'POST',
+    principalId,
+    body: { reason: 'console' },
+  })
+}
+
+function orgLifecycleAction(id: string, action: string, principalId: string): Promise<void> {
+  return axisFetch<void>(`/api/orgs/${encodeURIComponent(id)}/${action}`, {
+    method: 'POST',
+    principalId,
+    body: { reason: 'console' },
+  })
+}
+
+function productLifecycleAction(id: string, action: string, principalId: string): Promise<void> {
+  return axisFetch<void>(`/api/products/${encodeURIComponent(id)}/${action}`, {
     method: 'POST',
     principalId,
     body: { reason: 'console' },

@@ -38,6 +38,25 @@ func TestCreateTenantIsIdempotentByOrgAndProduct(t *testing.T) {
 	}
 }
 
+func TestCreateTenantRequiresActiveProductWhenResolverConfigured(t *testing.T) {
+	repo := newFakeTenantRepo()
+	uc := NewUseCasesWithProductResolver(repo, fakeProductResolver{active: map[string]bool{"axis": true}})
+	org := repo.seedOrg()
+
+	if _, err := uc.Create(context.Background(), domain.CreateTenantInput{
+		OrgID:          org.ID,
+		ProductSurface: "unknown",
+	}); !domainerr.IsValidation(err) {
+		t.Fatalf("expected validation error, got %v", err)
+	}
+	if _, err := uc.Create(context.Background(), domain.CreateTenantInput{
+		OrgID:          org.ID,
+		ProductSurface: "axis",
+	}); err != nil {
+		t.Fatalf("expected active product to work: %v", err)
+	}
+}
+
 func TestResolveAccessRequiresMembership(t *testing.T) {
 	repo := newFakeTenantRepo()
 	uc := NewUseCases(repo)
@@ -66,6 +85,84 @@ func TestResolveAccessRequiresMembership(t *testing.T) {
 	}
 	if resolved.ID != tenant.ID || member.Role != "admin" {
 		t.Fatalf("unexpected resolved context: tenant=%+v member=%+v", resolved, member)
+	}
+}
+
+func TestOwnerCanListAndAccessAllTenants(t *testing.T) {
+	repo := newFakeTenantRepo()
+	uc := NewUseCases(repo)
+	ownerID := uuid.NewString()
+	firstOrg := repo.seedOrg()
+	secondOrg := repo.seedOrg()
+	first, err := uc.Create(context.Background(), domain.CreateTenantInput{
+		OrgID:          firstOrg.ID,
+		ProductSurface: "axis",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := uc.Create(context.Background(), domain.CreateTenantInput{
+		OrgID:          secondOrg.ID,
+		ProductSurface: "ponti",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := uc.AddMember(context.Background(), domain.AddMemberInput{
+		TenantID: first.ID.String(),
+		UserID:   ownerID,
+		Role:     "owner",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	tenants, err := uc.ListForPrincipal(context.Background(), ownerID)
+	if err != nil {
+		t.Fatalf("ListForPrincipal: %v", err)
+	}
+	if len(tenants) != 2 {
+		t.Fatalf("owner should see all tenants, got %+v", tenants)
+	}
+	_, member, err := uc.ResolveAccess(context.Background(), second.ID.String(), ownerID)
+	if err != nil {
+		t.Fatalf("owner should access tenant without direct membership: %v", err)
+	}
+	if member.Role != domain.RoleOwner {
+		t.Fatalf("expected virtual owner member, got %+v", member)
+	}
+}
+
+func TestOwnerCanDeactivateVisibleTenantWithoutDirectMembership(t *testing.T) {
+	repo := newFakeTenantRepo()
+	uc := NewUseCases(repo)
+	ownerID := uuid.NewString()
+	firstOrg := repo.seedOrg()
+	secondOrg := repo.seedOrg()
+	first, err := uc.Create(context.Background(), domain.CreateTenantInput{
+		OrgID:          firstOrg.ID,
+		ProductSurface: "axis",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := uc.Create(context.Background(), domain.CreateTenantInput{
+		OrgID:          secondOrg.ID,
+		ProductSurface: "ponti",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := uc.AddMember(context.Background(), domain.AddMemberInput{
+		TenantID: first.ID.String(),
+		UserID:   ownerID,
+		Role:     "owner",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := uc.Archive(context.Background(), domain.LifecycleInput{
+		TenantID:    second.ID.String(),
+		PrincipalID: ownerID,
+	}); err != nil {
+		t.Fatalf("owner should archive visible tenant without direct membership: %v", err)
 	}
 }
 
@@ -420,16 +517,6 @@ func TestPurgeTenantKeepsProviderOrgWhenAnotherProductTenantExists(t *testing.T)
 	}
 }
 
-func TestProductsCatalog(t *testing.T) {
-	products, err := NewUseCases(newFakeTenantRepo()).Products(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(products) != 5 || products[0].ProductSurface != "axis" {
-		t.Fatalf("unexpected product catalog: %+v", products)
-	}
-}
-
 type fakeTenantRepo struct {
 	orgs    map[string]domain.Org
 	tenants map[uuid.UUID]domain.Tenant
@@ -547,6 +634,20 @@ func (r *fakeTenantRepo) TenantByID(_ context.Context, id uuid.UUID) (domain.Ten
 
 func (r *fakeTenantRepo) ListForPrincipal(_ context.Context, userID string) ([]domain.Tenant, error) {
 	return r.ListForPrincipalLifecycle(context.Background(), userID, domain.StateActive)
+}
+
+func (r *fakeTenantRepo) ListLifecycle(_ context.Context, lifecycle string) ([]domain.Tenant, error) {
+	out := []domain.Tenant{}
+	for _, tenant := range r.tenants {
+		if tenant.State() != domain.NormalizeState(lifecycle) {
+			continue
+		}
+		if org, ok := r.orgs[tenant.OrgID]; ok {
+			tenant.OrgName = org.Name
+		}
+		out = append(out, tenant)
+	}
+	return out, nil
 }
 
 func (r *fakeTenantRepo) ListForPrincipalLifecycle(_ context.Context, userID, lifecycle string) ([]domain.Tenant, error) {
@@ -674,6 +775,17 @@ func (r *fakeTenantRepo) TenantMembership(_ context.Context, tenantID uuid.UUID,
 	return member, nil
 }
 
+func (r *fakeTenantRepo) PrincipalHasOwnerRole(_ context.Context, userID string) (bool, error) {
+	for _, member := range r.members {
+		if member.UserID == userID && member.Role == domain.RoleOwner && member.IsUsable() {
+			if tenant, ok := r.tenants[member.TenantID]; ok && tenant.IsUsable() {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
 func (r *fakeTenantRepo) DeactivateUserMemberships(context.Context, string) error {
 	return nil
 }
@@ -687,6 +799,14 @@ type fakeOrgProvider struct {
 	updatedProviderOrgID string
 	updatedName          string
 	deletedProviderOrgID string
+}
+
+type fakeProductResolver struct {
+	active map[string]bool
+}
+
+func (f fakeProductResolver) ActiveProductExists(_ context.Context, productSurface string) (bool, error) {
+	return f.active[productSurface], nil
 }
 
 func (f *fakeOrgProvider) CreateOrg(_ context.Context, name string) (identitydomain.ProviderOrg, error) {

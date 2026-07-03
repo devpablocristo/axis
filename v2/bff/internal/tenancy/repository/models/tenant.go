@@ -29,6 +29,7 @@ type Tenant struct {
 	OrgID          string
 	OrgName        string
 	ProductSurface string
+	ProductName    string
 	Status         string
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
@@ -74,6 +75,7 @@ func (m Tenant) ToDomain() domain.Tenant {
 		OrgID:          m.OrgID,
 		OrgName:        m.OrgName,
 		ProductSurface: m.ProductSurface,
+		ProductName:    m.ProductName,
 		Status:         m.Status,
 		CreatedAt:      m.CreatedAt,
 		UpdatedAt:      m.UpdatedAt,

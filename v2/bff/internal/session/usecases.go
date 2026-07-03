@@ -259,7 +259,9 @@ func activeOrgFirst(memberships []userdomain.ProviderOrgMembership, activeProvid
 
 func providerTenantRole(raw string) string {
 	switch strings.TrimSpace(strings.ToLower(raw)) {
-	case "owner", "admin", "org:admin":
+	case "owner", "org:owner":
+		return tenantdomain.RoleOwner
+	case "admin", "org:admin":
 		return tenantdomain.RoleAdmin
 	case "member", "org:member":
 		return tenantdomain.RoleMember

@@ -43,6 +43,7 @@ type Tenant struct {
 	OrgID          string
 	OrgName        string
 	ProductSurface string
+	ProductName    string
 	Status         string
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
@@ -63,11 +64,6 @@ type TenantMember struct {
 	ArchivedAt *time.Time
 	TrashedAt  *time.Time
 	PurgeAfter *time.Time
-}
-
-type Product struct {
-	ProductSurface string
-	Name           string
 }
 
 type EnsureOrgInput struct {
@@ -138,14 +134,6 @@ type NormalizedAddMemberInput struct {
 	TenantID uuid.UUID
 	UserID   string
 	Role     string
-}
-
-var ProductCatalog = []Product{
-	{ProductSurface: "axis", Name: "Axis"},
-	{ProductSurface: "companion", Name: "Companion"},
-	{ProductSurface: "medmory", Name: "Medmory"},
-	{ProductSurface: "ponti", Name: "Ponti"},
-	{ProductSurface: "pymes", Name: "Pymes"},
 }
 
 func NormalizeEnsureOrgInput(in EnsureOrgInput) (EnsureOrgInput, error) {

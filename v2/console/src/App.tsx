@@ -1,7 +1,7 @@
 import { Bot, BriefcaseBusiness, Building2, RefreshCw, ShieldCheck, Users } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { JobRolesPage } from './JobRolesPage'
-import { TenantsPage } from './TenantsPage'
+import { TenancyPage } from './TenancyPage'
 import { UsersPage } from './UsersPage'
 import { VirployeesPage } from './VirployeesPage'
 import { getSession, type Session, type Tenant } from './api'
@@ -47,10 +47,19 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
     }
     return labels
   }, [tenants])
-  const workspaceProducts = useMemo(
-    () => unique(tenants.filter((tenant) => tenant.org_id === orgId).map((tenant) => tenant.product_surface)),
-    [orgId, tenants],
-  )
+  const workspaceProducts = useMemo(() => {
+    const labels = new Map<string, string>()
+    for (const tenant of tenants) {
+      if (tenant.org_id !== orgId) continue
+      if (!labels.has(tenant.product_surface)) {
+        labels.set(tenant.product_surface, tenant.product_name || tenant.product_surface)
+      }
+    }
+    return Array.from(labels.entries())
+      .map(([value, label]) => ({ value, label }))
+      .sort((left, right) => left.label.localeCompare(right.label))
+  }, [orgId, tenants])
+  const workspaceProductValues = useMemo(() => workspaceProducts.map((product) => product.value), [workspaceProducts])
   const selectedTenant = useMemo(
     () => tenants.find((tenant) => tenant.org_id === orgId && tenant.product_surface === productSurface) ?? null,
     [orgId, productSurface, tenants],
@@ -67,10 +76,10 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
 
   useEffect(() => {
     if (workspaceProducts.length === 0) return
-    if (!productSurface || !workspaceProducts.includes(productSurface)) {
-      setProductSurface(workspaceProducts[0])
+    if (!productSurface || !workspaceProductValues.includes(productSurface)) {
+      setProductSurface(workspaceProductValues[0])
     }
-  }, [productSurface, workspaceProducts])
+  }, [productSurface, workspaceProductValues])
 
   useEffect(() => {
     if (orgId) localStorage.setItem('axis.v2.org_id', orgId)
@@ -151,7 +160,7 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
                   <span>Product</span>
                   <select value={productSurface} onChange={(event) => setProductSurface(event.target.value)}>
                     {workspaceProducts.map((product) => (
-                      <option key={product} value={product}>{product}</option>
+                      <option key={product.value} value={product.value}>{product.label}</option>
                     ))}
                   </select>
                 </label>
@@ -169,7 +178,7 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
         {session.loading && !session.data ? (
           <div className="spinner" />
         ) : activePage === 'tenants' ? (
-          <TenantsPage principalId={principalId} sessionTenants={tenants} onSessionChanged={refresh} />
+          <TenancyPage principalId={principalId} sessionTenants={tenants} onSessionChanged={refresh} />
         ) : tenants.length === 0 ? (
           <section className="empty-state">No tenants are available for this user.</section>
         ) : selectedTenant == null ? (

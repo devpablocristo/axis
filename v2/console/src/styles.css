@@ -434,6 +434,40 @@ button:disabled,
   gap: 14px;
 }
 
+.tenancy-section {
+  display: grid;
+  gap: 14px;
+}
+
+.tenancy-section__tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tenancy-section__tabs button {
+  min-height: var(--axis-button-height);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--axis-border-strong);
+  border-radius: var(--axis-radius);
+  background: var(--axis-surface);
+  color: var(--axis-text);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1;
+  padding: 0 var(--axis-button-padding-x);
+}
+
+.tenancy-section__tabs button.active,
+.tenancy-section__tabs button:hover:not(:disabled) {
+  border-color: var(--axis-primary);
+  background: var(--axis-primary);
+  color: #ffffff;
+}
+
 .empty-state {
   min-height: 160px;
   display: grid;

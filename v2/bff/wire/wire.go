@@ -13,6 +13,8 @@ import (
 	clerkprovider "github.com/devpablocristo/bff-v2/internal/identity/provider/clerk"
 	devprovider "github.com/devpablocristo/bff-v2/internal/identity/provider/dev"
 	"github.com/devpablocristo/bff-v2/internal/infra/migrations"
+	"github.com/devpablocristo/bff-v2/internal/orgs"
+	"github.com/devpablocristo/bff-v2/internal/products"
 	"github.com/devpablocristo/bff-v2/internal/session"
 	"github.com/devpablocristo/bff-v2/internal/tenancy"
 	"github.com/devpablocristo/bff-v2/internal/users"
@@ -61,8 +63,12 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		tokenVerifier = authnoidc.NewDiscoveryClient(config.ClerkIssuerURL)
 	}
 
+	productsRepo := products.NewRepository(db.Pool())
 	tenancyRepo := tenancy.NewRepository(db.Pool())
-	tenancyUC := tenancy.NewUseCases(tenancyRepo, orgProvider)
+	tenancyUC := tenancy.NewUseCasesWithProductResolver(tenancyRepo, productsRepo, orgProvider)
+	orgsRepo := orgs.NewRepository(db.Pool())
+	orgsUC := orgs.NewUseCases(orgsRepo, tenancyUC, orgProvider)
+	productsUC := products.NewUseCases(productsRepo, tenancyUC)
 
 	usersRepo := users.NewRepository(db.Pool())
 	usersUC := users.NewUseCases(
@@ -112,6 +118,12 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	api := router.Group("/api")
 	identity.NewWebhookHandler(identityUC, tenancyUC, config.ClerkWebhookSecret).Routes(api)
 	sessionHandler.Routes(api)
+	orgs.NewHandler(orgsUC, orgs.HandlerOptions{
+		DefaultPrincipalID: config.DevPrincipalID,
+	}).Routes(api)
+	products.NewHandler(productsUC, products.HandlerOptions{
+		DefaultPrincipalID: config.DevPrincipalID,
+	}).Routes(api)
 	tenancy.NewHandler(tenancyUC, tenancy.HandlerOptions{
 		DefaultPrincipalID: config.DevPrincipalID,
 	}).Routes(api)

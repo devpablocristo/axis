@@ -1,4 +1,4 @@
-package tenancy
+package orgs
 
 import (
 	"context"
@@ -7,17 +7,15 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/devpablocristo/bff-v2/internal/tenancy/handler/dto"
-	"github.com/devpablocristo/bff-v2/internal/tenancy/usecases/domain"
+	"github.com/devpablocristo/bff-v2/internal/orgs/handler/dto"
+	"github.com/devpablocristo/bff-v2/internal/orgs/usecases/domain"
 	ginmw "github.com/devpablocristo/platform/http/gin/go"
 )
 
 type UseCasesPort interface {
-	Create(context.Context, domain.CreateTenantInput) (domain.Tenant, error)
-	Update(context.Context, domain.UpdateTenantInput) (domain.Tenant, error)
-	AddMember(context.Context, domain.AddMemberInput) (domain.TenantMember, error)
-	List(context.Context, domain.ListInput) ([]domain.Tenant, error)
-	ListForPrincipal(context.Context, string) ([]domain.Tenant, error)
+	List(context.Context, domain.ListInput) ([]domain.Org, error)
+	Create(context.Context, domain.CreateInput) (domain.Org, error)
+	Update(context.Context, domain.UpdateInput) (domain.Org, error)
 	Archive(context.Context, domain.LifecycleInput) error
 	Unarchive(context.Context, domain.LifecycleInput) error
 	Trash(context.Context, domain.LifecycleInput) error
@@ -39,70 +37,55 @@ func NewHandler(ucs UseCasesPort, options HandlerOptions) *Handler {
 }
 
 func (h *Handler) Routes(router gin.IRouter) {
-	group := router.Group("/tenants")
+	group := router.Group("/orgs")
 	{
 		group.GET("", h.List)
 		group.POST("", h.Create)
-		group.PUT("/:tenant_id", h.Update)
-		group.POST("/:tenant_id/archive", h.Archive)
-		group.POST("/:tenant_id/unarchive", h.Unarchive)
-		group.POST("/:tenant_id/trash", h.Trash)
-		group.POST("/:tenant_id/restore", h.Restore)
-		group.DELETE("/:tenant_id/purge", h.Purge)
-		group.POST("/:tenant_id/members", h.AddMember)
+		group.PUT("/:org_id", h.Update)
+		group.POST("/:org_id/archive", h.Archive)
+		group.POST("/:org_id/unarchive", h.Unarchive)
+		group.POST("/:org_id/trash", h.Trash)
+		group.POST("/:org_id/restore", h.Restore)
+		group.DELETE("/:org_id/purge", h.Purge)
 	}
 }
 
 func (h *Handler) List(c *gin.Context) {
 	out, err := h.ucs.List(c.Request.Context(), domain.ListInput{
-		PrincipalID: h.principalID(c),
 		Lifecycle:   c.Query("lifecycle"),
+		PrincipalID: h.principalID(c),
 	})
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
 	}
-	ginmw.WriteJSON(c, http.StatusOK, dto.TenantsFromDomain(out))
+	ginmw.WriteJSON(c, http.StatusOK, dto.OrgsFromDomain(out))
 }
 
 func (h *Handler) Create(c *gin.Context) {
-	var req dto.CreateTenantRequest
+	var req dto.CreateOrgRequest
 	if err := ginmw.BindJSON(c, &req); err != nil {
 		return
 	}
-	input := req.ToDomain(h.principalID(c))
-	out, err := h.ucs.Create(c.Request.Context(), input)
+	out, err := h.ucs.Create(c.Request.Context(), req.ToDomain(h.principalID(c)))
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
 	}
-	ginmw.WriteCreated(c, dto.TenantFromDomain(out))
+	ginmw.WriteCreated(c, dto.OrgFromDomain(out))
 }
 
 func (h *Handler) Update(c *gin.Context) {
-	var req dto.UpdateTenantRequest
+	var req dto.UpdateOrgRequest
 	if err := ginmw.BindJSON(c, &req); err != nil {
 		return
 	}
-	out, err := h.ucs.Update(c.Request.Context(), req.ToDomain(c.Param("tenant_id"), h.principalID(c)))
+	out, err := h.ucs.Update(c.Request.Context(), req.ToDomain(c.Param("org_id"), h.principalID(c)))
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
 	}
-	ginmw.WriteJSON(c, http.StatusOK, dto.TenantFromDomain(out))
-}
-
-func (h *Handler) AddMember(c *gin.Context) {
-	var req dto.AddTenantMemberRequest
-	if err := ginmw.BindJSON(c, &req); err != nil {
-		return
-	}
-	out, err := h.ucs.AddMember(c.Request.Context(), req.ToDomain(c.Param("tenant_id")))
-	if err != nil {
-		ginmw.Respond(c, err)
-		return
-	}
-	ginmw.WriteCreated(c, dto.TenantMemberFromDomain(out))
+	ginmw.WriteJSON(c, http.StatusOK, dto.OrgFromDomain(out))
 }
 
 func (h *Handler) Archive(c *gin.Context) {
@@ -127,7 +110,7 @@ func (h *Handler) Purge(c *gin.Context) {
 
 func (h *Handler) lifecycleAction(c *gin.Context, fn func(context.Context, domain.LifecycleInput) error) {
 	err := fn(c.Request.Context(), domain.LifecycleInput{
-		TenantID:    c.Param("tenant_id"),
+		OrgID:       c.Param("org_id"),
 		PrincipalID: h.principalID(c),
 	})
 	if err != nil {

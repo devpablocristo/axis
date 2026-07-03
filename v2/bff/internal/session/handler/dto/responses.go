@@ -35,6 +35,7 @@ type TenantResponse struct {
 	OrgID          string     `json:"org_id"`
 	OrgName        string     `json:"org_name"`
 	ProductSurface string     `json:"product_surface"`
+	ProductName    string     `json:"product_name"`
 	Status         string     `json:"status"`
 	State          string     `json:"state"`
 	CreatedAt      time.Time  `json:"created_at"`
@@ -80,6 +81,7 @@ func TenantFromDomain(tenant tenantdomain.Tenant) TenantResponse {
 		OrgID:          tenant.OrgID,
 		OrgName:        tenant.OrgName,
 		ProductSurface: tenant.ProductSurface,
+		ProductName:    tenant.ProductName,
 		Status:         tenant.Status,
 		State:          tenant.State(),
 		CreatedAt:      tenant.CreatedAt,

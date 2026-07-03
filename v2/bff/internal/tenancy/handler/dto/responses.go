@@ -11,6 +11,7 @@ type TenantResponse struct {
 	OrgID          string     `json:"org_id"`
 	OrgName        string     `json:"org_name"`
 	ProductSurface string     `json:"product_surface"`
+	ProductName    string     `json:"product_name"`
 	Status         string     `json:"status"`
 	State          string     `json:"state"`
 	CreatedAt      time.Time  `json:"created_at"`
@@ -22,15 +23,6 @@ type TenantResponse struct {
 
 type ListTenantsResponse struct {
 	Data []TenantResponse `json:"data"`
-}
-
-type ProductResponse struct {
-	ProductSurface string `json:"product_surface"`
-	Name           string `json:"name"`
-}
-
-type ListProductsResponse struct {
-	Data []ProductResponse `json:"data"`
 }
 
 type TenantMemberResponse struct {
@@ -51,6 +43,7 @@ func TenantFromDomain(tenant domain.Tenant) TenantResponse {
 		OrgID:          tenant.OrgID,
 		OrgName:        tenant.OrgName,
 		ProductSurface: tenant.ProductSurface,
+		ProductName:    tenant.ProductName,
 		Status:         tenant.Status,
 		State:          tenant.State(),
 		CreatedAt:      tenant.CreatedAt,
@@ -59,17 +52,6 @@ func TenantFromDomain(tenant domain.Tenant) TenantResponse {
 		TrashedAt:      tenant.TrashedAt,
 		PurgeAfter:     tenant.PurgeAfter,
 	}
-}
-
-func ProductsFromDomain(items []domain.Product) ListProductsResponse {
-	data := make([]ProductResponse, 0, len(items))
-	for _, item := range items {
-		data = append(data, ProductResponse{
-			ProductSurface: item.ProductSurface,
-			Name:           item.Name,
-		})
-	}
-	return ListProductsResponse{Data: data}
 }
 
 func TenantsFromDomain(items []domain.Tenant) ListTenantsResponse {

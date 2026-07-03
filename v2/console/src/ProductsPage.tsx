@@ -6,27 +6,23 @@ import {
 } from '@devpablocristo/platform-crud-ui'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import {
-  type AxisOrg,
   type Product,
-  type Tenant,
-  type TenantInput,
-  archiveTenant,
-  createTenant,
-  listOrgs,
+  type ProductInput,
+  archiveProduct,
+  createProduct,
   listProducts,
-  listTenants,
-  purgeTenant,
-  restoreTenant,
-  trashTenant,
-  unarchiveTenant,
+  purgeProduct,
+  restoreProduct,
+  trashProduct,
+  unarchiveProduct,
+  updateProduct,
 } from './api'
 
 type CrudLifecycleView = 'active' | 'archived' | 'trash'
 type BulkAction = 'archive' | 'trash' | 'restore' | 'purge'
 
-type TenantsPageProps = {
+type ProductsPageProps = {
   principalId: string
-  sessionTenants: Tenant[]
   onSessionChanged: () => void | Promise<void>
 }
 
@@ -34,7 +30,7 @@ const CrudPage = PlatformCrudPage as unknown as <T extends { id: string }>(
   props: CrudPageProps<T>,
 ) => ReactElement
 
-export function TenantsPage({ principalId, sessionTenants, onSessionChanged }: TenantsPageProps) {
+export function ProductsPage({ principalId, onSessionChanged }: ProductsPageProps) {
   const rootRef = useRef<HTMLElement | null>(null)
   const [lifecycleView, setLifecycleView] = useState<CrudLifecycleView>('active')
   const [selectedIds, setSelectedIds] = useState<string[]>([])
@@ -43,100 +39,45 @@ export function TenantsPage({ principalId, sessionTenants, onSessionChanged }: T
   const [bulkBusy, setBulkBusy] = useState(false)
   const [reloadVersion, setReloadVersion] = useState(0)
   const [actionError, setActionError] = useState('')
-  const [orgs, setOrgs] = useState<AxisOrg[]>([])
-  const [orgsError, setOrgsError] = useState('')
-  const [products, setProducts] = useState<Product[]>([])
-  const [productsError, setProductsError] = useState('')
   const isActive = Boolean(principalId)
 
-  const orgLabels = useMemo(() => {
-    const labels = new Map<string, string>()
-    for (const org of orgs) {
-      labels.set(org.id, org.name || org.id)
-    }
-    for (const tenant of sessionTenants) {
-      if (!labels.has(tenant.org_id)) {
-        labels.set(tenant.org_id, tenant.org_name || tenant.org_id)
-      }
-    }
-    return labels
-  }, [orgs, sessionTenants])
-  const orgOptions = useMemo(() => orgSelectOptions(orgLabels), [orgLabels])
-  const productOptions = useMemo(() => products.map((product) => ({
-    label: product.name || product.product_surface,
-    value: product.product_surface,
-  })), [products])
-  const productLabels = useMemo(() => {
-    const labels = new Map<string, string>()
-    for (const product of products) {
-      labels.set(product.product_surface, product.name || product.product_surface)
-    }
-    return labels
-  }, [products])
-
   const refreshAfterMutation = useCallback(async () => {
-    await onSessionChanged()
     setReloadVersion((current) => current + 1)
+    await onSessionChanged()
   }, [onSessionChanged])
 
-  const dataSource: NonNullable<CrudPageProps<Tenant>['dataSource']> = useMemo(() => ({
-    list: ({ view }) => isActive ? listTenants(view, principalId) : Promise.resolve([]),
+  const dataSource: NonNullable<CrudPageProps<Product>['dataSource']> = useMemo(() => ({
+    list: ({ view }) => isActive ? listProducts(view, principalId) : Promise.resolve([]),
     create: async (values) => {
-      await createTenant(tenantPayload(values), principalId)
+      await createProduct(productPayload(values, true), principalId)
       setCreateOpen(false)
       await refreshAfterMutation()
     },
+    update: async (row, values) => {
+      await updateProduct(row.id, productPayload(values, false), principalId)
+      await refreshAfterMutation()
+    },
     archive: async (row) => {
-      await archiveTenant(row.id, principalId)
+      await archiveProduct(row.id, principalId)
       await refreshAfterMutation()
     },
     trash: async (row) => {
-      await trashTenant(row.id, principalId)
+      await trashProduct(row.id, principalId)
       await refreshAfterMutation()
     },
     unarchive: async (row) => {
-      await unarchiveTenant(row.id, principalId)
+      await unarchiveProduct(row.id, principalId)
       await refreshAfterMutation()
     },
     restore: async (row) => {
-      await restoreTenant(row.id, principalId)
+      await restoreProduct(row.id, principalId)
       await refreshAfterMutation()
     },
     purge: async (row) => {
-      await purgeTenant(row.id, principalId)
+      await purgeProduct(row.id, principalId)
       await refreshAfterMutation()
     },
   }), [isActive, principalId, refreshAfterMutation])
-
-  useEffect(() => {
-    if (!principalId) return
-    let cancelled = false
-    setOrgsError('')
-    setProductsError('')
-    listOrgs('active', principalId)
-      .then((next) => {
-        if (!cancelled) setOrgs(next)
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          setOrgsError(error instanceof Error ? error.message : 'Could not load orgs')
-          setOrgs([])
-        }
-      })
-    listProducts('active', principalId)
-      .then((next) => {
-        if (!cancelled) setProducts(next)
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          setProductsError(error instanceof Error ? error.message : 'Could not load products')
-          setProducts([])
-        }
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [principalId, reloadVersion])
 
   useEffect(() => {
     setSelectedIds([])
@@ -198,17 +139,17 @@ export function TenantsPage({ principalId, sessionTenants, onSessionChanged }: T
     try {
       for (const id of selectedIds) {
         if (action === 'archive') {
-          await archiveTenant(id, principalId)
+          await archiveProduct(id, principalId)
         } else if (action === 'trash') {
-          await trashTenant(id, principalId)
+          await trashProduct(id, principalId)
         } else if (action === 'restore') {
           if (lifecycleView === 'archived') {
-            await unarchiveTenant(id, principalId)
+            await unarchiveProduct(id, principalId)
           } else {
-            await restoreTenant(id, principalId)
+            await restoreProduct(id, principalId)
           }
         } else {
-          await purgeTenant(id, principalId)
+          await purgeProduct(id, principalId)
         }
       }
       clearSelected()
@@ -223,53 +164,52 @@ export function TenantsPage({ principalId, sessionTenants, onSessionChanged }: T
   if (!isActive) {
     return (
       <section className="page-section">
-        <div className="empty-state">Sign in to manage Tenants.</div>
+        <div className="empty-state">Sign in to manage Products.</div>
       </section>
     )
   }
 
   return (
-    <section ref={rootRef} className="page-section iam-control axis-crud-host iam-control--external-lifecycle tenants-control">
-      <CrudPage<Tenant>
-        key={`tenants-${principalId}-${lifecycleView}-${reloadVersion}`}
+    <section ref={rootRef} className="page-section iam-control axis-crud-host iam-control--external-lifecycle">
+      <CrudPage<Product>
+        key={`products-${principalId}-${lifecycleView}-${reloadVersion}`}
         dataSource={dataSource}
         stringsBase={defaultCrudStrings}
         strings={{
-          actionSave: 'Create',
           actionTrash: 'Trash',
           actionPurge: 'Delete permanently',
-          formCreate: 'Create {{label}}',
           confirmWord: 'delete',
         }}
         initialView={lifecycleView}
         supportsArchived
         supportsTrash
         allowCreate
+        allowEdit
         allowArchive
         allowTrash
         allowUnarchive
         allowRestore
         allowPurge
-        label="tenant"
-        labelPlural="tenants"
-        labelPluralCap="Tenants"
+        label="product"
+        labelPlural="products"
+        labelPluralCap="Products"
         createLabel="New"
-        columns={tenantColumns(selectedIds, toggleSelected, orgLabels, productLabels)}
-        formFields={tenantFormFields(orgOptions, productOptions)}
-        searchText={tenantSearchText}
-        toFormValues={tenantToFormValues}
-        isValid={isValidTenantForm}
-        emptyState="No tenants"
-        archivedEmptyState="No archived tenants"
-        trashEmptyState="No tenants in trash"
-        searchPlaceholder="Search tenants"
+        columns={productColumns(selectedIds, toggleSelected)}
+        formFields={productFormFields()}
+        searchText={productSearchText}
+        toFormValues={productToFormValues}
+        isValid={isValidProductForm}
+        emptyState="No products"
+        archivedEmptyState="No archived products"
+        trashEmptyState="No products in trash"
+        searchPlaceholder="Search products"
         listHeaderInlineSlot={() => (
           <div className="iam-control__lead-stack">
             <CreateAndBulkActions
               selectedCount={selectedIds.length}
               view={lifecycleView}
               createOpen={createOpen}
-              busy={bulkBusy || !isActive || products.length === 0 || orgOptions.length === 0}
+              busy={bulkBusy || !isActive}
               onCreate={() => {
                 setCreateOpen(true)
                 setCreateRequested(true)
@@ -277,8 +217,6 @@ export function TenantsPage({ principalId, sessionTenants, onSessionChanged }: T
               onClear={clearSelected}
               onBulkAction={(action) => void applyBulkAction(action)}
             />
-            {orgsError ? <p role="alert" className="iam-control__inline-error">{orgsError}</p> : null}
-            {productsError ? <p role="alert" className="iam-control__inline-error">{productsError}</p> : null}
             {actionError ? <p role="alert" className="iam-control__inline-error">{actionError}</p> : null}
           </div>
         )}
@@ -289,81 +227,54 @@ export function TenantsPage({ principalId, sessionTenants, onSessionChanged }: T
   )
 }
 
-function tenantColumns(
+function productColumns(
   selectedIds: string[],
   onToggle: (id: string, checked: boolean) => void,
-  orgLabels: Map<string, string>,
-  productLabels: Map<string, string>,
-): CrudPageProps<Tenant>['columns'] {
+): CrudPageProps<Product>['columns'] {
   return [
-    selectionColumn<Tenant>(selectedIds, onToggle),
-    { key: 'org_name', header: 'Org', render: (_value, row) => row.org_name || orgLabels.get(row.org_id) || row.org_id },
-    { key: 'product_surface', header: 'Product', render: (value) => productLabels.get(String(value ?? '')) || String(value || '-') },
+    selectionColumn<Product>(selectedIds, onToggle),
+    { key: 'name', header: 'Product' },
+    { key: 'product_surface', header: 'Slug' },
     { key: 'state', header: 'State', render: (value) => formatState(String(value ?? '')) },
     { key: 'updated_at', header: 'Updated', render: (value) => formatDate(String(value ?? '')) },
   ]
 }
 
-function tenantFormFields(
-  orgOptions: Array<{ label: string; value: string }>,
-  productOptions: Array<{ label: string; value: string }>,
-): CrudPageProps<Tenant>['formFields'] {
+function productFormFields(): CrudPageProps<Product>['formFields'] {
   return [
-    {
-      key: 'org_id',
-      label: 'Org',
-      type: 'select' as const,
-      placeholder: 'Select...',
-      createOnly: true,
-      options: orgOptions,
-    },
-    {
-      key: 'product_surface',
-      label: 'Product',
-      type: 'select' as const,
-      placeholder: 'Select...',
-      createOnly: true,
-      options: productOptions,
-    },
+    { key: 'name', label: 'Product' },
+    { key: 'product_surface', label: 'Slug (optional)', createOnly: true },
   ]
 }
 
-function tenantToFormValues(row: Tenant): CrudFormValues {
+function productToFormValues(row: Product): CrudFormValues {
   return {
-    org_id: row.org_id,
+    name: row.name,
     product_surface: row.product_surface,
   }
 }
 
-function tenantPayload(values: CrudFormValues): TenantInput {
-  const selectedOrgID = stringValue(values.org_id)
-  return {
-    org_id: selectedOrgID,
-    product_surface: stringValue(values.product_surface),
+function productPayload(values: CrudFormValues, includeSlug: boolean): ProductInput {
+  const payload: ProductInput = { name: stringValue(values.name) }
+  if (includeSlug) {
+    const productSurface = stringValue(values.product_surface)
+    if (productSurface) payload.product_surface = productSurface
   }
+  return payload
 }
 
-function isValidTenantForm(values: CrudFormValues): boolean {
-  const hasOrg = stringValue(values.org_id).length > 0
-  const hasProduct = stringValue(values.product_surface).length > 0
-  return hasOrg && hasProduct
+function isValidProductForm(values: CrudFormValues): boolean {
+  return stringValue(values.name).length > 0
 }
 
-function tenantSearchText(row: Tenant): string {
+function productSearchText(row: Product): string {
   return [
     row.id,
-    row.org_id,
-    row.org_name,
+    row.name,
     row.product_surface,
     row.status,
     row.state,
   ].join(' ')
-}
-
-function orgSelectOptions(labels: Map<string, string>): Array<{ label: string; value: string }> {
-  return Array.from(labels.entries())
-    .map(([value, label]) => ({ label, value }))
-    .sort((left, right) => left.label.localeCompare(right.label))
 }
 
 function selectionColumn<T extends { id: string }>(
@@ -438,26 +349,43 @@ function CreateAndBulkActions(props: {
 
 function lifecycleToolbarActions(view: CrudLifecycleView, createOpen: boolean, onChange: (view: CrudLifecycleView) => void) {
   return [
-    { id: 'active', label: 'Active', kind: !createOpen && view === 'active' ? 'primary' as const : 'secondary' as const, onClick: () => onChange('active') },
-    { id: 'archived', label: 'Archived', kind: !createOpen && view === 'archived' ? 'primary' as const : 'secondary' as const, onClick: () => onChange('archived') },
-    { id: 'trash', label: 'Trash', kind: !createOpen && view === 'trash' ? 'primary' as const : 'secondary' as const, onClick: () => onChange('trash') },
+    {
+      id: 'active',
+      label: 'Active',
+      kind: !createOpen && view === 'active' ? 'primary' as const : 'secondary' as const,
+      onClick: () => onChange('active'),
+    },
+    {
+      id: 'archived',
+      label: 'Archived',
+      kind: !createOpen && view === 'archived' ? 'primary' as const : 'secondary' as const,
+      onClick: () => onChange('archived'),
+    },
+    {
+      id: 'trash',
+      label: 'Trash',
+      kind: !createOpen && view === 'trash' ? 'primary' as const : 'secondary' as const,
+      onClick: () => onChange('trash'),
+    },
   ]
-}
-
-function stringValue(value: CrudFormValues[string]): string {
-  return String(value ?? '').trim()
-}
-
-function formatState(value: string): string {
-  if (value === 'active') return 'Active'
-  if (value === 'archived') return 'Archived'
-  if (value === 'trashed') return 'Trash'
-  return value || '-'
 }
 
 function formatDate(value: string): string {
   if (!value) return '-'
   const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString('en-US', { dateStyle: 'short', timeStyle: 'short' })
+  if (Number.isNaN(date.getTime())) return '-'
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: 'short',
+    timeStyle: 'short',
+  }).format(date)
+}
+
+function formatState(value: string): string {
+  if (value === 'trashed') return 'Trash'
+  if (value === 'archived') return 'Archived'
+  return 'Active'
+}
+
+function stringValue(value: unknown): string {
+  return String(value ?? '').trim()
 }

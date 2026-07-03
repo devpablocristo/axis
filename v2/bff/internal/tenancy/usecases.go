@@ -18,11 +18,13 @@ type RepositoryPort interface {
 	OrgByProvider(ctx context.Context, provider, providerOrgID string) (domain.Org, error)
 	CreateTenant(ctx context.Context, input domain.NormalizedCreateTenantInput) (domain.Tenant, error)
 	TenantByID(ctx context.Context, id uuid.UUID) (domain.Tenant, error)
+	ListLifecycle(ctx context.Context, lifecycle string) ([]domain.Tenant, error)
 	ListForPrincipal(ctx context.Context, userID string) ([]domain.Tenant, error)
 	ListForPrincipalLifecycle(ctx context.Context, userID, lifecycle string) ([]domain.Tenant, error)
 	List(ctx context.Context, orgID string) ([]domain.Tenant, error)
 	UpsertMember(ctx context.Context, input domain.NormalizedAddMemberInput) (domain.TenantMember, error)
 	TenantMembership(ctx context.Context, tenantID uuid.UUID, userID string) (domain.TenantMember, error)
+	PrincipalHasOwnerRole(ctx context.Context, userID string) (bool, error)
 	ArchiveTenant(ctx context.Context, id uuid.UUID, at time.Time) error
 	UnarchiveTenant(ctx context.Context, id uuid.UUID) error
 	TrashTenant(ctx context.Context, id uuid.UUID, at time.Time, purgeAfter *time.Time) error
@@ -34,9 +36,14 @@ type RepositoryPort interface {
 	DeactivateOrgUserMemberships(ctx context.Context, orgID, userID string) error
 }
 
+type ProductResolverPort interface {
+	ActiveProductExists(ctx context.Context, productSurface string) (bool, error)
+}
+
 type UseCases struct {
-	repo        RepositoryPort
-	orgProvider identity.OrgProviderPort
+	repo            RepositoryPort
+	orgProvider     identity.OrgProviderPort
+	productResolver ProductResolverPort
 }
 
 func NewUseCases(repo RepositoryPort, providers ...identity.OrgProviderPort) *UseCases {
@@ -45,6 +52,12 @@ func NewUseCases(repo RepositoryPort, providers ...identity.OrgProviderPort) *Us
 		orgProvider = providers[0]
 	}
 	return &UseCases{repo: repo, orgProvider: orgProvider}
+}
+
+func NewUseCasesWithProductResolver(repo RepositoryPort, productResolver ProductResolverPort, providers ...identity.OrgProviderPort) *UseCases {
+	uc := NewUseCases(repo, providers...)
+	uc.productResolver = productResolver
+	return uc
 }
 
 func (u *UseCases) EnsureDefaultTenant(ctx context.Context, orgID, orgName, userID string) (domain.Tenant, error) {
@@ -92,6 +105,9 @@ func (u *UseCases) EnsureProviderDefaultTenantWithRole(ctx context.Context, inpu
 func (u *UseCases) Create(ctx context.Context, input domain.CreateTenantInput) (domain.Tenant, error) {
 	normalized, err := domain.NormalizeCreateTenantInput(input)
 	if err != nil {
+		return domain.Tenant{}, err
+	}
+	if err := u.requireActiveProduct(ctx, normalized.ProductSurface); err != nil {
 		return domain.Tenant{}, err
 	}
 	if normalized.OrgID == "" {
@@ -211,17 +227,23 @@ func (u *UseCases) List(ctx context.Context, input domain.ListInput) ([]domain.T
 	if err != nil {
 		return nil, err
 	}
+	if isOwner, err := u.principalHasOwnerAccess(ctx, normalized.PrincipalID); err != nil {
+		return nil, err
+	} else if isOwner {
+		return u.repo.ListLifecycle(ctx, normalized.Lifecycle)
+	}
 	return u.repo.ListForPrincipalLifecycle(ctx, normalized.PrincipalID, normalized.Lifecycle)
-}
-
-func (u *UseCases) Products(context.Context) ([]domain.Product, error) {
-	return domain.ProductCatalog, nil
 }
 
 func (u *UseCases) ListForPrincipal(ctx context.Context, userID string) ([]domain.Tenant, error) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return nil, domainerr.Validation("user_id is required")
+	}
+	if isOwner, err := u.principalHasOwnerAccess(ctx, userID); err != nil {
+		return nil, err
+	} else if isOwner {
+		return u.repo.ListLifecycle(ctx, domain.StateActive)
 	}
 	return u.repo.ListForPrincipal(ctx, userID)
 }
@@ -317,6 +339,11 @@ func (u *UseCases) ResolveAccess(ctx context.Context, tenantID, principalID stri
 	member, err := u.repo.TenantMembership(ctx, id, principalID)
 	if err != nil {
 		if domainerr.IsNotFound(err) {
+			if isOwner, ownerErr := u.principalHasOwnerAccess(ctx, principalID); ownerErr != nil {
+				return domain.Tenant{}, domain.TenantMember{}, ownerErr
+			} else if isOwner {
+				return tenant, virtualOwnerMember(id, principalID), nil
+			}
 			return domain.Tenant{}, domain.TenantMember{}, domainerr.Forbidden("principal is not a member of the requested tenant")
 		}
 		return domain.Tenant{}, domain.TenantMember{}, err
@@ -372,6 +399,20 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
+func (u *UseCases) requireActiveProduct(ctx context.Context, productSurface string) error {
+	if u.productResolver == nil {
+		return nil
+	}
+	exists, err := u.productResolver.ActiveProductExists(ctx, productSurface)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return domainerr.Validation("product_surface must reference an active product")
+	}
+	return nil
+}
+
 func (u *UseCases) normalizeLifecycleMutation(ctx context.Context, input domain.LifecycleInput) (domain.NormalizedLifecycleInput, domain.Tenant, error) {
 	normalized, err := domain.NormalizeLifecycleInput(input)
 	if err != nil {
@@ -391,6 +432,11 @@ func (u *UseCases) requireTenantMutator(ctx context.Context, tenantID uuid.UUID,
 	member, err := u.repo.TenantMembership(ctx, tenantID, principalID)
 	if err != nil {
 		if domainerr.IsNotFound(err) {
+			if isOwner, ownerErr := u.principalHasOwnerAccess(ctx, principalID); ownerErr != nil {
+				return ownerErr
+			} else if isOwner {
+				return nil
+			}
 			return domainerr.Forbidden("principal is not a member of the requested tenant")
 		}
 		return err
@@ -405,6 +451,11 @@ func (u *UseCases) requireTenantMutator(ctx context.Context, tenantID uuid.UUID,
 }
 
 func (u *UseCases) requireOrgMutator(ctx context.Context, orgID, principalID string) error {
+	if isOwner, err := u.principalHasOwnerAccess(ctx, principalID); err != nil {
+		return err
+	} else if isOwner {
+		return nil
+	}
 	tenants, err := u.repo.ListForPrincipalLifecycle(ctx, principalID, domain.StateActive)
 	if err != nil {
 		return err
@@ -424,11 +475,32 @@ func (u *UseCases) requireOrgMutator(ctx context.Context, orgID, principalID str
 	return domainerr.Forbidden("principal cannot mutate tenants for this org")
 }
 
+func (u *UseCases) PrincipalHasOwnerAccess(ctx context.Context, userID string) (bool, error) {
+	return u.principalHasOwnerAccess(ctx, userID)
+}
+
+func (u *UseCases) principalHasOwnerAccess(ctx context.Context, userID string) (bool, error) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return false, domainerr.Validation("user_id is required")
+	}
+	return u.repo.PrincipalHasOwnerRole(ctx, userID)
+}
+
+func virtualOwnerMember(tenantID uuid.UUID, principalID string) domain.TenantMember {
+	return domain.TenantMember{
+		TenantID: tenantID,
+		UserID:   principalID,
+		Role:     domain.RoleOwner,
+		Status:   domain.StatusActive,
+	}
+}
+
 func (u *UseCases) ensureCanDeactivate(ctx context.Context, tenant domain.Tenant, principalID string) error {
 	if tenant.State() != domain.StateActive {
 		return domainerr.Conflict("tenant must be active")
 	}
-	activeTenants, err := u.repo.ListForPrincipalLifecycle(ctx, principalID, domain.StateActive)
+	activeTenants, err := u.activeTenantsForPrincipal(ctx, principalID)
 	if err != nil {
 		return err
 	}
@@ -436,4 +508,13 @@ func (u *UseCases) ensureCanDeactivate(ctx context.Context, tenant domain.Tenant
 		return domainerr.Conflict("cannot deactivate the last active tenant for the principal")
 	}
 	return nil
+}
+
+func (u *UseCases) activeTenantsForPrincipal(ctx context.Context, principalID string) ([]domain.Tenant, error) {
+	if isOwner, err := u.principalHasOwnerAccess(ctx, principalID); err != nil {
+		return nil, err
+	} else if isOwner {
+		return u.repo.ListLifecycle(ctx, domain.StateActive)
+	}
+	return u.repo.ListForPrincipalLifecycle(ctx, principalID, domain.StateActive)
 }
