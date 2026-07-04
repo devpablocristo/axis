@@ -12,10 +12,12 @@ import {
   type VirployeeAutonomy,
   type VirployeeAutonomyLevel,
   type Virployee,
+  type ProfileTemplate,
   archiveVirployee,
   createVirployee,
   listCapabilities,
   listJobRoles,
+  listProfileTemplates,
   listUsers,
   listVirployeeAutonomyLevels,
   listVirployees,
@@ -37,6 +39,7 @@ type VirployeesPageProps = {
 type VirployeeEditValues = {
   name: string
   job_role_id: string
+  profile_template_id: string
   autonomy: VirployeeAutonomy | ''
   supervisor_user_id: string
   description: string
@@ -92,6 +95,9 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
   const [usersError, setUsersError] = useState('')
   const [capabilities, setCapabilities] = useState<Capability[]>([])
   const [capabilitiesError, setCapabilitiesError] = useState('')
+  const [profileTemplates, setProfileTemplates] = useState<ProfileTemplate[]>([])
+  const [profileTemplatesError, setProfileTemplatesError] = useState('')
+  const [previewRow, setPreviewRow] = useState<Virployee | null>(null)
   const [editRow, setEditRow] = useState<Virployee | null>(null)
   const [editValues, setEditValues] = useState<VirployeeEditValues | null>(null)
   const [editSaving, setEditSaving] = useState(false)
@@ -106,6 +112,9 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
   const capabilityByID = useMemo(() => {
     return new Map(capabilities.map((capability) => [capability.id, capability]))
   }, [capabilities])
+  const profileTemplateByID = useMemo(() => {
+    return new Map(profileTemplates.map((profile) => [profile.id, profile]))
+  }, [profileTemplates])
   const activeSupervisorUsers = useMemo(() => {
     return users.filter((user) => user.kind !== 'invitation' && user.state === 'active')
   }, [users])
@@ -130,6 +139,12 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
       value: user.id,
     }))
   }, [activeSupervisorUsers])
+  const profileTemplateOptions = useMemo(() => {
+    return profileTemplates.map((profile) => ({
+      label: profile.name,
+      value: profile.id,
+    }))
+  }, [profileTemplates])
 
   const dataSource: NonNullable<CrudPageProps<Virployee>['dataSource']> = useMemo(() => ({
     list: ({ view }) => isActive ? listVirployees(view, tenantId, principalId) : Promise.resolve([]),
@@ -174,6 +189,9 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
     setUsersError('')
     setCapabilities([])
     setCapabilitiesError('')
+    setProfileTemplates([])
+    setProfileTemplatesError('')
+    closePreview()
     closeEdit()
   }, [lifecycleView, tenantId])
 
@@ -217,6 +235,29 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
         if (cancelled) return
         setCapabilities([])
         setCapabilitiesError(error instanceof Error ? error.message : 'Could not load Capabilities')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [isActive, principalId, reloadVersion, tenantId])
+
+  useEffect(() => {
+    if (!isActive) {
+      setProfileTemplates([])
+      setProfileTemplatesError('')
+      return
+    }
+    let cancelled = false
+    listProfileTemplates('active', tenantId, principalId)
+      .then((items) => {
+        if (cancelled) return
+        setProfileTemplates(items)
+        setProfileTemplatesError('')
+      })
+      .catch((error) => {
+        if (cancelled) return
+        setProfileTemplates([])
+        setProfileTemplatesError(error instanceof Error ? error.message : 'Could not load Profile Templates')
       })
     return () => {
       cancelled = true
@@ -404,6 +445,7 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
   }
 
   const openEdit = (row: Virployee) => {
+    closePreview()
     setEditRow(row)
     setEditValues(virployeeToEditValues(row))
     setEditError('')
@@ -415,6 +457,16 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
     setEditValues(null)
     setEditError('')
     setEditSaving(false)
+  }
+
+  const openPreview = (row: Virployee) => {
+    closeEdit()
+    setPreviewRow(row)
+    setActionError('')
+  }
+
+  const closePreview = () => {
+    setPreviewRow(null)
   }
 
   const updateEditValue = (key: keyof VirployeeEditValues, value: string) => {
@@ -482,11 +534,12 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
         labelPlural="virployees"
         labelPluralCap="Virployees"
         createLabel="New"
-        columns={virployeeColumns(selectedIds, toggleSelected, autonomyByLevel, jobRoleByID, userByID, capabilityByID)}
-        formFields={virployeeFormFields(autonomyOptions, jobRoleOptions, supervisorOptions)}
-        searchText={(row) => virployeeSearchText(row, autonomyByLevel, jobRoleByID, userByID, capabilityByID)}
+        columns={virployeeColumns(selectedIds, toggleSelected, autonomyByLevel, jobRoleByID, userByID, capabilityByID, profileTemplateByID)}
+        formFields={virployeeFormFields(autonomyOptions, jobRoleOptions, supervisorOptions, profileTemplateOptions)}
+        searchText={(row) => virployeeSearchText(row, autonomyByLevel, jobRoleByID, userByID, capabilityByID, profileTemplateByID)}
         toFormValues={virployeeToFormValues}
         onExternalEdit={openEdit}
+        rowActions={virployeeRowActions(openPreview)}
         isValid={isValidVirployeeForm}
         emptyState="No virployees"
         archivedEmptyState="No archived virployees"
@@ -500,6 +553,8 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
               createOpen={createOpen}
               busy={bulkBusy || !isActive}
               onCreate={() => {
+                closePreview()
+                closeEdit()
                 setCreateOpen(true)
                 setCreateRequested(true)
               }}
@@ -510,11 +565,26 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
             {jobRolesError ? <p role="alert" className="iam-control__inline-error">{jobRolesError}</p> : null}
             {usersError ? <p role="alert" className="iam-control__inline-error">{usersError}</p> : null}
             {capabilitiesError ? <p role="alert" className="iam-control__inline-error">{capabilitiesError}</p> : null}
+            {profileTemplatesError ? <p role="alert" className="iam-control__inline-error">{profileTemplatesError}</p> : null}
             {!jobRolesError && jobRoles.length === 0 ? (
               <p className="iam-control__inline-note">Create a Job Role before creating Virployees.</p>
             ) : null}
+            {!profileTemplatesError && profileTemplates.length === 0 ? (
+              <p className="iam-control__inline-note">Create a Profile Template before creating Virployees.</p>
+            ) : null}
             {!usersError && activeSupervisorUsers.length === 0 ? (
               <p className="iam-control__inline-note">Create a User before assigning a supervisor.</p>
+            ) : null}
+            {previewRow ? (
+              <VirployeePreviewInline
+                row={previewRow}
+                autonomyByLevel={autonomyByLevel}
+                jobRole={jobRoleByID.get(previewRow.job_role_id)}
+                profileTemplate={profileTemplateByID.get(previewRow.profile_template_id)}
+                capabilities={previewRow.capability_ids.map((id) => capabilityByID.get(id) ?? id)}
+                supervisor={userByID.get(previewRow.supervisor_user_id)}
+                onClose={closePreview}
+              />
             ) : null}
             {editRow && editValues ? (
               <VirployeeEditInline
@@ -524,6 +594,7 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
                 error={editError}
                 autonomyOptions={autonomyOptions}
                 jobRoleOptions={jobRoleOptions}
+                profileTemplateOptions={profileTemplateOptions}
                 supervisorOptions={supervisorOptions}
                 capabilities={capabilities}
                 capabilityByID={capabilityByID}
@@ -549,6 +620,7 @@ function VirployeeEditInline(props: {
   error: string
   autonomyOptions: Array<{ label: string; value: string }>
   jobRoleOptions: Array<{ label: string; value: string }>
+  profileTemplateOptions: Array<{ label: string; value: string }>
   supervisorOptions: Array<{ label: string; value: string }>
   capabilities: Capability[]
   capabilityByID: ReadonlyMap<string, Capability>
@@ -590,6 +662,18 @@ function VirployeeEditInline(props: {
               >
                 <option value="">{props.jobRoleOptions.length > 0 ? 'Select...' : 'Create a Job Role first'}</option>
                 {props.jobRoleOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="form-group">
+              Profile template
+              <select
+                value={props.values.profile_template_id}
+                onChange={(event) => props.onValueChange('profile_template_id', event.currentTarget.value)}
+              >
+                <option value="">{props.profileTemplateOptions.length > 0 ? 'Select profile template...' : 'Create a Profile Template first'}</option>
+                {props.profileTemplateOptions.map((option) => (
                   <option key={option.value} value={option.value}>{option.label}</option>
                 ))}
               </select>
@@ -686,6 +770,106 @@ function VirployeeEditInline(props: {
   )
 }
 
+function VirployeePreviewInline(props: {
+  row: Virployee
+  autonomyByLevel: ReadonlyMap<VirployeeAutonomy, VirployeeAutonomyLevel>
+  jobRole?: JobRole
+  profileTemplate?: ProfileTemplate
+  capabilities: Array<Capability | string>
+  supervisor?: TenantUser
+  onClose: () => void
+}) {
+  const description = stringValue(props.row.description)
+  const jobRoleNameValue = props.jobRole?.name ?? 'Unknown Job Role'
+  const jobRoleMission = stringValue(props.jobRole?.mission ?? '')
+  const profileNameValue = props.profileTemplate?.name ?? 'Unknown Profile Template'
+  const profilePrompt = stringValue(props.profileTemplate?.system_prompt ?? '')
+  const supervisorValue = props.supervisor ? userLabel(props.supervisor) : 'Unknown Supervisor'
+
+  return (
+    <div className="card crud-form-card virployee-preview-inline">
+      <div className="card-header">
+        <h2>Virployee preview</h2>
+      </div>
+      <div className="virployee-preview">
+        <section className="virployee-preview__section" aria-label="Virployee">
+          <h3>{props.row.name}</h3>
+          <div className="virployee-preview__grid">
+            <PreviewField label="Autonomy" value={formatAutonomy(props.row.autonomy, props.autonomyByLevel)} />
+            <PreviewField label="State" value={formatState(props.row.state)} />
+            <PreviewField label="Supervisor" value={supervisorValue} />
+            <PreviewField label="Description" value={description || '-'} />
+          </div>
+        </section>
+
+        <section className="virployee-preview__section" aria-label="Job Role">
+          <h3>Job Role</h3>
+          <div className="virployee-preview__grid">
+            <PreviewField label="Name" value={jobRoleNameValue} />
+            <PreviewField label="Mission" value={jobRoleMission || '-'} />
+          </div>
+        </section>
+
+        <section className="virployee-preview__section" aria-label="Profile Template">
+          <h3>Profile Template</h3>
+          <div className="virployee-preview__grid">
+            <PreviewField label="Name" value={profileNameValue} />
+            <PreviewField
+              label="Max autonomy"
+              value={props.profileTemplate ? formatAutonomy(props.profileTemplate.max_autonomy, props.autonomyByLevel) : '-'}
+            />
+          </div>
+          <div className="virployee-preview__prompt">
+            <span>System prompt</span>
+            <pre>{profilePrompt || '-'}</pre>
+          </div>
+        </section>
+
+        <section className="virployee-preview__section" aria-label="Capabilities">
+          <h3>Capabilities</h3>
+          {props.capabilities.length === 0 ? (
+            <p className="virployee-preview__empty">No capabilities assigned</p>
+          ) : (
+            <div className="virployee-preview__capabilities">
+              {props.capabilities.map((capability) => {
+                if (typeof capability === 'string') {
+                  return (
+                    <div key={capability} className="virployee-preview__capability">
+                      <strong>Unknown Capability</strong>
+                      <span>{shortId(capability)}</span>
+                    </div>
+                  )
+                }
+                return (
+                  <div key={capability.id} className="virployee-preview__capability">
+                    <strong>{capability.name}</strong>
+                    <span>{capability.capability_key}</span>
+                    <span>Requires {formatAutonomy(capability.required_autonomy, props.autonomyByLevel)}</span>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </section>
+      </div>
+      <footer className="virployee-edit-form__footer">
+        <button type="button" className="btn-secondary" onClick={props.onClose}>
+          Close
+        </button>
+      </footer>
+    </div>
+  )
+}
+
+function PreviewField(props: { label: string; value: string }) {
+  return (
+    <div className="virployee-preview__field">
+      <span>{props.label}</span>
+      <strong>{props.value}</strong>
+    </div>
+  )
+}
+
 function ensureFieldHelpTrigger(root: HTMLElement, fieldKey: string, ariaLabel: string): HTMLElement | null {
   const field = root.querySelector<HTMLElement>(`#crud-field-${fieldKey}`)
   const group = field?.closest('.form-group')
@@ -764,11 +948,13 @@ function virployeeColumns(
   jobRoleByID?: ReadonlyMap<string, JobRole>,
   userByID?: ReadonlyMap<string, TenantUser>,
   capabilityByID?: ReadonlyMap<string, Capability>,
+  profileTemplateByID?: ReadonlyMap<string, ProfileTemplate>,
 ): CrudPageProps<Virployee>['columns'] {
   return [
     selectionColumn<Virployee>(selectedIds, onToggle),
     { key: 'name', header: 'Name' },
     { key: 'job_role_id', header: 'Job Role', render: (value) => jobRoleName(String(value ?? ''), jobRoleByID) },
+    { key: 'profile_template_id', header: 'Profile Template', render: (value) => profileTemplateName(String(value ?? ''), profileTemplateByID) },
     { key: 'autonomy', header: 'Autonomy', render: (value) => formatAutonomy(String(value ?? ''), autonomyByLevel) },
     { key: 'capability_ids', header: 'Capabilities', render: (_value, row) => capabilitySummary(row.capability_ids ?? [], capabilityByID) },
     { key: 'supervisor_user_id', header: 'Supervisor', render: (value) => supervisorName(String(value ?? ''), userByID) },
@@ -777,10 +963,24 @@ function virployeeColumns(
   ]
 }
 
+function virployeeRowActions(
+  onPreview: (row: Virployee) => void,
+): NonNullable<CrudPageProps<Virployee>['rowActions']> {
+  return [
+    {
+      id: 'preview',
+      label: 'Preview',
+      kind: 'secondary',
+      onClick: (row) => onPreview(row),
+    },
+  ]
+}
+
 function virployeeFormFields(
   autonomyOptions: Array<{ label: string; value: string }>,
   jobRoleOptions: Array<{ label: string; value: string }>,
   supervisorOptions: Array<{ label: string; value: string }>,
+  profileTemplateOptions: Array<{ label: string; value: string }>,
 ): CrudPageProps<Virployee>['formFields'] {
   return [
     { key: 'name', label: 'Name' },
@@ -790,6 +990,13 @@ function virployeeFormFields(
       type: 'select' as const,
       placeholder: jobRoleOptions.length > 0 ? 'Select...' : 'Create a Job Role first',
       options: jobRoleOptions,
+    },
+    {
+      key: 'profile_template_id',
+      label: 'Profile template',
+      type: 'select' as const,
+      placeholder: profileTemplateOptions.length > 0 ? 'Select profile template...' : 'Create a Profile Template first',
+      options: profileTemplateOptions,
     },
     {
       key: 'autonomy',
@@ -814,6 +1021,7 @@ function virployeeToFormValues(row: Virployee): CrudFormValues {
   return {
     name: row.name,
     job_role_id: row.job_role_id,
+    profile_template_id: row.profile_template_id,
     autonomy: row.autonomy ?? 'A1',
     description: row.description ?? '',
     supervisor_user_id: row.supervisor_user_id,
@@ -824,6 +1032,7 @@ function virployeePayload(values: CrudFormValues, capabilityIds: string[] = []) 
   return {
     name: stringValue(values.name),
     job_role_id: stringValue(values.job_role_id),
+    profile_template_id: stringValue(values.profile_template_id),
     capability_ids: capabilityIds,
     description: stringValue(values.description),
     supervisor_user_id: stringValue(values.supervisor_user_id),
@@ -835,6 +1044,7 @@ function virployeeToEditValues(row: Virployee): VirployeeEditValues {
   return {
     name: row.name,
     job_role_id: row.job_role_id,
+    profile_template_id: row.profile_template_id,
     autonomy: row.autonomy ?? '',
     supervisor_user_id: row.supervisor_user_id,
     description: row.description ?? '',
@@ -846,6 +1056,7 @@ function editPayload(values: VirployeeEditValues) {
   return {
     name: stringValue(values.name),
     job_role_id: stringValue(values.job_role_id),
+    profile_template_id: values.profile_template_id,
     capability_ids: values.capability_ids,
     description: stringValue(values.description),
     supervisor_user_id: stringValue(values.supervisor_user_id),
@@ -857,6 +1068,7 @@ function isValidEditValues(values: VirployeeEditValues): boolean {
   return (
     stringValue(values.name).length > 0 &&
     stringValue(values.job_role_id).length > 0 &&
+    stringValue(values.profile_template_id).length > 0 &&
     stringValue(values.supervisor_user_id).length > 0
   )
 }
@@ -869,6 +1081,7 @@ function isValidVirployeeForm(values: CrudFormValues): boolean {
   return (
     stringValue(values.name).length > 0 &&
     stringValue(values.job_role_id).length > 0 &&
+    stringValue(values.profile_template_id).length > 0 &&
     stringValue(values.supervisor_user_id).length > 0
   )
 }
@@ -879,8 +1092,10 @@ function virployeeSearchText(
   jobRoleByID: ReadonlyMap<string, JobRole>,
   userByID: ReadonlyMap<string, TenantUser>,
   capabilityByID: ReadonlyMap<string, Capability>,
+  profileTemplateByID: ReadonlyMap<string, ProfileTemplate>,
 ): string {
   const jobRole = jobRoleByID.get(row.job_role_id)
+  const profile = row.profile_template_id ? profileTemplateByID.get(row.profile_template_id) : undefined
   const supervisor = userByID.get(row.supervisor_user_id)
   return [
     row.id,
@@ -888,6 +1103,9 @@ function virployeeSearchText(
     row.job_role_id,
     jobRole?.name,
     jobRole?.slug,
+    row.profile_template_id,
+    profile?.name,
+    profile?.description,
     row.autonomy,
     formatAutonomy(row.autonomy, autonomyByLevel),
     row.description,
@@ -996,6 +1214,12 @@ function supervisorName(id: string, userByID?: ReadonlyMap<string, TenantUser>):
   if (!id) return '-'
   const user = userByID?.get(id)
   return user ? userLabel(user) : shortId(id)
+}
+
+function profileTemplateName(id: string, profileTemplateByID?: ReadonlyMap<string, ProfileTemplate>): string {
+  if (!id) return '-'
+  const profile = profileTemplateByID?.get(id)
+  return profile?.name ?? shortId(id)
 }
 
 function capabilitySummary(ids: string[], capabilityByID?: ReadonlyMap<string, Capability>): string {

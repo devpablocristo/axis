@@ -36,10 +36,10 @@ func (r *Repository) Create(ctx context.Context, tenantID string, input domain.N
 	defer tx.Rollback(ctx)
 
 	row := tx.QueryRow(ctx, `
-		INSERT INTO virployees (id, tenant_id, name, job_role_id, description, supervisor_user_id, autonomy, created_at, updated_at)
-		VALUES ($1::uuid, $2, $3, $4::uuid, $5, $6, $7, $8, $8)
-		RETURNING id::text, name, job_role_id::text, description, supervisor_user_id::text, autonomy, created_at, updated_at, archived_at, trashed_at, purge_after
-	`, id.String(), tenantID, input.Name, input.JobRoleID.String(), input.Description, input.SupervisorUserID, string(input.Autonomy), now)
+		INSERT INTO virployees (id, tenant_id, name, job_role_id, profile_template_id, description, supervisor_user_id, autonomy, created_at, updated_at)
+		VALUES ($1::uuid, $2, $3, $4::uuid, $5::uuid, $6, $7, $8, $9, $9)
+		RETURNING id::text, name, job_role_id::text, profile_template_id::text, description, supervisor_user_id::text, autonomy, created_at, updated_at, archived_at, trashed_at, purge_after
+	`, id.String(), tenantID, input.Name, input.JobRoleID.String(), input.ProfileTemplateID.String(), input.Description, input.SupervisorUserID, string(input.Autonomy), now)
 	item, err := scanVirployee(row)
 	if err != nil {
 		return domain.Virployee{}, err
@@ -68,7 +68,7 @@ func (r *Repository) List(ctx context.Context, tenantID string, state domain.Sta
 	}
 
 	rows, err := r.pool.Query(ctx, fmt.Sprintf(`
-		SELECT id::text, name, job_role_id::text, description, supervisor_user_id::text, autonomy, created_at, updated_at, archived_at, trashed_at, purge_after
+		SELECT id::text, name, job_role_id::text, profile_template_id::text, description, supervisor_user_id::text, autonomy, created_at, updated_at, archived_at, trashed_at, purge_after
 		FROM virployees
 		WHERE %s
 		ORDER BY created_at DESC, id DESC
@@ -89,12 +89,12 @@ func (r *Repository) List(ctx context.Context, tenantID string, state domain.Sta
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	return r.attachCapabilityIDs(ctx, tenantID, out)
+	return r.attachRelated(ctx, tenantID, out)
 }
 
 func (r *Repository) Get(ctx context.Context, tenantID string, id uuid.UUID) (domain.Virployee, error) {
 	row := r.pool.QueryRow(ctx, `
-		SELECT id::text, name, job_role_id::text, description, supervisor_user_id::text, autonomy, created_at, updated_at, archived_at, trashed_at, purge_after
+		SELECT id::text, name, job_role_id::text, profile_template_id::text, description, supervisor_user_id::text, autonomy, created_at, updated_at, archived_at, trashed_at, purge_after
 		FROM virployees
 		WHERE tenant_id = $1 AND id = $2::uuid AND trashed_at IS NULL
 	`, tenantID, id.String())
@@ -119,13 +119,19 @@ func (r *Repository) Update(ctx context.Context, tenantID string, id uuid.UUID, 
 
 	row := tx.QueryRow(ctx, `
 		UPDATE virployees
-		SET name = $3, job_role_id = $4::uuid, description = $5, supervisor_user_id = $6, autonomy = $7, updated_at = $8
+		SET name = $3,
+			job_role_id = $4::uuid,
+			profile_template_id = $5::uuid,
+			description = $6,
+			supervisor_user_id = $7,
+			autonomy = $8,
+			updated_at = $9
 		WHERE tenant_id = $1
 			AND id = $2::uuid
 			AND archived_at IS NULL
 			AND trashed_at IS NULL
-		RETURNING id::text, name, job_role_id::text, description, supervisor_user_id::text, autonomy, created_at, updated_at, archived_at, trashed_at, purge_after
-	`, tenantID, id.String(), input.Name, input.JobRoleID.String(), input.Description, input.SupervisorUserID, string(input.Autonomy), time.Now().UTC())
+		RETURNING id::text, name, job_role_id::text, profile_template_id::text, description, supervisor_user_id::text, autonomy, created_at, updated_at, archived_at, trashed_at, purge_after
+	`, tenantID, id.String(), input.Name, input.JobRoleID.String(), input.ProfileTemplateID.String(), input.Description, input.SupervisorUserID, string(input.Autonomy), time.Now().UTC())
 	item, err := scanVirployee(row)
 	if err == nil {
 		if err := replaceVirployeeCapabilities(ctx, tx, tenantID, id, input.CapabilityIDs); err != nil {
@@ -249,7 +255,7 @@ func (r *Repository) lifecycleResult(ctx context.Context, tenantID string, id uu
 	return domainerr.Conflict("invalid lifecycle transition")
 }
 
-func (r *Repository) attachCapabilityIDs(ctx context.Context, tenantID string, items []domain.Virployee) ([]domain.Virployee, error) {
+func (r *Repository) attachRelated(ctx context.Context, tenantID string, items []domain.Virployee) ([]domain.Virployee, error) {
 	for i := range items {
 		ids, err := r.capabilityIDs(ctx, tenantID, items[i].ID)
 		if err != nil {
@@ -320,6 +326,7 @@ type scanner interface {
 func scanVirployee(row scanner) (domain.Virployee, error) {
 	var idText string
 	var jobRoleIDText string
+	var profileTemplateIDText string
 	var supervisorUserIDText string
 	var autonomyText string
 	var model models.Virployee
@@ -327,6 +334,7 @@ func scanVirployee(row scanner) (domain.Virployee, error) {
 		&idText,
 		&model.Name,
 		&jobRoleIDText,
+		&profileTemplateIDText,
 		&model.Description,
 		&supervisorUserIDText,
 		&autonomyText,
@@ -350,8 +358,13 @@ func scanVirployee(row scanner) (domain.Virployee, error) {
 	if err != nil {
 		return domain.Virployee{}, err
 	}
+	profileTemplateID, err := uuid.Parse(profileTemplateIDText)
+	if err != nil {
+		return domain.Virployee{}, err
+	}
 	model.ID = id
 	model.JobRoleID = jobRoleID
+	model.ProfileTemplateID = profileTemplateID
 	model.SupervisorUserID = supervisorUserIDText
 	model.Autonomy = domain.AutonomyLevel(autonomyText)
 	return model.ToDomain(), nil
@@ -370,6 +383,8 @@ func mapVirployeeStorageError(err error) error {
 		switch pgErr.ConstraintName {
 		case "virployees_job_role_id_fkey":
 			return domainerr.Validation("job_role_id must reference an existing job role")
+		case "virployees_profile_template_id_fkey":
+			return domainerr.Validation("profile_template_id must reference an existing profile template")
 		case "virployee_capabilities_capability_id_fkey":
 			return domainerr.Validation("capability_ids must reference existing capabilities")
 		default:

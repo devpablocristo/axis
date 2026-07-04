@@ -43,7 +43,8 @@ Evaluation criteria:
 | `status` | yes | yes | yes | yes | yes | `core` | Add operational status separate from lifecycle. Values: `draft`, `active`, `disabled`, `suspended`, `error`. Default `draft`. |
 | lifecycle `state` | no | no | no | partial | yes | `metadata` | Keep as technical lifecycle derived from timestamps: `active`, `archived`, `trashed`. Do not use it as operational readiness. |
 | `job_role_id` | yes | yes | partial | partial | yes | `core` | Required UUID in v2.1. Replaces `role` as the work-function reference and must point to an active Job Role in the same tenant. |
-| `profile_id` | no | no | yes | yes | partial | `deferred-core` | Essential later, but wait for Virployee Profiles. Do not accept fake runtime profile references yet. |
+| `profile_template_id` | no | no | yes | yes | yes | `core` | Required live reference to an active Profile Template. Editing the template changes the expected behavior of Virployees that use it. |
+| `virployee_profile` | no | no | yes | yes | partial | `out` | Do not store a snapshot in the Virployee CRUD model now. Exact prompt/config snapshots belong later in runtime or audit logs. |
 | `autonomy` | no | partial | yes | yes | yes | `core` | Optional in `POST`, default `A1`. Values: `A0` to `A5`. This is the minimum runtime safety control. |
 | `capability_ids` | no | yes | yes | yes | partial | `deferred-core` | Essential later, but wait for Capability design. Do not store opaque capability lists before the registry contract is clear. |
 | `memory_id` | no | partial | yes | yes | partial | `deferred-core` | Essential for persistent employee memory, but wait for Memory design. Omit from v2.1 create/update. |
@@ -69,6 +70,7 @@ Virployee
 - supervisor_user_id: string
 - status: VirployeeStatus
 - job_role_id: UUID
+- profile_template_id: UUID
 - autonomy: AutonomyLevel
 
 Metadata
@@ -129,8 +131,6 @@ References stored as opaque values in v2.1:
 
 References intentionally not stored yet:
 
-- `profile_id`
-- `capability_ids`
 - `memory_id`
 
 Those references affect runtime behavior and should wait until their modules or
@@ -140,7 +140,7 @@ contracts exist in `companion`.
 
 - Do not import or depend on Axis v1.
 - Do not design public tenants, orgs or product surfaces in this step.
-- Do not add tasks, runtime execution, LLMs, profiles, capabilities or memory
+- Do not add tasks, runtime execution, LLM providers or memory
   to the Virployee module yet.
 - Do not treat `job_role_id` as authorization. Permissions and approvals remain
   separate concerns.
@@ -151,6 +151,9 @@ contracts exist in `companion`.
 - `supervisor_user_id` entered the v2 API as an opaque string reference to the
   responsible human.
 - `autonomy` enters the core now with safe default `A1`.
-- `profile_id`, `capability_ids` and `memory_id` are deferred core concepts.
+- Profile Templates are reusable catalog records; Virployees reference them
+  directly by `profile_template_id`.
+- Runtime/audit snapshots are deferred until execution exists.
+- `memory_id` remains deferred.
 - Lifecycle metadata remains technical metadata, separate from operational
   `status`.

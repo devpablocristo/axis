@@ -8,19 +8,20 @@ import (
 )
 
 type VirployeeResponse struct {
-	ID               string     `json:"id"`
-	Name             string     `json:"name"`
-	JobRoleID        string     `json:"job_role_id"`
-	CapabilityIDs    []string   `json:"capability_ids"`
-	Description      string     `json:"description"`
-	SupervisorUserID string     `json:"supervisor_user_id"`
-	Autonomy         string     `json:"autonomy"`
-	State            string     `json:"state"`
-	CreatedAt        time.Time  `json:"created_at"`
-	UpdatedAt        time.Time  `json:"updated_at"`
-	ArchivedAt       *time.Time `json:"archived_at"`
-	TrashedAt        *time.Time `json:"trashed_at"`
-	PurgeAfter       *time.Time `json:"purge_after"`
+	ID                string     `json:"id"`
+	Name              string     `json:"name"`
+	JobRoleID         string     `json:"job_role_id"`
+	ProfileTemplateID string     `json:"profile_template_id"`
+	CapabilityIDs     []string   `json:"capability_ids"`
+	Description       string     `json:"description"`
+	SupervisorUserID  string     `json:"supervisor_user_id"`
+	Autonomy          string     `json:"autonomy"`
+	State             string     `json:"state"`
+	CreatedAt         time.Time  `json:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at"`
+	ArchivedAt        *time.Time `json:"archived_at"`
+	TrashedAt         *time.Time `json:"trashed_at"`
+	PurgeAfter        *time.Time `json:"purge_after"`
 }
 
 type ListVirployeesResponse struct {
@@ -40,19 +41,20 @@ type ListAutonomyLevelsResponse struct {
 
 func VirployeeFromDomain(v domain.Virployee) VirployeeResponse {
 	return VirployeeResponse{
-		ID:               v.ID.String(),
-		Name:             v.Name,
-		JobRoleID:        v.JobRoleID.String(),
-		CapabilityIDs:    uuidStrings(v.CapabilityIDs),
-		Description:      v.Description,
-		SupervisorUserID: v.SupervisorUserID,
-		Autonomy:         string(v.Autonomy),
-		State:            string(v.State()),
-		CreatedAt:        v.CreatedAt,
-		UpdatedAt:        v.UpdatedAt,
-		ArchivedAt:       v.ArchivedAt,
-		TrashedAt:        v.TrashedAt,
-		PurgeAfter:       v.PurgeAfter,
+		ID:                v.ID.String(),
+		Name:              v.Name,
+		JobRoleID:         v.JobRoleID.String(),
+		ProfileTemplateID: v.ProfileTemplateID.String(),
+		CapabilityIDs:     uuidStrings(v.CapabilityIDs),
+		Description:       v.Description,
+		SupervisorUserID:  v.SupervisorUserID,
+		Autonomy:          string(v.Autonomy),
+		State:             string(v.State()),
+		CreatedAt:         v.CreatedAt,
+		UpdatedAt:         v.UpdatedAt,
+		ArchivedAt:        v.ArchivedAt,
+		TrashedAt:         v.TrashedAt,
+		PurgeAfter:        v.PurgeAfter,
 	}
 }
 

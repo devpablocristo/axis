@@ -33,8 +33,7 @@ Out of scope for this version:
 - Runtime execution.
 - LLM providers.
 - Memory.
-- Tools and capabilities.
-- Profiles.
+- Tools.
 - Nexus, BFF, Console or any Axis v1 dependency.
 
 ## Architecture Rules
@@ -68,6 +67,7 @@ Public representation:
   "id": "uuid",
   "name": "Sales Assistant",
   "job_role_id": "uuid",
+  "profile_template_id": "uuid",
   "description": "Helps with commercial follow-up.",
   "supervisor_user_id": "dev-user",
   "autonomy": "A1",
@@ -86,6 +86,9 @@ Fields:
 - `name`: required, trimmed, non-empty.
 - `job_role_id`: required UUID reference to an active Job Role in the same
   tenant. It replaces the old free-text `role`.
+- `profile_template_id`: required UUID reference to an active Profile Template
+  in the same tenant. This is a live reference: editing the Profile Template
+  changes the expected behavior for Virployees that use it.
 - `description`: optional, trimmed.
 - `supervisor_user_id`: required opaque string reference to the human
   responsible for the Virployee. BFF validates it against tenant Users before
@@ -103,6 +106,10 @@ Fields:
 These fields are not audit records. Audit is the append-only event history of
 who performed an action and when. Metadata/lifecycle fields describe the current
 resource row.
+
+Profile Template snapshots are intentionally out of the Virployee CRUD model.
+When runtime/audit exists, execution logs can store the exact prompt/config used
+by a run without freezing every Virployee at creation time.
 
 Autonomy definitions:
 
@@ -299,6 +306,7 @@ Request:
 {
   "name": "Sales Assistant",
   "job_role_id": "22222222-2222-4222-8222-222222222222",
+  "profile_template_id": "33333333-3333-4333-8333-333333333333",
   "description": "Helps with commercial follow-up.",
   "supervisor_user_id": "dev-user",
   "autonomy": ""
@@ -312,6 +320,7 @@ Response: `201 Created`
   "id": "uuid",
   "name": "Sales Assistant",
   "job_role_id": "22222222-2222-4222-8222-222222222222",
+  "profile_template_id": "33333333-3333-4333-8333-333333333333",
   "description": "Helps with commercial follow-up.",
   "supervisor_user_id": "dev-user",
   "autonomy": "A1",
@@ -329,6 +338,8 @@ Validation:
 - `name` is required.
 - `job_role_id` is required, must be a UUID and must reference an active Job
   Role in the same tenant.
+- `profile_template_id` is required, must be a UUID and must reference an active
+  Profile Template in the same tenant.
 - `supervisor_user_id` is required, trimmed and must be non-empty.
 - `autonomy` is optional. Empty or omitted values default to `A1`.
 - `autonomy` must be one of `A0`, `A1`, `A2`, `A3`, `A4` or `A5`.

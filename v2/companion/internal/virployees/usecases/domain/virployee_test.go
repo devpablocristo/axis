@@ -11,26 +11,29 @@ import (
 func TestNormalizeCreateInput(t *testing.T) {
 	supervisorID := "dev-user"
 	jobRoleID := uuid.New()
+	profileTemplateID := uuid.New()
 	got, err := NormalizeCreateInput(CreateInput{
-		Name:             "  Sales Assistant ",
-		JobRoleID:        " " + jobRoleID.String() + " ",
-		Description:      "  Helps  ",
-		SupervisorUserID: " " + supervisorID + " ",
-		Autonomy:         " A2 ",
+		Name:              "  Sales Assistant ",
+		JobRoleID:         " " + jobRoleID.String() + " ",
+		ProfileTemplateID: " " + profileTemplateID.String() + " ",
+		Description:       "  Helps  ",
+		SupervisorUserID:  " " + supervisorID + " ",
+		Autonomy:          " A2 ",
 	})
 	if err != nil {
 		t.Fatalf("NormalizeCreateInput: %v", err)
 	}
-	if got.Name != "Sales Assistant" || got.JobRoleID != jobRoleID || got.Description != "Helps" || got.SupervisorUserID != supervisorID || got.Autonomy != AutonomyA2 {
+	if got.Name != "Sales Assistant" || got.JobRoleID != jobRoleID || got.ProfileTemplateID != profileTemplateID || got.Description != "Helps" || got.SupervisorUserID != supervisorID || got.Autonomy != AutonomyA2 {
 		t.Fatalf("unexpected normalized input: %+v", got)
 	}
 }
 
 func TestNormalizeCreateInputDefaultsAutonomy(t *testing.T) {
 	got, err := NormalizeCreateInput(CreateInput{
-		Name:             "name",
-		JobRoleID:        uuid.NewString(),
-		SupervisorUserID: uuid.NewString(),
+		Name:              "name",
+		JobRoleID:         uuid.NewString(),
+		ProfileTemplateID: uuid.NewString(),
+		SupervisorUserID:  uuid.NewString(),
 	})
 	if err != nil {
 		t.Fatalf("NormalizeCreateInput: %v", err)
@@ -42,19 +45,26 @@ func TestNormalizeCreateInputDefaultsAutonomy(t *testing.T) {
 
 func TestNormalizeCreateInputRequiresNameJobRoleAndSupervisor(t *testing.T) {
 	jobRoleID := uuid.NewString()
-	if _, err := NormalizeCreateInput(CreateInput{Name: "", JobRoleID: jobRoleID, SupervisorUserID: uuid.NewString()}); !domainerr.IsValidation(err) {
+	profileTemplateID := uuid.NewString()
+	if _, err := NormalizeCreateInput(CreateInput{Name: "", JobRoleID: jobRoleID, ProfileTemplateID: profileTemplateID, SupervisorUserID: uuid.NewString()}); !domainerr.IsValidation(err) {
 		t.Fatalf("expected validation for name, got %v", err)
 	}
-	if _, err := NormalizeCreateInput(CreateInput{Name: "name", JobRoleID: "", SupervisorUserID: uuid.NewString()}); !domainerr.IsValidation(err) {
+	if _, err := NormalizeCreateInput(CreateInput{Name: "name", JobRoleID: "", ProfileTemplateID: profileTemplateID, SupervisorUserID: uuid.NewString()}); !domainerr.IsValidation(err) {
 		t.Fatalf("expected validation for job_role_id, got %v", err)
 	}
-	if _, err := NormalizeCreateInput(CreateInput{Name: "name", JobRoleID: "not-a-uuid", SupervisorUserID: uuid.NewString()}); !domainerr.IsValidation(err) {
+	if _, err := NormalizeCreateInput(CreateInput{Name: "name", JobRoleID: "not-a-uuid", ProfileTemplateID: profileTemplateID, SupervisorUserID: uuid.NewString()}); !domainerr.IsValidation(err) {
 		t.Fatalf("expected validation for invalid job_role_id, got %v", err)
 	}
-	if _, err := NormalizeCreateInput(CreateInput{Name: "name", JobRoleID: jobRoleID}); !domainerr.IsValidation(err) {
+	if _, err := NormalizeCreateInput(CreateInput{Name: "name", JobRoleID: jobRoleID, SupervisorUserID: uuid.NewString()}); !domainerr.IsValidation(err) {
+		t.Fatalf("expected validation for profile_template_id, got %v", err)
+	}
+	if _, err := NormalizeCreateInput(CreateInput{Name: "name", JobRoleID: jobRoleID, ProfileTemplateID: "not-a-uuid", SupervisorUserID: uuid.NewString()}); !domainerr.IsValidation(err) {
+		t.Fatalf("expected validation for invalid profile_template_id, got %v", err)
+	}
+	if _, err := NormalizeCreateInput(CreateInput{Name: "name", JobRoleID: jobRoleID, ProfileTemplateID: profileTemplateID}); !domainerr.IsValidation(err) {
 		t.Fatalf("expected validation for supervisor_user_id, got %v", err)
 	}
-	if _, err := NormalizeCreateInput(CreateInput{Name: "name", JobRoleID: jobRoleID, SupervisorUserID: "dev-user", Autonomy: "A9"}); !domainerr.IsValidation(err) {
+	if _, err := NormalizeCreateInput(CreateInput{Name: "name", JobRoleID: jobRoleID, ProfileTemplateID: profileTemplateID, SupervisorUserID: "dev-user", Autonomy: "A9"}); !domainerr.IsValidation(err) {
 		t.Fatalf("expected validation for invalid autonomy, got %v", err)
 	}
 }

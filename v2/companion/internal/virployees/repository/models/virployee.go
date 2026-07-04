@@ -9,13 +9,14 @@ import (
 )
 
 type Virployee struct {
-	ID               uuid.UUID
-	Name             string
-	JobRoleID        uuid.UUID
-	CapabilityIDs    []uuid.UUID
-	Description      string
-	SupervisorUserID string
-	Autonomy         domain.AutonomyLevel
+	ID                uuid.UUID
+	Name              string
+	JobRoleID         uuid.UUID
+	ProfileTemplateID uuid.UUID
+	CapabilityIDs     []uuid.UUID
+	Description       string
+	SupervisorUserID  string
+	Autonomy          domain.AutonomyLevel
 
 	CreatedAt time.Time
 	UpdatedAt time.Time
@@ -27,18 +28,19 @@ type Virployee struct {
 
 func (m Virployee) ToDomain() domain.Virployee {
 	return domain.Virployee{
-		ID:               m.ID,
-		Name:             m.Name,
-		JobRoleID:        m.JobRoleID,
-		CapabilityIDs:    m.CapabilityIDs,
-		Description:      m.Description,
-		SupervisorUserID: m.SupervisorUserID,
-		Autonomy:         m.Autonomy,
-		CreatedAt:        m.CreatedAt,
-		UpdatedAt:        m.UpdatedAt,
-		ArchivedAt:       nullTimePtr(m.ArchivedAt),
-		TrashedAt:        nullTimePtr(m.TrashedAt),
-		PurgeAfter:       nullTimePtr(m.PurgeAfter),
+		ID:                m.ID,
+		Name:              m.Name,
+		JobRoleID:         m.JobRoleID,
+		ProfileTemplateID: m.ProfileTemplateID,
+		CapabilityIDs:     m.CapabilityIDs,
+		Description:       m.Description,
+		SupervisorUserID:  m.SupervisorUserID,
+		Autonomy:          m.Autonomy,
+		CreatedAt:         m.CreatedAt,
+		UpdatedAt:         m.UpdatedAt,
+		ArchivedAt:        nullTimePtr(m.ArchivedAt),
+		TrashedAt:         nullTimePtr(m.TrashedAt),
+		PurgeAfter:        nullTimePtr(m.PurgeAfter),
 	}
 }
 

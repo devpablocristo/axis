@@ -588,6 +588,12 @@ button:disabled,
   margin-top: 12px;
 }
 
+.virployees-control .virployee-preview-inline {
+  grid-column: 1 / -1;
+  width: 100%;
+  margin-top: 12px;
+}
+
 .virployees-control .crud-page-shell__header-actions {
   grid-column: 2;
   grid-row: 1;
@@ -961,6 +967,92 @@ tbody tr:hover {
   color: var(--axis-muted);
 }
 
+.virployee-preview-inline {
+  width: 100%;
+  margin-top: 10px;
+  margin-bottom: 6px;
+}
+
+.virployee-preview {
+  display: grid;
+  gap: 18px;
+  padding: 16px;
+}
+
+.virployee-preview__section {
+  display: grid;
+  gap: 10px;
+}
+
+.virployee-preview__section h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.virployee-preview__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 16px;
+}
+
+.virployee-preview__field {
+  display: grid;
+  gap: 3px;
+}
+
+.virployee-preview__field span,
+.virployee-preview__prompt span,
+.virployee-preview__capability span,
+.virployee-preview__empty {
+  color: var(--axis-muted);
+  font-size: 12px;
+}
+
+.virployee-preview__field strong {
+  font-size: 14px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.virployee-preview__prompt {
+  display: grid;
+  gap: 6px;
+}
+
+.virployee-preview__prompt pre {
+  margin: 0;
+  min-height: 72px;
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  border: 1px solid var(--axis-border);
+  border-radius: 6px;
+  background: #fff;
+  padding: 10px;
+  color: var(--axis-text);
+  font: inherit;
+  line-height: 1.45;
+}
+
+.virployee-preview__capabilities {
+  display: grid;
+  gap: 8px;
+}
+
+.virployee-preview__capability {
+  display: grid;
+  gap: 3px;
+  border: 1px solid var(--axis-border);
+  border-radius: 6px;
+  background: #fff;
+  padding: 10px;
+}
+
+.virployee-preview__capability strong {
+  font-size: 14px;
+  font-weight: 600;
+}
+
 @media (max-width: 960px) {
   .app-shell {
     grid-template-columns: 1fr;
@@ -1004,6 +1096,7 @@ tbody tr:hover {
   .virployees-control .iam-control__create-inline,
   .virployees-control .iam-control__inline-error,
   .virployees-control .iam-control__inline-note,
+  .virployees-control .virployee-preview-inline,
   .virployees-control .virployee-edit-inline,
   .virployees-control .crud-page-shell__header-actions {
     grid-column: 1;
@@ -1012,6 +1105,10 @@ tbody tr:hover {
   .crud-shell-header-actions-column__search-row,
   .axis-crud-host .actions-row {
     justify-content: flex-start;
+  }
+
+  .virployee-preview__grid {
+    grid-template-columns: 1fr;
   }
 }
 

@@ -11,6 +11,7 @@ import (
 	"github.com/devpablocristo/companion-v2/internal/capabilities"
 	"github.com/devpablocristo/companion-v2/internal/infra/migrations"
 	"github.com/devpablocristo/companion-v2/internal/jobroles"
+	"github.com/devpablocristo/companion-v2/internal/profiletemplates"
 	"github.com/devpablocristo/companion-v2/internal/virployees"
 	postgres "github.com/devpablocristo/platform/databases/postgres/go"
 	ginmw "github.com/devpablocristo/platform/http/gin/go"
@@ -61,6 +62,14 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	}
 	capabilitiesHandler := capabilities.NewHandler(capabilitiesUsecases)
 
+	profileTemplatesRepo := profiletemplates.NewRepository(db.Pool())
+	profileTemplatesUsecases, err := profiletemplates.NewUseCases(profileTemplatesRepo)
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	profileTemplatesHandler := profiletemplates.NewHandler(profileTemplatesUsecases)
+
 	virployeesRepo := virployees.NewRepository(db.Pool())
 	virployeesUsecases, err := virployees.NewUseCases(virployeesRepo, jobRolesUsecases)
 	if err != nil {
@@ -68,6 +77,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		return nil, err
 	}
 	virployeesUsecases.SetCapabilityValidator(capabilitiesUsecases)
+	virployeesUsecases.SetProfileTemplateReader(profileTemplatesUsecases)
 	virployeesHandler := virployees.NewHandler(virployeesUsecases)
 
 	gin.SetMode(gin.ReleaseMode)
@@ -82,6 +92,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	api := router.Group("/v1")
 	jobRolesHandler.Routes(api)
 	capabilitiesHandler.Routes(api)
+	profileTemplatesHandler.Routes(api)
 	virployeesHandler.Routes(api)
 
 	server := &http.Server{

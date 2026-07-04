@@ -19,17 +19,19 @@ func TestUseCasesCreateAndListActive(t *testing.T) {
 	}
 	supervisorID := "dev-user"
 	jobRoleID := uuid.New()
+	profileTemplateID := uuid.New()
 
 	created, err := uc.Create(context.Background(), "tenant-1", domain.CreateInput{
-		Name:             " Sales Assistant ",
-		JobRoleID:        jobRoleID.String(),
-		SupervisorUserID: " " + supervisorID + " ",
-		Autonomy:         "A2",
+		Name:              " Sales Assistant ",
+		JobRoleID:         jobRoleID.String(),
+		ProfileTemplateID: profileTemplateID.String(),
+		SupervisorUserID:  " " + supervisorID + " ",
+		Autonomy:          "A2",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if created.Name != "Sales Assistant" || created.JobRoleID != jobRoleID || created.SupervisorUserID != supervisorID || created.Autonomy != domain.AutonomyA2 {
+	if created.Name != "Sales Assistant" || created.JobRoleID != jobRoleID || created.ProfileTemplateID != profileTemplateID || created.SupervisorUserID != supervisorID || created.Autonomy != domain.AutonomyA2 {
 		t.Fatalf("unexpected create output: %+v", created)
 	}
 
@@ -52,9 +54,10 @@ func TestUseCasesCreateDefaultsAutonomyToA1AndValidatesJobRole(t *testing.T) {
 	}
 
 	created, err := uc.Create(context.Background(), "tenant-1", domain.CreateInput{
-		Name:             "Ops",
-		JobRoleID:        jobRoleID.String(),
-		SupervisorUserID: "dev-user",
+		Name:              "Ops",
+		JobRoleID:         jobRoleID.String(),
+		ProfileTemplateID: uuid.NewString(),
+		SupervisorUserID:  "dev-user",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -67,6 +70,23 @@ func TestUseCasesCreateDefaultsAutonomyToA1AndValidatesJobRole(t *testing.T) {
 	}
 }
 
+func TestUseCasesCreateRequiresProfileTemplateID(t *testing.T) {
+	repo := newFakeRepo()
+	uc, err := NewUseCases(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = uc.Create(context.Background(), "tenant-1", domain.CreateInput{
+		Name:             "Ops",
+		JobRoleID:        uuid.NewString(),
+		SupervisorUserID: "dev-user",
+	})
+	if !domainerr.IsValidation(err) {
+		t.Fatalf("expected validation for missing profile_template_id, got %v", err)
+	}
+}
+
 func TestUseCasesCreateFailsWhenJobRoleIsNotActive(t *testing.T) {
 	repo := newFakeRepo()
 	jobRoleID := uuid.New()
@@ -76,12 +96,124 @@ func TestUseCasesCreateFailsWhenJobRoleIsNotActive(t *testing.T) {
 	}
 
 	_, err = uc.Create(context.Background(), "tenant-1", domain.CreateInput{
-		Name:             "Ops",
-		JobRoleID:        jobRoleID.String(),
-		SupervisorUserID: "dev-user",
+		Name:              "Ops",
+		JobRoleID:         jobRoleID.String(),
+		ProfileTemplateID: uuid.NewString(),
+		SupervisorUserID:  "dev-user",
 	})
 	if !domainerr.IsConflict(err) {
 		t.Fatalf("expected conflict for inactive job role, got %v", err)
+	}
+}
+
+func TestUseCasesCreateValidatesProfileTemplate(t *testing.T) {
+	repo := newFakeRepo()
+	profileTemplateID := uuid.New()
+	reader := &fakeProfileTemplateReader{}
+	uc, err := NewUseCases(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uc.SetProfileTemplateReader(reader)
+
+	created, err := uc.Create(context.Background(), "tenant-1", domain.CreateInput{
+		Name:              "Ops",
+		JobRoleID:         uuid.NewString(),
+		ProfileTemplateID: profileTemplateID.String(),
+		SupervisorUserID:  "dev-user",
+		Autonomy:          "A2",
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if created.ProfileTemplateID != profileTemplateID {
+		t.Fatalf("expected profile_template_id to be persisted, got %+v", created.ProfileTemplateID)
+	}
+	if reader.lastTenant != "tenant-1" || reader.lastID != profileTemplateID || reader.lastAutonomy != domain.AutonomyA2 {
+		t.Fatalf("expected profile template validation, got tenant=%q id=%s autonomy=%s", reader.lastTenant, reader.lastID, reader.lastAutonomy)
+	}
+}
+
+func TestUseCasesCreateFailsWhenProfileTemplateRejectsAutonomy(t *testing.T) {
+	repo := newFakeRepo()
+	uc, err := NewUseCases(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uc.SetProfileTemplateReader(&fakeProfileTemplateReader{err: domainerr.Validation("profile template max autonomy exceeded")})
+
+	_, err = uc.Create(context.Background(), "tenant-1", domain.CreateInput{
+		Name:              "Ops",
+		JobRoleID:         uuid.NewString(),
+		ProfileTemplateID: uuid.NewString(),
+		SupervisorUserID:  "dev-user",
+		Autonomy:          "A3",
+	})
+	if !domainerr.IsValidation(err) {
+		t.Fatalf("expected validation for incompatible profile template, got %v", err)
+	}
+}
+
+func TestUseCasesUpdateRequiresProfileTemplateID(t *testing.T) {
+	repo := newFakeRepo()
+	uc, err := NewUseCases(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := uc.Create(context.Background(), "tenant-1", domain.CreateInput{
+		Name:              "Ops",
+		JobRoleID:         uuid.NewString(),
+		ProfileTemplateID: uuid.NewString(),
+		SupervisorUserID:  "dev-user",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = uc.Update(context.Background(), "tenant-1", created.ID, domain.UpdateInput{
+		Name:             "Ops",
+		JobRoleID:        uuid.NewString(),
+		SupervisorUserID: "dev-user",
+	})
+	if !domainerr.IsValidation(err) {
+		t.Fatalf("expected validation for missing profile_template_id, got %v", err)
+	}
+}
+
+func TestUseCasesUpdateChangesProfileTemplateReference(t *testing.T) {
+	repo := newFakeRepo()
+	reader := &fakeProfileTemplateReader{}
+	uc, err := NewUseCases(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uc.SetProfileTemplateReader(reader)
+	firstTemplateID := uuid.New()
+	secondTemplateID := uuid.New()
+	created, err := uc.Create(context.Background(), "tenant-1", domain.CreateInput{
+		Name:              "Ops",
+		JobRoleID:         uuid.NewString(),
+		ProfileTemplateID: firstTemplateID.String(),
+		SupervisorUserID:  "dev-user",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	updated, err := uc.Update(context.Background(), "tenant-1", created.ID, domain.UpdateInput{
+		Name:              "Ops updated",
+		JobRoleID:         uuid.NewString(),
+		ProfileTemplateID: secondTemplateID.String(),
+		SupervisorUserID:  "dev-user",
+	})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if updated.ProfileTemplateID != secondTemplateID {
+		t.Fatalf("expected second profile template, got %s", updated.ProfileTemplateID)
+	}
+	if reader.lastID != secondTemplateID {
+		t.Fatalf("expected reader to be called with second template, got %s", reader.lastID)
 	}
 }
 
@@ -91,7 +223,7 @@ func TestUseCasesLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := uc.Create(context.Background(), "tenant-1", domain.CreateInput{Name: "Ops", JobRoleID: uuid.NewString(), SupervisorUserID: "dev-user"})
+	created, err := uc.Create(context.Background(), "tenant-1", domain.CreateInput{Name: "Ops", JobRoleID: uuid.NewString(), ProfileTemplateID: uuid.NewString(), SupervisorUserID: "dev-user"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,14 +267,14 @@ func TestUseCasesUpdateArchivedOrTrashedFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := uc.Create(context.Background(), "tenant-1", domain.CreateInput{Name: "Ops", JobRoleID: uuid.NewString(), SupervisorUserID: "dev-user"})
+	created, err := uc.Create(context.Background(), "tenant-1", domain.CreateInput{Name: "Ops", JobRoleID: uuid.NewString(), ProfileTemplateID: uuid.NewString(), SupervisorUserID: "dev-user"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := uc.Archive(context.Background(), "tenant-1", created.ID, "", ""); err != nil {
 		t.Fatal(err)
 	}
-	_, err = uc.Update(context.Background(), "tenant-1", created.ID, domain.UpdateInput{Name: "New", JobRoleID: uuid.NewString(), SupervisorUserID: "dev-user"})
+	_, err = uc.Update(context.Background(), "tenant-1", created.ID, domain.UpdateInput{Name: "New", JobRoleID: uuid.NewString(), ProfileTemplateID: uuid.NewString(), SupervisorUserID: "dev-user"})
 	if !domainerr.IsConflict(err) {
 		t.Fatalf("expected conflict updating archived, got %v", err)
 	}
@@ -170,14 +302,16 @@ func newFakeRepo() *fakeRepo {
 func (r *fakeRepo) Create(_ context.Context, _ string, input domain.NormalizedCreateInput) (domain.Virployee, error) {
 	now := time.Now().UTC()
 	row := domain.Virployee{
-		ID:               uuid.New(),
-		Name:             input.Name,
-		JobRoleID:        input.JobRoleID,
-		Description:      input.Description,
-		SupervisorUserID: input.SupervisorUserID,
-		Autonomy:         input.Autonomy,
-		CreatedAt:        now,
-		UpdatedAt:        now,
+		ID:                uuid.New(),
+		Name:              input.Name,
+		JobRoleID:         input.JobRoleID,
+		ProfileTemplateID: input.ProfileTemplateID,
+		CapabilityIDs:     input.CapabilityIDs,
+		Description:       input.Description,
+		SupervisorUserID:  input.SupervisorUserID,
+		Autonomy:          input.Autonomy,
+		CreatedAt:         now,
+		UpdatedAt:         now,
 	}
 	r.rows[row.ID] = row
 	return row, nil
@@ -211,6 +345,8 @@ func (r *fakeRepo) Update(_ context.Context, _ string, id uuid.UUID, input domai
 	}
 	row.Name = input.Name
 	row.JobRoleID = input.JobRoleID
+	row.ProfileTemplateID = input.ProfileTemplateID
+	row.CapabilityIDs = input.CapabilityIDs
 	row.Description = input.Description
 	row.SupervisorUserID = input.SupervisorUserID
 	row.Autonomy = input.Autonomy
@@ -312,6 +448,23 @@ func (r *fakeJobRoleReader) EnsureActive(_ context.Context, tenantID string, id 
 	r.lastID = id
 	if r.err != nil {
 		return r.err
+	}
+	return nil
+}
+
+type fakeProfileTemplateReader struct {
+	lastTenant   string
+	lastID       uuid.UUID
+	lastAutonomy domain.AutonomyLevel
+	err          error
+}
+
+func (v *fakeProfileTemplateReader) EnsureUsableByVirployee(_ context.Context, tenantID string, id uuid.UUID, autonomy domain.AutonomyLevel) error {
+	v.lastTenant = tenantID
+	v.lastID = id
+	v.lastAutonomy = autonomy
+	if v.err != nil {
+		return v.err
 	}
 	return nil
 }

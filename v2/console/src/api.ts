@@ -93,6 +93,7 @@ export type Virployee = {
   id: string
   name: string
   job_role_id: string
+  profile_template_id: string
   capability_ids: string[]
   description: string
   supervisor_user_id: string
@@ -108,6 +109,7 @@ export type Virployee = {
 export type VirployeeInput = {
   name: string
   job_role_id: string
+  profile_template_id: string
   capability_ids?: string[]
   description: string
   supervisor_user_id: string
@@ -162,6 +164,30 @@ export type CapabilityInput = {
   required_autonomy: VirployeeAutonomy | ''
 }
 
+export type ProfileTemplateState = 'active' | 'archived' | 'trashed'
+
+export type ProfileTemplate = {
+  id: string
+  tenant_id: string
+  name: string
+  description: string
+  system_prompt: string
+  max_autonomy: VirployeeAutonomy
+  state: ProfileTemplateState
+  created_at: string
+  updated_at: string
+  archived_at: LifecycleTimestamp
+  trashed_at: LifecycleTimestamp
+  purge_after: LifecycleTimestamp
+}
+
+export type ProfileTemplateInput = {
+  name: string
+  description: string
+  system_prompt: string
+  max_autonomy: VirployeeAutonomy | ''
+}
+
 export type UserState = 'active' | 'archived' | 'trashed' | 'pending'
 export type TenantUserRole = 'owner' | 'admin' | 'member'
 export type TenantUserKind = 'user' | 'invitation'
@@ -195,6 +221,10 @@ type JobRolesListResponse = {
 
 type CapabilitiesListResponse = {
   data: Capability[]
+}
+
+type ProfileTemplatesListResponse = {
+  data: ProfileTemplate[]
 }
 
 type UsersListResponse = {
@@ -628,6 +658,71 @@ export function purgeCapability(id: string, tenantId: string, principalId: strin
   })
 }
 
+export function listProfileTemplates(
+  lifecycle: 'active' | 'archived' | 'trash',
+  tenantId: string,
+  principalId: string,
+): Promise<ProfileTemplate[]> {
+  const path =
+    lifecycle === 'active'
+      ? '/api/profile-templates'
+      : lifecycle === 'archived'
+        ? '/api/profile-templates?lifecycle=archived'
+        : '/api/profile-templates?lifecycle=trash'
+  return axisFetch<ProfileTemplatesListResponse>(path, { tenantId, principalId }).then((payload) => payload.data ?? [])
+}
+
+export function createProfileTemplate(
+  input: ProfileTemplateInput,
+  tenantId: string,
+  principalId: string,
+): Promise<ProfileTemplate> {
+  return axisFetch<ProfileTemplate>('/api/profile-templates', {
+    method: 'POST',
+    tenantId,
+    principalId,
+    body: input,
+  })
+}
+
+export function updateProfileTemplate(
+  id: string,
+  input: ProfileTemplateInput,
+  tenantId: string,
+  principalId: string,
+): Promise<ProfileTemplate> {
+  return axisFetch<ProfileTemplate>(`/api/profile-templates/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    tenantId,
+    principalId,
+    body: input,
+  })
+}
+
+export function archiveProfileTemplate(id: string, tenantId: string, principalId: string): Promise<void> {
+  return lifecycleAction('profile-templates', id, 'archive', tenantId, principalId)
+}
+
+export function unarchiveProfileTemplate(id: string, tenantId: string, principalId: string): Promise<void> {
+  return lifecycleAction('profile-templates', id, 'unarchive', tenantId, principalId)
+}
+
+export function trashProfileTemplate(id: string, tenantId: string, principalId: string): Promise<void> {
+  return lifecycleAction('profile-templates', id, 'trash', tenantId, principalId)
+}
+
+export function restoreProfileTemplate(id: string, tenantId: string, principalId: string): Promise<void> {
+  return lifecycleAction('profile-templates', id, 'restore', tenantId, principalId)
+}
+
+export function purgeProfileTemplate(id: string, tenantId: string, principalId: string): Promise<void> {
+  return axisFetch<void>(`/api/profile-templates/${encodeURIComponent(id)}/purge`, {
+    method: 'DELETE',
+    tenantId,
+    principalId,
+  })
+}
+
 export function listUsers(
   lifecycle: 'active' | 'archived' | 'trash',
   tenantId: string,
@@ -701,7 +796,7 @@ async function responseErrorMessage(response: Response): Promise<string> {
 }
 
 function lifecycleAction(
-  resource: 'virployees' | 'job-roles' | 'capabilities' | 'users',
+  resource: 'virployees' | 'job-roles' | 'capabilities' | 'profile-templates' | 'users',
   id: string,
   action: string,
   tenantId: string,

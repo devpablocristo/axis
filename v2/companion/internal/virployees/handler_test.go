@@ -32,7 +32,8 @@ func TestHandlerCreateReturnsAutonomy(t *testing.T) {
 	router := testRouter(&handlerFakeUseCases{})
 	rec := httptest.NewRecorder()
 	jobRoleID := uuid.New()
-	body := `{"name":"Ops","job_role_id":"` + jobRoleID.String() + `","supervisor_user_id":"dev-user","autonomy":"A2"}`
+	profileTemplateID := uuid.New()
+	body := `{"name":"Ops","job_role_id":"` + jobRoleID.String() + `","profile_template_id":"` + profileTemplateID.String() + `","supervisor_user_id":"dev-user","autonomy":"A2"}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/virployees", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Tenant-ID", "tenant-1")
@@ -43,14 +44,25 @@ func TestHandlerCreateReturnsAutonomy(t *testing.T) {
 		t.Fatalf("expected 201, got %d body=%s", rec.Code, rec.Body.String())
 	}
 	var payload struct {
-		JobRoleID string `json:"job_role_id"`
-		Autonomy  string `json:"autonomy"`
+		JobRoleID         string `json:"job_role_id"`
+		ProfileTemplateID string `json:"profile_template_id"`
+		Autonomy          string `json:"autonomy"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode raw response: %v", err)
+	}
+	if _, ok := raw["virployee_profile"]; ok {
+		t.Fatalf("response must not include virployee_profile: %s", rec.Body.String())
+	}
 	if payload.JobRoleID != jobRoleID.String() {
 		t.Fatalf("expected job_role_id %s, got %q", jobRoleID, payload.JobRoleID)
+	}
+	if payload.ProfileTemplateID != profileTemplateID.String() {
+		t.Fatalf("expected profile_template_id %s, got %q", profileTemplateID, payload.ProfileTemplateID)
 	}
 	if payload.Autonomy != "A2" {
 		t.Fatalf("expected autonomy A2, got %q", payload.Autonomy)
@@ -155,7 +167,7 @@ func (f *handlerFakeUseCases) Create(_ context.Context, tenantID string, input d
 	if err != nil {
 		return domain.Virployee{}, err
 	}
-	return domain.Virployee{ID: uuid.New(), Name: normalized.Name, JobRoleID: normalized.JobRoleID, SupervisorUserID: normalized.SupervisorUserID, Autonomy: normalized.Autonomy}, nil
+	return domain.Virployee{ID: uuid.New(), Name: normalized.Name, JobRoleID: normalized.JobRoleID, ProfileTemplateID: normalized.ProfileTemplateID, SupervisorUserID: normalized.SupervisorUserID, Autonomy: normalized.Autonomy}, nil
 }
 
 func (f *handlerFakeUseCases) ListActive(context.Context, string) ([]domain.Virployee, error) {
@@ -171,7 +183,7 @@ func (f *handlerFakeUseCases) ListTrash(context.Context, string) ([]domain.Virpl
 }
 
 func (f *handlerFakeUseCases) Get(_ context.Context, _ string, id uuid.UUID) (domain.Virployee, error) {
-	return domain.Virployee{ID: id, Name: "Ops", JobRoleID: uuid.New(), SupervisorUserID: "dev-user", Autonomy: domain.AutonomyA1}, nil
+	return domain.Virployee{ID: id, Name: "Ops", JobRoleID: uuid.New(), ProfileTemplateID: uuid.New(), SupervisorUserID: "dev-user", Autonomy: domain.AutonomyA1}, nil
 }
 
 func (f *handlerFakeUseCases) Update(_ context.Context, _ string, id uuid.UUID, input domain.UpdateInput) (domain.Virployee, error) {
@@ -179,7 +191,7 @@ func (f *handlerFakeUseCases) Update(_ context.Context, _ string, id uuid.UUID, 
 	if err != nil {
 		return domain.Virployee{}, err
 	}
-	return domain.Virployee{ID: id, Name: normalized.Name, JobRoleID: normalized.JobRoleID, SupervisorUserID: normalized.SupervisorUserID, Autonomy: normalized.Autonomy}, nil
+	return domain.Virployee{ID: id, Name: normalized.Name, JobRoleID: normalized.JobRoleID, ProfileTemplateID: normalized.ProfileTemplateID, SupervisorUserID: normalized.SupervisorUserID, Autonomy: normalized.Autonomy}, nil
 }
 
 func (f *handlerFakeUseCases) Archive(_ context.Context, tenantID string, _ uuid.UUID, actor, _ string) error {

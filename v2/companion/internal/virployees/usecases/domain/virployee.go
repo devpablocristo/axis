@@ -17,13 +17,14 @@ const (
 )
 
 type Virployee struct {
-	ID               uuid.UUID
-	Name             string
-	JobRoleID        uuid.UUID
-	CapabilityIDs    []uuid.UUID
-	Description      string
-	SupervisorUserID string
-	Autonomy         AutonomyLevel
+	ID                uuid.UUID
+	Name              string
+	JobRoleID         uuid.UUID
+	ProfileTemplateID uuid.UUID
+	CapabilityIDs     []uuid.UUID
+	Description       string
+	SupervisorUserID  string
+	Autonomy          AutonomyLevel
 
 	CreatedAt time.Time
 	UpdatedAt time.Time
@@ -34,39 +35,43 @@ type Virployee struct {
 }
 
 type CreateInput struct {
-	Name             string
-	JobRoleID        string
-	CapabilityIDs    []string
-	Description      string
-	SupervisorUserID string
-	Autonomy         string
+	Name              string
+	JobRoleID         string
+	ProfileTemplateID string
+	CapabilityIDs     []string
+	Description       string
+	SupervisorUserID  string
+	Autonomy          string
 }
 
 type UpdateInput struct {
-	Name             string
-	JobRoleID        string
-	CapabilityIDs    []string
-	Description      string
-	SupervisorUserID string
-	Autonomy         string
+	Name              string
+	JobRoleID         string
+	ProfileTemplateID string
+	CapabilityIDs     []string
+	Description       string
+	SupervisorUserID  string
+	Autonomy          string
 }
 
 type NormalizedCreateInput struct {
-	Name             string
-	JobRoleID        uuid.UUID
-	CapabilityIDs    []uuid.UUID
-	Description      string
-	SupervisorUserID string
-	Autonomy         AutonomyLevel
+	Name              string
+	JobRoleID         uuid.UUID
+	ProfileTemplateID uuid.UUID
+	CapabilityIDs     []uuid.UUID
+	Description       string
+	SupervisorUserID  string
+	Autonomy          AutonomyLevel
 }
 
 type NormalizedUpdateInput struct {
-	Name             string
-	JobRoleID        uuid.UUID
-	CapabilityIDs    []uuid.UUID
-	Description      string
-	SupervisorUserID string
-	Autonomy         AutonomyLevel
+	Name              string
+	JobRoleID         uuid.UUID
+	ProfileTemplateID uuid.UUID
+	CapabilityIDs     []uuid.UUID
+	Description       string
+	SupervisorUserID  string
+	Autonomy          AutonomyLevel
 }
 
 func (v Virployee) State() State {
@@ -89,6 +94,10 @@ func NormalizeCreateInput(in CreateInput) (NormalizedCreateInput, error) {
 	if err != nil {
 		return NormalizedCreateInput{}, err
 	}
+	profileTemplateID, err := parseRequiredUUID(in.ProfileTemplateID, "profile_template_id")
+	if err != nil {
+		return NormalizedCreateInput{}, err
+	}
 	capabilityIDs, err := parseOptionalUUIDList(in.CapabilityIDs, "capability_ids")
 	if err != nil {
 		return NormalizedCreateInput{}, err
@@ -98,12 +107,13 @@ func NormalizeCreateInput(in CreateInput) (NormalizedCreateInput, error) {
 		return NormalizedCreateInput{}, err
 	}
 	out := NormalizedCreateInput{
-		Name:             strings.TrimSpace(in.Name),
-		JobRoleID:        jobRoleID,
-		CapabilityIDs:    capabilityIDs,
-		Description:      strings.TrimSpace(in.Description),
-		SupervisorUserID: supervisorID,
-		Autonomy:         autonomy,
+		Name:              strings.TrimSpace(in.Name),
+		JobRoleID:         jobRoleID,
+		ProfileTemplateID: profileTemplateID,
+		CapabilityIDs:     capabilityIDs,
+		Description:       strings.TrimSpace(in.Description),
+		SupervisorUserID:  supervisorID,
+		Autonomy:          autonomy,
 	}
 	if out.Name == "" {
 		return NormalizedCreateInput{}, domainerr.Validation("name is required")
@@ -120,6 +130,10 @@ func NormalizeUpdateInput(in UpdateInput) (NormalizedUpdateInput, error) {
 	if err != nil {
 		return NormalizedUpdateInput{}, err
 	}
+	profileTemplateID, err := parseRequiredUUID(in.ProfileTemplateID, "profile_template_id")
+	if err != nil {
+		return NormalizedUpdateInput{}, err
+	}
 	capabilityIDs, err := parseOptionalUUIDList(in.CapabilityIDs, "capability_ids")
 	if err != nil {
 		return NormalizedUpdateInput{}, err
@@ -129,12 +143,13 @@ func NormalizeUpdateInput(in UpdateInput) (NormalizedUpdateInput, error) {
 		return NormalizedUpdateInput{}, err
 	}
 	out := NormalizedUpdateInput{
-		Name:             strings.TrimSpace(in.Name),
-		JobRoleID:        jobRoleID,
-		CapabilityIDs:    capabilityIDs,
-		Description:      strings.TrimSpace(in.Description),
-		SupervisorUserID: supervisorID,
-		Autonomy:         autonomy,
+		Name:              strings.TrimSpace(in.Name),
+		JobRoleID:         jobRoleID,
+		ProfileTemplateID: profileTemplateID,
+		CapabilityIDs:     capabilityIDs,
+		Description:       strings.TrimSpace(in.Description),
+		SupervisorUserID:  supervisorID,
+		Autonomy:          autonomy,
 	}
 	if out.Name == "" {
 		return NormalizedUpdateInput{}, domainerr.Validation("name is required")

@@ -32,11 +32,16 @@ type CapabilityValidatorPort interface {
 	EnsureAssignable(ctx context.Context, tenantID string, ids []uuid.UUID, autonomy domain.AutonomyLevel) error
 }
 
+type ProfileTemplateReaderPort interface {
+	EnsureUsableByVirployee(ctx context.Context, tenantID string, id uuid.UUID, autonomy domain.AutonomyLevel) error
+}
+
 type UseCases struct {
-	repo         RepositoryPort
-	jobRoles     JobRoleReaderPort
-	capabilities CapabilityValidatorPort
-	lifecycle    *lifecycle.Service
+	repo             RepositoryPort
+	jobRoles         JobRoleReaderPort
+	capabilities     CapabilityValidatorPort
+	profileTemplates ProfileTemplateReaderPort
+	lifecycle        *lifecycle.Service
 }
 
 func NewUseCases(repo RepositoryPort, jobRoles ...JobRoleReaderPort) (*UseCases, error) {
@@ -60,7 +65,13 @@ func NewUseCases(repo RepositoryPort, jobRoles ...JobRoleReaderPort) (*UseCases,
 	if len(jobRoles) > 0 && jobRoles[0] != nil {
 		reader = jobRoles[0]
 	}
-	return &UseCases{repo: repo, jobRoles: reader, capabilities: noopCapabilityValidator{}, lifecycle: service}, nil
+	return &UseCases{
+		repo:             repo,
+		jobRoles:         reader,
+		capabilities:     noopCapabilityValidator{},
+		profileTemplates: noopProfileTemplateReader{},
+		lifecycle:        service,
+	}, nil
 }
 
 func (u *UseCases) SetCapabilityValidator(validator CapabilityValidatorPort) {
@@ -71,12 +82,23 @@ func (u *UseCases) SetCapabilityValidator(validator CapabilityValidatorPort) {
 	u.capabilities = validator
 }
 
+func (u *UseCases) SetProfileTemplateReader(reader ProfileTemplateReaderPort) {
+	if reader == nil {
+		u.profileTemplates = noopProfileTemplateReader{}
+		return
+	}
+	u.profileTemplates = reader
+}
+
 func (u *UseCases) Create(ctx context.Context, tenantID string, input domain.CreateInput) (domain.Virployee, error) {
 	normalized, err := domain.NormalizeCreateInput(input)
 	if err != nil {
 		return domain.Virployee{}, err
 	}
 	if err := u.jobRoles.EnsureActive(ctx, normalizeTenantID(tenantID), normalized.JobRoleID); err != nil {
+		return domain.Virployee{}, err
+	}
+	if err := u.profileTemplates.EnsureUsableByVirployee(ctx, normalizeTenantID(tenantID), normalized.ProfileTemplateID, normalized.Autonomy); err != nil {
 		return domain.Virployee{}, err
 	}
 	if err := u.capabilities.EnsureAssignable(ctx, normalizeTenantID(tenantID), normalized.CapabilityIDs, normalized.Autonomy); err != nil {
@@ -107,6 +129,9 @@ func (u *UseCases) Update(ctx context.Context, tenantID string, id uuid.UUID, in
 		return domain.Virployee{}, err
 	}
 	if err := u.jobRoles.EnsureActive(ctx, normalizeTenantID(tenantID), normalized.JobRoleID); err != nil {
+		return domain.Virployee{}, err
+	}
+	if err := u.profileTemplates.EnsureUsableByVirployee(ctx, normalizeTenantID(tenantID), normalized.ProfileTemplateID, normalized.Autonomy); err != nil {
 		return domain.Virployee{}, err
 	}
 	if err := u.capabilities.EnsureAssignable(ctx, normalizeTenantID(tenantID), normalized.CapabilityIDs, normalized.Autonomy); err != nil {
@@ -197,5 +222,11 @@ func (noopJobRoleReader) EnsureActive(context.Context, string, uuid.UUID) error 
 type noopCapabilityValidator struct{}
 
 func (noopCapabilityValidator) EnsureAssignable(context.Context, string, []uuid.UUID, domain.AutonomyLevel) error {
+	return nil
+}
+
+type noopProfileTemplateReader struct{}
+
+func (noopProfileTemplateReader) EnsureUsableByVirployee(context.Context, string, uuid.UUID, domain.AutonomyLevel) error {
 	return nil
 }
