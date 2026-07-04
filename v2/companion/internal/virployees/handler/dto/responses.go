@@ -4,12 +4,14 @@ import (
 	"time"
 
 	"github.com/devpablocristo/companion-v2/internal/virployees/usecases/domain"
+	"github.com/google/uuid"
 )
 
 type VirployeeResponse struct {
 	ID               string     `json:"id"`
 	Name             string     `json:"name"`
 	JobRoleID        string     `json:"job_role_id"`
+	CapabilityIDs    []string   `json:"capability_ids"`
 	Description      string     `json:"description"`
 	SupervisorUserID string     `json:"supervisor_user_id"`
 	Autonomy         string     `json:"autonomy"`
@@ -25,18 +27,11 @@ type ListVirployeesResponse struct {
 	Data []VirployeeResponse `json:"data"`
 }
 
-type AutonomyActionClassResponse struct {
-	Class            string `json:"class"`
-	Name             string `json:"name"`
-	Description      string `json:"description"`
-	RequiresApproval bool   `json:"requires_approval"`
-}
-
 type AutonomyLevelResponse struct {
-	Level                string                        `json:"level"`
-	Name                 string                        `json:"name"`
-	Description          string                        `json:"description"`
-	AllowedActionClasses []AutonomyActionClassResponse `json:"allowed_action_classes"`
+	Level                    string   `json:"level"`
+	Name                     string   `json:"name"`
+	Description              string   `json:"description"`
+	AllowsRequiredAutonomies []string `json:"allows_required_autonomies"`
 }
 
 type ListAutonomyLevelsResponse struct {
@@ -48,6 +43,7 @@ func VirployeeFromDomain(v domain.Virployee) VirployeeResponse {
 		ID:               v.ID.String(),
 		Name:             v.Name,
 		JobRoleID:        v.JobRoleID.String(),
+		CapabilityIDs:    uuidStrings(v.CapabilityIDs),
 		Description:      v.Description,
 		SupervisorUserID: v.SupervisorUserID,
 		Autonomy:         string(v.Autonomy),
@@ -68,36 +64,36 @@ func ListVirployeesFromDomain(items []domain.Virployee) ListVirployeesResponse {
 	return ListVirployeesResponse{Data: data}
 }
 
+func uuidStrings(ids []uuid.UUID) []string {
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, id.String())
+	}
+	return out
+}
+
 func ListAutonomyLevelsFromDomain(definitions []domain.AutonomyDefinition) ListAutonomyLevelsResponse {
 	data := make([]AutonomyLevelResponse, 0, len(definitions))
-	actionClasses := domain.ActionClassDefinitions()
 	for _, definition := range definitions {
 		data = append(data, AutonomyLevelResponse{
-			Level:                string(definition.Level),
-			Name:                 definition.Name,
-			Description:          definition.Description,
-			AllowedActionClasses: allowedActionClasses(definition.Level, actionClasses),
+			Level:                    string(definition.Level),
+			Name:                     definition.Name,
+			Description:              definition.Description,
+			AllowsRequiredAutonomies: allowedRequiredAutonomies(definition.Level, definitions),
 		})
 	}
 	return ListAutonomyLevelsResponse{Data: data}
 }
 
-func allowedActionClasses(
+func allowedRequiredAutonomies(
 	level domain.AutonomyLevel,
-	definitions []domain.ActionClassDefinition,
-) []AutonomyActionClassResponse {
-	out := make([]AutonomyActionClassResponse, 0, len(definitions))
+	definitions []domain.AutonomyDefinition,
+) []string {
+	out := make([]string, 0, len(definitions))
 	for _, definition := range definitions {
-		decision := domain.EvaluateAutonomy(level, definition.Class)
-		if !decision.Allowed {
-			continue
+		if level.Allows(definition.Level) {
+			out = append(out, string(definition.Level))
 		}
-		out = append(out, AutonomyActionClassResponse{
-			Class:            string(definition.Class),
-			Name:             definition.Name,
-			Description:      definition.Description,
-			RequiresApproval: decision.RequiresApproval,
-		})
 	}
 	return out
 }

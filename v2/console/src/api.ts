@@ -82,24 +82,18 @@ export type TenantUpdateInput = {
 export type VirployeeState = 'active' | 'archived' | 'trashed'
 export type VirployeeAutonomy = 'A0' | 'A1' | 'A2' | 'A3' | 'A4' | 'A5'
 
-export type VirployeeAutonomyActionClass = {
-  class: string
-  name: string
-  description: string
-  requires_approval: boolean
-}
-
 export type VirployeeAutonomyLevel = {
   level: VirployeeAutonomy
   name: string
   description: string
-  allowed_action_classes: VirployeeAutonomyActionClass[]
+  allows_required_autonomies: VirployeeAutonomy[]
 }
 
 export type Virployee = {
   id: string
   name: string
   job_role_id: string
+  capability_ids: string[]
   description: string
   supervisor_user_id: string
   autonomy: VirployeeAutonomy
@@ -114,6 +108,7 @@ export type Virployee = {
 export type VirployeeInput = {
   name: string
   job_role_id: string
+  capability_ids?: string[]
   description: string
   supervisor_user_id: string
   autonomy: VirployeeAutonomy | ''
@@ -138,6 +133,33 @@ export type JobRole = {
 export type JobRoleInput = {
   name: string
   mission: string
+}
+
+export type CapabilityState = 'active' | 'archived' | 'trashed'
+
+export type Capability = {
+  id: string
+  tenant_id: string
+  capability_key: string
+  name: string
+  description: string
+  required_autonomy: VirployeeAutonomy
+  state: CapabilityState
+  created_at: string
+  updated_at: string
+  archived_at: LifecycleTimestamp
+  trashed_at: LifecycleTimestamp
+  purge_after: LifecycleTimestamp
+}
+
+export type CapabilityInput = {
+  capability_key?: string
+  domain?: string
+  resource?: string
+  action?: string
+  name: string
+  description: string
+  required_autonomy: VirployeeAutonomy | ''
 }
 
 export type UserState = 'active' | 'archived' | 'trashed' | 'pending'
@@ -169,6 +191,10 @@ type VirployeesListResponse = {
 
 type JobRolesListResponse = {
   data: JobRole[]
+}
+
+type CapabilitiesListResponse = {
+  data: Capability[]
 }
 
 type UsersListResponse = {
@@ -532,6 +558,76 @@ export function purgeJobRole(id: string, tenantId: string, principalId: string):
   })
 }
 
+export function listCapabilities(
+  lifecycle: 'active' | 'archived' | 'trash',
+  tenantId: string,
+  principalId: string,
+): Promise<Capability[]> {
+  const path =
+    lifecycle === 'active'
+      ? '/api/capabilities'
+      : lifecycle === 'archived'
+        ? '/api/capabilities?lifecycle=archived'
+        : '/api/capabilities?lifecycle=trash'
+  return axisFetch<CapabilitiesListResponse>(path, { tenantId, principalId }).then((payload) => payload.data ?? [])
+}
+
+export function createCapability(input: CapabilityInput, tenantId: string, principalId: string): Promise<Capability> {
+  return axisFetch<Capability>('/api/capabilities', {
+    method: 'POST',
+    tenantId,
+    principalId,
+    body: {
+      capability_key: input.capability_key,
+      name: input.name,
+      description: input.description,
+      required_autonomy: input.required_autonomy,
+    },
+  })
+}
+
+export function updateCapability(
+  id: string,
+  input: CapabilityInput,
+  tenantId: string,
+  principalId: string,
+): Promise<Capability> {
+  return axisFetch<Capability>(`/api/capabilities/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    tenantId,
+    principalId,
+    body: {
+      name: input.name,
+      description: input.description,
+      required_autonomy: input.required_autonomy,
+    },
+  })
+}
+
+export function archiveCapability(id: string, tenantId: string, principalId: string): Promise<void> {
+  return lifecycleAction('capabilities', id, 'archive', tenantId, principalId)
+}
+
+export function unarchiveCapability(id: string, tenantId: string, principalId: string): Promise<void> {
+  return lifecycleAction('capabilities', id, 'unarchive', tenantId, principalId)
+}
+
+export function trashCapability(id: string, tenantId: string, principalId: string): Promise<void> {
+  return lifecycleAction('capabilities', id, 'trash', tenantId, principalId)
+}
+
+export function restoreCapability(id: string, tenantId: string, principalId: string): Promise<void> {
+  return lifecycleAction('capabilities', id, 'restore', tenantId, principalId)
+}
+
+export function purgeCapability(id: string, tenantId: string, principalId: string): Promise<void> {
+  return axisFetch<void>(`/api/capabilities/${encodeURIComponent(id)}/purge`, {
+    method: 'DELETE',
+    tenantId,
+    principalId,
+  })
+}
+
 export function listUsers(
   lifecycle: 'active' | 'archived' | 'trash',
   tenantId: string,
@@ -605,7 +701,7 @@ async function responseErrorMessage(response: Response): Promise<string> {
 }
 
 function lifecycleAction(
-  resource: 'virployees' | 'job-roles' | 'users',
+  resource: 'virployees' | 'job-roles' | 'capabilities' | 'users',
   id: string,
   action: string,
   tenantId: string,

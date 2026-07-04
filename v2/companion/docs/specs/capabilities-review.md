@@ -1,0 +1,133 @@
+# Capabilities Design Review
+
+## Summary
+
+Decision: keep `Capability` as a Companion work-ability catalog, but simplify
+the assignment guard.
+
+`Capability` remains:
+
+```text
+reusable work ability declared by contract
+```
+
+It is not an IAM permission, not a Tool, not a Nexus approval, not a policy and
+not a Job Role.
+
+The public control field is now:
+
+```text
+required_autonomy
+```
+
+The assignment rule is:
+
+```text
+Virployee.autonomy >= Capability.required_autonomy
+```
+
+## Source Comparison
+
+| Current concept | v1 comparison | External comparison | Decision |
+|---|---|---|---|
+| `Capability` entity | v1 separates Capability from Tool, Manifest and Nexus. | OAuth scopes/IAM permissions are authorization. MCP Tools are callable functions. | Keep as business/work ability, not authorization and not execution. |
+| `id` UUID | v1 had ambiguity between text keys and IDs. | Persisted resources commonly use strong IDs. | Keep UUID as the relationship identity. |
+| `capability_key` | v1 wanted a stable key separate from UUID. | Permission-like names often use structured strings. | Keep `domain.resource.action` as a human/developer key. |
+| `name` and `description` | v1 manifests had display fields. | OpenAPI and MCP rely on names/descriptions for human/machine context. | Keep both for Console and future planner context. |
+| `required_autonomy` | v1 had richer mode/risk/side-effect/approval metadata. | ABAC and RAR show rich authorization needs structure when execution exists. | Keep only minimum autonomy now; risk/policy belongs later. |
+| `tenant_id` | v1 scoped work by org/product context. | Access systems evaluate within a context boundary. | Keep tenant-scoped now. |
+| `capability_ids` on Virployee | v1 referenced capabilities, not tools. | Roles often collect permissions; here Virployees collect work abilities. | Keep assignment by UUID and validate same tenant, active lifecycle and autonomy. |
+| lifecycle blocking | v1 protected active consumers through lifecycle flows. | Resource lifecycle should not break active references. | Keep archive/trash/purge blocked while assigned to active Virployees. |
+
+## Answers
+
+### What does a Capability represent?
+
+It represents what a Virployee can be configured to do.
+
+It does not grant access by itself. Actual access, approvals, policy and
+execution remain separate concerns.
+
+### Why `required_autonomy`?
+
+The previous `Action Class` scale mapped 1:1 to autonomy. That made the UI and
+domain language harder without adding real meaning.
+
+The simpler model is clearer:
+
+```text
+Capability.required_autonomy = the minimum autonomy needed to assign it
+```
+
+### Is the 3-segment key useful?
+
+Yes. Keep:
+
+```text
+domain.resource.action
+```
+
+It is readable, stable enough for humans and useful for catalog search. UUIDs
+remain the relationship identity.
+
+### Manual CRUD or derived from manifests?
+
+Manual CRUD is correct now.
+
+Later, manifests/imports may create or update Capabilities, but that should
+wait until tools/runtime exist.
+
+### Tenant-scoped or global?
+
+Tenant-scoped is correct now because Axis v2 is organized around:
+
+```text
+tenant = org + product_surface
+```
+
+A global/product source catalog can be added later as an import/source layer.
+
+## Recommendation
+
+Keep the current minimal implementation:
+
+- CRUD Capability catalog.
+- UUID relationships.
+- `capability_key = domain.resource.action`.
+- `required_autonomy` as the only assignment guard.
+- lifecycle blocking while assigned to active Virployees.
+
+Do not add runtime, schemas, scopes, risk, side effects or Nexus until there is
+real execution to govern.
+
+## Do Not Implement Yet
+
+- Tools.
+- Runtime execution.
+- LLM planning against capabilities.
+- Manifest versions.
+- Conformance runs.
+- OAuth scopes.
+- IAM permissions.
+- Nexus approvals or policies.
+- Risk and side-effect fields.
+- Job Role recommended capabilities.
+- Global/product Capability catalog.
+
+## Sources
+
+Local sources:
+
+- `v1/docs/specs/companion/domain/capabilities-and-tools-domain-spec.md`
+- `v1/docs/companion/tools.md`
+- `v2/companion/docs/specs/capabilities.md`
+- `v2/companion/internal/capabilities`
+
+External references:
+
+- OAuth 2.0 scopes, RFC 6749: https://datatracker.ietf.org/doc/html/rfc6749#section-3.3
+- OAuth 2.0 Rich Authorization Requests, RFC 9396: https://www.rfc-editor.org/rfc/rfc9396.html
+- NIST SP 800-162 ABAC: https://nvlpubs.nist.gov/nistpubs/specialpublications/nist.sp.800-162.pdf
+- Google Cloud IAM roles and permissions: https://docs.cloud.google.com/iam/docs/roles-overview
+- Model Context Protocol Tools: https://modelcontextprotocol.io/specification/draft/server/tools
+- OpenAPI Specification: https://spec.openapis.org/oas/v3.2.0.html

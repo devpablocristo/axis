@@ -3,7 +3,6 @@ package jobroles
 import (
 	"context"
 	"strings"
-	"time"
 
 	"github.com/devpablocristo/companion-v2/internal/jobroles/usecases/domain"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
@@ -24,9 +23,6 @@ type RepositoryPort interface {
 	List(ctx context.Context, tenantID string, state domain.State) ([]domain.JobRole, error)
 	Get(ctx context.Context, tenantID string, id uuid.UUID) (domain.JobRole, error)
 	Update(ctx context.Context, tenantID string, id uuid.UUID, input domain.NormalizedUpdateInput) (domain.JobRole, error)
-	Trash(ctx context.Context, tenantID string, id uuid.UUID, at time.Time, purgeAfter *time.Time) error
-	RestoreTrashed(ctx context.Context, tenantID string, id uuid.UUID) error
-	State(ctx context.Context, tenantID string, id uuid.UUID) (domain.State, error)
 }
 
 type UseCases struct {
@@ -35,12 +31,13 @@ type UseCases struct {
 }
 
 func NewUseCases(repo RepositoryPort) (*UseCases, error) {
-	policy := &lifecycle.ArchivePolicy{
-		ResourceType:    ResourceTypeJobRole,
-		AllowArchive:    true,
-		AllowHardDelete: true,
-		RequireReason:   false,
-		RetentionDays:   30,
+	policy := &lifecycle.LifecyclePolicy{
+		ResourceType:  ResourceTypeJobRole,
+		AllowArchive:  true,
+		AllowTrash:    true,
+		AllowPurge:    true,
+		RequireReason: false,
+		RetentionDays: 30,
 	}
 	service, err := lifecycle.NewServiceWithRepos(
 		map[string]lifecycle.RepositoryPort{ResourceTypeJobRole: repo},
@@ -86,7 +83,7 @@ func (u *UseCases) Update(ctx context.Context, tenantID string, id uuid.UUID, in
 }
 
 func (u *UseCases) Archive(ctx context.Context, tenantID string, id uuid.UUID, actor, reason string) error {
-	return u.lifecycle.SoftDelete(ctx, &lifecycle.ArchiveRequest{
+	return u.lifecycle.Archive(ctx, &lifecycle.ArchiveRequest{
 		ResourceType: ResourceTypeJobRole,
 		ResourceID:   id,
 		TenantID:     normalizeTenantID(tenantID),
@@ -96,7 +93,7 @@ func (u *UseCases) Archive(ctx context.Context, tenantID string, id uuid.UUID, a
 }
 
 func (u *UseCases) Unarchive(ctx context.Context, tenantID string, id uuid.UUID, actor, reason string) error {
-	return u.lifecycle.Restore(ctx, &lifecycle.RestoreRequest{
+	return u.lifecycle.Unarchive(ctx, &lifecycle.UnarchiveRequest{
 		ResourceType: ResourceTypeJobRole,
 		ResourceID:   id,
 		TenantID:     normalizeTenantID(tenantID),
@@ -106,31 +103,33 @@ func (u *UseCases) Unarchive(ctx context.Context, tenantID string, id uuid.UUID,
 }
 
 func (u *UseCases) Trash(ctx context.Context, tenantID string, id uuid.UUID, actor, reason string) error {
-	now := time.Now().UTC()
-	purgeAfter := now.AddDate(0, 0, 30)
-	return u.repo.Trash(ctx, normalizeTenantID(tenantID), id, now, &purgeAfter)
+	return u.lifecycle.Trash(ctx, &lifecycle.TrashRequest{
+		ResourceType: ResourceTypeJobRole,
+		ResourceID:   id,
+		TenantID:     normalizeTenantID(tenantID),
+		Actor:        normalizeActor(actor),
+		Reason:       strings.TrimSpace(reason),
+	})
 }
 
 func (u *UseCases) Restore(ctx context.Context, tenantID string, id uuid.UUID, actor, reason string) error {
-	return u.repo.RestoreTrashed(ctx, normalizeTenantID(tenantID), id)
+	return u.lifecycle.Restore(ctx, &lifecycle.RestoreRequest{
+		ResourceType: ResourceTypeJobRole,
+		ResourceID:   id,
+		TenantID:     normalizeTenantID(tenantID),
+		Actor:        normalizeActor(actor),
+		Reason:       strings.TrimSpace(reason),
+	})
 }
 
 func (u *UseCases) Purge(ctx context.Context, tenantID string, id uuid.UUID, actor, reason string) error {
-	tenantID = normalizeTenantID(tenantID)
-	state, err := u.repo.State(ctx, tenantID, id)
-	if err != nil {
-		return err
-	}
-	if state != domain.StateTrashed {
-		return domainerr.Conflict("job role must be trashed before purge")
-	}
-	return u.lifecycle.HardDelete(ctx, &lifecycle.HardDeleteRequest{
-		ResourceType:   ResourceTypeJobRole,
-		ResourceID:     id,
-		TenantID:       tenantID,
-		Actor:          normalizeActor(actor),
-		Reason:         strings.TrimSpace(reason),
-		MustBeArchived: false,
+	return u.lifecycle.Purge(ctx, &lifecycle.PurgeRequest{
+		ResourceType:  ResourceTypeJobRole,
+		ResourceID:    id,
+		TenantID:      normalizeTenantID(tenantID),
+		Actor:         normalizeActor(actor),
+		Reason:        strings.TrimSpace(reason),
+		MustBeTrashed: true,
 	})
 }
 
@@ -163,6 +162,6 @@ func normalizeActor(actor string) string {
 
 type noopLifecycleAudit struct{}
 
-func (noopLifecycleAudit) Append(context.Context, lifecycle.ArchiveAudit) error {
+func (noopLifecycleAudit) Append(context.Context, lifecycle.AuditEvent) error {
 	return nil
 }

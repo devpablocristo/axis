@@ -69,12 +69,9 @@ func TestHandlerListsAutonomyLevels(t *testing.T) {
 	}
 	var payload struct {
 		Data []struct {
-			Level                string `json:"level"`
-			Name                 string `json:"name"`
-			AllowedActionClasses []struct {
-				Class            string `json:"class"`
-				RequiresApproval bool   `json:"requires_approval"`
-			} `json:"allowed_action_classes"`
+			Level                    string   `json:"level"`
+			Name                     string   `json:"name"`
+			AllowsRequiredAutonomies []string `json:"allows_required_autonomies"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
@@ -86,20 +83,14 @@ func TestHandlerListsAutonomyLevels(t *testing.T) {
 	if payload.Data[0].Level != "A0" || payload.Data[0].Name != "Conversation" {
 		t.Fatalf("unexpected first autonomy level: %+v", payload.Data[0])
 	}
-	var a3Actions []struct {
-		Class            string `json:"class"`
-		RequiresApproval bool   `json:"requires_approval"`
-	}
+	var a3Autonomies []string
 	for _, item := range payload.Data {
 		if item.Level == "A3" {
-			a3Actions = item.AllowedActionClasses
+			a3Autonomies = item.AllowsRequiredAutonomies
 		}
 	}
-	if len(a3Actions) != 4 {
-		t.Fatalf("expected A3 to allow 4 action classes, got %+v", a3Actions)
-	}
-	if a3Actions[len(a3Actions)-1].Class != "write_low" || a3Actions[len(a3Actions)-1].RequiresApproval {
-		t.Fatalf("unexpected A3 last action: %+v", a3Actions[len(a3Actions)-1])
+	if got, want := strings.Join(a3Autonomies, ","), "A0,A1,A2,A3"; got != want {
+		t.Fatalf("expected A3 to allow %s, got %s", want, got)
 	}
 }
 

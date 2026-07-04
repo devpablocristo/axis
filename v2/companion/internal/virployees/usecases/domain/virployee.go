@@ -20,6 +20,7 @@ type Virployee struct {
 	ID               uuid.UUID
 	Name             string
 	JobRoleID        uuid.UUID
+	CapabilityIDs    []uuid.UUID
 	Description      string
 	SupervisorUserID string
 	Autonomy         AutonomyLevel
@@ -35,6 +36,7 @@ type Virployee struct {
 type CreateInput struct {
 	Name             string
 	JobRoleID        string
+	CapabilityIDs    []string
 	Description      string
 	SupervisorUserID string
 	Autonomy         string
@@ -43,6 +45,7 @@ type CreateInput struct {
 type UpdateInput struct {
 	Name             string
 	JobRoleID        string
+	CapabilityIDs    []string
 	Description      string
 	SupervisorUserID string
 	Autonomy         string
@@ -51,6 +54,7 @@ type UpdateInput struct {
 type NormalizedCreateInput struct {
 	Name             string
 	JobRoleID        uuid.UUID
+	CapabilityIDs    []uuid.UUID
 	Description      string
 	SupervisorUserID string
 	Autonomy         AutonomyLevel
@@ -59,6 +63,7 @@ type NormalizedCreateInput struct {
 type NormalizedUpdateInput struct {
 	Name             string
 	JobRoleID        uuid.UUID
+	CapabilityIDs    []uuid.UUID
 	Description      string
 	SupervisorUserID string
 	Autonomy         AutonomyLevel
@@ -84,6 +89,10 @@ func NormalizeCreateInput(in CreateInput) (NormalizedCreateInput, error) {
 	if err != nil {
 		return NormalizedCreateInput{}, err
 	}
+	capabilityIDs, err := parseOptionalUUIDList(in.CapabilityIDs, "capability_ids")
+	if err != nil {
+		return NormalizedCreateInput{}, err
+	}
 	autonomy, err := normalizeAutonomy(in.Autonomy)
 	if err != nil {
 		return NormalizedCreateInput{}, err
@@ -91,6 +100,7 @@ func NormalizeCreateInput(in CreateInput) (NormalizedCreateInput, error) {
 	out := NormalizedCreateInput{
 		Name:             strings.TrimSpace(in.Name),
 		JobRoleID:        jobRoleID,
+		CapabilityIDs:    capabilityIDs,
 		Description:      strings.TrimSpace(in.Description),
 		SupervisorUserID: supervisorID,
 		Autonomy:         autonomy,
@@ -110,6 +120,10 @@ func NormalizeUpdateInput(in UpdateInput) (NormalizedUpdateInput, error) {
 	if err != nil {
 		return NormalizedUpdateInput{}, err
 	}
+	capabilityIDs, err := parseOptionalUUIDList(in.CapabilityIDs, "capability_ids")
+	if err != nil {
+		return NormalizedUpdateInput{}, err
+	}
 	autonomy, err := normalizeAutonomy(in.Autonomy)
 	if err != nil {
 		return NormalizedUpdateInput{}, err
@@ -117,6 +131,7 @@ func NormalizeUpdateInput(in UpdateInput) (NormalizedUpdateInput, error) {
 	out := NormalizedUpdateInput{
 		Name:             strings.TrimSpace(in.Name),
 		JobRoleID:        jobRoleID,
+		CapabilityIDs:    capabilityIDs,
 		Description:      strings.TrimSpace(in.Description),
 		SupervisorUserID: supervisorID,
 		Autonomy:         autonomy,
@@ -143,6 +158,27 @@ func parseRequiredString(raw, field string) (string, error) {
 	out := strings.TrimSpace(raw)
 	if out == "" {
 		return "", domainerr.Validation(field + " is required")
+	}
+	return out, nil
+}
+
+func parseOptionalUUIDList(raw []string, field string) ([]uuid.UUID, error) {
+	out := make([]uuid.UUID, 0, len(raw))
+	seen := map[uuid.UUID]struct{}{}
+	for _, value := range raw {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return nil, domainerr.Validation(field + " must contain valid UUIDs")
+		}
+		id, err := uuid.Parse(value)
+		if err != nil || id == uuid.Nil {
+			return nil, domainerr.Validation(field + " must contain valid UUIDs")
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
 	}
 	return out, nil
 }

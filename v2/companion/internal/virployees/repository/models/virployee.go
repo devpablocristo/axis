@@ -12,6 +12,7 @@ type Virployee struct {
 	ID               uuid.UUID
 	Name             string
 	JobRoleID        uuid.UUID
+	CapabilityIDs    []uuid.UUID
 	Description      string
 	SupervisorUserID string
 	Autonomy         domain.AutonomyLevel
@@ -29,6 +30,7 @@ func (m Virployee) ToDomain() domain.Virployee {
 		ID:               m.ID,
 		Name:             m.Name,
 		JobRoleID:        m.JobRoleID,
+		CapabilityIDs:    m.CapabilityIDs,
 		Description:      m.Description,
 		SupervisorUserID: m.SupervisorUserID,
 		Autonomy:         m.Autonomy,

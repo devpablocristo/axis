@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	cfg "github.com/devpablocristo/companion-v2/cmd/config"
+	"github.com/devpablocristo/companion-v2/internal/capabilities"
 	"github.com/devpablocristo/companion-v2/internal/infra/migrations"
 	"github.com/devpablocristo/companion-v2/internal/jobroles"
 	"github.com/devpablocristo/companion-v2/internal/virployees"
@@ -52,12 +53,21 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	}
 	jobRolesHandler := jobroles.NewHandler(jobRolesUsecases)
 
+	capabilitiesRepo := capabilities.NewRepository(db.Pool())
+	capabilitiesUsecases, err := capabilities.NewUseCases(capabilitiesRepo)
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	capabilitiesHandler := capabilities.NewHandler(capabilitiesUsecases)
+
 	virployeesRepo := virployees.NewRepository(db.Pool())
 	virployeesUsecases, err := virployees.NewUseCases(virployeesRepo, jobRolesUsecases)
 	if err != nil {
 		db.Close()
 		return nil, err
 	}
+	virployeesUsecases.SetCapabilityValidator(capabilitiesUsecases)
 	virployeesHandler := virployees.NewHandler(virployeesUsecases)
 
 	gin.SetMode(gin.ReleaseMode)
@@ -71,6 +81,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	ginmw.RegisterHealthEndpoints(router, db.Ping)
 	api := router.Group("/v1")
 	jobRolesHandler.Routes(api)
+	capabilitiesHandler.Routes(api)
 	virployeesHandler.Routes(api)
 
 	server := &http.Server{

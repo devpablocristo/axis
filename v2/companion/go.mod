@@ -7,7 +7,7 @@ require (
 	github.com/devpablocristo/platform/databases/postgres/go v0.1.0
 	github.com/devpablocristo/platform/errors/go v0.2.0
 	github.com/devpablocristo/platform/http/gin/go v0.2.3
-	github.com/devpablocristo/platform/lifecycle/go v0.2.0
+	github.com/devpablocristo/platform/lifecycle/go v0.3.0
 	github.com/gin-gonic/gin v1.12.0
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.10.0

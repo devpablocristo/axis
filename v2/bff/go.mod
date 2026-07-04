@@ -64,5 +64,3 @@ require (
 	gorm.io/driver/sqlite v1.6.0 // indirect
 	gorm.io/gorm v1.30.0 // indirect
 )
-
-replace github.com/devpablocristo/platform/sdks/clerk/go => ../../../platform/sdks/clerk/go

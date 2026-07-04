@@ -1,5 +1,6 @@
-import { Bot, BriefcaseBusiness, Building2, RefreshCw, ShieldCheck, Users } from 'lucide-react'
+import { Bot, BriefcaseBusiness, Building2, RefreshCw, ShieldCheck, Users, Wrench } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { CapabilitiesPage } from './CapabilitiesPage'
 import { JobRolesPage } from './JobRolesPage'
 import { TenancyPage } from './TenancyPage'
 import { UsersPage } from './UsersPage'
@@ -122,6 +123,14 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
           </button>
           <button
             type="button"
+            className={activePage === 'capabilities' ? 'active' : ''}
+            onClick={() => setActivePage('capabilities')}
+          >
+            <Wrench aria-hidden="true" />
+            Capabilities
+          </button>
+          <button
+            type="button"
             className={activePage === 'users' ? 'active' : ''}
             onClick={() => setActivePage('users')}
           >
@@ -185,6 +194,8 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
           <section className="empty-state">No active tenant matches the selected combination.</section>
         ) : activePage === 'job-roles' ? (
           <JobRolesPage tenantId={selectedTenant.id} principalId={principalId} />
+        ) : activePage === 'capabilities' ? (
+          <CapabilitiesPage tenantId={selectedTenant.id} principalId={principalId} />
         ) : activePage === 'users' ? (
           <UsersPage tenantId={selectedTenant.id} principalId={principalId} />
         ) : (
@@ -199,10 +210,11 @@ function unique(values: string[]): string[] {
   return Array.from(new Set(values.filter(Boolean))).sort((left, right) => left.localeCompare(right))
 }
 
-type Page = 'virployees' | 'job-roles' | 'users' | 'tenants'
+type Page = 'virployees' | 'job-roles' | 'capabilities' | 'users' | 'tenants'
 
 function pageTitle(page: Page): string {
   if (page === 'job-roles') return 'Job Roles'
+  if (page === 'capabilities') return 'Capabilities'
   if (page === 'users') return 'Users'
   if (page === 'tenants') return 'Tenants'
   return 'Virployees'

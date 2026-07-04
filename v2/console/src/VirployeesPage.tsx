@@ -6,6 +6,7 @@ import {
 } from '@devpablocristo/platform-crud-ui'
 import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import {
+  type Capability,
   type JobRole,
   type TenantUser,
   type VirployeeAutonomy,
@@ -13,6 +14,7 @@ import {
   type Virployee,
   archiveVirployee,
   createVirployee,
+  listCapabilities,
   listJobRoles,
   listUsers,
   listVirployeeAutonomyLevels,
@@ -32,6 +34,15 @@ type VirployeesPageProps = {
   principalId: string
 }
 
+type VirployeeEditValues = {
+  name: string
+  job_role_id: string
+  autonomy: VirployeeAutonomy | ''
+  supervisor_user_id: string
+  description: string
+  capability_ids: string[]
+}
+
 const VISIBLE_AUTONOMY_LEVELS: VirployeeAutonomy[] = ['A0', 'A1', 'A2', 'A3']
 
 const FALLBACK_AUTONOMY_LEVELS: VirployeeAutonomyLevel[] = [
@@ -39,89 +50,25 @@ const FALLBACK_AUTONOMY_LEVELS: VirployeeAutonomyLevel[] = [
     level: 'A0',
     name: 'Conversation',
     description: 'Can hold conversation and read contextual information.',
-    allowed_action_classes: [
-      {
-        class: 'observe',
-        name: 'Observe',
-        description: 'Read context and hold conversation.',
-        requires_approval: false,
-      },
-    ],
+    allows_required_autonomies: ['A0'],
   },
   {
     level: 'A1',
     name: 'Recommendation',
     description: 'Can read, analyze and recommend actions.',
-    allowed_action_classes: [
-      {
-        class: 'observe',
-        name: 'Observe',
-        description: 'Read context and hold conversation.',
-        requires_approval: false,
-      },
-      {
-        class: 'recommend',
-        name: 'Recommend',
-        description: 'Analyze context and recommend actions.',
-        requires_approval: false,
-      },
-    ],
+    allows_required_autonomies: ['A0', 'A1'],
   },
   {
     level: 'A2',
     name: 'Draft',
     description: 'Can prepare plans or executable drafts.',
-    allowed_action_classes: [
-      {
-        class: 'observe',
-        name: 'Observe',
-        description: 'Read context and hold conversation.',
-        requires_approval: false,
-      },
-      {
-        class: 'recommend',
-        name: 'Recommend',
-        description: 'Analyze context and recommend actions.',
-        requires_approval: false,
-      },
-      {
-        class: 'draft',
-        name: 'Draft',
-        description: 'Prepare plans or executable drafts.',
-        requires_approval: false,
-      },
-    ],
+    allows_required_autonomies: ['A0', 'A1', 'A2'],
   },
   {
     level: 'A3',
     name: 'Limited execution',
     description: 'Can execute low-risk reversible writes.',
-    allowed_action_classes: [
-      {
-        class: 'observe',
-        name: 'Observe',
-        description: 'Read context and hold conversation.',
-        requires_approval: false,
-      },
-      {
-        class: 'recommend',
-        name: 'Recommend',
-        description: 'Analyze context and recommend actions.',
-        requires_approval: false,
-      },
-      {
-        class: 'draft',
-        name: 'Draft',
-        description: 'Prepare plans or executable drafts.',
-        requires_approval: false,
-      },
-      {
-        class: 'write_low',
-        name: 'Low-risk write',
-        description: 'Execute low-risk reversible writes.',
-        requires_approval: false,
-      },
-    ],
+    allows_required_autonomies: ['A0', 'A1', 'A2', 'A3'],
   },
 ]
 
@@ -143,6 +90,12 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
   const [jobRolesError, setJobRolesError] = useState('')
   const [users, setUsers] = useState<TenantUser[]>([])
   const [usersError, setUsersError] = useState('')
+  const [capabilities, setCapabilities] = useState<Capability[]>([])
+  const [capabilitiesError, setCapabilitiesError] = useState('')
+  const [editRow, setEditRow] = useState<Virployee | null>(null)
+  const [editValues, setEditValues] = useState<VirployeeEditValues | null>(null)
+  const [editSaving, setEditSaving] = useState(false)
+  const [editError, setEditError] = useState('')
   const isActive = Boolean(tenantId && principalId)
   const jobRoleByID = useMemo(() => {
     return new Map(jobRoles.map((jobRole) => [jobRole.id, jobRole]))
@@ -150,6 +103,9 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
   const userByID = useMemo(() => {
     return new Map(users.map((user) => [user.id, user]))
   }, [users])
+  const capabilityByID = useMemo(() => {
+    return new Map(capabilities.map((capability) => [capability.id, capability]))
+  }, [capabilities])
   const activeSupervisorUsers = useMemo(() => {
     return users.filter((user) => user.kind !== 'invitation' && user.state === 'active')
   }, [users])
@@ -183,7 +139,7 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
       setReloadVersion((current) => current + 1)
     },
     update: async (row, values) => {
-      await updateVirployee(row.id, virployeePayload(values), tenantId, principalId)
+      await updateVirployee(row.id, virployeePayload(values, row.capability_ids ?? []), tenantId, principalId)
       setReloadVersion((current) => current + 1)
     },
     archive: async (row) => {
@@ -216,6 +172,9 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
     setJobRolesError('')
     setUsers([])
     setUsersError('')
+    setCapabilities([])
+    setCapabilitiesError('')
+    closeEdit()
   }, [lifecycleView, tenantId])
 
   useEffect(() => {
@@ -235,6 +194,29 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
         if (cancelled) return
         setJobRoles([])
         setJobRolesError(error instanceof Error ? error.message : 'Could not load Job Roles')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [isActive, principalId, reloadVersion, tenantId])
+
+  useEffect(() => {
+    if (!isActive) {
+      setCapabilities([])
+      setCapabilitiesError('')
+      return
+    }
+    let cancelled = false
+    listCapabilities('active', tenantId, principalId)
+      .then((items) => {
+        if (cancelled) return
+        setCapabilities(items)
+        setCapabilitiesError('')
+      })
+      .catch((error) => {
+        if (cancelled) return
+        setCapabilities([])
+        setCapabilitiesError(error instanceof Error ? error.message : 'Could not load Capabilities')
       })
     return () => {
       cancelled = true
@@ -323,22 +305,17 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
 
     const syncAutonomyHelp = () => {
       const select = root.querySelector<HTMLSelectElement>('#crud-field-autonomy')
-      if (!select) {
+      const trigger = ensureFieldHelpTrigger(root, 'autonomy', 'Autonomy help')
+      if (!select || !trigger) {
         hideAutonomyBubble()
         return
       }
       const raw = select.value.trim()
-      let host = document.querySelector<HTMLElement>('#virployee-autonomy-help-host')
-      if (!host) {
-        host = document.createElement('div')
-        host.id = 'virployee-autonomy-help-host'
-        host.className = 'virployee-autonomy-help-host'
-        document.body.appendChild(host)
-      }
+      const host = ensureHelpHost('virployee-autonomy-help-host')
       const selectedAutonomy = isAutonomy(raw) ? raw : 'A1'
       const definition = autonomyByLevel.get(selectedAutonomy) ?? FALLBACK_AUTONOMY_LEVELS[1]
       host.innerHTML = autonomyBubbleMarkup(definition, raw === '')
-      positionAutonomyBubble(select, host)
+      positionHelpBubble(trigger, host)
       host.style.display = bubbleVisible ? 'block' : 'none'
     }
 
@@ -353,69 +330,31 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
       if (host) host.style.display = 'none'
     }
 
-    const isAutonomySelectEvent = (event: Event) => {
-      const target = event.target
-      return target instanceof HTMLSelectElement && target.id === 'crud-field-autonomy'
-    }
-
-    const handleChange = (event: Event) => {
-      if (isAutonomySelectEvent(event)) {
-        syncAutonomyHelp()
-      }
-    }
-
-    const handleFocusIn = (event: Event) => {
-      if (isAutonomySelectEvent(event)) {
-        showAutonomyBubble()
-      }
-    }
-
-    const handleFocusOut = (event: Event) => {
-      if (!isAutonomySelectEvent(event)) return
-      window.setTimeout(() => {
-        if (document.activeElement?.id !== 'crud-field-autonomy') {
-          hideAutonomyBubble()
-        }
-      }, 120)
-    }
-
     const handlePointerOver = (event: Event) => {
-      if (isAutonomySelectEvent(event)) {
+      if (helpTriggerFromEvent(event, root, 'autonomy')) {
         showAutonomyBubble()
       }
     }
 
     const handlePointerOut = (event: Event) => {
-      if (!isAutonomySelectEvent(event)) return
-      if (document.activeElement?.id !== 'crud-field-autonomy') {
+      const trigger = helpTriggerFromEvent(event, root, 'autonomy')
+      if (!trigger) return
+      const relatedTarget = event instanceof MouseEvent ? event.relatedTarget : null
+      if (!(relatedTarget instanceof Node) || !trigger.contains(relatedTarget)) {
         hideAutonomyBubble()
       }
     }
 
     const observer = new MutationObserver(syncAutonomyHelp)
     observer.observe(root, { childList: true, subtree: true })
-    root.addEventListener('change', handleChange)
-    root.addEventListener('input', handleChange)
-    root.addEventListener('keyup', handleChange)
-    root.addEventListener('mouseup', handleChange)
-    root.addEventListener('focusin', handleFocusIn)
-    root.addEventListener('focusout', handleFocusOut)
     root.addEventListener('mouseover', handlePointerOver)
     root.addEventListener('mouseout', handlePointerOut)
-    const interval = window.setInterval(syncAutonomyHelp, 200)
     syncAutonomyHelp()
 
     return () => {
       observer.disconnect()
-      root.removeEventListener('change', handleChange)
-      root.removeEventListener('input', handleChange)
-      root.removeEventListener('keyup', handleChange)
-      root.removeEventListener('mouseup', handleChange)
-      root.removeEventListener('focusin', handleFocusIn)
-      root.removeEventListener('focusout', handleFocusOut)
       root.removeEventListener('mouseover', handlePointerOver)
       root.removeEventListener('mouseout', handlePointerOut)
-      window.clearInterval(interval)
       hideAutonomyBubble()
     }
   }, [autonomyByLevel, lifecycleView, reloadVersion, tenantId])
@@ -464,6 +403,52 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
     }
   }
 
+  const openEdit = (row: Virployee) => {
+    setEditRow(row)
+    setEditValues(virployeeToEditValues(row))
+    setEditError('')
+    setActionError('')
+  }
+
+  const closeEdit = () => {
+    setEditRow(null)
+    setEditValues(null)
+    setEditError('')
+    setEditSaving(false)
+  }
+
+  const updateEditValue = (key: keyof VirployeeEditValues, value: string) => {
+    setEditValues((current) => current ? { ...current, [key]: value } : current)
+  }
+
+  const toggleEditCapability = (id: string) => {
+    setEditValues((current) => {
+      if (!current) return current
+      const exists = current.capability_ids.includes(id)
+      return {
+        ...current,
+        capability_ids: exists
+          ? current.capability_ids.filter((item) => item !== id)
+          : [...current.capability_ids, id],
+      }
+    })
+  }
+
+  const saveEdit = async () => {
+    if (!editRow || !editValues || editSaving || !isValidEditValues(editValues)) return
+    setEditSaving(true)
+    setEditError('')
+    try {
+      await updateVirployee(editRow.id, editPayload(editValues), tenantId, principalId)
+      closeEdit()
+      setReloadVersion((current) => current + 1)
+    } catch (error) {
+      setEditError(error instanceof Error ? error.message : 'Could not save Virployee')
+    } finally {
+      setEditSaving(false)
+    }
+  }
+
   if (!isActive) {
     return (
       <section className="page-section">
@@ -473,7 +458,7 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
   }
 
   return (
-    <section ref={rootRef} className="page-section iam-control axis-crud-host iam-control--external-lifecycle">
+    <section ref={rootRef} className="page-section iam-control axis-crud-host virployees-control iam-control--external-lifecycle">
       <CrudPage<Virployee>
         key={`virployees-${tenantId}-${lifecycleView}-${reloadVersion}`}
         dataSource={dataSource}
@@ -497,10 +482,11 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
         labelPlural="virployees"
         labelPluralCap="Virployees"
         createLabel="New"
-        columns={virployeeColumns(selectedIds, toggleSelected, autonomyByLevel, jobRoleByID, userByID)}
+        columns={virployeeColumns(selectedIds, toggleSelected, autonomyByLevel, jobRoleByID, userByID, capabilityByID)}
         formFields={virployeeFormFields(autonomyOptions, jobRoleOptions, supervisorOptions)}
-        searchText={(row) => virployeeSearchText(row, autonomyByLevel, jobRoleByID, userByID)}
-        toFormValues={(row) => virployeeToFormValues(row)}
+        searchText={(row) => virployeeSearchText(row, autonomyByLevel, jobRoleByID, userByID, capabilityByID)}
+        toFormValues={virployeeToFormValues}
+        onExternalEdit={openEdit}
         isValid={isValidVirployeeForm}
         emptyState="No virployees"
         archivedEmptyState="No archived virployees"
@@ -523,11 +509,29 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
             {actionError ? <p role="alert" className="iam-control__inline-error">{actionError}</p> : null}
             {jobRolesError ? <p role="alert" className="iam-control__inline-error">{jobRolesError}</p> : null}
             {usersError ? <p role="alert" className="iam-control__inline-error">{usersError}</p> : null}
+            {capabilitiesError ? <p role="alert" className="iam-control__inline-error">{capabilitiesError}</p> : null}
             {!jobRolesError && jobRoles.length === 0 ? (
               <p className="iam-control__inline-note">Create a Job Role before creating Virployees.</p>
             ) : null}
             {!usersError && activeSupervisorUsers.length === 0 ? (
               <p className="iam-control__inline-note">Create a User before assigning a supervisor.</p>
+            ) : null}
+            {editRow && editValues ? (
+              <VirployeeEditInline
+                row={editRow}
+                values={editValues}
+                saving={editSaving}
+                error={editError}
+                autonomyOptions={autonomyOptions}
+                jobRoleOptions={jobRoleOptions}
+                supervisorOptions={supervisorOptions}
+                capabilities={capabilities}
+                capabilityByID={capabilityByID}
+                onValueChange={updateEditValue}
+                onToggleCapability={toggleEditCapability}
+                onClose={closeEdit}
+                onSave={() => void saveEdit()}
+              />
             ) : null}
           </div>
         )}
@@ -538,11 +542,191 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
   )
 }
 
-function positionAutonomyBubble(select: HTMLSelectElement, host: HTMLElement) {
-  const rect = select.getBoundingClientRect()
+function VirployeeEditInline(props: {
+  row: Virployee
+  values: VirployeeEditValues
+  saving: boolean
+  error: string
+  autonomyOptions: Array<{ label: string; value: string }>
+  jobRoleOptions: Array<{ label: string; value: string }>
+  supervisorOptions: Array<{ label: string; value: string }>
+  capabilities: Capability[]
+  capabilityByID: ReadonlyMap<string, Capability>
+  onValueChange: (key: keyof VirployeeEditValues, value: string) => void
+  onToggleCapability: (id: string) => void
+  onClose: () => void
+  onSave: () => void
+}) {
+  const selectedIDs = props.values.capability_ids
+  const selectedSet = new Set(selectedIDs)
+  const availableCapabilities = props.capabilities.filter((capability) => !selectedSet.has(capability.id))
+
+  return (
+    <div className="card crud-form-card virployee-edit-inline">
+      <div className="card-header">
+        <h2>Edit virployee</h2>
+      </div>
+      <form
+        className="virployee-edit-form"
+        onSubmit={(event) => {
+            event.preventDefault()
+            props.onSave()
+          }}
+        >
+          {props.error ? <p role="alert" className="iam-control__inline-error">{props.error}</p> : null}
+          <div className="crud-form-grid">
+            <label className="form-group">
+              Name
+              <input
+                value={props.values.name}
+                onChange={(event) => props.onValueChange('name', event.currentTarget.value)}
+              />
+            </label>
+            <label className="form-group">
+              Job Role
+              <select
+                value={props.values.job_role_id}
+                onChange={(event) => props.onValueChange('job_role_id', event.currentTarget.value)}
+              >
+                <option value="">{props.jobRoleOptions.length > 0 ? 'Select...' : 'Create a Job Role first'}</option>
+                {props.jobRoleOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="form-group">
+              Autonomy (optional)
+              <select
+                value={props.values.autonomy}
+                onChange={(event) => props.onValueChange('autonomy', event.currentTarget.value)}
+              >
+                <option value="">Default: A1 - Recommendation</option>
+                {props.autonomyOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="form-group full-width">
+              Supervisor
+              <select
+                value={props.values.supervisor_user_id}
+                onChange={(event) => props.onValueChange('supervisor_user_id', event.currentTarget.value)}
+              >
+                <option value="">{props.supervisorOptions.length > 0 ? 'Select...' : 'Create a User first'}</option>
+                {props.supervisorOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="form-group full-width">
+              Description (optional)
+              <textarea
+                rows={3}
+                value={props.values.description}
+                onChange={(event) => props.onValueChange('description', event.currentTarget.value)}
+              />
+            </label>
+          </div>
+          <section className="capability-selector" aria-label="Capabilities">
+            <label className="form-group">
+              Capabilities
+              <select
+                value=""
+                disabled={props.capabilities.length === 0 || availableCapabilities.length === 0}
+                onChange={(event) => {
+                  const id = event.currentTarget.value
+                  if (id) props.onToggleCapability(id)
+                }}
+              >
+                <option value="" disabled hidden>
+                  {props.capabilities.length === 0
+                    ? 'Create a Capability first'
+                    : availableCapabilities.length === 0
+                      ? 'No capabilities available'
+                      : 'Select capability...'}
+                </option>
+                {availableCapabilities.map((capability) => (
+                  <option key={capability.id} value={capability.id}>
+                    {capabilityOptionLabel(capability)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <p className="capability-selector__count">{selectedIDs.length} selected</p>
+            <div className="capability-selector__chips" aria-label="Selected capabilities">
+              {selectedIDs.length === 0 ? (
+                <span className="capability-selector__empty-chip">No capabilities selected</span>
+              ) : selectedIDs.map((id) => {
+                const capability = props.capabilityByID.get(id)
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    className="capability-chip"
+                    onClick={() => props.onToggleCapability(id)}
+                    title="Remove capability"
+                  >
+                    {capability?.name ?? shortId(id)}
+                    <span aria-hidden="true">x</span>
+                  </button>
+                )
+              })}
+            </div>
+          </section>
+        <footer className="virployee-edit-form__footer">
+            <button type="submit" className="btn-primary" disabled={props.saving || !isValidEditValues(props.values)}>
+              {props.saving ? 'Saving...' : 'Save'}
+            </button>
+          <button type="button" className="btn-secondary" disabled={props.saving} onClick={props.onClose}>
+            Cancel
+          </button>
+        </footer>
+      </form>
+    </div>
+  )
+}
+
+function ensureFieldHelpTrigger(root: HTMLElement, fieldKey: string, ariaLabel: string): HTMLElement | null {
+  const field = root.querySelector<HTMLElement>(`#crud-field-${fieldKey}`)
+  const group = field?.closest('.form-group')
+  const label = group?.querySelector<HTMLLabelElement>(`label[for="crud-field-${fieldKey}"]`)
+  if (!label) return null
+  const existing = label.querySelector<HTMLElement>(`.axis-field-help-trigger[data-help-field="${fieldKey}"]`)
+  if (existing) return existing
+  const trigger = document.createElement('span')
+  trigger.className = 'axis-field-help-trigger'
+  trigger.dataset.helpField = fieldKey
+  trigger.textContent = '?'
+  trigger.setAttribute('aria-label', ariaLabel)
+  trigger.setAttribute('role', 'img')
+  label.appendChild(trigger)
+  return trigger
+}
+
+function helpTriggerFromEvent(event: Event, root: HTMLElement, fieldKey: string): HTMLElement | null {
+  const target = event.target
+  if (!(target instanceof Element)) return null
+  const trigger = target.closest<HTMLElement>(`.axis-field-help-trigger[data-help-field="${fieldKey}"]`)
+  if (!trigger || !root.contains(trigger)) return null
+  return trigger
+}
+
+function ensureHelpHost(id: string): HTMLElement {
+  let host = document.querySelector<HTMLElement>(`#${id}`)
+  if (!host) {
+    host = document.createElement('div')
+    host.id = id
+    host.className = 'axis-field-help-host'
+    document.body.appendChild(host)
+  }
+  return host
+}
+
+function positionHelpBubble(anchor: HTMLElement, host: HTMLElement) {
+  const rect = anchor.getBoundingClientRect()
   const viewportPadding = 10
-  const width = Math.min(Math.max(rect.width, 320), window.innerWidth - viewportPadding * 2)
-  const left = Math.min(Math.max(rect.left, viewportPadding), window.innerWidth - width - viewportPadding)
+  const width = Math.min(420, window.innerWidth - viewportPadding * 2)
+  const left = Math.min(Math.max(rect.left - 26, viewportPadding), window.innerWidth - width - viewportPadding)
   const top = Math.max(rect.top, viewportPadding)
   host.style.left = `${left}px`
   host.style.top = `${top}px`
@@ -550,16 +734,16 @@ function positionAutonomyBubble(select: HTMLSelectElement, host: HTMLElement) {
 }
 
 function autonomyBubbleMarkup(definition: VirployeeAutonomyLevel, usesDefault: boolean): string {
-  const allowedActions = definition.allowed_action_classes.map((action) => action.name).join(', ') || 'None'
+  const allowedAutonomies = definition.allows_required_autonomies.join(', ') || 'None'
   return `
-    <div class="virployee-autonomy-bubble">
-      <div class="virployee-autonomy-bubble__title">
-        <span class="virployee-autonomy-bubble__level">${escapeHTML(definition.level)}</span>
-        <strong>${escapeHTML(definition.name)}</strong>
-        ${usesDefault ? '<span class="virployee-autonomy-bubble__default">Default</span>' : ''}
-      </div>
+    <div class="axis-field-help-bubble">
+      <strong>Autonomy</strong>
+      <p><span>Status</span>Optional. Empty uses A1 - Recommendation.</p>
+      <p><span>Selected</span>${escapeHTML(definition.level)} - ${escapeHTML(definition.name)}${usesDefault ? ' (default)' : ''}</p>
+      <p><span>Purpose</span>Defines how far this Virployee may go when using assigned Capabilities.</p>
       <p><span>Meaning</span>${escapeHTML(definition.description)}</p>
-      <p><span>Allows</span>${escapeHTML(allowedActions)}</p>
+      <p><span>Allows</span>Capabilities requiring ${escapeHTML(allowedAutonomies)}</p>
+      <p><span>Effect</span>Capabilities requiring higher autonomy cannot be assigned.</p>
     </div>
   `
 }
@@ -579,12 +763,14 @@ function virployeeColumns(
   autonomyByLevel: ReadonlyMap<VirployeeAutonomy, VirployeeAutonomyLevel>,
   jobRoleByID?: ReadonlyMap<string, JobRole>,
   userByID?: ReadonlyMap<string, TenantUser>,
+  capabilityByID?: ReadonlyMap<string, Capability>,
 ): CrudPageProps<Virployee>['columns'] {
   return [
     selectionColumn<Virployee>(selectedIds, onToggle),
     { key: 'name', header: 'Name' },
     { key: 'job_role_id', header: 'Job Role', render: (value) => jobRoleName(String(value ?? ''), jobRoleByID) },
     { key: 'autonomy', header: 'Autonomy', render: (value) => formatAutonomy(String(value ?? ''), autonomyByLevel) },
+    { key: 'capability_ids', header: 'Capabilities', render: (_value, row) => capabilitySummary(row.capability_ids ?? [], capabilityByID) },
     { key: 'supervisor_user_id', header: 'Supervisor', render: (value) => supervisorName(String(value ?? ''), userByID) },
     { key: 'state', header: 'State', render: (value) => formatState(String(value ?? '')) },
     { key: 'updated_at', header: 'Updated', render: (value) => formatDate(String(value ?? '')) },
@@ -634,14 +820,49 @@ function virployeeToFormValues(row: Virployee): CrudFormValues {
   }
 }
 
-function virployeePayload(values: CrudFormValues) {
+function virployeePayload(values: CrudFormValues, capabilityIds: string[] = []) {
   return {
     name: stringValue(values.name),
     job_role_id: stringValue(values.job_role_id),
+    capability_ids: capabilityIds,
     description: stringValue(values.description),
     supervisor_user_id: stringValue(values.supervisor_user_id),
     autonomy: autonomyValue(values.autonomy),
   }
+}
+
+function virployeeToEditValues(row: Virployee): VirployeeEditValues {
+  return {
+    name: row.name,
+    job_role_id: row.job_role_id,
+    autonomy: row.autonomy ?? '',
+    supervisor_user_id: row.supervisor_user_id,
+    description: row.description ?? '',
+    capability_ids: row.capability_ids ?? [],
+  }
+}
+
+function editPayload(values: VirployeeEditValues) {
+  return {
+    name: stringValue(values.name),
+    job_role_id: stringValue(values.job_role_id),
+    capability_ids: values.capability_ids,
+    description: stringValue(values.description),
+    supervisor_user_id: stringValue(values.supervisor_user_id),
+    autonomy: values.autonomy,
+  }
+}
+
+function isValidEditValues(values: VirployeeEditValues): boolean {
+  return (
+    stringValue(values.name).length > 0 &&
+    stringValue(values.job_role_id).length > 0 &&
+    stringValue(values.supervisor_user_id).length > 0
+  )
+}
+
+function capabilityOptionLabel(capability: Capability): string {
+  return `${capability.name} - ${capability.capability_key} - Requires ${capability.required_autonomy}`
 }
 
 function isValidVirployeeForm(values: CrudFormValues): boolean {
@@ -657,6 +878,7 @@ function virployeeSearchText(
   autonomyByLevel: ReadonlyMap<VirployeeAutonomy, VirployeeAutonomyLevel>,
   jobRoleByID: ReadonlyMap<string, JobRole>,
   userByID: ReadonlyMap<string, TenantUser>,
+  capabilityByID: ReadonlyMap<string, Capability>,
 ): string {
   const jobRole = jobRoleByID.get(row.job_role_id)
   const supervisor = userByID.get(row.supervisor_user_id)
@@ -671,6 +893,8 @@ function virployeeSearchText(
     row.description,
     row.supervisor_user_id,
     supervisor?.email,
+    row.capability_ids?.join(' '),
+    row.capability_ids?.map((id) => capabilityByID.get(id)?.name ?? '').join(' '),
     row.state,
   ].join(' ')
 }
@@ -772,6 +996,13 @@ function supervisorName(id: string, userByID?: ReadonlyMap<string, TenantUser>):
   if (!id) return '-'
   const user = userByID?.get(id)
   return user ? userLabel(user) : shortId(id)
+}
+
+function capabilitySummary(ids: string[], capabilityByID?: ReadonlyMap<string, Capability>): string {
+  if (ids.length === 0) return '-'
+  const labels = ids.map((id) => capabilityByID?.get(id)?.name ?? shortId(id))
+  if (labels.length <= 2) return labels.join(', ')
+  return `${labels.slice(0, 2).join(', ')} +${labels.length - 2}`
 }
 
 function userLabel(user: TenantUser): string {

@@ -7,6 +7,7 @@ import (
 
 	"github.com/devpablocristo/companion-v2/internal/jobroles/usecases/domain"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
+	"github.com/devpablocristo/platform/lifecycle/go/lifecycle"
 	"github.com/google/uuid"
 )
 
@@ -179,7 +180,7 @@ func (r *fakeRepo) Update(_ context.Context, tenantID string, id uuid.UUID, inpu
 	return row, nil
 }
 
-func (r *fakeRepo) SoftDelete(_ context.Context, tenantID string, id uuid.UUID, at time.Time) error {
+func (r *fakeRepo) Archive(_ context.Context, tenantID string, id uuid.UUID, at time.Time) error {
 	row, ok := r.rows[id]
 	if !ok || row.TenantID != tenantID || row.State() != domain.StateActive {
 		return domainerr.NotFoundf("job role", id.String())
@@ -190,7 +191,7 @@ func (r *fakeRepo) SoftDelete(_ context.Context, tenantID string, id uuid.UUID, 
 	return nil
 }
 
-func (r *fakeRepo) Restore(_ context.Context, tenantID string, id uuid.UUID) error {
+func (r *fakeRepo) Unarchive(_ context.Context, tenantID string, id uuid.UUID) error {
 	row, ok := r.rows[id]
 	if !ok || row.TenantID != tenantID || row.State() != domain.StateArchived {
 		return domainerr.NotFoundf("job role", id.String())
@@ -214,7 +215,7 @@ func (r *fakeRepo) Trash(_ context.Context, tenantID string, id uuid.UUID, at ti
 	return nil
 }
 
-func (r *fakeRepo) RestoreTrashed(_ context.Context, tenantID string, id uuid.UUID) error {
+func (r *fakeRepo) Restore(_ context.Context, tenantID string, id uuid.UUID) error {
 	row, ok := r.rows[id]
 	if !ok || row.TenantID != tenantID || row.State() != domain.StateTrashed {
 		return domainerr.NotFoundf("job role", id.String())
@@ -226,7 +227,7 @@ func (r *fakeRepo) RestoreTrashed(_ context.Context, tenantID string, id uuid.UU
 	return nil
 }
 
-func (r *fakeRepo) HardDelete(_ context.Context, tenantID string, id uuid.UUID) error {
+func (r *fakeRepo) Purge(_ context.Context, tenantID string, id uuid.UUID) error {
 	row, ok := r.rows[id]
 	if !ok || row.TenantID != tenantID {
 		return domainerr.NotFoundf("job role", id.String())
@@ -243,10 +244,21 @@ func (r *fakeRepo) IsArchived(_ context.Context, tenantID string, id uuid.UUID) 
 	return row.State() == domain.StateArchived, nil
 }
 
-func (r *fakeRepo) State(_ context.Context, tenantID string, id uuid.UUID) (domain.State, error) {
+func (r *fakeRepo) State(_ context.Context, tenantID string, id uuid.UUID) (lifecycle.LifecycleState, error) {
 	row, ok := r.rows[id]
 	if !ok || row.TenantID != tenantID {
 		return "", domainerr.NotFoundf("job role", id.String())
 	}
-	return row.State(), nil
+	return lifecycleState(row.State()), nil
+}
+
+func lifecycleState(state domain.State) lifecycle.LifecycleState {
+	switch state {
+	case domain.StateArchived:
+		return lifecycle.StateArchived
+	case domain.StateTrashed:
+		return lifecycle.StateTrashed
+	default:
+		return lifecycle.StateActive
+	}
 }

@@ -7,6 +7,7 @@ import (
 
 	"github.com/devpablocristo/companion-v2/internal/virployees/usecases/domain"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
+	"github.com/devpablocristo/platform/lifecycle/go/lifecycle"
 	"github.com/google/uuid"
 )
 
@@ -218,7 +219,7 @@ func (r *fakeRepo) Update(_ context.Context, _ string, id uuid.UUID, input domai
 	return row, nil
 }
 
-func (r *fakeRepo) SoftDelete(_ context.Context, _ string, id uuid.UUID, at time.Time) error {
+func (r *fakeRepo) Archive(_ context.Context, _ string, id uuid.UUID, at time.Time) error {
 	row, ok := r.rows[id]
 	if !ok || row.State() != domain.StateActive {
 		return domainerr.NotFoundf("virployee", id.String())
@@ -229,7 +230,7 @@ func (r *fakeRepo) SoftDelete(_ context.Context, _ string, id uuid.UUID, at time
 	return nil
 }
 
-func (r *fakeRepo) Restore(_ context.Context, _ string, id uuid.UUID) error {
+func (r *fakeRepo) Unarchive(_ context.Context, _ string, id uuid.UUID) error {
 	row, ok := r.rows[id]
 	if !ok || row.State() != domain.StateArchived {
 		return domainerr.NotFoundf("virployee", id.String())
@@ -253,7 +254,7 @@ func (r *fakeRepo) Trash(_ context.Context, _ string, id uuid.UUID, at time.Time
 	return nil
 }
 
-func (r *fakeRepo) RestoreTrashed(_ context.Context, _ string, id uuid.UUID) error {
+func (r *fakeRepo) Restore(_ context.Context, _ string, id uuid.UUID) error {
 	row, ok := r.rows[id]
 	if !ok || row.State() != domain.StateTrashed {
 		return domainerr.NotFoundf("virployee", id.String())
@@ -265,7 +266,7 @@ func (r *fakeRepo) RestoreTrashed(_ context.Context, _ string, id uuid.UUID) err
 	return nil
 }
 
-func (r *fakeRepo) HardDelete(_ context.Context, _ string, id uuid.UUID) error {
+func (r *fakeRepo) Purge(_ context.Context, _ string, id uuid.UUID) error {
 	if _, ok := r.rows[id]; !ok {
 		return domainerr.NotFoundf("virployee", id.String())
 	}
@@ -281,12 +282,23 @@ func (r *fakeRepo) IsArchived(_ context.Context, _ string, id uuid.UUID) (bool, 
 	return row.State() == domain.StateArchived, nil
 }
 
-func (r *fakeRepo) State(_ context.Context, _ string, id uuid.UUID) (domain.State, error) {
+func (r *fakeRepo) State(_ context.Context, _ string, id uuid.UUID) (lifecycle.LifecycleState, error) {
 	row, ok := r.rows[id]
 	if !ok {
 		return "", domainerr.NotFoundf("virployee", id.String())
 	}
-	return row.State(), nil
+	return lifecycleState(row.State()), nil
+}
+
+func lifecycleState(state domain.State) lifecycle.LifecycleState {
+	switch state {
+	case domain.StateArchived:
+		return lifecycle.StateArchived
+	case domain.StateTrashed:
+		return lifecycle.StateTrashed
+	default:
+		return lifecycle.StateActive
+	}
 }
 
 type fakeJobRoleReader struct {
