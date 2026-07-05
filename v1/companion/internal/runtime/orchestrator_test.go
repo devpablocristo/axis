@@ -577,11 +577,11 @@ func TestOrchestrator_BlocksPlanStepWhenEvidenceContractMissing(t *testing.T) {
 		return `{"result":{"ok":true}}`, nil
 	})
 	toolkit.setMetadata("pymes_customers_search", ToolMetadata{
-			Operation:        "pymes.customers.search",
-			CapabilityID:     "pymes.customers.search",
-			Product:          "pymes",
-			EvidenceRequired: []string{"items"},
-		})
+		Operation:        "pymes.customers.search",
+		CapabilityID:     "pymes.customers.search",
+		Product:          "pymes",
+		EvidenceRequired: []string{"items"},
+	})
 	RegisterTaskPlannerTools(toolkit, planner)
 	provider := &fakeLLMProvider{
 		responses: []ChatResponse{
