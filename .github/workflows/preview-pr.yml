@@ -24,21 +24,20 @@ jobs:
         with:
           filters: |
             axis:
-              - 'bff/**'
-              - 'companion/**'
-              - 'console/**'
-              - 'nexus/**'
-              - 'Dockerfile.*'
-              - 'console.nginx.conf.template'
+              - 'v1/**'
+              - 'v2/**'
               - '.github/workflows/**'
       - id: resolve
         env:
           SAME_REPO: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
           IS_DRAFT: ${{ github.event.pull_request.draft }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
           AXIS_CHANGED: ${{ steps.filter.outputs.axis }}
         run: |
           should_deploy=false
-          if [[ "$SAME_REPO" == "true" && "$IS_DRAFT" != "true" && "$AXIS_CHANGED" == "true" ]]; then
+          if [[ "$PR_AUTHOR" == "dependabot[bot]" ]]; then
+            echo "Skipping preview deploy for Dependabot PRs."
+          elif [[ "$SAME_REPO" == "true" && "$IS_DRAFT" != "true" && "$AXIS_CHANGED" == "true" ]]; then
             should_deploy=true
           fi
           echo "should_deploy=$should_deploy" >> "$GITHUB_OUTPUT"
@@ -55,7 +54,7 @@ jobs:
 
   cleanup:
     name: Cleanup PR preview
-    if: github.event.action == 'closed' && github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event.action == 'closed' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]'
     uses: ./.github/workflows/preview-cleanup.yml
     with:
       pr_number: ${{ github.event.pull_request.number }}
