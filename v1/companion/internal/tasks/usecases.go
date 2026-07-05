@@ -15,19 +15,19 @@ import (
 
 // Identidad del servicio Companion ante Nexus (documentado en README).
 const (
-	CompanionRequesterType     = "service"
-	CompanionRequesterID       = identityctx.CompanionPrincipal
-	CompanionRequesterName     = "Companion Employee AI"
-	ActionTypePropose          = "companion.propose"
-	TaskActionInvestigate      = "investigate"
-	TaskActionPropose          = "propose"
-	TaskActionSyncNexus        = "sync_nexus"
-	TaskActionVerifyExecution  = "verify_execution"
-	TaskActionSetDurablePlan   = "set_durable_plan"
-	TaskActionUpdatePlanStep   = "update_plan_step"
-	TaskActionPlanCheckpoint   = "plan_checkpoint"
-	TaskActionPrepareComp      = "prepare_compensation"
-	TaskActionExecuteComp      = "execute_compensation"
+	CompanionRequesterType    = "service"
+	CompanionRequesterID      = identityctx.CompanionPrincipal
+	CompanionRequesterName    = "Companion Employee AI"
+	ActionTypePropose         = "companion.propose"
+	TaskActionInvestigate     = "investigate"
+	TaskActionPropose         = "propose"
+	TaskActionSyncNexus       = "sync_nexus"
+	TaskActionVerifyExecution = "verify_execution"
+	TaskActionSetDurablePlan  = "set_durable_plan"
+	TaskActionUpdatePlanStep  = "update_plan_step"
+	TaskActionPlanCheckpoint  = "plan_checkpoint"
+	TaskActionPrepareComp     = "prepare_compensation"
+	TaskActionExecuteComp     = "execute_compensation"
 
 	TaskArtifactExecutionVerification = "execution_verification"
 

@@ -127,11 +127,11 @@ func TestRuntimeControlsHandlerPutMCPPolicyPreservesNonMCPFields(t *testing.T) {
 		AllowedModels:          []string{"gemini-1"},
 		MonthlyTokenBudget:     1000,
 		MonthlyToolCallBudget:  100,
-			AllowedProductSurfaces: []string{"companion"},
-			ControlPlane: OrgControlPlaneSettings{
-				Memory: OrgMemoryPolicy{
-					RetentionDays:     30,
-					RequireProvenance: true,
+		AllowedProductSurfaces: []string{"companion"},
+		ControlPlane: OrgControlPlaneSettings{
+			Memory: OrgMemoryPolicy{
+				RetentionDays:     30,
+				RequireProvenance: true,
 			},
 			ProductPolicies: map[string]ProductRuntimePolicy{
 				"ponti": {MonthlyCostBudgetCents: 123, MaxAutonomy: AutonomyA1},
@@ -157,7 +157,7 @@ func TestRuntimeControlsHandlerPutMCPPolicyPreservesNonMCPFields(t *testing.T) {
 	if policy.MonthlyTokenBudget != 1000 || policy.MonthlyToolCallBudget != 100 {
 		t.Fatalf("expected budgets preserved, got %+v", policy)
 	}
-		if policy.ControlPlane.Memory.RetentionDays != 30 || !policy.ControlPlane.Memory.RequireProvenance {
+	if policy.ControlPlane.Memory.RetentionDays != 30 || !policy.ControlPlane.Memory.RequireProvenance {
 		t.Fatalf("expected memory policy preserved, got %+v", policy.ControlPlane.Memory)
 	}
 	if policy.Metadata["existing"] != "kept" {

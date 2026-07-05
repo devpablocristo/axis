@@ -182,7 +182,7 @@ jobs:
         run: |
           for item in nexus companion bff console; do
             image_uri="${REGISTRY}/${PROJECT_ID}/${AR_REPOSITORY}/axis-${item}:${IMAGE_TAG}"
-            docker build -f "Dockerfile.${item}" -t "$image_uri" .
+            docker build -f "v1/Dockerfile.${item}" -t "$image_uri" v1
             docker push "$image_uri"
             echo "${item^^}_IMAGE=$image_uri" >> "$GITHUB_ENV"
           done
