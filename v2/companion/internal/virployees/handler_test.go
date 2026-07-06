@@ -11,6 +11,11 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
+	capabilitydomain "github.com/devpablocristo/companion-v2/internal/capabilities/usecases/domain"
+	jobroledomain "github.com/devpablocristo/companion-v2/internal/jobroles/usecases/domain"
+	profiletemplatedomain "github.com/devpablocristo/companion-v2/internal/profiletemplates/usecases/domain"
+	"github.com/devpablocristo/companion-v2/internal/virployees/dryrun"
+	"github.com/devpablocristo/companion-v2/internal/virployees/runtimecontext"
 	"github.com/devpablocristo/companion-v2/internal/virployees/usecases/domain"
 	ginmw "github.com/devpablocristo/platform/http/gin/go"
 )
@@ -106,6 +111,146 @@ func TestHandlerListsAutonomyLevels(t *testing.T) {
 	}
 }
 
+func TestHandlerRuntimeContext(t *testing.T) {
+	fake := &handlerFakeUseCases{}
+	router := testRouter(fake)
+	id := uuid.New()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/virployees/"+id.String()+"/runtime-context", nil)
+	req.Header.Set("X-Tenant-ID", "tenant-1")
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if fake.lastTenant != "tenant-1" {
+		t.Fatalf("expected tenant-1, got %q", fake.lastTenant)
+	}
+	var payload struct {
+		Virployee struct {
+			ID               string `json:"id"`
+			SupervisorUserID string `json:"supervisor_user_id"`
+		} `json:"virployee"`
+		JobRole struct {
+			Name             string        `json:"name"`
+			Responsibilities []interface{} `json:"responsibilities"`
+			SuccessCriteria  []interface{} `json:"success_criteria"`
+		} `json:"job_role"`
+		ProfileTemplate struct {
+			SystemPrompt string `json:"system_prompt"`
+			MaxAutonomy  string `json:"max_autonomy"`
+		} `json:"profile_template"`
+		Capabilities []struct {
+			CapabilityKey    string `json:"capability_key"`
+			RequiredAutonomy string `json:"required_autonomy"`
+		} `json:"capabilities"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Virployee.ID != id.String() || payload.Virployee.SupervisorUserID != "dev-user" {
+		t.Fatalf("unexpected virployee payload: %+v", payload.Virployee)
+	}
+	if payload.JobRole.Name != "Receptionist" || payload.JobRole.Responsibilities == nil || payload.JobRole.SuccessCriteria == nil {
+		t.Fatalf("unexpected job role payload: %+v", payload.JobRole)
+	}
+	if payload.ProfileTemplate.SystemPrompt != "Be warm." || payload.ProfileTemplate.MaxAutonomy != "A2" {
+		t.Fatalf("unexpected profile payload: %+v", payload.ProfileTemplate)
+	}
+	if len(payload.Capabilities) != 1 || payload.Capabilities[0].CapabilityKey != "calendar.events.create" || payload.Capabilities[0].RequiredAutonomy != "A2" {
+		t.Fatalf("unexpected capabilities payload: %+v", payload.Capabilities)
+	}
+}
+
+func TestHandlerDryRun(t *testing.T) {
+	fake := &handlerFakeUseCases{}
+	router := testRouter(fake)
+	id := uuid.New()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/virployees/"+id.String()+"/dry-run", strings.NewReader(`{"input":"Agendá una reunión para mañana"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Tenant-ID", "tenant-1")
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if fake.lastTenant != "tenant-1" {
+		t.Fatalf("expected tenant-1, got %q", fake.lastTenant)
+	}
+	var payload struct {
+		Input             string `json:"input"`
+		RequiredAutonomy  string `json:"required_autonomy"`
+		VirployeeAutonomy string `json:"virployee_autonomy"`
+		Decision          string `json:"decision"`
+		Intent            struct {
+			Matched       bool     `json:"matched"`
+			CapabilityKey string   `json:"capability_key"`
+			Confidence    float64  `json:"confidence"`
+			MatchedBy     []string `json:"matched_by"`
+			Rules         []struct {
+				Type   string `json:"type"`
+				Target string `json:"target"`
+				Value  string `json:"value"`
+			} `json:"rules"`
+		} `json:"intent"`
+		RequiredCapability struct {
+			CapabilityKey    string `json:"capability_key"`
+			RequiredAutonomy string `json:"required_autonomy"`
+			Matched          bool   `json:"matched"`
+		} `json:"required_capability"`
+		RuntimeContext struct {
+			Capabilities []struct {
+				CapabilityKey string `json:"capability_key"`
+			} `json:"capabilities"`
+		} `json:"runtime_context"`
+		Draft struct {
+			Status string `json:"status"`
+			Action string `json:"action"`
+			Kind   string `json:"kind"`
+			Fields []struct {
+				Key   string `json:"key"`
+				Value string `json:"value"`
+			} `json:"fields"`
+			MissingFields []struct {
+				Key string `json:"key"`
+			} `json:"missing_fields"`
+		} `json:"draft"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Input != "Agendá una reunión para mañana" || payload.Decision != "allowed" {
+		t.Fatalf("unexpected dry run payload: %+v", payload)
+	}
+	if payload.RequiredCapability.CapabilityKey != "calendar.events.create" || payload.RequiredCapability.RequiredAutonomy != "A2" || !payload.RequiredCapability.Matched {
+		t.Fatalf("unexpected required capability: %+v", payload.RequiredCapability)
+	}
+	if !payload.Intent.Matched || payload.Intent.CapabilityKey != "calendar.events.create" || payload.Intent.Confidence != 0.9 {
+		t.Fatalf("unexpected intent: %+v", payload.Intent)
+	}
+	if len(payload.Intent.MatchedBy) != 2 || len(payload.Intent.Rules) != 2 {
+		t.Fatalf("unexpected intent evidence: %+v", payload.Intent)
+	}
+	if payload.RequiredAutonomy != "A2" || payload.VirployeeAutonomy != "A2" {
+		t.Fatalf("unexpected autonomy values: required=%q virployee=%q", payload.RequiredAutonomy, payload.VirployeeAutonomy)
+	}
+	if len(payload.RuntimeContext.Capabilities) != 1 || payload.RuntimeContext.Capabilities[0].CapabilityKey != "calendar.events.create" {
+		t.Fatalf("unexpected runtime context: %+v", payload.RuntimeContext)
+	}
+	if payload.Draft.Status != "needs_input" || payload.Draft.Action != "calendar.events.create" || payload.Draft.Kind != "calendar_event" {
+		t.Fatalf("unexpected draft envelope: %+v", payload.Draft)
+	}
+	if len(payload.Draft.Fields) != 2 || payload.Draft.Fields[0].Key != "title" || payload.Draft.Fields[1].Key != "date_hint" {
+		t.Fatalf("unexpected draft fields: %+v", payload.Draft.Fields)
+	}
+	if len(payload.Draft.MissingFields) != 2 || payload.Draft.MissingFields[0].Key != "time" || payload.Draft.MissingFields[1].Key != "attendees" {
+		t.Fatalf("unexpected missing fields: %+v", payload.Draft.MissingFields)
+	}
+}
+
 func TestHandlerRoutesLifecycle(t *testing.T) {
 	fake := &handlerFakeUseCases{}
 	router := testRouter(fake)
@@ -184,6 +329,52 @@ func (f *handlerFakeUseCases) ListTrash(context.Context, string) ([]domain.Virpl
 
 func (f *handlerFakeUseCases) Get(_ context.Context, _ string, id uuid.UUID) (domain.Virployee, error) {
 	return domain.Virployee{ID: id, Name: "Ops", JobRoleID: uuid.New(), ProfileTemplateID: uuid.New(), SupervisorUserID: "dev-user", Autonomy: domain.AutonomyA1}, nil
+}
+
+func (f *handlerFakeUseCases) RuntimeContext(_ context.Context, tenantID string, id uuid.UUID) (runtimecontext.Context, error) {
+	f.lastTenant = tenantID
+	jobRoleID := uuid.New()
+	profileTemplateID := uuid.New()
+	capabilityID := uuid.New()
+	return runtimecontext.Context{
+		Virployee: domain.Virployee{
+			ID:                id,
+			Name:              "Sofia",
+			JobRoleID:         jobRoleID,
+			ProfileTemplateID: profileTemplateID,
+			Description:       "Reception support",
+			SupervisorUserID:  "dev-user",
+			Autonomy:          domain.AutonomyA2,
+		},
+		JobRole: jobroledomain.JobRole{
+			ID:      jobRoleID,
+			Name:    "Receptionist",
+			Mission: "Welcome visitors",
+		},
+		ProfileTemplate: profiletemplatedomain.ProfileTemplate{
+			ID:           profileTemplateID,
+			Name:         "Warm profile",
+			SystemPrompt: "Be warm.",
+			MaxAutonomy:  domain.AutonomyA2,
+		},
+		Capabilities: []capabilitydomain.Capability{
+			{
+				ID:               capabilityID,
+				CapabilityKey:    "calendar.events.create",
+				Name:             "Create calendar events",
+				RequiredAutonomy: domain.AutonomyA2,
+			},
+		},
+	}, nil
+}
+
+func (f *handlerFakeUseCases) DryRun(_ context.Context, tenantID string, id uuid.UUID, input string) (dryrun.Result, error) {
+	ctx, err := f.RuntimeContext(context.Background(), tenantID, id)
+	if err != nil {
+		return dryrun.Result{}, err
+	}
+	result := dryrun.Evaluate(input, ctx)
+	return result, nil
 }
 
 func (f *handlerFakeUseCases) Update(_ context.Context, _ string, id uuid.UUID, input domain.UpdateInput) (domain.Virployee, error) {

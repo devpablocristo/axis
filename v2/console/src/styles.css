@@ -588,7 +588,8 @@ button:disabled,
   margin-top: 12px;
 }
 
-.virployees-control .virployee-preview-inline {
+.virployees-control .virployee-preview-inline,
+.virployees-control .virployee-dry-run-inline {
   grid-column: 1 / -1;
   width: 100%;
   margin-top: 12px;
@@ -967,13 +968,15 @@ tbody tr:hover {
   color: var(--axis-muted);
 }
 
-.virployee-preview-inline {
+.virployee-preview-inline,
+.virployee-dry-run-inline {
   width: 100%;
   margin-top: 10px;
   margin-bottom: 6px;
 }
 
-.virployee-preview {
+.virployee-preview,
+.virployee-dry-run {
   display: grid;
   gap: 18px;
   padding: 16px;
@@ -1053,6 +1056,69 @@ tbody tr:hover {
   font-weight: 600;
 }
 
+.virployee-dry-run__result {
+  display: grid;
+  gap: 16px;
+}
+
+.virployee-dry-run__decision {
+  display: grid;
+  gap: 3px;
+  border: 1px solid var(--axis-border);
+  border-radius: 6px;
+  background: #fff;
+  padding: 10px;
+}
+
+.virployee-dry-run__decision strong {
+  font-size: 14px;
+}
+
+.virployee-dry-run__decision span {
+  color: var(--axis-muted);
+  font-size: 12px;
+}
+
+.virployee-dry-run__decision--allowed {
+  border-color: rgba(31, 143, 112, 0.42);
+  background: rgba(31, 143, 112, 0.06);
+}
+
+.virployee-dry-run__decision--blocked {
+  border-color: rgba(199, 49, 49, 0.42);
+  background: rgba(199, 49, 49, 0.06);
+}
+
+.virployee-dry-run__draft-list {
+  display: grid;
+  gap: 8px;
+}
+
+.virployee-dry-run__draft-list > span {
+  color: var(--axis-muted);
+  font-size: 12px;
+}
+
+.virployee-dry-run__draft-row {
+  display: grid;
+  gap: 3px;
+  border: 1px solid var(--axis-border);
+  border-radius: 6px;
+  background: #fff;
+  padding: 10px;
+}
+
+.virployee-dry-run__draft-row strong {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.virployee-dry-run__draft-row span,
+.virployee-dry-run__draft-row small {
+  color: var(--axis-muted);
+  font-size: 12px;
+}
+
 @media (max-width: 960px) {
   .app-shell {
     grid-template-columns: 1fr;
@@ -1097,6 +1163,7 @@ tbody tr:hover {
   .virployees-control .iam-control__inline-error,
   .virployees-control .iam-control__inline-note,
   .virployees-control .virployee-preview-inline,
+  .virployees-control .virployee-dry-run-inline,
   .virployees-control .virployee-edit-inline,
   .virployees-control .crud-page-shell__header-actions {
     grid-column: 1;

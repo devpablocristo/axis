@@ -106,6 +106,99 @@ export type Virployee = {
   purge_after: LifecycleTimestamp
 }
 
+export type VirployeeRuntimeContext = {
+  virployee: {
+    id: string
+    name: string
+    description: string
+    autonomy: VirployeeAutonomy
+    state: VirployeeState
+    supervisor_user_id: string
+  }
+  job_role: {
+    id: string
+    name: string
+    mission: string
+    responsibilities: Array<{
+      title: string
+      description: string
+      expected_outcome: string
+      priority: number
+    }>
+    success_criteria: Array<{
+      title: string
+      description: string
+      target_value: string
+      priority: number
+    }>
+  }
+  profile_template: {
+    id: string
+    name: string
+    system_prompt: string
+    max_autonomy: VirployeeAutonomy
+  }
+  capabilities: Array<{
+    id: string
+    capability_key: string
+    name: string
+    required_autonomy: VirployeeAutonomy
+  }>
+}
+
+export type VirployeeDryRun = {
+  input: string
+  runtime_context: VirployeeRuntimeContext
+  intent: VirployeeDryRunIntent
+  required_capability?: {
+    id?: string
+    capability_key: string
+    name?: string
+    required_autonomy: VirployeeAutonomy
+    matched: boolean
+  }
+  required_autonomy: VirployeeAutonomy
+  virployee_autonomy: VirployeeAutonomy
+  decision: 'allowed' | 'blocked'
+  reason: string
+  next_step: string
+  draft: VirployeeDryRunDraft
+}
+
+export type VirployeeDryRunIntent = {
+  matched: boolean
+  capability_key: string
+  domain: string
+  resource: string
+  action: string
+  confidence: number
+  matched_by: string[]
+  rules: Array<{
+    type: string
+    target: string
+    value: string
+  }>
+}
+
+export type VirployeeDryRunDraft = {
+  status: 'ready' | 'needs_input' | 'blocked' | 'not_applicable'
+  action: string
+  kind: string
+  summary: string
+  fields: Array<{
+    key: string
+    label: string
+    value: string
+    source: string
+  }>
+  missing_fields: Array<{
+    key: string
+    label: string
+    reason: string
+  }>
+  notes: string[]
+}
+
 export type VirployeeInput = {
   name: string
   job_role_id: string
@@ -500,6 +593,31 @@ export function updateVirployee(
     tenantId,
     principalId,
     body: input,
+  })
+}
+
+export function getVirployeeRuntimeContext(
+  id: string,
+  tenantId: string,
+  principalId: string,
+): Promise<VirployeeRuntimeContext> {
+  return axisFetch<VirployeeRuntimeContext>(
+    `/api/virployees/${encodeURIComponent(id)}/runtime-context`,
+    { tenantId, principalId },
+  )
+}
+
+export function dryRunVirployee(
+  id: string,
+  input: string,
+  tenantId: string,
+  principalId: string,
+): Promise<VirployeeDryRun> {
+  return axisFetch<VirployeeDryRun>(`/api/virployees/${encodeURIComponent(id)}/dry-run`, {
+    method: 'POST',
+    tenantId,
+    principalId,
+    body: { input },
   })
 }
 

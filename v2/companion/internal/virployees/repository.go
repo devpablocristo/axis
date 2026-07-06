@@ -96,7 +96,7 @@ func (r *Repository) Get(ctx context.Context, tenantID string, id uuid.UUID) (do
 	row := r.pool.QueryRow(ctx, `
 		SELECT id::text, name, job_role_id::text, profile_template_id::text, description, supervisor_user_id::text, autonomy, created_at, updated_at, archived_at, trashed_at, purge_after
 		FROM virployees
-		WHERE tenant_id = $1 AND id = $2::uuid AND trashed_at IS NULL
+		WHERE tenant_id = $1 AND id = $2::uuid
 	`, tenantID, id.String())
 	item, err := scanVirployee(row)
 	if err != nil {

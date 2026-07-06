@@ -12,9 +12,13 @@ import {
   type VirployeeAutonomy,
   type VirployeeAutonomyLevel,
   type Virployee,
+  type VirployeeDryRun,
+  type VirployeeRuntimeContext,
   type ProfileTemplate,
   archiveVirployee,
   createVirployee,
+  dryRunVirployee,
+  getVirployeeRuntimeContext,
   listCapabilities,
   listJobRoles,
   listProfileTemplates,
@@ -98,6 +102,16 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
   const [profileTemplates, setProfileTemplates] = useState<ProfileTemplate[]>([])
   const [profileTemplatesError, setProfileTemplatesError] = useState('')
   const [previewRow, setPreviewRow] = useState<Virployee | null>(null)
+  const [previewContext, setPreviewContext] = useState<VirployeeRuntimeContext | null>(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const [previewError, setPreviewError] = useState('')
+  const previewRequestRef = useRef(0)
+  const [dryRunRow, setDryRunRow] = useState<Virployee | null>(null)
+  const [dryRunInput, setDryRunInput] = useState('')
+  const [dryRunResult, setDryRunResult] = useState<VirployeeDryRun | null>(null)
+  const [dryRunLoading, setDryRunLoading] = useState(false)
+  const [dryRunError, setDryRunError] = useState('')
+  const dryRunRequestRef = useRef(0)
   const [editRow, setEditRow] = useState<Virployee | null>(null)
   const [editValues, setEditValues] = useState<VirployeeEditValues | null>(null)
   const [editSaving, setEditSaving] = useState(false)
@@ -192,6 +206,7 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
     setProfileTemplates([])
     setProfileTemplatesError('')
     closePreview()
+    closeDryRun()
     closeEdit()
   }, [lifecycleView, tenantId])
 
@@ -446,6 +461,7 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
 
   const openEdit = (row: Virployee) => {
     closePreview()
+    closeDryRun()
     setEditRow(row)
     setEditValues(virployeeToEditValues(row))
     setEditError('')
@@ -461,12 +477,74 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
 
   const openPreview = (row: Virployee) => {
     closeEdit()
+    closeDryRun()
+    const requestID = previewRequestRef.current + 1
+    previewRequestRef.current = requestID
     setPreviewRow(row)
+    setPreviewContext(null)
+    setPreviewError('')
+    setPreviewLoading(true)
     setActionError('')
+    getVirployeeRuntimeContext(row.id, tenantId, principalId)
+      .then((context) => {
+        if (previewRequestRef.current !== requestID) return
+        setPreviewContext(context)
+      })
+      .catch((error) => {
+        if (previewRequestRef.current !== requestID) return
+        setPreviewError(error instanceof Error ? error.message : 'Could not load Runtime Context')
+      })
+      .finally(() => {
+        if (previewRequestRef.current === requestID) setPreviewLoading(false)
+      })
   }
 
   const closePreview = () => {
+    previewRequestRef.current += 1
     setPreviewRow(null)
+    setPreviewContext(null)
+    setPreviewLoading(false)
+    setPreviewError('')
+  }
+
+  const openDryRun = (row: Virployee) => {
+    closePreview()
+    closeEdit()
+    dryRunRequestRef.current += 1
+    setDryRunRow(row)
+    setDryRunInput('')
+    setDryRunResult(null)
+    setDryRunError('')
+    setDryRunLoading(false)
+    setActionError('')
+  }
+
+  const closeDryRun = () => {
+    dryRunRequestRef.current += 1
+    setDryRunRow(null)
+    setDryRunInput('')
+    setDryRunResult(null)
+    setDryRunLoading(false)
+    setDryRunError('')
+  }
+
+  const runDryRun = async () => {
+    if (!dryRunRow || dryRunLoading || stringValue(dryRunInput).length === 0) return
+    const requestID = dryRunRequestRef.current + 1
+    dryRunRequestRef.current = requestID
+    setDryRunLoading(true)
+    setDryRunError('')
+    setDryRunResult(null)
+    try {
+      const result = await dryRunVirployee(dryRunRow.id, dryRunInput, tenantId, principalId)
+      if (dryRunRequestRef.current !== requestID) return
+      setDryRunResult(result)
+    } catch (error) {
+      if (dryRunRequestRef.current !== requestID) return
+      setDryRunError(error instanceof Error ? error.message : 'Could not run dry run')
+    } finally {
+      if (dryRunRequestRef.current === requestID) setDryRunLoading(false)
+    }
   }
 
   const updateEditValue = (key: keyof VirployeeEditValues, value: string) => {
@@ -539,7 +617,7 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
         searchText={(row) => virployeeSearchText(row, autonomyByLevel, jobRoleByID, userByID, capabilityByID, profileTemplateByID)}
         toFormValues={virployeeToFormValues}
         onExternalEdit={openEdit}
-        rowActions={virployeeRowActions(openPreview)}
+        rowActions={virployeeRowActions(openPreview, openDryRun)}
         isValid={isValidVirployeeForm}
         emptyState="No virployees"
         archivedEmptyState="No archived virployees"
@@ -554,6 +632,7 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
               busy={bulkBusy || !isActive}
               onCreate={() => {
                 closePreview()
+                closeDryRun()
                 closeEdit()
                 setCreateOpen(true)
                 setCreateRequested(true)
@@ -578,12 +657,26 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
             {previewRow ? (
               <VirployeePreviewInline
                 row={previewRow}
+                context={previewContext}
+                loading={previewLoading}
+                error={previewError}
                 autonomyByLevel={autonomyByLevel}
-                jobRole={jobRoleByID.get(previewRow.job_role_id)}
-                profileTemplate={profileTemplateByID.get(previewRow.profile_template_id)}
-                capabilities={previewRow.capability_ids.map((id) => capabilityByID.get(id) ?? id)}
-                supervisor={userByID.get(previewRow.supervisor_user_id)}
+                supervisor={userByID.get((previewContext?.virployee.supervisor_user_id ?? previewRow.supervisor_user_id))}
                 onClose={closePreview}
+              />
+            ) : null}
+            {dryRunRow ? (
+              <VirployeeDryRunInline
+                row={dryRunRow}
+                input={dryRunInput}
+                result={dryRunResult}
+                loading={dryRunLoading}
+                error={dryRunError}
+                autonomyByLevel={autonomyByLevel}
+                supervisor={userByID.get(dryRunResult?.runtime_context.virployee.supervisor_user_id ?? dryRunRow.supervisor_user_id)}
+                onInputChange={setDryRunInput}
+                onRun={() => void runDryRun()}
+                onClose={closeDryRun}
               />
             ) : null}
             {editRow && editValues ? (
@@ -772,18 +865,20 @@ function VirployeeEditInline(props: {
 
 function VirployeePreviewInline(props: {
   row: Virployee
+  context: VirployeeRuntimeContext | null
+  loading: boolean
+  error: string
   autonomyByLevel: ReadonlyMap<VirployeeAutonomy, VirployeeAutonomyLevel>
-  jobRole?: JobRole
-  profileTemplate?: ProfileTemplate
-  capabilities: Array<Capability | string>
   supervisor?: TenantUser
   onClose: () => void
 }) {
-  const description = stringValue(props.row.description)
-  const jobRoleNameValue = props.jobRole?.name ?? 'Unknown Job Role'
-  const jobRoleMission = stringValue(props.jobRole?.mission ?? '')
-  const profileNameValue = props.profileTemplate?.name ?? 'Unknown Profile Template'
-  const profilePrompt = stringValue(props.profileTemplate?.system_prompt ?? '')
+  const virployee = props.context?.virployee ?? props.row
+  const description = stringValue(virployee.description)
+  const jobRoleNameValue = props.context?.job_role.name ?? 'Unknown Job Role'
+  const jobRoleMission = stringValue(props.context?.job_role.mission ?? '')
+  const profileNameValue = props.context?.profile_template.name ?? 'Unknown Profile Template'
+  const profilePrompt = stringValue(props.context?.profile_template.system_prompt ?? '')
+  const capabilities = props.context?.capabilities ?? []
   const supervisorValue = props.supervisor ? userLabel(props.supervisor) : 'Unknown Supervisor'
 
   return (
@@ -792,11 +887,13 @@ function VirployeePreviewInline(props: {
         <h2>Virployee preview</h2>
       </div>
       <div className="virployee-preview">
+        {props.loading ? <p className="iam-control__inline-note">Loading Runtime Context...</p> : null}
+        {props.error ? <p role="alert" className="iam-control__inline-error">{props.error}</p> : null}
         <section className="virployee-preview__section" aria-label="Virployee">
-          <h3>{props.row.name}</h3>
+          <h3>{virployee.name}</h3>
           <div className="virployee-preview__grid">
-            <PreviewField label="Autonomy" value={formatAutonomy(props.row.autonomy, props.autonomyByLevel)} />
-            <PreviewField label="State" value={formatState(props.row.state)} />
+            <PreviewField label="Autonomy" value={formatAutonomy(virployee.autonomy, props.autonomyByLevel)} />
+            <PreviewField label="State" value={formatState(virployee.state)} />
             <PreviewField label="Supervisor" value={supervisorValue} />
             <PreviewField label="Description" value={description || '-'} />
           </div>
@@ -816,7 +913,7 @@ function VirployeePreviewInline(props: {
             <PreviewField label="Name" value={profileNameValue} />
             <PreviewField
               label="Max autonomy"
-              value={props.profileTemplate ? formatAutonomy(props.profileTemplate.max_autonomy, props.autonomyByLevel) : '-'}
+              value={props.context ? formatAutonomy(props.context.profile_template.max_autonomy, props.autonomyByLevel) : '-'}
             />
           </div>
           <div className="virployee-preview__prompt">
@@ -827,27 +924,17 @@ function VirployeePreviewInline(props: {
 
         <section className="virployee-preview__section" aria-label="Capabilities">
           <h3>Capabilities</h3>
-          {props.capabilities.length === 0 ? (
+          {capabilities.length === 0 ? (
             <p className="virployee-preview__empty">No capabilities assigned</p>
           ) : (
             <div className="virployee-preview__capabilities">
-              {props.capabilities.map((capability) => {
-                if (typeof capability === 'string') {
-                  return (
-                    <div key={capability} className="virployee-preview__capability">
-                      <strong>Unknown Capability</strong>
-                      <span>{shortId(capability)}</span>
-                    </div>
-                  )
-                }
-                return (
-                  <div key={capability.id} className="virployee-preview__capability">
-                    <strong>{capability.name}</strong>
-                    <span>{capability.capability_key}</span>
-                    <span>Requires {formatAutonomy(capability.required_autonomy, props.autonomyByLevel)}</span>
-                  </div>
-                )
-              })}
+              {capabilities.map((capability) => (
+                <div key={capability.id} className="virployee-preview__capability">
+                  <strong>{capability.name}</strong>
+                  <span>{capability.capability_key}</span>
+                  <span>Requires {formatAutonomy(capability.required_autonomy, props.autonomyByLevel)}</span>
+                </div>
+              ))}
             </div>
           )}
         </section>
@@ -858,6 +945,203 @@ function VirployeePreviewInline(props: {
         </button>
       </footer>
     </div>
+  )
+}
+
+function VirployeeDryRunInline(props: {
+  row: Virployee
+  input: string
+  result: VirployeeDryRun | null
+  loading: boolean
+  error: string
+  autonomyByLevel: ReadonlyMap<VirployeeAutonomy, VirployeeAutonomyLevel>
+  supervisor?: TenantUser
+  onInputChange: (value: string) => void
+  onRun: () => void
+  onClose: () => void
+}) {
+  const context = props.result?.runtime_context
+  const virployee = context?.virployee ?? props.row
+  const requiredCapability = props.result?.required_capability
+  const capabilities = context?.capabilities ?? []
+  const canRun = stringValue(props.input).length > 0 && !props.loading
+  const supervisorValue = props.supervisor ? userLabel(props.supervisor) : 'Unknown Supervisor'
+
+  return (
+    <div className="card crud-form-card virployee-dry-run-inline">
+      <div className="card-header">
+        <h2>Dry run</h2>
+      </div>
+      <form
+        className="virployee-dry-run"
+        onSubmit={(event) => {
+          event.preventDefault()
+          props.onRun()
+        }}
+      >
+        {props.error ? <p role="alert" className="iam-control__inline-error">{props.error}</p> : null}
+        <label className="form-group full-width">
+          Input
+          <textarea
+            rows={3}
+            value={props.input}
+            placeholder="Agendá una reunión para mañana"
+            onChange={(event) => props.onInputChange(event.currentTarget.value)}
+          />
+        </label>
+
+        {props.result ? (
+          <section className="virployee-dry-run__result" aria-label="Dry run result">
+            <div className={`virployee-dry-run__decision virployee-dry-run__decision--${props.result.decision}`}>
+              <strong>{props.result.decision === 'allowed' ? 'Allowed' : 'Blocked'}</strong>
+              <span>{props.result.reason}</span>
+            </div>
+            <div className="virployee-preview__grid">
+              <PreviewField
+                label="Required capability"
+                value={requiredCapability
+                  ? `${requiredCapability.name || requiredCapability.capability_key}${requiredCapability.matched ? '' : ' (not assigned)'}`
+                  : 'None inferred'}
+              />
+              <PreviewField
+                label="Required autonomy"
+                value={formatAutonomy(props.result.required_autonomy, props.autonomyByLevel)}
+              />
+              <PreviewField
+                label="Virployee autonomy"
+                value={formatAutonomy(props.result.virployee_autonomy, props.autonomyByLevel)}
+              />
+              <PreviewField label="Next step" value={props.result.next_step} />
+            </div>
+
+            <DryRunIntentView intent={props.result.intent} />
+            <DryRunDraftView draft={props.result.draft} />
+
+            <section className="virployee-preview__section" aria-label="Runtime Context">
+              <h3>Runtime Context used</h3>
+              <div className="virployee-preview__grid">
+                <PreviewField label="Virployee" value={virployee.name} />
+                <PreviewField label="Supervisor" value={supervisorValue} />
+                <PreviewField label="Job Role" value={context?.job_role.name ?? 'Unknown Job Role'} />
+                <PreviewField label="Profile Template" value={context?.profile_template.name ?? 'Unknown Profile Template'} />
+              </div>
+              <div className="virployee-preview__prompt">
+                <span>System prompt</span>
+                <pre>{context?.profile_template.system_prompt || '-'}</pre>
+              </div>
+              {capabilities.length === 0 ? (
+                <p className="virployee-preview__empty">No capabilities assigned</p>
+              ) : (
+                <div className="virployee-preview__capabilities">
+                  {capabilities.map((capability) => (
+                    <div key={capability.id} className="virployee-preview__capability">
+                      <strong>{capability.name}</strong>
+                      <span>{capability.capability_key}</span>
+                      <span>Requires {formatAutonomy(capability.required_autonomy, props.autonomyByLevel)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          </section>
+        ) : (
+          <p className="iam-control__inline-note">Dry run checks the Runtime Context, required Capability and autonomy decision without executing anything.</p>
+        )}
+
+        <footer className="virployee-edit-form__footer">
+          <button type="submit" className="btn-primary" disabled={!canRun}>
+            {props.loading ? 'Running...' : 'Run'}
+          </button>
+          <button type="button" className="btn-secondary" disabled={props.loading} onClick={props.onClose}>
+            Close
+          </button>
+        </footer>
+      </form>
+    </div>
+  )
+}
+
+function DryRunIntentView(props: { intent: VirployeeDryRun['intent'] }) {
+  const intent = props.intent
+  return (
+    <section className="virployee-preview__section" aria-label="Intent">
+      <h3>Intent</h3>
+      <div className="virployee-preview__grid">
+        <PreviewField label="Matched" value={intent.matched ? 'Yes' : 'No'} />
+        <PreviewField label="Capability key" value={intent.capability_key || '-'} />
+        <PreviewField label="Action" value={intent.action || '-'} />
+        <PreviewField label="Confidence" value={formatConfidence(intent.confidence)} />
+      </div>
+      {intent.matched_by.length > 0 ? (
+        <div className="virployee-dry-run__draft-list" aria-label="Intent matched by">
+          <span>Matched by</span>
+          {intent.matched_by.map((item) => (
+            <div key={item} className="virployee-dry-run__draft-row">
+              <span>{item}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {intent.rules.length > 0 ? (
+        <div className="virployee-dry-run__draft-list" aria-label="Intent rules">
+          <span>Rules</span>
+          {intent.rules.map((rule) => (
+            <div key={`${rule.type}-${rule.target}-${rule.value}`} className="virployee-dry-run__draft-row">
+              <strong>{rule.type}</strong>
+              <span>{rule.target}: {rule.value}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </section>
+  )
+}
+
+function DryRunDraftView(props: { draft: VirployeeDryRun['draft'] }) {
+  const draft = props.draft
+  return (
+    <section className="virployee-preview__section" aria-label="Draft">
+      <h3>Draft</h3>
+      <div className="virployee-preview__grid">
+        <PreviewField label="Status" value={formatDraftStatus(draft.status)} />
+        <PreviewField label="Action" value={draft.action || '-'} />
+        <PreviewField label="Kind" value={draft.kind || '-'} />
+        <PreviewField label="Summary" value={draft.summary || '-'} />
+      </div>
+      {draft.fields.length > 0 ? (
+        <div className="virployee-dry-run__draft-list" aria-label="Detected fields">
+          <span>Detected fields</span>
+          {draft.fields.map((field) => (
+            <div key={`${field.key}-${field.value}`} className="virployee-dry-run__draft-row">
+              <strong>{field.label}</strong>
+              <span>{field.value}</span>
+              <small>{field.source}</small>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {draft.missing_fields.length > 0 ? (
+        <div className="virployee-dry-run__draft-list" aria-label="Missing fields">
+          <span>Missing fields</span>
+          {draft.missing_fields.map((field) => (
+            <div key={field.key} className="virployee-dry-run__draft-row">
+              <strong>{field.label}</strong>
+              <span>{field.reason}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {draft.notes.length > 0 ? (
+        <div className="virployee-dry-run__draft-list" aria-label="Notes">
+          <span>Notes</span>
+          {draft.notes.map((note) => (
+            <div key={note} className="virployee-dry-run__draft-row">
+              <span>{note}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </section>
   )
 }
 
@@ -965,6 +1249,7 @@ function virployeeColumns(
 
 function virployeeRowActions(
   onPreview: (row: Virployee) => void,
+  onDryRun: (row: Virployee) => void,
 ): NonNullable<CrudPageProps<Virployee>['rowActions']> {
   return [
     {
@@ -972,6 +1257,12 @@ function virployeeRowActions(
       label: 'Preview',
       kind: 'secondary',
       onClick: (row) => onPreview(row),
+    },
+    {
+      id: 'dry-run',
+      label: 'Dry run',
+      kind: 'secondary',
+      onClick: (row) => onDryRun(row),
     },
   ]
 }
@@ -1257,6 +1548,19 @@ function formatState(value: string): string {
   if (value === 'archived') return 'Archived'
   if (value === 'trashed') return 'Trash'
   return value || '-'
+}
+
+function formatDraftStatus(value: VirployeeDryRun['draft']['status']): string {
+  if (value === 'ready') return 'Ready'
+  if (value === 'needs_input') return 'Needs input'
+  if (value === 'blocked') return 'Blocked'
+  if (value === 'not_applicable') return 'Not applicable'
+  return value || '-'
+}
+
+function formatConfidence(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return '0%'
+  return `${Math.round(value * 100)}%`
 }
 
 function formatDate(value: string): string {

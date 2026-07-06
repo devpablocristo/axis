@@ -5,6 +5,9 @@ import (
 	"testing"
 	"time"
 
+	capabilitydomain "github.com/devpablocristo/companion-v2/internal/capabilities/usecases/domain"
+	jobroledomain "github.com/devpablocristo/companion-v2/internal/jobroles/usecases/domain"
+	profiletemplatedomain "github.com/devpablocristo/companion-v2/internal/profiletemplates/usecases/domain"
 	"github.com/devpablocristo/companion-v2/internal/virployees/usecases/domain"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
 	"github.com/devpablocristo/platform/lifecycle/go/lifecycle"
@@ -280,6 +283,286 @@ func TestUseCasesUpdateArchivedOrTrashedFails(t *testing.T) {
 	}
 }
 
+func TestUseCasesRuntimeContextReturnsResolvedReferences(t *testing.T) {
+	repo := newFakeRepo()
+	jobRoleID := uuid.New()
+	profileTemplateID := uuid.New()
+	capabilityID := uuid.New()
+	jobRoles := &fakeJobRoleReader{
+		role: jobroledomain.JobRole{
+			ID:       jobRoleID,
+			TenantID: "tenant-1",
+			Name:     "Receptionist",
+			Mission:  "Welcome visitors",
+		},
+	}
+	profiles := &fakeProfileTemplateReader{
+		profile: profiletemplatedomain.ProfileTemplate{
+			ID:           profileTemplateID,
+			TenantID:     "tenant-1",
+			Name:         "Warm receptionist",
+			SystemPrompt: "Be warm and concise.",
+			MaxAutonomy:  domain.AutonomyA2,
+		},
+	}
+	capabilities := &fakeCapabilityReader{
+		rows: map[uuid.UUID]capabilitydomain.Capability{
+			capabilityID: {
+				ID:               capabilityID,
+				TenantID:         "tenant-1",
+				CapabilityKey:    "calendar.events.create",
+				Name:             "Create calendar events",
+				RequiredAutonomy: domain.AutonomyA2,
+			},
+		},
+	}
+	uc, err := NewUseCases(repo, jobRoles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uc.SetProfileTemplateReader(profiles)
+	uc.SetCapabilityValidator(capabilities)
+
+	created, err := uc.Create(context.Background(), "tenant-1", domain.CreateInput{
+		Name:              "Sofia",
+		JobRoleID:         jobRoleID.String(),
+		ProfileTemplateID: profileTemplateID.String(),
+		CapabilityIDs:     []string{capabilityID.String()},
+		SupervisorUserID:  "dev-user",
+		Autonomy:          "A2",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, err := uc.RuntimeContext(context.Background(), "tenant-1", created.ID)
+	if err != nil {
+		t.Fatalf("RuntimeContext: %v", err)
+	}
+	if ctx.Virployee.ID != created.ID || ctx.JobRole.Name != "Receptionist" || ctx.ProfileTemplate.SystemPrompt != "Be warm and concise." {
+		t.Fatalf("unexpected runtime context: %+v", ctx)
+	}
+	if len(ctx.Capabilities) != 1 || ctx.Capabilities[0].CapabilityKey != "calendar.events.create" {
+		t.Fatalf("unexpected capabilities: %+v", ctx.Capabilities)
+	}
+}
+
+func TestUseCasesRuntimeContextFailsWhenProfileTemplateNoLongerAllowsAutonomy(t *testing.T) {
+	repo := newFakeRepo()
+	jobRoleID := uuid.New()
+	profileTemplateID := uuid.New()
+	profiles := &fakeProfileTemplateReader{
+		profile: profiletemplatedomain.ProfileTemplate{
+			ID:           profileTemplateID,
+			TenantID:     "tenant-1",
+			Name:         "Safe profile",
+			SystemPrompt: "Stay safe.",
+			MaxAutonomy:  domain.AutonomyA2,
+		},
+	}
+	uc, err := NewUseCases(repo, &fakeJobRoleReader{
+		role: jobroledomain.JobRole{ID: jobRoleID, TenantID: "tenant-1", Name: "Ops"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	uc.SetProfileTemplateReader(profiles)
+
+	created, err := uc.Create(context.Background(), "tenant-1", domain.CreateInput{
+		Name:              "Ops",
+		JobRoleID:         jobRoleID.String(),
+		ProfileTemplateID: profileTemplateID.String(),
+		SupervisorUserID:  "dev-user",
+		Autonomy:          "A2",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	profiles.profile.MaxAutonomy = domain.AutonomyA1
+	if _, err := uc.RuntimeContext(context.Background(), "tenant-1", created.ID); !domainerr.IsValidation(err) {
+		t.Fatalf("expected validation for profile autonomy mismatch, got %v", err)
+	}
+}
+
+func TestUseCasesRuntimeContextFailsWhenCapabilityRequiresMoreAutonomy(t *testing.T) {
+	repo := newFakeRepo()
+	jobRoleID := uuid.New()
+	profileTemplateID := uuid.New()
+	capabilityID := uuid.New()
+	capabilities := &fakeCapabilityReader{
+		rows: map[uuid.UUID]capabilitydomain.Capability{
+			capabilityID: {
+				ID:               capabilityID,
+				TenantID:         "tenant-1",
+				CapabilityKey:    "calendar.events.create",
+				Name:             "Create calendar events",
+				RequiredAutonomy: domain.AutonomyA3,
+			},
+		},
+	}
+	uc, err := NewUseCases(repo, &fakeJobRoleReader{
+		role: jobroledomain.JobRole{ID: jobRoleID, TenantID: "tenant-1", Name: "Ops"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	uc.SetProfileTemplateReader(&fakeProfileTemplateReader{
+		profile: profiletemplatedomain.ProfileTemplate{
+			ID:           profileTemplateID,
+			TenantID:     "tenant-1",
+			Name:         "Broad profile",
+			SystemPrompt: "Work safely.",
+			MaxAutonomy:  domain.AutonomyA3,
+		},
+	})
+	uc.SetCapabilityValidator(capabilities)
+
+	created, err := uc.Create(context.Background(), "tenant-1", domain.CreateInput{
+		Name:              "Ops",
+		JobRoleID:         jobRoleID.String(),
+		ProfileTemplateID: profileTemplateID.String(),
+		CapabilityIDs:     []string{capabilityID.String()},
+		SupervisorUserID:  "dev-user",
+		Autonomy:          "A2",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := uc.RuntimeContext(context.Background(), "tenant-1", created.ID); !domainerr.IsValidation(err) {
+		t.Fatalf("expected validation for capability autonomy mismatch, got %v", err)
+	}
+}
+
+func TestUseCasesDryRunAllowsMatchedCapability(t *testing.T) {
+	repo := newFakeRepo()
+	jobRoleID := uuid.New()
+	profileTemplateID := uuid.New()
+	capabilityID := uuid.New()
+	uc, err := NewUseCases(repo, &fakeJobRoleReader{
+		role: jobroledomain.JobRole{ID: jobRoleID, TenantID: "tenant-1", Name: "Receptionist"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	uc.SetProfileTemplateReader(&fakeProfileTemplateReader{
+		profile: profiletemplatedomain.ProfileTemplate{
+			ID:           profileTemplateID,
+			TenantID:     "tenant-1",
+			Name:         "Receptionist profile",
+			SystemPrompt: "Be warm.",
+			MaxAutonomy:  domain.AutonomyA2,
+		},
+	})
+	uc.SetCapabilityValidator(&fakeCapabilityReader{
+		rows: map[uuid.UUID]capabilitydomain.Capability{
+			capabilityID: {
+				ID:               capabilityID,
+				TenantID:         "tenant-1",
+				CapabilityKey:    "calendar.events.create",
+				Name:             "Create calendar events",
+				RequiredAutonomy: domain.AutonomyA2,
+			},
+		},
+	})
+
+	created, err := uc.Create(context.Background(), "tenant-1", domain.CreateInput{
+		Name:              "Sofia",
+		JobRoleID:         jobRoleID.String(),
+		ProfileTemplateID: profileTemplateID.String(),
+		CapabilityIDs:     []string{capabilityID.String()},
+		SupervisorUserID:  "dev-user",
+		Autonomy:          "A2",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := uc.DryRun(context.Background(), "tenant-1", created.ID, "Agendá una reunión para mañana")
+	if err != nil {
+		t.Fatalf("DryRun: %v", err)
+	}
+	if result.Decision != "allowed" {
+		t.Fatalf("expected allowed, got %+v", result)
+	}
+	if result.RequiredCapability == nil || result.RequiredCapability.CapabilityKey != "calendar.events.create" || !result.RequiredCapability.Matched {
+		t.Fatalf("unexpected required capability: %+v", result.RequiredCapability)
+	}
+	if result.RequiredAutonomy != domain.AutonomyA2 || result.VirployeeAutonomy != domain.AutonomyA2 {
+		t.Fatalf("unexpected autonomy values: required=%s virployee=%s", result.RequiredAutonomy, result.VirployeeAutonomy)
+	}
+	if result.RuntimeContext.Virployee.ID != created.ID || len(result.RuntimeContext.Capabilities) != 1 {
+		t.Fatalf("unexpected runtime context: %+v", result.RuntimeContext)
+	}
+	if result.Draft.Status != "needs_input" || result.Draft.Action != "calendar.events.create" {
+		t.Fatalf("unexpected draft: %+v", result.Draft)
+	}
+}
+
+func TestUseCasesDryRunBlocksMissingCapability(t *testing.T) {
+	repo := newFakeRepo()
+	jobRoleID := uuid.New()
+	profileTemplateID := uuid.New()
+	uc, err := NewUseCases(repo, &fakeJobRoleReader{
+		role: jobroledomain.JobRole{ID: jobRoleID, TenantID: "tenant-1", Name: "Receptionist"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	uc.SetProfileTemplateReader(&fakeProfileTemplateReader{
+		profile: profiletemplatedomain.ProfileTemplate{
+			ID:           profileTemplateID,
+			TenantID:     "tenant-1",
+			Name:         "Receptionist profile",
+			SystemPrompt: "Be warm.",
+			MaxAutonomy:  domain.AutonomyA2,
+		},
+	})
+	uc.SetCapabilityValidator(&fakeCapabilityReader{rows: map[uuid.UUID]capabilitydomain.Capability{}})
+
+	created, err := uc.Create(context.Background(), "tenant-1", domain.CreateInput{
+		Name:              "Sofia",
+		JobRoleID:         jobRoleID.String(),
+		ProfileTemplateID: profileTemplateID.String(),
+		SupervisorUserID:  "dev-user",
+		Autonomy:          "A2",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := uc.DryRun(context.Background(), "tenant-1", created.ID, "Agendá una reunión para mañana")
+	if err != nil {
+		t.Fatalf("DryRun: %v", err)
+	}
+	if result.Decision != "blocked" {
+		t.Fatalf("expected blocked, got %+v", result)
+	}
+	if result.RequiredCapability == nil || result.RequiredCapability.CapabilityKey != "calendar.events.create" || result.RequiredCapability.Matched {
+		t.Fatalf("unexpected required capability: %+v", result.RequiredCapability)
+	}
+	if result.RequiredAutonomy != domain.AutonomyA2 || result.Reason != "required capability is not assigned to the virployee" {
+		t.Fatalf("unexpected blocked result: %+v", result)
+	}
+	if result.Draft.Status != "blocked" {
+		t.Fatalf("expected blocked draft, got %+v", result.Draft)
+	}
+}
+
+func TestUseCasesDryRunRejectsEmptyInput(t *testing.T) {
+	repo := newFakeRepo()
+	uc, err := NewUseCases(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = uc.DryRun(context.Background(), "tenant-1", uuid.New(), " ")
+	if !domainerr.IsValidation(err) {
+		t.Fatalf("expected validation for empty input, got %v", err)
+	}
+}
+
 func assertListLen(t *testing.T, fn func(context.Context, string) ([]domain.Virployee, error), want int) {
 	t.Helper()
 	got, err := fn(context.Background(), "tenant-1")
@@ -329,7 +612,7 @@ func (r *fakeRepo) List(_ context.Context, _ string, state domain.State) ([]doma
 
 func (r *fakeRepo) Get(_ context.Context, _ string, id uuid.UUID) (domain.Virployee, error) {
 	row, ok := r.rows[id]
-	if !ok || row.State() == domain.StateTrashed {
+	if !ok {
 		return domain.Virployee{}, domainerr.NotFoundf("virployee", id.String())
 	}
 	return row, nil
@@ -440,6 +723,7 @@ func lifecycleState(state domain.State) lifecycle.LifecycleState {
 type fakeJobRoleReader struct {
 	lastTenant string
 	lastID     uuid.UUID
+	role       jobroledomain.JobRole
 	err        error
 }
 
@@ -452,10 +736,25 @@ func (r *fakeJobRoleReader) EnsureActive(_ context.Context, tenantID string, id 
 	return nil
 }
 
+func (r *fakeJobRoleReader) Get(_ context.Context, tenantID string, id uuid.UUID) (jobroledomain.JobRole, error) {
+	if r.err != nil {
+		return jobroledomain.JobRole{}, r.err
+	}
+	role := r.role
+	if role.ID == uuid.Nil {
+		role = jobroledomain.JobRole{ID: id, TenantID: tenantID, Name: "Job Role"}
+	}
+	if role.ID != id || role.TenantID != tenantID || role.State() == jobroledomain.StateTrashed {
+		return jobroledomain.JobRole{}, domainerr.NotFoundf("job_role", id.String())
+	}
+	return role, nil
+}
+
 type fakeProfileTemplateReader struct {
 	lastTenant   string
 	lastID       uuid.UUID
 	lastAutonomy domain.AutonomyLevel
+	profile      profiletemplatedomain.ProfileTemplate
 	err          error
 }
 
@@ -467,4 +766,44 @@ func (v *fakeProfileTemplateReader) EnsureUsableByVirployee(_ context.Context, t
 		return v.err
 	}
 	return nil
+}
+
+func (v *fakeProfileTemplateReader) Get(_ context.Context, tenantID string, id uuid.UUID) (profiletemplatedomain.ProfileTemplate, error) {
+	if v.err != nil {
+		return profiletemplatedomain.ProfileTemplate{}, v.err
+	}
+	profile := v.profile
+	if profile.ID == uuid.Nil {
+		profile = profiletemplatedomain.ProfileTemplate{
+			ID:           id,
+			TenantID:     tenantID,
+			Name:         "Profile",
+			SystemPrompt: "Prompt.",
+			MaxAutonomy:  domain.AutonomyA5,
+		}
+	}
+	if profile.ID != id || profile.TenantID != tenantID || profile.State() == profiletemplatedomain.StateTrashed {
+		return profiletemplatedomain.ProfileTemplate{}, domainerr.NotFoundf("profile_template", id.String())
+	}
+	return profile, nil
+}
+
+type fakeCapabilityReader struct {
+	rows map[uuid.UUID]capabilitydomain.Capability
+	err  error
+}
+
+func (r *fakeCapabilityReader) EnsureAssignable(context.Context, string, []uuid.UUID, domain.AutonomyLevel) error {
+	return nil
+}
+
+func (r *fakeCapabilityReader) Get(_ context.Context, tenantID string, id uuid.UUID) (capabilitydomain.Capability, error) {
+	if r.err != nil {
+		return capabilitydomain.Capability{}, r.err
+	}
+	row, ok := r.rows[id]
+	if !ok || row.TenantID != tenantID || row.State() == capabilitydomain.StateTrashed {
+		return capabilitydomain.Capability{}, domainerr.NotFoundf("capability", id.String())
+	}
+	return row, nil
 }

@@ -3,6 +3,8 @@ package dto
 import (
 	"time"
 
+	"github.com/devpablocristo/companion-v2/internal/virployees/dryrun"
+	"github.com/devpablocristo/companion-v2/internal/virployees/runtimecontext"
 	"github.com/devpablocristo/companion-v2/internal/virployees/usecases/domain"
 	"github.com/google/uuid"
 )
@@ -39,6 +41,119 @@ type ListAutonomyLevelsResponse struct {
 	Data []AutonomyLevelResponse `json:"data"`
 }
 
+type RuntimeContextResponse struct {
+	Virployee       RuntimeContextVirployeeResponse       `json:"virployee"`
+	JobRole         RuntimeContextJobRoleResponse         `json:"job_role"`
+	ProfileTemplate RuntimeContextProfileTemplateResponse `json:"profile_template"`
+	Capabilities    []RuntimeContextCapabilityResponse    `json:"capabilities"`
+}
+
+type RuntimeContextVirployeeResponse struct {
+	ID               string `json:"id"`
+	Name             string `json:"name"`
+	Description      string `json:"description"`
+	Autonomy         string `json:"autonomy"`
+	State            string `json:"state"`
+	SupervisorUserID string `json:"supervisor_user_id"`
+}
+
+type RuntimeContextJobRoleResponse struct {
+	ID               string                                   `json:"id"`
+	Name             string                                   `json:"name"`
+	Mission          string                                   `json:"mission"`
+	Responsibilities []RuntimeContextResponsibilityResponse   `json:"responsibilities"`
+	SuccessCriteria  []RuntimeContextSuccessCriterionResponse `json:"success_criteria"`
+}
+
+type RuntimeContextResponsibilityResponse struct {
+	Title           string `json:"title"`
+	Description     string `json:"description"`
+	ExpectedOutcome string `json:"expected_outcome"`
+	Priority        int    `json:"priority"`
+}
+
+type RuntimeContextSuccessCriterionResponse struct {
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	TargetValue string `json:"target_value"`
+	Priority    int    `json:"priority"`
+}
+
+type RuntimeContextProfileTemplateResponse struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	SystemPrompt string `json:"system_prompt"`
+	MaxAutonomy  string `json:"max_autonomy"`
+}
+
+type RuntimeContextCapabilityResponse struct {
+	ID               string `json:"id"`
+	CapabilityKey    string `json:"capability_key"`
+	Name             string `json:"name"`
+	RequiredAutonomy string `json:"required_autonomy"`
+}
+
+type DryRunResponse struct {
+	Input              string                    `json:"input"`
+	RuntimeContext     RuntimeContextResponse    `json:"runtime_context"`
+	Intent             DryRunIntentResponse      `json:"intent"`
+	RequiredCapability *DryRunCapabilityResponse `json:"required_capability,omitempty"`
+	RequiredAutonomy   string                    `json:"required_autonomy"`
+	VirployeeAutonomy  string                    `json:"virployee_autonomy"`
+	Decision           string                    `json:"decision"`
+	Reason             string                    `json:"reason"`
+	NextStep           string                    `json:"next_step"`
+	Draft              DryRunDraftResponse       `json:"draft"`
+}
+
+type DryRunCapabilityResponse struct {
+	ID               string `json:"id,omitempty"`
+	CapabilityKey    string `json:"capability_key"`
+	Name             string `json:"name,omitempty"`
+	RequiredAutonomy string `json:"required_autonomy"`
+	Matched          bool   `json:"matched"`
+}
+
+type DryRunIntentResponse struct {
+	Matched       bool                       `json:"matched"`
+	CapabilityKey string                     `json:"capability_key"`
+	Domain        string                     `json:"domain"`
+	Resource      string                     `json:"resource"`
+	Action        string                     `json:"action"`
+	Confidence    float64                    `json:"confidence"`
+	MatchedBy     []string                   `json:"matched_by"`
+	Rules         []DryRunIntentRuleResponse `json:"rules"`
+}
+
+type DryRunIntentRuleResponse struct {
+	Type   string `json:"type"`
+	Target string `json:"target"`
+	Value  string `json:"value"`
+}
+
+type DryRunDraftResponse struct {
+	Status        string                       `json:"status"`
+	Action        string                       `json:"action"`
+	Kind          string                       `json:"kind"`
+	Summary       string                       `json:"summary"`
+	Fields        []DryRunDraftFieldResponse   `json:"fields"`
+	MissingFields []DryRunMissingFieldResponse `json:"missing_fields"`
+	Notes         []string                     `json:"notes"`
+}
+
+type DryRunDraftFieldResponse struct {
+	Key    string `json:"key"`
+	Label  string `json:"label"`
+	Value  string `json:"value"`
+	Source string `json:"source"`
+}
+
+type DryRunMissingFieldResponse struct {
+	Key    string `json:"key"`
+	Label  string `json:"label"`
+	Reason string `json:"reason"`
+}
+
 func VirployeeFromDomain(v domain.Virployee) VirployeeResponse {
 	return VirployeeResponse{
 		ID:                v.ID.String(),
@@ -64,6 +179,117 @@ func ListVirployeesFromDomain(items []domain.Virployee) ListVirployeesResponse {
 		data = append(data, VirployeeFromDomain(item))
 	}
 	return ListVirployeesResponse{Data: data}
+}
+
+func RuntimeContextFromDomain(ctx runtimecontext.Context) RuntimeContextResponse {
+	capabilities := make([]RuntimeContextCapabilityResponse, 0, len(ctx.Capabilities))
+	for _, capability := range ctx.Capabilities {
+		capabilities = append(capabilities, RuntimeContextCapabilityResponse{
+			ID:               capability.ID.String(),
+			CapabilityKey:    capability.CapabilityKey,
+			Name:             capability.Name,
+			RequiredAutonomy: string(capability.RequiredAutonomy),
+		})
+	}
+	return RuntimeContextResponse{
+		Virployee: RuntimeContextVirployeeResponse{
+			ID:               ctx.Virployee.ID.String(),
+			Name:             ctx.Virployee.Name,
+			Description:      ctx.Virployee.Description,
+			Autonomy:         string(ctx.Virployee.Autonomy),
+			State:            string(ctx.Virployee.State()),
+			SupervisorUserID: ctx.Virployee.SupervisorUserID,
+		},
+		JobRole: RuntimeContextJobRoleResponse{
+			ID:               ctx.JobRole.ID.String(),
+			Name:             ctx.JobRole.Name,
+			Mission:          ctx.JobRole.Mission,
+			Responsibilities: []RuntimeContextResponsibilityResponse{},
+			SuccessCriteria:  []RuntimeContextSuccessCriterionResponse{},
+		},
+		ProfileTemplate: RuntimeContextProfileTemplateResponse{
+			ID:           ctx.ProfileTemplate.ID.String(),
+			Name:         ctx.ProfileTemplate.Name,
+			SystemPrompt: ctx.ProfileTemplate.SystemPrompt,
+			MaxAutonomy:  string(ctx.ProfileTemplate.MaxAutonomy),
+		},
+		Capabilities: capabilities,
+	}
+}
+
+func DryRunFromDomain(result dryrun.Result) DryRunResponse {
+	var requiredCapability *DryRunCapabilityResponse
+	if result.RequiredCapability != nil {
+		requiredCapability = &DryRunCapabilityResponse{
+			ID:               result.RequiredCapability.ID,
+			CapabilityKey:    result.RequiredCapability.CapabilityKey,
+			Name:             result.RequiredCapability.Name,
+			RequiredAutonomy: string(result.RequiredCapability.RequiredAutonomy),
+			Matched:          result.RequiredCapability.Matched,
+		}
+	}
+	return DryRunResponse{
+		Input:              result.Input,
+		RuntimeContext:     RuntimeContextFromDomain(result.RuntimeContext),
+		Intent:             IntentFromDomain(result.Intent),
+		RequiredCapability: requiredCapability,
+		RequiredAutonomy:   string(result.RequiredAutonomy),
+		VirployeeAutonomy:  string(result.VirployeeAutonomy),
+		Decision:           string(result.Decision),
+		Reason:             result.Reason,
+		NextStep:           result.NextStep,
+		Draft:              DraftFromDomain(result.Draft),
+	}
+}
+
+func IntentFromDomain(intent dryrun.Intent) DryRunIntentResponse {
+	rules := make([]DryRunIntentRuleResponse, 0, len(intent.Rules))
+	for _, rule := range intent.Rules {
+		rules = append(rules, DryRunIntentRuleResponse{
+			Type:   rule.Type,
+			Target: rule.Target,
+			Value:  rule.Value,
+		})
+	}
+	return DryRunIntentResponse{
+		Matched:       intent.Matched,
+		CapabilityKey: intent.CapabilityKey,
+		Domain:        intent.Domain,
+		Resource:      intent.Resource,
+		Action:        intent.Action,
+		Confidence:    intent.Confidence,
+		MatchedBy:     intent.MatchedBy,
+		Rules:         rules,
+	}
+}
+
+func DraftFromDomain(draft dryrun.Draft) DryRunDraftResponse {
+	fields := make([]DryRunDraftFieldResponse, 0, len(draft.Fields))
+	for _, field := range draft.Fields {
+		fields = append(fields, DryRunDraftFieldResponse{
+			Key:    field.Key,
+			Label:  field.Label,
+			Value:  field.Value,
+			Source: field.Source,
+		})
+	}
+	missing := make([]DryRunMissingFieldResponse, 0, len(draft.MissingFields))
+	for _, field := range draft.MissingFields {
+		missing = append(missing, DryRunMissingFieldResponse{
+			Key:    field.Key,
+			Label:  field.Label,
+			Reason: field.Reason,
+		})
+	}
+	return DryRunDraftResponse{
+		Status:        string(draft.Status),
+		Action:        draft.Action,
+		Kind:          draft.Kind,
+		Summary:       draft.Summary,
+		Fields:        fields,
+		MissingFields: missing,
+		Notes:         draft.Notes,
+	}
 }
 
 func uuidStrings(ids []uuid.UUID) []string {

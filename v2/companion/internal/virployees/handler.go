@@ -10,7 +10,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
+	"github.com/devpablocristo/companion-v2/internal/virployees/dryrun"
 	"github.com/devpablocristo/companion-v2/internal/virployees/handler/dto"
+	"github.com/devpablocristo/companion-v2/internal/virployees/runtimecontext"
 	"github.com/devpablocristo/companion-v2/internal/virployees/usecases/domain"
 	ginmw "github.com/devpablocristo/platform/http/gin/go"
 	"github.com/devpablocristo/platform/lifecycle/go/paths"
@@ -22,6 +24,8 @@ type UseCasesPort interface {
 	ListArchived(context.Context, string) ([]domain.Virployee, error)
 	ListTrash(context.Context, string) ([]domain.Virployee, error)
 	Get(context.Context, string, uuid.UUID) (domain.Virployee, error)
+	RuntimeContext(context.Context, string, uuid.UUID) (runtimecontext.Context, error)
+	DryRun(context.Context, string, uuid.UUID, string) (dryrun.Result, error)
 	Update(context.Context, string, uuid.UUID, domain.UpdateInput) (domain.Virployee, error)
 	Archive(context.Context, string, uuid.UUID, string, string) error
 	Unarchive(context.Context, string, uuid.UUID, string, string) error
@@ -46,6 +50,8 @@ func (h *Handler) Routes(router gin.IRouter) {
 		group.GET("/"+paths.SegmentArchived, h.ListArchived)
 		group.GET("/trash", h.ListTrash)
 		group.GET("/autonomy-levels", h.ListAutonomyLevels)
+		group.GET("/:virployee_id/runtime-context", h.RuntimeContext)
+		group.POST("/:virployee_id/dry-run", h.DryRun)
 		group.GET("/:virployee_id", h.Get)
 		group.PUT("/:virployee_id", h.Update)
 		group.POST("/:virployee_id/"+paths.SegmentArchive, h.Archive)
@@ -111,6 +117,36 @@ func (h *Handler) Get(c *gin.Context) {
 		return
 	}
 	ginmw.WriteJSON(c, http.StatusOK, dto.VirployeeFromDomain(out))
+}
+
+func (h *Handler) RuntimeContext(c *gin.Context) {
+	id, ok := ginmw.ParseUUIDParam(c, "virployee_id")
+	if !ok {
+		return
+	}
+	out, err := h.ucs.RuntimeContext(c.Request.Context(), tenantID(c), id)
+	if err != nil {
+		ginmw.Respond(c, err)
+		return
+	}
+	ginmw.WriteJSON(c, http.StatusOK, dto.RuntimeContextFromDomain(out))
+}
+
+func (h *Handler) DryRun(c *gin.Context) {
+	id, ok := ginmw.ParseUUIDParam(c, "virployee_id")
+	if !ok {
+		return
+	}
+	var req dto.DryRunVirployeeRequest
+	if err := ginmw.BindJSON(c, &req); err != nil {
+		return
+	}
+	out, err := h.ucs.DryRun(c.Request.Context(), tenantID(c), id, req.Input)
+	if err != nil {
+		ginmw.Respond(c, err)
+		return
+	}
+	ginmw.WriteJSON(c, http.StatusOK, dto.DryRunFromDomain(out))
 }
 
 func (h *Handler) Update(c *gin.Context) {

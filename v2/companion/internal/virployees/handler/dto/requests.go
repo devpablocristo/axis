@@ -51,3 +51,7 @@ func (r UpdateVirployeeRequest) ToDomain() domain.UpdateInput {
 type LifecycleRequest struct {
 	Reason string `json:"reason"`
 }
+
+type DryRunVirployeeRequest struct {
+	Input string `json:"input" binding:"required"`
+}
