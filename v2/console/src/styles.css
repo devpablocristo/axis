@@ -1119,6 +1119,33 @@ tbody tr:hover {
   font-size: 12px;
 }
 
+.virployee-dry-run__draft-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.virployee-dry-run__clarifications {
+  display: grid;
+  gap: 6px;
+  border: 1px solid rgba(199, 49, 49, 0.32);
+  border-radius: 6px;
+  background: rgba(199, 49, 49, 0.05);
+  padding: 10px;
+}
+
+.virployee-dry-run__clarifications strong {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.virployee-dry-run__clarifications span,
+.form-field-required {
+  color: #c73131;
+  font-size: 12px;
+}
+
 @media (max-width: 960px) {
   .app-shell {
     grid-template-columns: 1fr;

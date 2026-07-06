@@ -12,10 +12,13 @@ import {
   type VirployeeAutonomy,
   type VirployeeAutonomyLevel,
   type Virployee,
+  type VirployeeConfirmedDraft,
   type VirployeeDryRun,
+  type VirployeeExecutionGate,
   type VirployeeRuntimeContext,
   type ProfileTemplate,
   archiveVirployee,
+  checkVirployeeExecutionGate,
   createVirployee,
   dryRunVirployee,
   getVirployeeRuntimeContext,
@@ -34,6 +37,13 @@ import {
 
 type CrudLifecycleView = 'active' | 'archived' | 'trash'
 type BulkAction = 'archive' | 'trash' | 'restore' | 'purge'
+type CalendarCreateDraftValues = {
+  title: string
+  date_hint: string
+  time: string
+  attendees: string
+}
+type CalendarCreateDraftKey = keyof CalendarCreateDraftValues
 
 type VirployeesPageProps = {
   tenantId: string
@@ -112,6 +122,12 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
   const [dryRunLoading, setDryRunLoading] = useState(false)
   const [dryRunError, setDryRunError] = useState('')
   const dryRunRequestRef = useRef(0)
+  const [executionGateResult, setExecutionGateResult] = useState<VirployeeExecutionGate | null>(null)
+  const [executionGateLoading, setExecutionGateLoading] = useState(false)
+  const [executionGateError, setExecutionGateError] = useState('')
+  const executionGateRequestRef = useRef(0)
+  const [calendarDraftValues, setCalendarDraftValues] = useState<CalendarCreateDraftValues | null>(null)
+  const [confirmedDraft, setConfirmedDraft] = useState<VirployeeConfirmedDraft | null>(null)
   const [editRow, setEditRow] = useState<Virployee | null>(null)
   const [editValues, setEditValues] = useState<VirployeeEditValues | null>(null)
   const [editSaving, setEditSaving] = useState(false)
@@ -511,21 +527,42 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
     closePreview()
     closeEdit()
     dryRunRequestRef.current += 1
+    executionGateRequestRef.current += 1
     setDryRunRow(row)
     setDryRunInput('')
     setDryRunResult(null)
     setDryRunError('')
     setDryRunLoading(false)
+    setExecutionGateResult(null)
+    setExecutionGateError('')
+    setExecutionGateLoading(false)
+    setCalendarDraftValues(null)
+    setConfirmedDraft(null)
     setActionError('')
   }
 
   const closeDryRun = () => {
     dryRunRequestRef.current += 1
+    executionGateRequestRef.current += 1
     setDryRunRow(null)
     setDryRunInput('')
     setDryRunResult(null)
     setDryRunLoading(false)
     setDryRunError('')
+    setExecutionGateResult(null)
+    setExecutionGateLoading(false)
+    setExecutionGateError('')
+    setCalendarDraftValues(null)
+    setConfirmedDraft(null)
+  }
+
+  const updateDryRunInput = (value: string) => {
+    setDryRunInput(value)
+    setDryRunResult(null)
+    setExecutionGateResult(null)
+    setExecutionGateError('')
+    setCalendarDraftValues(null)
+    setConfirmedDraft(null)
   }
 
   const runDryRun = async () => {
@@ -535,16 +572,57 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
     setDryRunLoading(true)
     setDryRunError('')
     setDryRunResult(null)
+    setExecutionGateResult(null)
+    setExecutionGateError('')
+    setCalendarDraftValues(null)
+    setConfirmedDraft(null)
     try {
       const result = await dryRunVirployee(dryRunRow.id, dryRunInput, tenantId, principalId)
       if (dryRunRequestRef.current !== requestID) return
       setDryRunResult(result)
+      setCalendarDraftValues(calendarCreateDraftValuesFromDryRun(result))
     } catch (error) {
       if (dryRunRequestRef.current !== requestID) return
       setDryRunError(error instanceof Error ? error.message : 'Could not run dry run')
     } finally {
       if (dryRunRequestRef.current === requestID) setDryRunLoading(false)
     }
+  }
+
+  const checkExecutionGate = async () => {
+    if (!dryRunRow || !dryRunResult || executionGateLoading || stringValue(dryRunInput).length === 0) return
+    if (requiresConfirmedCalendarDraft(dryRunResult) && !confirmedDraft) return
+    const requestID = executionGateRequestRef.current + 1
+    executionGateRequestRef.current = requestID
+    setExecutionGateLoading(true)
+    setExecutionGateError('')
+    setExecutionGateResult(null)
+    try {
+      const result = await checkVirployeeExecutionGate(dryRunRow.id, dryRunInput, tenantId, principalId, confirmedDraft ?? undefined)
+      if (executionGateRequestRef.current !== requestID) return
+      setExecutionGateResult(result)
+      setDryRunResult(result.dry_run)
+      setCalendarDraftValues(calendarCreateDraftValuesFromDryRun(result.dry_run))
+    } catch (error) {
+      if (executionGateRequestRef.current !== requestID) return
+      setExecutionGateError(error instanceof Error ? error.message : 'Could not check execution gate')
+    } finally {
+      if (executionGateRequestRef.current === requestID) setExecutionGateLoading(false)
+    }
+  }
+
+  const updateCalendarDraftValue = (key: CalendarCreateDraftKey, value: string) => {
+    setCalendarDraftValues((current) => current ? { ...current, [key]: value } : current)
+    setConfirmedDraft(null)
+    setExecutionGateResult(null)
+    setExecutionGateError('')
+  }
+
+  const confirmCalendarDraft = () => {
+    if (!calendarDraftValues || !isCalendarCreateDraftComplete(calendarDraftValues)) return
+    setConfirmedDraft(calendarConfirmedDraftFromValues(calendarDraftValues))
+    setExecutionGateResult(null)
+    setExecutionGateError('')
   }
 
   const updateEditValue = (key: keyof VirployeeEditValues, value: string) => {
@@ -672,10 +750,18 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
                 result={dryRunResult}
                 loading={dryRunLoading}
                 error={dryRunError}
+                executionGate={executionGateResult}
+                executionGateLoading={executionGateLoading}
+                executionGateError={executionGateError}
+                calendarDraftValues={calendarDraftValues}
+                confirmedDraft={confirmedDraft}
                 autonomyByLevel={autonomyByLevel}
                 supervisor={userByID.get(dryRunResult?.runtime_context.virployee.supervisor_user_id ?? dryRunRow.supervisor_user_id)}
-                onInputChange={setDryRunInput}
+                onInputChange={updateDryRunInput}
                 onRun={() => void runDryRun()}
+                onCheckExecutionGate={() => void checkExecutionGate()}
+                onCalendarDraftValueChange={updateCalendarDraftValue}
+                onConfirmCalendarDraft={confirmCalendarDraft}
                 onClose={closeDryRun}
               />
             ) : null}
@@ -954,10 +1040,18 @@ function VirployeeDryRunInline(props: {
   result: VirployeeDryRun | null
   loading: boolean
   error: string
+  executionGate: VirployeeExecutionGate | null
+  executionGateLoading: boolean
+  executionGateError: string
+  calendarDraftValues: CalendarCreateDraftValues | null
+  confirmedDraft: VirployeeConfirmedDraft | null
   autonomyByLevel: ReadonlyMap<VirployeeAutonomy, VirployeeAutonomyLevel>
   supervisor?: TenantUser
   onInputChange: (value: string) => void
   onRun: () => void
+  onCheckExecutionGate: () => void
+  onCalendarDraftValueChange: (key: CalendarCreateDraftKey, value: string) => void
+  onConfirmCalendarDraft: () => void
   onClose: () => void
 }) {
   const context = props.result?.runtime_context
@@ -965,6 +1059,8 @@ function VirployeeDryRunInline(props: {
   const requiredCapability = props.result?.required_capability
   const capabilities = context?.capabilities ?? []
   const canRun = stringValue(props.input).length > 0 && !props.loading
+  const needsConfirmedDraft = props.result ? requiresConfirmedCalendarDraft(props.result) : false
+  const canCheckGate = Boolean(props.result) && canRun && !props.executionGateLoading && (!needsConfirmedDraft || Boolean(props.confirmedDraft))
   const supervisorValue = props.supervisor ? userLabel(props.supervisor) : 'Unknown Supervisor'
 
   return (
@@ -980,6 +1076,7 @@ function VirployeeDryRunInline(props: {
         }}
       >
         {props.error ? <p role="alert" className="iam-control__inline-error">{props.error}</p> : null}
+        {props.executionGateError ? <p role="alert" className="iam-control__inline-error">{props.executionGateError}</p> : null}
         <label className="form-group full-width">
           Input
           <textarea
@@ -1015,7 +1112,20 @@ function VirployeeDryRunInline(props: {
             </div>
 
             <DryRunIntentView intent={props.result.intent} />
-            <DryRunDraftView draft={props.result.draft} />
+            {requiresConfirmedCalendarDraft(props.result) && props.calendarDraftValues ? (
+              <ConfirmableCalendarDraftView
+                draft={props.result.draft}
+                values={props.calendarDraftValues}
+                confirmed={Boolean(props.confirmedDraft)}
+                onValueChange={props.onCalendarDraftValueChange}
+                onConfirm={props.onConfirmCalendarDraft}
+              />
+            ) : (
+              <DryRunDraftView draft={props.result.draft} />
+            )}
+            {props.executionGate ? (
+              <ExecutionGateView gate={props.executionGate} autonomyByLevel={props.autonomyByLevel} />
+            ) : null}
 
             <section className="virployee-preview__section" aria-label="Runtime Context">
               <h3>Runtime Context used</h3>
@@ -1052,7 +1162,15 @@ function VirployeeDryRunInline(props: {
           <button type="submit" className="btn-primary" disabled={!canRun}>
             {props.loading ? 'Running...' : 'Run'}
           </button>
-          <button type="button" className="btn-secondary" disabled={props.loading} onClick={props.onClose}>
+          <button
+            type="button"
+            className="btn-secondary"
+            disabled={!canCheckGate}
+            onClick={props.onCheckExecutionGate}
+          >
+            {props.executionGateLoading ? 'Checking...' : 'Check gate'}
+          </button>
+          <button type="button" className="btn-secondary" disabled={props.loading || props.executionGateLoading} onClick={props.onClose}>
             Close
           </button>
         </footer>
@@ -1093,6 +1211,86 @@ function DryRunIntentView(props: { intent: VirployeeDryRun['intent'] }) {
           ))}
         </div>
       ) : null}
+    </section>
+  )
+}
+
+function ConfirmableCalendarDraftView(props: {
+  draft: VirployeeDryRun['draft']
+  values: CalendarCreateDraftValues
+  confirmed: boolean
+  onValueChange: (key: CalendarCreateDraftKey, value: string) => void
+  onConfirm: () => void
+}) {
+  const complete = isCalendarCreateDraftComplete(props.values)
+  const clarifications = props.draft.missing_fields.filter((field) => {
+    return isCalendarCreateDraftKey(field.key) && stringValue(props.values[field.key]).length === 0
+  })
+  return (
+    <section className="virployee-preview__section" aria-label="Draft">
+      <h3>Draft</h3>
+      {clarifications.length > 0 ? (
+        <div className="virployee-dry-run__clarifications" aria-label="Needs clarification">
+          <strong>Needs clarification</strong>
+          {clarifications.map((field) => (
+            <span key={field.key}>{clarificationQuestion(field.key)}</span>
+          ))}
+        </div>
+      ) : null}
+      <div className="virployee-preview__grid">
+        <label className="form-group">
+          Action
+          <input value="Create calendar event" readOnly />
+        </label>
+        <label className="form-group">
+          Title
+          <input
+            value={props.values.title}
+            placeholder="Reunión"
+            onChange={(event) => props.onValueChange('title', event.currentTarget.value)}
+            required
+          />
+          {stringValue(props.values.title).length === 0 ? <span className="form-field-required">Required</span> : null}
+        </label>
+        <label className="form-group">
+          Date
+          <input
+            value={props.values.date_hint}
+            placeholder="mañana"
+            onChange={(event) => props.onValueChange('date_hint', event.currentTarget.value)}
+            required
+          />
+          {stringValue(props.values.date_hint).length === 0 ? <span className="form-field-required">Required</span> : null}
+        </label>
+        <label className="form-group">
+          Time
+          <input
+            value={props.values.time}
+            placeholder="15:00"
+            onChange={(event) => props.onValueChange('time', event.currentTarget.value)}
+            required
+          />
+          {stringValue(props.values.time).length === 0 ? <span className="form-field-required">Required</span> : null}
+        </label>
+        <label className="form-group full-width">
+          Attendees
+          <input
+            value={props.values.attendees}
+            placeholder="ana@example.com"
+            onChange={(event) => props.onValueChange('attendees', event.currentTarget.value)}
+            required
+          />
+          {stringValue(props.values.attendees).length === 0 ? <span className="form-field-required">Required</span> : null}
+        </label>
+      </div>
+      <div className="virployee-dry-run__draft-actions">
+        <button type="button" className="btn-secondary" disabled={!complete || props.confirmed} onClick={props.onConfirm}>
+          Confirm draft
+        </button>
+        <span className={props.confirmed ? 'iam-control__inline-note' : 'iam-control__inline-error'}>
+          {props.confirmed ? 'Draft confirmed' : 'Review and confirm the draft before checking the gate.'}
+        </span>
+      </div>
     </section>
   )
 }
@@ -1141,6 +1339,44 @@ function DryRunDraftView(props: { draft: VirployeeDryRun['draft'] }) {
           ))}
         </div>
       ) : null}
+    </section>
+  )
+}
+
+function ExecutionGateView(props: {
+  gate: VirployeeExecutionGate
+  autonomyByLevel: ReadonlyMap<VirployeeAutonomy, VirployeeAutonomyLevel>
+}) {
+  const gate = props.gate.execution_gate
+  const decisionClass = gate.decision === 'pass' ? 'allowed' : 'blocked'
+  return (
+    <section className="virployee-preview__section" aria-label="Execution gate">
+      <h3>Execution gate</h3>
+      <div className={`virployee-dry-run__decision virployee-dry-run__decision--${decisionClass}`}>
+        <strong>{gate.decision === 'pass' ? 'Pass' : 'Blocked'}</strong>
+        <span>{gate.next_step}</span>
+      </div>
+      <div className="virployee-preview__grid">
+        <PreviewField label="Mode" value={gate.mode} />
+        <PreviewField label="Will execute" value={gate.will_execute ? 'Yes' : 'No'} />
+        <PreviewField
+          label="Required execution autonomy"
+          value={formatAutonomy(gate.required_execution_autonomy, props.autonomyByLevel)}
+        />
+        <PreviewField
+          label="Virployee autonomy"
+          value={formatAutonomy(gate.virployee_autonomy, props.autonomyByLevel)}
+        />
+      </div>
+      <div className="virployee-dry-run__draft-list" aria-label="Execution gate checks">
+        <span>Checks</span>
+        {gate.checks.map((check) => (
+          <div key={check.key} className="virployee-dry-run__draft-row">
+            <strong>{formatGateCheckKey(check.key)}: {check.status === 'pass' ? 'Pass' : 'Blocked'}</strong>
+            <span>{check.reason}</span>
+          </div>
+        ))}
+      </div>
     </section>
   )
 }
@@ -1550,12 +1786,72 @@ function formatState(value: string): string {
   return value || '-'
 }
 
+function requiresConfirmedCalendarDraft(result: VirployeeDryRun): boolean {
+  return result.intent.matched && result.draft.action === 'calendar.events.create'
+}
+
+function isCalendarCreateDraftKey(value: string): value is CalendarCreateDraftKey {
+  return value === 'title' || value === 'date_hint' || value === 'time' || value === 'attendees'
+}
+
+function clarificationQuestion(value: string): string {
+  if (value === 'title') return 'What is the event title?'
+  if (value === 'date_hint') return 'What date should I use?'
+  if (value === 'time') return 'What time should I use?'
+  if (value === 'attendees') return 'Who should be invited?'
+  return 'Please complete the missing field.'
+}
+
+function calendarCreateDraftValuesFromDryRun(result: VirployeeDryRun): CalendarCreateDraftValues | null {
+  if (!requiresConfirmedCalendarDraft(result)) return null
+  const values: CalendarCreateDraftValues = {
+    title: '',
+    date_hint: '',
+    time: '',
+    attendees: '',
+  }
+  for (const field of result.draft.fields) {
+    if (field.key === 'title' || field.key === 'date_hint' || field.key === 'time' || field.key === 'attendees') {
+      values[field.key] = field.value
+    }
+  }
+  return values
+}
+
+function isCalendarCreateDraftComplete(values: CalendarCreateDraftValues): boolean {
+  return stringValue(values.title).length > 0 &&
+    stringValue(values.date_hint).length > 0 &&
+    stringValue(values.time).length > 0 &&
+    stringValue(values.attendees).length > 0
+}
+
+function calendarConfirmedDraftFromValues(values: CalendarCreateDraftValues): VirployeeConfirmedDraft {
+  return {
+    action: 'calendar.events.create',
+    kind: 'calendar_event',
+    fields: [
+      { key: 'title', value: stringValue(values.title) },
+      { key: 'date_hint', value: stringValue(values.date_hint) },
+      { key: 'time', value: stringValue(values.time) },
+      { key: 'attendees', value: stringValue(values.attendees) },
+    ],
+  }
+}
+
 function formatDraftStatus(value: VirployeeDryRun['draft']['status']): string {
   if (value === 'ready') return 'Ready'
   if (value === 'needs_input') return 'Needs input'
   if (value === 'blocked') return 'Blocked'
   if (value === 'not_applicable') return 'Not applicable'
   return value || '-'
+}
+
+function formatGateCheckKey(value: string): string {
+  return value
+    .split('_')
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ')
 }
 
 function formatConfidence(value: number): string {

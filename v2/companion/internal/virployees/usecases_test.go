@@ -8,6 +8,7 @@ import (
 	capabilitydomain "github.com/devpablocristo/companion-v2/internal/capabilities/usecases/domain"
 	jobroledomain "github.com/devpablocristo/companion-v2/internal/jobroles/usecases/domain"
 	profiletemplatedomain "github.com/devpablocristo/companion-v2/internal/profiletemplates/usecases/domain"
+	"github.com/devpablocristo/companion-v2/internal/virployees/executiongate"
 	"github.com/devpablocristo/companion-v2/internal/virployees/usecases/domain"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
 	"github.com/devpablocristo/platform/lifecycle/go/lifecycle"
@@ -561,6 +562,130 @@ func TestUseCasesDryRunRejectsEmptyInput(t *testing.T) {
 	if !domainerr.IsValidation(err) {
 		t.Fatalf("expected validation for empty input, got %v", err)
 	}
+}
+
+func TestUseCasesExecutionGateBlocksCreateBelowExecutionAutonomy(t *testing.T) {
+	uc, created := setupExecutionGateUseCase(t, domain.AutonomyA2)
+
+	result, err := uc.ExecutionGate(context.Background(), "tenant-1", created.ID, "Agendá una reunión mañana a las 15 con ana@example.com", nil)
+	if err != nil {
+		t.Fatalf("ExecutionGate: %v", err)
+	}
+	if result.DryRun.Draft.Status != "ready" {
+		t.Fatalf("expected ready draft, got %+v", result.DryRun.Draft)
+	}
+	if result.Gate.Decision != "blocked" || result.Gate.RequiredExecutionAutonomy != domain.AutonomyA3 || result.Gate.VirployeeAutonomy != domain.AutonomyA2 {
+		t.Fatalf("unexpected execution gate: %+v", result.Gate)
+	}
+}
+
+func TestUseCasesExecutionGatePassesCreateAtExecutionAutonomy(t *testing.T) {
+	uc, created := setupExecutionGateUseCase(t, domain.AutonomyA3)
+
+	result, err := uc.ExecutionGate(context.Background(), "tenant-1", created.ID, "Agendá una reunión mañana a las 15 con ana@example.com", nil)
+	if err != nil {
+		t.Fatalf("ExecutionGate: %v", err)
+	}
+	if result.Gate.Decision != "pass" || result.Gate.WillExecute {
+		t.Fatalf("unexpected execution gate: %+v", result.Gate)
+	}
+}
+
+func TestUseCasesExecutionGateUsesConfirmedDraft(t *testing.T) {
+	uc, created := setupExecutionGateUseCase(t, domain.AutonomyA3)
+
+	result, err := uc.ExecutionGate(context.Background(), "tenant-1", created.ID, "Agendá una reunión para mañana", &executiongate.ConfirmedDraft{
+		Action: "calendar.events.create",
+		Kind:   "calendar_event",
+		Fields: []executiongate.ConfirmedDraftField{
+			{Key: "title", Value: "Reunión"},
+			{Key: "date_hint", Value: "mañana"},
+			{Key: "time", Value: "15:00"},
+			{Key: "attendees", Value: "ana@example.com"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ExecutionGate: %v", err)
+	}
+	if result.DryRun.Draft.Status != "ready" || result.Gate.Decision != "pass" {
+		t.Fatalf("expected confirmed draft to pass gate, got draft=%+v gate=%+v", result.DryRun.Draft, result.Gate)
+	}
+}
+
+func TestUseCasesExecutionGateBlocksIncompleteConfirmedDraft(t *testing.T) {
+	uc, created := setupExecutionGateUseCase(t, domain.AutonomyA3)
+
+	result, err := uc.ExecutionGate(context.Background(), "tenant-1", created.ID, "Agendá una reunión para mañana", &executiongate.ConfirmedDraft{
+		Action: "calendar.events.create",
+		Kind:   "calendar_event",
+		Fields: []executiongate.ConfirmedDraftField{
+			{Key: "title", Value: "Reunión"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ExecutionGate: %v", err)
+	}
+	if result.DryRun.Draft.Status != "needs_input" || result.Gate.Decision != "blocked" {
+		t.Fatalf("expected incomplete confirmed draft to block gate, got draft=%+v gate=%+v", result.DryRun.Draft, result.Gate)
+	}
+}
+
+func TestUseCasesExecutionGateRejectsConfirmedDraftActionMismatch(t *testing.T) {
+	uc, created := setupExecutionGateUseCase(t, domain.AutonomyA3)
+
+	_, err := uc.ExecutionGate(context.Background(), "tenant-1", created.ID, "Agendá una reunión para mañana", &executiongate.ConfirmedDraft{
+		Action: "calendar.events.read",
+		Kind:   "calendar_event",
+	})
+	if !domainerr.IsValidation(err) {
+		t.Fatalf("expected validation error, got %v", err)
+	}
+}
+
+func setupExecutionGateUseCase(t *testing.T, autonomy domain.AutonomyLevel) (*UseCases, domain.Virployee) {
+	t.Helper()
+	repo := newFakeRepo()
+	jobRoleID := uuid.New()
+	profileTemplateID := uuid.New()
+	capabilityID := uuid.New()
+	uc, err := NewUseCases(repo, &fakeJobRoleReader{
+		role: jobroledomain.JobRole{ID: jobRoleID, TenantID: "tenant-1", Name: "Receptionist"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	uc.SetProfileTemplateReader(&fakeProfileTemplateReader{
+		profile: profiletemplatedomain.ProfileTemplate{
+			ID:           profileTemplateID,
+			TenantID:     "tenant-1",
+			Name:         "Receptionist profile",
+			SystemPrompt: "Be warm.",
+			MaxAutonomy:  autonomy,
+		},
+	})
+	uc.SetCapabilityValidator(&fakeCapabilityReader{
+		rows: map[uuid.UUID]capabilitydomain.Capability{
+			capabilityID: {
+				ID:               capabilityID,
+				TenantID:         "tenant-1",
+				CapabilityKey:    "calendar.events.create",
+				Name:             "Create calendar events",
+				RequiredAutonomy: domain.AutonomyA2,
+			},
+		},
+	})
+	created, err := uc.Create(context.Background(), "tenant-1", domain.CreateInput{
+		Name:              "Sofia",
+		JobRoleID:         jobRoleID.String(),
+		ProfileTemplateID: profileTemplateID.String(),
+		CapabilityIDs:     []string{capabilityID.String()},
+		SupervisorUserID:  "dev-user",
+		Autonomy:          string(autonomy),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return uc, created
 }
 
 func assertListLen(t *testing.T, fn func(context.Context, string) ([]domain.Virployee, error), want int) {

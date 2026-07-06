@@ -1,6 +1,7 @@
 package dto
 
 import (
+	"github.com/devpablocristo/companion-v2/internal/virployees/executiongate"
 	"github.com/devpablocristo/companion-v2/internal/virployees/usecases/domain"
 )
 
@@ -54,4 +55,38 @@ type LifecycleRequest struct {
 
 type DryRunVirployeeRequest struct {
 	Input string `json:"input" binding:"required"`
+}
+
+type ExecutionGateVirployeeRequest struct {
+	Input          string                 `json:"input" binding:"required"`
+	ConfirmedDraft *ConfirmedDraftRequest `json:"confirmed_draft"`
+}
+
+type ConfirmedDraftRequest struct {
+	Action string                       `json:"action"`
+	Kind   string                       `json:"kind"`
+	Fields []ConfirmedDraftFieldRequest `json:"fields"`
+}
+
+type ConfirmedDraftFieldRequest struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+func (r ExecutionGateVirployeeRequest) ConfirmedDraftToDomain() *executiongate.ConfirmedDraft {
+	if r.ConfirmedDraft == nil {
+		return nil
+	}
+	fields := make([]executiongate.ConfirmedDraftField, 0, len(r.ConfirmedDraft.Fields))
+	for _, field := range r.ConfirmedDraft.Fields {
+		fields = append(fields, executiongate.ConfirmedDraftField{
+			Key:   field.Key,
+			Value: field.Value,
+		})
+	}
+	return &executiongate.ConfirmedDraft{
+		Action: r.ConfirmedDraft.Action,
+		Kind:   r.ConfirmedDraft.Kind,
+		Fields: fields,
+	}
 }

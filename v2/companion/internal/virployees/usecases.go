@@ -9,6 +9,7 @@ import (
 	jobroledomain "github.com/devpablocristo/companion-v2/internal/jobroles/usecases/domain"
 	profiletemplatedomain "github.com/devpablocristo/companion-v2/internal/profiletemplates/usecases/domain"
 	"github.com/devpablocristo/companion-v2/internal/virployees/dryrun"
+	"github.com/devpablocristo/companion-v2/internal/virployees/executiongate"
 	"github.com/devpablocristo/companion-v2/internal/virployees/runtimecontext"
 	"github.com/devpablocristo/companion-v2/internal/virployees/usecases/domain"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
@@ -211,6 +212,26 @@ func (u *UseCases) DryRun(ctx context.Context, tenantID string, id uuid.UUID, in
 		return dryrun.Result{}, err
 	}
 	return dryrun.Evaluate(input, runtimeCtx), nil
+}
+
+func (u *UseCases) ExecutionGate(
+	ctx context.Context,
+	tenantID string,
+	id uuid.UUID,
+	input string,
+	confirmedDraft *executiongate.ConfirmedDraft,
+) (executiongate.Result, error) {
+	result, err := u.DryRun(ctx, tenantID, id, input)
+	if err != nil {
+		return executiongate.Result{}, err
+	}
+	if confirmedDraft != nil {
+		result, err = executiongate.ApplyConfirmedDraft(result, *confirmedDraft)
+		if err != nil {
+			return executiongate.Result{}, domainerr.Validation(err.Error())
+		}
+	}
+	return executiongate.Evaluate(result), nil
 }
 
 func (u *UseCases) Update(ctx context.Context, tenantID string, id uuid.UUID, input domain.UpdateInput) (domain.Virployee, error) {

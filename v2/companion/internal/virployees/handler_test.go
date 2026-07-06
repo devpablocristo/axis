@@ -15,6 +15,7 @@ import (
 	jobroledomain "github.com/devpablocristo/companion-v2/internal/jobroles/usecases/domain"
 	profiletemplatedomain "github.com/devpablocristo/companion-v2/internal/profiletemplates/usecases/domain"
 	"github.com/devpablocristo/companion-v2/internal/virployees/dryrun"
+	"github.com/devpablocristo/companion-v2/internal/virployees/executiongate"
 	"github.com/devpablocristo/companion-v2/internal/virployees/runtimecontext"
 	"github.com/devpablocristo/companion-v2/internal/virployees/usecases/domain"
 	ginmw "github.com/devpablocristo/platform/http/gin/go"
@@ -251,6 +252,58 @@ func TestHandlerDryRun(t *testing.T) {
 	}
 }
 
+func TestHandlerExecutionGate(t *testing.T) {
+	fake := &handlerFakeUseCases{}
+	router := testRouter(fake)
+	id := uuid.New()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/virployees/"+id.String()+"/execution-gate", strings.NewReader(`{"input":"Agendá una reunión para mañana","confirmed_draft":{"action":"calendar.events.create","kind":"calendar_event","fields":[{"key":"title","value":"Reunión"},{"key":"date_hint","value":"mañana"},{"key":"time","value":"15:00"},{"key":"attendees","value":"ana@example.com"}]}}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Tenant-ID", "tenant-1")
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		Input  string `json:"input"`
+		DryRun struct {
+			Decision string `json:"decision"`
+			Draft    struct {
+				Status string `json:"status"`
+			} `json:"draft"`
+		} `json:"dry_run"`
+		ExecutionGate struct {
+			Decision                  string `json:"decision"`
+			Mode                      string `json:"mode"`
+			WillExecute               bool   `json:"will_execute"`
+			RequiredExecutionAutonomy string `json:"required_execution_autonomy"`
+			VirployeeAutonomy         string `json:"virployee_autonomy"`
+			Checks                    []struct {
+				Key    string `json:"key"`
+				Status string `json:"status"`
+			} `json:"checks"`
+		} `json:"execution_gate"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Input == "" || payload.DryRun.Decision != "allowed" || payload.DryRun.Draft.Status != "ready" {
+		t.Fatalf("unexpected dry run payload: %+v", payload.DryRun)
+	}
+	if payload.ExecutionGate.Decision != "blocked" ||
+		payload.ExecutionGate.Mode != "simulation" ||
+		payload.ExecutionGate.WillExecute ||
+		payload.ExecutionGate.RequiredExecutionAutonomy != "A3" ||
+		payload.ExecutionGate.VirployeeAutonomy != "A2" {
+		t.Fatalf("unexpected execution gate: %+v", payload.ExecutionGate)
+	}
+	if len(payload.ExecutionGate.Checks) == 0 {
+		t.Fatalf("expected checks, got %+v", payload.ExecutionGate)
+	}
+}
+
 func TestHandlerRoutesLifecycle(t *testing.T) {
 	fake := &handlerFakeUseCases{}
 	router := testRouter(fake)
@@ -375,6 +428,20 @@ func (f *handlerFakeUseCases) DryRun(_ context.Context, tenantID string, id uuid
 	}
 	result := dryrun.Evaluate(input, ctx)
 	return result, nil
+}
+
+func (f *handlerFakeUseCases) ExecutionGate(ctx context.Context, tenantID string, id uuid.UUID, input string, confirmedDraft *executiongate.ConfirmedDraft) (executiongate.Result, error) {
+	result, err := f.DryRun(ctx, tenantID, id, input)
+	if err != nil {
+		return executiongate.Result{}, err
+	}
+	if confirmedDraft != nil {
+		result, err = executiongate.ApplyConfirmedDraft(result, *confirmedDraft)
+		if err != nil {
+			return executiongate.Result{}, err
+		}
+	}
+	return executiongate.Evaluate(result), nil
 }
 
 func (f *handlerFakeUseCases) Update(_ context.Context, _ string, id uuid.UUID, input domain.UpdateInput) (domain.Virployee, error) {

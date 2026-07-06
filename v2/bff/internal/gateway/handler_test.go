@@ -312,6 +312,69 @@ func TestGatewayForwardsVirployeeDryRun(t *testing.T) {
 	}
 }
 
+func TestGatewayForwardsVirployeeExecutionGate(t *testing.T) {
+	tenantID := uuid.New()
+	virployeeID := uuid.New()
+	var gotPath string
+	var gotTenant string
+	var gotOrg string
+	var gotProduct string
+	var gotActor string
+	var gotBody string
+	downstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotTenant = r.Header.Get("X-Tenant-ID")
+		gotOrg = r.Header.Get("X-Axis-Org-ID")
+		gotProduct = r.Header.Get("X-Product-Surface")
+		gotActor = r.Header.Get("X-Actor-ID")
+		body, _ := io.ReadAll(r.Body)
+		gotBody = string(body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"execution_gate":{"decision":"blocked"}}`))
+	}))
+	defer downstream.Close()
+
+	requestBody := `{"input":"Agendá una reunión","confirmed_draft":{"action":"calendar.events.create","kind":"calendar_event","fields":[{"key":"title","value":"Reunión"}]}}`
+	router := gatewayTestRouter(t, &fakeGatewayTenancy{
+		tenant: tenantdomain.Tenant{
+			ID:             tenantID,
+			OrgID:          "org-a",
+			ProductSurface: "axis",
+			Status:         tenantdomain.StatusActive,
+			CreatedAt:      time.Now().UTC(),
+			UpdatedAt:      time.Now().UTC(),
+		},
+		member: tenantdomain.TenantMember{
+			TenantID: tenantID,
+			UserID:   "user-a",
+			Role:     tenantdomain.RoleAdmin,
+			Status:   tenantdomain.StatusActive,
+		},
+	}, downstream.URL)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/virployees/"+virployeeID.String()+"/execution-gate", strings.NewReader(requestBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Tenant-ID", tenantID.String())
+	req.Header.Set("X-Actor-ID", "user-a")
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected downstream status, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if gotPath != "/v1/virployees/"+virployeeID.String()+"/execution-gate" {
+		t.Fatalf("expected execution gate path, got %q", gotPath)
+	}
+	if gotBody != requestBody {
+		t.Fatalf("expected body to be forwarded, got %q", gotBody)
+	}
+	if gotTenant != tenantID.String() || gotOrg != "org-a" || gotProduct != "axis" || gotActor != "user-a" {
+		t.Fatalf("unexpected forwarded headers tenant=%q org=%q product=%q actor=%q", gotTenant, gotOrg, gotProduct, gotActor)
+	}
+}
+
 func TestGatewayForwardsJobRolesWithResolvedTenantHeaders(t *testing.T) {
 	tenantID := uuid.New()
 	var gotPath string

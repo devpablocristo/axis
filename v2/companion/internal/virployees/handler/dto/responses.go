@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/devpablocristo/companion-v2/internal/virployees/dryrun"
+	"github.com/devpablocristo/companion-v2/internal/virployees/executiongate"
 	"github.com/devpablocristo/companion-v2/internal/virployees/runtimecontext"
 	"github.com/devpablocristo/companion-v2/internal/virployees/usecases/domain"
 	"github.com/google/uuid"
@@ -154,6 +155,28 @@ type DryRunMissingFieldResponse struct {
 	Reason string `json:"reason"`
 }
 
+type ExecutionGateResponse struct {
+	Input         string                        `json:"input"`
+	DryRun        DryRunResponse                `json:"dry_run"`
+	ExecutionGate ExecutionGateDecisionResponse `json:"execution_gate"`
+}
+
+type ExecutionGateDecisionResponse struct {
+	Decision                  string                       `json:"decision"`
+	Mode                      string                       `json:"mode"`
+	WillExecute               bool                         `json:"will_execute"`
+	RequiredExecutionAutonomy string                       `json:"required_execution_autonomy"`
+	VirployeeAutonomy         string                       `json:"virployee_autonomy"`
+	Checks                    []ExecutionGateCheckResponse `json:"checks"`
+	NextStep                  string                       `json:"next_step"`
+}
+
+type ExecutionGateCheckResponse struct {
+	Key    string `json:"key"`
+	Status string `json:"status"`
+	Reason string `json:"reason"`
+}
+
 func VirployeeFromDomain(v domain.Virployee) VirployeeResponse {
 	return VirployeeResponse{
 		ID:                v.ID.String(),
@@ -239,6 +262,30 @@ func DryRunFromDomain(result dryrun.Result) DryRunResponse {
 		Reason:             result.Reason,
 		NextStep:           result.NextStep,
 		Draft:              DraftFromDomain(result.Draft),
+	}
+}
+
+func ExecutionGateFromDomain(result executiongate.Result) ExecutionGateResponse {
+	checks := make([]ExecutionGateCheckResponse, 0, len(result.Gate.Checks))
+	for _, check := range result.Gate.Checks {
+		checks = append(checks, ExecutionGateCheckResponse{
+			Key:    check.Key,
+			Status: string(check.Status),
+			Reason: check.Reason,
+		})
+	}
+	return ExecutionGateResponse{
+		Input:  result.Input,
+		DryRun: DryRunFromDomain(result.DryRun),
+		ExecutionGate: ExecutionGateDecisionResponse{
+			Decision:                  string(result.Gate.Decision),
+			Mode:                      result.Gate.Mode,
+			WillExecute:               result.Gate.WillExecute,
+			RequiredExecutionAutonomy: string(result.Gate.RequiredExecutionAutonomy),
+			VirployeeAutonomy:         string(result.Gate.VirployeeAutonomy),
+			Checks:                    checks,
+			NextStep:                  result.Gate.NextStep,
+		},
 	}
 }
 

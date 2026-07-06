@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/devpablocristo/companion-v2/internal/virployees/dryrun"
+	"github.com/devpablocristo/companion-v2/internal/virployees/executiongate"
 	"github.com/devpablocristo/companion-v2/internal/virployees/handler/dto"
 	"github.com/devpablocristo/companion-v2/internal/virployees/runtimecontext"
 	"github.com/devpablocristo/companion-v2/internal/virployees/usecases/domain"
@@ -26,6 +27,7 @@ type UseCasesPort interface {
 	Get(context.Context, string, uuid.UUID) (domain.Virployee, error)
 	RuntimeContext(context.Context, string, uuid.UUID) (runtimecontext.Context, error)
 	DryRun(context.Context, string, uuid.UUID, string) (dryrun.Result, error)
+	ExecutionGate(context.Context, string, uuid.UUID, string, *executiongate.ConfirmedDraft) (executiongate.Result, error)
 	Update(context.Context, string, uuid.UUID, domain.UpdateInput) (domain.Virployee, error)
 	Archive(context.Context, string, uuid.UUID, string, string) error
 	Unarchive(context.Context, string, uuid.UUID, string, string) error
@@ -52,6 +54,7 @@ func (h *Handler) Routes(router gin.IRouter) {
 		group.GET("/autonomy-levels", h.ListAutonomyLevels)
 		group.GET("/:virployee_id/runtime-context", h.RuntimeContext)
 		group.POST("/:virployee_id/dry-run", h.DryRun)
+		group.POST("/:virployee_id/execution-gate", h.ExecutionGate)
 		group.GET("/:virployee_id", h.Get)
 		group.PUT("/:virployee_id", h.Update)
 		group.POST("/:virployee_id/"+paths.SegmentArchive, h.Archive)
@@ -147,6 +150,23 @@ func (h *Handler) DryRun(c *gin.Context) {
 		return
 	}
 	ginmw.WriteJSON(c, http.StatusOK, dto.DryRunFromDomain(out))
+}
+
+func (h *Handler) ExecutionGate(c *gin.Context) {
+	id, ok := ginmw.ParseUUIDParam(c, "virployee_id")
+	if !ok {
+		return
+	}
+	var req dto.ExecutionGateVirployeeRequest
+	if err := ginmw.BindJSON(c, &req); err != nil {
+		return
+	}
+	out, err := h.ucs.ExecutionGate(c.Request.Context(), tenantID(c), id, req.Input, req.ConfirmedDraftToDomain())
+	if err != nil {
+		ginmw.Respond(c, err)
+		return
+	}
+	ginmw.WriteJSON(c, http.StatusOK, dto.ExecutionGateFromDomain(out))
 }
 
 func (h *Handler) Update(c *gin.Context) {

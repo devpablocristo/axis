@@ -199,6 +199,33 @@ export type VirployeeDryRunDraft = {
   notes: string[]
 }
 
+export type VirployeeConfirmedDraft = {
+  action: string
+  kind: string
+  fields: Array<{
+    key: string
+    value: string
+  }>
+}
+
+export type VirployeeExecutionGate = {
+  input: string
+  dry_run: VirployeeDryRun
+  execution_gate: {
+    decision: 'pass' | 'blocked'
+    mode: 'simulation'
+    will_execute: boolean
+    required_execution_autonomy: VirployeeAutonomy
+    virployee_autonomy: VirployeeAutonomy
+    checks: Array<{
+      key: string
+      status: 'pass' | 'blocked'
+      reason: string
+    }>
+    next_step: string
+  }
+}
+
 export type VirployeeInput = {
   name: string
   job_role_id: string
@@ -618,6 +645,21 @@ export function dryRunVirployee(
     tenantId,
     principalId,
     body: { input },
+  })
+}
+
+export function checkVirployeeExecutionGate(
+  id: string,
+  input: string,
+  tenantId: string,
+  principalId: string,
+  confirmedDraft?: VirployeeConfirmedDraft,
+): Promise<VirployeeExecutionGate> {
+  return axisFetch<VirployeeExecutionGate>(`/api/virployees/${encodeURIComponent(id)}/execution-gate`, {
+    method: 'POST',
+    tenantId,
+    principalId,
+    body: confirmedDraft ? { input, confirmed_draft: confirmedDraft } : { input },
   })
 }
 
