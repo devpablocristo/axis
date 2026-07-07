@@ -13,18 +13,16 @@ type Config struct {
 	RunMigrations bool
 	MaxBodyBytes  int64
 	CORSOrigins   []string
-	NexusBaseURL  string
 }
 
 func Load() Config {
 	return Config{
-		Environment:   envconfig.NormalizeEnv(envconfig.Get("COMPANION_V2_ENV", "development")),
-		Port:          envconfig.Get("PORT", "18086"),
-		DatabaseURL:   envconfig.Get("COMPANION_V2_DATABASE_URL", envconfig.Get("DATABASE_URL", "")),
-		RunMigrations: envconfig.Bool("COMPANION_V2_RUN_MIGRATIONS", true),
-		MaxBodyBytes:  int64(envconfig.Int("COMPANION_V2_MAX_BODY_BYTES", 1<<20)),
-		CORSOrigins:   splitCSV(envconfig.Get("COMPANION_V2_CORS_ORIGINS", "")),
-		NexusBaseURL:  strings.TrimRight(envconfig.Get("COMPANION_V2_NEXUS_BASE_URL", ""), "/"),
+		Environment:   envconfig.NormalizeEnv(envconfig.Get("NEXUS_V2_ENV", "development")),
+		Port:          envconfig.Get("PORT", "18087"),
+		DatabaseURL:   envconfig.Get("NEXUS_V2_DATABASE_URL", envconfig.Get("DATABASE_URL", "")),
+		RunMigrations: envconfig.Bool("NEXUS_V2_RUN_MIGRATIONS", true),
+		MaxBodyBytes:  int64(envconfig.Int("NEXUS_V2_MAX_BODY_BYTES", 1<<20)),
+		CORSOrigins:   splitCSV(envconfig.Get("NEXUS_V2_CORS_ORIGINS", "")),
 	}
 }
 

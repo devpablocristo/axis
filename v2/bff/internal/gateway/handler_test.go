@@ -539,13 +539,90 @@ func TestGatewayForwardsProfileTemplatesWithResolvedTenantHeaders(t *testing.T) 
 	}
 }
 
+func TestGatewayForwardsGovernanceCheckToNexusWithResolvedTenantHeaders(t *testing.T) {
+	tenantID := uuid.New()
+	var gotPath string
+	var gotQuery string
+	var gotTenant string
+	var gotOrg string
+	var gotProduct string
+	var gotActor string
+	var gotForwardedBy string
+	var gotBody string
+	nexus := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotQuery = r.URL.RawQuery
+		gotTenant = r.Header.Get("X-Tenant-ID")
+		gotOrg = r.Header.Get("X-Axis-Org-ID")
+		gotProduct = r.Header.Get("X-Product-Surface")
+		gotActor = r.Header.Get("X-Actor-ID")
+		gotForwardedBy = r.Header.Get("X-Axis-Forwarded-By")
+		body, _ := io.ReadAll(r.Body)
+		gotBody = string(body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"decision":"require_approval"}`))
+	}))
+	defer nexus.Close()
+
+	router := gatewayTestRouterWithTargets(t, &fakeGatewayTenancy{
+		tenant: tenantdomain.Tenant{
+			ID:             tenantID,
+			OrgID:          "org-a",
+			ProductSurface: "axis",
+			Status:         tenantdomain.StatusActive,
+			CreatedAt:      time.Now().UTC(),
+			UpdatedAt:      time.Now().UTC(),
+		},
+		member: tenantdomain.TenantMember{
+			TenantID: tenantID,
+			UserID:   "user-a",
+			Role:     tenantdomain.RoleAdmin,
+			Status:   tenantdomain.StatusActive,
+		},
+	}, "http://127.0.0.1:1", nexus.URL)
+
+	requestBody := `{"requester_id":"virployee-1","action_type":"calendar.events.delete","reason":"cleanup"}`
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/governance/check?mode=simulation", strings.NewReader(requestBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Tenant-ID", tenantID.String())
+	req.Header.Set("X-Actor-ID", "user-a")
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected downstream status, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if gotPath != "/v1/governance/check" {
+		t.Fatalf("expected /v1/governance/check, got %q", gotPath)
+	}
+	if gotQuery != "mode=simulation" {
+		t.Fatalf("expected query to be forwarded, got %q", gotQuery)
+	}
+	if gotBody != requestBody {
+		t.Fatalf("expected body to be forwarded, got %q", gotBody)
+	}
+	if gotTenant != tenantID.String() || gotOrg != "org-a" || gotProduct != "axis" || gotActor != "user-a" || gotForwardedBy != "bff-v2" {
+		t.Fatalf("unexpected forwarded headers tenant=%q org=%q product=%q actor=%q forwarded_by=%q", gotTenant, gotOrg, gotProduct, gotActor, gotForwardedBy)
+	}
+}
+
 func gatewayTestRouter(t *testing.T, tenancy TenancyPort, companionURL string) *gin.Engine {
 	return gatewayTestRouterWithSupervisor(t, tenancy, companionURL, nil)
 }
 
 func gatewayTestRouterWithSupervisor(t *testing.T, tenancy TenancyPort, companionURL string, supervisor SupervisorValidatorPort) *gin.Engine {
+	return gatewayTestRouterWithSupervisorAndTargets(t, tenancy, companionURL, companionURL, supervisor)
+}
+
+func gatewayTestRouterWithTargets(t *testing.T, tenancy TenancyPort, companionURL string, nexusURL string) *gin.Engine {
+	return gatewayTestRouterWithSupervisorAndTargets(t, tenancy, companionURL, nexusURL, nil)
+}
+
+func gatewayTestRouterWithSupervisorAndTargets(t *testing.T, tenancy TenancyPort, companionURL string, nexusURL string, supervisor SupervisorValidatorPort) *gin.Engine {
 	t.Helper()
-	uc, err := NewUseCases(tenancy, companionURL)
+	uc, err := NewUseCases(tenancy, companionURL, nexusURL)
 	if err != nil {
 		t.Fatal(err)
 	}

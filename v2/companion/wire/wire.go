@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/devpablocristo/companion-v2/internal/capabilities"
 	"github.com/devpablocristo/companion-v2/internal/infra/migrations"
 	"github.com/devpablocristo/companion-v2/internal/jobroles"
+	"github.com/devpablocristo/companion-v2/internal/nexusclient"
 	"github.com/devpablocristo/companion-v2/internal/profiletemplates"
 	"github.com/devpablocristo/companion-v2/internal/virployees"
 	postgres "github.com/devpablocristo/platform/databases/postgres/go"
@@ -78,6 +80,9 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	}
 	virployeesUsecases.SetCapabilityValidator(capabilitiesUsecases)
 	virployeesUsecases.SetProfileTemplateReader(profileTemplatesUsecases)
+	if config.NexusBaseURL != "" {
+		virployeesUsecases.SetGovernanceChecker(nexusclient.New(config.NexusBaseURL, &http.Client{Timeout: 5 * time.Second}))
+	}
 	virployeesHandler := virployees.NewHandler(virployeesUsecases)
 
 	gin.SetMode(gin.ReleaseMode)

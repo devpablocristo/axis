@@ -16,14 +16,19 @@ type TenancyPort interface {
 type UseCases struct {
 	tenancy          TenancyPort
 	companionBaseURL *url.URL
+	nexusBaseURL     *url.URL
 }
 
-func NewUseCases(tenancy TenancyPort, companionBaseURL string) (*UseCases, error) {
-	parsed, err := url.Parse(strings.TrimRight(strings.TrimSpace(companionBaseURL), "/"))
+func NewUseCases(tenancy TenancyPort, companionBaseURL string, nexusBaseURL string) (*UseCases, error) {
+	companionURL, err := parseBaseURL(companionBaseURL)
 	if err != nil {
 		return nil, err
 	}
-	return &UseCases{tenancy: tenancy, companionBaseURL: parsed}, nil
+	nexusURL, err := parseBaseURL(nexusBaseURL)
+	if err != nil {
+		return nil, err
+	}
+	return &UseCases{tenancy: tenancy, companionBaseURL: companionURL, nexusBaseURL: nexusURL}, nil
 }
 
 func (u *UseCases) Resolve(ctx context.Context, input gatewaydomain.ResolveInput) (gatewaydomain.ResolvedContext, error) {
@@ -47,7 +52,19 @@ func (u *UseCases) Resolve(ctx context.Context, input gatewaydomain.ResolveInput
 }
 
 func (u *UseCases) TargetURL(requestPath, rawQuery string) string {
-	target := *u.companionBaseURL
+	return targetURL(u.companionBaseURL, requestPath, rawQuery)
+}
+
+func (u *UseCases) NexusTargetURL(requestPath, rawQuery string) string {
+	return targetURL(u.nexusBaseURL, requestPath, rawQuery)
+}
+
+func parseBaseURL(value string) (*url.URL, error) {
+	return url.Parse(strings.TrimRight(strings.TrimSpace(value), "/"))
+}
+
+func targetURL(baseURL *url.URL, requestPath, rawQuery string) string {
+	target := *baseURL
 	appPath := strings.TrimPrefix(requestPath, "/api")
 	if appPath == requestPath {
 		appPath = requestPath

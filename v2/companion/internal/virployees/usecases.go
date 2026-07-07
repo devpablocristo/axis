@@ -47,11 +47,16 @@ type ProfileTemplateReaderPort interface {
 	Get(ctx context.Context, tenantID string, id uuid.UUID) (profiletemplatedomain.ProfileTemplate, error)
 }
 
+type GovernanceCheckerPort interface {
+	Check(ctx context.Context, input executiongate.GovernanceCheckInput) (executiongate.GovernanceCheckResult, error)
+}
+
 type UseCases struct {
 	repo             RepositoryPort
 	jobRoles         JobRoleReaderPort
 	capabilities     CapabilityValidatorPort
 	profileTemplates ProfileTemplateReaderPort
+	governance       GovernanceCheckerPort
 	lifecycle        *lifecycle.Service
 }
 
@@ -99,6 +104,10 @@ func (u *UseCases) SetProfileTemplateReader(reader ProfileTemplateReaderPort) {
 		return
 	}
 	u.profileTemplates = reader
+}
+
+func (u *UseCases) SetGovernanceChecker(checker GovernanceCheckerPort) {
+	u.governance = checker
 }
 
 func (u *UseCases) Create(ctx context.Context, tenantID string, input domain.CreateInput) (domain.Virployee, error) {
@@ -231,7 +240,15 @@ func (u *UseCases) ExecutionGate(
 			return executiongate.Result{}, domainerr.Validation(err.Error())
 		}
 	}
-	return executiongate.Evaluate(result), nil
+	gate := executiongate.Evaluate(result)
+	if u.governance == nil || gate.Gate.Decision != executiongate.DecisionPass {
+		return gate, nil
+	}
+	governance, err := u.governance.Check(ctx, governanceInput(tenantID, result))
+	if err != nil {
+		return executiongate.ApplyGovernanceUnavailable(gate), nil
+	}
+	return executiongate.ApplyGovernance(gate, governance), nil
 }
 
 func (u *UseCases) Update(ctx context.Context, tenantID string, id uuid.UUID, input domain.UpdateInput) (domain.Virployee, error) {
@@ -316,6 +333,35 @@ func normalizeActor(actor string) string {
 		return DefaultActorID
 	}
 	return actor
+}
+
+func governanceInput(tenantID string, result dryrun.Result) executiongate.GovernanceCheckInput {
+	return executiongate.GovernanceCheckInput{
+		TenantID:       normalizeTenantID(tenantID),
+		RequesterType:  "virployee",
+		RequesterID:    result.RuntimeContext.Virployee.ID.String(),
+		ActionType:     result.Intent.CapabilityKey,
+		TargetSystem:   result.Intent.Domain,
+		TargetResource: result.Intent.Resource,
+		Params:         governanceParams(result),
+		Reason:         result.Input,
+		Context:        result.RuntimeContext.JobRole.Name,
+	}
+}
+
+func governanceParams(result dryrun.Result) map[string]any {
+	fields := make(map[string]any, len(result.Draft.Fields))
+	for _, field := range result.Draft.Fields {
+		if field.Key == "" {
+			continue
+		}
+		fields[field.Key] = field.Value
+	}
+	return map[string]any{
+		"draft_status": string(result.Draft.Status),
+		"draft_kind":   result.Draft.Kind,
+		"fields":       fields,
+	}
 }
 
 type noopLifecycleAudit struct{}

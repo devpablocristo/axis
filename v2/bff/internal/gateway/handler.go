@@ -18,6 +18,7 @@ import (
 type UseCasesPort interface {
 	Resolve(ctx context.Context, input gatewaydomain.ResolveInput) (gatewaydomain.ResolvedContext, error)
 	TargetURL(requestPath, rawQuery string) string
+	NexusTargetURL(requestPath, rawQuery string) string
 }
 
 type SupervisorValidatorPort interface {
@@ -53,6 +54,10 @@ func (h *Handler) Routes(router gin.IRouter) {
 	router.Any("/profile-templates/*path", h.ForwardCompanion)
 	router.Any("/virployees", h.ForwardCompanion)
 	router.Any("/virployees/*path", h.ForwardCompanion)
+	router.Any("/action-types", h.ForwardNexus)
+	router.Any("/action-types/*path", h.ForwardNexus)
+	router.Any("/governance", h.ForwardNexus)
+	router.Any("/governance/*path", h.ForwardNexus)
 }
 
 func (h *Handler) ForwardVirployees(c *gin.Context) {
@@ -60,6 +65,14 @@ func (h *Handler) ForwardVirployees(c *gin.Context) {
 }
 
 func (h *Handler) ForwardCompanion(c *gin.Context) {
+	h.forward(c, h.ucs.TargetURL, true)
+}
+
+func (h *Handler) ForwardNexus(c *gin.Context) {
+	h.forward(c, h.ucs.NexusTargetURL, false)
+}
+
+func (h *Handler) forward(c *gin.Context, targetURL func(string, string) string, validateSupervisor bool) {
 	resolved, err := h.ucs.Resolve(c.Request.Context(), gatewaydomain.ResolveInput{
 		TenantID:    c.GetHeader("X-Tenant-ID"),
 		PrincipalID: h.principalID(c),
@@ -68,15 +81,17 @@ func (h *Handler) ForwardCompanion(c *gin.Context) {
 		ginmw.Respond(c, err)
 		return
 	}
-	if err := h.validateVirployeeSupervisor(c, resolved); err != nil {
-		ginmw.Respond(c, err)
-		return
+	if validateSupervisor {
+		if err := h.validateVirployeeSupervisor(c, resolved); err != nil {
+			ginmw.Respond(c, err)
+			return
+		}
 	}
 
 	req, err := http.NewRequestWithContext(
 		c.Request.Context(),
 		c.Request.Method,
-		h.ucs.TargetURL(c.Request.URL.Path, c.Request.URL.RawQuery),
+		targetURL(c.Request.URL.Path, c.Request.URL.RawQuery),
 		c.Request.Body,
 	)
 	if err != nil {

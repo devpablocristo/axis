@@ -2,6 +2,7 @@ package virployees
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -591,6 +592,67 @@ func TestUseCasesExecutionGatePassesCreateAtExecutionAutonomy(t *testing.T) {
 	}
 }
 
+func TestUseCasesExecutionGateChecksGovernanceWhenLocalGatePasses(t *testing.T) {
+	uc, created := setupExecutionGateUseCase(t, domain.AutonomyA3)
+	checker := &fakeGovernanceChecker{
+		result: executiongate.GovernanceCheckResult{
+			Decision:       "allow",
+			RiskLevel:      "medium",
+			Status:         "allowed",
+			DecisionReason: "default medium risk action",
+		},
+	}
+	uc.SetGovernanceChecker(checker)
+
+	result, err := uc.ExecutionGate(context.Background(), "tenant-1", created.ID, "Agendá una reunión mañana a las 15 con ana@example.com", nil)
+	if err != nil {
+		t.Fatalf("ExecutionGate: %v", err)
+	}
+	if result.Gate.Decision != "pass" {
+		t.Fatalf("expected governance allow to pass, got %+v", result.Gate)
+	}
+	if checker.last.TenantID != "tenant-1" || checker.last.ActionType != "calendar.events.create" || checker.last.RequesterID != created.ID.String() {
+		t.Fatalf("unexpected governance input: %+v", checker.last)
+	}
+	assertExecutionGateCheck(t, result.Gate.Checks, "governance_check", executiongate.CheckStatusPass)
+}
+
+func TestUseCasesExecutionGateBlocksWhenGovernanceRequiresApproval(t *testing.T) {
+	uc, created := setupExecutionGateUseCase(t, domain.AutonomyA3)
+	uc.SetGovernanceChecker(&fakeGovernanceChecker{
+		result: executiongate.GovernanceCheckResult{
+			Decision:             "require_approval",
+			RiskLevel:            "high",
+			Status:               "pending_approval",
+			DecisionReason:       "default high risk action",
+			WouldRequireApproval: true,
+		},
+	})
+
+	result, err := uc.ExecutionGate(context.Background(), "tenant-1", created.ID, "Agendá una reunión mañana a las 15 con ana@example.com", nil)
+	if err != nil {
+		t.Fatalf("ExecutionGate: %v", err)
+	}
+	if result.Gate.Decision != "blocked" {
+		t.Fatalf("expected governance to block, got %+v", result.Gate)
+	}
+	assertExecutionGateCheck(t, result.Gate.Checks, "governance_check", executiongate.CheckStatusBlocked)
+}
+
+func TestUseCasesExecutionGateBlocksWhenGovernanceUnavailable(t *testing.T) {
+	uc, created := setupExecutionGateUseCase(t, domain.AutonomyA3)
+	uc.SetGovernanceChecker(&fakeGovernanceChecker{err: errors.New("nexus unavailable")})
+
+	result, err := uc.ExecutionGate(context.Background(), "tenant-1", created.ID, "Agendá una reunión mañana a las 15 con ana@example.com", nil)
+	if err != nil {
+		t.Fatalf("ExecutionGate: %v", err)
+	}
+	if result.Gate.Decision != "blocked" {
+		t.Fatalf("expected unavailable governance to block, got %+v", result.Gate)
+	}
+	assertExecutionGateCheck(t, result.Gate.Checks, "governance_check", executiongate.CheckStatusBlocked)
+}
+
 func TestUseCasesExecutionGateUsesConfirmedDraft(t *testing.T) {
 	uc, created := setupExecutionGateUseCase(t, domain.AutonomyA3)
 
@@ -697,6 +759,20 @@ func assertListLen(t *testing.T, fn func(context.Context, string) ([]domain.Virp
 	if len(got) != want {
 		t.Fatalf("expected %d rows, got %d: %+v", want, len(got), got)
 	}
+}
+
+func assertExecutionGateCheck(t *testing.T, checks []executiongate.Check, key string, status executiongate.CheckStatus) {
+	t.Helper()
+	for _, check := range checks {
+		if check.Key != key {
+			continue
+		}
+		if check.Status != status {
+			t.Fatalf("expected %s check %s, got %+v", key, status, check)
+		}
+		return
+	}
+	t.Fatalf("missing check %s in %+v", key, checks)
 }
 
 type fakeRepo struct {
@@ -931,4 +1007,18 @@ func (r *fakeCapabilityReader) Get(_ context.Context, tenantID string, id uuid.U
 		return capabilitydomain.Capability{}, domainerr.NotFoundf("capability", id.String())
 	}
 	return row, nil
+}
+
+type fakeGovernanceChecker struct {
+	result executiongate.GovernanceCheckResult
+	err    error
+	last   executiongate.GovernanceCheckInput
+}
+
+func (c *fakeGovernanceChecker) Check(_ context.Context, input executiongate.GovernanceCheckInput) (executiongate.GovernanceCheckResult, error) {
+	c.last = input
+	if c.err != nil {
+		return executiongate.GovernanceCheckResult{}, c.err
+	}
+	return c.result, nil
 }

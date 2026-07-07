@@ -68,6 +68,40 @@ func TestEvaluatePassesReadAtRecommendationAutonomy(t *testing.T) {
 	}
 }
 
+func TestApplyGovernanceBlocksRequireApproval(t *testing.T) {
+	result := Evaluate(readyDryRun("calendar.events.delete", virployeedomain.AutonomyA3, dryrun.DraftStatusReady))
+	result = ApplyGovernance(result, GovernanceCheckResult{
+		Decision:             "require_approval",
+		RiskLevel:            "high",
+		Status:               "pending_approval",
+		DecisionReason:       "default high risk action",
+		WouldRequireApproval: true,
+	})
+
+	if result.Gate.Decision != DecisionBlocked {
+		t.Fatalf("expected governance to block, got %+v", result.Gate)
+	}
+	assertCheck(t, result.Gate.Checks, "governance_check", CheckStatusBlocked)
+	if result.Gate.NextStep != "would require governance clearance before execution" {
+		t.Fatalf("unexpected next step: %q", result.Gate.NextStep)
+	}
+}
+
+func TestApplyGovernancePassesAllow(t *testing.T) {
+	result := Evaluate(readyDryRun("calendar.events.create", virployeedomain.AutonomyA3, dryrun.DraftStatusReady))
+	result = ApplyGovernance(result, GovernanceCheckResult{
+		Decision:       "allow",
+		RiskLevel:      "medium",
+		Status:         "allowed",
+		DecisionReason: "default medium risk action",
+	})
+
+	if result.Gate.Decision != DecisionPass {
+		t.Fatalf("expected governance allow to keep pass, got %+v", result.Gate)
+	}
+	assertCheck(t, result.Gate.Checks, "governance_check", CheckStatusPass)
+}
+
 func TestApplyConfirmedDraftMarksCompleteCalendarDraftReady(t *testing.T) {
 	result, err := ApplyConfirmedDraft(readyDryRun("calendar.events.create", virployeedomain.AutonomyA2, dryrun.DraftStatusNeedsInput), ConfirmedDraft{
 		Action: "calendar.events.create",

@@ -14,6 +14,7 @@ type Config struct {
 	MaxBodyBytes     int64
 	CORSOrigins      []string
 	CompanionBaseURL string
+	NexusBaseURL     string
 	IdentityProvider string
 
 	ClerkSecretKey         string
@@ -36,6 +37,7 @@ func Load() Config {
 		MaxBodyBytes:     int64(envconfig.Int("BFF_V2_MAX_BODY_BYTES", 1<<20)),
 		CORSOrigins:      splitCSV(envconfig.Get("BFF_V2_CORS_ORIGINS", "")),
 		CompanionBaseURL: strings.TrimRight(envconfig.Get("BFF_V2_COMPANION_BASE_URL", "http://127.0.0.1:18086"), "/"),
+		NexusBaseURL:     strings.TrimRight(envconfig.Get("BFF_V2_NEXUS_BASE_URL", "http://127.0.0.1:18087"), "/"),
 		IdentityProvider: strings.TrimSpace(strings.ToLower(envconfig.Get("BFF_V2_IDENTITY_PROVIDER", "dev"))),
 		ClerkSecretKey:   envconfig.Get("BFF_V2_CLERK_SECRET_KEY", envconfig.Get("BFF_V2_CLERK_SECRET", envconfig.Get("CLERK_SECRET_KEY", ""))),
 		ClerkAPIBaseURL:  strings.TrimRight(envconfig.Get("BFF_V2_CLERK_API_BASE_URL", "https://api.clerk.com/v1"), "/"),

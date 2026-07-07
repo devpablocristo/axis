@@ -45,6 +45,26 @@ type Result struct {
 	Gate   Gate
 }
 
+type GovernanceCheckInput struct {
+	TenantID       string
+	RequesterType  string
+	RequesterID    string
+	ActionType     string
+	TargetSystem   string
+	TargetResource string
+	Params         map[string]any
+	Reason         string
+	Context        string
+}
+
+type GovernanceCheckResult struct {
+	Decision             string
+	RiskLevel            string
+	Status               string
+	DecisionReason       string
+	WouldRequireApproval bool
+}
+
 type ConfirmedDraft struct {
 	Action string
 	Kind   string
@@ -84,6 +104,45 @@ func Evaluate(result dryrun.Result) Result {
 			Checks:                    checks,
 			NextStep:                  nextStep(decision, checks),
 		},
+	}
+}
+
+func ApplyGovernance(result Result, governance GovernanceCheckResult) Result {
+	check := governanceCheck(governance)
+	result.Gate.Checks = append(result.Gate.Checks, check)
+	if check.Status == CheckStatusBlocked {
+		result.Gate.Decision = DecisionBlocked
+		result.Gate.NextStep = nextStep(result.Gate.Decision, result.Gate.Checks)
+	}
+	return result
+}
+
+func ApplyGovernanceUnavailable(result Result) Result {
+	result.Gate.Checks = append(result.Gate.Checks, Check{
+		Key:    "governance_check",
+		Status: CheckStatusBlocked,
+		Reason: "governance check is unavailable",
+	})
+	result.Gate.Decision = DecisionBlocked
+	result.Gate.NextStep = nextStep(result.Gate.Decision, result.Gate.Checks)
+	return result
+}
+
+func governanceCheck(governance GovernanceCheckResult) Check {
+	reason := governance.DecisionReason
+	if reason == "" {
+		reason = "governance decision is " + governance.Decision
+	}
+	if governance.RiskLevel != "" {
+		reason = reason + " (risk " + governance.RiskLevel + ")"
+	}
+	switch governance.Decision {
+	case "allow":
+		return Check{Key: "governance_check", Status: CheckStatusPass, Reason: reason}
+	case "deny", "require_approval":
+		return Check{Key: "governance_check", Status: CheckStatusBlocked, Reason: reason}
+	default:
+		return Check{Key: "governance_check", Status: CheckStatusBlocked, Reason: "unknown governance decision"}
 	}
 }
 
@@ -157,6 +216,8 @@ func nextStep(decision Decision, checks []Check) string {
 			return "would ask for missing draft fields before execution"
 		case "execution_autonomy":
 			return "would require higher autonomy or human approval before execution"
+		case "governance_check":
+			return "would require governance clearance before execution"
 		}
 	}
 	return "would stop before execution"

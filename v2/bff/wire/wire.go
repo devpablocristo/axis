@@ -38,6 +38,9 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	if config.CompanionBaseURL == "" {
 		return nil, fmt.Errorf("BFF_V2_COMPANION_BASE_URL is required")
 	}
+	if config.NexusBaseURL == "" {
+		return nil, fmt.Errorf("BFF_V2_NEXUS_BASE_URL is required")
+	}
 
 	dbConfig, err := postgres.ConfigFromEnv("BFF_V2_DB", "bff_v2")
 	if err != nil {
@@ -88,7 +91,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	}, tokenVerifier, orgProvider)
 	sessionHandler := session.NewHandler(sessionUC)
 
-	gatewayUC, err := gateway.NewUseCases(tenancyUC, config.CompanionBaseURL)
+	gatewayUC, err := gateway.NewUseCases(tenancyUC, config.CompanionBaseURL, config.NexusBaseURL)
 	if err != nil {
 		db.Close()
 		return nil, err

@@ -33,6 +33,23 @@ services:
       timeout: 3s
       retries: 30
 
+  nexus-v2-postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${NEXUS_V2_POSTGRES_DB:-nexus_v2}
+      POSTGRES_USER: ${NEXUS_V2_POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${NEXUS_V2_POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "${NEXUS_V2_POSTGRES_PORT:-15439}:5432"
+    volumes:
+      - nexus-v2-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
   companion-v2:
     build:
       context: .
@@ -45,6 +62,7 @@ services:
       COMPANION_V2_ENV: ${COMPANION_V2_ENV:-development}
       COMPANION_V2_RUN_MIGRATIONS: ${COMPANION_V2_RUN_MIGRATIONS:-true}
       COMPANION_V2_CORS_ORIGINS: ${COMPANION_V2_CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
+      COMPANION_V2_NEXUS_BASE_URL: ${COMPANION_V2_NEXUS_BASE_URL:-http://nexus-v2:8080}
       COMPANION_V2_DATABASE_URL: postgres://${COMPANION_V2_POSTGRES_USER:-postgres}:${COMPANION_V2_POSTGRES_PASSWORD:-postgres}@companion-v2-postgres:5432/${COMPANION_V2_POSTGRES_DB:-companion_v2}?sslmode=disable
     volumes:
       - ./companion:/src/companion
@@ -56,6 +74,36 @@ services:
       - "${COMPANION_V2_PORT:-18086}:8080"
     depends_on:
       companion-v2-postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/readyz >/dev/null 2>&1 || exit 1"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  nexus-v2:
+    build:
+      context: .
+      dockerfile: Dockerfile.nexus
+      target: dev
+    command: ["air", "-c", "air.nexus.toml"]
+    restart: unless-stopped
+    environment:
+      PORT: "8080"
+      NEXUS_V2_ENV: ${NEXUS_V2_ENV:-development}
+      NEXUS_V2_RUN_MIGRATIONS: ${NEXUS_V2_RUN_MIGRATIONS:-true}
+      NEXUS_V2_CORS_ORIGINS: ${NEXUS_V2_CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
+      NEXUS_V2_DATABASE_URL: postgres://${NEXUS_V2_POSTGRES_USER:-postgres}:${NEXUS_V2_POSTGRES_PASSWORD:-postgres}@nexus-v2-postgres:5432/${NEXUS_V2_POSTGRES_DB:-nexus_v2}?sslmode=disable
+    volumes:
+      - ./nexus:/src/nexus
+      - ./air.nexus.toml:/src/air.nexus.toml:ro
+      - ./nexus/migrations:/src/migrations:ro
+      - nexus-v2-go-mod-cache:/go/pkg/mod
+      - nexus-v2-go-build-cache:/root/.cache/go-build
+    ports:
+      - "${NEXUS_V2_PORT:-18087}:8080"
+    depends_on:
+      nexus-v2-postgres:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/readyz >/dev/null 2>&1 || exit 1"]
@@ -76,6 +124,7 @@ services:
       BFF_V2_RUN_MIGRATIONS: ${BFF_V2_RUN_MIGRATIONS:-true}
       BFF_V2_CORS_ORIGINS: ${BFF_V2_CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
       BFF_V2_COMPANION_BASE_URL: ${BFF_V2_COMPANION_BASE_URL:-http://companion-v2:8080}
+      BFF_V2_NEXUS_BASE_URL: ${BFF_V2_NEXUS_BASE_URL:-http://nexus-v2:8080}
       BFF_V2_IDENTITY_PROVIDER: ${BFF_V2_IDENTITY_PROVIDER:-dev}
       BFF_V2_CLERK_SECRET_KEY: ${BFF_V2_CLERK_SECRET_KEY:-${BFF_V2_CLERK_SECRET:-}}
       BFF_V2_CLERK_API_BASE_URL: ${BFF_V2_CLERK_API_BASE_URL:-https://api.clerk.com/v1}
@@ -99,6 +148,8 @@ services:
       bff-v2-postgres:
         condition: service_healthy
       companion-v2:
+        condition: service_healthy
+      nexus-v2:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/readyz >/dev/null 2>&1 || exit 1"]
@@ -128,8 +179,11 @@ services:
 volumes:
   companion-v2-postgres-data:
   bff-v2-postgres-data:
+  nexus-v2-postgres-data:
   companion-v2-go-mod-cache:
   companion-v2-go-build-cache:
   bff-v2-go-mod-cache:
   bff-v2-go-build-cache:
+  nexus-v2-go-mod-cache:
+  nexus-v2-go-build-cache:
   console-v2-node-modules:
