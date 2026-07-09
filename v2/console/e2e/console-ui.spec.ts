@@ -187,7 +187,7 @@ test('all main sections render with coherent action buttons', async ({ page }) =
   await expect(page.locator('.topbar h1')).toHaveText('Virployees')
 
   const nav = page.locator('.nav')
-  for (const section of ['Virployees', 'Job Roles', 'Capabilities', 'Profile Templates', 'Approvals', 'Admin']) {
+  for (const section of ['Virployees', 'Approvals', 'Capabilities', 'Job Roles', 'Profile Templates', 'Admin']) {
     await nav.getByRole('button', { name: section }).click()
     await expect(page.locator('.topbar h1')).toHaveText(section)
     await assertButtonSystem(page)
@@ -205,7 +205,7 @@ test('crud lists use one toolbar and do not render row action columns', async ({
   await page.goto('/')
 
   const nav = page.locator('.nav')
-  for (const section of ['Virployees', 'Job Roles', 'Capabilities', 'Profile Templates']) {
+  for (const section of ['Virployees', 'Capabilities', 'Job Roles', 'Profile Templates']) {
     await nav.getByRole('button', { name: section }).click()
     await expect(page.locator('th.col-actions')).toHaveCount(0)
     await expect(page.locator('.iam-control__bulk-buttons')).toHaveCount(1)
@@ -224,7 +224,7 @@ test('crud lists keep selection and primary columns fixed and expose created tim
   await page.goto('/')
 
   const nav = page.locator('.nav')
-  for (const section of ['Virployees', 'Job Roles', 'Capabilities', 'Profile Templates']) {
+  for (const section of ['Virployees', 'Capabilities', 'Job Roles', 'Profile Templates']) {
     await nav.getByRole('button', { name: section }).click()
     await expect(page.getByRole('columnheader', { name: 'Created' })).toBeVisible()
     await expectStickySelectionAndPrimary(page)

@@ -175,6 +175,7 @@ textarea:focus-visible {
   margin-top: 0;
 }
 
+.nav-section-label--builder,
 .nav-section-label--admin {
   padding-top: 12px;
   border-top: 1px solid rgba(219, 231, 245, 0.16);

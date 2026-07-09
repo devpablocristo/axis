@@ -117,12 +117,13 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
           </button>
           <button
             type="button"
-            className={activePage === 'job-roles' ? 'active' : ''}
-            onClick={() => setActivePage('job-roles')}
+            className={activePage === 'approvals' ? 'active' : ''}
+            onClick={() => setActivePage('approvals')}
           >
-            <BriefcaseBusiness aria-hidden="true" />
-            Job Roles
+            <ClipboardCheck aria-hidden="true" />
+            Approvals
           </button>
+          <span className="nav-section-label nav-section-label--builder">Builder</span>
           <button
             type="button"
             className={activePage === 'capabilities' ? 'active' : ''}
@@ -133,19 +134,19 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
           </button>
           <button
             type="button"
+            className={activePage === 'job-roles' ? 'active' : ''}
+            onClick={() => setActivePage('job-roles')}
+          >
+            <BriefcaseBusiness aria-hidden="true" />
+            Job Roles
+          </button>
+          <button
+            type="button"
             className={activePage === 'profile-templates' ? 'active' : ''}
             onClick={() => setActivePage('profile-templates')}
           >
             <SlidersHorizontal aria-hidden="true" />
             Profile Templates
-          </button>
-          <button
-            type="button"
-            className={activePage === 'approvals' ? 'active' : ''}
-            onClick={() => setActivePage('approvals')}
-          >
-            <ClipboardCheck aria-hidden="true" />
-            Approvals
           </button>
           <span className="nav-section-label nav-section-label--admin">Admin</span>
           <button

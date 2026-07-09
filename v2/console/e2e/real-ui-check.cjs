@@ -3,7 +3,7 @@ const fs = require('fs/promises')
 
 const baseURL = process.env.PLAYWRIGHT_BASE_URL || 'http://console-v2:19173'
 const reportPath = process.env.REAL_UI_CHECK_REPORT || '/app/test-results/real-ui-check.txt'
-const sections = ['Virployees', 'Job Roles', 'Capabilities', 'Profile Templates']
+const sections = ['Virployees', 'Capabilities', 'Job Roles', 'Profile Templates']
 
 async function main() {
   const browser = await chromium.launch()
