@@ -19,6 +19,8 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
   const [orgId, setOrgId] = useState(localStorage.getItem('axis.v2.org_id') || '')
   const [productSurface, setProductSurface] = useState(localStorage.getItem('axis.v2.product_surface') || '')
   const [activePage, setActivePage] = useState<Page>('virployees')
+  const [approvalReviewContext, setApprovalReviewContext] = useState<ApprovalReviewContext | null>(null)
+  const [focusDryRunVirployeeId, setFocusDryRunVirployeeId] = useState('')
 
   const refresh = useCallback(async () => {
     setSession((current) => ({ data: current.data, loading: true, error: '' }))
@@ -110,7 +112,10 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
           <button
             type="button"
             className={activePage === 'virployees' ? 'active' : ''}
-            onClick={() => setActivePage('virployees')}
+            onClick={() => {
+              setFocusDryRunVirployeeId('')
+              setActivePage('virployees')
+            }}
           >
             <Bot aria-hidden="true" />
             Virployees
@@ -118,7 +123,10 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
           <button
             type="button"
             className={activePage === 'approvals' ? 'active' : ''}
-            onClick={() => setActivePage('approvals')}
+            onClick={() => {
+              setApprovalReviewContext(null)
+              setActivePage('approvals')
+            }}
           >
             <ClipboardCheck aria-hidden="true" />
             Approvals
@@ -222,9 +230,30 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
         ) : activePage === 'profile-templates' ? (
           <ProfileTemplatesPage tenantId={selectedTenant.id} principalId={principalId} />
         ) : activePage === 'approvals' ? (
-          <ApprovalsPage tenantId={selectedTenant.id} principalId={principalId} />
+          <ApprovalsPage
+            tenantId={selectedTenant.id}
+            principalId={principalId}
+            focusApprovalId={approvalReviewContext?.approvalId ?? ''}
+            onReturnToVirployee={approvalReviewContext?.returnVirployeeId
+              ? () => {
+                  const returnVirployeeId = approvalReviewContext.returnVirployeeId ?? ''
+                  setApprovalReviewContext(null)
+                  setFocusDryRunVirployeeId(returnVirployeeId)
+                  setActivePage('virployees')
+                }
+              : undefined}
+          />
         ) : (
-          <VirployeesPage tenantId={selectedTenant.id} principalId={principalId} />
+          <VirployeesPage
+            tenantId={selectedTenant.id}
+            principalId={principalId}
+            focusDryRunVirployeeId={focusDryRunVirployeeId}
+            onFocusDryRunConsumed={() => setFocusDryRunVirployeeId('')}
+            onReviewApproval={({ approvalId, virployeeId }) => {
+              setApprovalReviewContext({ approvalId, returnVirployeeId: virployeeId })
+              setActivePage('approvals')
+            }}
+          />
         )}
       </main>
     </div>
@@ -236,6 +265,11 @@ function unique(values: string[]): string[] {
 }
 
 type Page = 'virployees' | 'job-roles' | 'capabilities' | 'profile-templates' | 'approvals' | 'admin'
+
+type ApprovalReviewContext = {
+  approvalId: string
+  returnVirployeeId?: string
+}
 
 function pageTitle(page: Page): string {
   if (page === 'job-roles') return 'Job Roles'

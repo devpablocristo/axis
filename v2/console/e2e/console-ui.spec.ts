@@ -161,7 +161,31 @@ const products = [{
   purge_after: null,
 }]
 
-const approvals = [{
+type ApprovalFixture = {
+  id: string
+  requester_id: string
+  action_type: string
+  target_system: string
+  target_resource: string
+  risk_level: string
+  reason: string
+  binding_hash: string
+  status: 'pending' | 'approved' | 'rejected'
+  decided_by: string
+  decision_note: string
+  decided_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+type ApiFixtureState = {
+  approvals: ApprovalFixture[]
+  runs: Array<Record<string, unknown>>
+  sequence: number
+  nextApproval: number
+}
+
+const approvals: ApprovalFixture[] = [{
   id: 'approval-1',
   requester_id: principalID,
   action_type: 'calendar.events.create',
@@ -279,7 +303,73 @@ test('virployee edit, preview, and dry run panels have matching top and bottom a
   await expectActionBars(page, '.virployee-form-actions--top', '.virployee-edit-form__footer')
 })
 
+test('approval flow can approve from Virployees and return with an approved run history state', async ({ page }) => {
+  await openSofiaDryRun(page)
+
+  await runDryRunInput(page, 'Agenda una reunion "Approval Test" manana a las 15 con ana@example.com')
+  await expect(page.getByText('Ready to check the gate.')).toBeVisible()
+  await page.getByRole('button', { name: 'Check execution gate' }).first().click()
+
+  await expect(page.getByRole('button', { name: 'Review approval' }).first()).toBeVisible()
+  await page.getByRole('button', { name: 'Review approval' }).first().click()
+  await expect(page.locator('.topbar h1')).toHaveText('Approvals')
+  await expect(page.getByText('Reviewing approval')).toBeVisible()
+
+  const focusedApproval = page.locator('.approvals-board__card--focused')
+  await expect(focusedApproval).toContainText('calendar.events.create')
+  await focusedApproval.getByRole('button', { name: 'Approve' }).click()
+  await expect(focusedApproval).toContainText('Approved')
+  await expect(focusedApproval.getByRole('button', { name: 'Approve' })).toHaveCount(0)
+  await expect(focusedApproval.getByRole('button', { name: 'Reject' })).toHaveCount(0)
+
+  await page.getByRole('button', { name: 'Back to Virployee' }).click()
+  await expect(page.locator('.topbar h1')).toHaveText('Virployees')
+  await expect(page.getByRole('heading', { name: 'Dry Run' })).toBeVisible()
+
+  const latestRun = page.locator('.virployee-run-history__row').first()
+  await expect(latestRun).toContainText('Approved')
+  await expect(latestRun).toContainText('Requires human approval')
+  await expect(latestRun).not.toContainText('Blocked')
+  await expect(latestRun.getByRole('button', { name: 'View approval' })).toBeVisible()
+})
+
+test('approval flow can reject and keeps rejected approvals read-only', async ({ page }) => {
+  await openSofiaDryRun(page)
+
+  await runDryRunInput(page, 'Agenda una reunion "Reject Test" manana a las 16 con ana@example.com')
+  await page.getByRole('button', { name: 'Check execution gate' }).first().click()
+  await page.getByRole('button', { name: 'Review approval' }).first().click()
+
+  const focusedApproval = page.locator('.approvals-board__card--focused')
+  await expect(focusedApproval).toContainText('Pending')
+  await focusedApproval.getByRole('button', { name: 'Reject' }).click()
+  await expect(focusedApproval).toContainText('Rejected')
+  await expect(focusedApproval.getByRole('button', { name: 'Approve' })).toHaveCount(0)
+  await expect(focusedApproval.getByRole('button', { name: 'Reject' })).toHaveCount(0)
+
+  await page.getByRole('button', { name: 'Back to Virployee' }).click()
+  const latestRun = page.locator('.virployee-run-history__row').first()
+  await expect(latestRun).toContainText('Rejected')
+  await expect(latestRun).not.toContainText('Blocked')
+})
+
+test('allow and deny gate results do not expose approval actions', async ({ page }) => {
+  await openSofiaDryRun(page)
+
+  await runDryRunInput(page, 'Que reuniones tengo manana')
+  await page.getByRole('button', { name: 'Check execution gate' }).first().click()
+  await expect(page.getByText('Allowed by Nexus').first()).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Review approval' })).toHaveCount(0)
+
+  await page.getByLabel('Action input').fill('Agenda una reunion "Smoke Deny" manana a las 16 con ana@example.com')
+  await page.getByRole('button', { name: /Run (Dry Run|again)/ }).first().click()
+  await page.getByRole('button', { name: 'Check execution gate' }).first().click()
+  await expect(page.getByText('Denied by Nexus').first()).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Review approval' })).toHaveCount(0)
+})
+
 async function installApiFixtures(page: Page) {
+  const state = createApiFixtureState()
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url())
     const path = url.pathname
@@ -288,7 +378,18 @@ async function installApiFixtures(page: Page) {
     if (path === '/api/virployees') return json(route, { data: virployees })
     if (path === '/api/virployees/archived' || path === '/api/virployees/trash') return json(route, { data: [] })
     if (path === '/api/virployees/virployee-sofia/runtime-context') return json(route, runtimeContext)
-    if (path === '/api/virployees/virployee-sofia/runs') return json(route, { data: [] })
+    if (path === '/api/virployees/virployee-sofia/dry-run' && route.request().method() === 'POST') {
+      const input = requestInput(route)
+      const result = dryRunForInput(input)
+      state.runs.unshift(dryRunTrace(input, result, nextSequence(state)))
+      return json(route, result)
+    }
+    if (path === '/api/virployees/virployee-sofia/execution-gate' && route.request().method() === 'POST') {
+      const input = requestInput(route)
+      const result = executionGateForInput(input, state)
+      return json(route, result)
+    }
+    if (path === '/api/virployees/virployee-sofia/runs') return json(route, { data: state.runs })
     if (path === '/api/job-roles') return json(route, { data: jobRoles })
     if (path === '/api/capabilities') return json(route, { data: capabilities })
     if (path === '/api/profile-templates') return json(route, { data: profileTemplates })
@@ -298,18 +399,291 @@ async function installApiFixtures(page: Page) {
     if (path === '/api/products') return json(route, { data: products })
     if (path === '/api/approvals') {
       const status = url.searchParams.get('status')
-      return json(route, { data: status === 'pending' ? approvals : [] })
+      return json(route, { data: state.approvals.filter((approval) => approval.status === status) })
+    }
+    const approvalDecisionMatch = path.match(/^\/api\/approvals\/([^/]+)\/(approve|reject)$/)
+    if (approvalDecisionMatch && route.request().method() === 'POST') {
+      const [, approvalID, decision] = approvalDecisionMatch
+      const approval = state.approvals.find((item) => item.id === approvalID)
+      if (!approval) return json(route, { error: 'approval not found' }, 404)
+      if (approval.status !== 'pending') return json(route, { error: 'approval already decided' }, 409)
+      approval.status = decision === 'approve' ? 'approved' : 'rejected'
+      approval.decided_by = principalID
+      approval.decision_note = decision === 'approve' ? 'approved in e2e' : 'rejected in e2e'
+      approval.decided_at = '2026-07-09T15:06:00Z'
+      approval.updated_at = approval.decided_at
+      return json(route, approval)
+    }
+    const approvalMatch = path.match(/^\/api\/approvals\/([^/]+)$/)
+    if (approvalMatch) {
+      const approval = state.approvals.find((item) => item.id === approvalMatch[1])
+      return approval ? json(route, approval) : json(route, { error: 'approval not found' }, 404)
     }
     return json(route, { data: [] })
   })
 }
 
-async function json(route: Route, body: unknown) {
+async function json(route: Route, body: unknown, status = 200) {
   await route.fulfill({
-    status: 200,
+    status,
     contentType: 'application/json',
     body: JSON.stringify(body),
   })
+}
+
+async function openSofiaDryRun(page: Page) {
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Virployees' }).click()
+  await page.getByRole('checkbox', { name: 'Select virployee-sofia' }).check()
+  await page.getByRole('button', { name: 'Dry Run' }).click()
+  await expect(page.getByRole('heading', { name: 'Dry Run' })).toBeVisible()
+}
+
+async function runDryRunInput(page: Page, input: string) {
+  await page.getByLabel('Action input').fill(input)
+  await page.getByRole('button', { name: /Run (Dry Run|again)/ }).first().click()
+  await expect(page.getByText('Dry Run result')).toBeVisible()
+}
+
+function createApiFixtureState(): ApiFixtureState {
+  return {
+    approvals: approvals.map((approval) => ({ ...approval })),
+    runs: [],
+    sequence: 0,
+    nextApproval: 2,
+  }
+}
+
+function nextSequence(state: ApiFixtureState): number {
+  state.sequence += 1
+  return state.sequence
+}
+
+function requestInput(route: Route): string {
+  const payload = route.request().postDataJSON() as { input?: string } | null
+  return String(payload?.input ?? '')
+}
+
+function executionGateForInput(input: string, state: ApiFixtureState) {
+  const sequence = nextSequence(state)
+  const dryRun = dryRunForInput(input)
+  if (isReadInput(input)) {
+    const result = executionGateResponse(input, dryRun, 'pass', 'Allowed by Nexus')
+    state.runs.unshift(executionGateTrace(input, dryRun, sequence, 'allow'))
+    return result
+  }
+  if (isDenyInput(input)) {
+    const result = executionGateResponse(input, dryRun, 'blocked', 'Action type is disabled')
+    state.runs.unshift(executionGateTrace(input, dryRun, sequence, 'deny'))
+    return result
+  }
+
+  const approvalID = `approval-${state.nextApproval}`
+  state.nextApproval += 1
+  const bindingHash = `binding-${sequence}-approval`
+  state.approvals.unshift({
+    id: approvalID,
+    requester_id: principalID,
+    action_type: 'calendar.events.create',
+    target_system: 'calendar',
+    target_resource: 'event',
+    risk_level: 'high',
+    reason: 'No policy matched; default for risk high',
+    binding_hash: bindingHash,
+    status: 'pending',
+    decided_by: '',
+    decision_note: '',
+    decided_at: null,
+    created_at: `2026-07-09T15:${String(sequence).padStart(2, '0')}:00Z`,
+    updated_at: `2026-07-09T15:${String(sequence).padStart(2, '0')}:00Z`,
+  })
+  const result = executionGateResponse(input, dryRun, 'blocked', 'Requires human approval')
+  state.runs.unshift(executionGateTrace(input, dryRun, sequence, 'require_approval', approvalID, bindingHash))
+  return result
+}
+
+function dryRunForInput(input: string) {
+  if (isReadInput(input)) {
+    return {
+      input,
+      runtime_context: runtimeContext,
+      intent: {
+        matched: true,
+        capability_key: 'calendar.events.read',
+        domain: 'calendar',
+        resource: 'events',
+        action: 'read',
+        confidence: 0.92,
+        matched_by: ['resource:reuniones'],
+        rules: [{ type: 'keyword', target: 'resource', value: 'reuniones' }],
+      },
+      required_capability: {
+        id: 'cap-events-read',
+        capability_key: 'calendar.events.read',
+        name: 'Read calendar events',
+        required_autonomy: 'A1',
+        matched: true,
+      },
+      required_autonomy: 'A1',
+      virployee_autonomy: 'A3',
+      decision: 'allowed',
+      reason: 'virployee autonomy allows the required capability',
+      next_step: 'would read calendar events without external side effects',
+      draft: {
+        status: 'not_applicable',
+        action: 'calendar.events.read',
+        kind: 'calendar_read',
+        summary: 'Read calendar events',
+        fields: [],
+        missing_fields: [],
+        notes: [],
+      },
+    }
+  }
+
+  return {
+    input,
+    runtime_context: runtimeContext,
+    intent: {
+      matched: true,
+      capability_key: 'calendar.events.create',
+      domain: 'calendar',
+      resource: 'events',
+      action: 'create',
+      confidence: 0.9,
+      matched_by: ['resource:reunion', 'action:agenda'],
+      rules: [
+        { type: 'keyword', target: 'resource', value: 'reunion' },
+        { type: 'keyword', target: 'action', value: 'agenda' },
+      ],
+    },
+    required_capability: {
+      id: 'cap-events-create',
+      capability_key: 'calendar.events.create',
+      name: 'Create calendar events',
+      required_autonomy: 'A2',
+      matched: true,
+    },
+    required_autonomy: 'A2',
+    virployee_autonomy: 'A3',
+    decision: 'allowed',
+    reason: 'virployee autonomy allows the required capability',
+    next_step: 'would draft or prepare the action without external side effects',
+    draft: {
+      status: 'needs_input',
+      action: 'calendar.events.create',
+      kind: 'calendar_event',
+      summary: 'Calendar event draft',
+      fields: [
+        { key: 'title', label: 'Title', value: isDenyInput(input) ? 'Smoke Deny' : titleFromInput(input), source: 'input' },
+        { key: 'date_hint', label: 'Date', value: 'manana', source: 'input' },
+        { key: 'time', label: 'Time', value: isDenyInput(input) ? '16:00' : '15:00', source: 'input' },
+        { key: 'attendees', label: 'Attendees', value: 'ana@example.com', source: 'input' },
+      ],
+      missing_fields: [],
+      notes: [],
+    },
+  }
+}
+
+function executionGateResponse(input: string, dryRun: ReturnType<typeof dryRunForInput>, decision: 'pass' | 'blocked', nextStep: string) {
+  return {
+    input,
+    dry_run: dryRun,
+    execution_gate: {
+      decision,
+      mode: 'simulation',
+      will_execute: decision === 'pass',
+      required_execution_autonomy: 'A3',
+      virployee_autonomy: 'A3',
+      checks: [{
+        key: decision === 'pass' ? 'nexus_policy' : 'nexus_gate',
+        status: decision === 'pass' ? 'pass' : 'blocked',
+        reason: nextStep,
+      }],
+      next_step: nextStep,
+    },
+  }
+}
+
+function dryRunTrace(input: string, dryRun: ReturnType<typeof dryRunForInput>, sequence: number) {
+  return {
+    id: `run-dry-${sequence}`,
+    virployee_id: 'virployee-sofia',
+    operation: 'dry_run',
+    input_hash: `hash-dry-${sequence}`,
+    input_preview: input,
+    intent: dryRun.intent,
+    capability_id: dryRun.required_capability.id,
+    capability_key: dryRun.required_capability.capability_key,
+    dry_run_decision: dryRun.decision,
+    gate_decision: '',
+    gate_checks: [],
+    binding_hash: `binding-dry-${sequence}`,
+    created_at: `2026-07-09T15:${String(sequence).padStart(2, '0')}:00Z`,
+  }
+}
+
+function executionGateTrace(
+  input: string,
+  dryRun: ReturnType<typeof dryRunForInput>,
+  sequence: number,
+  nexusDecision: 'allow' | 'deny' | 'require_approval',
+  approvalID = '',
+  bindingHash = `binding-${sequence}-${nexusDecision}`,
+) {
+  const approvalStatus = nexusDecision === 'require_approval' ? 'pending' : ''
+  return {
+    id: `run-gate-${sequence}`,
+    virployee_id: 'virployee-sofia',
+    operation: 'execution_gate',
+    input_hash: `hash-gate-${sequence}`,
+    input_preview: input,
+    intent: dryRun.intent,
+    capability_id: dryRun.required_capability.id,
+    capability_key: dryRun.required_capability.capability_key,
+    dry_run_decision: dryRun.decision,
+    gate_decision: nexusDecision === 'allow' ? 'pass' : 'blocked',
+    gate_checks: [{
+      key: 'nexus_policy',
+      status: nexusDecision === 'allow' ? 'pass' : 'blocked',
+      reason: nexusDecision === 'allow'
+        ? 'Allowed by Nexus'
+        : nexusDecision === 'deny'
+          ? 'Action type is disabled'
+          : 'Requires human approval',
+    }],
+    nexus_result: {
+      available: true,
+      decision: nexusDecision,
+      risk_level: nexusDecision === 'allow' ? 'low' : 'high',
+      status: nexusDecision === 'allow' ? 'allowed' : nexusDecision === 'deny' ? 'denied' : 'pending_approval',
+      decision_reason: nexusDecision === 'allow'
+        ? 'No policy matched; default for risk low'
+        : nexusDecision === 'deny'
+          ? 'Action type is disabled'
+          : 'No policy matched; default for risk high',
+      would_require_approval: nexusDecision === 'require_approval',
+      binding_hash: bindingHash,
+      approval_id: approvalID,
+      approval_status: approvalStatus,
+    },
+    binding_hash: bindingHash,
+    created_at: `2026-07-09T15:${String(sequence).padStart(2, '0')}:00Z`,
+  }
+}
+
+function isReadInput(input: string): boolean {
+  return input.toLowerCase().includes('que reuniones') || input.toLowerCase().includes('qué reuniones')
+}
+
+function isDenyInput(input: string): boolean {
+  return input.toLowerCase().includes('deny')
+}
+
+function titleFromInput(input: string): string {
+  const quoted = input.match(/"([^"]+)"/)
+  return quoted?.[1] ?? 'Approval Test'
 }
 
 async function assertButtonSystem(page: Page) {

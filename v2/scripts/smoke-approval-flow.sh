@@ -193,9 +193,28 @@ create_virployee() {
 run_gate() {
   local virployee_id="$1"
   local input="$2"
+  local confirmed_calendar_create="${3:-false}"
   local payload
 
-  payload="$(jq -n --arg input "$input" '{input: $input}')"
+  if [[ "$confirmed_calendar_create" == "true" ]]; then
+    payload="$(
+      jq -n --arg input "$input" '{
+        input: $input,
+        confirmed_draft: {
+          action: "calendar.events.create",
+          kind: "calendar_event",
+          fields: [
+            {key: "title", value: "Smoke Approval"},
+            {key: "date_hint", value: "manana"},
+            {key: "time", value: "15:00"},
+            {key: "attendees", value: "ana@example.com"}
+          ]
+        }
+      }'
+    )"
+  else
+    payload="$(jq -n --arg input "$input" '{input: $input}')"
+  fi
   api POST "/api/virployees/$virployee_id/execution-gate" "$payload"
 }
 
@@ -218,7 +237,7 @@ virployee_id="$(create_virployee "$job_role_id" "$profile_template_id" "$read_ca
 allow_gate="$(run_gate "$virployee_id" "Que reuniones tengo manana")"
 assert_jq "$allow_gate" '.execution_gate.decision == "pass"' "calendar read should pass"
 
-require_gate="$(run_gate "$virployee_id" "Agenda una reunion \"Smoke Approval\" manana a las 15 con ana@example.com")"
+require_gate="$(run_gate "$virployee_id" "Agenda una reunion \"Smoke Approval\" manana a las 15 con ana@example.com" true)"
 assert_jq "$require_gate" '.execution_gate.decision == "blocked"' "high-risk calendar create should block for approval"
 
 runs="$(latest_runs "$virployee_id")"
@@ -239,7 +258,7 @@ approved_lookup="$(api GET "/api/approvals/$approval_id")"
 assert_jq "$approved_lookup" '.status == "approved" and .decided_by != ""' "approved approval should be readable"
 
 ensure_action_type "calendar.events.create" "Create calendar events" "high" "false" >/dev/null
-deny_gate="$(run_gate "$virployee_id" "Agenda una reunion \"Smoke Deny\" manana a las 16 con ana@example.com")"
+deny_gate="$(run_gate "$virployee_id" "Agenda una reunion \"Smoke Deny\" manana a las 16 con ana@example.com" true)"
 assert_jq "$deny_gate" '.execution_gate.decision == "blocked"' "disabled action type should block"
 
 runs="$(latest_runs "$virployee_id")"

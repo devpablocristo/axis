@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
 import {
   type Approval,
   approveApproval,
@@ -9,6 +9,8 @@ import {
 type ApprovalsPageProps = {
   tenantId: string
   principalId: string
+  focusApprovalId?: string
+  onReturnToVirployee?: () => void
 }
 
 type ApprovalStatus = Approval['status']
@@ -21,17 +23,26 @@ const EMPTY_APPROVALS: ApprovalsByStatus = {
   rejected: [],
 }
 
-export function ApprovalsPage({ tenantId, principalId }: ApprovalsPageProps) {
+export function ApprovalsPage({ tenantId, principalId, focusApprovalId = '', onReturnToVirployee }: ApprovalsPageProps) {
   const [approvalsByStatus, setApprovalsByStatus] = useState<ApprovalsByStatus>(EMPTY_APPROVALS)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [busyID, setBusyID] = useState('')
+  const focusedCardRef = useRef<HTMLElement | null>(null)
   const isActive = Boolean(tenantId && principalId)
   const pendingCount = approvalsByStatus.pending.length
   const totalCount = useMemo(
     () => APPROVAL_STATUSES.reduce((count, status) => count + approvalsByStatus[status].length, 0),
     [approvalsByStatus],
   )
+  const focusedApproval = useMemo(() => {
+    if (!focusApprovalId) return null
+    for (const status of APPROVAL_STATUSES) {
+      const approval = approvalsByStatus[status].find((item) => item.id === focusApprovalId)
+      if (approval) return approval
+    }
+    return null
+  }, [approvalsByStatus, focusApprovalId])
 
   useEffect(() => {
     if (!isActive) {
@@ -42,6 +53,11 @@ export function ApprovalsPage({ tenantId, principalId }: ApprovalsPageProps) {
     }
     void load()
   }, [isActive, tenantId, principalId])
+
+  useEffect(() => {
+    if (!focusApprovalId || !focusedApproval || loading) return
+    focusedCardRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  }, [focusedApproval, focusApprovalId, loading])
 
   async function load() {
     setLoading(true)
@@ -102,6 +118,29 @@ export function ApprovalsPage({ tenantId, principalId }: ApprovalsPageProps) {
 
       {error ? <p role="alert" className="iam-control__inline-error">{error}</p> : null}
 
+      {focusApprovalId ? (
+        <div className={`approval-focus-banner ${focusedApproval ? '' : 'approval-focus-banner--missing'}`}>
+          <div>
+            <strong>{focusedApproval ? 'Reviewing approval' : 'Approval not found'}</strong>
+            <span>
+              {focusedApproval
+                ? `${focusedApproval.action_type} · ${approvalStatusLabel(focusedApproval.status)} · ${shortHash(focusedApproval.id)}`
+                : `${shortHash(focusApprovalId)} is not in the loaded approvals.`}
+            </span>
+          </div>
+          <div className="approval-focus-banner__actions">
+            <button type="button" className="btn-secondary" disabled={loading || Boolean(busyID)} onClick={() => void load()}>
+              Refresh
+            </button>
+            {onReturnToVirployee ? (
+              <button type="button" className="btn-primary" onClick={onReturnToVirployee}>
+                Back to Virployee
+              </button>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
       {loading && totalCount === 0 ? (
         <div className="spinner" />
       ) : (
@@ -112,6 +151,8 @@ export function ApprovalsPage({ tenantId, principalId }: ApprovalsPageProps) {
               status={status}
               approvals={approvalsByStatus[status]}
               busyID={busyID}
+              focusApprovalId={focusApprovalId}
+              focusedCardRef={focusedCardRef}
               onDecide={decide}
             />
           ))}
@@ -125,6 +166,8 @@ function ApprovalColumn(props: {
   status: ApprovalStatus
   approvals: Approval[]
   busyID: string
+  focusApprovalId: string
+  focusedCardRef: MutableRefObject<HTMLElement | null>
   onDecide: (id: string, decision: 'approve' | 'reject') => void
 }) {
   return (
@@ -149,6 +192,10 @@ function ApprovalColumn(props: {
               approval={approval}
               busy={props.busyID === approval.id}
               disabled={Boolean(props.busyID)}
+              focused={props.focusApprovalId === approval.id}
+              cardRef={props.focusApprovalId === approval.id ? (node) => {
+                props.focusedCardRef.current = node
+              } : undefined}
               onDecide={props.onDecide}
             />
           ))}
@@ -162,11 +209,17 @@ function ApprovalCard(props: {
   approval: Approval
   busy: boolean
   disabled: boolean
+  focused: boolean
+  cardRef?: (node: HTMLElement | null) => void
   onDecide: (id: string, decision: 'approve' | 'reject') => void
 }) {
   const approval = props.approval
   return (
-    <article className="approvals-board__card" aria-busy={props.busy}>
+    <article
+      ref={props.cardRef}
+      className={`approvals-board__card ${props.focused ? 'approvals-board__card--focused' : ''}`}
+      aria-busy={props.busy}
+    >
       <div className="approvals-board__card-title">
         <div>
           <span className="approvals-list__eyebrow">{approval.target_system || 'Unknown system'}</span>

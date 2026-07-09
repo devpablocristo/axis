@@ -53,6 +53,9 @@ type CalendarCreateDraftKey = keyof CalendarCreateDraftValues
 type VirployeesPageProps = {
   tenantId: string
   principalId: string
+  focusDryRunVirployeeId?: string
+  onFocusDryRunConsumed?: () => void
+  onReviewApproval?: (context: { approvalId: string; virployeeId: string }) => void
 }
 
 type VirployeeEditValues = {
@@ -113,7 +116,13 @@ async function listAllLifecycle<T extends { id: string }>(
   return [...rowsByID.values()]
 }
 
-export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
+export function VirployeesPage({
+  tenantId,
+  principalId,
+  focusDryRunVirployeeId = '',
+  onFocusDryRunConsumed,
+  onReviewApproval,
+}: VirployeesPageProps) {
   const rootRef = useRef<HTMLElement | null>(null)
   const [lifecycleView, setLifecycleView] = useState<CrudLifecycleView>('active')
   const [selectedIds, setSelectedIds] = useState<string[]>([])
@@ -603,6 +612,22 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
     setConfirmedDraft(null)
   }
 
+  useEffect(() => {
+    if (!focusDryRunVirployeeId || !isActive) return
+    if (lifecycleView !== 'active') {
+      setLifecycleView('active')
+      return
+    }
+    const row = virployeeRows.find((item) => item.id === focusDryRunVirployeeId)
+    if (!row) return
+    if (dryRunRow?.id !== row.id) {
+      openDryRun(row)
+    } else {
+      void loadRunTraces(row)
+    }
+    onFocusDryRunConsumed?.()
+  }, [dryRunRow?.id, focusDryRunVirployeeId, isActive, lifecycleView, onFocusDryRunConsumed, virployeeRows])
+
   const updateDryRunInput = (value: string) => {
     setDryRunInput(value)
     setDryRunResult(null)
@@ -657,14 +682,22 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
 
   const checkExecutionGate = async () => {
     if (!dryRunRow || !dryRunResult || executionGateLoading || stringValue(dryRunInput).length === 0) return
-    if (requiresConfirmedCalendarDraft(dryRunResult) && !confirmedDraft) return
+    const confirmedDraftForGate = confirmedDraft ?? (
+      requiresConfirmedCalendarDraft(dryRunResult) &&
+      calendarDraftValues &&
+      isCalendarCreateDraftComplete(calendarDraftValues)
+        ? calendarConfirmedDraftFromValues(calendarDraftValues)
+        : null
+    )
+    if (requiresConfirmedCalendarDraft(dryRunResult) && !confirmedDraftForGate) return
     const requestID = executionGateRequestRef.current + 1
     executionGateRequestRef.current = requestID
     setExecutionGateLoading(true)
     setExecutionGateError('')
     setExecutionGateResult(null)
+    if (confirmedDraftForGate) setConfirmedDraft(confirmedDraftForGate)
     try {
-      const result = await checkVirployeeExecutionGate(dryRunRow.id, dryRunInput, tenantId, principalId, confirmedDraft ?? undefined)
+      const result = await checkVirployeeExecutionGate(dryRunRow.id, dryRunInput, tenantId, principalId, confirmedDraftForGate ?? undefined)
       if (executionGateRequestRef.current !== requestID) return
       setExecutionGateResult(result)
       setDryRunResult(result.dry_run)
@@ -838,6 +871,7 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
                 onRun={() => void runDryRun()}
                 onCheckExecutionGate={() => void checkExecutionGate()}
                 onRefreshRuns={() => void loadRunTraces(dryRunRow)}
+                onReviewApproval={onReviewApproval ? (approvalId) => onReviewApproval({ approvalId, virployeeId: dryRunRow.id }) : undefined}
                 onCalendarDraftValueChange={updateCalendarDraftValue}
                 onConfirmCalendarDraft={confirmCalendarDraft}
                 onClose={closeDryRun}
@@ -1157,6 +1191,7 @@ function VirployeeDryRunInline(props: {
   onRun: () => void
   onCheckExecutionGate: () => void
   onRefreshRuns: () => void
+  onReviewApproval?: (approvalId: string) => void
   onCalendarDraftValueChange: (key: CalendarCreateDraftKey, value: string) => void
   onConfirmCalendarDraft: () => void
   onClose: () => void
@@ -1167,16 +1202,54 @@ function VirployeeDryRunInline(props: {
   const capabilities = context?.capabilities ?? []
   const canRun = stringValue(props.input).length > 0 && !props.loading
   const needsConfirmedDraft = props.result ? requiresConfirmedCalendarDraft(props.result) : false
-  const canCheckGate = Boolean(props.result) && canRun && !props.executionGateLoading && (!needsConfirmedDraft || Boolean(props.confirmedDraft))
+  const draftComplete = props.calendarDraftValues ? isCalendarCreateDraftComplete(props.calendarDraftValues) : false
+  const canCheckGate = Boolean(props.result) &&
+    canRun &&
+    !props.executionGateLoading &&
+    (!needsConfirmedDraft || Boolean(props.confirmedDraft) || draftComplete)
   const supervisorValue = props.supervisor ? userLabel(props.supervisor) : 'Unknown Supervisor'
   const latestGateRun = latestExecutionGateRun(props.runTraces)
   const latestApprovalID = latestGateRun?.nexus_result?.approval_id ?? ''
+  const [latestApproval, setLatestApproval] = useState<Approval | null>(null)
+  const [latestApprovalLoading, setLatestApprovalLoading] = useState(false)
+  const [latestApprovalError, setLatestApprovalError] = useState('')
+  const latestApprovalRequestRef = useRef(0)
   const runButtonLabel = props.loading ? 'Running...' : props.result ? 'Run again' : 'Run Dry Run'
   const gateButtonLabel = props.executionGateLoading
     ? 'Checking...'
     : props.executionGate
       ? 'Re-check execution gate'
       : 'Check execution gate'
+
+  useEffect(() => {
+    if (!latestApprovalID) {
+      latestApprovalRequestRef.current += 1
+      setLatestApproval(null)
+      setLatestApprovalLoading(false)
+      setLatestApprovalError('')
+      return
+    }
+    void loadLatestApproval(latestApprovalID)
+  }, [latestApprovalID, props.principalId, props.tenantId])
+
+  async function loadLatestApproval(approvalId = latestApprovalID) {
+    if (!approvalId) return
+    const requestID = latestApprovalRequestRef.current + 1
+    latestApprovalRequestRef.current = requestID
+    setLatestApprovalLoading(true)
+    setLatestApprovalError('')
+    try {
+      const approval = await getApproval(approvalId, props.tenantId, props.principalId)
+      if (latestApprovalRequestRef.current !== requestID) return
+      setLatestApproval(approval)
+    } catch (error) {
+      if (latestApprovalRequestRef.current !== requestID) return
+      setLatestApproval(null)
+      setLatestApprovalError(error instanceof Error ? error.message : 'Could not load approval')
+    } finally {
+      if (latestApprovalRequestRef.current === requestID) setLatestApprovalLoading(false)
+    }
+  }
 
   return (
     <div className="card crud-form-card virployee-dry-run-inline">
@@ -1243,13 +1316,13 @@ function VirployeeDryRunInline(props: {
                 />
                 <FlowSummaryItem
                   label="Nexus"
-                  value={latestGateRun ? formatNexusTrace(latestGateRun) : 'Not called'}
-                  tone={nexusTraceTone(latestGateRun)}
+                  value={latestGateRun ? formatNexusTrace(latestGateRun, latestApproval) : 'Not called'}
+                  tone={nexusTraceTone(latestGateRun, latestApproval)}
                 />
                 <FlowSummaryItem
                   label="Approval"
-                  value={latestGateRun && latestApprovalID ? formatApprovalTrace(latestGateRun) : 'None'}
-                  tone={approvalTraceTone(latestGateRun)}
+                  value={latestGateRun && latestApprovalID ? formatApprovalTrace(latestGateRun, latestApproval) : 'None'}
+                  tone={approvalTraceTone(latestGateRun, latestApproval)}
                 />
               </div>
             </section>
@@ -1295,11 +1368,21 @@ function VirployeeDryRunInline(props: {
               <ExecutionGateView gate={props.executionGate} autonomyByLevel={props.autonomyByLevel} />
             ) : null}
 
+            <ApprovalCheckpointView
+              run={latestGateRun}
+              approval={latestApproval}
+              loading={latestApprovalLoading}
+              error={latestApprovalError}
+              onRefresh={() => void loadLatestApproval()}
+              onReviewApproval={props.onReviewApproval}
+            />
+
             <RunTraceHistory
               tenantId={props.tenantId}
               principalId={props.principalId}
               runs={props.runTraces}
               loading={props.runTracesLoading}
+              onReviewApproval={props.onReviewApproval}
               onRefresh={props.onRefreshRuns}
             />
 
@@ -1338,6 +1421,7 @@ function VirployeeDryRunInline(props: {
               principalId={props.principalId}
               runs={props.runTraces}
               loading={props.runTracesLoading}
+              onReviewApproval={props.onReviewApproval}
               onRefresh={props.onRefreshRuns}
             />
           </>
@@ -1408,6 +1492,11 @@ function ConfirmableCalendarDraftView(props: {
   onConfirm: () => void
 }) {
   const complete = isCalendarCreateDraftComplete(props.values)
+  const reviewMessage = props.confirmed
+    ? 'Draft confirmed'
+    : complete
+      ? 'Ready to check the gate.'
+      : 'Complete the draft before checking the gate.'
   const clarifications = props.draft.missing_fields.filter((field) => {
     return isCalendarCreateDraftKey(field.key) && stringValue(props.values[field.key]).length === 0
   })
@@ -1472,8 +1561,8 @@ function ConfirmableCalendarDraftView(props: {
         <button type="button" className="btn-secondary" disabled={!complete || props.confirmed} onClick={props.onConfirm}>
           Confirm draft
         </button>
-        <span className={props.confirmed ? 'iam-control__inline-note' : 'iam-control__inline-error'}>
-          {props.confirmed ? 'Draft confirmed' : 'Review and confirm the draft before checking the gate.'}
+        <span className={complete || props.confirmed ? 'iam-control__inline-note' : 'iam-control__inline-error'}>
+          {reviewMessage}
         </span>
       </div>
     </section>
@@ -1566,11 +1655,54 @@ function ExecutionGateView(props: {
   )
 }
 
+function ApprovalCheckpointView(props: {
+  run: VirployeeRunTrace | null
+  approval: Approval | null
+  loading: boolean
+  error: string
+  onRefresh: () => void
+  onReviewApproval?: (approvalId: string) => void
+}) {
+  const approvalID = props.run?.nexus_result?.approval_id ?? ''
+  if (!approvalID) return null
+  const status = props.approval?.status || props.run?.nexus_result?.approval_status || 'pending'
+  const bindingHash = props.approval?.binding_hash || props.run?.nexus_result?.binding_hash || props.run?.binding_hash || ''
+  const decision = props.approval?.decided_by ? formatApprovalDecision(props.approval) : 'Not decided yet'
+  return (
+    <section className="virployee-preview__section virployee-approval-checkpoint" aria-label="Approval checkpoint">
+      <div className="virployee-approval-checkpoint__header">
+        <SectionHeading title="Approval" eyebrow="Human gate" />
+        <StatusBadge value={formatApprovalStatus(status)} tone={approvalStatusTone(status)} />
+      </div>
+      <div className="virployee-preview__grid">
+        <PreviewField label="Approval" value={shortHash(approvalID)} />
+        <PreviewField label="Status" value={formatApprovalStatus(status)} />
+        <PreviewField label="Risk" value={props.approval?.risk_level || props.run?.nexus_result?.risk_level || '-'} />
+        <PreviewField label="Binding hash" value={shortHash(bindingHash)} />
+        <PreviewField label="Reason" value={props.approval?.reason || props.run?.nexus_result?.decision_reason || '-'} />
+        <PreviewField label="Decision" value={decision} />
+      </div>
+      {props.error ? <p role="alert" className="iam-control__inline-error">{props.error}</p> : null}
+      <div className="virployee-approval-checkpoint__actions">
+        <button type="button" className="btn-secondary" disabled={props.loading} onClick={props.onRefresh}>
+          {props.loading ? 'Refreshing...' : 'Refresh approval'}
+        </button>
+        {props.onReviewApproval ? (
+          <button type="button" className={status === 'pending' ? 'btn-primary' : 'btn-secondary'} onClick={() => props.onReviewApproval?.(approvalID)}>
+            {status === 'pending' ? 'Review approval' : 'View approval'}
+          </button>
+        ) : null}
+      </div>
+    </section>
+  )
+}
+
 function RunTraceHistory(props: {
   tenantId: string
   principalId: string
   runs: VirployeeRunTrace[]
   loading: boolean
+  onReviewApproval?: (approvalId: string) => void
   onRefresh: () => void
 }) {
   const approvalIDs = useMemo(
@@ -1636,18 +1768,29 @@ function RunTraceHistory(props: {
                 <div className="virployee-run-history__main">
                   <div className="virployee-run-history__title">
                     <strong>{formatRunOperation(run.operation)}</strong>
-                    <StatusBadge value={formatRunDecision(run)} tone={runDecisionTone(run)} />
+                    <StatusBadge value={formatRunDecision(run, approval)} tone={runDecisionTone(run, approval)} />
                   </div>
                   <span>{formatDate(run.created_at)}</span>
                   <small>{run.capability_key || run.intent.capability_key || 'No capability'}</small>
                   <small>{run.input_preview || shortHash(run.input_hash)}</small>
                 </div>
                 <div className="virployee-run-history__nexus">
-                  <StatusBadge value={formatNexusTrace(run, approval)} tone={nexusTraceTone(run)} />
+                  <StatusBadge value={formatNexusTrace(run, approval)} tone={nexusTraceTone(run, approval)} />
                   {formatNexusReason(run) ? <small>{formatNexusReason(run)}</small> : null}
                   {approvalID ? <small>{formatApprovalTrace(run, approval)}</small> : null}
                   {approval?.decided_by ? <small>{formatApprovalDecision(approval)}</small> : null}
                   <small>Binding {run.binding_hash ? shortHash(run.binding_hash) : shortHash(run.input_hash)}</small>
+                  {approvalID && props.onReviewApproval ? (
+                    <div className="virployee-run-history__actions">
+                      <button
+                        type="button"
+                        className="btn-sm btn-secondary"
+                        onClick={() => props.onReviewApproval?.(approvalID)}
+                      >
+                        {(approval?.status || run.nexus_result?.approval_status) === 'pending' ? 'Review approval' : 'View approval'}
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
               </div>
             )
@@ -2216,15 +2359,25 @@ function latestExecutionGateRun(runs: VirployeeRunTrace[]): VirployeeRunTrace | 
   return runs.find((run) => run.operation === 'execution_gate') ?? null
 }
 
-function formatRunDecision(run: VirployeeRunTrace): string {
+function formatRunDecision(run: VirployeeRunTrace, approval?: Approval | null): string {
   if (run.operation === 'execution_gate') {
+    if (run.nexus_result?.decision === 'require_approval') {
+      const status = approval?.status || run.nexus_result.approval_status || 'pending'
+      if (status === 'approved') return 'Approved'
+      if (status === 'rejected') return 'Rejected'
+      return 'Needs approval'
+    }
     return run.gate_decision === 'pass' ? 'Pass' : 'Blocked'
   }
   return run.dry_run_decision === 'allowed' ? 'Allowed' : 'Blocked'
 }
 
-function runDecisionTone(run: VirployeeRunTrace): StatusTone {
-  return formatRunDecision(run) === 'Allowed' || formatRunDecision(run) === 'Pass' ? 'success' : 'danger'
+function runDecisionTone(run: VirployeeRunTrace, approval?: Approval | null): StatusTone {
+  if (run.operation === 'execution_gate' && run.nexus_result?.decision === 'require_approval') {
+    return approvalStatusTone(approval?.status || run.nexus_result.approval_status || 'pending')
+  }
+  const decision = formatRunDecision(run, approval)
+  return decision === 'Allowed' || decision === 'Pass' ? 'success' : 'danger'
 }
 
 function formatExecutionGateDecision(gate: VirployeeExecutionGate): string {
@@ -2248,10 +2401,12 @@ function formatNexusTrace(run: VirployeeRunTrace, approval?: Approval | null): s
   return run.nexus_result.decision ? `Nexus ${run.nexus_result.decision}` : 'Nexus checked'
 }
 
-function nexusTraceTone(run?: VirployeeRunTrace | null): StatusTone {
+function nexusTraceTone(run?: VirployeeRunTrace | null, approval?: Approval | null): StatusTone {
   if (!run?.nexus_result) return 'muted'
   if (!run.nexus_result.available || run.nexus_result.decision === 'deny') return 'danger'
-  if (run.nexus_result.decision === 'require_approval') return 'warning'
+  if (run.nexus_result.decision === 'require_approval') {
+    return approvalStatusTone(approval?.status || run.nexus_result.approval_status || 'pending')
+  }
   if (run.nexus_result.decision === 'allow') return 'success'
   return 'muted'
 }
@@ -2268,17 +2423,13 @@ function formatApprovalTrace(run: VirployeeRunTrace, approval?: Approval | null)
   return `Approval ${shortHash(approvalID)} · ${formatApprovalStatus(status)}`
 }
 
-function approvalTraceTone(run?: VirployeeRunTrace | null): StatusTone {
-  const status = run?.nexus_result?.approval_status
-  if (status === 'approved') return 'success'
-  if (status === 'rejected') return 'danger'
-  if (status === 'pending') return 'warning'
-  return 'muted'
+function approvalTraceTone(run?: VirployeeRunTrace | null, approval?: Approval | null): StatusTone {
+  return approvalStatusTone(approval?.status || run?.nexus_result?.approval_status || '')
 }
 
 function formatApprovalDecision(approval: Approval): string {
   const decidedAt = approval.decided_at ? ` · ${formatDate(approval.decided_at)}` : ''
-  return `${formatApprovalStatus(approval.status)} by ${approval.decided_by}${decidedAt}`
+  return `${formatApprovalStatus(approval.status)} by ${shortHash(approval.decided_by)}${decidedAt}`
 }
 
 function formatApprovalStatus(status: string): string {
@@ -2286,6 +2437,13 @@ function formatApprovalStatus(status: string): string {
   if (status === 'rejected') return 'Rejected'
   if (status === 'pending') return 'Pending'
   return status
+}
+
+function approvalStatusTone(status: string): StatusTone {
+  if (status === 'approved') return 'success'
+  if (status === 'rejected') return 'danger'
+  if (status === 'pending') return 'warning'
+  return 'muted'
 }
 
 function shortHash(value: string | undefined): string {

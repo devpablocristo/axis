@@ -61,7 +61,7 @@ services:
       PORT: "8080"
       COMPANION_V2_ENV: ${COMPANION_V2_ENV:-development}
       COMPANION_V2_RUN_MIGRATIONS: ${COMPANION_V2_RUN_MIGRATIONS:-true}
-      COMPANION_V2_CORS_ORIGINS: ${COMPANION_V2_CORS_ORIGINS:-http://localhost:19173,http://127.0.0.1:19173}
+      COMPANION_V2_CORS_ORIGINS: ${COMPANION_V2_CORS_ORIGINS:-http://localhost:19173,http://127.0.0.1:19173,http://console-v2:19173,http://console-v2-e2e:19173}
       COMPANION_V2_NEXUS_BASE_URL: ${COMPANION_V2_NEXUS_BASE_URL:-http://nexus-v2:8080}
       COMPANION_V2_DATABASE_URL: postgres://${COMPANION_V2_POSTGRES_USER:-postgres}:${COMPANION_V2_POSTGRES_PASSWORD:-postgres}@companion-v2-postgres:5432/${COMPANION_V2_POSTGRES_DB:-companion_v2}?sslmode=disable
     volumes:
@@ -92,7 +92,7 @@ services:
       PORT: "8080"
       NEXUS_V2_ENV: ${NEXUS_V2_ENV:-development}
       NEXUS_V2_RUN_MIGRATIONS: ${NEXUS_V2_RUN_MIGRATIONS:-true}
-      NEXUS_V2_CORS_ORIGINS: ${NEXUS_V2_CORS_ORIGINS:-http://localhost:19173,http://127.0.0.1:19173}
+      NEXUS_V2_CORS_ORIGINS: ${NEXUS_V2_CORS_ORIGINS:-http://localhost:19173,http://127.0.0.1:19173,http://console-v2:19173,http://console-v2-e2e:19173}
       NEXUS_V2_DATABASE_URL: postgres://${NEXUS_V2_POSTGRES_USER:-postgres}:${NEXUS_V2_POSTGRES_PASSWORD:-postgres}@nexus-v2-postgres:5432/${NEXUS_V2_POSTGRES_DB:-nexus_v2}?sslmode=disable
     volumes:
       - ./nexus:/src/nexus
@@ -122,7 +122,7 @@ services:
       PORT: "8080"
       BFF_V2_ENV: ${BFF_V2_ENV:-development}
       BFF_V2_RUN_MIGRATIONS: ${BFF_V2_RUN_MIGRATIONS:-true}
-      BFF_V2_CORS_ORIGINS: ${BFF_V2_CORS_ORIGINS:-http://localhost:19173,http://127.0.0.1:19173}
+      BFF_V2_CORS_ORIGINS: ${BFF_V2_CORS_ORIGINS:-http://localhost:19173,http://127.0.0.1:19173,http://console-v2:19173,http://console-v2-e2e:19173}
       BFF_V2_COMPANION_BASE_URL: ${BFF_V2_COMPANION_BASE_URL:-http://companion-v2:8080}
       BFF_V2_NEXUS_BASE_URL: ${BFF_V2_NEXUS_BASE_URL:-http://nexus-v2:8080}
       BFF_V2_IDENTITY_PROVIDER: ${BFF_V2_IDENTITY_PROVIDER:-dev}
@@ -209,6 +209,20 @@ services:
       console-v2-e2e:
         condition: service_healthy
     command: ["npm", "run", "test:e2e"]
+
+  approval-flow-e2e:
+    build:
+      context: .
+      dockerfile: Dockerfile.e2e
+    working_dir: /workspace
+    environment:
+      BFF_URL: http://bff-v2:8080
+    volumes:
+      - ./scripts:/workspace/scripts:ro
+    depends_on:
+      bff-v2:
+        condition: service_healthy
+    command: ["scripts/smoke-approval-flow.sh"]
 
 volumes:
   companion-v2-postgres-data:

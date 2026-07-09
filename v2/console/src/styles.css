@@ -297,6 +297,11 @@ textarea:focus-visible {
   opacity: 0.72;
 }
 
+.approvals-board__card--focused {
+  border-color: var(--axis-primary);
+  box-shadow: 0 0 0 3px var(--axis-focus-ring), var(--axis-shadow);
+}
+
 .approvals-board__card-title {
   align-items: start;
   display: flex;
@@ -363,6 +368,47 @@ textarea:focus-visible {
   line-height: 1.4;
   text-align: center;
   padding: var(--axis-space-150);
+}
+
+.approval-focus-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--axis-space-150);
+  border: 1px solid var(--axis-color-info-border);
+  border-radius: var(--axis-radius-md);
+  background: var(--axis-color-info-soft);
+  padding: var(--axis-space-125);
+}
+
+.approval-focus-banner--missing {
+  border-color: var(--axis-color-warning-border);
+  background: var(--axis-color-warning-soft);
+}
+
+.approval-focus-banner > div:first-child {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.approval-focus-banner strong {
+  color: var(--axis-color-heading);
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.approval-focus-banner span {
+  color: var(--axis-muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.approval-focus-banner__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--axis-space-100);
 }
 
 .approvals-list {
@@ -1911,6 +1957,28 @@ tbody tr:hover {
   flex-wrap: wrap;
   gap: 10px;
   padding-top: var(--axis-space-050);
+}
+
+.virployee-approval-checkpoint {
+  border: 1px solid var(--axis-border);
+  border-radius: var(--axis-radius-md);
+  background: var(--axis-surface-subtle);
+  padding: var(--axis-space-150);
+}
+
+.virployee-approval-checkpoint__header,
+.virployee-approval-checkpoint__actions,
+.virployee-run-history__actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--axis-space-100);
+}
+
+.virployee-approval-checkpoint__actions,
+.virployee-run-history__actions {
+  justify-content: flex-end;
 }
 
 .virployee-run-history__header {
