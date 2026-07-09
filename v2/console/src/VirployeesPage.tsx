@@ -4,8 +4,10 @@ import {
   type CrudFormValues,
   type CrudPageProps,
 } from '@devpablocristo/platform-crud-ui'
+import { CheckCircle2, Play, RefreshCw, ShieldCheck, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import {
+  type Approval,
   type Capability,
   type JobRole,
   type TenantUser,
@@ -15,16 +17,19 @@ import {
   type VirployeeConfirmedDraft,
   type VirployeeDryRun,
   type VirployeeExecutionGate,
+  type VirployeeRunTrace,
   type VirployeeRuntimeContext,
   type ProfileTemplate,
   archiveVirployee,
   checkVirployeeExecutionGate,
   createVirployee,
   dryRunVirployee,
+  getApproval,
   getVirployeeRuntimeContext,
   listCapabilities,
   listJobRoles,
   listProfileTemplates,
+  listVirployeeRuns,
   listUsers,
   listVirployeeAutonomyLevels,
   listVirployees,
@@ -97,8 +102,10 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
   const rootRef = useRef<HTMLElement | null>(null)
   const [lifecycleView, setLifecycleView] = useState<CrudLifecycleView>('active')
   const [selectedIds, setSelectedIds] = useState<string[]>([])
-  const [createRequested, setCreateRequested] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
+  const [createValues, setCreateValues] = useState<VirployeeEditValues | null>(null)
+  const [createSaving, setCreateSaving] = useState(false)
+  const [createError, setCreateError] = useState('')
   const [bulkBusy, setBulkBusy] = useState(false)
   const [reloadVersion, setReloadVersion] = useState(0)
   const [actionError, setActionError] = useState('')
@@ -122,6 +129,10 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
   const [dryRunLoading, setDryRunLoading] = useState(false)
   const [dryRunError, setDryRunError] = useState('')
   const dryRunRequestRef = useRef(0)
+  const [runTraces, setRunTraces] = useState<VirployeeRunTrace[]>([])
+  const [runTracesLoading, setRunTracesLoading] = useState(false)
+  const [runTracesError, setRunTracesError] = useState('')
+  const runTraceRequestRef = useRef(0)
   const [executionGateResult, setExecutionGateResult] = useState<VirployeeExecutionGate | null>(null)
   const [executionGateLoading, setExecutionGateLoading] = useState(false)
   const [executionGateError, setExecutionGateError] = useState('')
@@ -211,7 +222,7 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
 
   useEffect(() => {
     setSelectedIds([])
-    setCreateOpen(false)
+    closeCreate()
     setActionError('')
     setJobRoles([])
     setJobRolesError('')
@@ -339,25 +350,6 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
   }, [isActive, principalId, tenantId])
 
   useEffect(() => {
-    if (!createRequested) return
-    const handle = window.setTimeout(() => {
-      const buttons = Array.from(
-        rootRef.current?.querySelectorAll<HTMLButtonElement>(
-          '.crud-page-shell__header-actions > .actions-row > .actions-row > button',
-        ) ?? [],
-      )
-      const newButton = buttons.find((button) => button.textContent?.trim() === 'New')
-      if (newButton) {
-        newButton.click()
-      } else {
-        setCreateOpen(false)
-      }
-      setCreateRequested(false)
-    }, 0)
-    return () => window.clearTimeout(handle)
-  }, [createRequested, reloadVersion])
-
-  useEffect(() => {
     const root = rootRef.current
     if (!root) return
     const syncCreateOpen = () => {
@@ -475,7 +467,58 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
     }
   }
 
+  const openCreate = () => {
+    closePreview()
+    closeDryRun()
+    closeEdit()
+    setCreateValues(initialVirployeeCreateValues(jobRoleOptions, profileTemplateOptions, supervisorOptions))
+    setCreateSaving(false)
+    setCreateError('')
+    setActionError('')
+    setCreateOpen(true)
+  }
+
+  const closeCreate = () => {
+    setCreateValues(null)
+    setCreateSaving(false)
+    setCreateError('')
+    setCreateOpen(false)
+  }
+
+  const updateCreateValue = (key: keyof VirployeeEditValues, value: string) => {
+    setCreateValues((current) => current ? { ...current, [key]: value } : current)
+  }
+
+  const toggleCreateCapability = (id: string) => {
+    setCreateValues((current) => {
+      if (!current) return current
+      const exists = current.capability_ids.includes(id)
+      return {
+        ...current,
+        capability_ids: exists
+          ? current.capability_ids.filter((item) => item !== id)
+          : [...current.capability_ids, id],
+      }
+    })
+  }
+
+  const saveCreate = async () => {
+    if (!createValues || createSaving || !isValidEditValues(createValues)) return
+    setCreateSaving(true)
+    setCreateError('')
+    try {
+      await createVirployee(editPayload(createValues), tenantId, principalId)
+      closeCreate()
+      setReloadVersion((current) => current + 1)
+    } catch (error) {
+      setCreateError(error instanceof Error ? error.message : 'Could not create Virployee')
+    } finally {
+      setCreateSaving(false)
+    }
+  }
+
   const openEdit = (row: Virployee) => {
+    closeCreate()
     closePreview()
     closeDryRun()
     setEditRow(row)
@@ -492,6 +535,7 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
   }
 
   const openPreview = (row: Virployee) => {
+    closeCreate()
     closeEdit()
     closeDryRun()
     const requestID = previewRequestRef.current + 1
@@ -524,6 +568,7 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
   }
 
   const openDryRun = (row: Virployee) => {
+    closeCreate()
     closePreview()
     closeEdit()
     dryRunRequestRef.current += 1
@@ -539,16 +584,21 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
     setCalendarDraftValues(null)
     setConfirmedDraft(null)
     setActionError('')
+    void loadRunTraces(row)
   }
 
   const closeDryRun = () => {
     dryRunRequestRef.current += 1
     executionGateRequestRef.current += 1
+    runTraceRequestRef.current += 1
     setDryRunRow(null)
     setDryRunInput('')
     setDryRunResult(null)
     setDryRunLoading(false)
     setDryRunError('')
+    setRunTraces([])
+    setRunTracesLoading(false)
+    setRunTracesError('')
     setExecutionGateResult(null)
     setExecutionGateLoading(false)
     setExecutionGateError('')
@@ -563,6 +613,24 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
     setExecutionGateError('')
     setCalendarDraftValues(null)
     setConfirmedDraft(null)
+  }
+
+  async function loadRunTraces(row: Virployee) {
+    const requestID = runTraceRequestRef.current + 1
+    runTraceRequestRef.current = requestID
+    setRunTracesLoading(true)
+    setRunTracesError('')
+    try {
+      const runs = await listVirployeeRuns(row.id, tenantId, principalId, 20)
+      if (runTraceRequestRef.current !== requestID) return
+      setRunTraces(runs)
+    } catch (error) {
+      if (runTraceRequestRef.current !== requestID) return
+      setRunTraces([])
+      setRunTracesError(error instanceof Error ? error.message : 'Could not load run history')
+    } finally {
+      if (runTraceRequestRef.current === requestID) setRunTracesLoading(false)
+    }
   }
 
   const runDryRun = async () => {
@@ -581,6 +649,7 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
       if (dryRunRequestRef.current !== requestID) return
       setDryRunResult(result)
       setCalendarDraftValues(calendarCreateDraftValuesFromDryRun(result))
+      void loadRunTraces(dryRunRow)
     } catch (error) {
       if (dryRunRequestRef.current !== requestID) return
       setDryRunError(error instanceof Error ? error.message : 'Could not run dry run')
@@ -603,6 +672,7 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
       setExecutionGateResult(result)
       setDryRunResult(result.dry_run)
       setCalendarDraftValues(calendarCreateDraftValuesFromDryRun(result.dry_run))
+      void loadRunTraces(dryRunRow)
     } catch (error) {
       if (executionGateRequestRef.current !== requestID) return
       setExecutionGateError(error instanceof Error ? error.message : 'Could not check execution gate')
@@ -679,7 +749,7 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
         initialView={lifecycleView}
         supportsArchived
         supportsTrash
-        allowCreate
+        allowCreate={false}
         allowEdit
         allowArchive
         allowTrash
@@ -708,13 +778,7 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
               view={lifecycleView}
               createOpen={createOpen}
               busy={bulkBusy || !isActive}
-              onCreate={() => {
-                closePreview()
-                closeDryRun()
-                closeEdit()
-                setCreateOpen(true)
-                setCreateRequested(true)
-              }}
+              onCreate={openCreate}
               onClear={clearSelected}
               onBulkAction={(action) => void applyBulkAction(action)}
             />
@@ -732,6 +796,25 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
             {!usersError && activeSupervisorUsers.length === 0 ? (
               <p className="iam-control__inline-note">Create a User before assigning a supervisor.</p>
             ) : null}
+            {createValues ? (
+              <VirployeeEditInline
+                title="New virployee"
+                primaryLabel="Create"
+                values={createValues}
+                saving={createSaving}
+                error={createError}
+                autonomyOptions={autonomyOptions}
+                jobRoleOptions={jobRoleOptions}
+                profileTemplateOptions={profileTemplateOptions}
+                supervisorOptions={supervisorOptions}
+                capabilities={capabilities}
+                capabilityByID={capabilityByID}
+                onValueChange={updateCreateValue}
+                onToggleCapability={toggleCreateCapability}
+                onClose={closeCreate}
+                onSave={() => void saveCreate()}
+              />
+            ) : null}
             {previewRow ? (
               <VirployeePreviewInline
                 row={previewRow}
@@ -745,6 +828,8 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
             ) : null}
             {dryRunRow ? (
               <VirployeeDryRunInline
+                tenantId={tenantId}
+                principalId={principalId}
                 row={dryRunRow}
                 input={dryRunInput}
                 result={dryRunResult}
@@ -753,6 +838,9 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
                 executionGate={executionGateResult}
                 executionGateLoading={executionGateLoading}
                 executionGateError={executionGateError}
+                runTraces={runTraces}
+                runTracesLoading={runTracesLoading}
+                runTracesError={runTracesError}
                 calendarDraftValues={calendarDraftValues}
                 confirmedDraft={confirmedDraft}
                 autonomyByLevel={autonomyByLevel}
@@ -760,6 +848,7 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
                 onInputChange={updateDryRunInput}
                 onRun={() => void runDryRun()}
                 onCheckExecutionGate={() => void checkExecutionGate()}
+                onRefreshRuns={() => void loadRunTraces(dryRunRow)}
                 onCalendarDraftValueChange={updateCalendarDraftValue}
                 onConfirmCalendarDraft={confirmCalendarDraft}
                 onClose={closeDryRun}
@@ -767,7 +856,8 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
             ) : null}
             {editRow && editValues ? (
               <VirployeeEditInline
-                row={editRow}
+                title="Edit virployee"
+                primaryLabel="Save"
                 values={editValues}
                 saving={editSaving}
                 error={editError}
@@ -793,7 +883,8 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
 }
 
 function VirployeeEditInline(props: {
-  row: Virployee
+  title: string
+  primaryLabel: string
   values: VirployeeEditValues
   saving: boolean
   error: string
@@ -815,7 +906,7 @@ function VirployeeEditInline(props: {
   return (
     <div className="card crud-form-card virployee-edit-inline">
       <div className="card-header">
-        <h2>Edit virployee</h2>
+        <h2>{props.title}</h2>
       </div>
       <form
         className="virployee-edit-form"
@@ -938,7 +1029,7 @@ function VirployeeEditInline(props: {
           </section>
         <footer className="virployee-edit-form__footer">
             <button type="submit" className="btn-primary" disabled={props.saving || !isValidEditValues(props.values)}>
-              {props.saving ? 'Saving...' : 'Save'}
+              {props.saving ? 'Saving...' : props.primaryLabel}
             </button>
           <button type="button" className="btn-secondary" disabled={props.saving} onClick={props.onClose}>
             Cancel
@@ -1035,6 +1126,8 @@ function VirployeePreviewInline(props: {
 }
 
 function VirployeeDryRunInline(props: {
+  tenantId: string
+  principalId: string
   row: Virployee
   input: string
   result: VirployeeDryRun | null
@@ -1043,6 +1136,9 @@ function VirployeeDryRunInline(props: {
   executionGate: VirployeeExecutionGate | null
   executionGateLoading: boolean
   executionGateError: string
+  runTraces: VirployeeRunTrace[]
+  runTracesLoading: boolean
+  runTracesError: string
   calendarDraftValues: CalendarCreateDraftValues | null
   confirmedDraft: VirployeeConfirmedDraft | null
   autonomyByLevel: ReadonlyMap<VirployeeAutonomy, VirployeeAutonomyLevel>
@@ -1050,6 +1146,7 @@ function VirployeeDryRunInline(props: {
   onInputChange: (value: string) => void
   onRun: () => void
   onCheckExecutionGate: () => void
+  onRefreshRuns: () => void
   onCalendarDraftValueChange: (key: CalendarCreateDraftKey, value: string) => void
   onConfirmCalendarDraft: () => void
   onClose: () => void
@@ -1062,6 +1159,14 @@ function VirployeeDryRunInline(props: {
   const needsConfirmedDraft = props.result ? requiresConfirmedCalendarDraft(props.result) : false
   const canCheckGate = Boolean(props.result) && canRun && !props.executionGateLoading && (!needsConfirmedDraft || Boolean(props.confirmedDraft))
   const supervisorValue = props.supervisor ? userLabel(props.supervisor) : 'Unknown Supervisor'
+  const latestGateRun = latestExecutionGateRun(props.runTraces)
+  const latestApprovalID = latestGateRun?.nexus_result?.approval_id ?? ''
+  const runButtonLabel = props.loading ? 'Running...' : props.result ? 'Run again' : 'Run dry run'
+  const gateButtonLabel = props.executionGateLoading
+    ? 'Checking...'
+    : props.executionGate
+      ? 'Re-check execution gate'
+      : 'Check execution gate'
 
   return (
     <div className="card crud-form-card virployee-dry-run-inline">
@@ -1077,8 +1182,16 @@ function VirployeeDryRunInline(props: {
       >
         {props.error ? <p role="alert" className="iam-control__inline-error">{props.error}</p> : null}
         {props.executionGateError ? <p role="alert" className="iam-control__inline-error">{props.executionGateError}</p> : null}
+        {props.runTracesError ? <p role="alert" className="iam-control__inline-error">{props.runTracesError}</p> : null}
+
+        <div className="virployee-run-target" aria-label="Selected virployee">
+          <PreviewField label="Virployee" value={virployee.name} />
+          <PreviewField label="Supervisor" value={supervisorValue} />
+          <PreviewField label="Autonomy" value={formatAutonomy(virployee.autonomy, props.autonomyByLevel)} />
+        </div>
+
         <label className="form-group full-width">
-          Input
+          Action input
           <textarea
             rows={3}
             value={props.input}
@@ -1089,29 +1202,57 @@ function VirployeeDryRunInline(props: {
 
         {props.result ? (
           <section className="virployee-dry-run__result" aria-label="Dry run result">
-            <div className={`virployee-dry-run__decision virployee-dry-run__decision--${props.result.decision}`}>
-              <strong>{props.result.decision === 'allowed' ? 'Allowed' : 'Blocked'}</strong>
-              <span>{props.result.reason}</span>
-            </div>
-            <div className="virployee-preview__grid">
-              <PreviewField
-                label="Required capability"
-                value={requiredCapability
-                  ? `${requiredCapability.name || requiredCapability.capability_key}${requiredCapability.matched ? '' : ' (not assigned)'}`
-                  : 'None inferred'}
-              />
-              <PreviewField
-                label="Required autonomy"
-                value={formatAutonomy(props.result.required_autonomy, props.autonomyByLevel)}
-              />
-              <PreviewField
-                label="Virployee autonomy"
-                value={formatAutonomy(props.result.virployee_autonomy, props.autonomyByLevel)}
-              />
-              <PreviewField label="Next step" value={props.result.next_step} />
-            </div>
+            <section className="virployee-preview__section virployee-flow-section" aria-label="Flow status">
+              <SectionHeading title="Flow status" eyebrow="Checkpoint" />
+              <div className="virployee-flow-summary" aria-label="Flow summary">
+                <FlowSummaryItem
+                  label="Dry run"
+                  value={props.result.decision === 'allowed' ? 'Allowed' : 'Blocked'}
+                  tone={props.result.decision === 'allowed' ? 'success' : 'danger'}
+                />
+                <FlowSummaryItem
+                  label="Gate"
+                  value={props.executionGate ? formatExecutionGateDecision(props.executionGate) : 'Not checked'}
+                  tone={executionGateTone(props.executionGate)}
+                />
+                <FlowSummaryItem
+                  label="Nexus"
+                  value={latestGateRun ? formatNexusTrace(latestGateRun) : 'Not called'}
+                  tone={nexusTraceTone(latestGateRun)}
+                />
+                <FlowSummaryItem
+                  label="Approval"
+                  value={latestGateRun && latestApprovalID ? formatApprovalTrace(latestGateRun) : 'None'}
+                  tone={approvalTraceTone(latestGateRun)}
+                />
+              </div>
+            </section>
 
-            <DryRunIntentView intent={props.result.intent} />
+            <section className="virployee-preview__section" aria-label="Dry run decision">
+              <SectionHeading title="Dry run result" eyebrow="Capability and autonomy" />
+              <div className={`virployee-dry-run__decision virployee-dry-run__decision--${props.result.decision}`}>
+                <strong>{props.result.decision === 'allowed' ? 'Allowed' : 'Blocked'}</strong>
+                <span>{props.result.reason}</span>
+              </div>
+              <div className="virployee-preview__grid">
+                <PreviewField
+                  label="Required capability"
+                  value={requiredCapability
+                    ? `${requiredCapability.name || requiredCapability.capability_key}${requiredCapability.matched ? '' : ' (not assigned)'}`
+                    : 'None inferred'}
+                />
+                <PreviewField
+                  label="Required autonomy"
+                  value={formatAutonomy(props.result.required_autonomy, props.autonomyByLevel)}
+                />
+                <PreviewField
+                  label="Virployee autonomy"
+                  value={formatAutonomy(props.result.virployee_autonomy, props.autonomyByLevel)}
+                />
+                <PreviewField label="Next step" value={props.result.next_step} />
+              </div>
+            </section>
+
             {requiresConfirmedCalendarDraft(props.result) && props.calendarDraftValues ? (
               <ConfirmableCalendarDraftView
                 draft={props.result.draft}
@@ -1123,12 +1264,21 @@ function VirployeeDryRunInline(props: {
             ) : (
               <DryRunDraftView draft={props.result.draft} />
             )}
+            <DryRunIntentView intent={props.result.intent} />
             {props.executionGate ? (
               <ExecutionGateView gate={props.executionGate} autonomyByLevel={props.autonomyByLevel} />
             ) : null}
 
-            <section className="virployee-preview__section" aria-label="Runtime Context">
-              <h3>Runtime Context used</h3>
+            <RunTraceHistory
+              tenantId={props.tenantId}
+              principalId={props.principalId}
+              runs={props.runTraces}
+              loading={props.runTracesLoading}
+              onRefresh={props.onRefreshRuns}
+            />
+
+            <details className="virployee-preview__section virployee-runtime-details">
+              <summary>Runtime Context used</summary>
               <div className="virployee-preview__grid">
                 <PreviewField label="Virployee" value={virployee.name} />
                 <PreviewField label="Supervisor" value={supervisorValue} />
@@ -1152,15 +1302,25 @@ function VirployeeDryRunInline(props: {
                   ))}
                 </div>
               )}
-            </section>
+            </details>
           </section>
         ) : (
-          <p className="iam-control__inline-note">Dry run checks the Runtime Context, required Capability and autonomy decision without executing anything.</p>
+          <>
+            <p className="iam-control__inline-note">Dry run checks the Runtime Context, required Capability and autonomy decision without executing anything.</p>
+            <RunTraceHistory
+              tenantId={props.tenantId}
+              principalId={props.principalId}
+              runs={props.runTraces}
+              loading={props.runTracesLoading}
+              onRefresh={props.onRefreshRuns}
+            />
+          </>
         )}
 
         <footer className="virployee-edit-form__footer">
           <button type="submit" className="btn-primary" disabled={!canRun}>
-            {props.loading ? 'Running...' : 'Run'}
+            <Play aria-hidden="true" />
+            {runButtonLabel}
           </button>
           <button
             type="button"
@@ -1168,9 +1328,11 @@ function VirployeeDryRunInline(props: {
             disabled={!canCheckGate}
             onClick={props.onCheckExecutionGate}
           >
-            {props.executionGateLoading ? 'Checking...' : 'Check gate'}
+            <ShieldCheck aria-hidden="true" />
+            {gateButtonLabel}
           </button>
           <button type="button" className="btn-secondary" disabled={props.loading || props.executionGateLoading} onClick={props.onClose}>
+            <X aria-hidden="true" />
             Close
           </button>
         </footer>
@@ -1183,7 +1345,7 @@ function DryRunIntentView(props: { intent: VirployeeDryRun['intent'] }) {
   const intent = props.intent
   return (
     <section className="virployee-preview__section" aria-label="Intent">
-      <h3>Intent</h3>
+      <SectionHeading title="Intent match" eyebrow="Parser" />
       <div className="virployee-preview__grid">
         <PreviewField label="Matched" value={intent.matched ? 'Yes' : 'No'} />
         <PreviewField label="Capability key" value={intent.capability_key || '-'} />
@@ -1228,7 +1390,7 @@ function ConfirmableCalendarDraftView(props: {
   })
   return (
     <section className="virployee-preview__section" aria-label="Draft">
-      <h3>Draft</h3>
+      <SectionHeading title="Draft" eyebrow="Human review" />
       {clarifications.length > 0 ? (
         <div className="virployee-dry-run__clarifications" aria-label="Needs clarification">
           <strong>Needs clarification</strong>
@@ -1285,6 +1447,7 @@ function ConfirmableCalendarDraftView(props: {
       </div>
       <div className="virployee-dry-run__draft-actions">
         <button type="button" className="btn-secondary" disabled={!complete || props.confirmed} onClick={props.onConfirm}>
+          <CheckCircle2 aria-hidden="true" />
           Confirm draft
         </button>
         <span className={props.confirmed ? 'iam-control__inline-note' : 'iam-control__inline-error'}>
@@ -1299,7 +1462,7 @@ function DryRunDraftView(props: { draft: VirployeeDryRun['draft'] }) {
   const draft = props.draft
   return (
     <section className="virployee-preview__section" aria-label="Draft">
-      <h3>Draft</h3>
+      <SectionHeading title="Draft" eyebrow="Prepared action" />
       <div className="virployee-preview__grid">
         <PreviewField label="Status" value={formatDraftStatus(draft.status)} />
         <PreviewField label="Action" value={draft.action || '-'} />
@@ -1351,7 +1514,7 @@ function ExecutionGateView(props: {
   const decisionClass = gate.decision === 'pass' ? 'allowed' : 'blocked'
   return (
     <section className="virployee-preview__section" aria-label="Execution gate">
-      <h3>Execution gate</h3>
+      <SectionHeading title="Execution gate" eyebrow="Local checks" />
       <div className={`virployee-dry-run__decision virployee-dry-run__decision--${decisionClass}`}>
         <strong>{gate.decision === 'pass' ? 'Pass' : 'Blocked'}</strong>
         <span>{gate.next_step}</span>
@@ -1379,6 +1542,123 @@ function ExecutionGateView(props: {
       </div>
     </section>
   )
+}
+
+function RunTraceHistory(props: {
+  tenantId: string
+  principalId: string
+  runs: VirployeeRunTrace[]
+  loading: boolean
+  onRefresh: () => void
+}) {
+  const approvalIDs = useMemo(
+    () => Array.from(new Set(props.runs.map((run) => run.nexus_result?.approval_id).filter(Boolean) as string[])).sort(),
+    [props.runs],
+  )
+  const approvalKey = approvalIDs.join('|')
+  const [approvalByID, setApprovalByID] = useState<Record<string, Approval | null>>({})
+
+  useEffect(() => {
+    if (approvalIDs.length === 0 || !props.tenantId || !props.principalId) {
+      setApprovalByID({})
+      return undefined
+    }
+    let cancelled = false
+    setApprovalByID((current) => {
+      const next: Record<string, Approval | null> = {}
+      for (const id of approvalIDs) {
+        next[id] = current[id] ?? null
+      }
+      return next
+    })
+    void Promise.all(
+      approvalIDs.map(async (id): Promise<[string, Approval | null]> => {
+        try {
+          return [id, await getApproval(id, props.tenantId, props.principalId)]
+        } catch {
+          return [id, null]
+        }
+      }),
+    ).then((entries) => {
+      if (cancelled) return
+      const next: Record<string, Approval | null> = {}
+      for (const [id, approval] of entries) {
+        next[id] = approval
+      }
+      setApprovalByID(next)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [approvalKey, props.tenantId, props.principalId])
+
+  return (
+    <section className="virployee-preview__section" aria-label="Run history">
+      <div className="virployee-run-history__header">
+        <SectionHeading title="Run history" eyebrow="Audit trail" />
+        <button type="button" className="btn-secondary" disabled={props.loading} onClick={props.onRefresh}>
+          <RefreshCw aria-hidden="true" />
+          {props.loading ? 'Refreshing...' : 'Refresh'}
+        </button>
+      </div>
+      {props.loading && props.runs.length === 0 ? (
+        <p className="virployee-preview__empty">Loading runs</p>
+      ) : props.runs.length === 0 ? (
+        <p className="virployee-preview__empty">No runs recorded</p>
+      ) : (
+        <div className="virployee-run-history">
+          {props.runs.map((run) => {
+            const approvalID = run.nexus_result?.approval_id ?? ''
+            const approval = approvalID ? approvalByID[approvalID] : null
+            return (
+              <div key={run.id} className="virployee-run-history__row">
+                <div className="virployee-run-history__main">
+                  <div className="virployee-run-history__title">
+                    <strong>{formatRunOperation(run.operation)}</strong>
+                    <StatusBadge value={formatRunDecision(run)} tone={runDecisionTone(run)} />
+                  </div>
+                  <span>{formatDate(run.created_at)}</span>
+                  <small>{run.capability_key || run.intent.capability_key || 'No capability'}</small>
+                  <small>{run.input_preview || shortHash(run.input_hash)}</small>
+                </div>
+                <div className="virployee-run-history__nexus">
+                  <StatusBadge value={formatNexusTrace(run, approval)} tone={nexusTraceTone(run)} />
+                  {formatNexusReason(run) ? <small>{formatNexusReason(run)}</small> : null}
+                  {approvalID ? <small>{formatApprovalTrace(run, approval)}</small> : null}
+                  {approval?.decided_by ? <small>{formatApprovalDecision(approval)}</small> : null}
+                  <small>Binding {run.binding_hash ? shortHash(run.binding_hash) : shortHash(run.input_hash)}</small>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </section>
+  )
+}
+
+type StatusTone = 'success' | 'danger' | 'warning' | 'muted'
+
+function FlowSummaryItem(props: { label: string; value: string; tone: StatusTone }) {
+  return (
+    <div className="virployee-flow-summary__item">
+      <span>{props.label}</span>
+      <StatusBadge value={props.value} tone={props.tone} />
+    </div>
+  )
+}
+
+function SectionHeading(props: { title: string; eyebrow: string }) {
+  return (
+    <div className="virployee-section-heading">
+      <span>{props.eyebrow}</span>
+      <h3>{props.title}</h3>
+    </div>
+  )
+}
+
+function StatusBadge(props: { value: string; tone: StatusTone }) {
+  return <span className={`axis-status-badge axis-status-badge--${props.tone}`}>{props.value}</span>
 }
 
 function PreviewField(props: { label: string; value: string }) {
@@ -1588,6 +1868,22 @@ function editPayload(values: VirployeeEditValues) {
     description: stringValue(values.description),
     supervisor_user_id: stringValue(values.supervisor_user_id),
     autonomy: values.autonomy,
+  }
+}
+
+function initialVirployeeCreateValues(
+  jobRoleOptions: Array<{ label: string; value: string }>,
+  profileTemplateOptions: Array<{ label: string; value: string }>,
+  supervisorOptions: Array<{ label: string; value: string }>,
+): VirployeeEditValues {
+  return {
+    name: '',
+    job_role_id: jobRoleOptions.length === 1 ? jobRoleOptions[0].value : '',
+    profile_template_id: profileTemplateOptions.length === 1 ? profileTemplateOptions[0].value : '',
+    autonomy: 'A1',
+    supervisor_user_id: supervisorOptions.length === 1 ? supervisorOptions[0].value : '',
+    description: '',
+    capability_ids: [],
   }
 }
 
@@ -1859,9 +2155,94 @@ function formatConfidence(value: number): string {
   return `${Math.round(value * 100)}%`
 }
 
-function formatDate(value: string): string {
+function formatDate(value: string | null): string {
   if (!value) return '-'
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
   return date.toLocaleString('en-US', { dateStyle: 'short', timeStyle: 'short' })
+}
+
+function formatRunOperation(value: VirployeeRunTrace['operation']): string {
+  return value === 'execution_gate' ? 'Execution gate' : 'Dry run'
+}
+
+function latestExecutionGateRun(runs: VirployeeRunTrace[]): VirployeeRunTrace | null {
+  return runs.find((run) => run.operation === 'execution_gate') ?? null
+}
+
+function formatRunDecision(run: VirployeeRunTrace): string {
+  if (run.operation === 'execution_gate') {
+    return run.gate_decision === 'pass' ? 'Pass' : 'Blocked'
+  }
+  return run.dry_run_decision === 'allowed' ? 'Allowed' : 'Blocked'
+}
+
+function runDecisionTone(run: VirployeeRunTrace): StatusTone {
+  return formatRunDecision(run) === 'Allowed' || formatRunDecision(run) === 'Pass' ? 'success' : 'danger'
+}
+
+function formatExecutionGateDecision(gate: VirployeeExecutionGate): string {
+  return gate.execution_gate.decision === 'pass' ? 'Pass' : 'Blocked'
+}
+
+function executionGateTone(gate: VirployeeExecutionGate | null): StatusTone {
+  if (!gate) return 'muted'
+  return gate.execution_gate.decision === 'pass' ? 'success' : 'danger'
+}
+
+function formatNexusTrace(run: VirployeeRunTrace, approval?: Approval | null): string {
+  if (!run.nexus_result) return 'Nexus not called'
+  if (!run.nexus_result.available) return 'Nexus unavailable'
+  if (run.nexus_result.decision === 'allow') return 'Allowed by Nexus'
+  if (run.nexus_result.decision === 'deny') return 'Denied by Nexus'
+  if (run.nexus_result.decision === 'require_approval') {
+    const status = approval?.status || run.nexus_result.approval_status
+    return status ? `Requires human approval · ${formatApprovalStatus(status)}` : 'Requires human approval'
+  }
+  return run.nexus_result.decision ? `Nexus ${run.nexus_result.decision}` : 'Nexus checked'
+}
+
+function nexusTraceTone(run?: VirployeeRunTrace | null): StatusTone {
+  if (!run?.nexus_result) return 'muted'
+  if (!run.nexus_result.available || run.nexus_result.decision === 'deny') return 'danger'
+  if (run.nexus_result.decision === 'require_approval') return 'warning'
+  if (run.nexus_result.decision === 'allow') return 'success'
+  return 'muted'
+}
+
+function formatNexusReason(run: VirployeeRunTrace): string {
+  if (!run.nexus_result) return ''
+  return run.nexus_result.error || run.nexus_result.decision_reason || run.nexus_result.status || ''
+}
+
+function formatApprovalTrace(run: VirployeeRunTrace, approval?: Approval | null): string {
+  const approvalID = run.nexus_result?.approval_id
+  if (!approvalID) return ''
+  const status = approval?.status || run.nexus_result?.approval_status || 'pending'
+  return `Approval ${shortHash(approvalID)} · ${formatApprovalStatus(status)}`
+}
+
+function approvalTraceTone(run?: VirployeeRunTrace | null): StatusTone {
+  const status = run?.nexus_result?.approval_status
+  if (status === 'approved') return 'success'
+  if (status === 'rejected') return 'danger'
+  if (status === 'pending') return 'warning'
+  return 'muted'
+}
+
+function formatApprovalDecision(approval: Approval): string {
+  const decidedAt = approval.decided_at ? ` · ${formatDate(approval.decided_at)}` : ''
+  return `${formatApprovalStatus(approval.status)} by ${approval.decided_by}${decidedAt}`
+}
+
+function formatApprovalStatus(status: string): string {
+  if (status === 'approved') return 'Approved'
+  if (status === 'rejected') return 'Rejected'
+  if (status === 'pending') return 'Pending'
+  return status
+}
+
+function shortHash(value: string | undefined): string {
+  if (!value) return '-'
+  return value.length <= 12 ? value : value.slice(0, 12)
 }

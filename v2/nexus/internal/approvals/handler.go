@@ -1,0 +1,121 @@
+package approvals
+
+import (
+	"context"
+	"strconv"
+	"strings"
+
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+
+	"github.com/devpablocristo/nexus-v2/internal/approvals/handler/dto"
+	"github.com/devpablocristo/nexus-v2/internal/approvals/usecases/domain"
+	ginmw "github.com/devpablocristo/platform/http/gin/go"
+)
+
+type UseCasesPort interface {
+	List(context.Context, string, string, int) ([]domain.Approval, error)
+	Get(context.Context, string, uuid.UUID) (domain.Approval, error)
+	Approve(context.Context, string, uuid.UUID, string, domain.DecisionInput) (domain.Approval, error)
+	Reject(context.Context, string, uuid.UUID, string, domain.DecisionInput) (domain.Approval, error)
+}
+
+type Handler struct {
+	ucs UseCasesPort
+}
+
+func NewHandler(ucs UseCasesPort) *Handler {
+	return &Handler{ucs: ucs}
+}
+
+func (h *Handler) Routes(router gin.IRouter) {
+	group := router.Group("/approvals")
+	{
+		group.GET("", h.List)
+		group.GET("/:approval_id", h.Get)
+		group.POST("/:approval_id/approve", h.Approve)
+		group.POST("/:approval_id/reject", h.Reject)
+	}
+}
+
+func (h *Handler) List(c *gin.Context) {
+	limit, ok := parseLimit(c)
+	if !ok {
+		return
+	}
+	out, err := h.ucs.List(c.Request.Context(), tenantID(c), c.Query("status"), limit)
+	if err != nil {
+		ginmw.Respond(c, err)
+		return
+	}
+	ginmw.WriteJSON(c, 200, dto.ListApprovalsFromDomain(out))
+}
+
+func (h *Handler) Get(c *gin.Context) {
+	id, ok := ginmw.ParseUUIDParam(c, "approval_id")
+	if !ok {
+		return
+	}
+	out, err := h.ucs.Get(c.Request.Context(), tenantID(c), id)
+	if err != nil {
+		ginmw.Respond(c, err)
+		return
+	}
+	ginmw.WriteJSON(c, 200, dto.ApprovalFromDomain(out))
+}
+
+func (h *Handler) Approve(c *gin.Context) {
+	h.decide(c, h.ucs.Approve)
+}
+
+func (h *Handler) Reject(c *gin.Context) {
+	h.decide(c, h.ucs.Reject)
+}
+
+func (h *Handler) decide(
+	c *gin.Context,
+	fn func(context.Context, string, uuid.UUID, string, domain.DecisionInput) (domain.Approval, error),
+) {
+	id, ok := ginmw.ParseUUIDParam(c, "approval_id")
+	if !ok {
+		return
+	}
+	var req dto.DecisionRequest
+	if err := ginmw.BindJSON(c, &req); err != nil {
+		return
+	}
+	out, err := fn(c.Request.Context(), tenantID(c), id, actorID(c), req.ToDomain())
+	if err != nil {
+		ginmw.Respond(c, err)
+		return
+	}
+	ginmw.WriteJSON(c, 200, dto.ApprovalFromDomain(out))
+}
+
+func parseLimit(c *gin.Context) (int, bool) {
+	raw := strings.TrimSpace(c.Query("limit"))
+	if raw == "" {
+		return 50, true
+	}
+	limit, err := strconv.Atoi(raw)
+	if err != nil || limit <= 0 {
+		ginmw.Respond(c, ginmw.ErrBadInput)
+		return 0, false
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	return limit, true
+}
+
+func tenantID(c *gin.Context) string {
+	return strings.TrimSpace(c.GetHeader("X-Tenant-ID"))
+}
+
+func actorID(c *gin.Context) string {
+	actor := strings.TrimSpace(c.GetHeader("X-Actor-ID"))
+	if actor == "" {
+		return "system"
+	}
+	return actor
+}

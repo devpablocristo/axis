@@ -31,6 +31,7 @@ type CheckInput struct {
 	Params         map[string]any
 	Reason         string
 	Context        string
+	BindingHash    string
 }
 
 type NormalizedCheckInput struct {
@@ -42,6 +43,7 @@ type NormalizedCheckInput struct {
 	Params         map[string]any
 	Reason         string
 	Context        string
+	BindingHash    string
 }
 
 type CheckResult struct {
@@ -51,6 +53,14 @@ type CheckResult struct {
 	DecisionReason       string
 	WouldRequireApproval bool
 	Mode                 string
+	BindingHash          string
+	ApprovalID           string
+	ApprovalStatus       string
+}
+
+type RecordedCheck struct {
+	ApprovalID     string
+	ApprovalStatus string
 }
 
 func NormalizeCheckInput(in CheckInput) (NormalizedCheckInput, error) {
@@ -79,5 +89,6 @@ func NormalizeCheckInput(in CheckInput) (NormalizedCheckInput, error) {
 		Params:         params,
 		Reason:         strings.TrimSpace(in.Reason),
 		Context:        strings.TrimSpace(in.Context),
+		BindingHash:    strings.TrimSpace(in.BindingHash),
 	}, nil
 }

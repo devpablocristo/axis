@@ -11,6 +11,7 @@ type CheckRequest struct {
 	Params         map[string]any `json:"params"`
 	Reason         string         `json:"reason"`
 	Context        string         `json:"context"`
+	BindingHash    string         `json:"binding_hash"`
 }
 
 func (r CheckRequest) ToDomain() domain.CheckInput {
@@ -23,5 +24,6 @@ func (r CheckRequest) ToDomain() domain.CheckInput {
 		Params:         r.Params,
 		Reason:         r.Reason,
 		Context:        r.Context,
+		BindingHash:    r.BindingHash,
 	}
 }

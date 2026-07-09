@@ -31,7 +31,10 @@ func TestCheckSendsGovernanceRequestToNexus(t *testing.T) {
 			"status":"pending_approval",
 			"decision_reason":"default high risk action",
 			"would_require_approval":true,
-			"mode":"simulation"
+			"mode":"simulation",
+			"binding_hash":"binding-123",
+			"approval_id":"approval-123",
+			"approval_status":"pending"
 		}`))
 	}))
 	defer srv.Close()
@@ -47,6 +50,7 @@ func TestCheckSendsGovernanceRequestToNexus(t *testing.T) {
 		Params:         map[string]any{"draft_status": "ready"},
 		Reason:         "delete the event",
 		Context:        "Ops",
+		BindingHash:    "binding-123",
 	})
 	if err != nil {
 		t.Fatalf("Check: %v", err)
@@ -57,7 +61,10 @@ func TestCheckSendsGovernanceRequestToNexus(t *testing.T) {
 	if gotBody["action_type"] != "calendar.events.delete" || gotBody["requester_id"] != "virployee-1" {
 		t.Fatalf("unexpected request body: %+v", gotBody)
 	}
-	if out.Decision != "require_approval" || !out.WouldRequireApproval {
+	if gotBody["binding_hash"] != "binding-123" {
+		t.Fatalf("expected binding hash in request, got %+v", gotBody)
+	}
+	if out.Decision != "require_approval" || !out.WouldRequireApproval || out.BindingHash != "binding-123" || out.ApprovalID != "approval-123" || out.ApprovalStatus != "pending" {
 		t.Fatalf("unexpected response: %+v", out)
 	}
 }

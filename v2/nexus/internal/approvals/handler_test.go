@@ -1,0 +1,174 @@
+package approvals
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+
+	"github.com/devpablocristo/nexus-v2/internal/approvals/usecases/domain"
+)
+
+func TestHandlerListApprovals(t *testing.T) {
+	fake := &handlerFakeUseCases{}
+	router := setupApprovalsRouter(fake)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/approvals?status=pending&limit=10", nil)
+	req.Header.Set("X-Tenant-ID", "tenant-1")
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if fake.lastTenant != "tenant-1" || fake.lastStatus != "pending" || fake.lastLimit != 10 {
+		t.Fatalf("unexpected list call: %+v", fake)
+	}
+	var payload struct {
+		Data []struct {
+			ID         string `json:"id"`
+			ActionType string `json:"action_type"`
+			Status     string `json:"status"`
+		} `json:"data"`
+	}
+	decodeApprovalsJSON(t, rec, &payload)
+	if len(payload.Data) != 1 || payload.Data[0].ActionType != "calendar.events.delete" || payload.Data[0].Status != "pending" {
+		t.Fatalf("unexpected payload: %+v", payload)
+	}
+}
+
+func TestHandlerGetApproval(t *testing.T) {
+	fake := &handlerFakeUseCases{}
+	router := setupApprovalsRouter(fake)
+	id := uuid.New()
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/approvals/"+id.String(), nil)
+	req.Header.Set("X-Tenant-ID", "tenant-1")
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if fake.lastTenant != "tenant-1" || fake.lastID != id {
+		t.Fatalf("unexpected get call: %+v", fake)
+	}
+	var payload struct {
+		ID     string `json:"id"`
+		Status string `json:"status"`
+	}
+	decodeApprovalsJSON(t, rec, &payload)
+	if payload.ID != id.String() || payload.Status != "pending" {
+		t.Fatalf("unexpected payload: %+v", payload)
+	}
+}
+
+func TestHandlerApproveApproval(t *testing.T) {
+	fake := &handlerFakeUseCases{}
+	router := setupApprovalsRouter(fake)
+	id := uuid.New()
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/approvals/"+id.String()+"/approve", strings.NewReader(`{"note":"approved"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Tenant-ID", "tenant-1")
+	req.Header.Set("X-Actor-ID", "approver-1")
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if fake.lastID != id || fake.lastActor != "approver-1" || fake.lastNote != "approved" || fake.lastDecision != "approve" {
+		t.Fatalf("unexpected approve call: %+v", fake)
+	}
+}
+
+func setupApprovalsRouter(ucs UseCasesPort) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	NewHandler(ucs).Routes(router.Group("/v1"))
+	return router
+}
+
+func decodeApprovalsJSON(t *testing.T, rec *httptest.ResponseRecorder, out any) {
+	t.Helper()
+	if err := json.NewDecoder(rec.Body).Decode(out); err != nil {
+		t.Fatalf("decode json: %v; body=%s", err, rec.Body.String())
+	}
+}
+
+type handlerFakeUseCases struct {
+	lastTenant   string
+	lastStatus   string
+	lastLimit    int
+	lastID       uuid.UUID
+	lastActor    string
+	lastNote     string
+	lastDecision string
+}
+
+func (f *handlerFakeUseCases) List(_ context.Context, tenantID string, status string, limit int) ([]domain.Approval, error) {
+	f.lastTenant = tenantID
+	f.lastStatus = status
+	f.lastLimit = limit
+	return []domain.Approval{fakeApproval(tenantID, domain.StatusPending)}, nil
+}
+
+func (f *handlerFakeUseCases) Get(_ context.Context, tenantID string, id uuid.UUID) (domain.Approval, error) {
+	f.lastTenant = tenantID
+	f.lastID = id
+	item := fakeApproval(tenantID, domain.StatusPending)
+	item.ID = id
+	return item, nil
+}
+
+func (f *handlerFakeUseCases) Approve(_ context.Context, tenantID string, id uuid.UUID, actorID string, input domain.DecisionInput) (domain.Approval, error) {
+	f.lastTenant = tenantID
+	f.lastID = id
+	f.lastActor = actorID
+	f.lastNote = input.Note
+	f.lastDecision = "approve"
+	item := fakeApproval(tenantID, domain.StatusApproved)
+	item.ID = id
+	item.DecidedBy = actorID
+	item.DecisionNote = input.Note
+	return item, nil
+}
+
+func (f *handlerFakeUseCases) Reject(_ context.Context, tenantID string, id uuid.UUID, actorID string, input domain.DecisionInput) (domain.Approval, error) {
+	f.lastTenant = tenantID
+	f.lastID = id
+	f.lastActor = actorID
+	f.lastNote = input.Note
+	f.lastDecision = "reject"
+	item := fakeApproval(tenantID, domain.StatusRejected)
+	item.ID = id
+	item.DecidedBy = actorID
+	item.DecisionNote = input.Note
+	return item, nil
+}
+
+func fakeApproval(tenantID string, status domain.Status) domain.Approval {
+	now := time.Now().UTC()
+	return domain.Approval{
+		ID:                uuid.New(),
+		TenantID:          tenantID,
+		GovernanceCheckID: uuid.New(),
+		RequesterID:       "virployee-1",
+		ActionType:        "calendar.events.delete",
+		TargetSystem:      "calendar",
+		TargetResource:    "events",
+		RiskLevel:         "high",
+		Reason:            "delete event",
+		BindingHash:       "binding-hash",
+		Status:            status,
+		CreatedAt:         now,
+		UpdatedAt:         now,
+	}
+}

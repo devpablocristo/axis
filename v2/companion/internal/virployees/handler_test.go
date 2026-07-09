@@ -17,6 +17,7 @@ import (
 	"github.com/devpablocristo/companion-v2/internal/virployees/dryrun"
 	"github.com/devpablocristo/companion-v2/internal/virployees/executiongate"
 	"github.com/devpablocristo/companion-v2/internal/virployees/runtimecontext"
+	"github.com/devpablocristo/companion-v2/internal/virployees/runtraces"
 	"github.com/devpablocristo/companion-v2/internal/virployees/usecases/domain"
 	ginmw "github.com/devpablocristo/platform/http/gin/go"
 )
@@ -304,6 +305,58 @@ func TestHandlerExecutionGate(t *testing.T) {
 	}
 }
 
+func TestHandlerListRuns(t *testing.T) {
+	fake := &handlerFakeUseCases{}
+	router := testRouter(fake)
+	id := uuid.New()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/virployees/"+id.String()+"/runs?limit=10", nil)
+	req.Header.Set("X-Tenant-ID", "tenant-1")
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if fake.lastTenant != "tenant-1" {
+		t.Fatalf("expected tenant-1, got %q", fake.lastTenant)
+	}
+	var payload struct {
+		Data []struct {
+			Operation     string `json:"operation"`
+			InputPreview  string `json:"input_preview"`
+			CapabilityKey string `json:"capability_key"`
+			GateDecision  string `json:"gate_decision"`
+			BindingHash   string `json:"binding_hash"`
+			NexusResult   struct {
+				Decision string `json:"decision"`
+			} `json:"nexus_result"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Data) != 1 || payload.Data[0].Operation != "execution_gate" || payload.Data[0].BindingHash == "" {
+		t.Fatalf("unexpected runs payload: %+v", payload.Data)
+	}
+	if payload.Data[0].NexusResult.Decision != "allow" {
+		t.Fatalf("unexpected nexus result: %+v", payload.Data[0].NexusResult)
+	}
+}
+
+func TestHandlerListRunsRejectsInvalidLimit(t *testing.T) {
+	router := testRouter(&handlerFakeUseCases{})
+	id := uuid.New()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/virployees/"+id.String()+"/runs?limit=nope", nil)
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestHandlerRoutesLifecycle(t *testing.T) {
 	fake := &handlerFakeUseCases{}
 	router := testRouter(fake)
@@ -442,6 +495,27 @@ func (f *handlerFakeUseCases) ExecutionGate(ctx context.Context, tenantID string
 		}
 	}
 	return executiongate.Evaluate(result), nil
+}
+
+func (f *handlerFakeUseCases) ListRuns(_ context.Context, tenantID string, id uuid.UUID, _ int) ([]runtraces.Trace, error) {
+	f.lastTenant = tenantID
+	return []runtraces.Trace{
+		{
+			ID:             uuid.New(),
+			TenantID:       tenantID,
+			VirployeeID:    id,
+			Operation:      runtraces.OperationExecutionGate,
+			InputHash:      runtraces.HashString("Agendá una reunión"),
+			InputPreview:   "Agendá una reunión",
+			Intent:         map[string]any{"matched": true, "capability_key": "calendar.events.create"},
+			CapabilityKey:  "calendar.events.create",
+			DryRunDecision: "allowed",
+			GateDecision:   "pass",
+			GateChecks:     []runtraces.GateCheck{{Key: "governance_check", Status: "pass", Reason: "allowed"}},
+			NexusResult:    &runtraces.NexusResult{Available: true, Decision: "allow", Status: "allowed"},
+			BindingHash:    "binding-hash",
+		},
+	}, nil
 }
 
 func (f *handlerFakeUseCases) Update(_ context.Context, _ string, id uuid.UUID, input domain.UpdateInput) (domain.Virployee, error) {

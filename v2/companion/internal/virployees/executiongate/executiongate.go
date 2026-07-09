@@ -55,6 +55,7 @@ type GovernanceCheckInput struct {
 	Params         map[string]any
 	Reason         string
 	Context        string
+	BindingHash    string
 }
 
 type GovernanceCheckResult struct {
@@ -63,6 +64,9 @@ type GovernanceCheckResult struct {
 	Status               string
 	DecisionReason       string
 	WouldRequireApproval bool
+	BindingHash          string
+	ApprovalID           string
+	ApprovalStatus       string
 }
 
 type ConfirmedDraft struct {

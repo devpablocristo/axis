@@ -6,6 +6,7 @@ import (
 	"github.com/devpablocristo/companion-v2/internal/virployees/dryrun"
 	"github.com/devpablocristo/companion-v2/internal/virployees/executiongate"
 	"github.com/devpablocristo/companion-v2/internal/virployees/runtimecontext"
+	"github.com/devpablocristo/companion-v2/internal/virployees/runtraces"
 	"github.com/devpablocristo/companion-v2/internal/virployees/usecases/domain"
 	"github.com/google/uuid"
 )
@@ -177,6 +178,46 @@ type ExecutionGateCheckResponse struct {
 	Reason string `json:"reason"`
 }
 
+type RunTraceResponse struct {
+	ID             string                       `json:"id"`
+	VirployeeID    string                       `json:"virployee_id"`
+	Operation      string                       `json:"operation"`
+	InputHash      string                       `json:"input_hash"`
+	InputPreview   string                       `json:"input_preview"`
+	Intent         map[string]any               `json:"intent"`
+	CapabilityID   string                       `json:"capability_id,omitempty"`
+	CapabilityKey  string                       `json:"capability_key"`
+	DryRunDecision string                       `json:"dry_run_decision"`
+	GateDecision   string                       `json:"gate_decision,omitempty"`
+	GateChecks     []RunTraceGateCheckResponse  `json:"gate_checks"`
+	NexusResult    *RunTraceNexusResultResponse `json:"nexus_result,omitempty"`
+	BindingHash    string                       `json:"binding_hash,omitempty"`
+	CreatedAt      time.Time                    `json:"created_at"`
+}
+
+type RunTraceGateCheckResponse struct {
+	Key    string `json:"key"`
+	Status string `json:"status"`
+	Reason string `json:"reason"`
+}
+
+type RunTraceNexusResultResponse struct {
+	Available            bool   `json:"available"`
+	Decision             string `json:"decision,omitempty"`
+	RiskLevel            string `json:"risk_level,omitempty"`
+	Status               string `json:"status,omitempty"`
+	DecisionReason       string `json:"decision_reason,omitempty"`
+	WouldRequireApproval bool   `json:"would_require_approval,omitempty"`
+	BindingHash          string `json:"binding_hash,omitempty"`
+	ApprovalID           string `json:"approval_id,omitempty"`
+	ApprovalStatus       string `json:"approval_status,omitempty"`
+	Error                string `json:"error,omitempty"`
+}
+
+type ListRunTracesResponse struct {
+	Data []RunTraceResponse `json:"data"`
+}
+
 func VirployeeFromDomain(v domain.Virployee) VirployeeResponse {
 	return VirployeeResponse{
 		ID:                v.ID.String(),
@@ -202,6 +243,59 @@ func ListVirployeesFromDomain(items []domain.Virployee) ListVirployeesResponse {
 		data = append(data, VirployeeFromDomain(item))
 	}
 	return ListVirployeesResponse{Data: data}
+}
+
+func ListRunTracesFromDomain(items []runtraces.Trace) ListRunTracesResponse {
+	data := make([]RunTraceResponse, 0, len(items))
+	for _, item := range items {
+		data = append(data, RunTraceFromDomain(item))
+	}
+	return ListRunTracesResponse{Data: data}
+}
+
+func RunTraceFromDomain(trace runtraces.Trace) RunTraceResponse {
+	checks := make([]RunTraceGateCheckResponse, 0, len(trace.GateChecks))
+	for _, check := range trace.GateChecks {
+		checks = append(checks, RunTraceGateCheckResponse{
+			Key:    check.Key,
+			Status: check.Status,
+			Reason: check.Reason,
+		})
+	}
+	return RunTraceResponse{
+		ID:             trace.ID.String(),
+		VirployeeID:    trace.VirployeeID.String(),
+		Operation:      string(trace.Operation),
+		InputHash:      trace.InputHash,
+		InputPreview:   trace.InputPreview,
+		Intent:         trace.Intent,
+		CapabilityID:   trace.CapabilityID,
+		CapabilityKey:  trace.CapabilityKey,
+		DryRunDecision: trace.DryRunDecision,
+		GateDecision:   trace.GateDecision,
+		GateChecks:     checks,
+		NexusResult:    runTraceNexusResultFromDomain(trace.NexusResult),
+		BindingHash:    trace.BindingHash,
+		CreatedAt:      trace.CreatedAt,
+	}
+}
+
+func runTraceNexusResultFromDomain(result *runtraces.NexusResult) *RunTraceNexusResultResponse {
+	if result == nil {
+		return nil
+	}
+	return &RunTraceNexusResultResponse{
+		Available:            result.Available,
+		Decision:             result.Decision,
+		RiskLevel:            result.RiskLevel,
+		Status:               result.Status,
+		DecisionReason:       result.DecisionReason,
+		WouldRequireApproval: result.WouldRequireApproval,
+		BindingHash:          result.BindingHash,
+		ApprovalID:           result.ApprovalID,
+		ApprovalStatus:       result.ApprovalStatus,
+		Error:                result.Error,
+	}
 }
 
 func RuntimeContextFromDomain(ctx runtimecontext.Context) RuntimeContextResponse {

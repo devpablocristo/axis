@@ -1,5 +1,6 @@
-import { Bot, BriefcaseBusiness, Building2, RefreshCw, ShieldCheck, SlidersHorizontal, Users, Wrench } from 'lucide-react'
+import { Bot, BriefcaseBusiness, Building2, ClipboardCheck, RefreshCw, ShieldCheck, SlidersHorizontal, Users, Wrench } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { ApprovalsPage } from './ApprovalsPage'
 import { CapabilitiesPage } from './CapabilitiesPage'
 import { JobRolesPage } from './JobRolesPage'
 import { ProfileTemplatesPage } from './ProfileTemplatesPage'
@@ -148,6 +149,14 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
           </button>
           <button
             type="button"
+            className={activePage === 'approvals' ? 'active' : ''}
+            onClick={() => setActivePage('approvals')}
+          >
+            <ClipboardCheck aria-hidden="true" />
+            Approvals
+          </button>
+          <button
+            type="button"
             className={activePage === 'tenants' ? 'active' : ''}
             onClick={() => setActivePage('tenants')}
           >
@@ -209,6 +218,8 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
           <ProfileTemplatesPage tenantId={selectedTenant.id} principalId={principalId} />
         ) : activePage === 'users' ? (
           <UsersPage tenantId={selectedTenant.id} principalId={principalId} />
+        ) : activePage === 'approvals' ? (
+          <ApprovalsPage tenantId={selectedTenant.id} principalId={principalId} />
         ) : (
           <VirployeesPage tenantId={selectedTenant.id} principalId={principalId} />
         )}
@@ -221,13 +232,14 @@ function unique(values: string[]): string[] {
   return Array.from(new Set(values.filter(Boolean))).sort((left, right) => left.localeCompare(right))
 }
 
-type Page = 'virployees' | 'job-roles' | 'capabilities' | 'profile-templates' | 'users' | 'tenants'
+type Page = 'virployees' | 'job-roles' | 'capabilities' | 'profile-templates' | 'users' | 'approvals' | 'tenants'
 
 function pageTitle(page: Page): string {
   if (page === 'job-roles') return 'Job Roles'
   if (page === 'capabilities') return 'Capabilities'
   if (page === 'profile-templates') return 'Profile Templates'
   if (page === 'users') return 'Users'
+  if (page === 'approvals') return 'Approvals'
   if (page === 'tenants') return 'Tenants'
   return 'Virployees'
 }

@@ -65,14 +65,31 @@ export type Product = {
 }
 
 export type ProductInput = {
-  name: string
-  product_surface?: string
+	name: string
+	product_surface?: string
+}
+
+export type Approval = {
+	id: string
+	requester_id: string
+	action_type: string
+	target_system: string
+	target_resource: string
+	risk_level: string
+	reason: string
+	binding_hash: string
+	status: 'pending' | 'approved' | 'rejected'
+	decided_by: string
+	decision_note: string
+	decided_at: string | null
+	created_at: string
+	updated_at: string
 }
 
 export type TenantInput = {
-  org_id?: string
-  org_name?: string
-  product_surface: string
+	org_id?: string
+	org_name?: string
+	product_surface: string
 }
 
 export type TenantUpdateInput = {
@@ -226,6 +243,43 @@ export type VirployeeExecutionGate = {
   }
 }
 
+export type VirployeeRunTrace = {
+  id: string
+  virployee_id: string
+  operation: 'dry_run' | 'execution_gate'
+  input_hash: string
+  input_preview: string
+  intent: {
+    matched?: boolean
+    capability_key?: string
+    action?: string
+    [key: string]: unknown
+  }
+  capability_id?: string
+  capability_key: string
+  dry_run_decision: 'allowed' | 'blocked' | ''
+  gate_decision?: 'pass' | 'blocked' | ''
+  gate_checks: Array<{
+    key: string
+    status: 'pass' | 'blocked'
+    reason: string
+  }>
+  nexus_result?: {
+    available: boolean
+    decision?: string
+    risk_level?: string
+    status?: string
+    decision_reason?: string
+    would_require_approval?: boolean
+    binding_hash?: string
+    approval_id?: string
+    approval_status?: string
+    error?: string
+  }
+  binding_hash?: string
+  created_at: string
+}
+
 export type VirployeeInput = {
   name: string
   job_role_id: string
@@ -335,6 +389,10 @@ type VirployeesListResponse = {
   data: Virployee[]
 }
 
+type VirployeeRunTracesListResponse = {
+  data: VirployeeRunTrace[]
+}
+
 type JobRolesListResponse = {
   data: JobRole[]
 }
@@ -360,11 +418,15 @@ type OrgsListResponse = {
 }
 
 type ProductsListResponse = {
-  data: Product[]
+	data: Product[]
+}
+
+type ApprovalsListResponse = {
+	data: Approval[]
 }
 
 type AutonomyLevelsResponse = {
-  data: VirployeeAutonomyLevel[]
+	data: VirployeeAutonomyLevel[]
 }
 
 export type AxisFetchInit = {
@@ -523,10 +585,47 @@ export function restoreProduct(id: string, principalId: string): Promise<void> {
 }
 
 export function purgeProduct(id: string, principalId: string): Promise<void> {
-  return axisFetch<void>(`/api/products/${encodeURIComponent(id)}/purge`, {
-    method: 'DELETE',
-    principalId,
-  })
+	return axisFetch<void>(`/api/products/${encodeURIComponent(id)}/purge`, {
+		method: 'DELETE',
+		principalId,
+	})
+}
+
+export function listApprovals(
+	tenantId: string,
+	principalId: string,
+	status: Approval['status'] = 'pending',
+	limit = 50,
+): Promise<Approval[]> {
+	return axisFetch<ApprovalsListResponse>(
+		`/api/approvals?status=${encodeURIComponent(status)}&limit=${encodeURIComponent(String(limit))}`,
+		{ tenantId, principalId },
+	).then((payload) => payload.data ?? [])
+}
+
+export function getApproval(id: string, tenantId: string, principalId: string): Promise<Approval> {
+	return axisFetch<Approval>(`/api/approvals/${encodeURIComponent(id)}`, {
+		tenantId,
+		principalId,
+	})
+}
+
+export function approveApproval(id: string, tenantId: string, principalId: string, note = ''): Promise<Approval> {
+	return axisFetch<Approval>(`/api/approvals/${encodeURIComponent(id)}/approve`, {
+		method: 'POST',
+		tenantId,
+		principalId,
+		body: { note },
+	})
+}
+
+export function rejectApproval(id: string, tenantId: string, principalId: string, note = ''): Promise<Approval> {
+	return axisFetch<Approval>(`/api/approvals/${encodeURIComponent(id)}/reject`, {
+		method: 'POST',
+		tenantId,
+		principalId,
+		body: { note },
+	})
 }
 
 export function createTenant(input: TenantInput, principalId: string): Promise<Tenant> {
@@ -661,6 +760,18 @@ export function checkVirployeeExecutionGate(
     principalId,
     body: confirmedDraft ? { input, confirmed_draft: confirmedDraft } : { input },
   })
+}
+
+export function listVirployeeRuns(
+  id: string,
+  tenantId: string,
+  principalId: string,
+  limit = 20,
+): Promise<VirployeeRunTrace[]> {
+  return axisFetch<VirployeeRunTracesListResponse>(
+    `/api/virployees/${encodeURIComponent(id)}/runs?limit=${encodeURIComponent(String(limit))}`,
+    { tenantId, principalId },
+  ).then((payload) => payload.data ?? [])
 }
 
 export function archiveVirployee(id: string, tenantId: string, principalId: string): Promise<void> {

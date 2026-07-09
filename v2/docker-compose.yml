@@ -7,7 +7,7 @@ services:
       POSTGRES_USER: ${COMPANION_V2_POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${COMPANION_V2_POSTGRES_PASSWORD:-postgres}
     ports:
-      - "${COMPANION_V2_POSTGRES_PORT:-15437}:5432"
+      - "${COMPANION_V2_POSTGRES_PORT:-19437}:5432"
     volumes:
       - companion-v2-postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -24,7 +24,7 @@ services:
       POSTGRES_USER: ${BFF_V2_POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${BFF_V2_POSTGRES_PASSWORD:-postgres}
     ports:
-      - "${BFF_V2_POSTGRES_PORT:-15438}:5432"
+      - "${BFF_V2_POSTGRES_PORT:-19438}:5432"
     volumes:
       - bff-v2-postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -41,7 +41,7 @@ services:
       POSTGRES_USER: ${NEXUS_V2_POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${NEXUS_V2_POSTGRES_PASSWORD:-postgres}
     ports:
-      - "${NEXUS_V2_POSTGRES_PORT:-15439}:5432"
+      - "${NEXUS_V2_POSTGRES_PORT:-19439}:5432"
     volumes:
       - nexus-v2-postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -61,7 +61,7 @@ services:
       PORT: "8080"
       COMPANION_V2_ENV: ${COMPANION_V2_ENV:-development}
       COMPANION_V2_RUN_MIGRATIONS: ${COMPANION_V2_RUN_MIGRATIONS:-true}
-      COMPANION_V2_CORS_ORIGINS: ${COMPANION_V2_CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
+      COMPANION_V2_CORS_ORIGINS: ${COMPANION_V2_CORS_ORIGINS:-http://localhost:19173,http://127.0.0.1:19173}
       COMPANION_V2_NEXUS_BASE_URL: ${COMPANION_V2_NEXUS_BASE_URL:-http://nexus-v2:8080}
       COMPANION_V2_DATABASE_URL: postgres://${COMPANION_V2_POSTGRES_USER:-postgres}:${COMPANION_V2_POSTGRES_PASSWORD:-postgres}@companion-v2-postgres:5432/${COMPANION_V2_POSTGRES_DB:-companion_v2}?sslmode=disable
     volumes:
@@ -71,7 +71,7 @@ services:
       - companion-v2-go-mod-cache:/go/pkg/mod
       - companion-v2-go-build-cache:/root/.cache/go-build
     ports:
-      - "${COMPANION_V2_PORT:-18086}:8080"
+      - "${COMPANION_V2_PORT:-19086}:8080"
     depends_on:
       companion-v2-postgres:
         condition: service_healthy
@@ -92,7 +92,7 @@ services:
       PORT: "8080"
       NEXUS_V2_ENV: ${NEXUS_V2_ENV:-development}
       NEXUS_V2_RUN_MIGRATIONS: ${NEXUS_V2_RUN_MIGRATIONS:-true}
-      NEXUS_V2_CORS_ORIGINS: ${NEXUS_V2_CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
+      NEXUS_V2_CORS_ORIGINS: ${NEXUS_V2_CORS_ORIGINS:-http://localhost:19173,http://127.0.0.1:19173}
       NEXUS_V2_DATABASE_URL: postgres://${NEXUS_V2_POSTGRES_USER:-postgres}:${NEXUS_V2_POSTGRES_PASSWORD:-postgres}@nexus-v2-postgres:5432/${NEXUS_V2_POSTGRES_DB:-nexus_v2}?sslmode=disable
     volumes:
       - ./nexus:/src/nexus
@@ -101,7 +101,7 @@ services:
       - nexus-v2-go-mod-cache:/go/pkg/mod
       - nexus-v2-go-build-cache:/root/.cache/go-build
     ports:
-      - "${NEXUS_V2_PORT:-18087}:8080"
+      - "${NEXUS_V2_PORT:-19087}:8080"
     depends_on:
       nexus-v2-postgres:
         condition: service_healthy
@@ -122,7 +122,7 @@ services:
       PORT: "8080"
       BFF_V2_ENV: ${BFF_V2_ENV:-development}
       BFF_V2_RUN_MIGRATIONS: ${BFF_V2_RUN_MIGRATIONS:-true}
-      BFF_V2_CORS_ORIGINS: ${BFF_V2_CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
+      BFF_V2_CORS_ORIGINS: ${BFF_V2_CORS_ORIGINS:-http://localhost:19173,http://127.0.0.1:19173}
       BFF_V2_COMPANION_BASE_URL: ${BFF_V2_COMPANION_BASE_URL:-http://companion-v2:8080}
       BFF_V2_NEXUS_BASE_URL: ${BFF_V2_NEXUS_BASE_URL:-http://nexus-v2:8080}
       BFF_V2_IDENTITY_PROVIDER: ${BFF_V2_IDENTITY_PROVIDER:-dev}
@@ -143,7 +143,7 @@ services:
       - bff-v2-go-mod-cache:/go/pkg/mod
       - bff-v2-go-build-cache:/root/.cache/go-build
     ports:
-      - "${BFF_V2_PORT:-18080}:8080"
+      - "${BFF_V2_PORT:-19080}:8080"
     depends_on:
       bff-v2-postgres:
         condition: service_healthy
@@ -166,12 +166,12 @@ services:
       AXIS_BFF_BASE_URL: ${AXIS_CONSOLE_BFF_BASE_URL:-http://bff-v2:8080}
       VITE_CLERK_PUBLISHABLE_KEY: ${VITE_CLERK_PUBLISHABLE_KEY:-}
       VITE_CLERK_JWT_TEMPLATE: ${VITE_CLERK_JWT_TEMPLATE:-axis-bff}
-      VITE_HMR_CLIENT_PORT: ${AXIS_CONSOLE_PORT:-5173}
+      VITE_HMR_CLIENT_PORT: ${AXIS_CONSOLE_PORT:-19173}
     volumes:
       - ./console:/app
       - console-v2-node-modules:/app/node_modules
     ports:
-      - "${AXIS_CONSOLE_PORT:-5173}:5173"
+      - "${AXIS_CONSOLE_PORT:-19173}:19173"
     depends_on:
       bff-v2:
         condition: service_healthy

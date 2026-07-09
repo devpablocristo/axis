@@ -9,6 +9,9 @@ type CheckResponse struct {
 	DecisionReason       string `json:"decision_reason"`
 	WouldRequireApproval bool   `json:"would_require_approval"`
 	Mode                 string `json:"mode"`
+	BindingHash          string `json:"binding_hash,omitempty"`
+	ApprovalID           string `json:"approval_id,omitempty"`
+	ApprovalStatus       string `json:"approval_status,omitempty"`
 }
 
 func CheckFromDomain(result domain.CheckResult) CheckResponse {
@@ -19,5 +22,8 @@ func CheckFromDomain(result domain.CheckResult) CheckResponse {
 		DecisionReason:       result.DecisionReason,
 		WouldRequireApproval: result.WouldRequireApproval,
 		Mode:                 result.Mode,
+		BindingHash:          result.BindingHash,
+		ApprovalID:           result.ApprovalID,
+		ApprovalStatus:       result.ApprovalStatus,
 	}
 }

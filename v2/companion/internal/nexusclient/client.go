@@ -37,6 +37,7 @@ func (c *Client) Check(ctx context.Context, input executiongate.GovernanceCheckI
 		Params:         input.Params,
 		Reason:         input.Reason,
 		Context:        input.Context,
+		BindingHash:    input.BindingHash,
 	}
 	raw, err := json.Marshal(body)
 	if err != nil {
@@ -70,6 +71,9 @@ func (c *Client) Check(ctx context.Context, input executiongate.GovernanceCheckI
 		Status:               out.Status,
 		DecisionReason:       out.DecisionReason,
 		WouldRequireApproval: out.WouldRequireApproval,
+		BindingHash:          out.BindingHash,
+		ApprovalID:           out.ApprovalID,
+		ApprovalStatus:       out.ApprovalStatus,
 	}, nil
 }
 
@@ -82,6 +86,7 @@ type checkRequest struct {
 	Params         map[string]any `json:"params,omitempty"`
 	Reason         string         `json:"reason,omitempty"`
 	Context        string         `json:"context,omitempty"`
+	BindingHash    string         `json:"binding_hash,omitempty"`
 }
 
 type checkResponse struct {
@@ -91,4 +96,7 @@ type checkResponse struct {
 	DecisionReason       string `json:"decision_reason"`
 	WouldRequireApproval bool   `json:"would_require_approval"`
 	Mode                 string `json:"mode"`
+	BindingHash          string `json:"binding_hash"`
+	ApprovalID           string `json:"approval_id"`
+	ApprovalStatus       string `json:"approval_status"`
 }

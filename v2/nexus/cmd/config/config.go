@@ -18,7 +18,7 @@ type Config struct {
 func Load() Config {
 	return Config{
 		Environment:   envconfig.NormalizeEnv(envconfig.Get("NEXUS_V2_ENV", "development")),
-		Port:          envconfig.Get("PORT", "18087"),
+		Port:          envconfig.Get("PORT", "19087"),
 		DatabaseURL:   envconfig.Get("NEXUS_V2_DATABASE_URL", envconfig.Get("DATABASE_URL", "")),
 		RunMigrations: envconfig.Bool("NEXUS_V2_RUN_MIGRATIONS", true),
 		MaxBodyBytes:  int64(envconfig.Int("NEXUS_V2_MAX_BODY_BYTES", 1<<20)),

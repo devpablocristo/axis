@@ -9,6 +9,7 @@ import (
 
 	cfg "github.com/devpablocristo/nexus-v2/cmd/config"
 	"github.com/devpablocristo/nexus-v2/internal/actiontypes"
+	"github.com/devpablocristo/nexus-v2/internal/approvals"
 	"github.com/devpablocristo/nexus-v2/internal/governance"
 	"github.com/devpablocristo/nexus-v2/internal/infra/migrations"
 	postgres "github.com/devpablocristo/platform/databases/postgres/go"
@@ -48,8 +49,13 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	actionTypeUseCases := actiontypes.NewUseCases(actionTypeRepo)
 	actionTypeHandler := actiontypes.NewHandler(actionTypeUseCases)
 
-	governanceUseCases := governance.NewUseCases(actionTypeUseCases)
+	governanceRepo := governance.NewRepository(db.Pool())
+	governanceUseCases := governance.NewUseCases(actionTypeUseCases, governanceRepo)
 	governanceHandler := governance.NewHandler(governanceUseCases)
+
+	approvalsRepo := approvals.NewRepository(db.Pool())
+	approvalsUseCases := approvals.NewUseCases(approvalsRepo)
+	approvalsHandler := approvals.NewHandler(approvalsUseCases)
 
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
@@ -69,6 +75,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	api := router.Group("/v1")
 	actionTypeHandler.Routes(api)
 	governanceHandler.Routes(api)
+	approvalsHandler.Routes(api)
 
 	server := &http.Server{
 		Addr:    config.Addr(),

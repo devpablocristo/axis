@@ -1,0 +1,55 @@
+package domain
+
+import (
+	"strings"
+	"time"
+
+	"github.com/devpablocristo/platform/errors/go/domainerr"
+	"github.com/google/uuid"
+)
+
+type Status string
+
+const (
+	StatusPending  Status = "pending"
+	StatusApproved Status = "approved"
+	StatusRejected Status = "rejected"
+)
+
+type Approval struct {
+	ID                uuid.UUID
+	TenantID          string
+	GovernanceCheckID uuid.UUID
+	RequesterID       string
+	ActionType        string
+	TargetSystem      string
+	TargetResource    string
+	RiskLevel         string
+	Reason            string
+	BindingHash       string
+	Status            Status
+	DecidedBy         string
+	DecisionNote      string
+	DecidedAt         *time.Time
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+}
+
+type DecisionInput struct {
+	Note string
+}
+
+func NormalizeListStatus(value string) (Status, error) {
+	status := Status(strings.TrimSpace(value))
+	if status == "" {
+		return StatusPending, nil
+	}
+	if status != StatusPending && status != StatusApproved && status != StatusRejected {
+		return "", domainerr.Validation("invalid approval status")
+	}
+	return status, nil
+}
+
+func NormalizeDecisionNote(input DecisionInput) string {
+	return strings.TrimSpace(input.Note)
+}

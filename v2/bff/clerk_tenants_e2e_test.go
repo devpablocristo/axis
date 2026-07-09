@@ -20,7 +20,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-const defaultE2EDatabaseURL = "postgres://postgres:postgres@127.0.0.1:15438/postgres?sslmode=disable"
+const defaultE2EDatabaseURL = "postgres://postgres:postgres@127.0.0.1:19438/postgres?sslmode=disable"
 
 func TestClerkUsersAndTenantsE2E(t *testing.T) {
 	ctx := context.Background()

@@ -10,6 +10,7 @@ import (
 	jobroledomain "github.com/devpablocristo/companion-v2/internal/jobroles/usecases/domain"
 	profiletemplatedomain "github.com/devpablocristo/companion-v2/internal/profiletemplates/usecases/domain"
 	"github.com/devpablocristo/companion-v2/internal/virployees/executiongate"
+	"github.com/devpablocristo/companion-v2/internal/virployees/runtraces"
 	"github.com/devpablocristo/companion-v2/internal/virployees/usecases/domain"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
 	"github.com/devpablocristo/platform/lifecycle/go/lifecycle"
@@ -500,6 +501,9 @@ func TestUseCasesDryRunAllowsMatchedCapability(t *testing.T) {
 	if result.Draft.Status != "needs_input" || result.Draft.Action != "calendar.events.create" {
 		t.Fatalf("unexpected draft: %+v", result.Draft)
 	}
+	if len(repo.traces) != 1 || repo.traces[0].Operation != runtraces.OperationDryRun || repo.traces[0].DryRunDecision != "allowed" {
+		t.Fatalf("expected dry run trace, got %+v", repo.traces)
+	}
 }
 
 func TestUseCasesDryRunBlocksMissingCapability(t *testing.T) {
@@ -614,7 +618,17 @@ func TestUseCasesExecutionGateChecksGovernanceWhenLocalGatePasses(t *testing.T) 
 	if checker.last.TenantID != "tenant-1" || checker.last.ActionType != "calendar.events.create" || checker.last.RequesterID != created.ID.String() {
 		t.Fatalf("unexpected governance input: %+v", checker.last)
 	}
+	if checker.last.BindingHash == "" {
+		t.Fatal("expected governance input binding hash")
+	}
 	assertExecutionGateCheck(t, result.Gate.Checks, "governance_check", executiongate.CheckStatusPass)
+	repo := uc.repo.(*fakeRepo)
+	if len(repo.traces) != 1 || repo.traces[0].Operation != runtraces.OperationExecutionGate || repo.traces[0].BindingHash == "" {
+		t.Fatalf("expected execution gate trace with binding hash, got %+v", repo.traces)
+	}
+	if repo.traces[0].NexusResult == nil || repo.traces[0].NexusResult.Decision != "allow" {
+		t.Fatalf("expected nexus result trace, got %+v", repo.traces[0].NexusResult)
+	}
 }
 
 func TestUseCasesExecutionGateBlocksWhenGovernanceRequiresApproval(t *testing.T) {
@@ -626,6 +640,8 @@ func TestUseCasesExecutionGateBlocksWhenGovernanceRequiresApproval(t *testing.T)
 			Status:               "pending_approval",
 			DecisionReason:       "default high risk action",
 			WouldRequireApproval: true,
+			ApprovalID:           "approval-1",
+			ApprovalStatus:       "pending",
 		},
 	})
 
@@ -637,6 +653,38 @@ func TestUseCasesExecutionGateBlocksWhenGovernanceRequiresApproval(t *testing.T)
 		t.Fatalf("expected governance to block, got %+v", result.Gate)
 	}
 	assertExecutionGateCheck(t, result.Gate.Checks, "governance_check", executiongate.CheckStatusBlocked)
+	repo := uc.repo.(*fakeRepo)
+	if len(repo.traces) != 1 || repo.traces[0].NexusResult == nil || repo.traces[0].NexusResult.ApprovalID != "approval-1" || repo.traces[0].NexusResult.ApprovalStatus != "pending" {
+		t.Fatalf("expected approval metadata in trace, got %+v", repo.traces)
+	}
+}
+
+func TestUseCasesExecutionGateBlocksWhenGovernanceDenies(t *testing.T) {
+	uc, created := setupExecutionGateUseCase(t, domain.AutonomyA3)
+	uc.SetGovernanceChecker(&fakeGovernanceChecker{
+		result: executiongate.GovernanceCheckResult{
+			Decision:       "deny",
+			RiskLevel:      "medium",
+			Status:         "denied",
+			DecisionReason: "action type is disabled",
+		},
+	})
+
+	result, err := uc.ExecutionGate(context.Background(), "tenant-1", created.ID, "Agendá una reunión mañana a las 15 con ana@example.com", nil)
+	if err != nil {
+		t.Fatalf("ExecutionGate: %v", err)
+	}
+	if result.Gate.Decision != "blocked" {
+		t.Fatalf("expected governance deny to block, got %+v", result.Gate)
+	}
+	assertExecutionGateCheck(t, result.Gate.Checks, "governance_check", executiongate.CheckStatusBlocked)
+	repo := uc.repo.(*fakeRepo)
+	if len(repo.traces) != 1 || repo.traces[0].NexusResult == nil || repo.traces[0].NexusResult.Decision != "deny" || repo.traces[0].NexusResult.Status != "denied" {
+		t.Fatalf("expected deny nexus result in trace, got %+v", repo.traces)
+	}
+	if repo.traces[0].NexusResult.ApprovalID != "" || repo.traces[0].NexusResult.ApprovalStatus != "" {
+		t.Fatalf("deny must not carry approval metadata, got %+v", repo.traces[0].NexusResult)
+	}
 }
 
 func TestUseCasesExecutionGateBlocksWhenGovernanceUnavailable(t *testing.T) {
@@ -651,6 +699,10 @@ func TestUseCasesExecutionGateBlocksWhenGovernanceUnavailable(t *testing.T) {
 		t.Fatalf("expected unavailable governance to block, got %+v", result.Gate)
 	}
 	assertExecutionGateCheck(t, result.Gate.Checks, "governance_check", executiongate.CheckStatusBlocked)
+	repo := uc.repo.(*fakeRepo)
+	if len(repo.traces) != 1 || repo.traces[0].NexusResult == nil || repo.traces[0].NexusResult.Available {
+		t.Fatalf("expected unavailable nexus trace, got %+v", repo.traces)
+	}
 }
 
 func TestUseCasesExecutionGateUsesConfirmedDraft(t *testing.T) {
@@ -701,6 +753,25 @@ func TestUseCasesExecutionGateRejectsConfirmedDraftActionMismatch(t *testing.T) 
 	})
 	if !domainerr.IsValidation(err) {
 		t.Fatalf("expected validation error, got %v", err)
+	}
+}
+
+func TestUseCasesListRunsReturnsLatestForVirployee(t *testing.T) {
+	uc, created := setupExecutionGateUseCase(t, domain.AutonomyA3)
+
+	if _, err := uc.DryRun(context.Background(), "tenant-1", created.ID, "Agendá una reunión para mañana"); err != nil {
+		t.Fatalf("DryRun: %v", err)
+	}
+	if _, err := uc.ExecutionGate(context.Background(), "tenant-1", created.ID, "Agendá una reunión mañana a las 15 con ana@example.com", nil); err != nil {
+		t.Fatalf("ExecutionGate: %v", err)
+	}
+
+	runs, err := uc.ListRuns(context.Background(), "tenant-1", created.ID, 20)
+	if err != nil {
+		t.Fatalf("ListRuns: %v", err)
+	}
+	if len(runs) != 2 || runs[0].Operation != runtraces.OperationExecutionGate || runs[1].Operation != runtraces.OperationDryRun {
+		t.Fatalf("unexpected runs: %+v", runs)
 	}
 }
 
@@ -776,7 +847,8 @@ func assertExecutionGateCheck(t *testing.T, checks []executiongate.Check, key st
 }
 
 type fakeRepo struct {
-	rows map[uuid.UUID]domain.Virployee
+	rows   map[uuid.UUID]domain.Virployee
+	traces []runtraces.Trace
 }
 
 func newFakeRepo() *fakeRepo {
@@ -908,6 +980,52 @@ func (r *fakeRepo) State(_ context.Context, _ string, id uuid.UUID) (lifecycle.L
 		return "", domainerr.NotFoundf("virployee", id.String())
 	}
 	return lifecycleState(row.State()), nil
+}
+
+func (r *fakeRepo) CreateRunTrace(_ context.Context, tenantID string, input runtraces.CreateInput) (runtraces.Trace, error) {
+	now := time.Now().UTC()
+	intent := input.Intent
+	if intent == nil {
+		intent = map[string]any{}
+	}
+	checks := input.GateChecks
+	if checks == nil {
+		checks = []runtraces.GateCheck{}
+	}
+	trace := runtraces.Trace{
+		ID:             uuid.New(),
+		TenantID:       tenantID,
+		VirployeeID:    input.VirployeeID,
+		Operation:      input.Operation,
+		InputHash:      runtraces.HashString(input.Input),
+		InputPreview:   runtraces.InputPreview(input.Input),
+		Intent:         intent,
+		CapabilityID:   input.CapabilityID,
+		CapabilityKey:  input.CapabilityKey,
+		DryRunDecision: input.DryRunDecision,
+		GateDecision:   input.GateDecision,
+		GateChecks:     checks,
+		NexusResult:    input.NexusResult,
+		BindingHash:    input.BindingHash,
+		CreatedAt:      now,
+	}
+	r.traces = append(r.traces, trace)
+	return trace, nil
+}
+
+func (r *fakeRepo) ListRunTraces(_ context.Context, tenantID string, virployeeID uuid.UUID, limit int) ([]runtraces.Trace, error) {
+	out := []runtraces.Trace{}
+	for i := len(r.traces) - 1; i >= 0; i-- {
+		trace := r.traces[i]
+		if trace.TenantID != tenantID || trace.VirployeeID != virployeeID {
+			continue
+		}
+		out = append(out, trace)
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
 }
 
 func lifecycleState(state domain.State) lifecycle.LifecycleState {

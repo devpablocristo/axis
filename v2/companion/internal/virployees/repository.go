@@ -3,8 +3,10 @@ package virployees
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -12,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/devpablocristo/companion-v2/internal/virployees/repository/models"
+	"github.com/devpablocristo/companion-v2/internal/virployees/runtraces"
 	"github.com/devpablocristo/companion-v2/internal/virployees/usecases/domain"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
 	"github.com/devpablocristo/platform/lifecycle/go/lifecycle"
@@ -242,6 +245,133 @@ func (r *Repository) State(ctx context.Context, tenantID string, resourceID uuid
 	}
 }
 
+func (r *Repository) CreateRunTrace(ctx context.Context, tenantID string, input runtraces.CreateInput) (runtraces.Trace, error) {
+	id := uuid.New()
+	now := time.Now().UTC()
+	intent, err := json.Marshal(runtraces.RedactValue(input.Intent))
+	if err != nil {
+		return runtraces.Trace{}, fmt.Errorf("marshal intent trace: %w", err)
+	}
+	checks, err := json.Marshal(input.GateChecks)
+	if err != nil {
+		return runtraces.Trace{}, fmt.Errorf("marshal gate checks trace: %w", err)
+	}
+	var nexusResult any
+	if input.NexusResult != nil {
+		redacted := runtraces.RedactValue(map[string]any{
+			"available":              input.NexusResult.Available,
+			"decision":               input.NexusResult.Decision,
+			"risk_level":             input.NexusResult.RiskLevel,
+			"status":                 input.NexusResult.Status,
+			"decision_reason":        input.NexusResult.DecisionReason,
+			"would_require_approval": input.NexusResult.WouldRequireApproval,
+			"binding_hash":           input.NexusResult.BindingHash,
+			"approval_id":            input.NexusResult.ApprovalID,
+			"approval_status":        input.NexusResult.ApprovalStatus,
+			"error":                  input.NexusResult.Error,
+		})
+		raw, err := json.Marshal(redacted)
+		if err != nil {
+			return runtraces.Trace{}, fmt.Errorf("marshal nexus trace: %w", err)
+		}
+		nexusResult = string(raw)
+	}
+
+	row := r.pool.QueryRow(ctx, `
+		INSERT INTO companion_run_traces (
+			id,
+			tenant_id,
+			virployee_id,
+			operation,
+			input_hash,
+			input_preview,
+			intent,
+			capability_id,
+			capability_key,
+			dry_run_decision,
+			gate_decision,
+			gate_checks,
+			nexus_result,
+			binding_hash,
+			created_at
+		)
+		VALUES (
+			$1::uuid,
+			$2,
+			$3::uuid,
+			$4,
+			$5,
+			$6,
+			$7::jsonb,
+			$8::uuid,
+			$9,
+			$10,
+			$11,
+			$12::jsonb,
+			$13::jsonb,
+			$14,
+			$15
+		)
+		RETURNING
+			id::text,
+			tenant_id,
+			virployee_id::text,
+			operation,
+			input_hash,
+			input_preview,
+			intent,
+			capability_id::text,
+			capability_key,
+			dry_run_decision,
+			gate_decision,
+			gate_checks,
+			nexus_result,
+			binding_hash,
+			created_at
+	`, id.String(), tenantID, input.VirployeeID.String(), string(input.Operation), runtraces.HashString(input.Input), runtraces.InputPreview(input.Input), string(intent), nullableUUID(input.CapabilityID), input.CapabilityKey, input.DryRunDecision, input.GateDecision, string(checks), nexusResult, input.BindingHash, now)
+	return scanRunTrace(row)
+}
+
+func (r *Repository) ListRunTraces(ctx context.Context, tenantID string, virployeeID uuid.UUID, limit int) ([]runtraces.Trace, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT
+			id::text,
+			tenant_id,
+			virployee_id::text,
+			operation,
+			input_hash,
+			input_preview,
+			intent,
+			capability_id::text,
+			capability_key,
+			dry_run_decision,
+			gate_decision,
+			gate_checks,
+			nexus_result,
+			binding_hash,
+			created_at
+		FROM companion_run_traces
+		WHERE tenant_id = $1
+			AND virployee_id = $2::uuid
+		ORDER BY created_at DESC, id DESC
+		LIMIT $3
+	`, tenantID, virployeeID.String(), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []runtraces.Trace{}
+	for rows.Next() {
+		item, err := scanRunTrace(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
 func (r *Repository) lifecycleResult(ctx context.Context, tenantID string, id uuid.UUID, tag pgconn.CommandTag, err error) error {
 	if err != nil {
 		return err
@@ -370,11 +500,89 @@ func scanVirployee(row scanner) (domain.Virployee, error) {
 	return model.ToDomain(), nil
 }
 
+func scanRunTrace(row scanner) (runtraces.Trace, error) {
+	var idText string
+	var virployeeIDText string
+	var operation string
+	var capabilityID sql.NullString
+	var gateDecision sql.NullString
+	var intentRaw []byte
+	var checksRaw []byte
+	var nexusRaw []byte
+	var item runtraces.Trace
+	err := row.Scan(
+		&idText,
+		&item.TenantID,
+		&virployeeIDText,
+		&operation,
+		&item.InputHash,
+		&item.InputPreview,
+		&intentRaw,
+		&capabilityID,
+		&item.CapabilityKey,
+		&item.DryRunDecision,
+		&gateDecision,
+		&checksRaw,
+		&nexusRaw,
+		&item.BindingHash,
+		&item.CreatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return runtraces.Trace{}, domainerr.NotFound("run trace not found")
+	}
+	if err != nil {
+		return runtraces.Trace{}, err
+	}
+	id, err := uuid.Parse(idText)
+	if err != nil {
+		return runtraces.Trace{}, err
+	}
+	virployeeID, err := uuid.Parse(virployeeIDText)
+	if err != nil {
+		return runtraces.Trace{}, err
+	}
+	item.ID = id
+	item.VirployeeID = virployeeID
+	item.Operation = runtraces.Operation(operation)
+	if len(intentRaw) > 0 {
+		if err := json.Unmarshal(intentRaw, &item.Intent); err != nil {
+			return runtraces.Trace{}, err
+		}
+	}
+	if len(checksRaw) > 0 {
+		if err := json.Unmarshal(checksRaw, &item.GateChecks); err != nil {
+			return runtraces.Trace{}, err
+		}
+	}
+	if capabilityID.Valid {
+		item.CapabilityID = capabilityID.String
+	}
+	if gateDecision.Valid {
+		item.GateDecision = gateDecision.String
+	}
+	if len(nexusRaw) > 0 {
+		var nexus runtraces.NexusResult
+		if err := json.Unmarshal(nexusRaw, &nexus); err != nil {
+			return runtraces.Trace{}, err
+		}
+		item.NexusResult = &nexus
+	}
+	return item, nil
+}
+
 func nullableTime(value *time.Time) any {
 	if value == nil {
 		return nil
 	}
 	return value.UTC()
+}
+
+func nullableUUID(value string) any {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	return value
 }
 
 func mapVirployeeStorageError(err error) error {

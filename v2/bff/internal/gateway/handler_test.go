@@ -312,6 +312,178 @@ func TestGatewayForwardsVirployeeDryRun(t *testing.T) {
 	}
 }
 
+func TestGatewayForwardsVirployeeRuns(t *testing.T) {
+	tenantID := uuid.New()
+	virployeeID := uuid.New()
+	var gotPath string
+	var gotQuery string
+	var gotTenant string
+	var gotOrg string
+	var gotProduct string
+	var gotActor string
+	downstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotQuery = r.URL.RawQuery
+		gotTenant = r.Header.Get("X-Tenant-ID")
+		gotOrg = r.Header.Get("X-Axis-Org-ID")
+		gotProduct = r.Header.Get("X-Product-Surface")
+		gotActor = r.Header.Get("X-Actor-ID")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"data":[]}`))
+	}))
+	defer downstream.Close()
+
+	router := gatewayTestRouter(t, &fakeGatewayTenancy{
+		tenant: tenantdomain.Tenant{
+			ID:             tenantID,
+			OrgID:          "org-a",
+			ProductSurface: "axis",
+			Status:         tenantdomain.StatusActive,
+			CreatedAt:      time.Now().UTC(),
+			UpdatedAt:      time.Now().UTC(),
+		},
+		member: tenantdomain.TenantMember{
+			TenantID: tenantID,
+			UserID:   "user-a",
+			Role:     tenantdomain.RoleAdmin,
+			Status:   tenantdomain.StatusActive,
+		},
+	}, downstream.URL)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/virployees/"+virployeeID.String()+"/runs?limit=10", nil)
+	req.Header.Set("X-Tenant-ID", tenantID.String())
+	req.Header.Set("X-Actor-ID", "user-a")
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected downstream status, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if gotPath != "/v1/virployees/"+virployeeID.String()+"/runs" || gotQuery != "limit=10" {
+		t.Fatalf("expected runs path/query, got %q?%s", gotPath, gotQuery)
+	}
+	if gotTenant != tenantID.String() || gotOrg != "org-a" || gotProduct != "axis" || gotActor != "user-a" {
+		t.Fatalf("unexpected forwarded headers tenant=%q org=%q product=%q actor=%q", gotTenant, gotOrg, gotProduct, gotActor)
+	}
+}
+
+func TestGatewayForwardsApprovalsToNexus(t *testing.T) {
+	tenantID := uuid.New()
+	approvalID := uuid.New()
+	var gotPath string
+	var gotQuery string
+	var gotTenant string
+	var gotOrg string
+	var gotProduct string
+	var gotActor string
+	var gotBody string
+	nexus := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotQuery = r.URL.RawQuery
+		gotTenant = r.Header.Get("X-Tenant-ID")
+		gotOrg = r.Header.Get("X-Axis-Org-ID")
+		gotProduct = r.Header.Get("X-Product-Surface")
+		gotActor = r.Header.Get("X-Actor-ID")
+		body, _ := io.ReadAll(r.Body)
+		gotBody = string(body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"approved"}`))
+	}))
+	defer nexus.Close()
+
+	router := gatewayTestRouterWithTargets(t, &fakeGatewayTenancy{
+		tenant: tenantdomain.Tenant{
+			ID:             tenantID,
+			OrgID:          "org-a",
+			ProductSurface: "axis",
+			Status:         tenantdomain.StatusActive,
+			CreatedAt:      time.Now().UTC(),
+			UpdatedAt:      time.Now().UTC(),
+		},
+		member: tenantdomain.TenantMember{
+			TenantID: tenantID,
+			UserID:   "user-a",
+			Role:     tenantdomain.RoleAdmin,
+			Status:   tenantdomain.StatusActive,
+		},
+	}, "http://127.0.0.1:1", nexus.URL)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/approvals/"+approvalID.String()+"/approve?view=pending", strings.NewReader(`{"note":"ok"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Tenant-ID", tenantID.String())
+	req.Header.Set("X-Actor-ID", "user-a")
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected downstream status, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if gotPath != "/v1/approvals/"+approvalID.String()+"/approve" || gotQuery != "view=pending" {
+		t.Fatalf("expected approval path/query, got %q?%s", gotPath, gotQuery)
+	}
+	if gotBody != `{"note":"ok"}` {
+		t.Fatalf("expected body forwarded, got %q", gotBody)
+	}
+	if gotTenant != tenantID.String() || gotOrg != "org-a" || gotProduct != "axis" || gotActor != "user-a" {
+		t.Fatalf("unexpected forwarded headers tenant=%q org=%q product=%q actor=%q", gotTenant, gotOrg, gotProduct, gotActor)
+	}
+}
+
+func TestGatewayForwardsApprovalGetToNexus(t *testing.T) {
+	tenantID := uuid.New()
+	approvalID := uuid.New()
+	var gotPath string
+	var gotTenant string
+	var gotActor string
+	nexus := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotTenant = r.Header.Get("X-Tenant-ID")
+		gotActor = r.Header.Get("X-Actor-ID")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"pending"}`))
+	}))
+	defer nexus.Close()
+
+	router := gatewayTestRouterWithTargets(t, &fakeGatewayTenancy{
+		tenant: tenantdomain.Tenant{
+			ID:             tenantID,
+			OrgID:          "org-a",
+			ProductSurface: "axis",
+			Status:         tenantdomain.StatusActive,
+			CreatedAt:      time.Now().UTC(),
+			UpdatedAt:      time.Now().UTC(),
+		},
+		member: tenantdomain.TenantMember{
+			TenantID: tenantID,
+			UserID:   "user-a",
+			Role:     tenantdomain.RoleAdmin,
+			Status:   tenantdomain.StatusActive,
+		},
+	}, "http://127.0.0.1:1", nexus.URL)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/approvals/"+approvalID.String(), nil)
+	req.Header.Set("X-Tenant-ID", tenantID.String())
+	req.Header.Set("X-Actor-ID", "user-a")
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected downstream status, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if gotPath != "/v1/approvals/"+approvalID.String() {
+		t.Fatalf("expected approval path, got %q", gotPath)
+	}
+	if gotTenant != tenantID.String() || gotActor != "user-a" {
+		t.Fatalf("unexpected forwarded headers tenant=%q actor=%q", gotTenant, gotActor)
+	}
+}
+
 func TestGatewayForwardsVirployeeExecutionGate(t *testing.T) {
 	tenantID := uuid.New()
 	virployeeID := uuid.New()

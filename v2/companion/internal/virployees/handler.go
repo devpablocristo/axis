@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -14,6 +15,7 @@ import (
 	"github.com/devpablocristo/companion-v2/internal/virployees/executiongate"
 	"github.com/devpablocristo/companion-v2/internal/virployees/handler/dto"
 	"github.com/devpablocristo/companion-v2/internal/virployees/runtimecontext"
+	"github.com/devpablocristo/companion-v2/internal/virployees/runtraces"
 	"github.com/devpablocristo/companion-v2/internal/virployees/usecases/domain"
 	ginmw "github.com/devpablocristo/platform/http/gin/go"
 	"github.com/devpablocristo/platform/lifecycle/go/paths"
@@ -28,6 +30,7 @@ type UseCasesPort interface {
 	RuntimeContext(context.Context, string, uuid.UUID) (runtimecontext.Context, error)
 	DryRun(context.Context, string, uuid.UUID, string) (dryrun.Result, error)
 	ExecutionGate(context.Context, string, uuid.UUID, string, *executiongate.ConfirmedDraft) (executiongate.Result, error)
+	ListRuns(context.Context, string, uuid.UUID, int) ([]runtraces.Trace, error)
 	Update(context.Context, string, uuid.UUID, domain.UpdateInput) (domain.Virployee, error)
 	Archive(context.Context, string, uuid.UUID, string, string) error
 	Unarchive(context.Context, string, uuid.UUID, string, string) error
@@ -55,6 +58,7 @@ func (h *Handler) Routes(router gin.IRouter) {
 		group.GET("/:virployee_id/runtime-context", h.RuntimeContext)
 		group.POST("/:virployee_id/dry-run", h.DryRun)
 		group.POST("/:virployee_id/execution-gate", h.ExecutionGate)
+		group.GET("/:virployee_id/runs", h.ListRuns)
 		group.GET("/:virployee_id", h.Get)
 		group.PUT("/:virployee_id", h.Update)
 		group.POST("/:virployee_id/"+paths.SegmentArchive, h.Archive)
@@ -63,6 +67,23 @@ func (h *Handler) Routes(router gin.IRouter) {
 		group.POST("/:virployee_id/"+paths.SegmentRestore, h.Restore)
 		group.DELETE("/:virployee_id/purge", h.Purge)
 	}
+}
+
+func (h *Handler) ListRuns(c *gin.Context) {
+	id, ok := ginmw.ParseUUIDParam(c, "virployee_id")
+	if !ok {
+		return
+	}
+	limit, ok := parseRunTraceLimit(c)
+	if !ok {
+		return
+	}
+	out, err := h.ucs.ListRuns(c.Request.Context(), tenantID(c), id, limit)
+	if err != nil {
+		ginmw.Respond(c, err)
+		return
+	}
+	ginmw.WriteJSON(c, http.StatusOK, dto.ListRunTracesFromDomain(out))
 }
 
 func (h *Handler) ListAutonomyLevels(c *gin.Context) {
@@ -251,4 +272,20 @@ func actorID(c *gin.Context) string {
 		return DefaultActorID
 	}
 	return actor
+}
+
+func parseRunTraceLimit(c *gin.Context) (int, bool) {
+	raw := strings.TrimSpace(c.Query("limit"))
+	if raw == "" {
+		return 20, true
+	}
+	limit, err := strconv.Atoi(raw)
+	if err != nil || limit <= 0 {
+		ginmw.Respond(c, ginmw.ErrBadInput)
+		return 0, false
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	return limit, true
 }

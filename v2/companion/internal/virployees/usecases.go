@@ -11,6 +11,7 @@ import (
 	"github.com/devpablocristo/companion-v2/internal/virployees/dryrun"
 	"github.com/devpablocristo/companion-v2/internal/virployees/executiongate"
 	"github.com/devpablocristo/companion-v2/internal/virployees/runtimecontext"
+	"github.com/devpablocristo/companion-v2/internal/virployees/runtraces"
 	"github.com/devpablocristo/companion-v2/internal/virployees/usecases/domain"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
 	"github.com/devpablocristo/platform/lifecycle/go/lifecycle"
@@ -30,6 +31,8 @@ type RepositoryPort interface {
 	List(ctx context.Context, tenantID string, state domain.State) ([]domain.Virployee, error)
 	Get(ctx context.Context, tenantID string, id uuid.UUID) (domain.Virployee, error)
 	Update(ctx context.Context, tenantID string, id uuid.UUID, input domain.NormalizedUpdateInput) (domain.Virployee, error)
+	CreateRunTrace(ctx context.Context, tenantID string, input runtraces.CreateInput) (runtraces.Trace, error)
+	ListRunTraces(ctx context.Context, tenantID string, virployeeID uuid.UUID, limit int) ([]runtraces.Trace, error)
 }
 
 type JobRoleReaderPort interface {
@@ -212,6 +215,18 @@ func (u *UseCases) RuntimeContext(ctx context.Context, tenantID string, id uuid.
 }
 
 func (u *UseCases) DryRun(ctx context.Context, tenantID string, id uuid.UUID, input string) (dryrun.Result, error) {
+	tenantID = normalizeTenantID(tenantID)
+	result, err := u.dryRun(ctx, tenantID, id, input)
+	if err != nil {
+		return dryrun.Result{}, err
+	}
+	if err := u.recordDryRunTrace(ctx, tenantID, result); err != nil {
+		return dryrun.Result{}, err
+	}
+	return result, nil
+}
+
+func (u *UseCases) dryRun(ctx context.Context, tenantID string, id uuid.UUID, input string) (dryrun.Result, error) {
 	input = strings.TrimSpace(input)
 	if input == "" {
 		return dryrun.Result{}, domainerr.Validation("input is required")
@@ -230,7 +245,8 @@ func (u *UseCases) ExecutionGate(
 	input string,
 	confirmedDraft *executiongate.ConfirmedDraft,
 ) (executiongate.Result, error) {
-	result, err := u.DryRun(ctx, tenantID, id, input)
+	tenantID = normalizeTenantID(tenantID)
+	result, err := u.dryRun(ctx, tenantID, id, input)
 	if err != nil {
 		return executiongate.Result{}, err
 	}
@@ -241,14 +257,42 @@ func (u *UseCases) ExecutionGate(
 		}
 	}
 	gate := executiongate.Evaluate(result)
+	bindingHash, err := bindingHashFor(tenantID, result)
+	if err != nil {
+		return executiongate.Result{}, err
+	}
 	if u.governance == nil || gate.Gate.Decision != executiongate.DecisionPass {
+		if err := u.recordExecutionGateTrace(ctx, tenantID, gate, nil, bindingHash); err != nil {
+			return executiongate.Result{}, err
+		}
 		return gate, nil
 	}
-	governance, err := u.governance.Check(ctx, governanceInput(tenantID, result))
+	governance, err := u.governance.Check(ctx, governanceInput(tenantID, result, bindingHash))
 	if err != nil {
-		return executiongate.ApplyGovernanceUnavailable(gate), nil
+		gate = executiongate.ApplyGovernanceUnavailable(gate)
+		nexus := &runtraces.NexusResult{
+			Available:   false,
+			BindingHash: bindingHash,
+			Error:       runtraces.RedactText(err.Error()),
+		}
+		if err := u.recordExecutionGateTrace(ctx, tenantID, gate, nexus, bindingHash); err != nil {
+			return executiongate.Result{}, err
+		}
+		return gate, nil
 	}
-	return executiongate.ApplyGovernance(gate, governance), nil
+	gate = executiongate.ApplyGovernance(gate, governance)
+	if err := u.recordExecutionGateTrace(ctx, tenantID, gate, nexusTraceFrom(governance, bindingHash), bindingHash); err != nil {
+		return executiongate.Result{}, err
+	}
+	return gate, nil
+}
+
+func (u *UseCases) ListRuns(ctx context.Context, tenantID string, id uuid.UUID, limit int) ([]runtraces.Trace, error) {
+	tenantID = normalizeTenantID(tenantID)
+	if _, err := u.repo.Get(ctx, tenantID, id); err != nil {
+		return nil, err
+	}
+	return u.repo.ListRunTraces(ctx, tenantID, id, normalizeRunTraceLimit(limit))
 }
 
 func (u *UseCases) Update(ctx context.Context, tenantID string, id uuid.UUID, input domain.UpdateInput) (domain.Virployee, error) {
@@ -335,7 +379,7 @@ func normalizeActor(actor string) string {
 	return actor
 }
 
-func governanceInput(tenantID string, result dryrun.Result) executiongate.GovernanceCheckInput {
+func governanceInput(tenantID string, result dryrun.Result, bindingHash string) executiongate.GovernanceCheckInput {
 	return executiongate.GovernanceCheckInput{
 		TenantID:       normalizeTenantID(tenantID),
 		RequesterType:  "virployee",
@@ -346,6 +390,7 @@ func governanceInput(tenantID string, result dryrun.Result) executiongate.Govern
 		Params:         governanceParams(result),
 		Reason:         result.Input,
 		Context:        result.RuntimeContext.JobRole.Name,
+		BindingHash:    bindingHash,
 	}
 }
 
@@ -361,6 +406,133 @@ func governanceParams(result dryrun.Result) map[string]any {
 		"draft_status": string(result.Draft.Status),
 		"draft_kind":   result.Draft.Kind,
 		"fields":       fields,
+	}
+}
+
+func (u *UseCases) recordDryRunTrace(ctx context.Context, tenantID string, result dryrun.Result) error {
+	capabilityID, capabilityKey := capabilityTraceFields(result)
+	_, err := u.repo.CreateRunTrace(ctx, tenantID, runtraces.CreateInput{
+		VirployeeID:    result.RuntimeContext.Virployee.ID,
+		Operation:      runtraces.OperationDryRun,
+		Input:          result.Input,
+		Intent:         intentTrace(result.Intent),
+		CapabilityID:   capabilityID,
+		CapabilityKey:  capabilityKey,
+		DryRunDecision: string(result.Decision),
+		GateChecks:     []runtraces.GateCheck{},
+	})
+	return err
+}
+
+func (u *UseCases) recordExecutionGateTrace(
+	ctx context.Context,
+	tenantID string,
+	result executiongate.Result,
+	nexus *runtraces.NexusResult,
+	bindingHash string,
+) error {
+	capabilityID, capabilityKey := capabilityTraceFields(result.DryRun)
+	_, err := u.repo.CreateRunTrace(ctx, tenantID, runtraces.CreateInput{
+		VirployeeID:    result.DryRun.RuntimeContext.Virployee.ID,
+		Operation:      runtraces.OperationExecutionGate,
+		Input:          result.Input,
+		Intent:         intentTrace(result.DryRun.Intent),
+		CapabilityID:   capabilityID,
+		CapabilityKey:  capabilityKey,
+		DryRunDecision: string(result.DryRun.Decision),
+		GateDecision:   string(result.Gate.Decision),
+		GateChecks:     gateChecksTrace(result.Gate.Checks),
+		NexusResult:    nexus,
+		BindingHash:    bindingHash,
+	})
+	return err
+}
+
+func normalizeRunTraceLimit(limit int) int {
+	if limit <= 0 {
+		return 20
+	}
+	if limit > 100 {
+		return 100
+	}
+	return limit
+}
+
+func capabilityTraceFields(result dryrun.Result) (string, string) {
+	if result.RequiredCapability == nil {
+		return "", result.Intent.CapabilityKey
+	}
+	return result.RequiredCapability.ID, result.RequiredCapability.CapabilityKey
+}
+
+func intentTrace(intent dryrun.Intent) map[string]any {
+	rules := make([]any, 0, len(intent.Rules))
+	for _, rule := range intent.Rules {
+		rules = append(rules, map[string]any{
+			"type":   rule.Type,
+			"target": rule.Target,
+			"value":  rule.Value,
+		})
+	}
+	return map[string]any{
+		"matched":        intent.Matched,
+		"capability_key": intent.CapabilityKey,
+		"domain":         intent.Domain,
+		"resource":       intent.Resource,
+		"action":         intent.Action,
+		"confidence":     intent.Confidence,
+		"matched_by":     intent.MatchedBy,
+		"rules":          rules,
+	}
+}
+
+func gateChecksTrace(checks []executiongate.Check) []runtraces.GateCheck {
+	out := make([]runtraces.GateCheck, 0, len(checks))
+	for _, check := range checks {
+		out = append(out, runtraces.GateCheck{
+			Key:    check.Key,
+			Status: string(check.Status),
+			Reason: check.Reason,
+		})
+	}
+	return out
+}
+
+func bindingHashFor(tenantID string, result dryrun.Result) (string, error) {
+	return runtraces.BindingHash(actionBinding(tenantID, result))
+}
+
+func actionBinding(tenantID string, result dryrun.Result) map[string]any {
+	if !result.Intent.Matched {
+		return nil
+	}
+	return map[string]any{
+		"schema_version":  "tool_intent.v1",
+		"tenant_id":       normalizeTenantID(tenantID),
+		"virployee_id":    result.RuntimeContext.Virployee.ID.String(),
+		"operation":       "execution_gate",
+		"capability_key":  result.Intent.CapabilityKey,
+		"action":          result.Intent.Action,
+		"target_system":   result.Intent.Domain,
+		"target_resource": result.Intent.Resource,
+		"input_hash":      runtraces.HashString(result.Input),
+	}
+}
+
+func nexusTraceFrom(governance executiongate.GovernanceCheckResult, bindingHash string) *runtraces.NexusResult {
+	if governance.BindingHash != "" {
+		bindingHash = governance.BindingHash
+	}
+	return &runtraces.NexusResult{
+		Available:            true,
+		Decision:             governance.Decision,
+		RiskLevel:            governance.RiskLevel,
+		Status:               governance.Status,
+		DecisionReason:       governance.DecisionReason,
+		WouldRequireApproval: governance.WouldRequireApproval,
+		BindingHash:          bindingHash,
+		ApprovalID:           governance.ApprovalID,
+		ApprovalStatus:       governance.ApprovalStatus,
 	}
 }
 

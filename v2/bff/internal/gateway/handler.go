@@ -58,6 +58,8 @@ func (h *Handler) Routes(router gin.IRouter) {
 	router.Any("/action-types/*path", h.ForwardNexus)
 	router.Any("/governance", h.ForwardNexus)
 	router.Any("/governance/*path", h.ForwardNexus)
+	router.Any("/approvals", h.ForwardNexus)
+	router.Any("/approvals/*path", h.ForwardNexus)
 }
 
 func (h *Handler) ForwardVirployees(c *gin.Context) {
