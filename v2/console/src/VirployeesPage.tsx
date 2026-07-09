@@ -4,7 +4,6 @@ import {
   type CrudFormValues,
   type CrudPageProps,
 } from '@devpablocristo/platform-crud-ui'
-import { CheckCircle2, Play, RefreshCw, ShieldCheck, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import {
   type Approval,
@@ -98,6 +97,21 @@ const CrudPage = PlatformCrudPage as unknown as <T extends { id: string }>(
   props: CrudPageProps<T>,
 ) => ReactElement
 
+const LIFECYCLE_VIEWS: CrudLifecycleView[] = ['active', 'archived', 'trash']
+
+async function listAllLifecycle<T extends { id: string }>(
+  load: (view: CrudLifecycleView) => Promise<T[]>,
+): Promise<T[]> {
+  const groups = await Promise.all(LIFECYCLE_VIEWS.map((view) => load(view)))
+  const rowsByID = new Map<string, T>()
+  for (const group of groups) {
+    for (const row of group) {
+      rowsByID.set(row.id, row)
+    }
+  }
+  return [...rowsByID.values()]
+}
+
 export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
   const rootRef = useRef<HTMLElement | null>(null)
   const [lifecycleView, setLifecycleView] = useState<CrudLifecycleView>('active')
@@ -109,6 +123,7 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
   const [bulkBusy, setBulkBusy] = useState(false)
   const [reloadVersion, setReloadVersion] = useState(0)
   const [actionError, setActionError] = useState('')
+  const [virployeeRows, setVirployeeRows] = useState<Virployee[]>([])
   const [autonomyLevels, setAutonomyLevels] = useState<VirployeeAutonomyLevel[]>(FALLBACK_AUTONOMY_LEVELS)
   const [jobRoles, setJobRoles] = useState<JobRole[]>([])
   const [jobRolesError, setJobRolesError] = useState('')
@@ -159,6 +174,15 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
   const activeSupervisorUsers = useMemo(() => {
     return users.filter((user) => user.kind !== 'invitation' && user.state === 'active')
   }, [users])
+  const activeJobRoles = useMemo(() => {
+    return jobRoles.filter((jobRole) => jobRole.state === 'active')
+  }, [jobRoles])
+  const activeCapabilities = useMemo(() => {
+    return capabilities.filter((capability) => capability.state === 'active')
+  }, [capabilities])
+  const activeProfileTemplates = useMemo(() => {
+    return profileTemplates.filter((profile) => profile.state === 'active')
+  }, [profileTemplates])
   const autonomyByLevel = useMemo(() => {
     return new Map(autonomyLevels.map((level) => [level.level, level]))
   }, [autonomyLevels])
@@ -169,11 +193,11 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
     }))
   }, [autonomyLevels])
   const jobRoleOptions = useMemo(() => {
-    return jobRoles.map((jobRole) => ({
+    return activeJobRoles.map((jobRole) => ({
       label: jobRole.name,
       value: jobRole.id,
     }))
-  }, [jobRoles])
+  }, [activeJobRoles])
   const supervisorOptions = useMemo(() => {
     return activeSupervisorUsers.map((user) => ({
       label: userLabel(user),
@@ -181,47 +205,32 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
     }))
   }, [activeSupervisorUsers])
   const profileTemplateOptions = useMemo(() => {
-    return profileTemplates.map((profile) => ({
+    return activeProfileTemplates.map((profile) => ({
       label: profile.name,
       value: profile.id,
     }))
-  }, [profileTemplates])
+  }, [activeProfileTemplates])
+  const virployeeByID = useMemo(() => {
+    return new Map(virployeeRows.map((virployee) => [virployee.id, virployee]))
+  }, [virployeeRows])
+  const selectedVirployee = selectedIds.length === 1 ? virployeeByID.get(selectedIds[0]) ?? null : null
+  const inlinePanelOpen = createOpen || previewRow != null || dryRunRow != null || editRow != null
 
   const dataSource: NonNullable<CrudPageProps<Virployee>['dataSource']> = useMemo(() => ({
-    list: ({ view }) => isActive ? listVirployees(view, tenantId, principalId) : Promise.resolve([]),
-    create: async (values) => {
-      await createVirployee(virployeePayload(values), tenantId, principalId)
-      setCreateOpen(false)
-      setReloadVersion((current) => current + 1)
+    list: async () => {
+      if (!isActive) {
+        setVirployeeRows([])
+        return []
+      }
+      const rows = await listVirployees(lifecycleView, tenantId, principalId)
+      setVirployeeRows(rows)
+      return rows
     },
-    update: async (row, values) => {
-      await updateVirployee(row.id, virployeePayload(values, row.capability_ids ?? []), tenantId, principalId)
-      setReloadVersion((current) => current + 1)
-    },
-    archive: async (row) => {
-      await archiveVirployee(row.id, tenantId, principalId)
-      setReloadVersion((current) => current + 1)
-    },
-    trash: async (row) => {
-      await trashVirployee(row.id, tenantId, principalId)
-      setReloadVersion((current) => current + 1)
-    },
-    unarchive: async (row) => {
-      await unarchiveVirployee(row.id, tenantId, principalId)
-      setReloadVersion((current) => current + 1)
-    },
-    restore: async (row) => {
-      await restoreVirployee(row.id, tenantId, principalId)
-      setReloadVersion((current) => current + 1)
-    },
-    purge: async (row) => {
-      await purgeVirployee(row.id, tenantId, principalId)
-      setReloadVersion((current) => current + 1)
-    },
-  }), [isActive, principalId, tenantId])
+  }), [isActive, lifecycleView, principalId, tenantId])
 
   useEffect(() => {
     setSelectedIds([])
+    setVirployeeRows([])
     closeCreate()
     setActionError('')
     setJobRoles([])
@@ -244,7 +253,7 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
       return
     }
     let cancelled = false
-    listJobRoles('active', tenantId, principalId)
+    listAllLifecycle((view) => listJobRoles(view, tenantId, principalId))
       .then((items) => {
         if (cancelled) return
         setJobRoles(items)
@@ -267,7 +276,7 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
       return
     }
     let cancelled = false
-    listCapabilities('active', tenantId, principalId)
+    listAllLifecycle((view) => listCapabilities(view, tenantId, principalId))
       .then((items) => {
         if (cancelled) return
         setCapabilities(items)
@@ -290,7 +299,7 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
       return
     }
     let cancelled = false
-    listProfileTemplates('active', tenantId, principalId)
+    listAllLifecycle((view) => listProfileTemplates(view, tenantId, principalId))
       .then((items) => {
         if (cancelled) return
         setProfileTemplates(items)
@@ -313,7 +322,7 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
       return
     }
     let cancelled = false
-    listUsers('active', tenantId, principalId)
+    listAllLifecycle((view) => listUsers(view, tenantId, principalId))
       .then((items) => {
         if (cancelled) return
         setUsers(items)
@@ -348,19 +357,6 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
       cancelled = true
     }
   }, [isActive, principalId, tenantId])
-
-  useEffect(() => {
-    const root = rootRef.current
-    if (!root) return
-    const syncCreateOpen = () => {
-      const title = root.querySelector<HTMLElement>('.crud-form-card .card-header h2')
-      setCreateOpen(title?.textContent?.trim().toLowerCase().startsWith('new ') ?? false)
-    }
-    syncCreateOpen()
-    const observer = new MutationObserver(syncCreateOpen)
-    observer.observe(root, { childList: true, subtree: true })
-    return () => observer.disconnect()
-  }, [tenantId, lifecycleView, reloadVersion])
 
   useEffect(() => {
     const root = rootRef.current
@@ -736,7 +732,7 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
   }
 
   return (
-    <section ref={rootRef} className="page-section iam-control axis-crud-host virployees-control iam-control--external-lifecycle">
+    <section ref={rootRef} className="page-section iam-control axis-crud-host virployees-control">
       <CrudPage<Virployee>
         key={`virployees-${tenantId}-${lifecycleView}-${reloadVersion}`}
         dataSource={dataSource}
@@ -746,26 +742,23 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
           actionPurge: 'Delete permanently',
           confirmWord: 'delete',
         }}
-        initialView={lifecycleView}
-        supportsArchived
-        supportsTrash
+        supportsArchived={false}
+        supportsTrash={false}
         allowCreate={false}
-        allowEdit
-        allowArchive
-        allowTrash
-        allowUnarchive
-        allowRestore
-        allowPurge
+        allowEdit={false}
+        allowArchive={false}
+        allowTrash={false}
+        allowUnarchive={false}
+        allowRestore={false}
+        allowPurge={false}
         label="virployee"
         labelPlural="virployees"
         labelPluralCap="Virployees"
         createLabel="New"
-        columns={virployeeColumns(selectedIds, toggleSelected, autonomyByLevel, jobRoleByID, userByID, capabilityByID, profileTemplateByID)}
+        columns={virployeeColumns(selectedIds, toggleSelected, autonomyByLevel, jobRoleByID, userByID, capabilityByID)}
         formFields={virployeeFormFields(autonomyOptions, jobRoleOptions, supervisorOptions, profileTemplateOptions)}
         searchText={(row) => virployeeSearchText(row, autonomyByLevel, jobRoleByID, userByID, capabilityByID, profileTemplateByID)}
         toFormValues={virployeeToFormValues}
-        onExternalEdit={openEdit}
-        rowActions={virployeeRowActions(openPreview, openDryRun)}
         isValid={isValidVirployeeForm}
         emptyState="No virployees"
         archivedEmptyState="No archived virployees"
@@ -778,7 +771,11 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
               view={lifecycleView}
               createOpen={createOpen}
               busy={bulkBusy || !isActive}
+              selectedRow={selectedVirployee}
               onCreate={openCreate}
+              onEdit={openEdit}
+              onPreview={openPreview}
+              onDryRun={openDryRun}
               onClear={clearSelected}
               onBulkAction={(action) => void applyBulkAction(action)}
             />
@@ -787,15 +784,6 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
             {usersError ? <p role="alert" className="iam-control__inline-error">{usersError}</p> : null}
             {capabilitiesError ? <p role="alert" className="iam-control__inline-error">{capabilitiesError}</p> : null}
             {profileTemplatesError ? <p role="alert" className="iam-control__inline-error">{profileTemplatesError}</p> : null}
-            {!jobRolesError && jobRoles.length === 0 ? (
-              <p className="iam-control__inline-note">Create a Job Role before creating Virployees.</p>
-            ) : null}
-            {!profileTemplatesError && profileTemplates.length === 0 ? (
-              <p className="iam-control__inline-note">Create a Profile Template before creating Virployees.</p>
-            ) : null}
-            {!usersError && activeSupervisorUsers.length === 0 ? (
-              <p className="iam-control__inline-note">Create a User before assigning a supervisor.</p>
-            ) : null}
             {createValues ? (
               <VirployeeEditInline
                 title="New virployee"
@@ -807,7 +795,7 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
                 jobRoleOptions={jobRoleOptions}
                 profileTemplateOptions={profileTemplateOptions}
                 supervisorOptions={supervisorOptions}
-                capabilities={capabilities}
+                capabilities={activeCapabilities}
                 capabilityByID={capabilityByID}
                 onValueChange={updateCreateValue}
                 onToggleCapability={toggleCreateCapability}
@@ -865,7 +853,7 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
                 jobRoleOptions={jobRoleOptions}
                 profileTemplateOptions={profileTemplateOptions}
                 supervisorOptions={supervisorOptions}
-                capabilities={capabilities}
+                capabilities={activeCapabilities}
                 capabilityByID={capabilityByID}
                 onValueChange={updateEditValue}
                 onToggleCapability={toggleEditCapability}
@@ -875,7 +863,7 @@ export function VirployeesPage({ tenantId, principalId }: VirployeesPageProps) {
             ) : null}
           </div>
         )}
-        toolbarActions={lifecycleToolbarActions(lifecycleView, createOpen, setExternalLifecycleView)}
+        toolbarActions={lifecycleToolbarActions(lifecycleView, inlinePanelOpen, setExternalLifecycleView)}
         featureFlags={{ csvToolbar: false }}
       />
     </section>
@@ -902,6 +890,11 @@ function VirployeeEditInline(props: {
   const selectedIDs = props.values.capability_ids
   const selectedSet = new Set(selectedIDs)
   const availableCapabilities = props.capabilities.filter((capability) => !selectedSet.has(capability.id))
+  const prerequisiteNotes = [
+    props.jobRoleOptions.length === 0 ? 'Create an active Job Role before saving Virployees.' : '',
+    props.profileTemplateOptions.length === 0 ? 'Create an active Profile Template before saving Virployees.' : '',
+    props.supervisorOptions.length === 0 ? 'Create an active User before assigning a supervisor.' : '',
+  ].filter(Boolean)
 
   return (
     <div className="card crud-form-card virployee-edit-inline">
@@ -915,7 +908,18 @@ function VirployeeEditInline(props: {
             props.onSave()
           }}
         >
+          <div className="virployee-form-actions virployee-form-actions--top">
+            <button type="submit" className="btn-primary" disabled={props.saving || !isValidEditValues(props.values)}>
+              {props.saving ? 'Saving...' : props.primaryLabel}
+            </button>
+            <button type="button" className="btn-secondary" disabled={props.saving} onClick={props.onClose}>
+              Cancel
+            </button>
+          </div>
           {props.error ? <p role="alert" className="iam-control__inline-error">{props.error}</p> : null}
+          {prerequisiteNotes.map((note) => (
+            <p key={note} className="iam-control__inline-note">{note}</p>
+          ))}
           <div className="crud-form-grid">
             <label className="form-group">
               Name
@@ -1027,14 +1031,14 @@ function VirployeeEditInline(props: {
               })}
             </div>
           </section>
-        <footer className="virployee-edit-form__footer">
+          <footer className="virployee-edit-form__footer">
             <button type="submit" className="btn-primary" disabled={props.saving || !isValidEditValues(props.values)}>
               {props.saving ? 'Saving...' : props.primaryLabel}
             </button>
-          <button type="button" className="btn-secondary" disabled={props.saving} onClick={props.onClose}>
-            Cancel
-          </button>
-        </footer>
+            <button type="button" className="btn-secondary" disabled={props.saving} onClick={props.onClose}>
+              Cancel
+            </button>
+          </footer>
       </form>
     </div>
   )
@@ -1062,6 +1066,11 @@ function VirployeePreviewInline(props: {
     <div className="card crud-form-card virployee-preview-inline">
       <div className="card-header">
         <h2>Virployee preview</h2>
+      </div>
+      <div className="virployee-panel-actions virployee-panel-actions--top">
+        <button type="button" className="btn-secondary" onClick={props.onClose}>
+          Close
+        </button>
       </div>
       <div className="virployee-preview">
         {props.loading ? <p className="iam-control__inline-note">Loading Runtime Context...</p> : null}
@@ -1116,7 +1125,7 @@ function VirployeePreviewInline(props: {
           )}
         </section>
       </div>
-      <footer className="virployee-edit-form__footer">
+      <footer className="virployee-panel-footer">
         <button type="button" className="btn-secondary" onClick={props.onClose}>
           Close
         </button>
@@ -1161,7 +1170,7 @@ function VirployeeDryRunInline(props: {
   const supervisorValue = props.supervisor ? userLabel(props.supervisor) : 'Unknown Supervisor'
   const latestGateRun = latestExecutionGateRun(props.runTraces)
   const latestApprovalID = latestGateRun?.nexus_result?.approval_id ?? ''
-  const runButtonLabel = props.loading ? 'Running...' : props.result ? 'Run again' : 'Run dry run'
+  const runButtonLabel = props.loading ? 'Running...' : props.result ? 'Run again' : 'Run Dry Run'
   const gateButtonLabel = props.executionGateLoading
     ? 'Checking...'
     : props.executionGate
@@ -1171,7 +1180,7 @@ function VirployeeDryRunInline(props: {
   return (
     <div className="card crud-form-card virployee-dry-run-inline">
       <div className="card-header">
-        <h2>Dry run</h2>
+        <h2>Dry Run</h2>
       </div>
       <form
         className="virployee-dry-run"
@@ -1180,6 +1189,22 @@ function VirployeeDryRunInline(props: {
           props.onRun()
         }}
       >
+        <div className="virployee-form-actions virployee-form-actions--top">
+          <button type="submit" className="btn-primary" disabled={!canRun}>
+            {runButtonLabel}
+          </button>
+          <button
+            type="button"
+            className="btn-secondary"
+            disabled={!canCheckGate}
+            onClick={props.onCheckExecutionGate}
+          >
+            {gateButtonLabel}
+          </button>
+          <button type="button" className="btn-secondary" disabled={props.loading || props.executionGateLoading} onClick={props.onClose}>
+            Close
+          </button>
+        </div>
         {props.error ? <p role="alert" className="iam-control__inline-error">{props.error}</p> : null}
         {props.executionGateError ? <p role="alert" className="iam-control__inline-error">{props.executionGateError}</p> : null}
         {props.runTracesError ? <p role="alert" className="iam-control__inline-error">{props.runTracesError}</p> : null}
@@ -1201,12 +1226,12 @@ function VirployeeDryRunInline(props: {
         </label>
 
         {props.result ? (
-          <section className="virployee-dry-run__result" aria-label="Dry run result">
+          <section className="virployee-dry-run__result" aria-label="Dry Run result">
             <section className="virployee-preview__section virployee-flow-section" aria-label="Flow status">
               <SectionHeading title="Flow status" eyebrow="Checkpoint" />
               <div className="virployee-flow-summary" aria-label="Flow summary">
                 <FlowSummaryItem
-                  label="Dry run"
+                  label="Dry Run"
                   value={props.result.decision === 'allowed' ? 'Allowed' : 'Blocked'}
                   tone={props.result.decision === 'allowed' ? 'success' : 'danger'}
                 />
@@ -1228,8 +1253,8 @@ function VirployeeDryRunInline(props: {
               </div>
             </section>
 
-            <section className="virployee-preview__section" aria-label="Dry run decision">
-              <SectionHeading title="Dry run result" eyebrow="Capability and autonomy" />
+            <section className="virployee-preview__section" aria-label="Dry Run decision">
+              <SectionHeading title="Dry Run result" eyebrow="Capability and autonomy" />
               <div className={`virployee-dry-run__decision virployee-dry-run__decision--${props.result.decision}`}>
                 <strong>{props.result.decision === 'allowed' ? 'Allowed' : 'Blocked'}</strong>
                 <span>{props.result.reason}</span>
@@ -1306,7 +1331,7 @@ function VirployeeDryRunInline(props: {
           </section>
         ) : (
           <>
-            <p className="iam-control__inline-note">Dry run checks the Runtime Context, required Capability and autonomy decision without executing anything.</p>
+            <p className="iam-control__inline-note">Dry Run checks the Runtime Context, required Capability and autonomy decision without executing anything.</p>
             <RunTraceHistory
               tenantId={props.tenantId}
               principalId={props.principalId}
@@ -1319,7 +1344,6 @@ function VirployeeDryRunInline(props: {
 
         <footer className="virployee-edit-form__footer">
           <button type="submit" className="btn-primary" disabled={!canRun}>
-            <Play aria-hidden="true" />
             {runButtonLabel}
           </button>
           <button
@@ -1328,11 +1352,9 @@ function VirployeeDryRunInline(props: {
             disabled={!canCheckGate}
             onClick={props.onCheckExecutionGate}
           >
-            <ShieldCheck aria-hidden="true" />
             {gateButtonLabel}
           </button>
           <button type="button" className="btn-secondary" disabled={props.loading || props.executionGateLoading} onClick={props.onClose}>
-            <X aria-hidden="true" />
             Close
           </button>
         </footer>
@@ -1447,7 +1469,6 @@ function ConfirmableCalendarDraftView(props: {
       </div>
       <div className="virployee-dry-run__draft-actions">
         <button type="button" className="btn-secondary" disabled={!complete || props.confirmed} onClick={props.onConfirm}>
-          <CheckCircle2 aria-hidden="true" />
           Confirm draft
         </button>
         <span className={props.confirmed ? 'iam-control__inline-note' : 'iam-control__inline-error'}>
@@ -1597,7 +1618,6 @@ function RunTraceHistory(props: {
       <div className="virployee-run-history__header">
         <SectionHeading title="Run history" eyebrow="Audit trail" />
         <button type="button" className="btn-secondary" disabled={props.loading} onClick={props.onRefresh}>
-          <RefreshCw aria-hidden="true" />
           {props.loading ? 'Refreshing...' : 'Refresh'}
         </button>
       </div>
@@ -1748,38 +1768,16 @@ function virployeeColumns(
   jobRoleByID?: ReadonlyMap<string, JobRole>,
   userByID?: ReadonlyMap<string, TenantUser>,
   capabilityByID?: ReadonlyMap<string, Capability>,
-  profileTemplateByID?: ReadonlyMap<string, ProfileTemplate>,
 ): CrudPageProps<Virployee>['columns'] {
   return [
     selectionColumn<Virployee>(selectedIds, onToggle),
-    { key: 'name', header: 'Name' },
+    { key: 'name', header: 'Name', className: 'virployee-name-col' },
+    { key: 'created_at', header: 'Created', className: 'virployee-created-col', render: (value) => formatDate(String(value ?? '')) },
     { key: 'job_role_id', header: 'Job Role', render: (value) => jobRoleName(String(value ?? ''), jobRoleByID) },
-    { key: 'profile_template_id', header: 'Profile Template', render: (value) => profileTemplateName(String(value ?? ''), profileTemplateByID) },
     { key: 'autonomy', header: 'Autonomy', render: (value) => formatAutonomy(String(value ?? ''), autonomyByLevel) },
-    { key: 'capability_ids', header: 'Capabilities', render: (_value, row) => capabilitySummary(row.capability_ids ?? [], capabilityByID) },
+    { key: 'capability_ids', header: 'Capabilities', className: 'virployee-capabilities-col', render: (_value, row) => capabilitySummary(row.capability_ids ?? [], capabilityByID) },
     { key: 'supervisor_user_id', header: 'Supervisor', render: (value) => supervisorName(String(value ?? ''), userByID) },
     { key: 'state', header: 'State', render: (value) => formatState(String(value ?? '')) },
-    { key: 'updated_at', header: 'Updated', render: (value) => formatDate(String(value ?? '')) },
-  ]
-}
-
-function virployeeRowActions(
-  onPreview: (row: Virployee) => void,
-  onDryRun: (row: Virployee) => void,
-): NonNullable<CrudPageProps<Virployee>['rowActions']> {
-  return [
-    {
-      id: 'preview',
-      label: 'Preview',
-      kind: 'secondary',
-      onClick: (row) => onPreview(row),
-    },
-    {
-      id: 'dry-run',
-      label: 'Dry run',
-      kind: 'secondary',
-      onClick: (row) => onDryRun(row),
-    },
   ]
 }
 
@@ -1966,44 +1964,97 @@ function CreateAndBulkActions(props: {
   view: CrudLifecycleView
   createOpen: boolean
   busy: boolean
+  selectedRow: Virployee | null
   onCreate: () => void
+  onEdit: (row: Virployee) => void
+  onPreview: (row: Virployee) => void
+  onDryRun: (row: Virployee) => void
   onClear: () => void
   onBulkAction: (action: BulkAction) => void
 }) {
   const actionsDisabled = props.busy || props.selectedCount === 0
+  const singleActionDisabled = props.busy || props.selectedCount !== 1 || props.selectedRow == null
   return (
     <div className="iam-control__create-inline">
       <div className="iam-control__bulk-buttons">
-        <button
-          type="button"
-          className={`btn-sm ${props.createOpen ? 'btn-primary' : 'btn-secondary'} iam-control__new-button`}
-          onClick={props.onCreate}
-        >
-          New
-        </button>
+        <div className="iam-control__button-group">
+          <button
+            type="button"
+            className={`btn-sm ${props.createOpen ? 'btn-primary' : 'btn-secondary'} iam-control__new-button`}
+            onClick={props.onCreate}
+          >
+            New
+          </button>
+        </div>
         {props.view === 'active' ? (
-          <>
+          <div className="iam-control__button-group">
+            <button
+              type="button"
+              className="btn-sm btn-secondary"
+              disabled={singleActionDisabled}
+              onClick={() => {
+                if (props.selectedRow) props.onEdit(props.selectedRow)
+              }}
+            >
+              Edit
+            </button>
+            <button
+              type="button"
+              className="btn-sm btn-secondary"
+              disabled={singleActionDisabled}
+              onClick={() => {
+                if (props.selectedRow) props.onPreview(props.selectedRow)
+              }}
+            >
+              Preview
+            </button>
+            <button
+              type="button"
+              className="btn-sm btn-secondary"
+              disabled={singleActionDisabled}
+              onClick={() => {
+                if (props.selectedRow) props.onDryRun(props.selectedRow)
+              }}
+            >
+              Dry Run
+            </button>
+            <button type="button" className="btn-sm btn-secondary" disabled={actionsDisabled} onClick={props.onClear}>Clear</button>
+          </div>
+        ) : null}
+        {props.view === 'active' ? (
+          <div className="iam-control__button-group iam-control__button-group--lifecycle">
             <button type="button" className="btn-sm btn-secondary" disabled={actionsDisabled} onClick={() => props.onBulkAction('archive')}>Archive</button>
-            <button type="button" className="btn-sm btn-secondary" disabled={actionsDisabled} onClick={() => props.onBulkAction('trash')}>Trash</button>
-          </>
+            <button type="button" className="btn-sm btn-danger" disabled={actionsDisabled} onClick={() => props.onBulkAction('trash')}>Trash</button>
+          </div>
         ) : null}
         {props.view === 'archived' ? (
-          <button type="button" className="btn-sm btn-secondary" disabled={actionsDisabled} onClick={() => props.onBulkAction('restore')}>Restore</button>
+          <>
+            <div className="iam-control__button-group">
+              <button type="button" className="btn-sm btn-secondary" disabled={actionsDisabled} onClick={props.onClear}>Clear</button>
+            </div>
+            <div className="iam-control__button-group iam-control__button-group--lifecycle">
+              <button type="button" className="btn-sm btn-primary" disabled={actionsDisabled} onClick={() => props.onBulkAction('restore')}>Restore</button>
+            </div>
+          </>
         ) : null}
         {props.view === 'trash' ? (
           <>
-            <button type="button" className="btn-sm btn-secondary" disabled={actionsDisabled} onClick={() => props.onBulkAction('restore')}>Restore</button>
-            <button
-              type="button"
-              className="btn-sm btn-danger iam-control__danger-button"
-              disabled={actionsDisabled}
-              onClick={() => props.onBulkAction('purge')}
-            >
-              Delete
-            </button>
+            <div className="iam-control__button-group">
+              <button type="button" className="btn-sm btn-secondary" disabled={actionsDisabled} onClick={props.onClear}>Clear</button>
+            </div>
+            <div className="iam-control__button-group iam-control__button-group--lifecycle">
+              <button type="button" className="btn-sm btn-primary" disabled={actionsDisabled} onClick={() => props.onBulkAction('restore')}>Restore</button>
+              <button
+                type="button"
+                className="btn-sm btn-danger iam-control__danger-button"
+                disabled={actionsDisabled}
+                onClick={() => props.onBulkAction('purge')}
+              >
+                Delete
+              </button>
+            </div>
           </>
         ) : null}
-        <button type="button" className="btn-sm btn-secondary" disabled={actionsDisabled} onClick={props.onClear}>Clear</button>
       </div>
       <span className="iam-control__selected-count">{props.selectedCount} selected</span>
     </div>
@@ -2037,12 +2088,6 @@ function supervisorName(id: string, userByID?: ReadonlyMap<string, TenantUser>):
   if (!id) return '-'
   const user = userByID?.get(id)
   return user ? userLabel(user) : shortId(id)
-}
-
-function profileTemplateName(id: string, profileTemplateByID?: ReadonlyMap<string, ProfileTemplate>): string {
-  if (!id) return '-'
-  const profile = profileTemplateByID?.get(id)
-  return profile?.name ?? shortId(id)
 }
 
 function capabilitySummary(ids: string[], capabilityByID?: ReadonlyMap<string, Capability>): string {
@@ -2159,11 +2204,11 @@ function formatDate(value: string | null): string {
   if (!value) return '-'
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString('en-US', { dateStyle: 'short', timeStyle: 'short' })
+  return date.toLocaleString('en-US', { dateStyle: 'short', timeStyle: 'short', hour12: false })
 }
 
 function formatRunOperation(value: VirployeeRunTrace['operation']): string {
-  return value === 'execution_gate' ? 'Execution gate' : 'Dry run'
+  return value === 'execution_gate' ? 'Execution gate' : 'Dry Run'
 }
 
 function latestExecutionGateRun(runs: VirployeeRunTrace[]): VirployeeRunTrace | null {

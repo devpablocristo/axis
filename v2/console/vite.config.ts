@@ -10,6 +10,7 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     port: Number.isFinite(serverPort) ? serverPort : 19173,
+    allowedHosts: ['localhost', '127.0.0.1', 'console-v2', 'console-v2-e2e'],
     hmr: Number.isFinite(hmrClientPort) ? { clientPort: hmrClientPort } : undefined,
     proxy: {
       '/api': bffTarget,

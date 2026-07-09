@@ -4,7 +4,9 @@ import {
   type CrudFormValues,
   type CrudPageProps,
 } from '@devpablocristo/platform-crud-ui'
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react'
+import { EntityFormPanel, emptyFormValues } from './EntityFormPanel'
+import { LifecycleBulkActions } from './LifecycleBulkActions'
 import {
   type Product,
   type ProductInput,
@@ -31,15 +33,18 @@ const CrudPage = PlatformCrudPage as unknown as <T extends { id: string }>(
 ) => ReactElement
 
 export function ProductsPage({ principalId, onSessionChanged }: ProductsPageProps) {
-  const rootRef = useRef<HTMLElement | null>(null)
   const [lifecycleView, setLifecycleView] = useState<CrudLifecycleView>('active')
   const [selectedIds, setSelectedIds] = useState<string[]>([])
-  const [createRequested, setCreateRequested] = useState(false)
-  const [createOpen, setCreateOpen] = useState(false)
+  const [selectedRowsById, setSelectedRowsById] = useState<Record<string, Product>>({})
+  const [formMode, setFormMode] = useState<'create' | 'edit' | null>(null)
+  const [formValues, setFormValues] = useState<CrudFormValues>({})
+  const [formSaving, setFormSaving] = useState(false)
   const [bulkBusy, setBulkBusy] = useState(false)
   const [reloadVersion, setReloadVersion] = useState(0)
   const [actionError, setActionError] = useState('')
   const isActive = Boolean(principalId)
+  const formFields = useMemo(() => productFormFields(), [])
+  const selectedRow = selectedIds.length === 1 ? selectedRowsById[selectedIds[0]] ?? null : null
 
   const refreshAfterMutation = useCallback(async () => {
     setReloadVersion((current) => current + 1)
@@ -47,89 +52,77 @@ export function ProductsPage({ principalId, onSessionChanged }: ProductsPageProp
   }, [onSessionChanged])
 
   const dataSource: NonNullable<CrudPageProps<Product>['dataSource']> = useMemo(() => ({
-    list: ({ view }) => isActive ? listProducts(view, principalId) : Promise.resolve([]),
-    create: async (values) => {
-      await createProduct(productPayload(values, true), principalId)
-      setCreateOpen(false)
-      await refreshAfterMutation()
-    },
-    update: async (row, values) => {
-      await updateProduct(row.id, productPayload(values, false), principalId)
-      await refreshAfterMutation()
-    },
-    archive: async (row) => {
-      await archiveProduct(row.id, principalId)
-      await refreshAfterMutation()
-    },
-    trash: async (row) => {
-      await trashProduct(row.id, principalId)
-      await refreshAfterMutation()
-    },
-    unarchive: async (row) => {
-      await unarchiveProduct(row.id, principalId)
-      await refreshAfterMutation()
-    },
-    restore: async (row) => {
-      await restoreProduct(row.id, principalId)
-      await refreshAfterMutation()
-    },
-    purge: async (row) => {
-      await purgeProduct(row.id, principalId)
-      await refreshAfterMutation()
-    },
-  }), [isActive, principalId, refreshAfterMutation])
+    list: () => isActive ? listProducts(lifecycleView, principalId) : Promise.resolve([]),
+  }), [isActive, lifecycleView, principalId])
 
   useEffect(() => {
     setSelectedIds([])
-    setCreateOpen(false)
+    setSelectedRowsById({})
+    closeForm()
     setActionError('')
   }, [lifecycleView, principalId])
 
-  useEffect(() => {
-    if (!createRequested) return
-    const handle = window.setTimeout(() => {
-      const buttons = Array.from(
-        rootRef.current?.querySelectorAll<HTMLButtonElement>(
-          '.crud-page-shell__header-actions > .actions-row > .actions-row > button',
-        ) ?? [],
-      )
-      const newButton = buttons.find((button) => button.textContent?.trim() === 'New')
-      if (newButton) {
-        newButton.click()
-      } else {
-        setCreateOpen(false)
-      }
-      setCreateRequested(false)
-    }, 0)
-    return () => window.clearTimeout(handle)
-  }, [createRequested, reloadVersion])
-
-  useEffect(() => {
-    const root = rootRef.current
-    if (!root) return
-    const syncCreateOpen = () => {
-      const title = root.querySelector<HTMLElement>('.crud-form-card .card-header h2')
-      setCreateOpen(title?.textContent?.trim().toLowerCase().startsWith('new ') ?? false)
-    }
-    syncCreateOpen()
-    const observer = new MutationObserver(syncCreateOpen)
-    observer.observe(root, { childList: true, subtree: true })
-    return () => observer.disconnect()
-  }, [principalId, lifecycleView, reloadVersion])
-
-  const toggleSelected = (id: string, checked: boolean) => {
+  const toggleSelected = (row: Product, checked: boolean) => {
+    setSelectedRowsById((current) => {
+      const next = { ...current }
+      if (checked) next[row.id] = row
+      else delete next[row.id]
+      return next
+    })
     setSelectedIds((current) => (
-      checked ? Array.from(new Set([...current, id])) : current.filter((item) => item !== id)
+      checked ? Array.from(new Set([...current, row.id])) : current.filter((item) => item !== row.id)
     ))
   }
 
-  const clearSelected = () => setSelectedIds([])
+  const clearSelected = () => {
+    setSelectedIds([])
+    setSelectedRowsById({})
+  }
 
   const setExternalLifecycleView = (view: CrudLifecycleView) => {
     setLifecycleView(view)
-    setCreateOpen(false)
+    closeForm()
     clearSelected()
     setActionError('')
+  }
+
+  const openCreate = () => {
+    setFormMode('create')
+    setFormValues(emptyFormValues<Product>(formFields))
+    setActionError('')
+  }
+
+  const openEdit = () => {
+    if (!selectedRow) return
+    setFormMode('edit')
+    setFormValues(productToFormValues(selectedRow))
+    setActionError('')
+  }
+
+  function closeForm() {
+    setFormMode(null)
+    setFormValues({})
+    setFormSaving(false)
+  }
+
+  const submitForm = async () => {
+    if (!isActive || !formMode || !isValidProductForm(formValues) || formSaving) return
+    setFormSaving(true)
+    setActionError('')
+    try {
+      if (formMode === 'create') {
+        await createProduct(productPayload(formValues, true), principalId)
+      } else if (selectedRow) {
+        await updateProduct(selectedRow.id, productPayload(formValues, false), principalId)
+      }
+      closeForm()
+      clearSelected()
+      await refreshAfterMutation()
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Could not save the product')
+    } finally {
+      setFormSaving(false)
+    }
   }
 
   const applyBulkAction = async (action: BulkAction) => {
@@ -170,7 +163,7 @@ export function ProductsPage({ principalId, onSessionChanged }: ProductsPageProp
   }
 
   return (
-    <section ref={rootRef} className="page-section iam-control axis-crud-host iam-control--external-lifecycle">
+    <section className="page-section iam-control axis-crud-host">
       <CrudPage<Product>
         key={`products-${principalId}-${lifecycleView}-${reloadVersion}`}
         dataSource={dataSource}
@@ -180,22 +173,21 @@ export function ProductsPage({ principalId, onSessionChanged }: ProductsPageProp
           actionPurge: 'Delete permanently',
           confirmWord: 'delete',
         }}
-        initialView={lifecycleView}
-        supportsArchived
-        supportsTrash
-        allowCreate
-        allowEdit
-        allowArchive
-        allowTrash
-        allowUnarchive
-        allowRestore
-        allowPurge
+        supportsArchived={false}
+        supportsTrash={false}
+        allowCreate={false}
+        allowEdit={false}
+        allowArchive={false}
+        allowTrash={false}
+        allowUnarchive={false}
+        allowRestore={false}
+        allowPurge={false}
         label="product"
         labelPlural="products"
         labelPluralCap="Products"
         createLabel="New"
         columns={productColumns(selectedIds, toggleSelected)}
-        formFields={productFormFields()}
+        formFields={formFields}
         searchText={productSearchText}
         toFormValues={productToFormValues}
         isValid={isValidProductForm}
@@ -208,19 +200,32 @@ export function ProductsPage({ principalId, onSessionChanged }: ProductsPageProp
             <CreateAndBulkActions
               selectedCount={selectedIds.length}
               view={lifecycleView}
-              createOpen={createOpen}
-              busy={bulkBusy || !isActive}
-              onCreate={() => {
-                setCreateOpen(true)
-                setCreateRequested(true)
-              }}
+              createOpen={formMode === 'create'}
+              editOpen={formMode === 'edit'}
+              busy={bulkBusy || formSaving || !isActive}
+              onCreate={openCreate}
+              onEdit={openEdit}
               onClear={clearSelected}
               onBulkAction={(action) => void applyBulkAction(action)}
             />
             {actionError ? <p role="alert" className="iam-control__inline-error">{actionError}</p> : null}
+            {formMode ? (
+              <EntityFormPanel<Product>
+                title={formMode === 'create' ? 'New product' : 'Edit product'}
+                mode={formMode}
+                fields={formFields}
+                values={formValues}
+                saving={formSaving}
+                primaryLabel={formMode === 'create' ? 'Create' : 'Save'}
+                valid={isValidProductForm(formValues)}
+                onChange={setFormValues}
+                onSubmit={() => void submitForm()}
+                onCancel={closeForm}
+              />
+            ) : null}
           </div>
         )}
-        toolbarActions={lifecycleToolbarActions(lifecycleView, createOpen, setExternalLifecycleView)}
+        toolbarActions={lifecycleToolbarActions(lifecycleView, formMode != null, setExternalLifecycleView)}
         featureFlags={{ csvToolbar: false }}
       />
     </section>
@@ -229,14 +234,13 @@ export function ProductsPage({ principalId, onSessionChanged }: ProductsPageProp
 
 function productColumns(
   selectedIds: string[],
-  onToggle: (id: string, checked: boolean) => void,
+  onToggle: (row: Product, checked: boolean) => void,
 ): CrudPageProps<Product>['columns'] {
   return [
     selectionColumn<Product>(selectedIds, onToggle),
     { key: 'name', header: 'Product' },
     { key: 'product_surface', header: 'Slug' },
     { key: 'state', header: 'State', render: (value) => formatState(String(value ?? '')) },
-    { key: 'updated_at', header: 'Updated', render: (value) => formatDate(String(value ?? '')) },
   ]
 }
 
@@ -277,9 +281,9 @@ function productSearchText(row: Product): string {
   ].join(' ')
 }
 
-function selectionColumn<T extends { id: string }>(
+function selectionColumn<T extends Product>(
   selectedIds: string[],
-  onToggle: (id: string, checked: boolean) => void,
+  onToggle: (row: T, checked: boolean) => void,
 ): NonNullable<CrudPageProps<T>['columns']>[number] {
   return {
     key: 'id' as keyof T & string,
@@ -292,7 +296,7 @@ function selectionColumn<T extends { id: string }>(
         aria-label={`Select ${row.id}`}
         checked={selectedIds.includes(row.id)}
         onClick={(event) => event.stopPropagation()}
-        onChange={(event) => onToggle(row.id, event.currentTarget.checked)}
+        onChange={(event) => onToggle(row, event.currentTarget.checked)}
       />
     ),
   }
@@ -302,48 +306,25 @@ function CreateAndBulkActions(props: {
   selectedCount: number
   view: CrudLifecycleView
   createOpen: boolean
+  editOpen: boolean
   busy: boolean
   onCreate: () => void
+  onEdit: () => void
   onClear: () => void
   onBulkAction: (action: BulkAction) => void
 }) {
-  const actionsDisabled = props.busy || props.selectedCount === 0
   return (
-    <div className="iam-control__create-inline">
-      <div className="iam-control__bulk-buttons">
-        <button
-          type="button"
-          className={`btn-sm ${props.createOpen ? 'btn-primary' : 'btn-secondary'} iam-control__new-button`}
-          onClick={props.onCreate}
-        >
-          New
-        </button>
-        {props.view === 'active' ? (
-          <>
-            <button type="button" className="btn-sm btn-secondary" disabled={actionsDisabled} onClick={() => props.onBulkAction('archive')}>Archive</button>
-            <button type="button" className="btn-sm btn-secondary" disabled={actionsDisabled} onClick={() => props.onBulkAction('trash')}>Trash</button>
-          </>
-        ) : null}
-        {props.view === 'archived' ? (
-          <button type="button" className="btn-sm btn-secondary" disabled={actionsDisabled} onClick={() => props.onBulkAction('restore')}>Restore</button>
-        ) : null}
-        {props.view === 'trash' ? (
-          <>
-            <button type="button" className="btn-sm btn-secondary" disabled={actionsDisabled} onClick={() => props.onBulkAction('restore')}>Restore</button>
-            <button
-              type="button"
-              className="btn-sm btn-danger iam-control__danger-button"
-              disabled={actionsDisabled}
-              onClick={() => props.onBulkAction('purge')}
-            >
-              Delete
-            </button>
-          </>
-        ) : null}
-        <button type="button" className="btn-sm btn-secondary" disabled={actionsDisabled} onClick={props.onClear}>Clear</button>
-      </div>
-      <span className="iam-control__selected-count">{props.selectedCount} selected</span>
-    </div>
+    <LifecycleBulkActions
+      selectedCount={props.selectedCount}
+      view={props.view}
+      createOpen={props.createOpen}
+      editOpen={props.editOpen}
+      busy={props.busy}
+      onCreate={props.onCreate}
+      onEdit={props.onEdit}
+      onClear={props.onClear}
+      onBulkAction={props.onBulkAction}
+    />
   )
 }
 
@@ -368,16 +349,6 @@ function lifecycleToolbarActions(view: CrudLifecycleView, createOpen: boolean, o
       onClick: () => onChange('trash'),
     },
   ]
-}
-
-function formatDate(value: string): string {
-  if (!value) return '-'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return '-'
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: 'short',
-    timeStyle: 'short',
-  }).format(date)
 }
 
 function formatState(value: string): string {

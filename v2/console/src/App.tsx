@@ -193,7 +193,13 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
                 </label>
               </>
             ) : null}
-            <button type="button" onClick={() => void refresh()} disabled={session.loading} title="Refresh session">
+            <button
+              type="button"
+              className="btn-secondary toolbar-icon-button"
+              onClick={() => void refresh()}
+              disabled={session.loading}
+              title="Refresh session"
+            >
               <RefreshCw aria-hidden="true" />
             </button>
             {authSlot ? <div className="auth-slot">{authSlot}</div> : null}

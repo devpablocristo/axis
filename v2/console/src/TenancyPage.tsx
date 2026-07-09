@@ -20,21 +20,27 @@ export function TenancyPage({ principalId, sessionTenants, onSessionChanged }: T
       <div className="tenancy-section__tabs" role="tablist" aria-label="Tenants section">
         <button
           type="button"
-          className={view === 'tenants' ? 'active' : ''}
+          role="tab"
+          aria-selected={view === 'tenants'}
+          className={view === 'tenants' ? 'btn-primary active' : 'btn-secondary'}
           onClick={() => setView('tenants')}
         >
           Tenants
         </button>
         <button
           type="button"
-          className={view === 'orgs' ? 'active' : ''}
+          role="tab"
+          aria-selected={view === 'orgs'}
+          className={view === 'orgs' ? 'btn-primary active' : 'btn-secondary'}
           onClick={() => setView('orgs')}
         >
           Orgs
         </button>
         <button
           type="button"
-          className={view === 'products' ? 'active' : ''}
+          role="tab"
+          aria-selected={view === 'products'}
+          className={view === 'products' ? 'btn-primary active' : 'btn-secondary'}
           onClick={() => setView('products')}
         >
           Products

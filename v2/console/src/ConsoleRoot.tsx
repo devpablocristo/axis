@@ -25,7 +25,7 @@ class ConsoleErrorBoundary extends Component<{ children: ReactNode }, { message:
             <ShieldLogo />
             <h1>Axis Console</h1>
             <p>{this.state.message}</p>
-            <button type="button" onClick={() => window.location.reload()}>Reload</button>
+            <button type="button" className="btn-primary" onClick={() => window.location.reload()}>Reload</button>
           </section>
         </main>
       )
@@ -80,7 +80,7 @@ function AxisConsoleWithClerk() {
             <ShieldLogo />
             <h1>Axis Console</h1>
             <SignInButton mode="redirect" forceRedirectUrl="/" fallbackRedirectUrl="/">
-              <button type="button">Sign in</button>
+              <button type="button" className="btn-primary">Sign in</button>
             </SignInButton>
           </section>
         </main>

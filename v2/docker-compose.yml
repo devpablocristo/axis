@@ -176,6 +176,40 @@ services:
       bff-v2:
         condition: service_healthy
 
+  console-v2-e2e:
+    build:
+      context: .
+      dockerfile: Dockerfile.console
+    environment:
+      AXIS_BFF_BASE_URL: http://bff-v2:8080
+      VITE_CLERK_PUBLISHABLE_KEY: ""
+      VITE_CLERK_JWT_TEMPLATE: axis-bff
+      VITE_HMR_CLIENT_PORT: "19173"
+    volumes:
+      - ./console:/app
+      - console-v2-node-modules:/app/node_modules
+    depends_on:
+      bff-v2:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:19173 >/dev/null 2>&1 || exit 1"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  console-e2e:
+    image: mcr.microsoft.com/playwright:v1.61.1-noble
+    working_dir: /app
+    environment:
+      PLAYWRIGHT_BASE_URL: http://console-v2-e2e:19173
+    volumes:
+      - ./console:/app
+      - console-v2-node-modules:/app/node_modules
+    depends_on:
+      console-v2-e2e:
+        condition: service_healthy
+    command: ["npm", "run", "test:e2e"]
+
 volumes:
   companion-v2-postgres-data:
   bff-v2-postgres-data:

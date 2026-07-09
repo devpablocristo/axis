@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "test:e2e": "playwright test",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview"
   },
@@ -22,6 +23,7 @@
     "vite": "^8.0.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "typescript": "^5.9.0"
