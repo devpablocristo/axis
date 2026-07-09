@@ -160,6 +160,26 @@ textarea:focus-visible {
   gap: 4px;
 }
 
+.nav-section-label {
+  display: block;
+  margin: 14px 10px 6px;
+  color: var(--axis-color-sidebar-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.nav-section-label:first-child {
+  margin-top: 0;
+}
+
+.nav-section-label--admin {
+  padding-top: 12px;
+  border-top: 1px solid rgba(219, 231, 245, 0.16);
+}
+
 .nav button {
   width: 100%;
   min-height: 40px;
@@ -1144,20 +1164,20 @@ p.iam-control__inline-note {
   height: 16px;
 }
 
-.virployees-control .crud-table {
+.axis-crud-host .crud-table {
   width: max-content;
   min-width: 100%;
   table-layout: auto;
   overflow: visible;
 }
 
-.virployees-control .iam-control__select-col,
-.virployees-control .virployee-name-col {
+.axis-crud-host .iam-control__select-col,
+.axis-crud-host .iam-control__primary-col {
   position: sticky;
   background: var(--axis-surface);
 }
 
-.virployees-control .iam-control__select-col {
+.axis-crud-host .iam-control__select-col {
   left: 0;
   z-index: 6;
   width: 52px;
@@ -1172,7 +1192,7 @@ p.iam-control__inline-note {
   overflow: visible;
 }
 
-.virployees-control .virployee-name-col {
+.axis-crud-host .iam-control__primary-col {
   left: 52px;
   z-index: 5;
   width: 280px;
@@ -1184,15 +1204,15 @@ p.iam-control__inline-note {
   box-shadow: 1px 0 0 var(--axis-border);
 }
 
-.virployees-control .crud-table th:not(.iam-control__select-col):not(.virployee-name-col),
-.virployees-control .crud-table td:not(.iam-control__select-col):not(.virployee-name-col) {
+.axis-crud-host .crud-table th:not(.iam-control__select-col):not(.iam-control__primary-col),
+.axis-crud-host .crud-table td:not(.iam-control__select-col):not(.iam-control__primary-col) {
   min-width: 180px;
   max-width: none;
   overflow: visible;
   text-overflow: clip;
 }
 
-.virployees-control .virployee-created-col {
+.axis-crud-host .iam-control__created-col {
   min-width: 160px;
 }
 
@@ -1200,21 +1220,21 @@ p.iam-control__inline-note {
   min-width: 360px;
 }
 
-.virployees-control th.iam-control__select-col,
-.virployees-control th.virployee-name-col {
+.axis-crud-host th.iam-control__select-col,
+.axis-crud-host th.iam-control__primary-col {
   background: var(--axis-surface-subtle);
 }
 
-.virployees-control th.iam-control__select-col {
+.axis-crud-host th.iam-control__select-col {
   z-index: 8;
 }
 
-.virployees-control th.virployee-name-col {
+.axis-crud-host th.iam-control__primary-col {
   z-index: 7;
 }
 
-.virployees-control tr:hover .iam-control__select-col,
-.virployees-control tr:hover .virployee-name-col {
+.axis-crud-host tr:hover .iam-control__select-col,
+.axis-crud-host tr:hover .iam-control__primary-col {
   background: var(--axis-surface-subtle);
 }
 

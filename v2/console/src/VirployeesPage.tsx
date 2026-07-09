@@ -5,6 +5,7 @@ import {
   type CrudPageProps,
 } from '@devpablocristo/platform-crud-ui'
 import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
+import { formatDateTime24 } from './formatters'
 import {
   type Approval,
   type Capability,
@@ -1771,8 +1772,8 @@ function virployeeColumns(
 ): CrudPageProps<Virployee>['columns'] {
   return [
     selectionColumn<Virployee>(selectedIds, onToggle),
-    { key: 'name', header: 'Name', className: 'virployee-name-col' },
-    { key: 'created_at', header: 'Created', className: 'virployee-created-col', render: (value) => formatDate(String(value ?? '')) },
+    { key: 'name', header: 'Name', className: 'iam-control__primary-col virployee-name-col' },
+    { key: 'created_at', header: 'Created', className: 'iam-control__created-col', render: (value) => formatDateTime24(String(value ?? '')) },
     { key: 'job_role_id', header: 'Job Role', render: (value) => jobRoleName(String(value ?? ''), jobRoleByID) },
     { key: 'autonomy', header: 'Autonomy', render: (value) => formatAutonomy(String(value ?? ''), autonomyByLevel) },
     { key: 'capability_ids', header: 'Capabilities', className: 'virployee-capabilities-col', render: (_value, row) => capabilitySummary(row.capability_ids ?? [], capabilityByID) },

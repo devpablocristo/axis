@@ -7,6 +7,7 @@ import {
 import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import { EntityFormPanel, emptyFormValues } from './EntityFormPanel'
 import { LifecycleBulkActions } from './LifecycleBulkActions'
+import { formatDateTime24 } from './formatters'
 import {
   type VirployeeAutonomy,
   type ProfileTemplate,
@@ -431,7 +432,8 @@ function profileColumns(
 ): CrudPageProps<ProfileTemplate>['columns'] {
   return [
     selectionColumn<ProfileTemplate>(selectedIds, onToggle),
-    { key: 'name', header: 'Name' },
+    { key: 'name', header: 'Name', className: 'iam-control__primary-col' },
+    { key: 'created_at', header: 'Created', className: 'iam-control__created-col', render: (value) => formatDateTime24(String(value ?? '')) },
     { key: 'max_autonomy', header: 'Max autonomy', render: (value) => formatAutonomy(String(value ?? '')) },
     { key: 'state', header: 'State', render: (value) => formatState(String(value ?? '')) },
   ]

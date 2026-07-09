@@ -7,6 +7,7 @@ import {
 import { useEffect, useMemo, useState, type ReactElement } from 'react'
 import { EntityFormPanel, emptyFormValues } from './EntityFormPanel'
 import { LifecycleBulkActions } from './LifecycleBulkActions'
+import { formatDateTime24 } from './formatters'
 import {
   type TenantUser,
   type TenantUserInput,
@@ -240,7 +241,8 @@ function userColumns(
 ): CrudPageProps<TenantUser>['columns'] {
   return [
     selectionColumn<TenantUser>(selectedIds, onToggle),
-    { key: 'email', header: 'Email' },
+    { key: 'email', header: 'Email', className: 'iam-control__primary-col' },
+    { key: 'created_at', header: 'Created', className: 'iam-control__created-col', render: (value) => formatDateTime24(String(value ?? '')) },
     { key: 'role', header: 'Role', render: (value) => formatRole(String(value ?? '')) },
     { key: 'state', header: 'State', render: (value) => formatState(String(value ?? '')) },
   ]

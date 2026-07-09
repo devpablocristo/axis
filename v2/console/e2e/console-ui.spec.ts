@@ -187,15 +187,15 @@ test('all main sections render with coherent action buttons', async ({ page }) =
   await expect(page.locator('.topbar h1')).toHaveText('Virployees')
 
   const nav = page.locator('.nav')
-  for (const section of ['Virployees', 'Job Roles', 'Capabilities', 'Profile Templates', 'Users', 'Approvals', 'Tenants']) {
+  for (const section of ['Virployees', 'Job Roles', 'Capabilities', 'Profile Templates', 'Approvals', 'Admin']) {
     await nav.getByRole('button', { name: section }).click()
     await expect(page.locator('.topbar h1')).toHaveText(section)
     await assertButtonSystem(page)
   }
 
-  await nav.getByRole('button', { name: 'Tenants' }).click()
+  await nav.getByRole('button', { name: 'Admin' }).click()
   const tenancyTabs = page.locator('.tenancy-section__tabs')
-  for (const tab of ['Tenants', 'Orgs', 'Products']) {
+  for (const tab of ['Users', 'Tenants', 'Orgs', 'Products']) {
     await tenancyTabs.getByRole('tab', { name: tab }).click()
     await assertButtonSystem(page)
   }
@@ -205,18 +205,37 @@ test('crud lists use one toolbar and do not render row action columns', async ({
   await page.goto('/')
 
   const nav = page.locator('.nav')
-  for (const section of ['Virployees', 'Job Roles', 'Capabilities', 'Profile Templates', 'Users']) {
+  for (const section of ['Virployees', 'Job Roles', 'Capabilities', 'Profile Templates']) {
     await nav.getByRole('button', { name: section }).click()
     await expect(page.locator('th.col-actions')).toHaveCount(0)
     await expect(page.locator('.iam-control__bulk-buttons')).toHaveCount(1)
   }
 
-  await nav.getByRole('button', { name: 'Tenants' }).click()
+  await nav.getByRole('button', { name: 'Admin' }).click()
   const tenancyTabs = page.locator('.tenancy-section__tabs')
-  for (const tab of ['Tenants', 'Orgs', 'Products']) {
+  for (const tab of ['Users', 'Tenants', 'Orgs', 'Products']) {
     await tenancyTabs.getByRole('tab', { name: tab }).click()
     await expect(page.locator('th.col-actions')).toHaveCount(0)
     await expect(page.locator('.iam-control__bulk-buttons')).toHaveCount(1)
+  }
+})
+
+test('crud lists keep selection and primary columns fixed and expose created time', async ({ page }) => {
+  await page.goto('/')
+
+  const nav = page.locator('.nav')
+  for (const section of ['Virployees', 'Job Roles', 'Capabilities', 'Profile Templates']) {
+    await nav.getByRole('button', { name: section }).click()
+    await expect(page.getByRole('columnheader', { name: 'Created' })).toBeVisible()
+    await expectStickySelectionAndPrimary(page)
+  }
+
+  await nav.getByRole('button', { name: 'Admin' }).click()
+  const tenancyTabs = page.locator('.tenancy-section__tabs')
+  for (const tab of ['Users', 'Tenants', 'Orgs', 'Products']) {
+    await tenancyTabs.getByRole('tab', { name: tab }).click()
+    await expect(page.getByRole('columnheader', { name: 'Created' })).toBeVisible()
+    await expectStickySelectionAndPrimary(page)
   }
 })
 
@@ -347,6 +366,22 @@ async function cellPositions(
   const nameBox = await nameCell.boundingBox()
   if (!checkboxBox || !nameBox) throw new Error('Could not measure sticky cells')
   return { checkboxX: checkboxBox.x, nameX: nameBox.x }
+}
+
+async function expectStickySelectionAndPrimary(page: Page) {
+  const tableWrap = page.locator('.axis-crud-host .table-wrap').first()
+  const firstRow = page.locator('.axis-crud-host tbody tr').first()
+  await expect(firstRow).toBeVisible()
+  const checkboxCell = firstRow.locator('td').nth(0)
+  const primaryCell = firstRow.locator('td').nth(1)
+  const before = await cellPositions(checkboxCell, primaryCell)
+  await tableWrap.evaluate((element) => {
+    element.scrollLeft = 900
+  })
+  await page.waitForTimeout(100)
+  const after = await cellPositions(checkboxCell, primaryCell)
+  expect(Math.abs(after.checkboxX - before.checkboxX)).toBeLessThanOrEqual(1)
+  expect(Math.abs(after.nameX - before.nameX)).toBeLessThanOrEqual(1)
 }
 
 async function expectActionBars(page: Page, topSelector: string, bottomSelector: string) {

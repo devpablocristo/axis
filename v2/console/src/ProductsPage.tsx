@@ -7,6 +7,7 @@ import {
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react'
 import { EntityFormPanel, emptyFormValues } from './EntityFormPanel'
 import { LifecycleBulkActions } from './LifecycleBulkActions'
+import { formatDateTime24 } from './formatters'
 import {
   type Product,
   type ProductInput,
@@ -238,7 +239,8 @@ function productColumns(
 ): CrudPageProps<Product>['columns'] {
   return [
     selectionColumn<Product>(selectedIds, onToggle),
-    { key: 'name', header: 'Product' },
+    { key: 'name', header: 'Product', className: 'iam-control__primary-col' },
+    { key: 'created_at', header: 'Created', className: 'iam-control__created-col', render: (value) => formatDateTime24(String(value ?? '')) },
     { key: 'product_surface', header: 'Slug' },
     { key: 'state', header: 'State', render: (value) => formatState(String(value ?? '')) },
   ]

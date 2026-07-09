@@ -1,11 +1,10 @@
-import { Bot, BriefcaseBusiness, Building2, ClipboardCheck, RefreshCw, ShieldCheck, SlidersHorizontal, Users, Wrench } from 'lucide-react'
+import { Bot, BriefcaseBusiness, ClipboardCheck, RefreshCw, Settings, ShieldCheck, SlidersHorizontal, Wrench } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { ApprovalsPage } from './ApprovalsPage'
 import { CapabilitiesPage } from './CapabilitiesPage'
 import { JobRolesPage } from './JobRolesPage'
 import { ProfileTemplatesPage } from './ProfileTemplatesPage'
 import { TenancyPage } from './TenancyPage'
-import { UsersPage } from './UsersPage'
 import { VirployeesPage } from './VirployeesPage'
 import { getSession, type Session, type Tenant } from './api'
 
@@ -107,6 +106,7 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
           </div>
         </div>
         <nav className="nav">
+          <span className="nav-section-label">Operate</span>
           <button
             type="button"
             className={activePage === 'virployees' ? 'active' : ''}
@@ -141,27 +141,20 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
           </button>
           <button
             type="button"
-            className={activePage === 'users' ? 'active' : ''}
-            onClick={() => setActivePage('users')}
-          >
-            <Users aria-hidden="true" />
-            Users
-          </button>
-          <button
-            type="button"
             className={activePage === 'approvals' ? 'active' : ''}
             onClick={() => setActivePage('approvals')}
           >
             <ClipboardCheck aria-hidden="true" />
             Approvals
           </button>
+          <span className="nav-section-label nav-section-label--admin">Admin</span>
           <button
             type="button"
-            className={activePage === 'tenants' ? 'active' : ''}
-            onClick={() => setActivePage('tenants')}
+            className={activePage === 'admin' ? 'active' : ''}
+            onClick={() => setActivePage('admin')}
           >
-            <Building2 aria-hidden="true" />
-            Tenants
+            <Settings aria-hidden="true" />
+            Admin
           </button>
         </nav>
       </aside>
@@ -210,8 +203,13 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
 
         {session.loading && !session.data ? (
           <div className="spinner" />
-        ) : activePage === 'tenants' ? (
-          <TenancyPage principalId={principalId} sessionTenants={tenants} onSessionChanged={refresh} />
+        ) : activePage === 'admin' ? (
+          <TenancyPage
+            tenantId={selectedTenant?.id ?? ''}
+            principalId={principalId}
+            sessionTenants={tenants}
+            onSessionChanged={refresh}
+          />
         ) : tenants.length === 0 ? (
           <section className="empty-state">No tenants are available for this user.</section>
         ) : selectedTenant == null ? (
@@ -222,8 +220,6 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
           <CapabilitiesPage tenantId={selectedTenant.id} principalId={principalId} />
         ) : activePage === 'profile-templates' ? (
           <ProfileTemplatesPage tenantId={selectedTenant.id} principalId={principalId} />
-        ) : activePage === 'users' ? (
-          <UsersPage tenantId={selectedTenant.id} principalId={principalId} />
         ) : activePage === 'approvals' ? (
           <ApprovalsPage tenantId={selectedTenant.id} principalId={principalId} />
         ) : (
@@ -238,14 +234,13 @@ function unique(values: string[]): string[] {
   return Array.from(new Set(values.filter(Boolean))).sort((left, right) => left.localeCompare(right))
 }
 
-type Page = 'virployees' | 'job-roles' | 'capabilities' | 'profile-templates' | 'users' | 'approvals' | 'tenants'
+type Page = 'virployees' | 'job-roles' | 'capabilities' | 'profile-templates' | 'approvals' | 'admin'
 
 function pageTitle(page: Page): string {
   if (page === 'job-roles') return 'Job Roles'
   if (page === 'capabilities') return 'Capabilities'
   if (page === 'profile-templates') return 'Profile Templates'
-  if (page === 'users') return 'Users'
   if (page === 'approvals') return 'Approvals'
-  if (page === 'tenants') return 'Tenants'
+  if (page === 'admin') return 'Admin'
   return 'Virployees'
 }

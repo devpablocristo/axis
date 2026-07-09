@@ -7,6 +7,7 @@ import {
 import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import { EntityFormPanel, emptyFormValues } from './EntityFormPanel'
 import { LifecycleBulkActions } from './LifecycleBulkActions'
+import { formatDateTime24 } from './formatters'
 import {
   type Capability,
   type CapabilityInput,
@@ -443,7 +444,8 @@ function capabilityColumns(
 ): CrudPageProps<Capability>['columns'] {
   return [
     selectionColumn<Capability>(selectedIds, onToggle),
-    { key: 'capability_key', header: 'Key' },
+    { key: 'capability_key', header: 'Key', className: 'iam-control__primary-col' },
+    { key: 'created_at', header: 'Created', className: 'iam-control__created-col', render: (value) => formatDateTime24(String(value ?? '')) },
     { key: 'name', header: 'Name' },
     { key: 'required_autonomy', header: 'Required autonomy', render: (value) => formatRequiredAutonomy(String(value ?? '')) },
     { key: 'state', header: 'State', render: (value) => formatState(String(value ?? '')) },
