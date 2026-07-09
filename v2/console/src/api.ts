@@ -246,7 +246,7 @@ export type VirployeeExecutionGate = {
 export type VirployeeRunTrace = {
   id: string
   virployee_id: string
-  operation: 'dry_run' | 'execution_gate'
+  operation: 'dry_run' | 'execution_gate' | 'simulated_execution'
   input_hash: string
   input_preview: string
   intent: {
@@ -275,6 +275,15 @@ export type VirployeeRunTrace = {
     approval_id?: string
     approval_status?: string
     error?: string
+  }
+  execution_result?: {
+    status?: string
+    mode?: string
+    approval_id?: string
+    approval_status?: string
+    binding_hash?: string
+    message?: string
+    external_effects: boolean
   }
   binding_hash?: string
   created_at: string
@@ -772,6 +781,20 @@ export function listVirployeeRuns(
     `/api/virployees/${encodeURIComponent(id)}/runs?limit=${encodeURIComponent(String(limit))}`,
     { tenantId, principalId },
   ).then((payload) => payload.data ?? [])
+}
+
+export function simulateApprovedVirployeeExecution(
+  id: string,
+  approvalId: string,
+  tenantId: string,
+  principalId: string,
+): Promise<VirployeeRunTrace> {
+  return axisFetch<VirployeeRunTrace>(`/api/virployees/${encodeURIComponent(id)}/simulated-executions`, {
+    method: 'POST',
+    tenantId,
+    principalId,
+    body: { approval_id: approvalId },
+  })
 }
 
 export function archiveVirployee(id: string, tenantId: string, principalId: string): Promise<void> {

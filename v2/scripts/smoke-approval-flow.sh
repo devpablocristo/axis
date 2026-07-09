@@ -55,7 +55,8 @@ assert_jq() {
   local json="$1"
   local expr="$2"
   local message="$3"
-  if ! jq -e "$expr" >/dev/null <<<"$json"; then
+  shift 3
+  if ! jq -e "$@" "$expr" >/dev/null <<<"$json"; then
     echo "assertion failed: $message" >&2
     echo "$json" | jq . >&2
     exit 1
@@ -257,11 +258,20 @@ assert_jq "$approved_approval" '.status == "approved"' "approval should be appro
 approved_lookup="$(api GET "/api/approvals/$approval_id")"
 assert_jq "$approved_lookup" '.status == "approved" and .decided_by != ""' "approved approval should be readable"
 
+simulated_execution="$(api POST "/api/virployees/$virployee_id/simulated-executions" "$(jq -n --arg approvalID "$approval_id" '{approval_id: $approvalID}')")"
+assert_jq "$simulated_execution" '.operation == "simulated_execution"' "approved approval should create a simulated execution trace"
+assert_jq "$simulated_execution" '.execution_result.status == "simulated_executed" and .execution_result.external_effects == false' "simulated execution should not perform external effects"
+
+simulated_trace_id="$(jq -r '.id' <<<"$simulated_execution")"
+simulated_replay="$(api POST "/api/virployees/$virployee_id/simulated-executions" "$(jq -n --arg approvalID "$approval_id" '{approval_id: $approvalID}')")"
+assert_jq "$simulated_replay" '.id == $traceID' "simulated execution should be idempotent for the same approval" --arg traceID "$simulated_trace_id"
+
 ensure_action_type "calendar.events.create" "Create calendar events" "high" "false" >/dev/null
 deny_gate="$(run_gate "$virployee_id" "Agenda una reunion \"Smoke Deny\" manana a las 16 con ana@example.com" true)"
 assert_jq "$deny_gate" '.execution_gate.decision == "blocked"' "disabled action type should block"
 
 runs="$(latest_runs "$virployee_id")"
+assert_jq "$runs" '[.data[]? | select(.operation == "simulated_execution" and .execution_result.status == "simulated_executed")] | length >= 1' "run history should include simulated execution trace"
 assert_jq "$runs" '[.data[]? | select(.nexus_result.decision == "deny" and .nexus_result.status == "denied")] | length >= 1' "run history should include deny trace"
 
 ensure_action_type "calendar.events.create" "Create calendar events" "high" "true" >/dev/null

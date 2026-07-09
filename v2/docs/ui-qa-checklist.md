@@ -35,6 +35,8 @@ Open `http://localhost:19173`.
 - Approving or rejecting removes decision buttons from the approval card.
 - Returning to the Virployee keeps the Dry Run panel open and refreshes the run history.
 - Approved/rejected approval traces do not show as blocked.
+- Approved approvals show `Simulate execution` in the Virployee Dry Run panel.
+- Simulated execution records a run history row with `No external effects`.
 
 ## Automated checks
 

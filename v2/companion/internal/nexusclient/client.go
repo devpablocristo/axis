@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/devpablocristo/companion-v2/internal/virployees/executiongate"
+	"github.com/devpablocristo/platform/errors/go/domainerr"
+	"github.com/google/uuid"
 )
 
 type Client struct {
@@ -77,6 +79,39 @@ func (c *Client) Check(ctx context.Context, input executiongate.GovernanceCheckI
 	}, nil
 }
 
+func (c *Client) GetApproval(ctx context.Context, tenantID string, id uuid.UUID) (executiongate.GovernanceApproval, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/v1/approvals/"+id.String(), nil)
+	if err != nil {
+		return executiongate.GovernanceApproval{}, fmt.Errorf("build approval request: %w", err)
+	}
+	if tenantID != "" {
+		req.Header.Set("X-Tenant-ID", tenantID)
+	}
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return executiongate.GovernanceApproval{}, fmt.Errorf("get approval: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return executiongate.GovernanceApproval{}, domainerr.NotFound("approval not found")
+	}
+	if resp.StatusCode != http.StatusOK {
+		return executiongate.GovernanceApproval{}, fmt.Errorf("get approval: status %d", resp.StatusCode)
+	}
+	var out approvalResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return executiongate.GovernanceApproval{}, fmt.Errorf("decode approval: %w", err)
+	}
+	return executiongate.GovernanceApproval{
+		ID:          out.ID,
+		RequesterID: out.RequesterID,
+		BindingHash: out.BindingHash,
+		Status:      out.Status,
+	}, nil
+}
+
 type checkRequest struct {
 	RequesterType  string         `json:"requester_type,omitempty"`
 	RequesterID    string         `json:"requester_id"`
@@ -87,6 +122,13 @@ type checkRequest struct {
 	Reason         string         `json:"reason,omitempty"`
 	Context        string         `json:"context,omitempty"`
 	BindingHash    string         `json:"binding_hash,omitempty"`
+}
+
+type approvalResponse struct {
+	ID          string `json:"id"`
+	RequesterID string `json:"requester_id"`
+	BindingHash string `json:"binding_hash"`
+	Status      string `json:"status"`
 }
 
 type checkResponse struct {

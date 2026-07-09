@@ -17,40 +17,45 @@ const InputPreviewLimit = 500
 type Operation string
 
 const (
-	OperationDryRun        Operation = "dry_run"
-	OperationExecutionGate Operation = "execution_gate"
+	OperationDryRun             Operation = "dry_run"
+	OperationExecutionGate      Operation = "execution_gate"
+	OperationSimulatedExecution Operation = "simulated_execution"
 )
 
 type Trace struct {
-	ID             uuid.UUID
-	TenantID       string
-	VirployeeID    uuid.UUID
-	Operation      Operation
-	InputHash      string
-	InputPreview   string
-	Intent         map[string]any
-	CapabilityID   string
-	CapabilityKey  string
-	DryRunDecision string
-	GateDecision   string
-	GateChecks     []GateCheck
-	NexusResult    *NexusResult
-	BindingHash    string
-	CreatedAt      time.Time
+	ID              uuid.UUID
+	TenantID        string
+	VirployeeID     uuid.UUID
+	Operation       Operation
+	InputHash       string
+	InputPreview    string
+	Intent          map[string]any
+	CapabilityID    string
+	CapabilityKey   string
+	DryRunDecision  string
+	GateDecision    string
+	GateChecks      []GateCheck
+	NexusResult     *NexusResult
+	ExecutionResult *ExecutionResult
+	BindingHash     string
+	CreatedAt       time.Time
 }
 
 type CreateInput struct {
-	VirployeeID    uuid.UUID
-	Operation      Operation
-	Input          string
-	Intent         map[string]any
-	CapabilityID   string
-	CapabilityKey  string
-	DryRunDecision string
-	GateDecision   string
-	GateChecks     []GateCheck
-	NexusResult    *NexusResult
-	BindingHash    string
+	VirployeeID     uuid.UUID
+	Operation       Operation
+	Input           string
+	Intent          map[string]any
+	CapabilityID    string
+	CapabilityKey   string
+	DryRunDecision  string
+	GateDecision    string
+	GateChecks      []GateCheck
+	NexusResult     *NexusResult
+	ExecutionResult *ExecutionResult
+	BindingHash     string
+	InputHash       string
+	InputPreview    string
 }
 
 type GateCheck struct {
@@ -70,6 +75,16 @@ type NexusResult struct {
 	ApprovalID           string `json:"approval_id,omitempty"`
 	ApprovalStatus       string `json:"approval_status,omitempty"`
 	Error                string `json:"error,omitempty"`
+}
+
+type ExecutionResult struct {
+	Status          string `json:"status,omitempty"`
+	Mode            string `json:"mode,omitempty"`
+	ApprovalID      string `json:"approval_id,omitempty"`
+	ApprovalStatus  string `json:"approval_status,omitempty"`
+	BindingHash     string `json:"binding_hash,omitempty"`
+	Message         string `json:"message,omitempty"`
+	ExternalEffects bool   `json:"external_effects"`
 }
 
 func HashString(value string) string {

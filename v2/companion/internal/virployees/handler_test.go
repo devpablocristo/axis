@@ -305,6 +305,40 @@ func TestHandlerExecutionGate(t *testing.T) {
 	}
 }
 
+func TestHandlerSimulateApprovedExecution(t *testing.T) {
+	fake := &handlerFakeUseCases{}
+	router := testRouter(fake)
+	id := uuid.New()
+	approvalID := uuid.New()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/virployees/"+id.String()+"/simulated-executions", strings.NewReader(`{"approval_id":"`+approvalID.String()+`"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Tenant-ID", "tenant-1")
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if fake.lastTenant != "tenant-1" {
+		t.Fatalf("expected tenant-1, got %q", fake.lastTenant)
+	}
+	var payload struct {
+		Operation       string `json:"operation"`
+		ExecutionResult struct {
+			Status          string `json:"status"`
+			ApprovalID      string `json:"approval_id"`
+			ExternalEffects bool   `json:"external_effects"`
+		} `json:"execution_result"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Operation != "simulated_execution" || payload.ExecutionResult.Status != "simulated_executed" || payload.ExecutionResult.ApprovalID != approvalID.String() || payload.ExecutionResult.ExternalEffects {
+		t.Fatalf("unexpected payload: %+v", payload)
+	}
+}
+
 func TestHandlerListRuns(t *testing.T) {
 	fake := &handlerFakeUseCases{}
 	router := testRouter(fake)
@@ -495,6 +529,33 @@ func (f *handlerFakeUseCases) ExecutionGate(ctx context.Context, tenantID string
 		}
 	}
 	return executiongate.Evaluate(result), nil
+}
+
+func (f *handlerFakeUseCases) SimulateApprovedExecution(_ context.Context, tenantID string, id uuid.UUID, approvalID uuid.UUID) (runtraces.Trace, error) {
+	f.lastTenant = tenantID
+	return runtraces.Trace{
+		ID:             uuid.New(),
+		TenantID:       tenantID,
+		VirployeeID:    id,
+		Operation:      runtraces.OperationSimulatedExecution,
+		InputHash:      runtraces.HashString("Agendá una reunión"),
+		InputPreview:   "Agendá una reunión",
+		Intent:         map[string]any{"matched": true, "capability_key": "calendar.events.create"},
+		CapabilityKey:  "calendar.events.create",
+		DryRunDecision: "allowed",
+		GateDecision:   "pass",
+		NexusResult:    &runtraces.NexusResult{Available: true, Decision: "require_approval", ApprovalID: approvalID.String(), ApprovalStatus: "approved"},
+		ExecutionResult: &runtraces.ExecutionResult{
+			Status:          "simulated_executed",
+			Mode:            "simulation",
+			ApprovalID:      approvalID.String(),
+			ApprovalStatus:  "approved",
+			BindingHash:     "binding-hash",
+			Message:         "Simulated execution completed; no external effects were performed.",
+			ExternalEffects: false,
+		},
+		BindingHash: "binding-hash",
+	}, nil
 }
 
 func (f *handlerFakeUseCases) ListRuns(_ context.Context, tenantID string, id uuid.UUID, _ int) ([]runtraces.Trace, error) {

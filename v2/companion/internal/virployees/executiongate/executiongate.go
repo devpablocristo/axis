@@ -69,6 +69,13 @@ type GovernanceCheckResult struct {
 	ApprovalStatus       string
 }
 
+type GovernanceApproval struct {
+	ID          string
+	RequesterID string
+	BindingHash string
+	Status      string
+}
+
 type ConfirmedDraft struct {
 	Action string
 	Kind   string

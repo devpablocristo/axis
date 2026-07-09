@@ -705,6 +705,88 @@ func TestUseCasesExecutionGateBlocksWhenGovernanceUnavailable(t *testing.T) {
 	}
 }
 
+func TestUseCasesSimulateApprovedExecutionCreatesIdempotentTrace(t *testing.T) {
+	uc, created := setupExecutionGateUseCase(t, domain.AutonomyA3)
+	approvalID := uuid.New()
+	uc.SetGovernanceChecker(&fakeGovernanceChecker{
+		result: executiongate.GovernanceCheckResult{
+			Decision:             "require_approval",
+			RiskLevel:            "high",
+			Status:               "pending_approval",
+			DecisionReason:       "default high risk action",
+			WouldRequireApproval: true,
+			ApprovalID:           approvalID.String(),
+			ApprovalStatus:       "pending",
+		},
+	})
+	if _, err := uc.ExecutionGate(context.Background(), "tenant-1", created.ID, "Agendá una reunión mañana a las 15 con ana@example.com", nil); err != nil {
+		t.Fatalf("ExecutionGate: %v", err)
+	}
+	repo := uc.repo.(*fakeRepo)
+	bindingHash := repo.traces[0].BindingHash
+	uc.SetApprovalReader(&fakeApprovalReader{approval: executiongate.GovernanceApproval{
+		ID:          approvalID.String(),
+		RequesterID: created.ID.String(),
+		BindingHash: bindingHash,
+		Status:      "approved",
+	}})
+
+	trace, err := uc.SimulateApprovedExecution(context.Background(), "tenant-1", created.ID, approvalID)
+	if err != nil {
+		t.Fatalf("SimulateApprovedExecution: %v", err)
+	}
+	if trace.Operation != runtraces.OperationSimulatedExecution || trace.ExecutionResult == nil {
+		t.Fatalf("expected simulated execution trace, got %+v", trace)
+	}
+	if trace.ExecutionResult.Status != "simulated_executed" || trace.ExecutionResult.ExternalEffects {
+		t.Fatalf("unexpected execution result: %+v", trace.ExecutionResult)
+	}
+	if trace.BindingHash != bindingHash || trace.NexusResult == nil || trace.NexusResult.ApprovalStatus != "approved" {
+		t.Fatalf("expected approved binding trace, got %+v", trace)
+	}
+
+	replayed, err := uc.SimulateApprovedExecution(context.Background(), "tenant-1", created.ID, approvalID)
+	if err != nil {
+		t.Fatalf("replay SimulateApprovedExecution: %v", err)
+	}
+	if replayed.ID != trace.ID {
+		t.Fatalf("expected idempotent replay of trace %s, got %s", trace.ID, replayed.ID)
+	}
+	if len(repo.traces) != 2 {
+		t.Fatalf("expected execution gate and one simulated trace, got %+v", repo.traces)
+	}
+}
+
+func TestUseCasesSimulateApprovedExecutionRejectsPendingApproval(t *testing.T) {
+	uc, created, approvalID, bindingHash := setupApprovedExecutionGateTrace(t)
+	uc.SetApprovalReader(&fakeApprovalReader{approval: executiongate.GovernanceApproval{
+		ID:          approvalID.String(),
+		RequesterID: created.ID.String(),
+		BindingHash: bindingHash,
+		Status:      "pending",
+	}})
+
+	_, err := uc.SimulateApprovedExecution(context.Background(), "tenant-1", created.ID, approvalID)
+	if !domainerr.IsConflict(err) {
+		t.Fatalf("expected conflict for pending approval, got %v", err)
+	}
+}
+
+func TestUseCasesSimulateApprovedExecutionRejectsBindingMismatch(t *testing.T) {
+	uc, created, approvalID, _ := setupApprovedExecutionGateTrace(t)
+	uc.SetApprovalReader(&fakeApprovalReader{approval: executiongate.GovernanceApproval{
+		ID:          approvalID.String(),
+		RequesterID: created.ID.String(),
+		BindingHash: "different-binding",
+		Status:      "approved",
+	}})
+
+	_, err := uc.SimulateApprovedExecution(context.Background(), "tenant-1", created.ID, approvalID)
+	if !domainerr.IsConflict(err) {
+		t.Fatalf("expected conflict for binding mismatch, got %v", err)
+	}
+}
+
 func TestUseCasesExecutionGateUsesConfirmedDraft(t *testing.T) {
 	uc, created := setupExecutionGateUseCase(t, domain.AutonomyA3)
 
@@ -773,6 +855,28 @@ func TestUseCasesListRunsReturnsLatestForVirployee(t *testing.T) {
 	if len(runs) != 2 || runs[0].Operation != runtraces.OperationExecutionGate || runs[1].Operation != runtraces.OperationDryRun {
 		t.Fatalf("unexpected runs: %+v", runs)
 	}
+}
+
+func setupApprovedExecutionGateTrace(t *testing.T) (*UseCases, domain.Virployee, uuid.UUID, string) {
+	t.Helper()
+	uc, created := setupExecutionGateUseCase(t, domain.AutonomyA3)
+	approvalID := uuid.New()
+	uc.SetGovernanceChecker(&fakeGovernanceChecker{
+		result: executiongate.GovernanceCheckResult{
+			Decision:             "require_approval",
+			RiskLevel:            "high",
+			Status:               "pending_approval",
+			DecisionReason:       "default high risk action",
+			WouldRequireApproval: true,
+			ApprovalID:           approvalID.String(),
+			ApprovalStatus:       "pending",
+		},
+	})
+	if _, err := uc.ExecutionGate(context.Background(), "tenant-1", created.ID, "Agendá una reunión mañana a las 15 con ana@example.com", nil); err != nil {
+		t.Fatalf("ExecutionGate: %v", err)
+	}
+	repo := uc.repo.(*fakeRepo)
+	return uc, created, approvalID, repo.traces[0].BindingHash
 }
 
 func setupExecutionGateUseCase(t *testing.T, autonomy domain.AutonomyLevel) (*UseCases, domain.Virployee) {
@@ -993,21 +1097,28 @@ func (r *fakeRepo) CreateRunTrace(_ context.Context, tenantID string, input runt
 		checks = []runtraces.GateCheck{}
 	}
 	trace := runtraces.Trace{
-		ID:             uuid.New(),
-		TenantID:       tenantID,
-		VirployeeID:    input.VirployeeID,
-		Operation:      input.Operation,
-		InputHash:      runtraces.HashString(input.Input),
-		InputPreview:   runtraces.InputPreview(input.Input),
-		Intent:         intent,
-		CapabilityID:   input.CapabilityID,
-		CapabilityKey:  input.CapabilityKey,
-		DryRunDecision: input.DryRunDecision,
-		GateDecision:   input.GateDecision,
-		GateChecks:     checks,
-		NexusResult:    input.NexusResult,
-		BindingHash:    input.BindingHash,
-		CreatedAt:      now,
+		ID:              uuid.New(),
+		TenantID:        tenantID,
+		VirployeeID:     input.VirployeeID,
+		Operation:       input.Operation,
+		InputHash:       runtraces.HashString(input.Input),
+		InputPreview:    runtraces.InputPreview(input.Input),
+		Intent:          intent,
+		CapabilityID:    input.CapabilityID,
+		CapabilityKey:   input.CapabilityKey,
+		DryRunDecision:  input.DryRunDecision,
+		GateDecision:    input.GateDecision,
+		GateChecks:      checks,
+		NexusResult:     input.NexusResult,
+		ExecutionResult: input.ExecutionResult,
+		BindingHash:     input.BindingHash,
+		CreatedAt:       now,
+	}
+	if input.InputHash != "" {
+		trace.InputHash = input.InputHash
+	}
+	if input.InputPreview != "" {
+		trace.InputPreview = input.InputPreview
 	}
 	r.traces = append(r.traces, trace)
 	return trace, nil
@@ -1026,6 +1137,34 @@ func (r *fakeRepo) ListRunTraces(_ context.Context, tenantID string, virployeeID
 		}
 	}
 	return out, nil
+}
+
+func (r *fakeRepo) FindExecutionGateTraceByApproval(_ context.Context, tenantID string, virployeeID uuid.UUID, approvalID string) (runtraces.Trace, error) {
+	for i := len(r.traces) - 1; i >= 0; i-- {
+		trace := r.traces[i]
+		if trace.TenantID == tenantID &&
+			trace.VirployeeID == virployeeID &&
+			trace.Operation == runtraces.OperationExecutionGate &&
+			trace.NexusResult != nil &&
+			trace.NexusResult.ApprovalID == approvalID {
+			return trace, nil
+		}
+	}
+	return runtraces.Trace{}, domainerr.NotFound("run trace not found")
+}
+
+func (r *fakeRepo) FindSimulatedExecutionTraceByApproval(_ context.Context, tenantID string, virployeeID uuid.UUID, approvalID string) (runtraces.Trace, error) {
+	for i := len(r.traces) - 1; i >= 0; i-- {
+		trace := r.traces[i]
+		if trace.TenantID == tenantID &&
+			trace.VirployeeID == virployeeID &&
+			trace.Operation == runtraces.OperationSimulatedExecution &&
+			trace.ExecutionResult != nil &&
+			trace.ExecutionResult.ApprovalID == approvalID {
+			return trace, nil
+		}
+	}
+	return runtraces.Trace{}, domainerr.NotFound("run trace not found")
 }
 
 func lifecycleState(state domain.State) lifecycle.LifecycleState {
@@ -1131,6 +1270,18 @@ type fakeGovernanceChecker struct {
 	result executiongate.GovernanceCheckResult
 	err    error
 	last   executiongate.GovernanceCheckInput
+}
+
+type fakeApprovalReader struct {
+	approval executiongate.GovernanceApproval
+	err      error
+}
+
+func (r *fakeApprovalReader) GetApproval(context.Context, string, uuid.UUID) (executiongate.GovernanceApproval, error) {
+	if r.err != nil {
+		return executiongate.GovernanceApproval{}, r.err
+	}
+	return r.approval, nil
 }
 
 func (c *fakeGovernanceChecker) Check(_ context.Context, input executiongate.GovernanceCheckInput) (executiongate.GovernanceCheckResult, error) {

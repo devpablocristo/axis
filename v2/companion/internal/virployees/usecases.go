@@ -33,6 +33,8 @@ type RepositoryPort interface {
 	Update(ctx context.Context, tenantID string, id uuid.UUID, input domain.NormalizedUpdateInput) (domain.Virployee, error)
 	CreateRunTrace(ctx context.Context, tenantID string, input runtraces.CreateInput) (runtraces.Trace, error)
 	ListRunTraces(ctx context.Context, tenantID string, virployeeID uuid.UUID, limit int) ([]runtraces.Trace, error)
+	FindExecutionGateTraceByApproval(ctx context.Context, tenantID string, virployeeID uuid.UUID, approvalID string) (runtraces.Trace, error)
+	FindSimulatedExecutionTraceByApproval(ctx context.Context, tenantID string, virployeeID uuid.UUID, approvalID string) (runtraces.Trace, error)
 }
 
 type JobRoleReaderPort interface {
@@ -54,12 +56,17 @@ type GovernanceCheckerPort interface {
 	Check(ctx context.Context, input executiongate.GovernanceCheckInput) (executiongate.GovernanceCheckResult, error)
 }
 
+type ApprovalReaderPort interface {
+	GetApproval(ctx context.Context, tenantID string, id uuid.UUID) (executiongate.GovernanceApproval, error)
+}
+
 type UseCases struct {
 	repo             RepositoryPort
 	jobRoles         JobRoleReaderPort
 	capabilities     CapabilityValidatorPort
 	profileTemplates ProfileTemplateReaderPort
 	governance       GovernanceCheckerPort
+	approvals        ApprovalReaderPort
 	lifecycle        *lifecycle.Service
 }
 
@@ -111,6 +118,10 @@ func (u *UseCases) SetProfileTemplateReader(reader ProfileTemplateReaderPort) {
 
 func (u *UseCases) SetGovernanceChecker(checker GovernanceCheckerPort) {
 	u.governance = checker
+}
+
+func (u *UseCases) SetApprovalReader(reader ApprovalReaderPort) {
+	u.approvals = reader
 }
 
 func (u *UseCases) Create(ctx context.Context, tenantID string, input domain.CreateInput) (domain.Virployee, error) {
@@ -293,6 +304,75 @@ func (u *UseCases) ListRuns(ctx context.Context, tenantID string, id uuid.UUID, 
 		return nil, err
 	}
 	return u.repo.ListRunTraces(ctx, tenantID, id, normalizeRunTraceLimit(limit))
+}
+
+func (u *UseCases) SimulateApprovedExecution(ctx context.Context, tenantID string, id uuid.UUID, approvalID uuid.UUID) (runtraces.Trace, error) {
+	tenantID = normalizeTenantID(tenantID)
+	if u.approvals == nil {
+		return runtraces.Trace{}, domainerr.Conflict("approval reader is not configured")
+	}
+	if _, err := u.repo.Get(ctx, tenantID, id); err != nil {
+		return runtraces.Trace{}, err
+	}
+	approval, err := u.approvals.GetApproval(ctx, tenantID, approvalID)
+	if err != nil {
+		return runtraces.Trace{}, err
+	}
+	if strings.TrimSpace(approval.Status) != "approved" {
+		return runtraces.Trace{}, domainerr.Conflict("approval is not approved")
+	}
+	if strings.TrimSpace(approval.RequesterID) != id.String() {
+		return runtraces.Trace{}, domainerr.Conflict("approval does not belong to virployee")
+	}
+	if strings.TrimSpace(approval.BindingHash) == "" {
+		return runtraces.Trace{}, domainerr.Conflict("approval has no binding hash")
+	}
+	if existing, err := u.repo.FindSimulatedExecutionTraceByApproval(ctx, tenantID, id, approvalID.String()); err == nil {
+		return existing, nil
+	} else if !domainerr.IsNotFound(err) {
+		return runtraces.Trace{}, err
+	}
+	source, err := u.repo.FindExecutionGateTraceByApproval(ctx, tenantID, id, approvalID.String())
+	if err != nil {
+		return runtraces.Trace{}, err
+	}
+	if source.NexusResult == nil || source.NexusResult.Decision != "require_approval" {
+		return runtraces.Trace{}, domainerr.Conflict("approval trace is not a require_approval gate")
+	}
+	if source.BindingHash != approval.BindingHash {
+		return runtraces.Trace{}, domainerr.Conflict("approval binding does not match evaluated action")
+	}
+	nexus := *source.NexusResult
+	nexus.ApprovalStatus = approval.Status
+	nexus.BindingHash = approval.BindingHash
+	return u.repo.CreateRunTrace(ctx, tenantID, runtraces.CreateInput{
+		VirployeeID:    id,
+		Operation:      runtraces.OperationSimulatedExecution,
+		Input:          source.InputPreview,
+		InputHash:      source.InputHash,
+		InputPreview:   source.InputPreview,
+		Intent:         source.Intent,
+		CapabilityID:   source.CapabilityID,
+		CapabilityKey:  source.CapabilityKey,
+		DryRunDecision: source.DryRunDecision,
+		GateDecision:   "pass",
+		GateChecks: []runtraces.GateCheck{
+			{Key: "approval_status", Status: "pass", Reason: "approval is approved"},
+			{Key: "binding_hash", Status: "pass", Reason: "approval binding matches evaluated action"},
+			{Key: "external_effects", Status: "pass", Reason: "no external effects were performed"},
+		},
+		NexusResult: &nexus,
+		ExecutionResult: &runtraces.ExecutionResult{
+			Status:          "simulated_executed",
+			Mode:            "simulation",
+			ApprovalID:      approval.ID,
+			ApprovalStatus:  approval.Status,
+			BindingHash:     approval.BindingHash,
+			Message:         "Simulated execution completed; no external effects were performed.",
+			ExternalEffects: false,
+		},
+		BindingHash: approval.BindingHash,
+	})
 }
 
 func (u *UseCases) Update(ctx context.Context, tenantID string, id uuid.UUID, input domain.UpdateInput) (domain.Virployee, error) {

@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/devpablocristo/companion-v2/internal/virployees/executiongate"
+	"github.com/devpablocristo/platform/errors/go/domainerr"
+	"github.com/google/uuid"
 )
 
 func TestCheckSendsGovernanceRequestToNexus(t *testing.T) {
@@ -66,5 +68,50 @@ func TestCheckSendsGovernanceRequestToNexus(t *testing.T) {
 	}
 	if out.Decision != "require_approval" || !out.WouldRequireApproval || out.BindingHash != "binding-123" || out.ApprovalID != "approval-123" || out.ApprovalStatus != "pending" {
 		t.Fatalf("unexpected response: %+v", out)
+	}
+}
+
+func TestGetApprovalReadsNexusApproval(t *testing.T) {
+	approvalID := uuid.New()
+	var gotTenant string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("expected GET, got %s", r.Method)
+		}
+		if r.URL.Path != "/v1/approvals/"+approvalID.String() {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		gotTenant = r.Header.Get("X-Tenant-ID")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"` + approvalID.String() + `",
+			"requester_id":"virployee-1",
+			"binding_hash":"binding-123",
+			"status":"approved"
+		}`))
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, srv.Client())
+	out, err := client.GetApproval(context.Background(), "tenant-1", approvalID)
+	if err != nil {
+		t.Fatalf("GetApproval: %v", err)
+	}
+	if gotTenant != "tenant-1" {
+		t.Fatalf("expected tenant header tenant-1, got %q", gotTenant)
+	}
+	if out.ID != approvalID.String() || out.RequesterID != "virployee-1" || out.BindingHash != "binding-123" || out.Status != "approved" {
+		t.Fatalf("unexpected approval: %+v", out)
+	}
+}
+
+func TestGetApprovalMapsNotFound(t *testing.T) {
+	srv := httptest.NewServer(http.NotFoundHandler())
+	defer srv.Close()
+
+	client := New(srv.URL, srv.Client())
+	_, err := client.GetApproval(context.Background(), "tenant-1", uuid.New())
+	if !domainerr.IsNotFound(err) {
+		t.Fatalf("expected not found, got %v", err)
 	}
 }

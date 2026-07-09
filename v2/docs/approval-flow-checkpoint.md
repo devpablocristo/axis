@@ -1,6 +1,6 @@
 # Approval flow checkpoint
 
-This checkpoint freezes new execution features and verifies the minimum Companion -> Nexus -> Approval -> Trace loop.
+This checkpoint verifies the minimum Companion -> Nexus -> Approval -> Trace loop and the first safe post-approval continuation.
 
 ## Quick start
 
@@ -29,6 +29,8 @@ The seed is additive. It reuses the base action types/capabilities and updates t
 6. Companion records a durable run trace with Nexus decision, risk, reason, binding hash, and approval metadata.
 7. Console shows the run trace in the Virployee dry-run history.
 8. Console lets a human approve/reject from Approvals and return to the Virployee.
+9. If approved, a human can manually trigger a simulated execution from the Virployee Dry Run panel.
+10. Companion validates the approval binding and records a `simulated_execution` trace without external effects.
 
 ## Automated checks
 
@@ -47,8 +49,8 @@ make test-approval-flow-e2e
 make test-console-real-e2e
 ```
 
-`test-approval-flow-e2e` approves one request and verifies `allow`, `require_approval`, and `deny`.
-`test-console-real-e2e` creates real data through BFF, drives the UI, approves a pending approval, and checks that the Virployee history reflects `Approved`.
+`test-approval-flow-e2e` approves one request, simulates the approved execution, and verifies `allow`, `require_approval`, `deny`, and idempotent simulation.
+`test-console-real-e2e` creates real data through BFF, drives the UI, approves a pending approval, simulates execution, and checks that the Virployee history reflects both `Approved` and `Simulated`.
 
 ## Manual UI check
 
@@ -62,6 +64,8 @@ make test-console-real-e2e
 8. Open the pending approval created by the seed.
 9. Approve or reject it.
 10. Return to the Virployee and confirm the history shows the human decision.
+11. Click `Simulate execution`.
+12. Confirm the history shows `Simulated execution` and `No external effects`.
 
 ## Current guarantees
 
@@ -70,10 +74,12 @@ make test-console-real-e2e
 - Run traces are durable in Companion.
 - `allow`, `deny`, `require_approval`, and Nexus unavailable are visible in traces.
 - Approval state can be read after the original trace was created.
+- Approved approvals can be resumed manually as a simulated execution only when `binding_hash` still matches.
+- Repeating the same simulation returns the existing trace.
 
 ## Deliberately out of scope
 
-- No automatic execution after approval.
 - No policy engine, CEL, callbacks, break-glass, or audit chain.
 - No external calendar execution.
 - No retry/resume worker.
+- No automatic execution after approval.

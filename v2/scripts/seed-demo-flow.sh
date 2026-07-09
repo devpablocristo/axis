@@ -319,4 +319,5 @@ manual check:
 3. Select it, open Dry Run, and review Run history
 4. Go to Approvals and review approval $approval_id
 5. Approve or reject it, then return to the Virployee history
+6. If approved, click "Simulate execution" and confirm no external effects were performed
 EOF

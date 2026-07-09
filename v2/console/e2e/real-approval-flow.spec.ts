@@ -61,6 +61,13 @@ test('real UI approval flow can approve and return to an approved run history', 
   await expect(latestRun).toContainText('Requires human approval')
   await expect(latestRun).not.toContainText('Blocked')
   await expect(latestRun.getByRole('button', { name: 'View approval' })).toBeVisible()
+
+  await page.getByRole('button', { name: 'Simulate execution' }).click()
+  await expect(page.getByText('Simulated execution completed; no external effects were performed.')).toBeVisible()
+  const simulatedRun = page.locator('.virployee-run-history__row').first()
+  await expect(simulatedRun).toContainText('Simulated execution')
+  await expect(simulatedRun).toContainText('Simulated')
+  await expect(simulatedRun).toContainText('No external effects')
 })
 
 async function seedApprovalFlowFixture(request: APIRequestContext) {

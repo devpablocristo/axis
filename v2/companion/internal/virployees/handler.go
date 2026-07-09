@@ -30,6 +30,7 @@ type UseCasesPort interface {
 	RuntimeContext(context.Context, string, uuid.UUID) (runtimecontext.Context, error)
 	DryRun(context.Context, string, uuid.UUID, string) (dryrun.Result, error)
 	ExecutionGate(context.Context, string, uuid.UUID, string, *executiongate.ConfirmedDraft) (executiongate.Result, error)
+	SimulateApprovedExecution(context.Context, string, uuid.UUID, uuid.UUID) (runtraces.Trace, error)
 	ListRuns(context.Context, string, uuid.UUID, int) ([]runtraces.Trace, error)
 	Update(context.Context, string, uuid.UUID, domain.UpdateInput) (domain.Virployee, error)
 	Archive(context.Context, string, uuid.UUID, string, string) error
@@ -58,6 +59,7 @@ func (h *Handler) Routes(router gin.IRouter) {
 		group.GET("/:virployee_id/runtime-context", h.RuntimeContext)
 		group.POST("/:virployee_id/dry-run", h.DryRun)
 		group.POST("/:virployee_id/execution-gate", h.ExecutionGate)
+		group.POST("/:virployee_id/simulated-executions", h.SimulateApprovedExecution)
 		group.GET("/:virployee_id/runs", h.ListRuns)
 		group.GET("/:virployee_id", h.Get)
 		group.PUT("/:virployee_id", h.Update)
@@ -84,6 +86,28 @@ func (h *Handler) ListRuns(c *gin.Context) {
 		return
 	}
 	ginmw.WriteJSON(c, http.StatusOK, dto.ListRunTracesFromDomain(out))
+}
+
+func (h *Handler) SimulateApprovedExecution(c *gin.Context) {
+	id, ok := ginmw.ParseUUIDParam(c, "virployee_id")
+	if !ok {
+		return
+	}
+	var req dto.SimulateApprovedExecutionRequest
+	if err := ginmw.BindJSON(c, &req); err != nil {
+		return
+	}
+	approvalID, err := uuid.Parse(strings.TrimSpace(req.ApprovalID))
+	if err != nil {
+		ginmw.Respond(c, ginmw.ErrBadInput)
+		return
+	}
+	out, err := h.ucs.SimulateApprovedExecution(c.Request.Context(), tenantID(c), id, approvalID)
+	if err != nil {
+		ginmw.Respond(c, err)
+		return
+	}
+	ginmw.WriteJSON(c, http.StatusOK, dto.RunTraceFromDomain(out))
 }
 
 func (h *Handler) ListAutonomyLevels(c *gin.Context) {

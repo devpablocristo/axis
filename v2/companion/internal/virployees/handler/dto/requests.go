@@ -62,6 +62,10 @@ type ExecutionGateVirployeeRequest struct {
 	ConfirmedDraft *ConfirmedDraftRequest `json:"confirmed_draft"`
 }
 
+type SimulateApprovedExecutionRequest struct {
+	ApprovalID string `json:"approval_id" binding:"required"`
+}
+
 type ConfirmedDraftRequest struct {
 	Action string                       `json:"action"`
 	Kind   string                       `json:"kind"`

@@ -81,7 +81,9 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	virployeesUsecases.SetCapabilityValidator(capabilitiesUsecases)
 	virployeesUsecases.SetProfileTemplateReader(profileTemplatesUsecases)
 	if config.NexusBaseURL != "" {
-		virployeesUsecases.SetGovernanceChecker(nexusclient.New(config.NexusBaseURL, &http.Client{Timeout: 5 * time.Second}))
+		nexusClient := nexusclient.New(config.NexusBaseURL, &http.Client{Timeout: 5 * time.Second})
+		virployeesUsecases.SetGovernanceChecker(nexusClient)
+		virployeesUsecases.SetApprovalReader(nexusClient)
 	}
 	virployeesHandler := virployees.NewHandler(virployeesUsecases)
 

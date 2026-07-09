@@ -35,6 +35,7 @@ import {
   listVirployees,
   purgeVirployee,
   restoreVirployee,
+  simulateApprovedVirployeeExecution,
   trashVirployee,
   unarchiveVirployee,
   updateVirployee,
@@ -162,6 +163,9 @@ export function VirployeesPage({
   const [executionGateLoading, setExecutionGateLoading] = useState(false)
   const [executionGateError, setExecutionGateError] = useState('')
   const executionGateRequestRef = useRef(0)
+  const [simulationLoading, setSimulationLoading] = useState(false)
+  const [simulationError, setSimulationError] = useState('')
+  const simulationRequestRef = useRef(0)
   const [calendarDraftValues, setCalendarDraftValues] = useState<CalendarCreateDraftValues | null>(null)
   const [confirmedDraft, setConfirmedDraft] = useState<VirployeeConfirmedDraft | null>(null)
   const [editRow, setEditRow] = useState<Virployee | null>(null)
@@ -579,6 +583,7 @@ export function VirployeesPage({
     closeEdit()
     dryRunRequestRef.current += 1
     executionGateRequestRef.current += 1
+    simulationRequestRef.current += 1
     setDryRunRow(row)
     setDryRunInput('')
     setDryRunResult(null)
@@ -587,6 +592,8 @@ export function VirployeesPage({
     setExecutionGateResult(null)
     setExecutionGateError('')
     setExecutionGateLoading(false)
+    setSimulationError('')
+    setSimulationLoading(false)
     setCalendarDraftValues(null)
     setConfirmedDraft(null)
     setActionError('')
@@ -597,6 +604,7 @@ export function VirployeesPage({
     dryRunRequestRef.current += 1
     executionGateRequestRef.current += 1
     runTraceRequestRef.current += 1
+    simulationRequestRef.current += 1
     setDryRunRow(null)
     setDryRunInput('')
     setDryRunResult(null)
@@ -608,6 +616,8 @@ export function VirployeesPage({
     setExecutionGateResult(null)
     setExecutionGateLoading(false)
     setExecutionGateError('')
+    setSimulationLoading(false)
+    setSimulationError('')
     setCalendarDraftValues(null)
     setConfirmedDraft(null)
   }
@@ -633,6 +643,7 @@ export function VirployeesPage({
     setDryRunResult(null)
     setExecutionGateResult(null)
     setExecutionGateError('')
+    setSimulationError('')
     setCalendarDraftValues(null)
     setConfirmedDraft(null)
   }
@@ -664,6 +675,7 @@ export function VirployeesPage({
     setDryRunResult(null)
     setExecutionGateResult(null)
     setExecutionGateError('')
+    setSimulationError('')
     setCalendarDraftValues(null)
     setConfirmedDraft(null)
     try {
@@ -723,6 +735,25 @@ export function VirployeesPage({
     setConfirmedDraft(calendarConfirmedDraftFromValues(calendarDraftValues))
     setExecutionGateResult(null)
     setExecutionGateError('')
+    setSimulationError('')
+  }
+
+  const simulateApprovedExecution = async (approvalId: string) => {
+    if (!dryRunRow || simulationLoading || stringValue(approvalId).length === 0) return
+    const requestID = simulationRequestRef.current + 1
+    simulationRequestRef.current = requestID
+    setSimulationLoading(true)
+    setSimulationError('')
+    try {
+      await simulateApprovedVirployeeExecution(dryRunRow.id, approvalId, tenantId, principalId)
+      if (simulationRequestRef.current !== requestID) return
+      await loadRunTraces(dryRunRow)
+    } catch (error) {
+      if (simulationRequestRef.current !== requestID) return
+      setSimulationError(error instanceof Error ? error.message : 'Could not simulate execution')
+    } finally {
+      if (simulationRequestRef.current === requestID) setSimulationLoading(false)
+    }
   }
 
   const updateEditValue = (key: keyof VirployeeEditValues, value: string) => {
@@ -860,6 +891,8 @@ export function VirployeesPage({
                 executionGate={executionGateResult}
                 executionGateLoading={executionGateLoading}
                 executionGateError={executionGateError}
+                simulationLoading={simulationLoading}
+                simulationError={simulationError}
                 runTraces={runTraces}
                 runTracesLoading={runTracesLoading}
                 runTracesError={runTracesError}
@@ -870,6 +903,7 @@ export function VirployeesPage({
                 onInputChange={updateDryRunInput}
                 onRun={() => void runDryRun()}
                 onCheckExecutionGate={() => void checkExecutionGate()}
+                onSimulateApprovedExecution={(approvalId) => void simulateApprovedExecution(approvalId)}
                 onRefreshRuns={() => void loadRunTraces(dryRunRow)}
                 onReviewApproval={onReviewApproval ? (approvalId) => onReviewApproval({ approvalId, virployeeId: dryRunRow.id }) : undefined}
                 onCalendarDraftValueChange={updateCalendarDraftValue}
@@ -1180,6 +1214,8 @@ function VirployeeDryRunInline(props: {
   executionGate: VirployeeExecutionGate | null
   executionGateLoading: boolean
   executionGateError: string
+  simulationLoading: boolean
+  simulationError: string
   runTraces: VirployeeRunTrace[]
   runTracesLoading: boolean
   runTracesError: string
@@ -1190,6 +1226,7 @@ function VirployeeDryRunInline(props: {
   onInputChange: (value: string) => void
   onRun: () => void
   onCheckExecutionGate: () => void
+  onSimulateApprovedExecution: (approvalId: string) => void
   onRefreshRuns: () => void
   onReviewApproval?: (approvalId: string) => void
   onCalendarDraftValueChange: (key: CalendarCreateDraftKey, value: string) => void
@@ -1210,6 +1247,7 @@ function VirployeeDryRunInline(props: {
   const supervisorValue = props.supervisor ? userLabel(props.supervisor) : 'Unknown Supervisor'
   const latestGateRun = latestExecutionGateRun(props.runTraces)
   const latestApprovalID = latestGateRun?.nexus_result?.approval_id ?? ''
+  const latestSimulatedRun = latestSimulatedExecutionRun(props.runTraces, latestApprovalID)
   const [latestApproval, setLatestApproval] = useState<Approval | null>(null)
   const [latestApprovalLoading, setLatestApprovalLoading] = useState(false)
   const [latestApprovalError, setLatestApprovalError] = useState('')
@@ -1281,6 +1319,7 @@ function VirployeeDryRunInline(props: {
         </div>
         {props.error ? <p role="alert" className="iam-control__inline-error">{props.error}</p> : null}
         {props.executionGateError ? <p role="alert" className="iam-control__inline-error">{props.executionGateError}</p> : null}
+        {props.simulationError ? <p role="alert" className="iam-control__inline-error">{props.simulationError}</p> : null}
         {props.runTracesError ? <p role="alert" className="iam-control__inline-error">{props.runTracesError}</p> : null}
 
         <div className="virployee-run-target" aria-label="Selected virployee">
@@ -1323,6 +1362,11 @@ function VirployeeDryRunInline(props: {
                   label="Approval"
                   value={latestGateRun && latestApprovalID ? formatApprovalTrace(latestGateRun, latestApproval) : 'None'}
                   tone={approvalTraceTone(latestGateRun, latestApproval)}
+                />
+                <FlowSummaryItem
+                  label="Execution"
+                  value={latestSimulatedRun ? 'Simulated' : latestApproval?.status === 'approved' ? 'Ready' : 'Not ready'}
+                  tone={latestSimulatedRun ? 'success' : latestApproval?.status === 'approved' ? 'warning' : 'muted'}
                 />
               </div>
             </section>
@@ -1371,10 +1415,14 @@ function VirployeeDryRunInline(props: {
             <ApprovalCheckpointView
               run={latestGateRun}
               approval={latestApproval}
+              simulatedRun={latestSimulatedRun}
               loading={latestApprovalLoading}
+              simulationLoading={props.simulationLoading}
               error={latestApprovalError}
+              simulationError={props.simulationError}
               onRefresh={() => void loadLatestApproval()}
               onReviewApproval={props.onReviewApproval}
+              onSimulateApprovedExecution={props.onSimulateApprovedExecution}
             />
 
             <RunTraceHistory
@@ -1382,7 +1430,9 @@ function VirployeeDryRunInline(props: {
               principalId={props.principalId}
               runs={props.runTraces}
               loading={props.runTracesLoading}
+              simulationLoading={props.simulationLoading}
               onReviewApproval={props.onReviewApproval}
+              onSimulateApprovedExecution={props.onSimulateApprovedExecution}
               onRefresh={props.onRefreshRuns}
             />
 
@@ -1421,7 +1471,9 @@ function VirployeeDryRunInline(props: {
               principalId={props.principalId}
               runs={props.runTraces}
               loading={props.runTracesLoading}
+              simulationLoading={props.simulationLoading}
               onReviewApproval={props.onReviewApproval}
+              onSimulateApprovedExecution={props.onSimulateApprovedExecution}
               onRefresh={props.onRefreshRuns}
             />
           </>
@@ -1658,10 +1710,14 @@ function ExecutionGateView(props: {
 function ApprovalCheckpointView(props: {
   run: VirployeeRunTrace | null
   approval: Approval | null
+  simulatedRun: VirployeeRunTrace | null
   loading: boolean
+  simulationLoading: boolean
   error: string
+  simulationError: string
   onRefresh: () => void
   onReviewApproval?: (approvalId: string) => void
+  onSimulateApprovedExecution: (approvalId: string) => void
 }) {
   const approvalID = props.run?.nexus_result?.approval_id ?? ''
   if (!approvalID) return null
@@ -1683,6 +1739,12 @@ function ApprovalCheckpointView(props: {
         <PreviewField label="Decision" value={decision} />
       </div>
       {props.error ? <p role="alert" className="iam-control__inline-error">{props.error}</p> : null}
+      {props.simulationError ? <p role="alert" className="iam-control__inline-error">{props.simulationError}</p> : null}
+      {props.simulatedRun ? (
+        <p className="iam-control__inline-note">
+          {props.simulatedRun.execution_result?.message || 'Simulated execution completed; no external effects were performed.'}
+        </p>
+      ) : null}
       <div className="virployee-approval-checkpoint__actions">
         <button type="button" className="btn-secondary" disabled={props.loading} onClick={props.onRefresh}>
           {props.loading ? 'Refreshing...' : 'Refresh approval'}
@@ -1690,6 +1752,11 @@ function ApprovalCheckpointView(props: {
         {props.onReviewApproval ? (
           <button type="button" className={status === 'pending' ? 'btn-primary' : 'btn-secondary'} onClick={() => props.onReviewApproval?.(approvalID)}>
             {status === 'pending' ? 'Review approval' : 'View approval'}
+          </button>
+        ) : null}
+        {status === 'approved' && !props.simulatedRun ? (
+          <button type="button" className="btn-primary" disabled={props.simulationLoading} onClick={() => props.onSimulateApprovedExecution(approvalID)}>
+            {props.simulationLoading ? 'Simulating...' : 'Simulate execution'}
           </button>
         ) : null}
       </div>
@@ -1702,11 +1769,13 @@ function RunTraceHistory(props: {
   principalId: string
   runs: VirployeeRunTrace[]
   loading: boolean
+  simulationLoading: boolean
   onReviewApproval?: (approvalId: string) => void
+  onSimulateApprovedExecution: (approvalId: string) => void
   onRefresh: () => void
 }) {
   const approvalIDs = useMemo(
-    () => Array.from(new Set(props.runs.map((run) => run.nexus_result?.approval_id).filter(Boolean) as string[])).sort(),
+    () => Array.from(new Set(props.runs.map((run) => run.nexus_result?.approval_id || run.execution_result?.approval_id).filter(Boolean) as string[])).sort(),
     [props.runs],
   )
   const approvalKey = approvalIDs.join('|')
@@ -1761,8 +1830,14 @@ function RunTraceHistory(props: {
       ) : (
         <div className="virployee-run-history">
           {props.runs.map((run) => {
-            const approvalID = run.nexus_result?.approval_id ?? ''
+            const approvalID = run.nexus_result?.approval_id || run.execution_result?.approval_id || ''
             const approval = approvalID ? approvalByID[approvalID] : null
+            const approvalStatus = approval?.status || run.nexus_result?.approval_status || ''
+            const simulatedRun = latestSimulatedExecutionRun(props.runs, approvalID)
+            const canSimulateExecution = run.operation === 'execution_gate' &&
+              approvalID.length > 0 &&
+              approvalStatus === 'approved' &&
+              !simulatedRun
             return (
               <div key={run.id} className="virployee-run-history__row">
                 <div className="virployee-run-history__main">
@@ -1780,15 +1855,27 @@ function RunTraceHistory(props: {
                   {approvalID ? <small>{formatApprovalTrace(run, approval)}</small> : null}
                   {approval?.decided_by ? <small>{formatApprovalDecision(approval)}</small> : null}
                   <small>Binding {run.binding_hash ? shortHash(run.binding_hash) : shortHash(run.input_hash)}</small>
-                  {approvalID && props.onReviewApproval ? (
+                  {approvalID && (props.onReviewApproval || canSimulateExecution) ? (
                     <div className="virployee-run-history__actions">
-                      <button
-                        type="button"
-                        className="btn-sm btn-secondary"
-                        onClick={() => props.onReviewApproval?.(approvalID)}
-                      >
-                        {(approval?.status || run.nexus_result?.approval_status) === 'pending' ? 'Review approval' : 'View approval'}
-                      </button>
+                      {props.onReviewApproval ? (
+                        <button
+                          type="button"
+                          className="btn-sm btn-secondary"
+                          onClick={() => props.onReviewApproval?.(approvalID)}
+                        >
+                          {(approval?.status || run.nexus_result?.approval_status) === 'pending' ? 'Review approval' : 'View approval'}
+                        </button>
+                      ) : null}
+                      {canSimulateExecution ? (
+                        <button
+                          type="button"
+                          className="btn-sm btn-primary"
+                          disabled={props.simulationLoading}
+                          onClick={() => props.onSimulateApprovedExecution(approvalID)}
+                        >
+                          {props.simulationLoading ? 'Simulating...' : 'Simulate execution'}
+                        </button>
+                      ) : null}
                     </div>
                   ) : null}
                 </div>
@@ -2352,14 +2439,24 @@ function formatDate(value: string | null): string {
 }
 
 function formatRunOperation(value: VirployeeRunTrace['operation']): string {
-  return value === 'execution_gate' ? 'Execution gate' : 'Dry Run'
+  if (value === 'execution_gate') return 'Execution gate'
+  if (value === 'simulated_execution') return 'Simulated execution'
+  return 'Dry Run'
 }
 
 function latestExecutionGateRun(runs: VirployeeRunTrace[]): VirployeeRunTrace | null {
   return runs.find((run) => run.operation === 'execution_gate') ?? null
 }
 
+function latestSimulatedExecutionRun(runs: VirployeeRunTrace[], approvalID: string): VirployeeRunTrace | null {
+  if (!approvalID) return null
+  return runs.find((run) => run.operation === 'simulated_execution' && run.execution_result?.approval_id === approvalID) ?? null
+}
+
 function formatRunDecision(run: VirployeeRunTrace, approval?: Approval | null): string {
+  if (run.operation === 'simulated_execution') {
+    return run.execution_result?.status === 'simulated_executed' ? 'Simulated' : 'Simulation'
+  }
   if (run.operation === 'execution_gate') {
     if (run.nexus_result?.decision === 'require_approval') {
       const status = approval?.status || run.nexus_result.approval_status || 'pending'
@@ -2373,6 +2470,7 @@ function formatRunDecision(run: VirployeeRunTrace, approval?: Approval | null): 
 }
 
 function runDecisionTone(run: VirployeeRunTrace, approval?: Approval | null): StatusTone {
+  if (run.operation === 'simulated_execution') return 'success'
   if (run.operation === 'execution_gate' && run.nexus_result?.decision === 'require_approval') {
     return approvalStatusTone(approval?.status || run.nexus_result.approval_status || 'pending')
   }
@@ -2390,6 +2488,9 @@ function executionGateTone(gate: VirployeeExecutionGate | null): StatusTone {
 }
 
 function formatNexusTrace(run: VirployeeRunTrace, approval?: Approval | null): string {
+  if (run.operation === 'simulated_execution') {
+    return run.execution_result?.external_effects ? 'External effects recorded' : 'No external effects'
+  }
   if (!run.nexus_result) return 'Nexus not called'
   if (!run.nexus_result.available) return 'Nexus unavailable'
   if (run.nexus_result.decision === 'allow') return 'Allowed by Nexus'
@@ -2403,6 +2504,7 @@ function formatNexusTrace(run: VirployeeRunTrace, approval?: Approval | null): s
 
 function nexusTraceTone(run?: VirployeeRunTrace | null, approval?: Approval | null): StatusTone {
   if (!run?.nexus_result) return 'muted'
+  if (run.operation === 'simulated_execution') return run.execution_result?.external_effects ? 'warning' : 'success'
   if (!run.nexus_result.available || run.nexus_result.decision === 'deny') return 'danger'
   if (run.nexus_result.decision === 'require_approval') {
     return approvalStatusTone(approval?.status || run.nexus_result.approval_status || 'pending')
@@ -2412,14 +2514,15 @@ function nexusTraceTone(run?: VirployeeRunTrace | null, approval?: Approval | nu
 }
 
 function formatNexusReason(run: VirployeeRunTrace): string {
+  if (run.operation === 'simulated_execution') return run.execution_result?.message || ''
   if (!run.nexus_result) return ''
   return run.nexus_result.error || run.nexus_result.decision_reason || run.nexus_result.status || ''
 }
 
 function formatApprovalTrace(run: VirployeeRunTrace, approval?: Approval | null): string {
-  const approvalID = run.nexus_result?.approval_id
+  const approvalID = run.nexus_result?.approval_id || run.execution_result?.approval_id
   if (!approvalID) return ''
-  const status = approval?.status || run.nexus_result?.approval_status || 'pending'
+  const status = approval?.status || run.nexus_result?.approval_status || run.execution_result?.approval_status || 'pending'
   return `Approval ${shortHash(approvalID)} · ${formatApprovalStatus(status)}`
 }
 

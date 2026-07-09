@@ -276,6 +276,31 @@ func (r *Repository) CreateRunTrace(ctx context.Context, tenantID string, input 
 		}
 		nexusResult = string(raw)
 	}
+	var executionResult any
+	if input.ExecutionResult != nil {
+		redacted := runtraces.RedactValue(map[string]any{
+			"status":           input.ExecutionResult.Status,
+			"mode":             input.ExecutionResult.Mode,
+			"approval_id":      input.ExecutionResult.ApprovalID,
+			"approval_status":  input.ExecutionResult.ApprovalStatus,
+			"binding_hash":     input.ExecutionResult.BindingHash,
+			"message":          input.ExecutionResult.Message,
+			"external_effects": input.ExecutionResult.ExternalEffects,
+		})
+		raw, err := json.Marshal(redacted)
+		if err != nil {
+			return runtraces.Trace{}, fmt.Errorf("marshal execution trace: %w", err)
+		}
+		executionResult = string(raw)
+	}
+	inputHash := strings.TrimSpace(input.InputHash)
+	if inputHash == "" {
+		inputHash = runtraces.HashString(input.Input)
+	}
+	inputPreview := strings.TrimSpace(input.InputPreview)
+	if inputPreview == "" {
+		inputPreview = runtraces.InputPreview(input.Input)
+	}
 
 	row := r.pool.QueryRow(ctx, `
 		INSERT INTO companion_run_traces (
@@ -292,6 +317,7 @@ func (r *Repository) CreateRunTrace(ctx context.Context, tenantID string, input 
 			gate_decision,
 			gate_checks,
 			nexus_result,
+			execution_result,
 			binding_hash,
 			created_at
 		)
@@ -309,8 +335,9 @@ func (r *Repository) CreateRunTrace(ctx context.Context, tenantID string, input 
 			$11,
 			$12::jsonb,
 			$13::jsonb,
-			$14,
-			$15
+			$14::jsonb,
+			$15,
+			$16
 		)
 		RETURNING
 			id::text,
@@ -326,9 +353,10 @@ func (r *Repository) CreateRunTrace(ctx context.Context, tenantID string, input 
 			gate_decision,
 			gate_checks,
 			nexus_result,
+			execution_result,
 			binding_hash,
 			created_at
-	`, id.String(), tenantID, input.VirployeeID.String(), string(input.Operation), runtraces.HashString(input.Input), runtraces.InputPreview(input.Input), string(intent), nullableUUID(input.CapabilityID), input.CapabilityKey, input.DryRunDecision, input.GateDecision, string(checks), nexusResult, input.BindingHash, now)
+	`, id.String(), tenantID, input.VirployeeID.String(), string(input.Operation), inputHash, inputPreview, string(intent), nullableUUID(input.CapabilityID), input.CapabilityKey, input.DryRunDecision, input.GateDecision, string(checks), nexusResult, executionResult, input.BindingHash, now)
 	return scanRunTrace(row)
 }
 
@@ -348,6 +376,7 @@ func (r *Repository) ListRunTraces(ctx context.Context, tenantID string, virploy
 			gate_decision,
 			gate_checks,
 			nexus_result,
+			execution_result,
 			binding_hash,
 			created_at
 		FROM companion_run_traces
@@ -370,6 +399,76 @@ func (r *Repository) ListRunTraces(ctx context.Context, tenantID string, virploy
 		out = append(out, item)
 	}
 	return out, rows.Err()
+}
+
+func (r *Repository) FindExecutionGateTraceByApproval(
+	ctx context.Context,
+	tenantID string,
+	virployeeID uuid.UUID,
+	approvalID string,
+) (runtraces.Trace, error) {
+	row := r.pool.QueryRow(ctx, `
+		SELECT
+			id::text,
+			tenant_id,
+			virployee_id::text,
+			operation,
+			input_hash,
+			input_preview,
+			intent,
+			capability_id::text,
+			capability_key,
+			dry_run_decision,
+			gate_decision,
+			gate_checks,
+			nexus_result,
+			execution_result,
+			binding_hash,
+			created_at
+		FROM companion_run_traces
+		WHERE tenant_id = $1
+			AND virployee_id = $2::uuid
+			AND operation = 'execution_gate'
+			AND nexus_result->>'approval_id' = $3
+		ORDER BY created_at DESC, id DESC
+		LIMIT 1
+	`, tenantID, virployeeID.String(), strings.TrimSpace(approvalID))
+	return scanRunTrace(row)
+}
+
+func (r *Repository) FindSimulatedExecutionTraceByApproval(
+	ctx context.Context,
+	tenantID string,
+	virployeeID uuid.UUID,
+	approvalID string,
+) (runtraces.Trace, error) {
+	row := r.pool.QueryRow(ctx, `
+		SELECT
+			id::text,
+			tenant_id,
+			virployee_id::text,
+			operation,
+			input_hash,
+			input_preview,
+			intent,
+			capability_id::text,
+			capability_key,
+			dry_run_decision,
+			gate_decision,
+			gate_checks,
+			nexus_result,
+			execution_result,
+			binding_hash,
+			created_at
+		FROM companion_run_traces
+		WHERE tenant_id = $1
+			AND virployee_id = $2::uuid
+			AND operation = 'simulated_execution'
+			AND execution_result->>'approval_id' = $3
+		ORDER BY created_at DESC, id DESC
+		LIMIT 1
+	`, tenantID, virployeeID.String(), strings.TrimSpace(approvalID))
+	return scanRunTrace(row)
 }
 
 func (r *Repository) lifecycleResult(ctx context.Context, tenantID string, id uuid.UUID, tag pgconn.CommandTag, err error) error {
@@ -509,6 +608,7 @@ func scanRunTrace(row scanner) (runtraces.Trace, error) {
 	var intentRaw []byte
 	var checksRaw []byte
 	var nexusRaw []byte
+	var executionRaw []byte
 	var item runtraces.Trace
 	err := row.Scan(
 		&idText,
@@ -524,6 +624,7 @@ func scanRunTrace(row scanner) (runtraces.Trace, error) {
 		&gateDecision,
 		&checksRaw,
 		&nexusRaw,
+		&executionRaw,
 		&item.BindingHash,
 		&item.CreatedAt,
 	)
@@ -566,6 +667,13 @@ func scanRunTrace(row scanner) (runtraces.Trace, error) {
 			return runtraces.Trace{}, err
 		}
 		item.NexusResult = &nexus
+	}
+	if len(executionRaw) > 0 {
+		var execution runtraces.ExecutionResult
+		if err := json.Unmarshal(executionRaw, &execution); err != nil {
+			return runtraces.Trace{}, err
+		}
+		item.ExecutionResult = &execution
 	}
 	return item, nil
 }

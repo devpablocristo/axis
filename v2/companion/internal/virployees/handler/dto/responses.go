@@ -179,20 +179,21 @@ type ExecutionGateCheckResponse struct {
 }
 
 type RunTraceResponse struct {
-	ID             string                       `json:"id"`
-	VirployeeID    string                       `json:"virployee_id"`
-	Operation      string                       `json:"operation"`
-	InputHash      string                       `json:"input_hash"`
-	InputPreview   string                       `json:"input_preview"`
-	Intent         map[string]any               `json:"intent"`
-	CapabilityID   string                       `json:"capability_id,omitempty"`
-	CapabilityKey  string                       `json:"capability_key"`
-	DryRunDecision string                       `json:"dry_run_decision"`
-	GateDecision   string                       `json:"gate_decision,omitempty"`
-	GateChecks     []RunTraceGateCheckResponse  `json:"gate_checks"`
-	NexusResult    *RunTraceNexusResultResponse `json:"nexus_result,omitempty"`
-	BindingHash    string                       `json:"binding_hash,omitempty"`
-	CreatedAt      time.Time                    `json:"created_at"`
+	ID              string                           `json:"id"`
+	VirployeeID     string                           `json:"virployee_id"`
+	Operation       string                           `json:"operation"`
+	InputHash       string                           `json:"input_hash"`
+	InputPreview    string                           `json:"input_preview"`
+	Intent          map[string]any                   `json:"intent"`
+	CapabilityID    string                           `json:"capability_id,omitempty"`
+	CapabilityKey   string                           `json:"capability_key"`
+	DryRunDecision  string                           `json:"dry_run_decision"`
+	GateDecision    string                           `json:"gate_decision,omitempty"`
+	GateChecks      []RunTraceGateCheckResponse      `json:"gate_checks"`
+	NexusResult     *RunTraceNexusResultResponse     `json:"nexus_result,omitempty"`
+	ExecutionResult *RunTraceExecutionResultResponse `json:"execution_result,omitempty"`
+	BindingHash     string                           `json:"binding_hash,omitempty"`
+	CreatedAt       time.Time                        `json:"created_at"`
 }
 
 type RunTraceGateCheckResponse struct {
@@ -212,6 +213,16 @@ type RunTraceNexusResultResponse struct {
 	ApprovalID           string `json:"approval_id,omitempty"`
 	ApprovalStatus       string `json:"approval_status,omitempty"`
 	Error                string `json:"error,omitempty"`
+}
+
+type RunTraceExecutionResultResponse struct {
+	Status          string `json:"status,omitempty"`
+	Mode            string `json:"mode,omitempty"`
+	ApprovalID      string `json:"approval_id,omitempty"`
+	ApprovalStatus  string `json:"approval_status,omitempty"`
+	BindingHash     string `json:"binding_hash,omitempty"`
+	Message         string `json:"message,omitempty"`
+	ExternalEffects bool   `json:"external_effects"`
 }
 
 type ListRunTracesResponse struct {
@@ -263,20 +274,21 @@ func RunTraceFromDomain(trace runtraces.Trace) RunTraceResponse {
 		})
 	}
 	return RunTraceResponse{
-		ID:             trace.ID.String(),
-		VirployeeID:    trace.VirployeeID.String(),
-		Operation:      string(trace.Operation),
-		InputHash:      trace.InputHash,
-		InputPreview:   trace.InputPreview,
-		Intent:         trace.Intent,
-		CapabilityID:   trace.CapabilityID,
-		CapabilityKey:  trace.CapabilityKey,
-		DryRunDecision: trace.DryRunDecision,
-		GateDecision:   trace.GateDecision,
-		GateChecks:     checks,
-		NexusResult:    runTraceNexusResultFromDomain(trace.NexusResult),
-		BindingHash:    trace.BindingHash,
-		CreatedAt:      trace.CreatedAt,
+		ID:              trace.ID.String(),
+		VirployeeID:     trace.VirployeeID.String(),
+		Operation:       string(trace.Operation),
+		InputHash:       trace.InputHash,
+		InputPreview:    trace.InputPreview,
+		Intent:          trace.Intent,
+		CapabilityID:    trace.CapabilityID,
+		CapabilityKey:   trace.CapabilityKey,
+		DryRunDecision:  trace.DryRunDecision,
+		GateDecision:    trace.GateDecision,
+		GateChecks:      checks,
+		NexusResult:     runTraceNexusResultFromDomain(trace.NexusResult),
+		ExecutionResult: runTraceExecutionResultFromDomain(trace.ExecutionResult),
+		BindingHash:     trace.BindingHash,
+		CreatedAt:       trace.CreatedAt,
 	}
 }
 
@@ -295,6 +307,21 @@ func runTraceNexusResultFromDomain(result *runtraces.NexusResult) *RunTraceNexus
 		ApprovalID:           result.ApprovalID,
 		ApprovalStatus:       result.ApprovalStatus,
 		Error:                result.Error,
+	}
+}
+
+func runTraceExecutionResultFromDomain(result *runtraces.ExecutionResult) *RunTraceExecutionResultResponse {
+	if result == nil {
+		return nil
+	}
+	return &RunTraceExecutionResultResponse{
+		Status:          result.Status,
+		Mode:            result.Mode,
+		ApprovalID:      result.ApprovalID,
+		ApprovalStatus:  result.ApprovalStatus,
+		BindingHash:     result.BindingHash,
+		Message:         result.Message,
+		ExternalEffects: result.ExternalEffects,
 	}
 }
 
