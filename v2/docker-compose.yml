@@ -224,6 +224,21 @@ services:
         condition: service_healthy
     command: ["scripts/smoke-approval-flow.sh"]
 
+  seed-demo:
+    build:
+      context: .
+      dockerfile: Dockerfile.e2e
+    working_dir: /workspace
+    environment:
+      BFF_URL: http://bff-v2:8080
+      CONSOLE_URL: ${AXIS_CONSOLE_URL:-http://localhost:19173}
+    volumes:
+      - ./scripts:/workspace/scripts:ro
+    depends_on:
+      bff-v2:
+        condition: service_healthy
+    command: ["scripts/seed-demo-flow.sh"]
+
 volumes:
   companion-v2-postgres-data:
   bff-v2-postgres-data:

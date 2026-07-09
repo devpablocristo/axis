@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 DC := docker compose --project-directory $(CURDIR) -f $(CURDIR)/docker-compose.yml
 
-.PHONY: up down test-console-e2e test-approval-flow-e2e test-console-real-e2e test-e2e
+.PHONY: up down seed-demo test-console-e2e test-approval-flow-e2e test-console-real-e2e test-e2e
 
 up:
 	@test -f .env || cp .env.example .env
@@ -9,6 +9,11 @@ up:
 
 down:
 	$(DC) down
+
+seed-demo:
+	@test -f .env || cp .env.example .env
+	$(DC) up -d --build bff-v2 console-v2
+	$(DC) run --rm -T --build seed-demo
 
 test-console-e2e:
 	@test -f .env || cp .env.example .env

@@ -11,6 +11,8 @@ when services collaborate.
   services.
 - `companion` is the workforce/runtime service. It owns Virployees and later
   their job roles, capabilities, autonomy, memory, and execution runtime.
+- `nexus` is the minimum governance service. It owns action types,
+  request/decision evaluation, durable approvals, and approval decisions.
 - Services communicate through HTTP. No service imports another service's
   internal packages.
 
@@ -48,8 +50,9 @@ BFF currently forwards that context to Companion with:
 ## Current Scope
 
 - Clerk integration is deferred.
-- Governance/Nexus is deferred.
+- Nexus is implemented as a minimal governance checkpoint: `allow`, `deny`,
+  `require_approval`, durable approvals, and binding hashes.
 - Companion tenancy storage is deferred; BFF validates tenancy before forwarding.
 - Virployees remain the first workforce primitive.
-- Runtime, tasks, capabilities, autonomy enforcement, and memory are future
-  Companion modules.
+- Policy engines, callbacks, break-glass, audit chains, external execution,
+  tasks, and memory are future modules.
