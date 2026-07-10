@@ -16,7 +16,7 @@
   "dependencies": {
     "@clerk/clerk-react": "^5.61.8",
     "@devpablocristo/platform-browser": "^0.2.0",
-    "@devpablocristo/platform-crud-ui": "^0.4.2",
+    "@devpablocristo/platform-crud-ui": "^0.4.3",
     "@devpablocristo/platform-lifecycle": "^0.1.1",
     "@devpablocristo/platform-ui-data-display": "^0.1.0",
     "@vitejs/plugin-react": "^6.0.3",
