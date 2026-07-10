@@ -1225,12 +1225,6 @@ p.iam-control__inline-note {
 }
 
 .iam-control__select-col {
-  width: 42px;
-  inline-size: 42px;
-  min-width: 42px;
-  min-inline-size: 42px;
-  max-width: 42px;
-  max-inline-size: 42px;
   box-sizing: border-box;
   text-align: center;
 }
@@ -1251,6 +1245,7 @@ p.iam-control__inline-note {
 
 .axis-crud-host .crud-table__cell--sticky {
   position: sticky;
+  box-sizing: border-box;
   background: var(--axis-surface);
 }
 
@@ -1260,19 +1255,11 @@ p.iam-control__inline-note {
 
 .axis-crud-host .iam-control__select-col,
 .axis-crud-host .iam-control__primary-col {
-  position: sticky;
   background: var(--axis-surface);
 }
 
 .axis-crud-host .iam-control__select-col {
-  left: 0;
   z-index: 6;
-  width: 52px;
-  inline-size: 52px;
-  min-width: 52px;
-  min-inline-size: 52px;
-  max-width: 52px;
-  max-inline-size: 52px;
   padding-right: 0;
   padding-left: 0;
   box-shadow: 1px 0 0 var(--axis-border);
@@ -1280,14 +1267,7 @@ p.iam-control__inline-note {
 }
 
 .axis-crud-host .iam-control__primary-col {
-  left: 52px;
   z-index: 5;
-  width: 280px;
-  inline-size: 280px;
-  min-width: 280px;
-  min-inline-size: 280px;
-  max-width: 280px;
-  max-inline-size: 280px;
   box-shadow: 1px 0 0 var(--axis-border);
 }
 
