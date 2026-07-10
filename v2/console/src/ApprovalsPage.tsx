@@ -36,12 +36,22 @@ export function ApprovalsPage({ tenantId, principalId, focusApprovalId = '', onR
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [busyID, setBusyID] = useState('')
+  const [searchQuery, setSearchQuery] = useState('')
   const focusedCardRef = useRef<HTMLElement | null>(null)
   const isActive = Boolean(tenantId && principalId)
+  const normalizedSearchQuery = searchQuery.trim().toLowerCase()
   const pendingCount = approvalsByStatus.pending.items.length
   const totalCount = useMemo(
     () => APPROVAL_STATUSES.reduce((count, status) => count + approvalsByStatus[status].items.length, 0),
     [approvalsByStatus],
+  )
+  const visibleApprovalsByStatus = useMemo(
+    () => filterApprovalsByStatus(approvalsByStatus, normalizedSearchQuery),
+    [approvalsByStatus, normalizedSearchQuery],
+  )
+  const visibleTotalCount = useMemo(
+    () => APPROVAL_STATUSES.reduce((count, status) => count + visibleApprovalsByStatus[status].items.length, 0),
+    [visibleApprovalsByStatus],
   )
   const loadingMore = APPROVAL_STATUSES.some((status) => approvalsByStatus[status].loadingMore)
   const focusedApproval = useMemo(() => {
@@ -176,6 +186,26 @@ export function ApprovalsPage({ tenantId, principalId, focusApprovalId = '', onR
 
       {error ? <p role="alert" className="iam-control__inline-error">{error}</p> : null}
 
+      <div className="approvals-toolbar">
+        <label className="approvals-search">
+          <span>Search approvals</span>
+          <input
+            type="search"
+            value={searchQuery}
+            placeholder="Search by action, system, requester or binding"
+            onChange={(event) => setSearchQuery(event.target.value)}
+          />
+        </label>
+        {searchQuery ? (
+          <button type="button" className="btn-secondary" onClick={() => setSearchQuery('')}>
+            Clear
+          </button>
+        ) : null}
+        <span className="approvals-toolbar__summary">
+          {approvalSearchSummary(visibleTotalCount, totalCount, Boolean(normalizedSearchQuery))}
+        </span>
+      </div>
+
       {focusApprovalId ? (
         <div className={`approval-focus-banner ${focusedApproval ? '' : 'approval-focus-banner--missing'}`}>
           <div>
@@ -207,7 +237,9 @@ export function ApprovalsPage({ tenantId, principalId, focusApprovalId = '', onR
             <ApprovalColumn
               key={status}
               status={status}
-              approvals={approvalsByStatus[status].items}
+              approvals={visibleApprovalsByStatus[status].items}
+              loadedCount={approvalsByStatus[status].items.length}
+              searchActive={Boolean(normalizedSearchQuery)}
               hasMore={approvalsByStatus[status].hasMore}
               loadingMore={approvalsByStatus[status].loadingMore}
               busyID={busyID}
@@ -226,6 +258,8 @@ export function ApprovalsPage({ tenantId, principalId, focusApprovalId = '', onR
 function ApprovalColumn(props: {
   status: ApprovalStatus
   approvals: Approval[]
+  loadedCount: number
+  searchActive: boolean
   hasMore: boolean
   loadingMore: boolean
   busyID: string
@@ -242,18 +276,19 @@ function ApprovalColumn(props: {
           <p>{approvalColumnCopy(props.status)}</p>
         </div>
         <span className={`axis-status-badge axis-status-badge--${approvalStatusTone(props.status)}`}>
-          {props.approvals.length}
+          {props.searchActive ? `${props.approvals.length}/${props.loadedCount}` : props.loadedCount}
         </span>
       </div>
 
       {props.approvals.length === 0 ? (
-        <div className="approvals-board__empty">{emptyStateFor(props.status)}</div>
+        <div className="approvals-board__empty">{emptyStateFor(props.status, props.searchActive)}</div>
       ) : (
         <div className="approvals-board__cards">
-          {props.approvals.map((approval) => (
+          {props.approvals.map((approval, index) => (
             <ApprovalCard
               key={approval.id}
               approval={approval}
+              index={index + 1}
               busy={props.busyID === approval.id}
               disabled={Boolean(props.busyID)}
               focused={props.focusApprovalId === approval.id}
@@ -283,6 +318,7 @@ function ApprovalColumn(props: {
 
 function ApprovalCard(props: {
   approval: Approval
+  index: number
   busy: boolean
   disabled: boolean
   focused: boolean
@@ -301,9 +337,12 @@ function ApprovalCard(props: {
           <span className="approvals-list__eyebrow">{approval.target_system || 'Unknown system'}</span>
           <strong>{approval.action_type}</strong>
         </div>
-        <span className={`axis-status-badge axis-status-badge--${approvalStatusTone(approval.status)}`}>
-          {approvalStatusLabel(approval.status)}
-        </span>
+        <div className="approvals-board__card-markers">
+          <span className="approvals-board__card-index">#{props.index}</span>
+          <span className={`axis-status-badge axis-status-badge--${approvalStatusTone(approval.status)}`}>
+            {approvalStatusLabel(approval.status)}
+          </span>
+        </div>
       </div>
 
       <p className="approvals-board__reason">{approval.reason || 'No reason provided'}</p>
@@ -368,6 +407,11 @@ function approvalBoardSummary(pendingCount: number, totalCount: number, loading:
   return `${pendingCount} pending ${pendingNoun} · ${totalCount} loaded ${totalNoun}`
 }
 
+function approvalSearchSummary(visibleCount: number, totalCount: number, searchActive: boolean): string {
+  if (!searchActive) return `${totalCount} loaded`
+  return `${visibleCount} of ${totalCount} loaded`
+}
+
 function approvalColumnTitle(status: ApprovalStatus): string {
   if (status === 'approved') return 'Approved'
   if (status === 'rejected') return 'Rejected'
@@ -392,7 +436,8 @@ function approvalStatusTone(status: ApprovalStatus): 'success' | 'danger' | 'war
   return 'warning'
 }
 
-function emptyStateFor(status: ApprovalStatus): string {
+function emptyStateFor(status: ApprovalStatus, searchActive = false): string {
+  if (searchActive) return 'No matching approvals loaded'
   if (status === 'approved') return 'No approved approvals'
   if (status === 'rejected') return 'No rejected approvals'
   return 'No pending approvals'
@@ -411,6 +456,33 @@ function mergeApprovals(current: Approval[], incoming: Approval[]): Approval[] {
     byID.set(approval.id, approval)
   }
   return Array.from(byID.values())
+}
+
+function filterApprovalsByStatus(columns: ApprovalsByStatus, query: string): ApprovalsByStatus {
+  if (!query) return columns
+  return {
+    pending: { ...columns.pending, items: columns.pending.items.filter((approval) => approvalMatchesQuery(approval, query)) },
+    approved: { ...columns.approved, items: columns.approved.items.filter((approval) => approvalMatchesQuery(approval, query)) },
+    rejected: { ...columns.rejected, items: columns.rejected.items.filter((approval) => approvalMatchesQuery(approval, query)) },
+  }
+}
+
+function approvalMatchesQuery(approval: Approval, query: string): boolean {
+  return [
+    approval.id,
+    approval.requester_id,
+    approval.action_type,
+    approval.target_system,
+    approval.target_resource,
+    approval.risk_level,
+    approval.reason,
+    approval.binding_hash,
+    approval.status,
+    approval.decided_by,
+    approval.decision_note,
+    approval.created_at,
+    approval.decided_at,
+  ].some((value) => String(value ?? '').toLowerCase().includes(query))
 }
 
 function insertApproval(columns: ApprovalsByStatus, approval: Approval): ApprovalsByStatus {

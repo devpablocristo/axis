@@ -232,6 +232,45 @@ textarea:focus-visible {
   gap: var(--axis-space-175);
 }
 
+.approvals-toolbar {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: var(--axis-space-100);
+}
+
+.approvals-search {
+  width: min(420px, 100%);
+  display: grid;
+  gap: 6px;
+  color: var(--axis-muted);
+  font-size: 12px;
+}
+
+.approvals-search input {
+  width: 100%;
+  min-height: var(--axis-button-height);
+  border: 1px solid var(--axis-border-strong);
+  border-radius: var(--axis-radius-md);
+  background: var(--axis-surface);
+  color: var(--axis-text);
+  padding: 0 10px;
+  transition:
+    background-color 0.12s ease,
+    border-color 0.12s ease,
+    box-shadow 0.12s ease;
+}
+
+.approvals-search input:hover {
+  border-color: var(--axis-color-subtle);
+}
+
+.approvals-toolbar__summary {
+  color: var(--axis-muted);
+  font-size: 12px;
+  line-height: var(--axis-button-height);
+}
+
 .approvals-board {
   display: grid;
   grid-template-columns: minmax(280px, 1.15fr) minmax(260px, 1fr) minmax(260px, 1fr);
@@ -315,6 +354,30 @@ textarea:focus-visible {
 
 .approvals-board__card-title > div {
   min-width: 0;
+}
+
+.approvals-board__card-markers {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--axis-space-075);
+}
+
+.approvals-board__card-index {
+  align-items: center;
+  display: inline-flex;
+  justify-content: center;
+  min-height: 24px;
+  border: 1px solid var(--axis-border);
+  border-radius: var(--axis-radius-pill);
+  background: var(--axis-surface-subtle);
+  color: var(--axis-muted);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 0 8px;
+  white-space: nowrap;
 }
 
 .approvals-board__card-title strong {

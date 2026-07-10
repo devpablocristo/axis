@@ -390,6 +390,29 @@ test('approvals board loads resolved approvals incrementally', async ({ page }) 
   await expect(approvedColumn.getByRole('button', { name: 'Load more' })).toBeVisible()
 })
 
+test('approvals board searches loaded approvals and keeps card positions visible', async ({ page }) => {
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Approvals' }).click()
+
+  const search = page.getByLabel('Search approvals')
+  const approvedColumn = page.getByLabel('Approved')
+  await expect(search).toBeVisible()
+  await expect(page.locator('.approvals-toolbar__summary')).toHaveText('11 loaded')
+  await expect(approvedColumn.locator('.approvals-board__card-index').first()).toHaveText('#1')
+
+  await search.fill('binding-approved-9')
+
+  await expect(page.locator('.approvals-toolbar__summary')).toHaveText('1 of 11 loaded')
+  await expect(approvedColumn.locator('.approvals-board__card')).toHaveCount(1)
+  await expect(approvedColumn.locator('.approvals-board__card-index')).toHaveText('#1')
+  await expect(page.getByLabel('Pending').locator('.approvals-board__empty')).toContainText('No matching approvals loaded')
+
+  await page.getByRole('button', { name: 'Clear' }).click()
+
+  await expect(search).toHaveValue('')
+  await expect(approvedColumn.locator('.approvals-board__card')).toHaveCount(10)
+})
+
 test('approval flow can reject and keeps rejected approvals read-only', async ({ page }) => {
   await openSofiaDryRun(page)
 
