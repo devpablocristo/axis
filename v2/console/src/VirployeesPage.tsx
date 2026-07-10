@@ -4,7 +4,7 @@ import {
   type CrudFormValues,
   type CrudPageProps,
 } from '@devpablocristo/platform-crud-ui'
-import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react'
 import { formatDateTime24 } from './formatters'
 import {
   type Approval,
@@ -1828,67 +1828,147 @@ function RunTraceHistory(props: {
       ) : props.runs.length === 0 ? (
         <p className="virployee-preview__empty">No runs recorded</p>
       ) : (
-        <div className="virployee-run-history">
-          {props.runs.map((run) => {
-            const approvalID = run.nexus_result?.approval_id || run.execution_result?.approval_id || ''
-            const approval = approvalID ? approvalByID[approvalID] : null
-            const approvalStatus = approval?.status || run.nexus_result?.approval_status || ''
-            const simulatedRun = latestSimulatedExecutionRun(props.runs, approvalID)
-            const canSimulateExecution = run.operation === 'execution_gate' &&
-              approvalID.length > 0 &&
-              approvalStatus === 'approved' &&
-              !simulatedRun
-            return (
-              <div key={run.id} className="virployee-run-history__row">
-                <div className="virployee-run-history__main">
-                  <div className="virployee-run-history__title">
-                    <strong>{formatRunOperation(run.operation)}</strong>
-                    <StatusBadge value={formatRunDecision(run, approval)} tone={runDecisionTone(run, approval)} />
+        <>
+          <RunTraceAuditSummary runs={props.runs} approvalByID={approvalByID} />
+          <div className="virployee-run-history">
+            {props.runs.map((run, index) => {
+              const approvalID = run.nexus_result?.approval_id || run.execution_result?.approval_id || ''
+              const approval = approvalID ? approvalByID[approvalID] : null
+              const approvalStatus = approval?.status || run.nexus_result?.approval_status || ''
+              const simulatedRun = latestSimulatedExecutionRun(props.runs, approvalID)
+              const canSimulateExecution = run.operation === 'execution_gate' &&
+                approvalID.length > 0 &&
+                approvalStatus === 'approved' &&
+                !simulatedRun
+              return (
+                <div key={run.id} className="virployee-run-history__row">
+                  <div className="virployee-run-history__marker" aria-hidden="true">
+                    <span>{index === 0 ? 'Now' : String(props.runs.length - index).padStart(2, '0')}</span>
                   </div>
-                  <span>{formatDate(run.created_at)}</span>
-                  <small>{run.capability_key || run.intent.capability_key || 'No capability'}</small>
-                  <small>{run.input_preview || shortHash(run.input_hash)}</small>
-                </div>
-                <div className="virployee-run-history__nexus">
-                  <StatusBadge value={formatNexusTrace(run, approval)} tone={nexusTraceTone(run, approval)} />
-                  {formatNexusReason(run) ? <small>{formatNexusReason(run)}</small> : null}
-                  {approvalID ? <small>{formatApprovalTrace(run, approval)}</small> : null}
-                  {approval?.decided_by ? <small>{formatApprovalDecision(approval)}</small> : null}
-                  <small>Binding {run.binding_hash ? shortHash(run.binding_hash) : shortHash(run.input_hash)}</small>
-                  {approvalID && (props.onReviewApproval || canSimulateExecution) ? (
-                    <div className="virployee-run-history__actions">
-                      {props.onReviewApproval ? (
-                        <button
-                          type="button"
-                          className="btn-sm btn-secondary"
-                          onClick={() => props.onReviewApproval?.(approvalID)}
-                        >
-                          {(approval?.status || run.nexus_result?.approval_status) === 'pending' ? 'Review approval' : 'View approval'}
-                        </button>
-                      ) : null}
-                      {canSimulateExecution ? (
-                        <button
-                          type="button"
-                          className="btn-sm btn-primary"
-                          disabled={props.simulationLoading}
-                          onClick={() => props.onSimulateApprovedExecution(approvalID)}
-                        >
-                          {props.simulationLoading ? 'Simulating...' : 'Simulate execution'}
-                        </button>
-                      ) : null}
+                  <div className="virployee-run-history__body">
+                    <div className="virployee-run-history__topline">
+                      <div className="virployee-run-history__title">
+                        <strong>{formatRunOperation(run.operation)}</strong>
+                        <StatusBadge value={formatRunDecision(run, approval)} tone={runDecisionTone(run, approval)} />
+                      </div>
+                      <time dateTime={run.created_at}>{formatDate(run.created_at)}</time>
                     </div>
-                  ) : null}
+
+                    <div className="virployee-run-history__facts">
+                      <AuditFact label="Capability" value={runCapabilityKey(run)} />
+                      <AuditFact
+                        label="Nexus"
+                        value={<StatusBadge value={formatNexusTrace(run, approval)} tone={nexusTraceTone(run, approval)} />}
+                      />
+                      <AuditFact label="Approval" value={approvalID ? formatApprovalTrace(run, approval) : 'None'} />
+                      <AuditFact label="Binding" value={shortHash(runBindingHash(run))} />
+                    </div>
+
+                    <div className="virployee-run-history__input">
+                      <span>Input</span>
+                      <p>{runInputPreview(run)}</p>
+                    </div>
+
+                    {formatNexusReason(run) ? (
+                      <div className="virployee-run-history__reason">
+                        <span>Reason</span>
+                        <p>{formatNexusReason(run)}</p>
+                      </div>
+                    ) : null}
+                    {approval?.decided_by ? (
+                      <div className="virployee-run-history__reason">
+                        <span>Human decision</span>
+                        <p>{formatApprovalDecision(approval)}</p>
+                      </div>
+                    ) : null}
+
+                    {approvalID && (props.onReviewApproval || canSimulateExecution) ? (
+                      <div className="virployee-run-history__actions">
+                        {props.onReviewApproval ? (
+                          <button
+                            type="button"
+                            className="btn-sm btn-secondary"
+                            onClick={() => props.onReviewApproval?.(approvalID)}
+                          >
+                            {(approval?.status || run.nexus_result?.approval_status) === 'pending' ? 'Review approval' : 'View approval'}
+                          </button>
+                        ) : null}
+                        {canSimulateExecution ? (
+                          <button
+                            type="button"
+                            className="btn-sm btn-primary"
+                            disabled={props.simulationLoading}
+                            onClick={() => props.onSimulateApprovedExecution(approvalID)}
+                          >
+                            {props.simulationLoading ? 'Simulating...' : 'Simulate execution'}
+                          </button>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
-              </div>
-            )
-          })}
-        </div>
+              )
+            })}
+          </div>
+        </>
       )}
     </section>
   )
 }
 
 type StatusTone = 'success' | 'danger' | 'warning' | 'muted'
+
+function RunTraceAuditSummary(props: { runs: VirployeeRunTrace[]; approvalByID: Record<string, Approval | null> }) {
+  const latestRun = props.runs[0]
+  const latestApprovalID = latestRun?.nexus_result?.approval_id || latestRun?.execution_result?.approval_id || ''
+  const latestApproval = latestApprovalID ? props.approvalByID[latestApprovalID] : null
+  const approvalIDs = new Set(props.runs.map((run) => run.nexus_result?.approval_id || run.execution_result?.approval_id).filter(Boolean))
+  const simulatedCount = props.runs.filter((run) => run.operation === 'simulated_execution').length
+  const pendingApprovals = Array.from(approvalIDs).filter((id) => props.approvalByID[id]?.status === 'pending').length
+
+  return (
+    <div className="virployee-audit-summary" aria-label="Audit summary">
+      <AuditSummaryItem
+        label="Latest event"
+        value={latestRun ? formatRunOperation(latestRun.operation) : '-'}
+        badge={latestRun ? <StatusBadge value={formatRunDecision(latestRun, latestApproval)} tone={runDecisionTone(latestRun, latestApproval)} /> : null}
+      />
+      <AuditSummaryItem
+        label="Approvals"
+        value={`${approvalIDs.size} linked`}
+        badge={pendingApprovals > 0 ? <StatusBadge value={`${pendingApprovals} pending`} tone="warning" /> : null}
+      />
+      <AuditSummaryItem
+        label="Simulations"
+        value={`${simulatedCount} completed`}
+        badge={simulatedCount > 0 ? <StatusBadge value="No external effects" tone="success" /> : null}
+      />
+      <AuditSummaryItem
+        label="Current binding"
+        value={latestRun ? shortHash(runBindingHash(latestRun)) : '-'}
+      />
+    </div>
+  )
+}
+
+function AuditSummaryItem(props: { label: string; value: string; badge?: ReactNode }) {
+  return (
+    <div className="virployee-audit-summary__item">
+      <span>{props.label}</span>
+      <strong>{props.value}</strong>
+      {props.badge}
+    </div>
+  )
+}
+
+function AuditFact(props: { label: string; value: ReactNode }) {
+  return (
+    <div className="virployee-run-history__fact">
+      <span>{props.label}</span>
+      <strong>{props.value}</strong>
+    </div>
+  )
+}
 
 function FlowSummaryItem(props: { label: string; value: string; tone: StatusTone }) {
   return (
@@ -2453,6 +2533,18 @@ function latestSimulatedExecutionRun(runs: VirployeeRunTrace[], approvalID: stri
   return runs.find((run) => run.operation === 'simulated_execution' && run.execution_result?.approval_id === approvalID) ?? null
 }
 
+function runCapabilityKey(run: VirployeeRunTrace): string {
+  return run.capability_key || run.intent.capability_key || 'No capability'
+}
+
+function runInputPreview(run: VirployeeRunTrace): string {
+  return run.input_preview || shortHash(run.input_hash)
+}
+
+function runBindingHash(run: VirployeeRunTrace): string {
+  return run.execution_result?.binding_hash || run.nexus_result?.binding_hash || run.binding_hash || run.input_hash || ''
+}
+
 function formatRunDecision(run: VirployeeRunTrace, approval?: Approval | null): string {
   if (run.operation === 'simulated_execution') {
     return run.execution_result?.status === 'simulated_executed' ? 'Simulated' : 'Simulation'
@@ -2503,8 +2595,9 @@ function formatNexusTrace(run: VirployeeRunTrace, approval?: Approval | null): s
 }
 
 function nexusTraceTone(run?: VirployeeRunTrace | null, approval?: Approval | null): StatusTone {
-  if (!run?.nexus_result) return 'muted'
+  if (!run) return 'muted'
   if (run.operation === 'simulated_execution') return run.execution_result?.external_effects ? 'warning' : 'success'
+  if (!run.nexus_result) return 'muted'
   if (!run.nexus_result.available || run.nexus_result.decision === 'deny') return 'danger'
   if (run.nexus_result.decision === 'require_approval') {
     return approvalStatusTone(approval?.status || run.nexus_result.approval_status || 'pending')

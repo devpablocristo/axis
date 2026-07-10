@@ -1992,27 +1992,95 @@ tbody tr:hover {
   min-width: 0;
 }
 
-.virployee-run-history {
+.virployee-audit-summary {
   display: grid;
-  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
 }
 
-.virployee-run-history__row {
-  align-items: start;
+.virployee-audit-summary__item {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(220px, 0.65fr);
-  gap: 12px;
+  align-content: start;
+  gap: 6px;
+  min-width: 0;
+  min-height: 72px;
   border: 1px solid var(--axis-border);
   border-radius: var(--axis-radius-md);
   background: var(--axis-surface);
   padding: 10px;
 }
 
-.virployee-run-history__main,
-.virployee-run-history__nexus {
+.virployee-audit-summary__item > span,
+.virployee-run-history__fact > span,
+.virployee-run-history__input > span,
+.virployee-run-history__reason > span {
+  color: var(--axis-muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.virployee-audit-summary__item > strong {
+  min-width: 0;
+  color: var(--axis-text);
+  font-size: 14px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.virployee-run-history {
+  display: grid;
+  gap: 10px;
+}
+
+.virployee-run-history__row {
+  align-items: start;
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr);
+  min-width: 0;
+  border: 1px solid var(--axis-border);
+  border-radius: var(--axis-radius-md);
+  background: var(--axis-surface);
+  overflow: hidden;
+}
+
+.virployee-run-history__marker {
+  align-self: stretch;
+  display: flex;
+  justify-content: center;
+  border-right: 1px solid var(--axis-border);
+  background: var(--axis-surface-subtle);
+  padding-top: 12px;
+}
+
+.virployee-run-history__marker span {
+  align-items: center;
+  display: inline-flex;
+  justify-content: center;
+  width: 34px;
+  height: 24px;
+  border: 1px solid var(--axis-border);
+  border-radius: var(--axis-radius-pill);
+  background: var(--axis-surface);
+  color: var(--axis-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.virployee-run-history__body {
   display: grid;
   align-content: start;
-  gap: 5px;
+  gap: 11px;
+  min-width: 0;
+  padding: 12px;
+}
+
+.virployee-run-history__topline {
+  align-items: start;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
   min-width: 0;
 }
 
@@ -2024,15 +2092,52 @@ tbody tr:hover {
   min-width: 0;
 }
 
-.virployee-run-history__row strong {
+.virployee-run-history__title strong {
   font-size: 14px;
   font-weight: 600;
 }
 
-.virployee-run-history__row span,
-.virployee-run-history__row small {
+.virployee-run-history__topline time {
   color: var(--axis-muted);
   font-size: 12px;
+  white-space: nowrap;
+}
+
+.virployee-run-history__facts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.virployee-run-history__fact {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.virployee-run-history__fact > strong {
+  min-width: 0;
+  color: var(--axis-text);
+  font-size: 13px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.virployee-run-history__input,
+.virployee-run-history__reason {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  border-top: 1px solid var(--axis-border);
+  padding-top: 10px;
+}
+
+.virployee-run-history__input p,
+.virployee-run-history__reason p {
+  margin: 0;
+  color: var(--axis-muted);
+  font-size: 12px;
+  line-height: 1.45;
   overflow-wrap: anywhere;
 }
 
@@ -2124,6 +2229,11 @@ tbody tr:hover {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .virployee-audit-summary,
+  .virployee-run-history__facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .approvals-board {
     grid-template-columns: 1fr;
   }
@@ -2140,7 +2250,11 @@ tbody tr:hover {
   }
 
   .virployee-run-history__row {
-    grid-template-columns: 1fr;
+    grid-template-columns: 44px minmax(0, 1fr);
+  }
+
+  .virployee-run-history__marker span {
+    width: 30px;
   }
 
   .approvals-list__actions {
@@ -2172,6 +2286,11 @@ tbody tr:hover {
     grid-template-columns: 1fr;
   }
 
+  .virployee-audit-summary,
+  .virployee-run-history__facts {
+    grid-template-columns: 1fr;
+  }
+
   .approvals-board__facts,
   .approvals-board__actions {
     grid-template-columns: 1fr;
@@ -2184,6 +2303,16 @@ tbody tr:hover {
 
   .virployee-run-history__header button {
     width: 100%;
+  }
+
+  .virployee-run-history__topline {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .virployee-run-history__topline time {
+    white-space: normal;
   }
 
   .tenants-control .crud-form {
