@@ -1074,6 +1074,7 @@ button:disabled,
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
+  min-width: 0;
   margin-bottom: 12px;
 }
 
@@ -1089,6 +1090,8 @@ button:disabled,
 }
 
 .axis-crud-host .crud-page-shell__header-actions {
+  min-width: 0;
+  width: 100%;
   display: grid;
   gap: 8px;
   justify-items: end;
@@ -1159,6 +1162,7 @@ button:disabled,
 }
 
 .iam-control__bulk-buttons {
+  max-width: 100%;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -1166,6 +1170,7 @@ button:disabled,
 }
 
 .iam-control__button-group {
+  min-width: 0;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -2183,10 +2188,11 @@ tbody tr:hover {
 
 @media (max-width: 960px) {
   .app-shell {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .sidebar {
+    min-width: 0;
     padding: 14px 16px;
   }
 
@@ -2197,6 +2203,10 @@ tbody tr:hover {
   .nav {
     grid-auto-flow: column;
     justify-content: start;
+    max-width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    padding-bottom: 2px;
   }
 
   .workspace {
@@ -2230,6 +2240,7 @@ tbody tr:hover {
   .virployees-control .virployee-edit-inline,
   .virployees-control .crud-page-shell__header-actions {
     grid-column: 1;
+    grid-row: auto;
   }
 
   .crud-shell-header-actions-column__search-row,

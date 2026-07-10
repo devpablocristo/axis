@@ -283,6 +283,32 @@ test('crud lists keep selection and primary columns fixed and expose created tim
   }
 })
 
+test('crud tables stay usable across desktop, tablet, and mobile viewports', async ({ page }) => {
+  const viewports = [
+    { name: 'desktop', width: 1366, height: 768 },
+    { name: 'tablet', width: 900, height: 900 },
+    { name: 'mobile', width: 390, height: 844 },
+  ]
+
+  for (const viewport of viewports) {
+    await page.setViewportSize({ width: viewport.width, height: viewport.height })
+    await page.goto('/')
+
+    const nav = page.locator('.nav')
+    for (const section of ['Virployees', 'Capabilities', 'Job Roles', 'Profile Templates']) {
+      await nav.getByRole('button', { name: section }).click()
+      await expectResponsiveCrudTable(page, viewport.name)
+    }
+
+    await nav.getByRole('button', { name: 'Admin' }).click()
+    const tenancyTabs = page.locator('.tenancy-section__tabs')
+    for (const tab of ['Users', 'Tenants', 'Orgs', 'Products']) {
+      await tenancyTabs.getByRole('tab', { name: tab }).click()
+      await expectResponsiveCrudTable(page, `${viewport.name} ${tab}`)
+    }
+  }
+})
+
 test('virployees keeps selector and name columns fixed during horizontal scroll', async ({ page }) => {
   await page.goto('/')
   await page.getByRole('button', { name: 'Virployees' }).click()
@@ -802,6 +828,32 @@ async function expectStickySelectionAndPrimary(page: Page) {
   const after = await cellPositions(checkboxCell, primaryCell)
   expect(Math.abs(after.checkboxX - before.checkboxX)).toBeLessThanOrEqual(1)
   expect(Math.abs(after.nameX - before.nameX)).toBeLessThanOrEqual(1)
+}
+
+async function expectResponsiveCrudTable(page: Page, context: string) {
+  const tableWrap = page.locator('.axis-crud-host .table-wrap').first()
+  await expect(tableWrap, context).toBeVisible()
+  await expect(page.getByRole('columnheader', { name: 'Created' }), context).toBeVisible()
+  await expect(page.locator('th.col-actions'), context).toHaveCount(0)
+  await expect(page.locator('.iam-control__bulk-buttons'), context).toHaveCount(1)
+  await expectStickySelectionAndPrimary(page)
+
+  const metrics = await tableWrap.evaluate((element) => {
+    const rect = element.getBoundingClientRect()
+    return {
+      left: rect.left,
+      right: rect.right,
+      viewportWidth: window.innerWidth,
+      scrollWidth: element.scrollWidth,
+      clientWidth: element.clientWidth,
+      overflowX: window.getComputedStyle(element).overflowX,
+    }
+  })
+
+  expect(metrics.left, context).toBeGreaterThanOrEqual(0)
+  expect(metrics.right, context).toBeLessThanOrEqual(metrics.viewportWidth + 1)
+  expect(metrics.scrollWidth, context).toBeGreaterThanOrEqual(metrics.clientWidth)
+  expect(metrics.overflowX, context).toBe('auto')
 }
 
 async function expectActionBars(page: Page, topSelector: string, bottomSelector: string) {
