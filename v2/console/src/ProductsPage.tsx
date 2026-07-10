@@ -7,6 +7,7 @@ import {
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react'
 import { EntityFormPanel, emptyFormValues } from './EntityFormPanel'
 import { LifecycleBulkActions } from './LifecycleBulkActions'
+import { crudPrimaryStickyColumn, crudSelectionStickyColumn } from './crudTableColumns'
 import { formatDateTime24 } from './formatters'
 import {
   type Product,
@@ -239,7 +240,7 @@ function productColumns(
 ): CrudPageProps<Product>['columns'] {
   return [
     selectionColumn<Product>(selectedIds, onToggle),
-    { key: 'name', header: 'Product', className: 'iam-control__primary-col' },
+    { key: 'name', header: 'Product', className: 'iam-control__primary-col', ...crudPrimaryStickyColumn },
     { key: 'created_at', header: 'Created', className: 'iam-control__created-col', render: (value) => formatDateTime24(String(value ?? '')) },
     { key: 'product_surface', header: 'Slug' },
     { key: 'state', header: 'State', render: (value) => formatState(String(value ?? '')) },
@@ -292,6 +293,7 @@ function selectionColumn<T extends Product>(
     header: '',
     sortable: false,
     className: 'iam-control__select-col',
+    ...crudSelectionStickyColumn,
     render: (_value: unknown, row: T) => (
       <input
         type="checkbox"

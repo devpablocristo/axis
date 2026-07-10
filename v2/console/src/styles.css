@@ -1249,6 +1249,15 @@ p.iam-control__inline-note {
   overflow: visible;
 }
 
+.axis-crud-host .crud-table__cell--sticky {
+  position: sticky;
+  background: var(--axis-surface);
+}
+
+.axis-crud-host th.crud-table__cell--sticky {
+  background: var(--axis-surface-subtle);
+}
+
 .axis-crud-host .iam-control__select-col,
 .axis-crud-host .iam-control__primary-col {
   position: sticky;

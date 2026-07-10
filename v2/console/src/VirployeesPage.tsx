@@ -5,6 +5,7 @@ import {
   type CrudPageProps,
 } from '@devpablocristo/platform-crud-ui'
 import { useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react'
+import { crudPrimaryStickyColumn, crudSelectionStickyColumn } from './crudTableColumns'
 import { formatDateTime24 } from './formatters'
 import {
   type Approval,
@@ -2090,11 +2091,7 @@ function virployeeColumns(
       key: 'name',
       header: 'Name',
       className: 'iam-control__primary-col virployee-name-col',
-      sticky: 'left',
-      stickyOffset: 52,
-      width: 280,
-      minWidth: 280,
-      maxWidth: 280,
+      ...crudPrimaryStickyColumn,
     },
     { key: 'created_at', header: 'Created', className: 'iam-control__created-col', render: (value) => formatDateTime24(String(value ?? '')) },
     { key: 'job_role_id', header: 'Job Role', render: (value) => jobRoleName(String(value ?? ''), jobRoleByID) },
@@ -2271,11 +2268,7 @@ function selectionColumn<T extends { id: string }>(
     header: '',
     sortable: false,
     className: 'iam-control__select-col',
-    sticky: 'left',
-    stickyOffset: 0,
-    width: 52,
-    minWidth: 52,
-    maxWidth: 52,
+    ...crudSelectionStickyColumn,
     render: (_value: unknown, row: T) => (
       <input
         type="checkbox"

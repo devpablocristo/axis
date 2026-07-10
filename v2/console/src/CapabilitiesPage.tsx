@@ -7,6 +7,7 @@ import {
 import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import { EntityFormPanel, emptyFormValues } from './EntityFormPanel'
 import { LifecycleBulkActions } from './LifecycleBulkActions'
+import { crudPrimaryStickyColumn, crudSelectionStickyColumn } from './crudTableColumns'
 import { formatDateTime24 } from './formatters'
 import {
   type Capability,
@@ -444,7 +445,7 @@ function capabilityColumns(
 ): CrudPageProps<Capability>['columns'] {
   return [
     selectionColumn<Capability>(selectedIds, onToggle),
-    { key: 'capability_key', header: 'Key', className: 'iam-control__primary-col' },
+    { key: 'capability_key', header: 'Key', className: 'iam-control__primary-col', ...crudPrimaryStickyColumn },
     { key: 'created_at', header: 'Created', className: 'iam-control__created-col', render: (value) => formatDateTime24(String(value ?? '')) },
     { key: 'name', header: 'Name' },
     { key: 'required_autonomy', header: 'Required autonomy', render: (value) => formatRequiredAutonomy(String(value ?? '')) },
@@ -521,6 +522,7 @@ function selectionColumn<T extends Capability>(
     header: '',
     sortable: false,
     className: 'iam-control__select-col',
+    ...crudSelectionStickyColumn,
     render: (_value: unknown, row: T) => (
       <input
         type="checkbox"

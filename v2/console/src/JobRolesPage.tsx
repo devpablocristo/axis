@@ -7,6 +7,7 @@ import {
 import { useEffect, useMemo, useState, type ReactElement } from 'react'
 import { EntityFormPanel, emptyFormValues } from './EntityFormPanel'
 import { LifecycleBulkActions } from './LifecycleBulkActions'
+import { crudPrimaryStickyColumn, crudSelectionStickyColumn } from './crudTableColumns'
 import { formatDateTime24 } from './formatters'
 import {
   type JobRole,
@@ -234,7 +235,7 @@ function jobRoleColumns(
 ): CrudPageProps<JobRole>['columns'] {
   return [
     selectionColumn<JobRole>(selectedIds, onToggle),
-    { key: 'name', header: 'Name', className: 'iam-control__primary-col' },
+    { key: 'name', header: 'Name', className: 'iam-control__primary-col', ...crudPrimaryStickyColumn },
     { key: 'created_at', header: 'Created', className: 'iam-control__created-col', render: (value) => formatDateTime24(String(value ?? '')) },
     { key: 'state', header: 'State', render: (value) => formatState(String(value ?? '')) },
   ]
@@ -284,6 +285,7 @@ function selectionColumn<T extends JobRole>(
     header: '',
     sortable: false,
     className: 'iam-control__select-col',
+    ...crudSelectionStickyColumn,
     render: (_value: unknown, row: T) => (
       <input
         type="checkbox"

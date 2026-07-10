@@ -7,6 +7,7 @@ import {
 import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import { EntityFormPanel, emptyFormValues } from './EntityFormPanel'
 import { LifecycleBulkActions } from './LifecycleBulkActions'
+import { crudPrimaryStickyColumn, crudSelectionStickyColumn } from './crudTableColumns'
 import { formatDateTime24 } from './formatters'
 import {
   type VirployeeAutonomy,
@@ -432,7 +433,7 @@ function profileColumns(
 ): CrudPageProps<ProfileTemplate>['columns'] {
   return [
     selectionColumn<ProfileTemplate>(selectedIds, onToggle),
-    { key: 'name', header: 'Name', className: 'iam-control__primary-col' },
+    { key: 'name', header: 'Name', className: 'iam-control__primary-col', ...crudPrimaryStickyColumn },
     { key: 'created_at', header: 'Created', className: 'iam-control__created-col', render: (value) => formatDateTime24(String(value ?? '')) },
     { key: 'max_autonomy', header: 'Max autonomy', render: (value) => formatAutonomy(String(value ?? '')) },
     { key: 'state', header: 'State', render: (value) => formatState(String(value ?? '')) },
@@ -501,6 +502,7 @@ function selectionColumn<T extends ProfileTemplate>(
     header: '',
     sortable: false,
     className: 'iam-control__select-col',
+    ...crudSelectionStickyColumn,
     render: (_value: unknown, row: T) => (
       <input
         type="checkbox"

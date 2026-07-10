@@ -7,6 +7,7 @@ import {
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react'
 import { EntityFormPanel, emptyFormValues } from './EntityFormPanel'
 import { LifecycleBulkActions } from './LifecycleBulkActions'
+import { crudPrimaryStickyColumn, crudSelectionStickyColumn } from './crudTableColumns'
 import { formatDateTime24 } from './formatters'
 import {
   type AxisOrg,
@@ -253,7 +254,7 @@ function orgColumns(
 ): CrudPageProps<AxisOrg>['columns'] {
   return [
     selectionColumn<AxisOrg>(selectedIds, onToggle),
-    { key: 'name', header: 'Org', className: 'iam-control__primary-col' },
+    { key: 'name', header: 'Org', className: 'iam-control__primary-col', ...crudPrimaryStickyColumn },
     { key: 'created_at', header: 'Created', className: 'iam-control__created-col', render: (value) => formatDateTime24(String(value ?? '')) },
     { key: 'tenant_count', header: 'Tenants', render: (value) => Number(value || 0) },
     { key: 'state', header: 'State', render: (value) => formatState(String(value ?? '')) },
@@ -299,6 +300,7 @@ function selectionColumn<T extends AxisOrg>(
     header: '',
     sortable: false,
     className: 'iam-control__select-col',
+    ...crudSelectionStickyColumn,
     render: (_value: unknown, row: T) => (
       <input
         type="checkbox"
