@@ -1,3 +1,5 @@
+import { parsePaginatedResponse, type PaginatedList as PlatformPaginatedList } from '@devpablocristo/platform-browser/crud'
+
 export type LifecycleTimestamp = string | null
 export type TenantState = 'active' | 'archived' | 'trashed'
 
@@ -430,9 +432,9 @@ type ProductsListResponse = {
 	data: Product[]
 }
 
-type ApprovalsListResponse = {
-	data: Approval[]
-}
+type ApprovalsListResponse = unknown
+
+export type PaginatedList<T> = PlatformPaginatedList<T>
 
 type AutonomyLevelsResponse = {
 	data: VirployeeAutonomyLevel[]
@@ -606,10 +608,25 @@ export function listApprovals(
 	status: Approval['status'] = 'pending',
 	limit = 50,
 ): Promise<Approval[]> {
+	return listApprovalsPage(tenantId, principalId, status, { limit }).then((page) => page.items)
+}
+
+export function listApprovalsPage(
+	tenantId: string,
+	principalId: string,
+	status: Approval['status'] = 'pending',
+	options: { limit?: number; cursor?: string } = {},
+): Promise<PaginatedList<Approval>> {
+	const params = new URLSearchParams()
+	params.set('status', status)
+	params.set('limit', String(options.limit ?? 50))
+	if (options.cursor) {
+		params.set('cursor', options.cursor)
+	}
 	return axisFetch<ApprovalsListResponse>(
-		`/api/approvals?status=${encodeURIComponent(status)}&limit=${encodeURIComponent(String(limit))}`,
+		`/api/approvals?${params.toString()}`,
 		{ tenantId, principalId },
-	).then((payload) => payload.data ?? [])
+	).then((payload) => parsePaginatedResponse<Approval>(payload))
 }
 
 export function getApproval(id: string, tenantId: string, principalId: string): Promise<Approval> {

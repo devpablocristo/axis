@@ -21,7 +21,13 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 	return &Repository{pool: pool}
 }
 
-func (r *Repository) List(ctx context.Context, tenantID string, status domain.Status, limit int) ([]domain.Approval, error) {
+func (r *Repository) List(ctx context.Context, tenantID string, status domain.Status, limit int, after *domain.ListCursor) ([]domain.Approval, error) {
+	args := []any{tenantID, string(status), limit}
+	cursorClause := ""
+	if after != nil {
+		cursorClause = " AND (created_at, id) < ($4, $5::uuid)"
+		args = append(args, after.CreatedAt, after.ID.String())
+	}
 	rows, err := r.pool.Query(ctx, `
 		SELECT
 			id::text,
@@ -43,9 +49,10 @@ func (r *Repository) List(ctx context.Context, tenantID string, status domain.St
 		FROM approvals
 		WHERE tenant_id = $1
 			AND status = $2
+			`+cursorClause+`
 		ORDER BY created_at DESC, id DESC
 		LIMIT $3
-	`, tenantID, string(status), limit)
+	`, args...)
 	if err != nil {
 		return nil, err
 	}

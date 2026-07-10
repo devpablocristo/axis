@@ -30,8 +30,8 @@ github.com/devpablocristo/platform/errors/go v0.2.0 h1:I7WZlgEd7ic6c2IETYgzA3ULy
 github.com/devpablocristo/platform/errors/go v0.2.0/go.mod h1:1cHoflrIdeQrLDtVPgsl5GqjYH7AZKASNYCMSAcdjOA=
 github.com/devpablocristo/platform/http/gin/go v0.2.3 h1:py98qKf2fCLpC0iEYxqlk3if8YS2Dbj5ApGpuboluQ0=
 github.com/devpablocristo/platform/http/gin/go v0.2.3/go.mod h1:Ni+Hek8a+klpqFlW1gt92bmnXFguSPLQLeAzBNKHm1U=
-github.com/devpablocristo/platform/http/go v0.2.0 h1:r6DWVguu22vaGV7B+a9iEvs6lBn2vRKPgrPfeoVR2Q4=
-github.com/devpablocristo/platform/http/go v0.2.0/go.mod h1:qinUKdGJ51xbKMLYWF96bSGu8JSRAbWPsAqTusrg5tk=
+github.com/devpablocristo/platform/http/go v0.2.1 h1:gyHLftz7bIYZ/VJI/Q0nOILc0rCvWke02O9AXgUKHv4=
+github.com/devpablocristo/platform/http/go v0.2.1/go.mod h1:qinUKdGJ51xbKMLYWF96bSGu8JSRAbWPsAqTusrg5tk=
 github.com/devpablocristo/platform/security/go v0.2.2 h1:qVHSXm659qnzUf4qCFFf4WD1aVWnAz5TWgkKinknvyk=
 github.com/devpablocristo/platform/security/go v0.2.2/go.mod h1:P0FEZO5qZDDOxLk6+d90AFlQeiK3qiQ3CnTKqscCmeg=
 github.com/dhui/dktest v0.4.6 h1:+DPKyScKSEp3VLtbMDHcUq6V5Lm5zfZZVb0Sk7Ahom4=

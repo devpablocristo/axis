@@ -35,6 +35,23 @@ type Approval struct {
 	UpdatedAt         time.Time
 }
 
+type ListInput struct {
+	StatusRaw string
+	Limit     int
+	Cursor    string
+}
+
+type ListCursor struct {
+	CreatedAt time.Time
+	ID        uuid.UUID
+}
+
+type ListPage struct {
+	Items      []Approval
+	HasMore    bool
+	NextCursor string
+}
+
 type DecisionInput struct {
 	Note string
 }

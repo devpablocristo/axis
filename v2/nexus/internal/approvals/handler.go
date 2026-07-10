@@ -2,7 +2,6 @@ package approvals
 
 import (
 	"context"
-	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -11,10 +10,11 @@ import (
 	"github.com/devpablocristo/nexus-v2/internal/approvals/handler/dto"
 	"github.com/devpablocristo/nexus-v2/internal/approvals/usecases/domain"
 	ginmw "github.com/devpablocristo/platform/http/gin/go"
+	"github.com/devpablocristo/platform/http/go/pagination"
 )
 
 type UseCasesPort interface {
-	List(context.Context, string, string, int) ([]domain.Approval, error)
+	List(context.Context, string, domain.ListInput) (domain.ListPage, error)
 	Get(context.Context, string, uuid.UUID) (domain.Approval, error)
 	Approve(context.Context, string, uuid.UUID, string, domain.DecisionInput) (domain.Approval, error)
 	Reject(context.Context, string, uuid.UUID, string, domain.DecisionInput) (domain.Approval, error)
@@ -39,11 +39,11 @@ func (h *Handler) Routes(router gin.IRouter) {
 }
 
 func (h *Handler) List(c *gin.Context) {
-	limit, ok := parseLimit(c)
+	input, ok := parseListInput(c)
 	if !ok {
 		return
 	}
-	out, err := h.ucs.List(c.Request.Context(), tenantID(c), c.Query("status"), limit)
+	out, err := h.ucs.List(c.Request.Context(), tenantID(c), input)
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -92,20 +92,20 @@ func (h *Handler) decide(
 	ginmw.WriteJSON(c, 200, dto.ApprovalFromDomain(out))
 }
 
-func parseLimit(c *gin.Context) (int, bool) {
-	raw := strings.TrimSpace(c.Query("limit"))
-	if raw == "" {
-		return 50, true
-	}
-	limit, err := strconv.Atoi(raw)
-	if err != nil || limit <= 0 {
+func parseListInput(c *gin.Context) (domain.ListInput, bool) {
+	params, err := pagination.ParseParams(c.Query("limit"), c.Query("cursor"), pagination.Config{
+		DefaultLimit: 20,
+		MaxLimit:     100,
+	})
+	if err != nil {
 		ginmw.Respond(c, ginmw.ErrBadInput)
-		return 0, false
+		return domain.ListInput{}, false
 	}
-	if limit > 100 {
-		limit = 100
-	}
-	return limit, true
+	return domain.ListInput{
+		StatusRaw: c.Query("status"),
+		Limit:     params.Limit,
+		Cursor:    params.Cursor,
+	}, true
 }
 
 func tenantID(c *gin.Context) string {

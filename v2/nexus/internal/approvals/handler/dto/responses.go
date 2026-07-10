@@ -24,7 +24,9 @@ type ApprovalResponse struct {
 }
 
 type ListApprovalsResponse struct {
-	Data []ApprovalResponse `json:"data"`
+	Items      []ApprovalResponse `json:"items"`
+	HasMore    bool               `json:"has_more"`
+	NextCursor string             `json:"next_cursor,omitempty"`
 }
 
 func ApprovalFromDomain(item domain.Approval) ApprovalResponse {
@@ -46,10 +48,14 @@ func ApprovalFromDomain(item domain.Approval) ApprovalResponse {
 	}
 }
 
-func ListApprovalsFromDomain(items []domain.Approval) ListApprovalsResponse {
-	data := make([]ApprovalResponse, 0, len(items))
-	for _, item := range items {
-		data = append(data, ApprovalFromDomain(item))
+func ListApprovalsFromDomain(page domain.ListPage) ListApprovalsResponse {
+	items := make([]ApprovalResponse, 0, len(page.Items))
+	for _, item := range page.Items {
+		items = append(items, ApprovalFromDomain(item))
 	}
-	return ListApprovalsResponse{Data: data}
+	return ListApprovalsResponse{
+		Items:      items,
+		HasMore:    page.HasMore,
+		NextCursor: page.NextCursor,
+	}
 }

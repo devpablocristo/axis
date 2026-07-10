@@ -20,25 +20,30 @@ func TestHandlerListApprovals(t *testing.T) {
 	router := setupApprovalsRouter(fake)
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/v1/approvals?status=pending&limit=10", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/approvals?status=pending&limit=10&cursor=cursor-1", nil)
 	req.Header.Set("X-Tenant-ID", "tenant-1")
 	router.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
-	if fake.lastTenant != "tenant-1" || fake.lastStatus != "pending" || fake.lastLimit != 10 {
+	if fake.lastTenant != "tenant-1" || fake.lastInput.StatusRaw != "pending" || fake.lastInput.Limit != 10 || fake.lastInput.Cursor != "cursor-1" {
 		t.Fatalf("unexpected list call: %+v", fake)
 	}
 	var payload struct {
-		Data []struct {
+		Items []struct {
 			ID         string `json:"id"`
 			ActionType string `json:"action_type"`
 			Status     string `json:"status"`
-		} `json:"data"`
+		} `json:"items"`
+		HasMore    bool   `json:"has_more"`
+		NextCursor string `json:"next_cursor"`
 	}
 	decodeApprovalsJSON(t, rec, &payload)
-	if len(payload.Data) != 1 || payload.Data[0].ActionType != "calendar.events.delete" || payload.Data[0].Status != "pending" {
+	if len(payload.Items) != 1 || payload.Items[0].ActionType != "calendar.events.delete" || payload.Items[0].Status != "pending" {
+		t.Fatalf("unexpected payload: %+v", payload)
+	}
+	if !payload.HasMore || payload.NextCursor != "cursor-2" {
 		t.Fatalf("unexpected payload: %+v", payload)
 	}
 }
@@ -105,19 +110,21 @@ func decodeApprovalsJSON(t *testing.T, rec *httptest.ResponseRecorder, out any) 
 
 type handlerFakeUseCases struct {
 	lastTenant   string
-	lastStatus   string
-	lastLimit    int
+	lastInput    domain.ListInput
 	lastID       uuid.UUID
 	lastActor    string
 	lastNote     string
 	lastDecision string
 }
 
-func (f *handlerFakeUseCases) List(_ context.Context, tenantID string, status string, limit int) ([]domain.Approval, error) {
+func (f *handlerFakeUseCases) List(_ context.Context, tenantID string, input domain.ListInput) (domain.ListPage, error) {
 	f.lastTenant = tenantID
-	f.lastStatus = status
-	f.lastLimit = limit
-	return []domain.Approval{fakeApproval(tenantID, domain.StatusPending)}, nil
+	f.lastInput = input
+	return domain.ListPage{
+		Items:      []domain.Approval{fakeApproval(tenantID, domain.StatusPending)},
+		HasMore:    true,
+		NextCursor: "cursor-2",
+	}, nil
 }
 
 func (f *handlerFakeUseCases) Get(_ context.Context, tenantID string, id uuid.UUID) (domain.Approval, error) {

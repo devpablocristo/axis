@@ -2,6 +2,7 @@ package approvals
 
 import (
 	"context"
+	"sort"
 	"testing"
 	"time"
 
@@ -16,12 +17,44 @@ func TestUseCasesListDefaultsToPending(t *testing.T) {
 	repo.add("tenant-1", domain.StatusApproved)
 	uc := NewUseCases(repo)
 
-	out, err := uc.List(context.Background(), "tenant-1", "", 0)
+	out, err := uc.List(context.Background(), "tenant-1", domain.ListInput{})
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if len(out) != 1 || out[0].ID != pending.ID {
+	if len(out.Items) != 1 || out.Items[0].ID != pending.ID {
 		t.Fatalf("unexpected list: %+v", out)
+	}
+}
+
+func TestUseCasesListCursorPaginatesApprovals(t *testing.T) {
+	repo := newFakeRepo()
+	base := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
+	first := repo.addAt("tenant-1", domain.StatusPending, base.Add(3*time.Minute))
+	second := repo.addAt("tenant-1", domain.StatusPending, base.Add(2*time.Minute))
+	third := repo.addAt("tenant-1", domain.StatusPending, base.Add(time.Minute))
+	repo.addAt("tenant-1", domain.StatusApproved, base.Add(4*time.Minute))
+	uc := NewUseCases(repo)
+
+	page, err := uc.List(context.Background(), "tenant-1", domain.ListInput{StatusRaw: "pending", Limit: 2})
+	if err != nil {
+		t.Fatalf("List first page: %v", err)
+	}
+	if !page.HasMore || page.NextCursor == "" {
+		t.Fatalf("expected next cursor, got %+v", page)
+	}
+	if len(page.Items) != 2 || page.Items[0].ID != first.ID || page.Items[1].ID != second.ID {
+		t.Fatalf("unexpected first page: %+v", page.Items)
+	}
+
+	next, err := uc.List(context.Background(), "tenant-1", domain.ListInput{StatusRaw: "pending", Limit: 2, Cursor: page.NextCursor})
+	if err != nil {
+		t.Fatalf("List next page: %v", err)
+	}
+	if next.HasMore || next.NextCursor != "" {
+		t.Fatalf("unexpected next metadata: %+v", next)
+	}
+	if len(next.Items) != 1 || next.Items[0].ID != third.ID {
+		t.Fatalf("unexpected next page: %+v", next.Items)
 	}
 }
 
@@ -83,9 +116,14 @@ func TestUseCasesRejectsInvalidDecisions(t *testing.T) {
 		t.Fatalf("expected validation for missing actor, got %v", err)
 	}
 
-	_, err = uc.List(context.Background(), "tenant-1", "bad", 0)
+	_, err = uc.List(context.Background(), "tenant-1", domain.ListInput{StatusRaw: "bad"})
 	if !domainerr.IsValidation(err) {
 		t.Fatalf("expected validation for invalid status, got %v", err)
+	}
+
+	_, err = uc.List(context.Background(), "tenant-1", domain.ListInput{Cursor: "bad-cursor"})
+	if !domainerr.IsValidation(err) {
+		t.Fatalf("expected validation for invalid cursor, got %v", err)
 	}
 }
 
@@ -98,7 +136,10 @@ func newFakeRepo() *fakeRepo {
 }
 
 func (r *fakeRepo) add(tenantID string, status domain.Status) domain.Approval {
-	now := time.Now().UTC()
+	return r.addAt(tenantID, status, time.Now().UTC())
+}
+
+func (r *fakeRepo) addAt(tenantID string, status domain.Status, now time.Time) domain.Approval {
 	row := domain.Approval{
 		ID:                uuid.New(),
 		TenantID:          tenantID,
@@ -118,18 +159,37 @@ func (r *fakeRepo) add(tenantID string, status domain.Status) domain.Approval {
 	return row
 }
 
-func (r *fakeRepo) List(_ context.Context, tenantID string, status domain.Status, limit int) ([]domain.Approval, error) {
+func (r *fakeRepo) List(_ context.Context, tenantID string, status domain.Status, limit int, after *domain.ListCursor) ([]domain.Approval, error) {
 	out := []domain.Approval{}
 	for _, row := range r.rows {
 		if row.TenantID != tenantID || row.Status != status {
 			continue
 		}
-		out = append(out, row)
-		if limit > 0 && len(out) >= limit {
-			break
+		if after != nil && !isAfterCursor(row, *after) {
+			continue
 		}
+		out = append(out, row)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].ID.String() > out[j].ID.String()
+		}
+		return out[i].CreatedAt.After(out[j].CreatedAt)
+	})
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
 	}
 	return out, nil
+}
+
+func isAfterCursor(row domain.Approval, after domain.ListCursor) bool {
+	if row.CreatedAt.Before(after.CreatedAt) {
+		return true
+	}
+	if row.CreatedAt.Equal(after.CreatedAt) {
+		return row.ID.String() < after.ID.String()
+	}
+	return false
 }
 
 func (r *fakeRepo) Get(_ context.Context, tenantID string, id uuid.UUID) (domain.Approval, error) {
