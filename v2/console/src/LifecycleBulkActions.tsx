@@ -1,5 +1,8 @@
-type LifecycleView = 'active' | 'archived' | 'trash'
-type LifecycleBulkAction = 'archive' | 'trash' | 'restore' | 'purge'
+import {
+  LifecycleActionToolbar,
+  type LifecycleBulkAction,
+  type LifecycleView,
+} from '@devpablocristo/platform-lifecycle'
 
 type LifecycleBulkActionsProps = {
   selectedCount: number
@@ -15,74 +18,31 @@ type LifecycleBulkActionsProps = {
 }
 
 export function LifecycleBulkActions(props: LifecycleBulkActionsProps) {
-  const actionsDisabled = props.busy || props.selectedCount === 0
-  const editDisabled = props.busy || props.selectedCount !== 1
   return (
-    <div className="iam-control__create-inline">
-      <div className="iam-control__bulk-buttons">
-        <div className="iam-control__button-group">
-          <button
-            type="button"
-            className={`btn-sm ${props.createOpen ? 'btn-primary' : 'btn-secondary'} iam-control__new-button`}
-            onClick={props.onCreate}
-          >
-            New
-          </button>
-        </div>
-          {props.view === 'active' ? (
-            <>
-              <div className="iam-control__button-group">
-                {props.onEdit ? (
-                  <button
-                    type="button"
-                    className={`btn-sm ${props.editOpen ? 'btn-primary' : 'btn-secondary'}`}
-                    disabled={editDisabled}
-                    onClick={props.onEdit}
-                  >
-                    Edit
-                  </button>
-                ) : null}
-                <button type="button" className="btn-sm btn-secondary" disabled={actionsDisabled} onClick={props.onClear}>Clear</button>
-              </div>
-            <div className="iam-control__button-group iam-control__button-group--lifecycle">
-              <button type="button" className="btn-sm btn-secondary" disabled={actionsDisabled} onClick={() => props.onBulkAction('archive')}>Archive</button>
-              <button type="button" className="btn-sm btn-danger" disabled={actionsDisabled} onClick={() => props.onBulkAction('trash')}>Trash</button>
-            </div>
-          </>
-        ) : null}
-        {props.view === 'archived' ? (
-          <>
-            <div className="iam-control__button-group">
-              <button type="button" className="btn-sm btn-secondary" disabled={actionsDisabled} onClick={props.onClear}>Clear</button>
-            </div>
-            <div className="iam-control__button-group iam-control__button-group--lifecycle">
-              <button type="button" className="btn-sm btn-primary" disabled={actionsDisabled} onClick={() => props.onBulkAction('restore')}>Restore</button>
-            </div>
-          </>
-        ) : null}
-        {props.view === 'trash' ? (
-          <>
-            <div className="iam-control__button-group">
-              <button type="button" className="btn-sm btn-secondary" disabled={actionsDisabled} onClick={props.onClear}>Clear</button>
-            </div>
-            <div className="iam-control__button-group iam-control__button-group--lifecycle">
-              <button type="button" className="btn-sm btn-primary" disabled={actionsDisabled} onClick={() => props.onBulkAction('restore')}>Restore</button>
-              <button
-                type="button"
-                className="btn-sm btn-danger iam-control__danger-button"
-                disabled={actionsDisabled}
-                onClick={() => props.onBulkAction('purge')}
-              >
-                Delete
-              </button>
-            </div>
-          </>
-        ) : null}
-      </div>
-      <span className="iam-control__selected-count">{props.selectedCount} selected</span>
-      {props.blockedMessage ? (
-        <span className="iam-control__inline-note">{props.blockedMessage}</span>
-      ) : null}
-    </div>
+    <LifecycleActionToolbar
+      selectedCount={props.selectedCount}
+      view={props.view}
+      createOpen={props.createOpen}
+      editOpen={props.editOpen}
+      busy={props.busy}
+      blockedMessage={props.blockedMessage}
+      onCreate={props.onCreate}
+      onEdit={props.onEdit}
+      onClear={props.onClear}
+      onBulkAction={props.onBulkAction}
+      classNames={{
+        root: 'iam-control__create-inline',
+        buttons: 'iam-control__bulk-buttons',
+        group: 'iam-control__button-group',
+        lifecycleGroup: 'iam-control__button-group--lifecycle',
+        buttonBase: 'btn-sm',
+        primaryButton: 'btn-primary',
+        secondaryButton: 'btn-secondary',
+        dangerButton: 'btn-danger iam-control__danger-button',
+        newButton: 'iam-control__new-button',
+        selectedCount: 'iam-control__selected-count',
+        inlineNote: 'iam-control__inline-note',
+      }}
+    />
   )
 }

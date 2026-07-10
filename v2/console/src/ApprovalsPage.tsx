@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
+import { LoadMoreControl } from '@devpablocristo/platform-ui-data-display'
 import {
-  type Approval,
-  approveApproval,
-  listApprovals,
-  rejectApproval,
+	type Approval,
+	approveApproval,
+	getApproval,
+	listApprovalsPage,
+	rejectApproval,
 } from './api'
 
 type ApprovalsPageProps = {
@@ -14,31 +16,38 @@ type ApprovalsPageProps = {
 }
 
 type ApprovalStatus = Approval['status']
-type ApprovalsByStatus = Record<ApprovalStatus, Approval[]>
+type ApprovalColumnState = {
+	items: Approval[]
+	hasMore: boolean
+	nextCursor: string
+	loadingMore: boolean
+}
+type ApprovalsByStatus = Record<ApprovalStatus, ApprovalColumnState>
 
 const APPROVAL_STATUSES: ApprovalStatus[] = ['pending', 'approved', 'rejected']
-const EMPTY_APPROVALS: ApprovalsByStatus = {
-  pending: [],
-  approved: [],
-  rejected: [],
+const APPROVAL_PAGE_LIMITS: Record<ApprovalStatus, number> = {
+	pending: 25,
+	approved: 10,
+	rejected: 10,
 }
 
 export function ApprovalsPage({ tenantId, principalId, focusApprovalId = '', onReturnToVirployee }: ApprovalsPageProps) {
-  const [approvalsByStatus, setApprovalsByStatus] = useState<ApprovalsByStatus>(EMPTY_APPROVALS)
+  const [approvalsByStatus, setApprovalsByStatus] = useState<ApprovalsByStatus>(() => emptyApprovalColumns())
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [busyID, setBusyID] = useState('')
   const focusedCardRef = useRef<HTMLElement | null>(null)
   const isActive = Boolean(tenantId && principalId)
-  const pendingCount = approvalsByStatus.pending.length
+  const pendingCount = approvalsByStatus.pending.items.length
   const totalCount = useMemo(
-    () => APPROVAL_STATUSES.reduce((count, status) => count + approvalsByStatus[status].length, 0),
+    () => APPROVAL_STATUSES.reduce((count, status) => count + approvalsByStatus[status].items.length, 0),
     [approvalsByStatus],
   )
+  const loadingMore = APPROVAL_STATUSES.some((status) => approvalsByStatus[status].loadingMore)
   const focusedApproval = useMemo(() => {
     if (!focusApprovalId) return null
     for (const status of APPROVAL_STATUSES) {
-      const approval = approvalsByStatus[status].find((item) => item.id === focusApprovalId)
+      const approval = approvalsByStatus[status].items.find((item) => item.id === focusApprovalId)
       if (approval) return approval
     }
     return null
@@ -46,7 +55,7 @@ export function ApprovalsPage({ tenantId, principalId, focusApprovalId = '', onR
 
   useEffect(() => {
     if (!isActive) {
-      setApprovalsByStatus(EMPTY_APPROVALS)
+      setApprovalsByStatus(emptyApprovalColumns())
       setError('')
       setLoading(false)
       return
@@ -64,17 +73,66 @@ export function ApprovalsPage({ tenantId, principalId, focusApprovalId = '', onR
     setError('')
     try {
       const entries = await Promise.all(
-        APPROVAL_STATUSES.map(async (status): Promise<[ApprovalStatus, Approval[]]> => [
-          status,
-          sortApprovals(await listApprovals(tenantId, principalId, status, 50)),
-        ]),
+        APPROVAL_STATUSES.map(async (status): Promise<[ApprovalStatus, ApprovalColumnState]> => {
+          const page = await listApprovalsPage(tenantId, principalId, status, { limit: APPROVAL_PAGE_LIMITS[status] })
+          return [status, {
+            items: sortApprovals(page.items),
+            hasMore: page.hasMore,
+            nextCursor: page.nextCursor,
+            loadingMore: false,
+          }]
+        }),
       )
-      setApprovalsByStatus(Object.fromEntries(entries) as ApprovalsByStatus)
+      const next = await withFocusedApproval(Object.fromEntries(entries) as ApprovalsByStatus)
+      setApprovalsByStatus(next)
     } catch (loadError) {
-      setApprovalsByStatus(EMPTY_APPROVALS)
+      setApprovalsByStatus(emptyApprovalColumns())
       setError(loadError instanceof Error ? loadError.message : 'Could not load approvals')
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function loadMore(status: ApprovalStatus) {
+    const column = approvalsByStatus[status]
+    if (column.loadingMore || !column.hasMore || !column.nextCursor) return
+    setApprovalsByStatus((current) => ({
+      ...current,
+      [status]: { ...current[status], loadingMore: true },
+    }))
+    setError('')
+    try {
+      const page = await listApprovalsPage(tenantId, principalId, status, {
+        limit: APPROVAL_PAGE_LIMITS[status],
+        cursor: column.nextCursor,
+      })
+      setApprovalsByStatus((current) => ({
+        ...current,
+        [status]: {
+          items: sortApprovals(mergeApprovals(current[status].items, page.items)),
+          hasMore: page.hasMore,
+          nextCursor: page.nextCursor,
+          loadingMore: false,
+        },
+      }))
+    } catch (loadError) {
+      setApprovalsByStatus((current) => ({
+        ...current,
+        [status]: { ...current[status], loadingMore: false },
+      }))
+      setError(loadError instanceof Error ? loadError.message : 'Could not load more approvals')
+    }
+  }
+
+  async function withFocusedApproval(columns: ApprovalsByStatus): Promise<ApprovalsByStatus> {
+    if (!focusApprovalId) return columns
+    const loaded = APPROVAL_STATUSES.some((status) => columns[status].items.some((approval) => approval.id === focusApprovalId))
+    if (loaded) return columns
+    try {
+      const approval = await getApproval(focusApprovalId, tenantId, principalId)
+      return insertApproval(columns, approval)
+    } catch {
+      return columns
     }
   }
 
@@ -111,7 +169,7 @@ export function ApprovalsPage({ tenantId, principalId, focusApprovalId = '', onR
           <h2>Approvals board</h2>
           <p className="axis-muted">{approvalBoardSummary(pendingCount, totalCount, loading)}</p>
         </div>
-        <button type="button" className="btn-secondary" disabled={loading || Boolean(busyID)} onClick={() => void load()}>
+        <button type="button" className="btn-secondary" disabled={loading || loadingMore || Boolean(busyID)} onClick={() => void load()}>
           {loading ? 'Refreshing...' : 'Refresh'}
         </button>
       </div>
@@ -129,7 +187,7 @@ export function ApprovalsPage({ tenantId, principalId, focusApprovalId = '', onR
             </span>
           </div>
           <div className="approval-focus-banner__actions">
-            <button type="button" className="btn-secondary" disabled={loading || Boolean(busyID)} onClick={() => void load()}>
+            <button type="button" className="btn-secondary" disabled={loading || loadingMore || Boolean(busyID)} onClick={() => void load()}>
               Refresh
             </button>
             {onReturnToVirployee ? (
@@ -149,11 +207,14 @@ export function ApprovalsPage({ tenantId, principalId, focusApprovalId = '', onR
             <ApprovalColumn
               key={status}
               status={status}
-              approvals={approvalsByStatus[status]}
+              approvals={approvalsByStatus[status].items}
+              hasMore={approvalsByStatus[status].hasMore}
+              loadingMore={approvalsByStatus[status].loadingMore}
               busyID={busyID}
               focusApprovalId={focusApprovalId}
               focusedCardRef={focusedCardRef}
               onDecide={decide}
+              onLoadMore={() => void loadMore(status)}
             />
           ))}
         </div>
@@ -165,10 +226,13 @@ export function ApprovalsPage({ tenantId, principalId, focusApprovalId = '', onR
 function ApprovalColumn(props: {
   status: ApprovalStatus
   approvals: Approval[]
+  hasMore: boolean
+  loadingMore: boolean
   busyID: string
   focusApprovalId: string
   focusedCardRef: MutableRefObject<HTMLElement | null>
   onDecide: (id: string, decision: 'approve' | 'reject') => void
+  onLoadMore: () => void
 }) {
   return (
     <section className={`approvals-board__column approvals-board__column--${props.status}`} aria-label={approvalColumnTitle(props.status)}>
@@ -201,6 +265,18 @@ function ApprovalColumn(props: {
           ))}
         </div>
       )}
+      {props.hasMore ? (
+        <LoadMoreControl
+          className="approvals-board__pager"
+          hasMore={props.hasMore}
+          loading={props.loadingMore}
+          disabled={props.loadingMore || Boolean(props.busyID)}
+          onLoadMore={props.onLoadMore}
+          loadMoreLabel="Load more"
+          loadingLabel="Loading..."
+          endLabel=""
+        />
+      ) : null}
     </section>
   )
 }
@@ -289,7 +365,7 @@ function approvalBoardSummary(pendingCount: number, totalCount: number, loading:
   if (loading && totalCount === 0) return 'Loading approval requests...'
   const pendingNoun = pendingCount === 1 ? 'request' : 'requests'
   const totalNoun = totalCount === 1 ? 'approval' : 'approvals'
-  return `${pendingCount} pending ${pendingNoun} · ${totalCount} total ${totalNoun}`
+  return `${pendingCount} pending ${pendingNoun} · ${totalCount} loaded ${totalNoun}`
 }
 
 function approvalColumnTitle(status: ApprovalStatus): string {
@@ -324,6 +400,49 @@ function emptyStateFor(status: ApprovalStatus): string {
 
 function sortApprovals(approvals: Approval[]): Approval[] {
   return [...approvals].sort((left, right) => Date.parse(right.created_at) - Date.parse(left.created_at))
+}
+
+function mergeApprovals(current: Approval[], incoming: Approval[]): Approval[] {
+  const byID = new Map<string, Approval>()
+  for (const approval of current) {
+    byID.set(approval.id, approval)
+  }
+  for (const approval of incoming) {
+    byID.set(approval.id, approval)
+  }
+  return Array.from(byID.values())
+}
+
+function insertApproval(columns: ApprovalsByStatus, approval: Approval): ApprovalsByStatus {
+  const next = { ...columns }
+  for (const status of APPROVAL_STATUSES) {
+    next[status] = {
+      ...next[status],
+      items: next[status].items.filter((item) => item.id !== approval.id),
+    }
+  }
+  next[approval.status] = {
+    ...next[approval.status],
+    items: sortApprovals([approval, ...next[approval.status].items]),
+  }
+  return next
+}
+
+function emptyApprovalColumns(): ApprovalsByStatus {
+  return {
+    pending: emptyApprovalColumn(),
+    approved: emptyApprovalColumn(),
+    rejected: emptyApprovalColumn(),
+  }
+}
+
+function emptyApprovalColumn(): ApprovalColumnState {
+  return {
+    items: [],
+    hasMore: false,
+    nextCursor: '',
+    loadingMore: false,
+  }
 }
 
 function formatDate(value: string | null): string {

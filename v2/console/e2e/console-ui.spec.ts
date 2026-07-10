@@ -202,6 +202,26 @@ const approvals: ApprovalFixture[] = [{
   updated_at: now,
 }]
 
+const approvedApprovalVolume: ApprovalFixture[] = Array.from({ length: 22 }, (_, index) => {
+  const minute = String(44 - index).padStart(2, '0')
+  return {
+    id: `approval-approved-${String(index + 1).padStart(2, '0')}`,
+    requester_id: principalID,
+    action_type: 'calendar.events.create',
+    target_system: 'calendar',
+    target_resource: 'event',
+    risk_level: 'high',
+    reason: 'No policy matched; default for risk high',
+    binding_hash: `binding-approved-${index + 1}`,
+    status: 'approved' as const,
+    decided_by: principalID,
+    decision_note: 'approved fixture',
+    decided_at: `2026-07-09T13:${minute}:00Z`,
+    created_at: `2026-07-09T13:${minute}:00Z`,
+    updated_at: `2026-07-09T13:${minute}:00Z`,
+  }
+})
+
 test.beforeEach(async ({ page }) => {
   await installApiFixtures(page)
 })
@@ -333,6 +353,17 @@ test('approval flow can approve from Virployees and return with an approved run 
   await expect(latestRun.getByRole('button', { name: 'View approval' })).toBeVisible()
 })
 
+test('approvals board loads resolved approvals incrementally', async ({ page }) => {
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Approvals' }).click()
+
+  const approvedColumn = page.getByLabel('Approved')
+  await expect(approvedColumn.locator('.approvals-board__card')).toHaveCount(10)
+  await approvedColumn.getByRole('button', { name: 'Load more' }).click()
+  await expect(approvedColumn.locator('.approvals-board__card')).toHaveCount(20)
+  await expect(approvedColumn.getByRole('button', { name: 'Load more' })).toBeVisible()
+})
+
 test('approval flow can reject and keeps rejected approvals read-only', async ({ page }) => {
   await openSofiaDryRun(page)
 
@@ -398,8 +429,8 @@ async function installApiFixtures(page: Page) {
     if (path === '/api/orgs') return json(route, { data: orgs })
     if (path === '/api/products') return json(route, { data: products })
     if (path === '/api/approvals') {
-      const status = url.searchParams.get('status')
-      return json(route, { data: state.approvals.filter((approval) => approval.status === status) })
+      const status = url.searchParams.get('status') ?? 'pending'
+      return json(route, paginatedApprovals(state.approvals, status, url.searchParams))
     }
     const approvalDecisionMatch = path.match(/^\/api\/approvals\/([^/]+)\/(approve|reject)$/)
     if (approvalDecisionMatch && route.request().method() === 'POST') {
@@ -447,10 +478,25 @@ async function runDryRunInput(page: Page, input: string) {
 
 function createApiFixtureState(): ApiFixtureState {
   return {
-    approvals: approvals.map((approval) => ({ ...approval })),
+    approvals: [...approvals, ...approvedApprovalVolume].map((approval) => ({ ...approval })),
     runs: [],
     sequence: 0,
     nextApproval: 2,
+  }
+}
+
+function paginatedApprovals(approvals: ApprovalFixture[], status: string, searchParams: URLSearchParams) {
+  const limit = Math.max(1, Number(searchParams.get('limit') ?? 50))
+  const cursor = Math.max(0, Number(searchParams.get('cursor') ?? 0))
+  const items = approvals
+    .filter((approval) => approval.status === status)
+    .sort((left, right) => Date.parse(right.created_at) - Date.parse(left.created_at))
+  const pageItems = items.slice(cursor, cursor + limit)
+  const nextCursor = cursor + limit < items.length ? String(cursor + limit) : ''
+  return {
+    items: pageItems,
+    has_more: nextCursor !== '',
+    next_cursor: nextCursor,
   }
 }
 

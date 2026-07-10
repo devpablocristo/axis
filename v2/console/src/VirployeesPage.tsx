@@ -1922,7 +1922,11 @@ function RunTraceAuditSummary(props: { runs: VirployeeRunTrace[]; approvalByID: 
   const latestRun = props.runs[0]
   const latestApprovalID = latestRun?.nexus_result?.approval_id || latestRun?.execution_result?.approval_id || ''
   const latestApproval = latestApprovalID ? props.approvalByID[latestApprovalID] : null
-  const approvalIDs = new Set(props.runs.map((run) => run.nexus_result?.approval_id || run.execution_result?.approval_id).filter(Boolean))
+  const approvalIDs = new Set(
+    props.runs
+      .map((run) => run.nexus_result?.approval_id || run.execution_result?.approval_id)
+      .filter((id): id is string => Boolean(id)),
+  )
   const simulatedCount = props.runs.filter((run) => run.operation === 'simulated_execution').length
   const pendingApprovals = Array.from(approvalIDs).filter((id) => props.approvalByID[id]?.status === 'pending').length
 
