@@ -27,6 +27,48 @@ CREATE TABLE IF NOT EXISTS approvals (
 ALTER TABLE approvals
     ADD COLUMN IF NOT EXISTS tenant_id text NOT NULL DEFAULT 'default';
 
+ALTER TABLE approvals
+    ADD COLUMN IF NOT EXISTS governance_check_id uuid;
+
+ALTER TABLE approvals
+    ADD COLUMN IF NOT EXISTS requester_id text NOT NULL DEFAULT '';
+
+ALTER TABLE approvals
+    ADD COLUMN IF NOT EXISTS action_type text NOT NULL DEFAULT '';
+
+ALTER TABLE approvals
+    ADD COLUMN IF NOT EXISTS target_system text NOT NULL DEFAULT '';
+
+ALTER TABLE approvals
+    ADD COLUMN IF NOT EXISTS target_resource text NOT NULL DEFAULT '';
+
+ALTER TABLE approvals
+    ADD COLUMN IF NOT EXISTS risk_level text NOT NULL DEFAULT '';
+
+ALTER TABLE approvals
+    ADD COLUMN IF NOT EXISTS reason text NOT NULL DEFAULT '';
+
+ALTER TABLE approvals
+    ADD COLUMN IF NOT EXISTS binding_hash text NOT NULL DEFAULT '';
+
+ALTER TABLE approvals
+    ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'pending';
+
+ALTER TABLE approvals
+    ADD COLUMN IF NOT EXISTS decided_by text NOT NULL DEFAULT '';
+
+ALTER TABLE approvals
+    ADD COLUMN IF NOT EXISTS decision_note text NOT NULL DEFAULT '';
+
+ALTER TABLE approvals
+    ADD COLUMN IF NOT EXISTS decided_at timestamptz NULL;
+
+ALTER TABLE approvals
+    ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT now();
+
+ALTER TABLE approvals
+    ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
+
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_approvals_tenant_status_created
     ON approvals (tenant_id, status, created_at DESC);
 

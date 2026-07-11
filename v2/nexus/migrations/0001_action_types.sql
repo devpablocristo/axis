@@ -25,6 +25,48 @@ CREATE TABLE IF NOT EXISTS action_types (
 ALTER TABLE action_types
     ADD COLUMN IF NOT EXISTS tenant_id text NOT NULL DEFAULT 'default';
 
+ALTER TABLE action_types
+    ADD COLUMN IF NOT EXISTS org_id text;
+
+UPDATE action_types
+SET tenant_id = org_id
+WHERE org_id IS NOT NULL
+    AND btrim(org_id) <> ''
+    AND tenant_id = 'default';
+
+ALTER TABLE action_types
+    ADD COLUMN IF NOT EXISTS action_type_key text;
+
+ALTER TABLE action_types
+    ADD COLUMN IF NOT EXISTS name text NOT NULL DEFAULT '';
+
+ALTER TABLE action_types
+    ADD COLUMN IF NOT EXISTS description text NOT NULL DEFAULT '';
+
+ALTER TABLE action_types
+    ADD COLUMN IF NOT EXISTS category text NOT NULL DEFAULT '';
+
+ALTER TABLE action_types
+    ADD COLUMN IF NOT EXISTS risk_class text NOT NULL DEFAULT 'low';
+
+ALTER TABLE action_types
+    ADD COLUMN IF NOT EXISTS enabled boolean NOT NULL DEFAULT true;
+
+ALTER TABLE action_types
+    ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT now();
+
+ALTER TABLE action_types
+    ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
+
+UPDATE action_types
+SET action_type_key = 'legacy.' || replace(id::text, '-', '')
+WHERE action_type_key IS NULL
+    OR btrim(action_type_key) = '';
+
+UPDATE action_types
+SET name = action_type_key
+WHERE btrim(name) = '';
+
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_action_types_tenant_id
     ON action_types (tenant_id, id);
 

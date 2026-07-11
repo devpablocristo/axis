@@ -20,6 +20,36 @@ CREATE TABLE IF NOT EXISTS governance_checks (
 ALTER TABLE governance_checks
     ADD COLUMN IF NOT EXISTS tenant_id text NOT NULL DEFAULT 'default';
 
+ALTER TABLE governance_checks
+    ADD COLUMN IF NOT EXISTS requester_id text NOT NULL DEFAULT '';
+
+ALTER TABLE governance_checks
+    ADD COLUMN IF NOT EXISTS action_type text NOT NULL DEFAULT '';
+
+ALTER TABLE governance_checks
+    ADD COLUMN IF NOT EXISTS target_system text NOT NULL DEFAULT '';
+
+ALTER TABLE governance_checks
+    ADD COLUMN IF NOT EXISTS target_resource text NOT NULL DEFAULT '';
+
+ALTER TABLE governance_checks
+    ADD COLUMN IF NOT EXISTS decision text NOT NULL DEFAULT '';
+
+ALTER TABLE governance_checks
+    ADD COLUMN IF NOT EXISTS risk_level text NOT NULL DEFAULT '';
+
+ALTER TABLE governance_checks
+    ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT '';
+
+ALTER TABLE governance_checks
+    ADD COLUMN IF NOT EXISTS decision_reason text NOT NULL DEFAULT '';
+
+ALTER TABLE governance_checks
+    ADD COLUMN IF NOT EXISTS binding_hash text NOT NULL DEFAULT '';
+
+ALTER TABLE governance_checks
+    ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT now();
+
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_governance_checks_tenant_created
     ON governance_checks (tenant_id, created_at DESC);
 
