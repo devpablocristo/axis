@@ -237,6 +237,7 @@ jobs:
           gcloud run deploy "$BFF_SERVICE" \
             --project="$PROJECT_ID" --region="$REGION" --image="$IMAGE_URI" \
             --service-account="$BFF_RUNTIME_SA" \
+            --add-cloudsql-instances="$CLOUDSQL_INSTANCE" \
             --set-env-vars="^|^AXIS_BFF_AUTH_MODE=${AXIS_BFF_AUTH_MODE}|AXIS_AUTH_ISSUER_URL=${AXIS_AUTH_ISSUER_URL}|AXIS_AUTH_AUDIENCE=${AXIS_AUTH_AUDIENCE}|AXIS_INTERNAL_JWT_ISSUER=axis-bff|AXIS_COMPANION_AUDIENCE=companion|AXIS_NEXUS_AUDIENCE=nexus|AXIS_ALLOWED_ORIGIN=${AXIS_ALLOWED_ORIGIN}|AXIS_DOWNSTREAM_TIMEOUT=10s|AXIS_READ_HEADER_TIMEOUT=5s|COMPANION_BASE_URL=${COMPANION_URL}|NEXUS_BASE_URL=${NEXUS_URL}" \
             --set-secrets="AXIS_INTERNAL_JWT_SECRET=${INTERNAL_JWT_SECRET}:latest,BFF_V2_DATABASE_URL=${BFF_DATABASE_SECRET}:latest" \
             --allow-unauthenticated --ingress=all --port=8080 --min-instances=0 --max-instances=3
