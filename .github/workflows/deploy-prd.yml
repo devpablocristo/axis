@@ -258,10 +258,15 @@ jobs:
         run: |
           bff_url="$(gcloud run services describe "$BFF_SERVICE" --project="$PROJECT_ID" --region="$REGION" --format='value(status.url)')"
           project_number="$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')"
+          service_hosts="$(gcloud run services describe "$CONSOLE_SERVICE" --project="$PROJECT_ID" --region="$REGION" --format=json 2>/dev/null | jq -r '.metadata.annotations["run.googleapis.com/urls"] // "[]" | fromjson[] | sub("^https://"; "")' | paste -sd, - || true)"
+          console_allowed_hosts="${CONSOLE_SERVICE}-${project_number}.${REGION}.run.app"
+          if [[ -n "$service_hosts" ]]; then
+            console_allowed_hosts="${console_allowed_hosts},${service_hosts}"
+          fi
           test -n "$bff_url"
           test -n "$project_number"
           echo "BFF_URL=$bff_url" >> "$GITHUB_ENV"
-          echo "CONSOLE_ALLOWED_HOSTS=${CONSOLE_SERVICE}-${project_number}.${REGION}.run.app" >> "$GITHUB_ENV"
+          echo "CONSOLE_ALLOWED_HOSTS=$console_allowed_hosts" >> "$GITHUB_ENV"
       - name: Build and push
         run: |
           image_uri="${REGISTRY}/${PROJECT_ID}/${AR_REPOSITORY}/axis-console:${{ needs.prepare.outputs.sha }}"
