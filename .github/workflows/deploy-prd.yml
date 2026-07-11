@@ -46,6 +46,7 @@ env:
   COMPANION_DATABASE_SECRET: ${{ vars.COMPANION_DATABASE_URL_SECRET_NAME_PRD || 'axis-companion-database-url-prd' }}
   COMPANION_API_KEYS_SECRET: ${{ vars.COMPANION_API_KEYS_SECRET_NAME_PRD || 'axis-companion-api-keys-prd' }}
   COMPANION_NEXUS_API_KEY_SECRET: ${{ vars.COMPANION_NEXUS_API_KEY_SECRET_NAME_PRD || 'axis-companion-nexus-api-key-prd' }}
+  BFF_DATABASE_SECRET: ${{ vars.AXIS_BFF_DATABASE_URL_SECRET_NAME_PRD || 'axis-bff-database-url-prd' }}
   PONTI_BASE_URL: ${{ vars.PONTI_BASE_URL_PRD }}
   AXIS_BFF_AUTH_MODE: ${{ vars.AXIS_BFF_AUTH_MODE_PRD || 'oidc' }}
   AXIS_AUTH_ISSUER_URL: ${{ vars.AXIS_AUTH_ISSUER_URL_PRD }}
@@ -74,7 +75,7 @@ jobs:
         run: |
           set -euo pipefail
           missing=0
-          for var_name in REGION PROJECT_ID WIF_PROVIDER WIF_SERVICE_ACCOUNT CLOUDSQL_INSTANCE NEXUS_RUNTIME_SA COMPANION_RUNTIME_SA BFF_RUNTIME_SA CONSOLE_RUNTIME_SA PONTI_BASE_URL AXIS_BFF_AUTH_MODE; do
+          for var_name in REGION PROJECT_ID WIF_PROVIDER WIF_SERVICE_ACCOUNT CLOUDSQL_INSTANCE NEXUS_RUNTIME_SA COMPANION_RUNTIME_SA BFF_RUNTIME_SA CONSOLE_RUNTIME_SA BFF_DATABASE_SECRET PONTI_BASE_URL AXIS_BFF_AUTH_MODE; do
             if [[ -z "${!var_name}" ]]; then
               echo "::error::$var_name is required for PRD"
               missing=1
@@ -227,7 +228,7 @@ jobs:
             --project="$PROJECT_ID" --region="$REGION" --image="$IMAGE_URI" \
             --service-account="$BFF_RUNTIME_SA" \
             --set-env-vars="^|^AXIS_BFF_AUTH_MODE=${AXIS_BFF_AUTH_MODE}|AXIS_AUTH_ISSUER_URL=${AXIS_AUTH_ISSUER_URL}|AXIS_AUTH_AUDIENCE=${AXIS_AUTH_AUDIENCE}|AXIS_INTERNAL_JWT_ISSUER=axis-bff|AXIS_COMPANION_AUDIENCE=companion|AXIS_NEXUS_AUDIENCE=nexus|AXIS_ALLOWED_ORIGIN=${AXIS_ALLOWED_ORIGIN}|AXIS_DOWNSTREAM_TIMEOUT=10s|AXIS_READ_HEADER_TIMEOUT=5s|COMPANION_BASE_URL=${COMPANION_URL}|NEXUS_BASE_URL=${NEXUS_URL}" \
-            --set-secrets="AXIS_INTERNAL_JWT_SECRET=${INTERNAL_JWT_SECRET}:latest" \
+            --set-secrets="AXIS_INTERNAL_JWT_SECRET=${INTERNAL_JWT_SECRET}:latest,BFF_V2_DATABASE_URL=${BFF_DATABASE_SECRET}:latest" \
             --allow-unauthenticated --ingress=all --port=8080 --min-instances=0 --max-instances=3
       - name: Smoke
         run: |
