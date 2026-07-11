@@ -206,8 +206,10 @@ run_gate() {
           kind: "calendar_event",
           fields: [
             {key: "title", value: "Smoke Approval"},
-            {key: "date_hint", value: "manana"},
+            {key: "date", value: "2099-01-01"},
             {key: "time", value: "15:00"},
+            {key: "timezone", value: "America/Argentina/Buenos_Aires"},
+            {key: "duration_minutes", value: "60"},
             {key: "attendees", value: "ana@example.com"}
           ]
         }
@@ -258,12 +260,12 @@ assert_jq "$approved_approval" '.status == "approved"' "approval should be appro
 approved_lookup="$(api GET "/api/approvals/$approval_id")"
 assert_jq "$approved_lookup" '.status == "approved" and .decided_by != ""' "approved approval should be readable"
 
-simulated_execution="$(api POST "/api/virployees/$virployee_id/simulated-executions" "$(jq -n --arg approvalID "$approval_id" '{approval_id: $approvalID}')")"
-assert_jq "$simulated_execution" '.operation == "simulated_execution"' "approved approval should create a simulated execution trace"
-assert_jq "$simulated_execution" '.execution_result.status == "simulated_executed" and .execution_result.external_effects == false' "simulated execution should not perform external effects"
+simulated_execution="$(api POST "/api/virployees/$virployee_id/executions" "$(jq -n --arg approvalID "$approval_id" '{approval_id: $approvalID}')")"
+assert_jq "$simulated_execution" '.operation == "execution"' "approved approval should create an execution trace"
+assert_jq "$simulated_execution" '.execution_result.status == "succeeded" and .execution_result.mode == "local" and .execution_result.nexus_report_status == "reported"' "local execution should succeed and report to Nexus"
 
 simulated_trace_id="$(jq -r '.id' <<<"$simulated_execution")"
-simulated_replay="$(api POST "/api/virployees/$virployee_id/simulated-executions" "$(jq -n --arg approvalID "$approval_id" '{approval_id: $approvalID}')")"
+simulated_replay="$(api POST "/api/virployees/$virployee_id/executions" "$(jq -n --arg approvalID "$approval_id" '{approval_id: $approvalID}')")"
 assert_jq "$simulated_replay" '.id == $traceID' "simulated execution should be idempotent for the same approval" --arg traceID "$simulated_trace_id"
 
 ensure_action_type "calendar.events.create" "Create calendar events" "high" "false" >/dev/null
@@ -271,7 +273,7 @@ deny_gate="$(run_gate "$virployee_id" "Agenda una reunion \"Smoke Deny\" manana 
 assert_jq "$deny_gate" '.execution_gate.decision == "blocked"' "disabled action type should block"
 
 runs="$(latest_runs "$virployee_id")"
-assert_jq "$runs" '[.data[]? | select(.operation == "simulated_execution" and .execution_result.status == "simulated_executed")] | length >= 1' "run history should include simulated execution trace"
+assert_jq "$runs" '[.data[]? | select(.operation == "execution" and .execution_result.status == "succeeded")] | length >= 1' "run history should include execution trace"
 assert_jq "$runs" '[.data[]? | select(.nexus_result.decision == "deny" and .nexus_result.status == "denied")] | length >= 1' "run history should include deny trace"
 
 ensure_action_type "calendar.events.create" "Create calendar events" "high" "true" >/dev/null

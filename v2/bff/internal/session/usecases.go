@@ -50,8 +50,15 @@ func NewUseCases(identity IdentityPort, tenancy TenancyPort, defaults Defaults, 
 }
 
 func (u *UseCases) Resolve(ctx context.Context, input sessiondomain.ResolveInput) (sessiondomain.Session, error) {
-	if token := bearerToken(input.Authorization); token != "" && u.tokenVerifier != nil {
+	token := bearerToken(input.Authorization)
+	if u.tokenVerifier != nil {
+		if token == "" {
+			return sessiondomain.Session{}, domainerr.Unauthorized("session token is required")
+		}
 		return u.resolveClerk(ctx, token)
+	}
+	if token != "" {
+		return sessiondomain.Session{}, domainerr.Unauthorized("session token verification is not configured")
 	}
 	input = u.applyDefaults(input)
 	normalized, err := sessiondomain.NormalizeResolveInput(input)

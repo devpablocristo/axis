@@ -27,3 +27,20 @@ func (r CheckRequest) ToDomain() domain.CheckInput {
 		BindingHash:    r.BindingHash,
 	}
 }
+
+type ExecutionResultRequest struct {
+	BindingHash string         `json:"binding_hash" binding:"required"`
+	Status      string         `json:"status" binding:"required"`
+	DurationMS  int64          `json:"duration_ms"`
+	Result      map[string]any `json:"result"`
+}
+
+func (r ExecutionResultRequest) ToDomain(idempotencyKey string) domain.ExecutionResultInput {
+	return domain.ExecutionResultInput{
+		IdempotencyKey: idempotencyKey,
+		BindingHash:    r.BindingHash,
+		Status:         r.Status,
+		DurationMS:     r.DurationMS,
+		Result:         r.Result,
+	}
+}

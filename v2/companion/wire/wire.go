@@ -84,6 +84,10 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		nexusClient := nexusclient.New(config.NexusBaseURL, &http.Client{Timeout: 5 * time.Second})
 		virployeesUsecases.SetGovernanceChecker(nexusClient)
 		virployeesUsecases.SetApprovalReader(nexusClient)
+		virployeesUsecases.SetExecutionResultReporter(nexusClient)
+	}
+	if config.ExecutionMode == "local" {
+		virployeesUsecases.RegisterExecutor("calendar.events.create", virployees.NewLocalCalendarExecutor(virployeesRepo))
 	}
 	virployeesHandler := virployees.NewHandler(virployeesUsecases)
 

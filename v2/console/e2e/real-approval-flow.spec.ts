@@ -31,8 +31,10 @@ test('real UI approval flow can approve and return to an approved run history', 
   await expect(page.getByText('Dry Run result')).toBeVisible()
 
   await page.getByLabel('Title').fill(title)
-  await page.getByLabel('Date').fill('manana')
-  await page.getByLabel('Time').fill('15:00')
+  await page.getByLabel('Date').fill('2099-01-01')
+  await page.getByLabel('Time', { exact: true }).fill('15:00')
+  await page.getByLabel('Timezone').fill('America/Argentina/Buenos_Aires')
+  await page.getByLabel('Duration (minutes)').fill('60')
   await page.getByLabel('Attendees').fill('ana@example.com')
   await expect(page.getByText('Ready to check the gate.')).toBeVisible()
   await page.getByRole('button', { name: 'Check execution gate' }).first().click()
@@ -62,12 +64,12 @@ test('real UI approval flow can approve and return to an approved run history', 
   await expect(latestRun).not.toContainText('Blocked')
   await expect(latestRun.getByRole('button', { name: 'View approval' })).toBeVisible()
 
-  await page.getByRole('button', { name: 'Simulate execution' }).click()
-  await expect(page.getByText('Simulated execution completed; no external effects were performed.')).toBeVisible()
+  page.once('dialog', (dialog) => dialog.accept())
+  await page.getByRole('button', { name: 'Execute locally' }).click()
+  await expect(page.getByText('Local calendar event created.')).toBeVisible()
   const simulatedRun = page.locator('.virployee-run-history__row').first()
-  await expect(simulatedRun).toContainText('Simulated execution')
-  await expect(simulatedRun).toContainText('Simulated')
-  await expect(simulatedRun).toContainText('No external effects')
+  await expect(simulatedRun).toContainText('Execution')
+  await expect(simulatedRun).toContainText('Executed')
 })
 
 async function seedApprovalFlowFixture(request: APIRequestContext) {

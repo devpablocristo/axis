@@ -65,6 +65,23 @@ func TestResolveClerkEnsuresProviderTenantMembership(t *testing.T) {
 	}
 }
 
+func TestResolveClerkDoesNotFallBackToDevWithoutToken(t *testing.T) {
+	identity := &fakeSessionIdentity{}
+	tenancy := &fakeSessionTenancy{}
+	uc := NewUseCases(identity, tenancy, Defaults{
+		PrincipalID:    "dev-user",
+		PrincipalEmail: "dev@example.local",
+		OrgID:          "dev-org",
+	}, &fakeTokenVerifier{}, nil)
+
+	if _, err := uc.Resolve(context.Background(), sessiondomain.ResolveInput{}); err == nil {
+		t.Fatal("expected Clerk mode to reject a missing session token")
+	}
+	if identity.ensured.ProviderUserID != "" {
+		t.Fatalf("Clerk mode must not ensure a dev identity, got %+v", identity.ensured)
+	}
+}
+
 func TestResolveClerkWithoutOrgUsesDefaultTenant(t *testing.T) {
 	identity := &fakeSessionIdentity{}
 	tenancy := &fakeSessionTenancy{}

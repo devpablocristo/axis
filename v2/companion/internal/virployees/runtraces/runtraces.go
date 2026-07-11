@@ -20,6 +20,7 @@ const (
 	OperationDryRun             Operation = "dry_run"
 	OperationExecutionGate      Operation = "execution_gate"
 	OperationSimulatedExecution Operation = "simulated_execution"
+	OperationExecution          Operation = "execution"
 )
 
 type Trace struct {
@@ -65,6 +66,7 @@ type GateCheck struct {
 }
 
 type NexusResult struct {
+	CheckID              string `json:"check_id,omitempty"`
 	Available            bool   `json:"available"`
 	Decision             string `json:"decision,omitempty"`
 	RiskLevel            string `json:"risk_level,omitempty"`
@@ -78,13 +80,16 @@ type NexusResult struct {
 }
 
 type ExecutionResult struct {
-	Status          string `json:"status,omitempty"`
-	Mode            string `json:"mode,omitempty"`
-	ApprovalID      string `json:"approval_id,omitempty"`
-	ApprovalStatus  string `json:"approval_status,omitempty"`
-	BindingHash     string `json:"binding_hash,omitempty"`
-	Message         string `json:"message,omitempty"`
-	ExternalEffects bool   `json:"external_effects"`
+	Status            string `json:"status,omitempty"`
+	Mode              string `json:"mode,omitempty"`
+	ApprovalID        string `json:"approval_id,omitempty"`
+	ApprovalStatus    string `json:"approval_status,omitempty"`
+	BindingHash       string `json:"binding_hash,omitempty"`
+	Message           string `json:"message,omitempty"`
+	ExternalEffects   bool   `json:"external_effects"`
+	ResourceID        string `json:"resource_id,omitempty"`
+	DurationMS        int64  `json:"duration_ms,omitempty"`
+	NexusReportStatus string `json:"nexus_report_status,omitempty"`
 }
 
 func HashString(value string) string {

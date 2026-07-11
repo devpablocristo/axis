@@ -63,6 +63,7 @@ services:
       COMPANION_V2_RUN_MIGRATIONS: ${COMPANION_V2_RUN_MIGRATIONS:-true}
       COMPANION_V2_CORS_ORIGINS: ${COMPANION_V2_CORS_ORIGINS:-http://localhost:19173,http://127.0.0.1:19173,http://console-v2:19173,http://console-v2-e2e:19173}
       COMPANION_V2_NEXUS_BASE_URL: ${COMPANION_V2_NEXUS_BASE_URL:-http://nexus-v2:8080}
+      COMPANION_V2_EXECUTION_MODE: ${COMPANION_V2_EXECUTION_MODE:-local}
       COMPANION_V2_DATABASE_URL: postgres://${COMPANION_V2_POSTGRES_USER:-postgres}:${COMPANION_V2_POSTGRES_PASSWORD:-postgres}@companion-v2-postgres:5432/${COMPANION_V2_POSTGRES_DB:-companion_v2}?sslmode=disable
     volumes:
       - ./companion:/src/companion

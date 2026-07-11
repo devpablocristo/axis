@@ -10,7 +10,7 @@ ALTER TABLE companion_run_traces
 
 ALTER TABLE companion_run_traces
     ADD CONSTRAINT companion_run_traces_operation_check CHECK (
-        operation IN ('dry_run', 'execution_gate', 'simulated_execution')
+        operation IN ('dry_run', 'execution_gate', 'simulated_execution', 'execution')
     ) NOT VALID;
 
 ALTER TABLE companion_run_traces

@@ -70,7 +70,7 @@ ALTER TABLE companion_run_traces
 
 UPDATE companion_run_traces
 SET operation = 'dry_run'
-WHERE operation NOT IN ('dry_run', 'execution_gate', 'simulated_execution')
+WHERE operation NOT IN ('dry_run', 'execution_gate', 'simulated_execution', 'execution')
     OR btrim(operation) = '';
 
 UPDATE companion_run_traces traces

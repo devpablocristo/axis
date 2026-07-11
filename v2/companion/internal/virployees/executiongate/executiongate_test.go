@@ -108,8 +108,10 @@ func TestApplyConfirmedDraftMarksCompleteCalendarDraftReady(t *testing.T) {
 		Kind:   "calendar_event",
 		Fields: []ConfirmedDraftField{
 			{Key: "title", Value: "Reunión"},
-			{Key: "date_hint", Value: "mañana"},
+			{Key: "date", Value: "2026-07-12"},
 			{Key: "time", Value: "15:00"},
+			{Key: "timezone", Value: "America/Argentina/Buenos_Aires"},
+			{Key: "duration_minutes", Value: "60"},
 			{Key: "attendees", Value: "ana@example.com"},
 		},
 	})
@@ -119,7 +121,7 @@ func TestApplyConfirmedDraftMarksCompleteCalendarDraftReady(t *testing.T) {
 	if result.Draft.Status != dryrun.DraftStatusReady || len(result.Draft.MissingFields) != 0 {
 		t.Fatalf("expected ready confirmed draft, got %+v", result.Draft)
 	}
-	if len(result.Draft.Fields) != 4 || result.Draft.Fields[0].Source != "confirmed" {
+	if len(result.Draft.Fields) != 6 || result.Draft.Fields[0].Source != "confirmed" {
 		t.Fatalf("unexpected confirmed fields: %+v", result.Draft.Fields)
 	}
 }
@@ -135,7 +137,7 @@ func TestApplyConfirmedDraftKeepsIncompleteCalendarDraftNeedsInput(t *testing.T)
 	if err != nil {
 		t.Fatalf("ApplyConfirmedDraft: %v", err)
 	}
-	if result.Draft.Status != dryrun.DraftStatusNeedsInput || len(result.Draft.MissingFields) != 3 {
+	if result.Draft.Status != dryrun.DraftStatusNeedsInput || len(result.Draft.MissingFields) != 5 {
 		t.Fatalf("expected incomplete confirmed draft, got %+v", result.Draft)
 	}
 }

@@ -36,7 +36,7 @@ import {
   listVirployees,
   purgeVirployee,
   restoreVirployee,
-  simulateApprovedVirployeeExecution,
+  executeApprovedVirployeeAction,
   trashVirployee,
   unarchiveVirployee,
   updateVirployee,
@@ -46,8 +46,10 @@ type CrudLifecycleView = 'active' | 'archived' | 'trash'
 type BulkAction = 'archive' | 'trash' | 'restore' | 'purge'
 type CalendarCreateDraftValues = {
   title: string
-  date_hint: string
+  date: string
   time: string
+  timezone: string
+  duration_minutes: string
   attendees: string
 }
 type CalendarCreateDraftKey = keyof CalendarCreateDraftValues
@@ -746,12 +748,17 @@ export function VirployeesPage({
     setSimulationLoading(true)
     setSimulationError('')
     try {
-      await simulateApprovedVirployeeExecution(dryRunRow.id, approvalId, tenantId, principalId)
+      const values = calendarDraftValues
+      const summary = values
+        ? `${values.title}\n${values.date} ${values.time} (${values.timezone})\n${values.duration_minutes} minutes\n${values.attendees}`
+        : 'Execute the approved prepared action?'
+      if (!window.confirm(`Execute this local calendar event?\n\n${summary}`)) return
+      await executeApprovedVirployeeAction(dryRunRow.id, approvalId, tenantId, principalId)
       if (simulationRequestRef.current !== requestID) return
       await loadRunTraces(dryRunRow)
     } catch (error) {
       if (simulationRequestRef.current !== requestID) return
-      setSimulationError(error instanceof Error ? error.message : 'Could not simulate execution')
+      setSimulationError(error instanceof Error ? error.message : 'Could not execute approved action')
     } finally {
       if (simulationRequestRef.current === requestID) setSimulationLoading(false)
     }
@@ -1366,7 +1373,7 @@ function VirployeeDryRunInline(props: {
                 />
                 <FlowSummaryItem
                   label="Execution"
-                  value={latestSimulatedRun ? 'Simulated' : latestApproval?.status === 'approved' ? 'Ready' : 'Not ready'}
+                  value={latestSimulatedRun ? (latestSimulatedRun.operation === 'execution' ? 'Executed' : 'Simulated') : latestApproval?.status === 'approved' ? 'Ready' : 'Not ready'}
                   tone={latestSimulatedRun ? 'success' : latestApproval?.status === 'approved' ? 'warning' : 'muted'}
                 />
               </div>
@@ -1582,22 +1589,44 @@ function ConfirmableCalendarDraftView(props: {
         <label className="form-group">
           Date
           <input
-            value={props.values.date_hint}
-            placeholder="mañana"
-            onChange={(event) => props.onValueChange('date_hint', event.currentTarget.value)}
+            type="date"
+            value={props.values.date}
+            onChange={(event) => props.onValueChange('date', event.currentTarget.value)}
             required
           />
-          {stringValue(props.values.date_hint).length === 0 ? <span className="form-field-required">Required</span> : null}
+          {stringValue(props.values.date).length === 0 ? <span className="form-field-required">Required</span> : null}
         </label>
         <label className="form-group">
           Time
           <input
+            type="time"
             value={props.values.time}
-            placeholder="15:00"
             onChange={(event) => props.onValueChange('time', event.currentTarget.value)}
             required
           />
           {stringValue(props.values.time).length === 0 ? <span className="form-field-required">Required</span> : null}
+        </label>
+        <label className="form-group">
+          Timezone
+          <input
+            value={props.values.timezone}
+            placeholder="America/Argentina/Buenos_Aires"
+            onChange={(event) => props.onValueChange('timezone', event.currentTarget.value)}
+            required
+          />
+          {stringValue(props.values.timezone).length === 0 ? <span className="form-field-required">Required</span> : null}
+        </label>
+        <label className="form-group">
+          Duration (minutes)
+          <input
+            type="number"
+            min="5"
+            max="1440"
+            step="5"
+            value={props.values.duration_minutes}
+            onChange={(event) => props.onValueChange('duration_minutes', event.currentTarget.value)}
+            required
+          />
         </label>
         <label className="form-group full-width">
           Attendees
@@ -1743,7 +1772,7 @@ function ApprovalCheckpointView(props: {
       {props.simulationError ? <p role="alert" className="iam-control__inline-error">{props.simulationError}</p> : null}
       {props.simulatedRun ? (
         <p className="iam-control__inline-note">
-          {props.simulatedRun.execution_result?.message || 'Simulated execution completed; no external effects were performed.'}
+          {props.simulatedRun.execution_result?.message || 'Approved action completed.'}
         </p>
       ) : null}
       <div className="virployee-approval-checkpoint__actions">
@@ -1755,9 +1784,9 @@ function ApprovalCheckpointView(props: {
             {status === 'pending' ? 'Review approval' : 'View approval'}
           </button>
         ) : null}
-        {status === 'approved' && !props.simulatedRun ? (
+        {status === 'approved' && Boolean(props.run?.nexus_result?.check_id) && !props.simulatedRun ? (
           <button type="button" className="btn-primary" disabled={props.simulationLoading} onClick={() => props.onSimulateApprovedExecution(approvalID)}>
-            {props.simulationLoading ? 'Simulating...' : 'Simulate execution'}
+            {props.simulationLoading ? 'Executing...' : 'Execute locally'}
           </button>
         ) : null}
       </div>
@@ -1839,6 +1868,7 @@ function RunTraceHistory(props: {
               const simulatedRun = latestSimulatedExecutionRun(props.runs, approvalID)
               const canSimulateExecution = run.operation === 'execution_gate' &&
                 approvalID.length > 0 &&
+                Boolean(run.nexus_result?.check_id) &&
                 approvalStatus === 'approved' &&
                 !simulatedRun
               return (
@@ -1901,7 +1931,7 @@ function RunTraceHistory(props: {
                             disabled={props.simulationLoading}
                             onClick={() => props.onSimulateApprovedExecution(approvalID)}
                           >
-                            {props.simulationLoading ? 'Simulating...' : 'Simulate execution'}
+                            {props.simulationLoading ? 'Executing...' : 'Execute locally'}
                           </button>
                         ) : null}
                       </div>
@@ -1928,7 +1958,7 @@ function RunTraceAuditSummary(props: { runs: VirployeeRunTrace[]; approvalByID: 
       .map((run) => run.nexus_result?.approval_id || run.execution_result?.approval_id)
       .filter((id): id is string => Boolean(id)),
   )
-  const simulatedCount = props.runs.filter((run) => run.operation === 'simulated_execution').length
+  const simulatedCount = props.runs.filter((run) => run.operation === 'simulated_execution' || run.operation === 'execution').length
   const pendingApprovals = Array.from(approvalIDs).filter((id) => props.approvalByID[id]?.status === 'pending').length
 
   return (
@@ -1944,9 +1974,9 @@ function RunTraceAuditSummary(props: { runs: VirployeeRunTrace[]; approvalByID: 
         badge={pendingApprovals > 0 ? <StatusBadge value={`${pendingApprovals} pending`} tone="warning" /> : null}
       />
       <AuditSummaryItem
-        label="Simulations"
+        label="Executions"
         value={`${simulatedCount} completed`}
-        badge={simulatedCount > 0 ? <StatusBadge value="No external effects" tone="success" /> : null}
+        badge={simulatedCount > 0 ? <StatusBadge value="Recorded" tone="success" /> : null}
       />
       <AuditSummaryItem
         label="Current binding"
@@ -2458,13 +2488,15 @@ function requiresConfirmedCalendarDraft(result: VirployeeDryRun): boolean {
 }
 
 function isCalendarCreateDraftKey(value: string): value is CalendarCreateDraftKey {
-  return value === 'title' || value === 'date_hint' || value === 'time' || value === 'attendees'
+  return value === 'title' || value === 'date' || value === 'time' || value === 'timezone' || value === 'duration_minutes' || value === 'attendees'
 }
 
 function clarificationQuestion(value: string): string {
   if (value === 'title') return 'What is the event title?'
-  if (value === 'date_hint') return 'What date should I use?'
+  if (value === 'date') return 'What date should I use?'
   if (value === 'time') return 'What time should I use?'
+  if (value === 'timezone') return 'What timezone should I use?'
+  if (value === 'duration_minutes') return 'How long should the event last?'
   if (value === 'attendees') return 'Who should be invited?'
   return 'Please complete the missing field.'
 }
@@ -2473,22 +2505,27 @@ function calendarCreateDraftValuesFromDryRun(result: VirployeeDryRun): CalendarC
   if (!requiresConfirmedCalendarDraft(result)) return null
   const values: CalendarCreateDraftValues = {
     title: '',
-    date_hint: '',
+    date: '',
     time: '',
+    timezone: browserTimezone(),
+    duration_minutes: '60',
     attendees: '',
   }
   for (const field of result.draft.fields) {
-    if (field.key === 'title' || field.key === 'date_hint' || field.key === 'time' || field.key === 'attendees') {
+    if (field.key === 'title' || field.key === 'attendees') {
       values[field.key] = field.value
     }
+    if (field.key === 'time') values.time = canonicalTime(field.value)
   }
   return values
 }
 
 function isCalendarCreateDraftComplete(values: CalendarCreateDraftValues): boolean {
   return stringValue(values.title).length > 0 &&
-    stringValue(values.date_hint).length > 0 &&
-    stringValue(values.time).length > 0 &&
+    /^\d{4}-\d{2}-\d{2}$/.test(stringValue(values.date)) &&
+    /^\d{2}:\d{2}$/.test(stringValue(values.time)) &&
+    stringValue(values.timezone).length > 0 &&
+    Number(values.duration_minutes) >= 5 && Number(values.duration_minutes) <= 1440 &&
     stringValue(values.attendees).length > 0
 }
 
@@ -2498,11 +2535,26 @@ function calendarConfirmedDraftFromValues(values: CalendarCreateDraftValues): Vi
     kind: 'calendar_event',
     fields: [
       { key: 'title', value: stringValue(values.title) },
-      { key: 'date_hint', value: stringValue(values.date_hint) },
+      { key: 'date', value: stringValue(values.date) },
       { key: 'time', value: stringValue(values.time) },
+      { key: 'timezone', value: stringValue(values.timezone) },
+      { key: 'duration_minutes', value: stringValue(values.duration_minutes) },
       { key: 'attendees', value: stringValue(values.attendees) },
     ],
   }
+}
+
+function browserTimezone(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+}
+
+function canonicalTime(value: string): string {
+  const match = value.match(/(?:a las\s*)?(\d{1,2})(?::(\d{2}))?/i)
+  if (!match) return ''
+  const hour = Number(match[1])
+  const minute = Number(match[2] ?? '0')
+  if (hour > 23 || minute > 59) return ''
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
 }
 
 function formatDraftStatus(value: VirployeeDryRun['draft']['status']): string {
@@ -2536,6 +2588,7 @@ function formatDate(value: string | null): string {
 function formatRunOperation(value: VirployeeRunTrace['operation']): string {
   if (value === 'execution_gate') return 'Execution gate'
   if (value === 'simulated_execution') return 'Simulated execution'
+  if (value === 'execution') return 'Execution'
   return 'Dry Run'
 }
 
@@ -2545,7 +2598,7 @@ function latestExecutionGateRun(runs: VirployeeRunTrace[]): VirployeeRunTrace | 
 
 function latestSimulatedExecutionRun(runs: VirployeeRunTrace[], approvalID: string): VirployeeRunTrace | null {
   if (!approvalID) return null
-  return runs.find((run) => run.operation === 'simulated_execution' && run.execution_result?.approval_id === approvalID) ?? null
+  return runs.find((run) => (run.operation === 'execution' || run.operation === 'simulated_execution') && run.execution_result?.approval_id === approvalID) ?? null
 }
 
 function runCapabilityKey(run: VirployeeRunTrace): string {
@@ -2564,6 +2617,7 @@ function formatRunDecision(run: VirployeeRunTrace, approval?: Approval | null): 
   if (run.operation === 'simulated_execution') {
     return run.execution_result?.status === 'simulated_executed' ? 'Simulated' : 'Simulation'
   }
+  if (run.operation === 'execution') return run.execution_result?.status === 'succeeded' ? 'Executed' : 'Failed'
   if (run.operation === 'execution_gate') {
     if (run.nexus_result?.decision === 'require_approval') {
       const status = approval?.status || run.nexus_result.approval_status || 'pending'
@@ -2578,6 +2632,7 @@ function formatRunDecision(run: VirployeeRunTrace, approval?: Approval | null): 
 
 function runDecisionTone(run: VirployeeRunTrace, approval?: Approval | null): StatusTone {
   if (run.operation === 'simulated_execution') return 'success'
+  if (run.operation === 'execution') return run.execution_result?.status === 'succeeded' ? 'success' : 'danger'
   if (run.operation === 'execution_gate' && run.nexus_result?.decision === 'require_approval') {
     return approvalStatusTone(approval?.status || run.nexus_result.approval_status || 'pending')
   }
@@ -2598,6 +2653,7 @@ function formatNexusTrace(run: VirployeeRunTrace, approval?: Approval | null): s
   if (run.operation === 'simulated_execution') {
     return run.execution_result?.external_effects ? 'External effects recorded' : 'No external effects'
   }
+  if (run.operation === 'execution') return run.execution_result?.status === 'succeeded' ? 'Execution completed' : 'Execution failed'
   if (!run.nexus_result) return 'Nexus not called'
   if (!run.nexus_result.available) return 'Nexus unavailable'
   if (run.nexus_result.decision === 'allow') return 'Allowed by Nexus'
@@ -2612,6 +2668,7 @@ function formatNexusTrace(run: VirployeeRunTrace, approval?: Approval | null): s
 function nexusTraceTone(run?: VirployeeRunTrace | null, approval?: Approval | null): StatusTone {
   if (!run) return 'muted'
   if (run.operation === 'simulated_execution') return run.execution_result?.external_effects ? 'warning' : 'success'
+  if (run.operation === 'execution') return run.execution_result?.status === 'succeeded' ? 'success' : 'danger'
   if (!run.nexus_result) return 'muted'
   if (!run.nexus_result.available || run.nexus_result.decision === 'deny') return 'danger'
   if (run.nexus_result.decision === 'require_approval') {
@@ -2623,6 +2680,7 @@ function nexusTraceTone(run?: VirployeeRunTrace | null, approval?: Approval | nu
 
 function formatNexusReason(run: VirployeeRunTrace): string {
   if (run.operation === 'simulated_execution') return run.execution_result?.message || ''
+  if (run.operation === 'execution') return run.execution_result?.message || ''
   if (!run.nexus_result) return ''
   return run.nexus_result.error || run.nexus_result.decision_reason || run.nexus_result.status || ''
 }

@@ -68,6 +68,7 @@ func (c *Client) Check(ctx context.Context, input executiongate.GovernanceCheckI
 		return executiongate.GovernanceCheckResult{}, fmt.Errorf("decode governance check: %w", err)
 	}
 	return executiongate.GovernanceCheckResult{
+		CheckID:              out.CheckID,
 		Decision:             out.Decision,
 		RiskLevel:            out.RiskLevel,
 		Status:               out.Status,
@@ -105,10 +106,11 @@ func (c *Client) GetApproval(ctx context.Context, tenantID string, id uuid.UUID)
 		return executiongate.GovernanceApproval{}, fmt.Errorf("decode approval: %w", err)
 	}
 	return executiongate.GovernanceApproval{
-		ID:          out.ID,
-		RequesterID: out.RequesterID,
-		BindingHash: out.BindingHash,
-		Status:      out.Status,
+		ID:                out.ID,
+		GovernanceCheckID: out.GovernanceCheckID,
+		RequesterID:       out.RequesterID,
+		BindingHash:       out.BindingHash,
+		Status:            out.Status,
 	}, nil
 }
 
@@ -125,13 +127,15 @@ type checkRequest struct {
 }
 
 type approvalResponse struct {
-	ID          string `json:"id"`
-	RequesterID string `json:"requester_id"`
-	BindingHash string `json:"binding_hash"`
-	Status      string `json:"status"`
+	ID                string `json:"id"`
+	GovernanceCheckID string `json:"governance_check_id"`
+	RequesterID       string `json:"requester_id"`
+	BindingHash       string `json:"binding_hash"`
+	Status            string `json:"status"`
 }
 
 type checkResponse struct {
+	CheckID              string `json:"check_id"`
 	Decision             string `json:"decision"`
 	RiskLevel            string `json:"risk_level"`
 	Status               string `json:"status"`
@@ -141,4 +145,28 @@ type checkResponse struct {
 	BindingHash          string `json:"binding_hash"`
 	ApprovalID           string `json:"approval_id"`
 	ApprovalStatus       string `json:"approval_status"`
+}
+
+func (c *Client) ReportExecutionResult(ctx context.Context, tenantID, checkID, idempotencyKey, bindingHash, status string, durationMS int64, result map[string]any) error {
+	body := map[string]any{"binding_hash": bindingHash, "status": status, "duration_ms": durationMS, "result": result}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("encode execution result: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/governance/checks/"+checkID+"/result", bytes.NewReader(raw))
+	if err != nil {
+		return fmt.Errorf("build execution result request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Tenant-ID", tenantID)
+	req.Header.Set("Idempotency-Key", idempotencyKey)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("report execution result: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("report execution result: status %d", resp.StatusCode)
+	}
+	return nil
 }

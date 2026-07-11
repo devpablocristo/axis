@@ -16,9 +16,14 @@ type CheckRecorderPort interface {
 	RecordCheck(ctx context.Context, tenantID string, input domain.NormalizedCheckInput, result domain.CheckResult) (domain.RecordedCheck, error)
 }
 
+type ExecutionResultRecorderPort interface {
+	RecordExecutionResult(ctx context.Context, tenantID, checkID string, input domain.ExecutionResultInput) (domain.ExecutionResult, error)
+}
+
 type UseCases struct {
 	actionTypes ActionTypeReaderPort
 	checks      CheckRecorderPort
+	results     ExecutionResultRecorderPort
 }
 
 func NewUseCases(actionTypes ActionTypeReaderPort, checks ...CheckRecorderPort) *UseCases {
@@ -26,7 +31,11 @@ func NewUseCases(actionTypes ActionTypeReaderPort, checks ...CheckRecorderPort) 
 	if len(checks) > 0 {
 		recorder = checks[0]
 	}
-	return &UseCases{actionTypes: actionTypes, checks: recorder}
+	var results ExecutionResultRecorderPort
+	if typed, ok := recorder.(ExecutionResultRecorderPort); ok {
+		results = typed
+	}
+	return &UseCases{actionTypes: actionTypes, checks: recorder, results: results}
 }
 
 func (u *UseCases) Check(ctx context.Context, tenantID string, input domain.CheckInput) (domain.CheckResult, error) {
@@ -45,9 +54,11 @@ func (u *UseCases) Check(ctx context.Context, tenantID string, input domain.Chec
 		result := denyForDisabledActionType(actionType.RiskClass)
 		result.BindingHash = normalized.BindingHash
 		if u.checks != nil {
-			if _, err := u.checks.RecordCheck(ctx, tenantID, normalized, result); err != nil {
+			recorded, err := u.checks.RecordCheck(ctx, tenantID, normalized, result)
+			if err != nil {
 				return domain.CheckResult{}, err
 			}
+			result.CheckID = recorded.CheckID
 		}
 		return result, nil
 	}
@@ -60,8 +71,20 @@ func (u *UseCases) Check(ctx context.Context, tenantID string, input domain.Chec
 		}
 		result.ApprovalID = recorded.ApprovalID
 		result.ApprovalStatus = recorded.ApprovalStatus
+		result.CheckID = recorded.CheckID
 	}
 	return result, nil
+}
+
+func (u *UseCases) ReportExecutionResult(ctx context.Context, tenantID, checkID string, input domain.ExecutionResultInput) (domain.ExecutionResult, error) {
+	if u.results == nil {
+		return domain.ExecutionResult{}, domainerr.Conflict("governance result recorder is not configured")
+	}
+	normalized, err := domain.NormalizeExecutionResultInput(input)
+	if err != nil {
+		return domain.ExecutionResult{}, err
+	}
+	return u.results.RecordExecutionResult(ctx, tenantID, checkID, normalized)
 }
 
 func decisionForRisk(risk actiondomain.RiskClass) domain.CheckResult {

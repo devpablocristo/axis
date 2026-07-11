@@ -9,6 +9,7 @@ import (
 	profiletemplatedomain "github.com/devpablocristo/companion-v2/internal/profiletemplates/usecases/domain"
 	"github.com/devpablocristo/companion-v2/internal/virployees/dryrun"
 	"github.com/devpablocristo/companion-v2/internal/virployees/executiongate"
+	"github.com/devpablocristo/companion-v2/internal/virployees/preparedactions"
 	"github.com/devpablocristo/companion-v2/internal/virployees/runtimecontext"
 	"github.com/devpablocristo/companion-v2/internal/virployees/runtraces"
 	"github.com/devpablocristo/companion-v2/internal/virployees/usecases/domain"
@@ -36,6 +37,17 @@ type RepositoryPort interface {
 	FindSimulatedExecutionTraceByApproval(ctx context.Context, tenantID string, virployeeID uuid.UUID, approvalID string) (runtraces.Trace, error)
 }
 
+type ExecutionRepositoryPort interface {
+	FindExecutionTraceByApproval(ctx context.Context, tenantID string, virployeeID uuid.UUID, approvalID string) (runtraces.Trace, error)
+	SavePreparedAction(ctx context.Context, tenantID string, virployeeID uuid.UUID, checkID, approvalID string, capabilityKey, payloadHash, bindingHash string, action preparedactions.Action) (PreparedActionRecord, error)
+	GetPreparedActionByApproval(ctx context.Context, tenantID string, virployeeID, approvalID uuid.UUID) (PreparedActionRecord, error)
+	BeginExecution(ctx context.Context, tenantID string, virployeeID uuid.UUID, preparedActionID uuid.UUID, idempotencyKey string) (ExecutionAttempt, bool, error)
+	GetExecutionByPreparedAction(ctx context.Context, tenantID string, preparedActionID uuid.UUID) (ExecutionAttempt, error)
+	CompleteExecution(ctx context.Context, tenantID string, id uuid.UUID, status, resourceID string, result map[string]any, executionError string, durationMS int64) (ExecutionAttempt, error)
+	CreateLocalCalendarEvent(ctx context.Context, tenantID string, virployeeID uuid.UUID, attempt ExecutionAttempt, action preparedactions.Action) (string, error)
+	SetNexusReportStatus(ctx context.Context, tenantID string, id uuid.UUID, status string) error
+}
+
 type JobRoleReaderPort interface {
 	EnsureActive(ctx context.Context, tenantID string, id uuid.UUID) error
 	Get(ctx context.Context, tenantID string, id uuid.UUID) (jobroledomain.JobRole, error)
@@ -59,13 +71,24 @@ type ApprovalReaderPort interface {
 	GetApproval(ctx context.Context, tenantID string, id uuid.UUID) (executiongate.GovernanceApproval, error)
 }
 
+type ExecutionResultReporterPort interface {
+	ReportExecutionResult(ctx context.Context, tenantID, checkID, idempotencyKey, bindingHash, status string, durationMS int64, result map[string]any) error
+}
+
+type ActionExecutorPort interface {
+	Execute(ctx context.Context, tenantID string, virployeeID uuid.UUID, attempt ExecutionAttempt, action preparedactions.Action) (string, map[string]any, error)
+}
+
 type UseCases struct {
 	repo             RepositoryPort
+	executionRepo    ExecutionRepositoryPort
 	jobRoles         JobRoleReaderPort
 	capabilities     CapabilityValidatorPort
 	profileTemplates ProfileTemplateReaderPort
 	governance       GovernanceCheckerPort
 	approvals        ApprovalReaderPort
+	resultReporter   ExecutionResultReporterPort
+	executors        map[string]ActionExecutorPort
 	lifecycle        *lifecycle.Service
 }
 
@@ -90,13 +113,18 @@ func NewUseCases(repo RepositoryPort, jobRoles ...JobRoleReaderPort) (*UseCases,
 	if len(jobRoles) > 0 && jobRoles[0] != nil {
 		reader = jobRoles[0]
 	}
-	return &UseCases{
+	uc := &UseCases{
 		repo:             repo,
 		jobRoles:         reader,
 		capabilities:     noopCapabilityValidator{},
 		profileTemplates: noopProfileTemplateReader{},
+		executors:        map[string]ActionExecutorPort{},
 		lifecycle:        service,
-	}, nil
+	}
+	if executionRepo, ok := repo.(ExecutionRepositoryPort); ok {
+		uc.executionRepo = executionRepo
+	}
+	return uc, nil
 }
 
 func (u *UseCases) SetCapabilityValidator(validator CapabilityValidatorPort) {
@@ -121,6 +149,17 @@ func (u *UseCases) SetGovernanceChecker(checker GovernanceCheckerPort) {
 
 func (u *UseCases) SetApprovalReader(reader ApprovalReaderPort) {
 	u.approvals = reader
+}
+
+func (u *UseCases) SetExecutionResultReporter(reporter ExecutionResultReporterPort) {
+	u.resultReporter = reporter
+}
+
+func (u *UseCases) RegisterExecutor(action string, executor ActionExecutorPort) {
+	action = strings.TrimSpace(action)
+	if action != "" && executor != nil {
+		u.executors[action] = executor
+	}
 }
 
 func (u *UseCases) Create(ctx context.Context, tenantID string, input domain.CreateInput) (domain.Virployee, error) {
@@ -256,8 +295,16 @@ func (u *UseCases) ExecutionGate(
 			return executiongate.Result{}, domainerr.Validation(err.Error())
 		}
 	}
+	var preparedAction *preparedactions.Action
+	if confirmedDraft != nil && result.Intent.CapabilityKey == preparedactions.ActionCreate && result.Draft.Status == dryrun.DraftStatusReady {
+		prepared, prepareErr := preparedactions.FromDraft(result.Draft)
+		if prepareErr != nil {
+			return executiongate.Result{}, domainerr.Validation(prepareErr.Error())
+		}
+		preparedAction = &prepared
+	}
 	gate := executiongate.Evaluate(result)
-	bindingHash, err := bindingHashFor(tenantID, result)
+	bindingHash, err := bindingHashFor(tenantID, result, preparedAction)
 	if err != nil {
 		return executiongate.Result{}, err
 	}
@@ -281,6 +328,18 @@ func (u *UseCases) ExecutionGate(
 		return gate, nil
 	}
 	gate = executiongate.ApplyGovernance(gate, governance)
+	if preparedAction != nil && governance.Decision == "require_approval" {
+		payloadHash, hashErr := preparedAction.PayloadHash()
+		if hashErr != nil {
+			return executiongate.Result{}, hashErr
+		}
+		if u.executionRepo == nil {
+			return executiongate.Result{}, domainerr.Conflict("execution repository is not configured")
+		}
+		if _, saveErr := u.executionRepo.SavePreparedAction(ctx, tenantID, id, governance.CheckID, governance.ApprovalID, result.Intent.CapabilityKey, payloadHash, bindingHash, *preparedAction); saveErr != nil {
+			return executiongate.Result{}, saveErr
+		}
+	}
 	if err := u.recordExecutionGateTrace(ctx, tenantID, gate, nexusTraceFrom(governance, bindingHash), bindingHash); err != nil {
 		return executiongate.Result{}, err
 	}
@@ -567,15 +626,15 @@ func gateChecksTrace(checks []executiongate.Check) []runtraces.GateCheck {
 	return out
 }
 
-func bindingHashFor(tenantID string, result dryrun.Result) (string, error) {
-	return runtraces.BindingHash(actionBinding(tenantID, result))
+func bindingHashFor(tenantID string, result dryrun.Result, prepared *preparedactions.Action) (string, error) {
+	return runtraces.BindingHash(actionBinding(tenantID, result, prepared))
 }
 
-func actionBinding(tenantID string, result dryrun.Result) map[string]any {
+func actionBinding(tenantID string, result dryrun.Result, prepared *preparedactions.Action) map[string]any {
 	if !result.Intent.Matched {
 		return nil
 	}
-	return map[string]any{
+	binding := map[string]any{
 		"schema_version":  "tool_intent.v1",
 		"tenant_id":       normalizeTenantID(tenantID),
 		"virployee_id":    result.RuntimeContext.Virployee.ID.String(),
@@ -586,6 +645,14 @@ func actionBinding(tenantID string, result dryrun.Result) map[string]any {
 		"target_resource": result.Intent.Resource,
 		"input_hash":      runtraces.HashString(result.Input),
 	}
+	if prepared != nil {
+		payloadHash, err := prepared.PayloadHash()
+		if err == nil {
+			binding["prepared_action_schema"] = prepared.SchemaVersion
+			binding["prepared_action_hash"] = payloadHash
+		}
+	}
+	return binding
 }
 
 func nexusTraceFrom(governance executiongate.GovernanceCheckResult, bindingHash string) *runtraces.NexusResult {
@@ -593,6 +660,7 @@ func nexusTraceFrom(governance executiongate.GovernanceCheckResult, bindingHash 
 		bindingHash = governance.BindingHash
 	}
 	return &runtraces.NexusResult{
+		CheckID:              governance.CheckID,
 		Available:            true,
 		Decision:             governance.Decision,
 		RiskLevel:            governance.RiskLevel,

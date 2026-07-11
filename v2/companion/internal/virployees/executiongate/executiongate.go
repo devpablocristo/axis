@@ -58,6 +58,7 @@ type GovernanceCheckInput struct {
 }
 
 type GovernanceCheckResult struct {
+	CheckID              string
 	Decision             string
 	RiskLevel            string
 	Status               string
@@ -69,10 +70,11 @@ type GovernanceCheckResult struct {
 }
 
 type GovernanceApproval struct {
-	ID          string
-	RequesterID string
-	BindingHash string
-	Status      string
+	ID                string
+	GovernanceCheckID string
+	RequesterID       string
+	BindingHash       string
+	Status            string
 }
 
 type ConfirmedDraft struct {
@@ -316,8 +318,10 @@ func calendarEventCreateRequiredFields() []struct {
 		reason string
 	}{
 		{key: "title", label: "Title", reason: "Title is required before preparing the event."},
-		{key: "date_hint", label: "Date", reason: "Date is required before preparing the event."},
+		{key: "date", label: "Date", reason: "Date in YYYY-MM-DD format is required before preparing the event."},
 		{key: "time", label: "Time", reason: "Time is required before preparing the event."},
+		{key: "timezone", label: "Timezone", reason: "An IANA timezone is required before preparing the event."},
+		{key: "duration_minutes", label: "Duration", reason: "Duration in minutes is required before preparing the event."},
 		{key: "attendees", label: "Attendees", reason: "At least one attendee is required for a meeting."},
 	}
 }

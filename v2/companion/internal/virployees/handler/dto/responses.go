@@ -203,6 +203,7 @@ type RunTraceGateCheckResponse struct {
 }
 
 type RunTraceNexusResultResponse struct {
+	CheckID              string `json:"check_id,omitempty"`
 	Available            bool   `json:"available"`
 	Decision             string `json:"decision,omitempty"`
 	RiskLevel            string `json:"risk_level,omitempty"`
@@ -216,13 +217,16 @@ type RunTraceNexusResultResponse struct {
 }
 
 type RunTraceExecutionResultResponse struct {
-	Status          string `json:"status,omitempty"`
-	Mode            string `json:"mode,omitempty"`
-	ApprovalID      string `json:"approval_id,omitempty"`
-	ApprovalStatus  string `json:"approval_status,omitempty"`
-	BindingHash     string `json:"binding_hash,omitempty"`
-	Message         string `json:"message,omitempty"`
-	ExternalEffects bool   `json:"external_effects"`
+	Status            string `json:"status,omitempty"`
+	Mode              string `json:"mode,omitempty"`
+	ApprovalID        string `json:"approval_id,omitempty"`
+	ApprovalStatus    string `json:"approval_status,omitempty"`
+	BindingHash       string `json:"binding_hash,omitempty"`
+	Message           string `json:"message,omitempty"`
+	ExternalEffects   bool   `json:"external_effects"`
+	ResourceID        string `json:"resource_id,omitempty"`
+	DurationMS        int64  `json:"duration_ms,omitempty"`
+	NexusReportStatus string `json:"nexus_report_status,omitempty"`
 }
 
 type ListRunTracesResponse struct {
@@ -297,6 +301,7 @@ func runTraceNexusResultFromDomain(result *runtraces.NexusResult) *RunTraceNexus
 		return nil
 	}
 	return &RunTraceNexusResultResponse{
+		CheckID:              result.CheckID,
 		Available:            result.Available,
 		Decision:             result.Decision,
 		RiskLevel:            result.RiskLevel,
@@ -315,13 +320,16 @@ func runTraceExecutionResultFromDomain(result *runtraces.ExecutionResult) *RunTr
 		return nil
 	}
 	return &RunTraceExecutionResultResponse{
-		Status:          result.Status,
-		Mode:            result.Mode,
-		ApprovalID:      result.ApprovalID,
-		ApprovalStatus:  result.ApprovalStatus,
-		BindingHash:     result.BindingHash,
-		Message:         result.Message,
-		ExternalEffects: result.ExternalEffects,
+		Status:            result.Status,
+		Mode:              result.Mode,
+		ApprovalID:        result.ApprovalID,
+		ApprovalStatus:    result.ApprovalStatus,
+		BindingHash:       result.BindingHash,
+		Message:           result.Message,
+		ExternalEffects:   result.ExternalEffects,
+		ResourceID:        result.ResourceID,
+		DurationMS:        result.DurationMS,
+		NexusReportStatus: result.NexusReportStatus,
 	}
 }
 

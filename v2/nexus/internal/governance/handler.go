@@ -13,6 +13,7 @@ import (
 
 type UseCasesPort interface {
 	Check(context.Context, string, domain.CheckInput) (domain.CheckResult, error)
+	ReportExecutionResult(context.Context, string, string, domain.ExecutionResultInput) (domain.ExecutionResult, error)
 }
 
 type Handler struct {
@@ -27,7 +28,26 @@ func (h *Handler) Routes(router gin.IRouter) {
 	group := router.Group("/governance")
 	{
 		group.POST("/check", h.Check)
+		group.POST("/checks/:check_id/result", h.ReportExecutionResult)
 	}
+}
+
+func (h *Handler) ReportExecutionResult(c *gin.Context) {
+	checkID := strings.TrimSpace(c.Param("check_id"))
+	if checkID == "" {
+		ginmw.Respond(c, ginmw.ErrBadInput)
+		return
+	}
+	var req dto.ExecutionResultRequest
+	if err := ginmw.BindJSON(c, &req); err != nil {
+		return
+	}
+	out, err := h.ucs.ReportExecutionResult(c.Request.Context(), tenantID(c), checkID, req.ToDomain(c.GetHeader("Idempotency-Key")))
+	if err != nil {
+		ginmw.Respond(c, err)
+		return
+	}
+	ginmw.WriteJSON(c, 200, dto.ExecutionResultFromDomain(out))
 }
 
 func (h *Handler) Check(c *gin.Context) {

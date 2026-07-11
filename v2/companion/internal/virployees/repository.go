@@ -259,6 +259,7 @@ func (r *Repository) CreateRunTrace(ctx context.Context, tenantID string, input 
 	var nexusResult any
 	if input.NexusResult != nil {
 		redacted := runtraces.RedactValue(map[string]any{
+			"check_id":               input.NexusResult.CheckID,
 			"available":              input.NexusResult.Available,
 			"decision":               input.NexusResult.Decision,
 			"risk_level":             input.NexusResult.RiskLevel,
@@ -279,13 +280,16 @@ func (r *Repository) CreateRunTrace(ctx context.Context, tenantID string, input 
 	var executionResult any
 	if input.ExecutionResult != nil {
 		redacted := runtraces.RedactValue(map[string]any{
-			"status":           input.ExecutionResult.Status,
-			"mode":             input.ExecutionResult.Mode,
-			"approval_id":      input.ExecutionResult.ApprovalID,
-			"approval_status":  input.ExecutionResult.ApprovalStatus,
-			"binding_hash":     input.ExecutionResult.BindingHash,
-			"message":          input.ExecutionResult.Message,
-			"external_effects": input.ExecutionResult.ExternalEffects,
+			"status":              input.ExecutionResult.Status,
+			"mode":                input.ExecutionResult.Mode,
+			"approval_id":         input.ExecutionResult.ApprovalID,
+			"approval_status":     input.ExecutionResult.ApprovalStatus,
+			"binding_hash":        input.ExecutionResult.BindingHash,
+			"message":             input.ExecutionResult.Message,
+			"external_effects":    input.ExecutionResult.ExternalEffects,
+			"resource_id":         input.ExecutionResult.ResourceID,
+			"duration_ms":         input.ExecutionResult.DurationMS,
+			"nexus_report_status": input.ExecutionResult.NexusReportStatus,
 		})
 		raw, err := json.Marshal(redacted)
 		if err != nil {
@@ -464,6 +468,26 @@ func (r *Repository) FindSimulatedExecutionTraceByApproval(
 		WHERE tenant_id = $1
 			AND virployee_id = $2::uuid
 			AND operation = 'simulated_execution'
+			AND execution_result->>'approval_id' = $3
+		ORDER BY created_at DESC, id DESC
+		LIMIT 1
+	`, tenantID, virployeeID.String(), strings.TrimSpace(approvalID))
+	return scanRunTrace(row)
+}
+
+func (r *Repository) FindExecutionTraceByApproval(
+	ctx context.Context,
+	tenantID string,
+	virployeeID uuid.UUID,
+	approvalID string,
+) (runtraces.Trace, error) {
+	row := r.pool.QueryRow(ctx, `
+		SELECT
+			id::text, tenant_id, virployee_id::text, operation, input_hash, input_preview,
+			intent, capability_id::text, capability_key, dry_run_decision, gate_decision,
+			gate_checks, nexus_result, execution_result, binding_hash, created_at
+		FROM companion_run_traces
+		WHERE tenant_id = $1 AND virployee_id = $2::uuid AND operation = 'execution'
 			AND execution_result->>'approval_id' = $3
 		ORDER BY created_at DESC, id DESC
 		LIMIT 1

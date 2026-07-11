@@ -31,6 +31,7 @@ type UseCasesPort interface {
 	DryRun(context.Context, string, uuid.UUID, string) (dryrun.Result, error)
 	ExecutionGate(context.Context, string, uuid.UUID, string, *executiongate.ConfirmedDraft) (executiongate.Result, error)
 	SimulateApprovedExecution(context.Context, string, uuid.UUID, uuid.UUID) (runtraces.Trace, error)
+	ExecuteApprovedAction(context.Context, string, uuid.UUID, uuid.UUID) (runtraces.Trace, error)
 	ListRuns(context.Context, string, uuid.UUID, int) ([]runtraces.Trace, error)
 	Update(context.Context, string, uuid.UUID, domain.UpdateInput) (domain.Virployee, error)
 	Archive(context.Context, string, uuid.UUID, string, string) error
@@ -60,6 +61,7 @@ func (h *Handler) Routes(router gin.IRouter) {
 		group.POST("/:virployee_id/dry-run", h.DryRun)
 		group.POST("/:virployee_id/execution-gate", h.ExecutionGate)
 		group.POST("/:virployee_id/simulated-executions", h.SimulateApprovedExecution)
+		group.POST("/:virployee_id/executions", h.ExecuteApprovedAction)
 		group.GET("/:virployee_id/runs", h.ListRuns)
 		group.GET("/:virployee_id", h.Get)
 		group.PUT("/:virployee_id", h.Update)
@@ -69,6 +71,28 @@ func (h *Handler) Routes(router gin.IRouter) {
 		group.POST("/:virployee_id/"+paths.SegmentRestore, h.Restore)
 		group.DELETE("/:virployee_id/purge", h.Purge)
 	}
+}
+
+func (h *Handler) ExecuteApprovedAction(c *gin.Context) {
+	id, ok := ginmw.ParseUUIDParam(c, "virployee_id")
+	if !ok {
+		return
+	}
+	var req dto.ExecuteApprovedActionRequest
+	if err := ginmw.BindJSON(c, &req); err != nil {
+		return
+	}
+	approvalID, err := uuid.Parse(strings.TrimSpace(req.ApprovalID))
+	if err != nil {
+		ginmw.Respond(c, ginmw.ErrBadInput)
+		return
+	}
+	out, err := h.ucs.ExecuteApprovedAction(c.Request.Context(), tenantID(c), id, approvalID)
+	if err != nil {
+		ginmw.Respond(c, err)
+		return
+	}
+	ginmw.WriteJSON(c, http.StatusOK, dto.RunTraceFromDomain(out))
 }
 
 func (h *Handler) ListRuns(c *gin.Context) {

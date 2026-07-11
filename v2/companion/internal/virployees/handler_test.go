@@ -258,7 +258,7 @@ func TestHandlerExecutionGate(t *testing.T) {
 	router := testRouter(fake)
 	id := uuid.New()
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/v1/virployees/"+id.String()+"/execution-gate", strings.NewReader(`{"input":"Agendá una reunión para mañana","confirmed_draft":{"action":"calendar.events.create","kind":"calendar_event","fields":[{"key":"title","value":"Reunión"},{"key":"date_hint","value":"mañana"},{"key":"time","value":"15:00"},{"key":"attendees","value":"ana@example.com"}]}}`))
+	req := httptest.NewRequest(http.MethodPost, "/v1/virployees/"+id.String()+"/execution-gate", strings.NewReader(`{"input":"Agendá una reunión para mañana","confirmed_draft":{"action":"calendar.events.create","kind":"calendar_event","fields":[{"key":"title","value":"Reunión"},{"key":"date","value":"2026-07-12"},{"key":"time","value":"15:00"},{"key":"timezone","value":"America/Argentina/Buenos_Aires"},{"key":"duration_minutes","value":"60"},{"key":"attendees","value":"ana@example.com"}]}}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Tenant-ID", "tenant-1")
 
@@ -555,6 +555,14 @@ func (f *handlerFakeUseCases) SimulateApprovedExecution(_ context.Context, tenan
 			ExternalEffects: false,
 		},
 		BindingHash: "binding-hash",
+	}, nil
+}
+
+func (f *handlerFakeUseCases) ExecuteApprovedAction(_ context.Context, tenantID string, id uuid.UUID, approvalID uuid.UUID) (runtraces.Trace, error) {
+	f.lastTenant = tenantID
+	return runtraces.Trace{
+		ID: uuid.New(), TenantID: tenantID, VirployeeID: id, Operation: runtraces.OperationExecution,
+		ExecutionResult: &runtraces.ExecutionResult{Status: "succeeded", Mode: "local", ApprovalID: approvalID.String(), ResourceID: uuid.NewString(), NexusReportStatus: "reported"},
 	}, nil
 }
 

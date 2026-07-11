@@ -495,8 +495,7 @@ test('allow and deny gate results do not expose approval actions', async ({ page
   await expect(page.getByText('Allowed by Nexus').first()).toBeVisible()
   await expect(page.getByRole('button', { name: 'Review approval' })).toHaveCount(0)
 
-  await page.getByLabel('Action input').fill('Agenda una reunion "Smoke Deny" manana a las 16 con ana@example.com')
-  await page.getByRole('button', { name: /Run (Dry Run|again)/ }).first().click()
+  await runDryRunInput(page, 'Agenda una reunion "Smoke Deny" manana a las 16 con ana@example.com')
   await page.getByRole('button', { name: 'Check execution gate' }).first().click()
   await expect(page.getByText('Denied by Nexus').first()).toBeVisible()
   await expect(page.getByRole('button', { name: 'Review approval' })).toHaveCount(0)
@@ -577,6 +576,10 @@ async function runDryRunInput(page: Page, input: string) {
   await page.getByLabel('Action input').fill(input)
   await page.getByRole('button', { name: /Run (Dry Run|again)/ }).first().click()
   await expect(page.getByText('Dry Run result')).toBeVisible()
+  const date = page.getByLabel('Date')
+  if (await date.count()) {
+    await date.fill('2099-01-01')
+  }
 }
 
 function createApiFixtureState(): ApiFixtureState {

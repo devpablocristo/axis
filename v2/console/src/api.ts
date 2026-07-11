@@ -248,7 +248,7 @@ export type VirployeeExecutionGate = {
 export type VirployeeRunTrace = {
   id: string
   virployee_id: string
-  operation: 'dry_run' | 'execution_gate' | 'simulated_execution'
+  operation: 'dry_run' | 'execution_gate' | 'simulated_execution' | 'execution'
   input_hash: string
   input_preview: string
   intent: {
@@ -267,6 +267,7 @@ export type VirployeeRunTrace = {
     reason: string
   }>
   nexus_result?: {
+    check_id?: string
     available: boolean
     decision?: string
     risk_level?: string
@@ -286,6 +287,9 @@ export type VirployeeRunTrace = {
     binding_hash?: string
     message?: string
     external_effects: boolean
+    resource_id?: string
+    duration_ms?: number
+    nexus_report_status?: 'pending' | 'reported' | 'failed'
   }
   binding_hash?: string
   created_at: string
@@ -807,6 +811,20 @@ export function simulateApprovedVirployeeExecution(
   principalId: string,
 ): Promise<VirployeeRunTrace> {
   return axisFetch<VirployeeRunTrace>(`/api/virployees/${encodeURIComponent(id)}/simulated-executions`, {
+    method: 'POST',
+    tenantId,
+    principalId,
+    body: { approval_id: approvalId },
+  })
+}
+
+export function executeApprovedVirployeeAction(
+  id: string,
+  approvalId: string,
+  tenantId: string,
+  principalId: string,
+): Promise<VirployeeRunTrace> {
+  return axisFetch<VirployeeRunTrace>(`/api/virployees/${encodeURIComponent(id)}/executions`, {
     method: 'POST',
     tenantId,
     principalId,

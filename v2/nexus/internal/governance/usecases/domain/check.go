@@ -1,6 +1,8 @@
 package domain
 
 import (
+	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/devpablocristo/platform/errors/go/domainerr"
@@ -47,6 +49,7 @@ type NormalizedCheckInput struct {
 }
 
 type CheckResult struct {
+	CheckID              string
 	Decision             Decision
 	RiskLevel            string
 	Status               Status
@@ -59,8 +62,66 @@ type CheckResult struct {
 }
 
 type RecordedCheck struct {
+	CheckID        string
 	ApprovalID     string
 	ApprovalStatus string
+}
+
+type ExecutionResultInput struct {
+	IdempotencyKey string
+	BindingHash    string
+	Status         string
+	DurationMS     int64
+	Result         map[string]any
+}
+
+type ExecutionResult struct {
+	ID                string
+	GovernanceCheckID string
+	BindingHash       string
+	Status            string
+	DurationMS        int64
+	Result            map[string]any
+}
+
+func NormalizeExecutionResultInput(in ExecutionResultInput) (ExecutionResultInput, error) {
+	in.IdempotencyKey = strings.TrimSpace(in.IdempotencyKey)
+	in.BindingHash = strings.TrimSpace(in.BindingHash)
+	in.Status = strings.TrimSpace(in.Status)
+	if in.IdempotencyKey == "" {
+		return ExecutionResultInput{}, domainerr.Validation("Idempotency-Key is required")
+	}
+	if in.BindingHash == "" {
+		return ExecutionResultInput{}, domainerr.Validation("binding_hash is required")
+	}
+	if in.Status != "succeeded" && in.Status != "failed" {
+		return ExecutionResultInput{}, domainerr.Validation("status must be succeeded or failed")
+	}
+	if in.DurationMS < 0 {
+		return ExecutionResultInput{}, domainerr.Validation("duration_ms cannot be negative")
+	}
+	if in.Result == nil {
+		in.Result = map[string]any{}
+	}
+	raw, err := json.Marshal(in.Result)
+	if err != nil || len(raw) > 16*1024 {
+		return ExecutionResultInput{}, fmt.Errorf("result payload is invalid or too large")
+	}
+	in.Result = sanitizeResult(in.Result)
+	return in, nil
+}
+
+func sanitizeResult(in map[string]any) map[string]any {
+	out := make(map[string]any, len(in))
+	for key, value := range in {
+		normalized := strings.ToLower(strings.TrimSpace(key))
+		if strings.Contains(normalized, "token") || strings.Contains(normalized, "secret") || strings.Contains(normalized, "password") || strings.Contains(normalized, "authorization") {
+			out[key] = "[REDACTED]"
+			continue
+		}
+		out[key] = value
+	}
+	return out
 }
 
 func NormalizeCheckInput(in CheckInput) (NormalizedCheckInput, error) {

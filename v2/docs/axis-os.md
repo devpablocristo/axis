@@ -52,9 +52,9 @@ BFF currently forwards that context to Companion with:
 - Clerk integration is deferred.
 - Nexus is implemented as a minimal governance checkpoint: `allow`, `deny`,
   `require_approval`, durable approvals, and binding hashes.
-- Companion can manually resume an approved approval as a simulated execution
-  after validating the approval binding hash.
+- Companion can manually execute an approved, durable prepared action through
+  the local calendar executor after validating the approval binding hash.
 - Companion tenancy storage is deferred; BFF validates tenancy before forwarding.
 - Virployees remain the first workforce primitive.
-- Policy engines, callbacks, break-glass, audit chains, external execution,
+- Policy engines, callbacks, break-glass, audit chains, external providers,
   tasks, and memory are future modules.

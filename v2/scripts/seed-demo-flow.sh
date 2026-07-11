@@ -306,8 +306,10 @@ run_gate() {
             kind: "calendar_event",
             fields: [
               {key: "title", value: $title},
-              {key: "date_hint", value: "manana"},
+              {key: "date", value: "2099-01-01"},
               {key: "time", value: "15:00"},
+              {key: "timezone", value: "America/Argentina/Buenos_Aires"},
+              {key: "duration_minutes", value: "60"},
               {key: "attendees", value: "ana@example.com"}
             ]
           }
@@ -379,5 +381,5 @@ manual check:
 3. Select it, open Dry Run, and review Run history
 4. Go to Approvals and review approval $approval_id
 5. Approve or reject it, then return to the Virployee history
-6. If approved, click "Simulate execution" and confirm no external effects were performed
+6. If approved, click "Execute locally" and confirm the local event and Nexus report were recorded
 EOF

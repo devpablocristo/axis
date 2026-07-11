@@ -795,8 +795,10 @@ func TestUseCasesExecutionGateUsesConfirmedDraft(t *testing.T) {
 		Kind:   "calendar_event",
 		Fields: []executiongate.ConfirmedDraftField{
 			{Key: "title", Value: "Reunión"},
-			{Key: "date_hint", Value: "mañana"},
+			{Key: "date", Value: "2026-07-12"},
 			{Key: "time", Value: "15:00"},
+			{Key: "timezone", Value: "America/Argentina/Buenos_Aires"},
+			{Key: "duration_minutes", Value: "60"},
 			{Key: "attendees", Value: "ana@example.com"},
 		},
 	})

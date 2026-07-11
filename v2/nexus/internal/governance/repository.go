@@ -47,7 +47,7 @@ func (r *Repository) RecordCheck(ctx context.Context, tenantID string, input dom
 		return domain.RecordedCheck{}, err
 	}
 
-	recorded := domain.RecordedCheck{}
+	recorded := domain.RecordedCheck{CheckID: checkID.String()}
 	if result.Decision == domain.DecisionRequireApproval {
 		approvalID := uuid.New()
 		if _, err := tx.Exec(ctx, `
