@@ -1,35 +1,35 @@
 version: 2
 updates:
   - package-ecosystem: gomod
-    directory: /companion
+    directory: /v2/companion
     schedule:
       interval: weekly
     cooldown:
       default-days: 7
     open-pull-requests-limit: 1
   - package-ecosystem: gomod
-    directory: /nexus
+    directory: /v2/nexus
     schedule:
       interval: weekly
     cooldown:
       default-days: 7
     open-pull-requests-limit: 1
   - package-ecosystem: gomod
-    directory: /bff
+    directory: /v2/bff
     schedule:
       interval: weekly
     cooldown:
       default-days: 7
     open-pull-requests-limit: 1
   - package-ecosystem: npm
-    directory: /console
+    directory: /v2/console
     schedule:
       interval: weekly
     cooldown:
       default-days: 7
     open-pull-requests-limit: 1
   - package-ecosystem: docker
-    directory: /
+    directory: /v2
     schedule:
       interval: monthly
     cooldown:
