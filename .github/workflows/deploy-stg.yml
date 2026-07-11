@@ -266,8 +266,11 @@ jobs:
       - name: Resolve BFF URL
         run: |
           bff_url="$(gcloud run services describe "$BFF_SERVICE" --project="$PROJECT_ID" --region="$REGION" --format='value(status.url)')"
+          project_number="$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')"
           test -n "$bff_url"
+          test -n "$project_number"
           echo "BFF_URL=$bff_url" >> "$GITHUB_ENV"
+          echo "CONSOLE_ALLOWED_HOSTS=${CONSOLE_SERVICE}-${project_number}.${REGION}.run.app" >> "$GITHUB_ENV"
       - name: Build and push
         run: |
           image_uri="${REGISTRY}/${PROJECT_ID}/${AR_REPOSITORY}/axis-console:${{ needs.prepare.outputs.sha }}"
@@ -279,7 +282,7 @@ jobs:
           gcloud run deploy "$CONSOLE_SERVICE" \
             --project="$PROJECT_ID" --region="$REGION" --image="$IMAGE_URI" \
             --service-account="$CONSOLE_RUNTIME_SA" \
-            --set-env-vars="AXIS_BFF_BASE_URL=${BFF_URL}" \
+            --set-env-vars="AXIS_BFF_BASE_URL=${BFF_URL},AXIS_CONSOLE_ALLOWED_HOSTS=${CONSOLE_ALLOWED_HOSTS}" \
             --allow-unauthenticated --ingress=all --port=19173 --min-instances=0 --max-instances=3
       - name: Smoke
         run: |
