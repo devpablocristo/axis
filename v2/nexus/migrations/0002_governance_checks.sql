@@ -1,3 +1,7 @@
+-- platform:migrate:non-transactional
+SET lock_timeout = '5s';
+SET statement_timeout = '30s';
+
 CREATE TABLE IF NOT EXISTS governance_checks (
     id uuid PRIMARY KEY,
     tenant_id text NOT NULL DEFAULT 'default',
@@ -13,9 +17,9 @@ CREATE TABLE IF NOT EXISTS governance_checks (
     created_at timestamptz NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_governance_checks_tenant_created
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_governance_checks_tenant_created
     ON governance_checks (tenant_id, created_at DESC);
 
-CREATE INDEX IF NOT EXISTS idx_governance_checks_binding_hash
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_governance_checks_binding_hash
     ON governance_checks (tenant_id, binding_hash)
     WHERE binding_hash <> '';

@@ -1,3 +1,7 @@
+-- platform:migrate:non-transactional
+SET lock_timeout = '5s';
+SET statement_timeout = '30s';
+
 CREATE TABLE IF NOT EXISTS companion_run_traces (
     id uuid PRIMARY KEY,
     tenant_id text NOT NULL DEFAULT 'default',
@@ -19,9 +23,9 @@ CREATE TABLE IF NOT EXISTS companion_run_traces (
     )
 );
 
-CREATE INDEX IF NOT EXISTS idx_companion_run_traces_virployee
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_companion_run_traces_virployee
     ON companion_run_traces (tenant_id, virployee_id, created_at DESC);
 
-CREATE INDEX IF NOT EXISTS idx_companion_run_traces_binding_hash
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_companion_run_traces_binding_hash
     ON companion_run_traces (tenant_id, binding_hash)
     WHERE binding_hash <> '';

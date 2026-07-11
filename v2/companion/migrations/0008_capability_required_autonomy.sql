@@ -1,3 +1,6 @@
+SET lock_timeout = '5s';
+SET statement_timeout = '30s';
+
 ALTER TABLE capabilities
     ADD COLUMN IF NOT EXISTS required_autonomy text;
 
@@ -26,7 +29,14 @@ BEGIN
 END $$;
 
 ALTER TABLE capabilities
-    ALTER COLUMN required_autonomy SET NOT NULL;
+    DROP CONSTRAINT IF EXISTS capabilities_required_autonomy_not_null;
+
+ALTER TABLE capabilities
+    ADD CONSTRAINT capabilities_required_autonomy_not_null
+    CHECK (required_autonomy IS NOT NULL) NOT VALID;
+
+ALTER TABLE capabilities
+    VALIDATE CONSTRAINT capabilities_required_autonomy_not_null;
 
 ALTER TABLE capabilities
     DROP CONSTRAINT IF EXISTS capabilities_action_class_check;
@@ -36,7 +46,10 @@ ALTER TABLE capabilities
 
 ALTER TABLE capabilities
     ADD CONSTRAINT capabilities_required_autonomy_check
-    CHECK (required_autonomy IN ('A0', 'A1', 'A2', 'A3', 'A4', 'A5'));
+    CHECK (required_autonomy IN ('A0', 'A1', 'A2', 'A3', 'A4', 'A5')) NOT VALID;
+
+ALTER TABLE capabilities
+    VALIDATE CONSTRAINT capabilities_required_autonomy_check;
 
 ALTER TABLE capabilities
     DROP COLUMN IF EXISTS action_class;

@@ -2,7 +2,6 @@ package virployees
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	capabilitydomain "github.com/devpablocristo/companion-v2/internal/capabilities/usecases/domain"
@@ -186,12 +185,7 @@ func (u *UseCases) RuntimeContext(ctx context.Context, tenantID string, id uuid.
 		return runtimecontext.Context{}, domainerr.Validation("profile_template_id must reference an active profile template in the same tenant")
 	}
 	if !profileTemplate.MaxAutonomy.Allows(virployee.Autonomy) {
-		return runtimecontext.Context{}, domainerr.Validation(fmt.Sprintf(
-			"profile template %s allows max autonomy %s; virployee autonomy %s exceeds it",
-			profileTemplate.Name,
-			profileTemplate.MaxAutonomy,
-			virployee.Autonomy,
-		))
+		return runtimecontext.Context{}, domainerr.Validation("profile template " + profileTemplate.Name + " allows max autonomy " + string(profileTemplate.MaxAutonomy) + "; virployee autonomy " + string(virployee.Autonomy) + " exceeds it")
 	}
 
 	capabilities := make([]capabilitydomain.Capability, 0, len(virployee.CapabilityIDs))
@@ -207,12 +201,7 @@ func (u *UseCases) RuntimeContext(ctx context.Context, tenantID string, id uuid.
 			return runtimecontext.Context{}, domainerr.Validation("capability_ids must reference active capabilities in the same tenant")
 		}
 		if !virployee.Autonomy.Allows(capability.RequiredAutonomy) {
-			return runtimecontext.Context{}, domainerr.Validation(fmt.Sprintf(
-				"capability %s requires autonomy %s; virployee autonomy %s does not allow it",
-				capability.CapabilityKey,
-				capability.RequiredAutonomy,
-				virployee.Autonomy,
-			))
+			return runtimecontext.Context{}, domainerr.Validation("capability " + capability.CapabilityKey + " requires autonomy " + string(capability.RequiredAutonomy) + "; virployee autonomy " + string(virployee.Autonomy) + " does not allow it")
 		}
 		capabilities = append(capabilities, capability)
 	}

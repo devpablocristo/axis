@@ -2,7 +2,6 @@ package executiongate
 
 import (
 	"errors"
-	"fmt"
 	"strings"
 
 	"github.com/devpablocristo/companion-v2/internal/virployees/dryrun"
@@ -200,14 +199,14 @@ func draftReadyCheck(result dryrun.Result) Check {
 	if result.Draft.Status == dryrun.DraftStatusReady {
 		return Check{Key: "draft_ready", Status: CheckStatusPass, Reason: "draft has required fields"}
 	}
-	return Check{Key: "draft_ready", Status: CheckStatusBlocked, Reason: fmt.Sprintf("draft status is %s", result.Draft.Status)}
+	return Check{Key: "draft_ready", Status: CheckStatusBlocked, Reason: "draft status is " + string(result.Draft.Status)}
 }
 
 func executionAutonomyCheck(result dryrun.Result, required virployeedomain.AutonomyLevel) Check {
 	if result.VirployeeAutonomy.Allows(required) {
-		return Check{Key: "execution_autonomy", Status: CheckStatusPass, Reason: fmt.Sprintf("virployee autonomy allows execution autonomy %s", required)}
+		return Check{Key: "execution_autonomy", Status: CheckStatusPass, Reason: "virployee autonomy allows execution autonomy " + string(required)}
 	}
-	return Check{Key: "execution_autonomy", Status: CheckStatusBlocked, Reason: fmt.Sprintf("execution requires %s", required)}
+	return Check{Key: "execution_autonomy", Status: CheckStatusBlocked, Reason: "execution requires " + string(required)}
 }
 
 func nextStep(decision Decision, checks []Check) string {

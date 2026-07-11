@@ -198,7 +198,7 @@ func deleteRealClerkUser(t *testing.T, secretKey, providerUserID string) {
 	if err != nil {
 		t.Fatalf("delete real Clerk user: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusNotFound {
 		return
 	}
@@ -211,14 +211,14 @@ func deleteRealClerkUser(t *testing.T, secretKey, providerUserID string) {
 func realClerkUserExists(t *testing.T, secretKey, providerUserID string) bool {
 	t.Helper()
 	resp := realClerkUserResponse(t, secretKey, providerUserID)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	return resp.StatusCode >= 200 && resp.StatusCode < 300
 }
 
 func realClerkUserHasEmail(t *testing.T, secretKey, providerUserID, email string) bool {
 	t.Helper()
 	resp := realClerkUserResponse(t, secretKey, providerUserID)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		t.Fatalf("read real Clerk user status=%d body=%s", resp.StatusCode, string(raw))

@@ -1,3 +1,6 @@
+SET lock_timeout = '5s';
+SET statement_timeout = '30s';
+
 CREATE TABLE IF NOT EXISTS axis_products (
     id uuid PRIMARY KEY,
     product_surface text NOT NULL UNIQUE,
@@ -50,7 +53,3 @@ BEGIN
             REFERENCES axis_products(product_surface);
     END IF;
 END $$;
-
-CREATE INDEX IF NOT EXISTS idx_axis_products_purge_after
-    ON axis_products (purge_after)
-    WHERE purge_after IS NOT NULL;

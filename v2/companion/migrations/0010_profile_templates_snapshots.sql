@@ -1,3 +1,6 @@
+SET lock_timeout = '5s';
+SET statement_timeout = '30s';
+
 DO $$
 BEGIN
     IF to_regclass('public.profile_templates') IS NULL
@@ -35,12 +38,6 @@ CREATE TABLE IF NOT EXISTS profile_templates (
     )
 );
 
-CREATE INDEX IF NOT EXISTS idx_profile_templates_lifecycle
-    ON profile_templates (tenant_id, archived_at, trashed_at);
-
-CREATE INDEX IF NOT EXISTS idx_profile_templates_tenant_id
-    ON profile_templates (tenant_id, id);
-
 CREATE TABLE IF NOT EXISTS virployee_profiles (
     id uuid PRIMARY KEY,
     tenant_id text NOT NULL DEFAULT 'default',
@@ -57,9 +54,6 @@ CREATE TABLE IF NOT EXISTS virployee_profiles (
         max_autonomy IN ('A0', 'A1', 'A2', 'A3', 'A4', 'A5')
     )
 );
-
-CREATE INDEX IF NOT EXISTS idx_virployee_profiles_template_id
-    ON virployee_profiles (tenant_id, profile_template_id);
 
 DO $$
 BEGIN

@@ -1,0 +1,28 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Local environment files are ignored by git and must not be committed."
+paths = [
+  '''(^|/)v1/\.env$''',
+  '''(^|/)v2/\.env$''',
+]
+
+[[allowlists]]
+description = "V1 profile_key test fixtures are identifiers, not secrets."
+paths = [
+  '''^v1/companion/internal/agentprofiles/handler_test\.go$''',
+  '''^v1/bff/main_test\.go$''',
+]
+regexes = [
+  '''profile_key''',
+]
+
+[[allowlists]]
+description = "Empty Clerk webhook placeholder in env examples."
+paths = [
+  '''(^|/)\.env\.example$''',
+]
+regexes = [
+  '''AXIS_CLERK_WEBHOOK_SECRET=''',
+]

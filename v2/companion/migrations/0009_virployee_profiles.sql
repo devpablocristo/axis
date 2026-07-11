@@ -1,3 +1,7 @@
+-- platform:migrate:non-transactional
+SET lock_timeout = '5s';
+SET statement_timeout = '30s';
+
 CREATE TABLE IF NOT EXISTS profile_templates (
     id uuid PRIMARY KEY,
     tenant_id text NOT NULL DEFAULT 'default',
@@ -15,10 +19,10 @@ CREATE TABLE IF NOT EXISTS profile_templates (
     )
 );
 
-CREATE INDEX IF NOT EXISTS idx_profile_templates_lifecycle
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_profile_templates_lifecycle
     ON profile_templates (tenant_id, archived_at, trashed_at);
 
-CREATE INDEX IF NOT EXISTS idx_profile_templates_tenant_id
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_profile_templates_tenant_id
     ON profile_templates (tenant_id, id);
 
 CREATE TABLE IF NOT EXISTS virployee_profiles (
@@ -38,5 +42,5 @@ CREATE TABLE IF NOT EXISTS virployee_profiles (
     )
 );
 
-CREATE INDEX IF NOT EXISTS idx_virployee_profiles_template_id
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_virployee_profiles_template_id
     ON virployee_profiles (tenant_id, profile_template_id);

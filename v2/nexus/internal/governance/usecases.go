@@ -2,7 +2,6 @@ package governance
 
 import (
 	"context"
-	"fmt"
 
 	actiondomain "github.com/devpablocristo/nexus-v2/internal/actiontypes/usecases/domain"
 	"github.com/devpablocristo/nexus-v2/internal/governance/usecases/domain"
@@ -80,7 +79,7 @@ func decisionForRisk(risk actiondomain.RiskClass) domain.CheckResult {
 		result.Status = domain.StatusAllowed
 		result.WouldRequireApproval = false
 	}
-	result.DecisionReason = fmt.Sprintf("No policy matched; default for risk %s", result.RiskLevel)
+	result.DecisionReason = "No policy matched; default for risk " + result.RiskLevel
 	return result
 }
 

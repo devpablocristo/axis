@@ -1,3 +1,7 @@
+-- platform:migrate:non-transactional
+SET lock_timeout = '5s';
+SET statement_timeout = '30s';
+
 CREATE TABLE IF NOT EXISTS action_types (
     id uuid PRIMARY KEY,
     tenant_id text NOT NULL DEFAULT 'default',
@@ -18,10 +22,10 @@ CREATE TABLE IF NOT EXISTS action_types (
     )
 );
 
-CREATE INDEX IF NOT EXISTS idx_action_types_tenant_id
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_action_types_tenant_id
     ON action_types (tenant_id, id);
 
-CREATE INDEX IF NOT EXISTS idx_action_types_tenant_key
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_action_types_tenant_key
     ON action_types (tenant_id, action_type_key);
 
 INSERT INTO action_types (

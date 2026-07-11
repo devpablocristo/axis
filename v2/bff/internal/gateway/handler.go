@@ -114,7 +114,7 @@ func (h *Handler) forward(c *gin.Context, targetURL func(string, string) string,
 		ginmw.WriteError(c, http.StatusBadGateway, "downstream_unavailable", "downstream request failed")
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if contentType := resp.Header.Get("Content-Type"); contentType != "" {
 		c.Header("Content-Type", contentType)

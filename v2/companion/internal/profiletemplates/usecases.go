@@ -2,7 +2,6 @@ package profiletemplates
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"github.com/devpablocristo/companion-v2/internal/profiletemplates/usecases/domain"
@@ -165,12 +164,7 @@ func (u *UseCases) EnsureUsableByVirployee(
 		return domainerr.Validation("profile_template_id must reference an active profile template in the same tenant")
 	}
 	if !profile.MaxAutonomy.Allows(autonomy) {
-		return domainerr.Validation(fmt.Sprintf(
-			"profile template %s allows max autonomy %s; virployee autonomy %s exceeds it",
-			profile.Name,
-			profile.MaxAutonomy,
-			autonomy,
-		))
+		return domainerr.Validation("profile template " + profile.Name + " allows max autonomy " + string(profile.MaxAutonomy) + "; virployee autonomy " + string(autonomy) + " exceeds it")
 	}
 	return nil
 }

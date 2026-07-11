@@ -1,3 +1,6 @@
+SET lock_timeout = '5s';
+SET statement_timeout = '30s';
+
 CREATE TABLE IF NOT EXISTS job_roles (
     id uuid PRIMARY KEY,
     tenant_id text NOT NULL DEFAULT 'default',
@@ -11,12 +14,6 @@ CREATE TABLE IF NOT EXISTS job_roles (
     purge_after timestamptz NULL,
     CONSTRAINT job_roles_tenant_slug_unique UNIQUE (tenant_id, slug)
 );
-
-CREATE INDEX IF NOT EXISTS idx_job_roles_lifecycle
-    ON job_roles (tenant_id, archived_at, trashed_at);
-
-CREATE INDEX IF NOT EXISTS idx_job_roles_tenant_id
-    ON job_roles (tenant_id, id);
 
 ALTER TABLE virployees
     ADD COLUMN IF NOT EXISTS job_role_id uuid;
@@ -116,7 +113,14 @@ BEGIN
 END $$;
 
 ALTER TABLE virployees
-    ALTER COLUMN job_role_id SET NOT NULL;
+    DROP CONSTRAINT IF EXISTS virployees_job_role_id_not_null;
+
+ALTER TABLE virployees
+    ADD CONSTRAINT virployees_job_role_id_not_null
+    CHECK (job_role_id IS NOT NULL) NOT VALID;
+
+ALTER TABLE virployees
+    VALIDATE CONSTRAINT virployees_job_role_id_not_null;
 
 DO $$
 BEGIN
@@ -135,6 +139,3 @@ END $$;
 
 ALTER TABLE virployees
     DROP COLUMN IF EXISTS role;
-
-CREATE INDEX IF NOT EXISTS idx_virployees_job_role_id
-    ON virployees (tenant_id, job_role_id);

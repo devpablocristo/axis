@@ -44,11 +44,11 @@ jobs:
           echo "PR_NUMBER=$PR_NUMBER" >> "$GITHUB_ENV"
           echo "NEXUS_DB=axis_nexus_preview_pr_${PR_NUMBER}" >> "$GITHUB_ENV"
           echo "COMPANION_DB=axis_companion_preview_pr_${PR_NUMBER}" >> "$GITHUB_ENV"
-      - uses: google-github-actions/auth@v3
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
           workload_identity_provider: ${{ env.WIF_PROVIDER }}
           service_account: ${{ env.WIF_SERVICE_ACCOUNT }}
-      - uses: google-github-actions/setup-gcloud@v3
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3
         with:
           project_id: ${{ env.PROJECT_ID }}
       - name: Delete preview services

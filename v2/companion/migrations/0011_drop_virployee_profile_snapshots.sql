@@ -1,3 +1,6 @@
+SET lock_timeout = '5s';
+SET statement_timeout = '30s';
+
 ALTER TABLE virployees
     ADD COLUMN IF NOT EXISTS profile_template_id uuid NULL;
 
@@ -17,7 +20,14 @@ DELETE FROM virployees
 WHERE profile_template_id IS NULL;
 
 ALTER TABLE virployees
-    ALTER COLUMN profile_template_id SET NOT NULL;
+    DROP CONSTRAINT IF EXISTS virployees_profile_template_id_not_null;
+
+ALTER TABLE virployees
+    ADD CONSTRAINT virployees_profile_template_id_not_null
+    CHECK (profile_template_id IS NOT NULL) NOT VALID;
+
+ALTER TABLE virployees
+    VALIDATE CONSTRAINT virployees_profile_template_id_not_null;
 
 DO $$
 BEGIN
@@ -31,8 +41,5 @@ BEGIN
             FOREIGN KEY (profile_template_id) REFERENCES profile_templates(id);
     END IF;
 END $$;
-
-CREATE INDEX IF NOT EXISTS idx_virployees_profile_template_id
-    ON virployees (tenant_id, profile_template_id);
 
 DROP TABLE IF EXISTS virployee_profiles;

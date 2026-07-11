@@ -36,7 +36,7 @@ func (r *Repository) Create(ctx context.Context, tenantID string, input domain.N
 	if err != nil {
 		return domain.Virployee{}, err
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	row := tx.QueryRow(ctx, `
 		INSERT INTO virployees (id, tenant_id, name, job_role_id, profile_template_id, description, supervisor_user_id, autonomy, created_at, updated_at)
@@ -58,7 +58,7 @@ func (r *Repository) Create(ctx context.Context, tenantID string, input domain.N
 }
 
 func (r *Repository) List(ctx context.Context, tenantID string, state domain.State) ([]domain.Virployee, error) {
-	where := "tenant_id = $1 AND archived_at IS NULL AND trashed_at IS NULL"
+	var where string
 	switch state {
 	case domain.StateActive, "":
 		where = "tenant_id = $1 AND archived_at IS NULL AND trashed_at IS NULL"
@@ -70,12 +70,12 @@ func (r *Repository) List(ctx context.Context, tenantID string, state domain.Sta
 		return nil, domainerr.Validation("invalid lifecycle state")
 	}
 
-	rows, err := r.pool.Query(ctx, fmt.Sprintf(`
+	rows, err := r.pool.Query(ctx, `
 		SELECT id::text, name, job_role_id::text, profile_template_id::text, description, supervisor_user_id::text, autonomy, created_at, updated_at, archived_at, trashed_at, purge_after
 		FROM virployees
-		WHERE %s
+		WHERE `+where+`
 		ORDER BY created_at DESC, id DESC
-	`, where), tenantID)
+	`, tenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -118,7 +118,7 @@ func (r *Repository) Update(ctx context.Context, tenantID string, id uuid.UUID, 
 	if err != nil {
 		return domain.Virployee{}, err
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	row := tx.QueryRow(ctx, `
 		UPDATE virployees

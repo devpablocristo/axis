@@ -1,11 +1,11 @@
 module github.com/devpablocristo/bff-v2
 
-go 1.26.2
+go 1.26.5
 
 require (
 	github.com/devpablocristo/platform/authn/go v0.2.0
 	github.com/devpablocristo/platform/config/go v0.1.0
-	github.com/devpablocristo/platform/databases/postgres/go v0.1.0
+	github.com/devpablocristo/platform/databases/postgres/go v0.1.2
 	github.com/devpablocristo/platform/errors/go v0.2.0
 	github.com/devpablocristo/platform/http/gin/go v0.2.3
 	github.com/devpablocristo/platform/sdks/clerk/go v0.1.0
@@ -48,19 +48,19 @@ require (
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
 	github.com/quic-go/qpack v0.6.0 // indirect
-	github.com/quic-go/quic-go v0.59.0 // indirect
+	github.com/quic-go/quic-go v0.59.1 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/ugorji/go/codec v1.3.1 // indirect
 	go.mongodb.org/mongo-driver/v2 v2.5.0 // indirect
 	golang.org/x/arch v0.22.0 // indirect
-	golang.org/x/crypto v0.48.0 // indirect
-	golang.org/x/net v0.51.0 // indirect
-	golang.org/x/sync v0.19.0 // indirect
-	golang.org/x/sys v0.41.0 // indirect
-	golang.org/x/text v0.34.0 // indirect
+	golang.org/x/crypto v0.54.0 // indirect
+	golang.org/x/net v0.57.0 // indirect
+	golang.org/x/sync v0.22.0 // indirect
+	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/text v0.40.0 // indirect
 	google.golang.org/protobuf v1.36.10 // indirect
 	gorm.io/driver/mysql v1.6.0 // indirect
 	gorm.io/driver/postgres v1.5.11 // indirect
 	gorm.io/driver/sqlite v1.6.0 // indirect
-	gorm.io/gorm v1.30.0 // indirect
+	gorm.io/gorm v1.31.1 // indirect
 )

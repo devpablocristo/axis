@@ -389,7 +389,7 @@ export function VirployeesPage({
       const host = ensureHelpHost('virployee-autonomy-help-host')
       const selectedAutonomy = isAutonomy(raw) ? raw : 'A1'
       const definition = autonomyByLevel.get(selectedAutonomy) ?? FALLBACK_AUTONOMY_LEVELS[1]
-      host.innerHTML = autonomyBubbleMarkup(definition, raw === '')
+      renderAutonomyBubble(host, definition, raw === '')
       positionHelpBubble(trigger, host)
       host.style.display = bubbleVisible ? 'block' : 'none'
     }
@@ -2053,28 +2053,32 @@ function positionHelpBubble(anchor: HTMLElement, host: HTMLElement) {
   host.style.width = `${width}px`
 }
 
-function autonomyBubbleMarkup(definition: VirployeeAutonomyLevel, usesDefault: boolean): string {
+function renderAutonomyBubble(host: HTMLElement, definition: VirployeeAutonomyLevel, usesDefault: boolean) {
   const allowedAutonomies = definition.allows_required_autonomies.join(', ') || 'None'
-  return `
-    <div class="axis-field-help-bubble">
-      <strong>Autonomy</strong>
-      <p><span>Status</span>Optional. Empty uses A1 - Recommendation.</p>
-      <p><span>Selected</span>${escapeHTML(definition.level)} - ${escapeHTML(definition.name)}${usesDefault ? ' (default)' : ''}</p>
-      <p><span>Purpose</span>Defines how far this Virployee may go when using assigned Capabilities.</p>
-      <p><span>Meaning</span>${escapeHTML(definition.description)}</p>
-      <p><span>Allows</span>Capabilities requiring ${escapeHTML(allowedAutonomies)}</p>
-      <p><span>Effect</span>Capabilities requiring higher autonomy cannot be assigned.</p>
-    </div>
-  `
-}
+  const bubble = document.createElement('div')
+  bubble.className = 'axis-field-help-bubble'
 
-function escapeHTML(value: string): string {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#039;')
+  const title = document.createElement('strong')
+  title.textContent = 'Autonomy'
+  bubble.appendChild(title)
+
+  const addRow = (label: string, value: string) => {
+    const row = document.createElement('p')
+    const rowLabel = document.createElement('span')
+    rowLabel.textContent = label
+    row.appendChild(rowLabel)
+    row.appendChild(document.createTextNode(value))
+    bubble.appendChild(row)
+  }
+
+  addRow('Status', 'Optional. Empty uses A1 - Recommendation.')
+  addRow('Selected', `${definition.level} - ${definition.name}${usesDefault ? ' (default)' : ''}`)
+  addRow('Purpose', 'Defines how far this Virployee may go when using assigned Capabilities.')
+  addRow('Meaning', definition.description)
+  addRow('Allows', `Capabilities requiring ${allowedAutonomies}`)
+  addRow('Effect', 'Capabilities requiring higher autonomy cannot be assigned.')
+
+  host.replaceChildren(bubble)
 }
 
 function virployeeColumns(

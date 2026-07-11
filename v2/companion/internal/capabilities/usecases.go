@@ -2,7 +2,6 @@ package capabilities
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"github.com/devpablocristo/companion-v2/internal/capabilities/usecases/domain"
@@ -162,12 +161,7 @@ func (u *UseCases) EnsureAssignable(ctx context.Context, tenantID string, ids []
 			return domainerr.Validation("capability_ids must reference active capabilities in the same tenant")
 		}
 		if !autonomy.Allows(capability.RequiredAutonomy) {
-			return domainerr.Validation(fmt.Sprintf(
-				"capability %s requires autonomy %s; virployee autonomy %s does not allow it",
-				capability.CapabilityKey,
-				capability.RequiredAutonomy,
-				autonomy,
-			))
+			return domainerr.Validation("capability " + capability.CapabilityKey + " requires autonomy " + string(capability.RequiredAutonomy) + "; virployee autonomy " + string(autonomy) + " does not allow it")
 		}
 	}
 	return nil

@@ -3,7 +3,6 @@ package orgs
 import (
 	"context"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -68,7 +67,7 @@ func (r *Repository) Get(ctx context.Context, id string) (domain.Org, error) {
 }
 
 func (r *Repository) List(ctx context.Context, input domain.NormalizedListInput) ([]domain.Org, error) {
-	where := "o.archived_at IS NULL AND o.trashed_at IS NULL"
+	var where string
 	switch input.Lifecycle {
 	case domain.StateActive:
 		where = "o.archived_at IS NULL AND o.trashed_at IS NULL"
@@ -79,14 +78,14 @@ func (r *Repository) List(ctx context.Context, input domain.NormalizedListInput)
 	default:
 		return nil, domainerr.Validation("invalid lifecycle state")
 	}
-	rows, err := r.pool.Query(ctx, fmt.Sprintf(`
+	rows, err := r.pool.Query(ctx, `
 		SELECT o.id, o.provider, o.provider_org_id, o.name, o.slug, o.status, o.synced_at,
 			(SELECT COUNT(*)::int FROM axis_tenants t WHERE t.org_id = o.id),
 			o.created_at, o.updated_at, o.archived_at, o.trashed_at, o.purge_after
 		FROM axis_orgs o
-		WHERE %s
+		WHERE `+where+`
 		ORDER BY o.name, o.id
-	`, where))
+	`)
 	if err != nil {
 		return nil, err
 	}

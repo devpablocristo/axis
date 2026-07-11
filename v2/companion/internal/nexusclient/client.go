@@ -58,7 +58,7 @@ func (c *Client) Check(ctx context.Context, input executiongate.GovernanceCheckI
 	if err != nil {
 		return executiongate.GovernanceCheckResult{}, fmt.Errorf("governance check: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return executiongate.GovernanceCheckResult{}, fmt.Errorf("governance check: status %d", resp.StatusCode)
@@ -92,7 +92,7 @@ func (c *Client) GetApproval(ctx context.Context, tenantID string, id uuid.UUID)
 	if err != nil {
 		return executiongate.GovernanceApproval{}, fmt.Errorf("get approval: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusNotFound {
 		return executiongate.GovernanceApproval{}, domainerr.NotFound("approval not found")

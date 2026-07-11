@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -41,7 +40,7 @@ func (r *Repository) Create(ctx context.Context, tenantID string, input domain.N
 }
 
 func (r *Repository) List(ctx context.Context, tenantID string, state domain.State) ([]domain.JobRole, error) {
-	where := "tenant_id = $1 AND archived_at IS NULL AND trashed_at IS NULL"
+	var where string
 	switch state {
 	case domain.StateActive, "":
 		where = "tenant_id = $1 AND archived_at IS NULL AND trashed_at IS NULL"
@@ -53,13 +52,13 @@ func (r *Repository) List(ctx context.Context, tenantID string, state domain.Sta
 		return nil, domainerr.Validation("invalid lifecycle state")
 	}
 
-	rows, err := r.pool.Query(ctx, fmt.Sprintf(`
+	rows, err := r.pool.Query(ctx, `
 		SELECT id::text, tenant_id, name, slug, mission,
 			created_at, updated_at, archived_at, trashed_at, purge_after
 		FROM job_roles
-		WHERE %s
+		WHERE `+where+`
 		ORDER BY name ASC, id ASC
-	`, where), tenantID)
+	`, tenantID)
 	if err != nil {
 		return nil, err
 	}

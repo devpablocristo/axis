@@ -33,7 +33,7 @@ func (r *Repository) Get(ctx context.Context, id uuid.UUID) (domain.Product, err
 }
 
 func (r *Repository) List(ctx context.Context, input domain.NormalizedListInput) ([]domain.Product, error) {
-	where := "archived_at IS NULL AND trashed_at IS NULL"
+	var where string
 	switch input.Lifecycle {
 	case domain.StateActive:
 		where = "archived_at IS NULL AND trashed_at IS NULL"

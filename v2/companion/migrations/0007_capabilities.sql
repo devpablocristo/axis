@@ -1,3 +1,7 @@
+-- platform:migrate:non-transactional
+SET lock_timeout = '5s';
+SET statement_timeout = '30s';
+
 CREATE TABLE IF NOT EXISTS capabilities (
     id uuid PRIMARY KEY,
     tenant_id text NOT NULL DEFAULT 'default',
@@ -19,10 +23,10 @@ CREATE TABLE IF NOT EXISTS capabilities (
     )
 );
 
-CREATE INDEX IF NOT EXISTS idx_capabilities_lifecycle
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_capabilities_lifecycle
     ON capabilities (tenant_id, archived_at, trashed_at);
 
-CREATE INDEX IF NOT EXISTS idx_capabilities_tenant_id
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_capabilities_tenant_id
     ON capabilities (tenant_id, id);
 
 CREATE TABLE IF NOT EXISTS virployee_capabilities (
@@ -33,5 +37,5 @@ CREATE TABLE IF NOT EXISTS virployee_capabilities (
     PRIMARY KEY (tenant_id, virployee_id, capability_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_virployee_capabilities_capability_id
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_virployee_capabilities_capability_id
     ON virployee_capabilities (tenant_id, capability_id);

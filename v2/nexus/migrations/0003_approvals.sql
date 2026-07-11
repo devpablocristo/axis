@@ -1,3 +1,7 @@
+-- platform:migrate:non-transactional
+SET lock_timeout = '5s';
+SET statement_timeout = '30s';
+
 CREATE TABLE IF NOT EXISTS approvals (
     id uuid PRIMARY KEY,
     tenant_id text NOT NULL DEFAULT 'default',
@@ -20,9 +24,9 @@ CREATE TABLE IF NOT EXISTS approvals (
     )
 );
 
-CREATE INDEX IF NOT EXISTS idx_approvals_tenant_status_created
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_approvals_tenant_status_created
     ON approvals (tenant_id, status, created_at DESC);
 
-CREATE INDEX IF NOT EXISTS idx_approvals_binding_hash
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_approvals_binding_hash
     ON approvals (tenant_id, binding_hash)
     WHERE binding_hash <> '';

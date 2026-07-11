@@ -3,7 +3,6 @@ package tenancy
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
@@ -133,7 +132,7 @@ func (r *Repository) ListForPrincipal(ctx context.Context, userID string) ([]dom
 }
 
 func (r *Repository) ListLifecycle(ctx context.Context, lifecycle string) ([]domain.Tenant, error) {
-	where := "t.archived_at IS NULL AND t.trashed_at IS NULL"
+	var where string
 	switch domain.NormalizeState(lifecycle) {
 	case domain.StateActive:
 		where = "t.archived_at IS NULL AND t.trashed_at IS NULL"
@@ -144,14 +143,14 @@ func (r *Repository) ListLifecycle(ctx context.Context, lifecycle string) ([]dom
 	default:
 		return nil, domainerr.Validation("invalid lifecycle state")
 	}
-	rows, err := r.pool.Query(ctx, fmt.Sprintf(`
+	rows, err := r.pool.Query(ctx, `
 		SELECT t.id, t.org_id, o.name, t.product_surface, COALESCE(p.name, t.product_surface), t.status, t.created_at, t.updated_at, t.archived_at, t.trashed_at, t.purge_after
 		FROM axis_tenants t
 		JOIN axis_orgs o ON o.id = t.org_id
 		LEFT JOIN axis_products p ON p.product_surface = t.product_surface
-		WHERE %s
+		WHERE `+where+`
 		ORDER BY o.name, t.product_surface
-	`, where))
+	`)
 	if err != nil {
 		return nil, err
 	}
@@ -160,7 +159,7 @@ func (r *Repository) ListLifecycle(ctx context.Context, lifecycle string) ([]dom
 }
 
 func (r *Repository) ListForPrincipalLifecycle(ctx context.Context, userID, lifecycle string) ([]domain.Tenant, error) {
-	where := "t.archived_at IS NULL AND t.trashed_at IS NULL"
+	var where string
 	switch domain.NormalizeState(lifecycle) {
 	case domain.StateActive:
 		where = "t.archived_at IS NULL AND t.trashed_at IS NULL"
@@ -171,7 +170,7 @@ func (r *Repository) ListForPrincipalLifecycle(ctx context.Context, userID, life
 	default:
 		return nil, domainerr.Validation("invalid lifecycle state")
 	}
-	rows, err := r.pool.Query(ctx, fmt.Sprintf(`
+	rows, err := r.pool.Query(ctx, `
 		SELECT t.id, t.org_id, o.name, t.product_surface, COALESCE(p.name, t.product_surface), t.status, t.created_at, t.updated_at, t.archived_at, t.trashed_at, t.purge_after
 		FROM axis_tenants t
 		JOIN axis_orgs o ON o.id = t.org_id
@@ -182,9 +181,9 @@ func (r *Repository) ListForPrincipalLifecycle(ctx context.Context, userID, life
 			AND m.status = 'active'
 			AND m.archived_at IS NULL
 			AND m.trashed_at IS NULL
-			AND %s
+			AND `+where+`
 		ORDER BY t.org_id, t.product_surface
-	`, where), userID)
+	`, userID)
 	if err != nil {
 		return nil, err
 	}

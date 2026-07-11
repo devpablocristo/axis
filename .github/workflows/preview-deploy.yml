@@ -61,7 +61,7 @@ jobs:
     name: Deploy full preview stack
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           ref: ${{ inputs.ref }}
       - name: Validate PR is still deployable
@@ -106,6 +106,7 @@ jobs:
           [[ "$missing" == "0" ]] || exit 1
           [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]] || { echo "Invalid PR number: $PR_NUMBER" >&2; exit 1; }
           sha="$(git rev-parse HEAD)"
+          echo "PR_NUMBER=$PR_NUMBER" >> "$GITHUB_ENV"
           echo "DEPLOY_SHA=$sha" >> "$GITHUB_ENV"
           echo "IMAGE_TAG=pr-${PR_NUMBER}-${sha}" >> "$GITHUB_ENV"
           echo "NEXUS_SERVICE=axis-nexus-pr-${PR_NUMBER}" >> "$GITHUB_ENV"
@@ -116,12 +117,12 @@ jobs:
           echo "COMPANION_DB=axis_companion_preview_pr_${PR_NUMBER}" >> "$GITHUB_ENV"
           echo "NEXUS_DB_URL_SECRET=axis-nexus-database-url-pr-${PR_NUMBER}" >> "$GITHUB_ENV"
           echo "COMPANION_DB_URL_SECRET=axis-companion-database-url-pr-${PR_NUMBER}" >> "$GITHUB_ENV"
-      - uses: google-github-actions/auth@v3
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         if: steps.pr-state.outputs.should_deploy == 'true'
         with:
           workload_identity_provider: ${{ env.WIF_PROVIDER }}
           service_account: ${{ env.WIF_SERVICE_ACCOUNT }}
-      - uses: google-github-actions/setup-gcloud@v3
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3
         if: steps.pr-state.outputs.should_deploy == 'true'
         with:
           project_id: ${{ env.PROJECT_ID }}
@@ -196,7 +197,7 @@ jobs:
             --set-env-vars="^|^NEXUS_ENV=preview|NEXUS_INTERNAL_JWT_ISSUER=axis-bff|NEXUS_INTERNAL_JWT_AUDIENCE=nexus|APPROVAL_DEFAULT_TTL=3600|NEXUS_ATTESTATION_VERIFIER=none" \
             --set-secrets="DATABASE_URL=${NEXUS_DB_URL_SECRET}:latest,NEXUS_API_KEYS=${NEXUS_API_KEYS_SECRET}:latest,NEXUS_SIGNING_KEY=${NEXUS_SIGNING_KEY_SECRET}:latest,NEXUS_CALLBACK_TOKEN=${NEXUS_CALLBACK_TOKEN_SECRET}:latest,NEXUS_INTERNAL_JWT_SECRET=${INTERNAL_JWT_SECRET}:latest" \
             --allow-unauthenticated --ingress=all --port=8080 --min-instances=0 --max-instances=1 \
-            --labels="axis-env=preview,axis-pr=${{ inputs.pr_number }},managed-by=axis-preview"
+            --labels="axis-env=preview,axis-pr=${PR_NUMBER},managed-by=axis-preview"
           echo "NEXUS_URL=$(gcloud run services describe "$NEXUS_SERVICE" --project="$PROJECT_ID" --region="$REGION" --format='value(status.url)')" >> "$GITHUB_ENV"
       - name: Deploy Companion
         if: steps.pr-state.outputs.should_deploy == 'true'
@@ -208,7 +209,7 @@ jobs:
             --set-env-vars="^|^NEXUS_BASE_URL=${NEXUS_URL}|PONTI_BASE_URL=${PONTI_BASE_URL}|COMPANION_INTERNAL_JWT_ISSUER=axis-bff|COMPANION_INTERNAL_JWT_AUDIENCE=companion|COMPANION_LLM_PROVIDER=vertex|COMPANION_LLM_MODEL=gemini-2.5-flash-lite|COMPANION_LLM_VERTEX_PROJECT=${PROJECT_ID}|COMPANION_LLM_VERTEX_LOCATION=${REGION}|COMPANION_EMBEDDING_PROVIDER=vertex|COMPANION_EMBEDDING_MODEL=text-embedding-005|COMPANION_EMBEDDING_VERTEX_PROJECT=${PROJECT_ID}|COMPANION_EMBEDDING_VERTEX_LOCATION=${REGION}|COMPANION_EMBEDDING_DIMENSIONS=768|COMPANION_NEXUS_SYNC_INTERVAL_SEC=30|COMPANION_STRICT_NEXUS=true|COMPANION_DEFAULT_AUTONOMY_LEVEL=A2|COMPANION_WATCHER_INTERVAL_SEC=0|COMPANION_WATCHER_SYNC_INTERVAL_SEC=0" \
             --set-secrets="DATABASE_URL=${COMPANION_DB_URL_SECRET}:latest,COMPANION_API_KEYS=${COMPANION_API_KEYS_SECRET}:latest,NEXUS_API_KEY=${COMPANION_NEXUS_API_KEY_SECRET}:latest,COMPANION_INTERNAL_JWT_SECRET=${INTERNAL_JWT_SECRET}:latest" \
             --allow-unauthenticated --ingress=all --port=8080 --min-instances=0 --max-instances=1 \
-            --labels="axis-env=preview,axis-pr=${{ inputs.pr_number }},managed-by=axis-preview"
+            --labels="axis-env=preview,axis-pr=${PR_NUMBER},managed-by=axis-preview"
           echo "COMPANION_URL=$(gcloud run services describe "$COMPANION_SERVICE" --project="$PROJECT_ID" --region="$REGION" --format='value(status.url)')" >> "$GITHUB_ENV"
       - name: Deploy BFF
         if: steps.pr-state.outputs.should_deploy == 'true'
@@ -219,7 +220,7 @@ jobs:
             --set-env-vars="^|^AXIS_BFF_AUTH_MODE=${AXIS_BFF_AUTH_MODE}|AXIS_AUTH_ISSUER_URL=${AXIS_AUTH_ISSUER_URL}|AXIS_AUTH_AUDIENCE=${AXIS_AUTH_AUDIENCE}|AXIS_INTERNAL_JWT_ISSUER=axis-bff|AXIS_COMPANION_AUDIENCE=companion|AXIS_NEXUS_AUDIENCE=nexus|AXIS_ALLOWED_ORIGIN=${AXIS_ALLOWED_ORIGIN}|AXIS_DOWNSTREAM_TIMEOUT=10s|AXIS_READ_HEADER_TIMEOUT=5s|COMPANION_BASE_URL=${COMPANION_URL}|NEXUS_BASE_URL=${NEXUS_URL}" \
             --set-secrets="AXIS_INTERNAL_JWT_SECRET=${INTERNAL_JWT_SECRET}:latest" \
             --allow-unauthenticated --ingress=all --port=8080 --min-instances=0 --max-instances=1 \
-            --labels="axis-env=preview,axis-pr=${{ inputs.pr_number }},managed-by=axis-preview"
+            --labels="axis-env=preview,axis-pr=${PR_NUMBER},managed-by=axis-preview"
           echo "BFF_URL=$(gcloud run services describe "$BFF_SERVICE" --project="$PROJECT_ID" --region="$REGION" --format='value(status.url)')" >> "$GITHUB_ENV"
       - name: Deploy Console
         if: steps.pr-state.outputs.should_deploy == 'true'
@@ -229,7 +230,7 @@ jobs:
             --service-account="$CONSOLE_RUNTIME_SA" \
             --set-env-vars="AXIS_BFF_BASE_URL=${BFF_URL}" \
             --allow-unauthenticated --ingress=all --port=80 --min-instances=0 --max-instances=1 \
-            --labels="axis-env=preview,axis-pr=${{ inputs.pr_number }},managed-by=axis-preview"
+            --labels="axis-env=preview,axis-pr=${PR_NUMBER},managed-by=axis-preview"
           echo "CONSOLE_URL=$(gcloud run services describe "$CONSOLE_SERVICE" --project="$PROJECT_ID" --region="$REGION" --format='value(status.url)')" >> "$GITHUB_ENV"
       - name: Smoke preview
         if: steps.pr-state.outputs.should_deploy == 'true'

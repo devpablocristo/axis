@@ -23,7 +23,7 @@ func (r *Repository) RecordCheck(ctx context.Context, tenantID string, input dom
 	if err != nil {
 		return domain.RecordedCheck{}, err
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	checkID := uuid.New()
 	now := time.Now().UTC()

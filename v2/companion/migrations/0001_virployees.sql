@@ -1,3 +1,7 @@
+-- platform:migrate:non-transactional
+SET lock_timeout = '5s';
+SET statement_timeout = '30s';
+
 CREATE TABLE IF NOT EXISTS job_roles (
     id uuid PRIMARY KEY,
     tenant_id text NOT NULL DEFAULT 'default',
@@ -12,10 +16,10 @@ CREATE TABLE IF NOT EXISTS job_roles (
     CONSTRAINT job_roles_tenant_slug_unique UNIQUE (tenant_id, slug)
 );
 
-CREATE INDEX IF NOT EXISTS idx_job_roles_lifecycle
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_job_roles_lifecycle
     ON job_roles (tenant_id, archived_at, trashed_at);
 
-CREATE INDEX IF NOT EXISTS idx_job_roles_tenant_id
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_job_roles_tenant_id
     ON job_roles (tenant_id, id);
 
 CREATE TABLE IF NOT EXISTS profile_templates (
@@ -35,10 +39,10 @@ CREATE TABLE IF NOT EXISTS profile_templates (
     )
 );
 
-CREATE INDEX IF NOT EXISTS idx_profile_templates_lifecycle
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_profile_templates_lifecycle
     ON profile_templates (tenant_id, archived_at, trashed_at);
 
-CREATE INDEX IF NOT EXISTS idx_profile_templates_tenant_id
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_profile_templates_tenant_id
     ON profile_templates (tenant_id, id);
 
 CREATE TABLE IF NOT EXISTS virployees (
@@ -58,13 +62,13 @@ CREATE TABLE IF NOT EXISTS virployees (
     CONSTRAINT virployees_autonomy_check CHECK (autonomy IN ('A0', 'A1', 'A2', 'A3', 'A4', 'A5'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_virployees_lifecycle
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_virployees_lifecycle
     ON virployees (tenant_id, archived_at, trashed_at);
 
-CREATE INDEX IF NOT EXISTS idx_virployees_tenant_id
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_virployees_tenant_id
     ON virployees (tenant_id, id);
 
-CREATE INDEX IF NOT EXISTS idx_virployees_profile_template_id
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_virployees_profile_template_id
     ON virployees (tenant_id, profile_template_id);
 
 CREATE TABLE IF NOT EXISTS capabilities (
@@ -88,10 +92,10 @@ CREATE TABLE IF NOT EXISTS capabilities (
     )
 );
 
-CREATE INDEX IF NOT EXISTS idx_capabilities_lifecycle
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_capabilities_lifecycle
     ON capabilities (tenant_id, archived_at, trashed_at);
 
-CREATE INDEX IF NOT EXISTS idx_capabilities_tenant_id
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_capabilities_tenant_id
     ON capabilities (tenant_id, id);
 
 CREATE TABLE IF NOT EXISTS virployee_capabilities (
@@ -102,5 +106,5 @@ CREATE TABLE IF NOT EXISTS virployee_capabilities (
     PRIMARY KEY (tenant_id, virployee_id, capability_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_virployee_capabilities_capability_id
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_virployee_capabilities_capability_id
     ON virployee_capabilities (tenant_id, capability_id);

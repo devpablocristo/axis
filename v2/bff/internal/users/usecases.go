@@ -304,31 +304,3 @@ func (u *UseCases) requireMutator(ctx context.Context, tenantID, principalID, _ 
 	}
 	return tenant, member, nil
 }
-
-func (u *UseCases) createInvitation(
-	ctx context.Context,
-	input domain.NormalizedCreateInput,
-	org tenantdomain.Org,
-	actorAxisUserID string,
-) (domain.User, error) {
-	actor, _ := u.identity.Get(ctx, actorAxisUserID)
-	invitation, err := u.invitations.CreateOrgInvitation(ctx, identity.CreateOrgInvitationInput{
-		ProviderOrgID:         org.ProviderOrgID,
-		Email:                 input.Email,
-		Role:                  input.Role,
-		InviterProviderUserID: actor.ProviderUserID,
-		RedirectURL:           u.redirectURL,
-	})
-	if err != nil {
-		return domain.User{}, err
-	}
-	return u.repo.UpsertInvitation(ctx, UpsertInvitationInput{
-		TenantID:             input.TenantID,
-		OrgID:                org.ID,
-		Provider:             invitation.Provider,
-		ProviderInvitationID: invitation.ProviderInvitationID,
-		Email:                input.Email,
-		Role:                 input.Role,
-		Status:               invitation.Status,
-	})
-}
