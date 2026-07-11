@@ -234,14 +234,14 @@ test('all main sections render with coherent action buttons', async ({ page }) =
   for (const section of ['Virployees', 'Approvals', 'Capabilities', 'Job Roles', 'Profile Templates', 'Admin']) {
     await nav.getByRole('button', { name: section }).click()
     await expect(page.locator('.topbar h1')).toHaveText(section)
-    await assertButtonSystem(page)
+    await assertVisualSystem(page)
   }
 
   await nav.getByRole('button', { name: 'Admin' }).click()
   const tenancyTabs = page.locator('.tenancy-section__tabs')
   for (const tab of ['Users', 'Tenants', 'Orgs', 'Products']) {
     await tenancyTabs.getByRole('tab', { name: tab }).click()
-    await assertButtonSystem(page)
+    await assertVisualSystem(page)
   }
 })
 
@@ -261,6 +261,24 @@ test('crud lists use one toolbar and do not render row action columns', async ({
     await tenancyTabs.getByRole('tab', { name: tab }).click()
     await expect(page.locator('th.col-actions')).toHaveCount(0)
     await expect(page.locator('.iam-control__bulk-buttons')).toHaveCount(1)
+  }
+})
+
+test('builder and admin action toolbars stay on one desktop row', async ({ page }) => {
+  await page.setViewportSize({ width: 1366, height: 768 })
+  await page.goto('/')
+
+  const nav = page.locator('.nav')
+  for (const section of ['Capabilities', 'Job Roles', 'Profile Templates']) {
+    await nav.getByRole('button', { name: section }).click()
+    await expectSingleToolbarRow(page, section)
+  }
+
+  await nav.getByRole('button', { name: 'Admin' }).click()
+  const tenancyTabs = page.locator('.tenancy-section__tabs')
+  for (const tab of ['Users', 'Tenants', 'Orgs', 'Products']) {
+    await tenancyTabs.getByRole('tab', { name: tab }).click()
+    await expectSingleToolbarRow(page, `Admin/${tab}`)
   }
 })
 
@@ -390,6 +408,18 @@ test('approvals board loads resolved approvals incrementally', async ({ page }) 
   await expect(approvedColumn.getByRole('button', { name: 'Load more' })).toBeVisible()
 })
 
+test('approvals board columns have equal desktop widths', async ({ page }) => {
+  await page.setViewportSize({ width: 1366, height: 768 })
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Approvals' }).click()
+
+  const widths = await page.locator('.approvals-board__column').evaluateAll((columns) => (
+    columns.map((column) => column.getBoundingClientRect().width)
+  ))
+  expect(widths).toHaveLength(3)
+  expect(Math.max(...widths) - Math.min(...widths)).toBeLessThanOrEqual(1)
+})
+
 test('approvals board searches loaded approvals and keeps card positions visible', async ({ page }) => {
   await page.goto('/')
   await page.getByRole('button', { name: 'Approvals' }).click()
@@ -397,12 +427,10 @@ test('approvals board searches loaded approvals and keeps card positions visible
   const search = page.getByLabel('Search approvals')
   const approvedColumn = page.getByLabel('Approved')
   await expect(search).toBeVisible()
-  await expect(page.locator('.approvals-toolbar__summary')).toHaveText('11 loaded')
   await expect(approvedColumn.locator('.approvals-board__card-index').first()).toHaveText('#1')
 
   await search.fill('binding-approved-9')
 
-  await expect(page.locator('.approvals-toolbar__summary')).toHaveText('1 of 11 loaded')
   await expect(approvedColumn.locator('.approvals-board__card')).toHaveCount(1)
   await expect(approvedColumn.locator('.approvals-board__card-index')).toHaveText('#1')
   await expect(page.getByLabel('Pending').locator('.approvals-board__empty')).toContainText('No matching approvals loaded')
@@ -411,6 +439,32 @@ test('approvals board searches loaded approvals and keeps card positions visible
 
   await expect(search).toHaveValue('')
   await expect(approvedColumn.locator('.approvals-board__card')).toHaveCount(10)
+})
+
+test('approvals and CRUD lists use the same search control', async ({ page }) => {
+  await page.goto('/')
+
+  const virployeeSearch = page.getByPlaceholder('Search virployees')
+  await expect(virployeeSearch).toBeVisible()
+  const virployeeMetrics = await virployeeSearch.evaluate(searchControlMetrics)
+
+  await page.getByRole('button', { name: 'Approvals' }).click()
+  const approvalSearch = page.getByLabel('Search approvals')
+  await expect(approvalSearch).toBeVisible()
+  const approvalMetrics = await approvalSearch.evaluate(searchControlMetrics)
+  const [headerActionsBox, searchBox, refreshBox] = await Promise.all([
+    page.locator('.approvals-header-actions').boundingBox(),
+    approvalSearch.boundingBox(),
+    page.getByRole('button', { name: 'Refresh', exact: true }).boundingBox(),
+  ])
+
+  expect(approvalMetrics).toEqual(virployeeMetrics)
+  expect(headerActionsBox).not.toBeNull()
+  expect(searchBox).not.toBeNull()
+  expect(refreshBox).not.toBeNull()
+  expect(searchBox?.y).toBe(refreshBox?.y)
+  expect((searchBox?.x ?? 0) + (searchBox?.width ?? 0)).toBeLessThan(refreshBox?.x ?? 0)
+  expect(Math.abs((headerActionsBox?.x ?? 0) + (headerActionsBox?.width ?? 0) - (refreshBox?.x ?? 0) - (refreshBox?.width ?? 0))).toBeLessThanOrEqual(1)
 })
 
 test('approval flow can reject and keeps rejected approvals read-only', async ({ page }) => {
@@ -827,6 +881,52 @@ async function assertButtonSystem(page: Page) {
   }
 }
 
+async function assertVisualSystem(page: Page) {
+  await assertButtonSystem(page)
+
+  const controls = await page.locator('main input:not([type="checkbox"]):visible, main select:visible, main textarea:visible').evaluateAll((elements) => {
+    return elements.map((element) => {
+      const style = window.getComputedStyle(element)
+      return {
+        label: element.getAttribute('aria-label') || element.getAttribute('placeholder') || element.tagName,
+        radius: style.borderRadius,
+        fontFamily: style.fontFamily,
+        background: style.backgroundColor,
+        borderStyle: style.borderStyle,
+        minHeight: Number.parseFloat(style.minHeight || '0'),
+        tagName: element.tagName,
+      }
+    })
+  })
+
+  expect(controls.length).toBeGreaterThan(0)
+  for (const control of controls) {
+    expect(control.radius, control.label).toBe('6px')
+    expect(control.fontFamily, control.label).toContain('Inter')
+    expect(control.background, control.label).toBe('rgb(255, 255, 255)')
+    expect(control.borderStyle, control.label).toBe('solid')
+    if (control.tagName !== 'TEXTAREA') {
+      expect(control.minHeight, control.label).toBeGreaterThanOrEqual(38)
+    }
+  }
+
+  const surfaces = await page.locator('main .card:visible, main .table-wrap:visible, main .approvals-board__column:visible').evaluateAll((elements) => {
+    return elements.map((element) => {
+      const style = window.getComputedStyle(element)
+      return {
+        className: element.className,
+        radius: style.borderRadius,
+        borderStyle: style.borderStyle,
+      }
+    })
+  })
+
+  for (const surface of surfaces) {
+    expect(surface.radius, String(surface.className)).toBe('8px')
+    expect(surface.borderStyle, String(surface.className)).toBe('solid')
+  }
+}
+
 async function cellPositions(
   checkboxCell: ReturnType<Page['locator']>,
   nameCell: ReturnType<Page['locator']>,
@@ -879,6 +979,21 @@ async function expectResponsiveCrudTable(page: Page, context: string) {
   expect(metrics.overflowX, context).toBe('auto')
 }
 
+async function expectSingleToolbarRow(page: Page, context: string) {
+  const buttons = page.locator('.iam-control__bulk-buttons button:visible')
+  await expect(buttons.first(), context).toBeVisible()
+  const topPositions = await buttons.evaluateAll((elements) => elements.map((element) => element.getBoundingClientRect().top))
+  expect(Math.max(...topPositions) - Math.min(...topPositions), context).toBeLessThanOrEqual(1)
+
+  const [bulkActionsBox, listActionsBox] = await Promise.all([
+    page.locator('.iam-control__bulk-buttons').boundingBox(),
+    page.locator('.crud-shell-header-actions-column__search-row').boundingBox(),
+  ])
+  expect(bulkActionsBox, context).not.toBeNull()
+  expect(listActionsBox, context).not.toBeNull()
+  expect(Math.abs((bulkActionsBox?.y ?? 0) - (listActionsBox?.y ?? 0)), context).toBeLessThanOrEqual(1)
+}
+
 async function expectActionBars(page: Page, topSelector: string, bottomSelector: string) {
   const [top, bottom] = await Promise.all([
     page.locator(topSelector).first().evaluate(actionBarMetrics),
@@ -887,6 +1002,9 @@ async function expectActionBars(page: Page, topSelector: string, bottomSelector:
   expect(top.gap).toBe(bottom.gap)
   expect(top.background).toBe(bottom.background)
   expect(top.justify).toBe(bottom.justify)
+  expect(top.edgeSpace).toBe(bottom.edgeSpace)
+  expect(top.marginLeft).toBe(bottom.marginLeft)
+  expect(top.marginRight).toBe(bottom.marginRight)
 }
 
 function actionBarMetrics(element: Element) {
@@ -895,6 +1013,28 @@ function actionBarMetrics(element: Element) {
     gap: style.gap,
     background: style.backgroundColor,
     justify: style.justifyContent,
+    edgeSpace: element.classList.contains('virployee-panel-actions--top') || element.classList.contains('virployee-form-actions--top')
+      ? style.paddingBottom
+      : style.paddingTop,
+    marginLeft: style.marginLeft,
+    marginRight: style.marginRight,
+  }
+}
+
+function searchControlMetrics(element: Element) {
+  const style = window.getComputedStyle(element)
+  const rect = element.getBoundingClientRect()
+  return {
+    width: rect.width,
+    height: rect.height,
+    borderRadius: style.borderRadius,
+    borderColor: style.borderColor,
+    background: style.backgroundColor,
+    color: style.color,
+    fontFamily: style.fontFamily,
+    fontSize: style.fontSize,
+    paddingLeft: style.paddingLeft,
+    paddingRight: style.paddingRight,
   }
 }
 

@@ -40,7 +40,6 @@ export function ApprovalsPage({ tenantId, principalId, focusApprovalId = '', onR
   const focusedCardRef = useRef<HTMLElement | null>(null)
   const isActive = Boolean(tenantId && principalId)
   const normalizedSearchQuery = searchQuery.trim().toLowerCase()
-  const pendingCount = approvalsByStatus.pending.items.length
   const totalCount = useMemo(
     () => APPROVAL_STATUSES.reduce((count, status) => count + approvalsByStatus[status].items.length, 0),
     [approvalsByStatus],
@@ -48,10 +47,6 @@ export function ApprovalsPage({ tenantId, principalId, focusApprovalId = '', onR
   const visibleApprovalsByStatus = useMemo(
     () => filterApprovalsByStatus(approvalsByStatus, normalizedSearchQuery),
     [approvalsByStatus, normalizedSearchQuery],
-  )
-  const visibleTotalCount = useMemo(
-    () => APPROVAL_STATUSES.reduce((count, status) => count + visibleApprovalsByStatus[status].items.length, 0),
-    [visibleApprovalsByStatus],
   )
   const loadingMore = APPROVAL_STATUSES.some((status) => approvalsByStatus[status].loadingMore)
   const focusedApproval = useMemo(() => {
@@ -174,23 +169,13 @@ export function ApprovalsPage({ tenantId, principalId, focusApprovalId = '', onR
 
   return (
     <section className="page-section approvals-control">
-      <div className="page-header">
-        <div>
-          <h2>Approvals board</h2>
-          <p className="axis-muted">{approvalBoardSummary(pendingCount, totalCount, loading)}</p>
-        </div>
-        <button type="button" className="btn-secondary" disabled={loading || loadingMore || Boolean(busyID)} onClick={() => void load()}>
-          {loading ? 'Refreshing...' : 'Refresh'}
-        </button>
-      </div>
-
-      {error ? <p role="alert" className="iam-control__inline-error">{error}</p> : null}
-
-      <div className="approvals-toolbar">
+      <div className="approvals-header-actions">
         <label className="approvals-search">
-          <span>Search approvals</span>
+          <span className="axis-visually-hidden">Search approvals</span>
           <input
             type="search"
+            className="axis-search-input"
+            aria-label="Search approvals"
             value={searchQuery}
             placeholder="Search by action, system, requester or binding"
             onChange={(event) => setSearchQuery(event.target.value)}
@@ -201,10 +186,12 @@ export function ApprovalsPage({ tenantId, principalId, focusApprovalId = '', onR
             Clear
           </button>
         ) : null}
-        <span className="approvals-toolbar__summary">
-          {approvalSearchSummary(visibleTotalCount, totalCount, Boolean(normalizedSearchQuery))}
-        </span>
+        <button type="button" className="btn-secondary" disabled={loading || loadingMore || Boolean(busyID)} onClick={() => void load()}>
+          {loading ? 'Refreshing...' : 'Refresh'}
+        </button>
       </div>
+
+      {error ? <p role="alert" className="iam-control__inline-error">{error}</p> : null}
 
       {focusApprovalId ? (
         <div className={`approval-focus-banner ${focusedApproval ? '' : 'approval-focus-banner--missing'}`}>
@@ -398,18 +385,6 @@ function MetaValue(props: { label: string; value: string }) {
       <strong>{props.value}</strong>
     </span>
   )
-}
-
-function approvalBoardSummary(pendingCount: number, totalCount: number, loading: boolean): string {
-  if (loading && totalCount === 0) return 'Loading approval requests...'
-  const pendingNoun = pendingCount === 1 ? 'request' : 'requests'
-  const totalNoun = totalCount === 1 ? 'approval' : 'approvals'
-  return `${pendingCount} pending ${pendingNoun} · ${totalCount} loaded ${totalNoun}`
-}
-
-function approvalSearchSummary(visibleCount: number, totalCount: number, searchActive: boolean): string {
-  if (!searchActive) return `${totalCount} loaded`
-  return `${visibleCount} of ${totalCount} loaded`
 }
 
 function approvalColumnTitle(status: ApprovalStatus): string {

@@ -12,6 +12,9 @@ DEMO_JOB_ROLE_NAME="${DEMO_JOB_ROLE_NAME:-Demo Approval Role}"
 DEMO_PROFILE_NAME="${DEMO_PROFILE_NAME:-Demo Approval Profile}"
 DEMO_VIRPLOYEE_NAME="${DEMO_VIRPLOYEE_NAME:-Demo Approval Virployee}"
 DEMO_TITLE="Demo Approval $RUN_ID"
+DEMO_CLEANUP="${DEMO_CLEANUP:-true}"
+DEMO_FIXTURE_NAME_RE='^(Demo|Smoke|Manual|Real) Approval (Virployee|Role|Profile)( |$)'
+DEMO_APPROVAL_REASON_RE='(Demo|Smoke|Manual Local|Manual|Real) Approval'
 
 need() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -56,6 +59,59 @@ api() {
       -H "X-Tenant-ID: $TENANT_ID" \
       -H "X-Actor-ID: $PRINCIPAL_ID"
   fi
+}
+
+reject_demo_approvals() {
+  local list ids id payload
+
+  list="$(api GET "/api/approvals?status=pending")"
+  ids="$(
+    jq -r --arg re "$DEMO_APPROVAL_REASON_RE" \
+      '.items[]? | select((.reason // "") | test($re)) | .id' \
+      <<<"$list"
+  )"
+  payload="$(jq -n '{note: "demo seed cleanup"}')"
+
+  while IFS= read -r id; do
+    [[ -z "$id" ]] && continue
+    api POST "/api/approvals/$id/reject" "$payload" >/dev/null || true
+  done <<<"$ids"
+}
+
+purge_demo_resource() {
+  local resource="$1"
+  local lifecycle path list ids id
+
+  for lifecycle in active archived trash; do
+    case "$lifecycle" in
+      active) path="/api/$resource" ;;
+      archived) path="/api/$resource?lifecycle=archived" ;;
+      trash) path="/api/$resource?lifecycle=trash" ;;
+    esac
+
+    list="$(api GET "$path" || true)"
+    ids="$(
+      jq -r --arg re "$DEMO_FIXTURE_NAME_RE" \
+        '.data[]? | select((.name // "") | test($re)) | .id' \
+        <<<"$list"
+    )"
+
+    while IFS= read -r id; do
+      [[ -z "$id" ]] && continue
+      if api DELETE "/api/$resource/$id/purge" >/dev/null 2>&1; then
+        continue
+      fi
+      api POST "/api/$resource/$id/trash" >/dev/null 2>&1 || true
+      api DELETE "/api/$resource/$id/purge" >/dev/null 2>&1 || true
+    done <<<"$ids"
+  done
+}
+
+cleanup_demo_fixtures() {
+  reject_demo_approvals
+  purge_demo_resource "virployees"
+  purge_demo_resource "job-roles"
+  purge_demo_resource "profile-templates"
 }
 
 assert_jq() {
@@ -267,6 +323,10 @@ latest_runs() {
   local virployee_id="$1"
   api GET "/api/virployees/$virployee_id/runs?limit=20"
 }
+
+if [[ "$DEMO_CLEANUP" == "true" ]]; then
+  cleanup_demo_fixtures
+fi
 
 read_action_id="$(ensure_action_type "calendar.events.read" "Read calendar events" "low" "true")"
 create_action_id="$(ensure_action_type "calendar.events.create" "Create calendar events" "high" "true")"
