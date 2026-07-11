@@ -17,6 +17,9 @@ CREATE TABLE IF NOT EXISTS governance_checks (
     created_at timestamptz NOT NULL
 );
 
+ALTER TABLE governance_checks
+    ADD COLUMN IF NOT EXISTS tenant_id text NOT NULL DEFAULT 'default';
+
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_governance_checks_tenant_created
     ON governance_checks (tenant_id, created_at DESC);
 

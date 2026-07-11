@@ -24,6 +24,9 @@ CREATE TABLE IF NOT EXISTS approvals (
     )
 );
 
+ALTER TABLE approvals
+    ADD COLUMN IF NOT EXISTS tenant_id text NOT NULL DEFAULT 'default';
+
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_approvals_tenant_status_created
     ON approvals (tenant_id, status, created_at DESC);
 

@@ -22,8 +22,14 @@ CREATE TABLE IF NOT EXISTS action_types (
     )
 );
 
+ALTER TABLE action_types
+    ADD COLUMN IF NOT EXISTS tenant_id text NOT NULL DEFAULT 'default';
+
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_action_types_tenant_id
     ON action_types (tenant_id, id);
+
+CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_action_types_tenant_key_unique
+    ON action_types (tenant_id, action_type_key);
 
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_action_types_tenant_key
     ON action_types (tenant_id, action_type_key);
