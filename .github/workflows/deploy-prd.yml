@@ -269,7 +269,7 @@ jobs:
             --project="$PROJECT_ID" --region="$REGION" --image="$IMAGE_URI" \
             --service-account="$CONSOLE_RUNTIME_SA" \
             --set-env-vars="AXIS_BFF_BASE_URL=${BFF_URL}" \
-            --allow-unauthenticated --ingress=all --port=80 --min-instances=0 --max-instances=3
+            --allow-unauthenticated --ingress=all --port=19173 --min-instances=0 --max-instances=3
       - name: Smoke
         run: |
           url="$(gcloud run services describe "$CONSOLE_SERVICE" --project="$PROJECT_ID" --region="$REGION" --format='value(status.url)')"
