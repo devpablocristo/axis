@@ -1,0 +1,4 @@
+# Historical test fixtures reviewed on 2026-07-11. New occurrences remain blocking.
+9a315b92aed2502433593d4f37529740e3e9d340:bff/main_test.go:generic-api-key:358
+f7dcc9c9cb3d2d447042127ca709bbcf6ee4027b:companion/internal/agentprofiles/handler_test.go:generic-api-key:21
+f7dcc9c9cb3d2d447042127ca709bbcf6ee4027b:bff/main_test.go:generic-api-key:358

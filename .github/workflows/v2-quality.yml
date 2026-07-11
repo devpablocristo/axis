@@ -1,0 +1,151 @@
+name: Axis v2 Quality
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "v2/**"
+      - "docs/**"
+      - "scripts/quality/**"
+      - ".githooks/**"
+      - ".github/workflows/v2-quality.yml"
+      - ".gitleaksignore"
+      - "drift.lock"
+  pull_request:
+    branches: [main]
+    paths:
+      - "v2/**"
+      - "docs/**"
+      - "scripts/quality/**"
+      - ".githooks/**"
+      - ".github/workflows/v2-quality.yml"
+      - ".gitleaksignore"
+      - "drift.lock"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: axis-v2-quality-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  blocking-static:
+    name: blocking-static
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: v2/bff/go.mod
+          cache: true
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - name: Install blocking quality tools
+        env:
+          DRIFT_VERSION: v0.10.1
+        run: |
+          set -euo pipefail
+          curl -fsSL https://drift.fp.dev/install.sh | sh -s -- --version "$DRIFT_VERSION"
+          python -m pip install --disable-pip-version-check semgrep==1.168.0
+          go install github.com/zricethezav/gitleaks/v8@v8.30.1
+          go install golang.org/x/vuln/cmd/govulncheck@v1.3.0
+          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.4
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - name: Drift, secrets, SAST, Go vulnerabilities and lint
+        run: ./scripts/quality/check-blocking.sh
+
+  tests:
+    name: tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [bff, companion, nexus]
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: v2/${{ matrix.module }}/go.mod
+          cache-dependency-path: v2/${{ matrix.module }}/go.sum
+      - name: Test ${{ matrix.module }}
+        working-directory: v2/${{ matrix.module }}
+        run: go test ./...
+
+  console:
+    name: console
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: "22.12.0"
+          cache: npm
+          cache-dependency-path: v2/console/package-lock.json
+      - run: npm ci
+        working-directory: v2/console
+      - run: npm run typecheck
+        working-directory: v2/console
+
+  playwright:
+    name: playwright-e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - name: Run complete local Docker E2E suite
+        run: make test-e2e
+        working-directory: v2
+      - name: Upload Playwright diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: axis-v2-playwright-${{ github.run_id }}
+          path: |
+            v2/console/test-results/
+            v2/console/playwright-report/
+          if-no-files-found: ignore
+      - name: Teardown
+        if: always()
+        run: docker compose down -v
+        working-directory: v2
+
+  advisory-security:
+    name: advisory-security
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: v2/bff/go.mod
+          cache: true
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: "22.12.0"
+          cache: npm
+          cache-dependency-path: v2/console/package-lock.json
+      - name: Install advisory scanners
+        run: |
+          set -euo pipefail
+          npm install --global squawk-cli@2.59.0
+          go install github.com/google/osv-scanner/v2/cmd/osv-scanner@v2.3.8
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - name: Install pinned Trivy
+        uses: aquasecurity/setup-trivy@3fb12ec12f41e471780db15c232d5dd185dcb514 # v0.2.6
+        with:
+          version: v0.69.3
+          cache: true
+      - name: Squawk, OSV Scanner and Trivy
+        run: ./scripts/quality/check-reporting.sh
