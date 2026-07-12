@@ -12,6 +12,9 @@ export default defineConfig({
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     viewport: { width: 1366, height: 768 },
+	launchOptions: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
+	  ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH }
+	  : undefined,
   },
   projects: [
     {

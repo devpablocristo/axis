@@ -132,6 +132,22 @@ const virployees = [
   },
 ]
 
+const memories = [{
+  id: 'memory-timezone',
+  virployee_id: 'virployee-sofia',
+  title: 'Preferred timezone',
+  type: 'preference',
+  preview: 'Use America/Argentina/Buenos_Aires.',
+  sensitivity: 'normal',
+  provenance: 'human',
+  actor_id: principalID,
+  content_hash: 'memory-hash-timezone',
+  version: 2,
+  state: 'active',
+  created_at: now,
+  updated_at: now,
+}]
+
 const orgs = [{
   id: 'dev-org',
   name: 'dev-org',
@@ -264,21 +280,21 @@ test('crud lists use one toolbar and do not render row action columns', async ({
   }
 })
 
-test('builder and admin action toolbars stay on one desktop row', async ({ page }) => {
+test('builder and admin toolbars align primary actions with filters and keep lifecycle on its own row', async ({ page }) => {
   await page.setViewportSize({ width: 1366, height: 768 })
   await page.goto('/')
 
   const nav = page.locator('.nav')
   for (const section of ['Capabilities', 'Job Roles', 'Profile Templates']) {
     await nav.getByRole('button', { name: section }).click()
-    await expectSingleToolbarRow(page, section)
+    await expectConsistentToolbarHierarchy(page, section)
   }
 
   await nav.getByRole('button', { name: 'Admin' }).click()
   const tenancyTabs = page.locator('.tenancy-section__tabs')
   for (const tab of ['Users', 'Tenants', 'Orgs', 'Products']) {
     await tenancyTabs.getByRole('tab', { name: tab }).click()
-    await expectSingleToolbarRow(page, `Admin/${tab}`)
+    await expectConsistentToolbarHierarchy(page, `Admin/${tab}`)
   }
 })
 
@@ -347,6 +363,31 @@ test('virployees keeps selector and name columns fixed during horizontal scroll'
   await expect(page.getByText('Sofia Nexus E2E')).toBeVisible()
 })
 
+test('virployee actions never overlap search or lifecycle filters', async ({ page }) => {
+  await page.setViewportSize({ width: 1366, height: 768 })
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Virployees' }).click()
+
+  const actions = page.locator('.virployees-control .iam-control__bulk-buttons')
+  const filters = page.locator('.virployees-control .crud-page-shell__header-actions')
+  const [actionsBox, filtersBox, headerBox, primaryActionsBox] = await Promise.all([
+		actions.boundingBox(),
+		filters.boundingBox(),
+		page.locator('.virployees-control .page-header').boundingBox(),
+		page.locator('.virployees-control .iam-control__button-group:not(.iam-control__button-group--lifecycle)').first().boundingBox(),
+	])
+  expect(actionsBox).not.toBeNull()
+  expect(filtersBox).not.toBeNull()
+	expect(headerBox).not.toBeNull()
+	expect(primaryActionsBox).not.toBeNull()
+	expect(Math.abs((filtersBox?.y ?? 0) - (primaryActionsBox?.y ?? 0))).toBeLessThanOrEqual(1)
+	expect((primaryActionsBox?.x ?? 0) + (primaryActionsBox?.width ?? 0)).toBeLessThanOrEqual((filtersBox?.x ?? 0) + 1)
+	expect(Math.abs(((filtersBox?.x ?? 0) + (filtersBox?.width ?? 0)) - ((headerBox?.x ?? 0) + (headerBox?.width ?? 0)))).toBeLessThanOrEqual(1)
+
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+  expect(overflow).toBeLessThanOrEqual(1)
+})
+
 test('virployee edit, preview, and dry run panels have matching top and bottom action spacing', async ({ page }) => {
   await page.goto('/')
   await page.getByRole('button', { name: 'Virployees' }).click()
@@ -365,6 +406,24 @@ test('virployee edit, preview, and dry run panels have matching top and bottom a
   await page.getByRole('button', { name: 'Dry Run' }).click()
   await expect(page.getByRole('heading', { name: 'Dry Run' })).toBeVisible()
   await expectActionBars(page, '.virployee-form-actions--top', '.virployee-edit-form__footer')
+})
+
+test('virployee memory panel keeps the page layout contained across desktop and mobile', async ({ page }) => {
+  for (const viewport of [{width: 1366, height: 768}, {width: 390, height: 844}]) {
+    await page.setViewportSize(viewport)
+    await page.goto('/')
+    await page.getByRole('button', { name: 'Virployees' }).click()
+    await page.getByRole('checkbox', { name: 'Select virployee-sofia' }).check()
+    await page.getByRole('button', { name: 'Memory', exact: true }).click()
+
+    await expect(page.getByRole('heading', { name: 'Memory', exact: true })).toBeVisible()
+    await expect(page.getByText('Preferred timezone')).toBeVisible()
+    await expect(page.locator('.virployee-memory-inline')).toHaveCount(1)
+    await expect(page.locator('.virployee-preview-inline, .virployee-dry-run-inline, .virployee-edit-inline')).toHaveCount(0)
+
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+    expect(overflow).toBeLessThanOrEqual(1)
+  }
 })
 
 test('approval flow can approve from Virployees and return with an approved run history state', async ({ page }) => {
@@ -511,6 +570,8 @@ async function installApiFixtures(page: Page) {
     if (path === '/api/virployees') return json(route, { data: virployees })
     if (path === '/api/virployees/archived' || path === '/api/virployees/trash') return json(route, { data: [] })
     if (path === '/api/virployees/virployee-sofia/runtime-context') return json(route, runtimeContext)
+	if (path === '/api/virployees/virployee-sofia/memories' && route.request().method() === 'GET') return json(route, { items: memories })
+	if (path === '/api/virployees/virployee-sofia/memories/recall' && route.request().method() === 'POST') return json(route, { items: memories.map((memory) => ({id:memory.id,title:memory.title,type:memory.type,version:memory.version,hash:memory.content_hash,sensitivity:memory.sensitivity,score:0.8})), memory_context_hash:'memory-context-hash' })
     if (path === '/api/virployees/virployee-sofia/dry-run' && route.request().method() === 'POST') {
       const input = requestInput(route)
       const result = dryRunForInput(input)
@@ -982,19 +1043,25 @@ async function expectResponsiveCrudTable(page: Page, context: string) {
   expect(metrics.overflowX, context).toBe('auto')
 }
 
-async function expectSingleToolbarRow(page: Page, context: string) {
-  const buttons = page.locator('.iam-control__bulk-buttons button:visible')
-  await expect(buttons.first(), context).toBeVisible()
-  const topPositions = await buttons.evaluateAll((elements) => elements.map((element) => element.getBoundingClientRect().top))
-  expect(Math.max(...topPositions) - Math.min(...topPositions), context).toBeLessThanOrEqual(1)
-
+async function expectConsistentToolbarHierarchy(page: Page, context: string) {
   const [bulkActionsBox, listActionsBox] = await Promise.all([
     page.locator('.iam-control__bulk-buttons').boundingBox(),
     page.locator('.crud-shell-header-actions-column__search-row').boundingBox(),
   ])
   expect(bulkActionsBox, context).not.toBeNull()
   expect(listActionsBox, context).not.toBeNull()
-  expect(Math.abs((bulkActionsBox?.y ?? 0) - (listActionsBox?.y ?? 0)), context).toBeLessThanOrEqual(1)
+	expect(Math.abs((listActionsBox?.y ?? 0) - (bulkActionsBox?.y ?? 0)), context).toBeLessThanOrEqual(1)
+
+	const lifecycle = page.locator('.iam-control__button-group--lifecycle')
+	if (await lifecycle.count()) {
+		const [primaryBox, lifecycleBox] = await Promise.all([
+			page.locator('.iam-control__button-group:not(.iam-control__button-group--lifecycle)').first().boundingBox(),
+			lifecycle.first().boundingBox(),
+		])
+		expect(primaryBox, context).not.toBeNull()
+		expect(lifecycleBox, context).not.toBeNull()
+		expect(lifecycleBox?.y ?? 0, context).toBeGreaterThan((primaryBox?.y ?? 0) + 1)
+	}
 }
 
 async function expectActionBars(page: Page, topSelector: string, bottomSelector: string) {

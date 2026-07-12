@@ -125,6 +125,7 @@ func (u *UseCases) ExecuteApprovedAction(ctx context.Context, tenantID string, i
 		CapabilityID: source.CapabilityID, CapabilityKey: source.CapabilityKey,
 		DryRunDecision: source.DryRunDecision, GateDecision: "pass", GateChecks: source.GateChecks,
 		NexusResult: nexus, BindingHash: prepared.BindingHash,
+		MemoryReferences: source.MemoryReferences, MemoryContextHash: source.MemoryContextHash,
 		ExecutionResult: &runtraces.ExecutionResult{
 			Status: attempt.Status, Mode: "local", ApprovalID: approval.ID, ApprovalStatus: approval.Status,
 			BindingHash: prepared.BindingHash, Message: message, ExternalEffects: false,

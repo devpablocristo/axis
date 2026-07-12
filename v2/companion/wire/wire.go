@@ -12,6 +12,7 @@ import (
 	"github.com/devpablocristo/companion-v2/internal/capabilities"
 	"github.com/devpablocristo/companion-v2/internal/infra/migrations"
 	"github.com/devpablocristo/companion-v2/internal/jobroles"
+	"github.com/devpablocristo/companion-v2/internal/memories"
 	"github.com/devpablocristo/companion-v2/internal/nexusclient"
 	"github.com/devpablocristo/companion-v2/internal/profiletemplates"
 	"github.com/devpablocristo/companion-v2/internal/virployees"
@@ -89,7 +90,10 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	if config.ExecutionMode == "local" {
 		virployeesUsecases.RegisterExecutor("calendar.events.create", virployees.NewLocalCalendarExecutor(virployeesRepo))
 	}
+	memoriesUsecases := memories.NewUseCases(memories.NewRepository(db.Pool()))
+	virployeesUsecases.SetMemoryReader(memoriesUsecases)
 	virployeesHandler := virployees.NewHandler(virployeesUsecases)
+	memoriesHandler := memories.NewHandler(memoriesUsecases)
 
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
@@ -97,7 +101,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	router.Use(ginmw.NewBodySizeLimit(config.MaxBodyBytes))
 	router.Use(ginmw.NewCORS(ginmw.CORSConfig{
 		Origins:      config.CORSOrigins,
-		AllowHeaders: []string{"X-Actor-ID", "X-Tenant-ID"},
+		AllowHeaders: []string{"X-Actor-ID", "X-Tenant-ID", "X-Axis-Tenant-Role"},
 	}))
 	ginmw.RegisterHealthEndpoints(router, db.Ping)
 	api := router.Group("/v1")
@@ -105,6 +109,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	capabilitiesHandler.Routes(api)
 	profileTemplatesHandler.Routes(api)
 	virployeesHandler.Routes(api)
+	memoriesHandler.Routes(api)
 
 	server := &http.Server{
 		Addr:    config.Addr(),

@@ -44,10 +44,22 @@ type ListAutonomyLevelsResponse struct {
 }
 
 type RuntimeContextResponse struct {
-	Virployee       RuntimeContextVirployeeResponse       `json:"virployee"`
-	JobRole         RuntimeContextJobRoleResponse         `json:"job_role"`
-	ProfileTemplate RuntimeContextProfileTemplateResponse `json:"profile_template"`
-	Capabilities    []RuntimeContextCapabilityResponse    `json:"capabilities"`
+	Virployee         RuntimeContextVirployeeResponse       `json:"virployee"`
+	JobRole           RuntimeContextJobRoleResponse         `json:"job_role"`
+	ProfileTemplate   RuntimeContextProfileTemplateResponse `json:"profile_template"`
+	Capabilities      []RuntimeContextCapabilityResponse    `json:"capabilities"`
+	MemoryReferences  []MemoryReferenceResponse             `json:"memory_references"`
+	MemoryContextHash string                                `json:"memory_context_hash"`
+}
+
+type MemoryReferenceResponse struct {
+	ID          string  `json:"id"`
+	Title       string  `json:"title"`
+	Type        string  `json:"type"`
+	Version     int     `json:"version"`
+	Hash        string  `json:"hash"`
+	Sensitivity string  `json:"sensitivity"`
+	Score       float64 `json:"score"`
 }
 
 type RuntimeContextVirployeeResponse struct {
@@ -179,21 +191,23 @@ type ExecutionGateCheckResponse struct {
 }
 
 type RunTraceResponse struct {
-	ID              string                           `json:"id"`
-	VirployeeID     string                           `json:"virployee_id"`
-	Operation       string                           `json:"operation"`
-	InputHash       string                           `json:"input_hash"`
-	InputPreview    string                           `json:"input_preview"`
-	Intent          map[string]any                   `json:"intent"`
-	CapabilityID    string                           `json:"capability_id,omitempty"`
-	CapabilityKey   string                           `json:"capability_key"`
-	DryRunDecision  string                           `json:"dry_run_decision"`
-	GateDecision    string                           `json:"gate_decision,omitempty"`
-	GateChecks      []RunTraceGateCheckResponse      `json:"gate_checks"`
-	NexusResult     *RunTraceNexusResultResponse     `json:"nexus_result,omitempty"`
-	ExecutionResult *RunTraceExecutionResultResponse `json:"execution_result,omitempty"`
-	BindingHash     string                           `json:"binding_hash,omitempty"`
-	CreatedAt       time.Time                        `json:"created_at"`
+	ID                string                           `json:"id"`
+	VirployeeID       string                           `json:"virployee_id"`
+	Operation         string                           `json:"operation"`
+	InputHash         string                           `json:"input_hash"`
+	InputPreview      string                           `json:"input_preview"`
+	Intent            map[string]any                   `json:"intent"`
+	CapabilityID      string                           `json:"capability_id,omitempty"`
+	CapabilityKey     string                           `json:"capability_key"`
+	DryRunDecision    string                           `json:"dry_run_decision"`
+	GateDecision      string                           `json:"gate_decision,omitempty"`
+	GateChecks        []RunTraceGateCheckResponse      `json:"gate_checks"`
+	NexusResult       *RunTraceNexusResultResponse     `json:"nexus_result,omitempty"`
+	ExecutionResult   *RunTraceExecutionResultResponse `json:"execution_result,omitempty"`
+	BindingHash       string                           `json:"binding_hash,omitempty"`
+	MemoryReferences  []MemoryReferenceResponse        `json:"memory_references"`
+	MemoryContextHash string                           `json:"memory_context_hash"`
+	CreatedAt         time.Time                        `json:"created_at"`
 }
 
 type RunTraceGateCheckResponse struct {
@@ -277,22 +291,28 @@ func RunTraceFromDomain(trace runtraces.Trace) RunTraceResponse {
 			Reason: check.Reason,
 		})
 	}
+	memoryReferences := make([]MemoryReferenceResponse, 0, len(trace.MemoryReferences))
+	for _, ref := range trace.MemoryReferences {
+		memoryReferences = append(memoryReferences, MemoryReferenceResponse{ID: ref.ID.String(), Title: ref.Title, Type: ref.Type, Version: ref.Version, Hash: ref.Hash, Sensitivity: ref.Sensitivity, Score: ref.Score})
+	}
 	return RunTraceResponse{
-		ID:              trace.ID.String(),
-		VirployeeID:     trace.VirployeeID.String(),
-		Operation:       string(trace.Operation),
-		InputHash:       trace.InputHash,
-		InputPreview:    trace.InputPreview,
-		Intent:          trace.Intent,
-		CapabilityID:    trace.CapabilityID,
-		CapabilityKey:   trace.CapabilityKey,
-		DryRunDecision:  trace.DryRunDecision,
-		GateDecision:    trace.GateDecision,
-		GateChecks:      checks,
-		NexusResult:     runTraceNexusResultFromDomain(trace.NexusResult),
-		ExecutionResult: runTraceExecutionResultFromDomain(trace.ExecutionResult),
-		BindingHash:     trace.BindingHash,
-		CreatedAt:       trace.CreatedAt,
+		ID:                trace.ID.String(),
+		VirployeeID:       trace.VirployeeID.String(),
+		Operation:         string(trace.Operation),
+		InputHash:         trace.InputHash,
+		InputPreview:      trace.InputPreview,
+		Intent:            trace.Intent,
+		CapabilityID:      trace.CapabilityID,
+		CapabilityKey:     trace.CapabilityKey,
+		DryRunDecision:    trace.DryRunDecision,
+		GateDecision:      trace.GateDecision,
+		GateChecks:        checks,
+		NexusResult:       runTraceNexusResultFromDomain(trace.NexusResult),
+		ExecutionResult:   runTraceExecutionResultFromDomain(trace.ExecutionResult),
+		BindingHash:       trace.BindingHash,
+		MemoryReferences:  memoryReferences,
+		MemoryContextHash: trace.MemoryContextHash,
+		CreatedAt:         trace.CreatedAt,
 	}
 }
 
@@ -343,6 +363,10 @@ func RuntimeContextFromDomain(ctx runtimecontext.Context) RuntimeContextResponse
 			RequiredAutonomy: string(capability.RequiredAutonomy),
 		})
 	}
+	memoryReferences := make([]MemoryReferenceResponse, 0, len(ctx.MemoryReferences))
+	for _, ref := range ctx.MemoryReferences {
+		memoryReferences = append(memoryReferences, MemoryReferenceResponse{ID: ref.ID.String(), Title: ref.Title, Type: ref.Type, Version: ref.Version, Hash: ref.Hash, Sensitivity: ref.Sensitivity, Score: ref.Score})
+	}
 	return RuntimeContextResponse{
 		Virployee: RuntimeContextVirployeeResponse{
 			ID:               ctx.Virployee.ID.String(),
@@ -365,7 +389,9 @@ func RuntimeContextFromDomain(ctx runtimecontext.Context) RuntimeContextResponse
 			SystemPrompt: ctx.ProfileTemplate.SystemPrompt,
 			MaxAutonomy:  string(ctx.ProfileTemplate.MaxAutonomy),
 		},
-		Capabilities: capabilities,
+		Capabilities:      capabilities,
+		MemoryReferences:  memoryReferences,
+		MemoryContextHash: ctx.MemoryContextHash,
 	}
 }
 

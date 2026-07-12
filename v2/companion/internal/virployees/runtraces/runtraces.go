@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/devpablocristo/companion-v2/internal/memories"
 	"github.com/google/uuid"
 )
 
@@ -24,39 +25,43 @@ const (
 )
 
 type Trace struct {
-	ID              uuid.UUID
-	TenantID        string
-	VirployeeID     uuid.UUID
-	Operation       Operation
-	InputHash       string
-	InputPreview    string
-	Intent          map[string]any
-	CapabilityID    string
-	CapabilityKey   string
-	DryRunDecision  string
-	GateDecision    string
-	GateChecks      []GateCheck
-	NexusResult     *NexusResult
-	ExecutionResult *ExecutionResult
-	BindingHash     string
-	CreatedAt       time.Time
+	ID                uuid.UUID
+	TenantID          string
+	VirployeeID       uuid.UUID
+	Operation         Operation
+	InputHash         string
+	InputPreview      string
+	Intent            map[string]any
+	CapabilityID      string
+	CapabilityKey     string
+	DryRunDecision    string
+	GateDecision      string
+	GateChecks        []GateCheck
+	NexusResult       *NexusResult
+	ExecutionResult   *ExecutionResult
+	BindingHash       string
+	MemoryReferences  []memories.Reference
+	MemoryContextHash string
+	CreatedAt         time.Time
 }
 
 type CreateInput struct {
-	VirployeeID     uuid.UUID
-	Operation       Operation
-	Input           string
-	Intent          map[string]any
-	CapabilityID    string
-	CapabilityKey   string
-	DryRunDecision  string
-	GateDecision    string
-	GateChecks      []GateCheck
-	NexusResult     *NexusResult
-	ExecutionResult *ExecutionResult
-	BindingHash     string
-	InputHash       string
-	InputPreview    string
+	VirployeeID       uuid.UUID
+	Operation         Operation
+	Input             string
+	Intent            map[string]any
+	CapabilityID      string
+	CapabilityKey     string
+	DryRunDecision    string
+	GateDecision      string
+	GateChecks        []GateCheck
+	NexusResult       *NexusResult
+	ExecutionResult   *ExecutionResult
+	BindingHash       string
+	MemoryReferences  []memories.Reference
+	MemoryContextHash string
+	InputHash         string
+	InputPreview      string
 }
 
 type GateCheck struct {

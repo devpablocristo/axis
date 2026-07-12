@@ -50,12 +50,14 @@ func TestGatewayForwardsVirployeesWithResolvedTenantHeaders(t *testing.T) {
 	var gotOrg string
 	var gotProduct string
 	var gotActor string
+	var gotRole string
 	downstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		gotTenant = r.Header.Get("X-Tenant-ID")
 		gotOrg = r.Header.Get("X-Axis-Org-ID")
 		gotProduct = r.Header.Get("X-Product-Surface")
 		gotActor = r.Header.Get("X-Actor-ID")
+		gotRole = r.Header.Get("X-Axis-Tenant-Role")
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		_, _ = w.Write([]byte(`{"ok":true}`))
@@ -83,6 +85,7 @@ func TestGatewayForwardsVirployeesWithResolvedTenantHeaders(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/virployees?view=active", nil)
 	req.Header.Set("X-Tenant-ID", tenantID.String())
 	req.Header.Set("X-Actor-ID", "user-a")
+	req.Header.Set("X-Axis-Tenant-Role", "owner")
 
 	router.ServeHTTP(rec, req)
 
@@ -95,6 +98,7 @@ func TestGatewayForwardsVirployeesWithResolvedTenantHeaders(t *testing.T) {
 	if gotTenant != tenantID.String() || gotOrg != "org-a" || gotProduct != "axis" || gotActor != "user-a" {
 		t.Fatalf("unexpected forwarded headers tenant=%q org=%q product=%q actor=%q", gotTenant, gotOrg, gotProduct, gotActor)
 	}
+	if gotRole != string(tenantdomain.RoleAdmin) { t.Fatalf("expected resolved role to replace spoofed role, got %q", gotRole) }
 }
 
 func TestGatewayValidatesVirployeeSupervisorBeforeForwarding(t *testing.T) {

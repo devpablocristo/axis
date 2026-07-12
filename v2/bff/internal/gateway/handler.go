@@ -103,11 +103,13 @@ func (h *Handler) forward(c *gin.Context, targetURL func(string, string) string,
 	req.Header = c.Request.Header.Clone()
 	req.Header.Del("Cookie")
 	req.Header.Del("Authorization")
+	req.Header.Del("X-Axis-Tenant-Role")
 	req.Header.Set("X-Actor-ID", resolved.PrincipalID)
 	req.Header.Set("X-Tenant-ID", resolved.TenantID)
 	req.Header.Set("X-Axis-Org-ID", resolved.OrgID)
 	req.Header.Set("X-Product-Surface", resolved.ProductSurface)
 	req.Header.Set("X-Axis-Forwarded-By", "bff-v2")
+	req.Header.Set("X-Axis-Tenant-Role", resolved.MembershipRole)
 
 	resp, err := h.client.Do(req)
 	if err != nil {

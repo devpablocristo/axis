@@ -32,7 +32,8 @@ Out of scope for this version:
 - Tasks.
 - Runtime execution.
 - LLM providers.
-- Memory.
+- Model-driven or automatically written memory (governed human memory is
+  specified separately in `memories.md`).
 - Tools.
 - Nexus, BFF, Console or any Axis v1 dependency.
 

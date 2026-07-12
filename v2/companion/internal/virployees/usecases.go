@@ -6,6 +6,7 @@ import (
 
 	capabilitydomain "github.com/devpablocristo/companion-v2/internal/capabilities/usecases/domain"
 	jobroledomain "github.com/devpablocristo/companion-v2/internal/jobroles/usecases/domain"
+	"github.com/devpablocristo/companion-v2/internal/memories"
 	profiletemplatedomain "github.com/devpablocristo/companion-v2/internal/profiletemplates/usecases/domain"
 	"github.com/devpablocristo/companion-v2/internal/virployees/dryrun"
 	"github.com/devpablocristo/companion-v2/internal/virployees/executiongate"
@@ -79,6 +80,10 @@ type ActionExecutorPort interface {
 	Execute(ctx context.Context, tenantID string, virployeeID uuid.UUID, attempt ExecutionAttempt, action preparedactions.Action) (string, map[string]any, error)
 }
 
+type MemoryReaderPort interface {
+	RecallInternal(context.Context, string, uuid.UUID, string, int) ([]memories.Recalled, error)
+}
+
 type UseCases struct {
 	repo             RepositoryPort
 	executionRepo    ExecutionRepositoryPort
@@ -89,6 +94,7 @@ type UseCases struct {
 	approvals        ApprovalReaderPort
 	resultReporter   ExecutionResultReporterPort
 	executors        map[string]ActionExecutorPort
+	memories         MemoryReaderPort
 	lifecycle        *lifecycle.Service
 }
 
@@ -154,6 +160,8 @@ func (u *UseCases) SetApprovalReader(reader ApprovalReaderPort) {
 func (u *UseCases) SetExecutionResultReporter(reporter ExecutionResultReporterPort) {
 	u.resultReporter = reporter
 }
+
+func (u *UseCases) SetMemoryReader(reader MemoryReaderPort) { u.memories = reader }
 
 func (u *UseCases) RegisterExecutor(action string, executor ActionExecutorPort) {
 	action = strings.TrimSpace(action)
@@ -245,12 +253,23 @@ func (u *UseCases) RuntimeContext(ctx context.Context, tenantID string, id uuid.
 		capabilities = append(capabilities, capability)
 	}
 
-	return runtimecontext.Context{
+	result := runtimecontext.Context{
 		Virployee:       virployee,
 		JobRole:         jobRole,
 		ProfileTemplate: profileTemplate,
 		Capabilities:    capabilities,
-	}, nil
+	}
+	if u.memories != nil {
+		items, recallErr := u.memories.RecallInternal(ctx, tenantID, id, virployee.Name+" "+virployee.Description, 5)
+		if recallErr != nil {
+			return runtimecontext.Context{}, recallErr
+		}
+		for _, item := range items {
+			result.MemoryReferences = append(result.MemoryReferences, item.Reference)
+		}
+		result.MemoryContextHash = memories.ContextHash(result.MemoryReferences)
+	}
+	return result, nil
 }
 
 func (u *UseCases) DryRun(ctx context.Context, tenantID string, id uuid.UUID, input string) (dryrun.Result, error) {
@@ -273,6 +292,17 @@ func (u *UseCases) dryRun(ctx context.Context, tenantID string, id uuid.UUID, in
 	runtimeCtx, err := u.RuntimeContext(ctx, tenantID, id)
 	if err != nil {
 		return dryrun.Result{}, err
+	}
+	if u.memories != nil {
+		items, recallErr := u.memories.RecallInternal(ctx, tenantID, id, input, 5)
+		if recallErr != nil {
+			return dryrun.Result{}, recallErr
+		}
+		runtimeCtx.MemoryReferences = runtimeCtx.MemoryReferences[:0]
+		for _, item := range items {
+			runtimeCtx.MemoryReferences = append(runtimeCtx.MemoryReferences, item.Reference)
+		}
+		runtimeCtx.MemoryContextHash = memories.ContextHash(runtimeCtx.MemoryReferences)
 	}
 	return dryrun.Evaluate(input, runtimeCtx), nil
 }
@@ -419,7 +449,9 @@ func (u *UseCases) SimulateApprovedExecution(ctx context.Context, tenantID strin
 			Message:         "Simulated execution completed; no external effects were performed.",
 			ExternalEffects: false,
 		},
-		BindingHash: approval.BindingHash,
+		BindingHash:       approval.BindingHash,
+		MemoryReferences:  source.MemoryReferences,
+		MemoryContextHash: source.MemoryContextHash,
 	})
 }
 
@@ -540,14 +572,16 @@ func governanceParams(result dryrun.Result) map[string]any {
 func (u *UseCases) recordDryRunTrace(ctx context.Context, tenantID string, result dryrun.Result) error {
 	capabilityID, capabilityKey := capabilityTraceFields(result)
 	_, err := u.repo.CreateRunTrace(ctx, tenantID, runtraces.CreateInput{
-		VirployeeID:    result.RuntimeContext.Virployee.ID,
-		Operation:      runtraces.OperationDryRun,
-		Input:          result.Input,
-		Intent:         intentTrace(result.Intent),
-		CapabilityID:   capabilityID,
-		CapabilityKey:  capabilityKey,
-		DryRunDecision: string(result.Decision),
-		GateChecks:     []runtraces.GateCheck{},
+		VirployeeID:       result.RuntimeContext.Virployee.ID,
+		Operation:         runtraces.OperationDryRun,
+		Input:             result.Input,
+		Intent:            intentTrace(result.Intent),
+		CapabilityID:      capabilityID,
+		CapabilityKey:     capabilityKey,
+		DryRunDecision:    string(result.Decision),
+		GateChecks:        []runtraces.GateCheck{},
+		MemoryReferences:  result.RuntimeContext.MemoryReferences,
+		MemoryContextHash: result.RuntimeContext.MemoryContextHash,
 	})
 	return err
 }
@@ -561,17 +595,19 @@ func (u *UseCases) recordExecutionGateTrace(
 ) error {
 	capabilityID, capabilityKey := capabilityTraceFields(result.DryRun)
 	_, err := u.repo.CreateRunTrace(ctx, tenantID, runtraces.CreateInput{
-		VirployeeID:    result.DryRun.RuntimeContext.Virployee.ID,
-		Operation:      runtraces.OperationExecutionGate,
-		Input:          result.Input,
-		Intent:         intentTrace(result.DryRun.Intent),
-		CapabilityID:   capabilityID,
-		CapabilityKey:  capabilityKey,
-		DryRunDecision: string(result.DryRun.Decision),
-		GateDecision:   string(result.Gate.Decision),
-		GateChecks:     gateChecksTrace(result.Gate.Checks),
-		NexusResult:    nexus,
-		BindingHash:    bindingHash,
+		VirployeeID:       result.DryRun.RuntimeContext.Virployee.ID,
+		Operation:         runtraces.OperationExecutionGate,
+		Input:             result.Input,
+		Intent:            intentTrace(result.DryRun.Intent),
+		CapabilityID:      capabilityID,
+		CapabilityKey:     capabilityKey,
+		DryRunDecision:    string(result.DryRun.Decision),
+		GateDecision:      string(result.Gate.Decision),
+		GateChecks:        gateChecksTrace(result.Gate.Checks),
+		NexusResult:       nexus,
+		BindingHash:       bindingHash,
+		MemoryReferences:  result.DryRun.RuntimeContext.MemoryReferences,
+		MemoryContextHash: result.DryRun.RuntimeContext.MemoryContextHash,
 	})
 	return err
 }
@@ -635,15 +671,16 @@ func actionBinding(tenantID string, result dryrun.Result, prepared *preparedacti
 		return nil
 	}
 	binding := map[string]any{
-		"schema_version":  "tool_intent.v1",
-		"tenant_id":       normalizeTenantID(tenantID),
-		"virployee_id":    result.RuntimeContext.Virployee.ID.String(),
-		"operation":       "execution_gate",
-		"capability_key":  result.Intent.CapabilityKey,
-		"action":          result.Intent.Action,
-		"target_system":   result.Intent.Domain,
-		"target_resource": result.Intent.Resource,
-		"input_hash":      runtraces.HashString(result.Input),
+		"schema_version":      "tool_intent.v1",
+		"tenant_id":           normalizeTenantID(tenantID),
+		"virployee_id":        result.RuntimeContext.Virployee.ID.String(),
+		"operation":           "execution_gate",
+		"capability_key":      result.Intent.CapabilityKey,
+		"action":              result.Intent.Action,
+		"target_system":       result.Intent.Domain,
+		"target_resource":     result.Intent.Resource,
+		"input_hash":          runtraces.HashString(result.Input),
+		"memory_context_hash": result.RuntimeContext.MemoryContextHash,
 	}
 	if prepared != nil {
 		payloadHash, err := prepared.PayloadHash()

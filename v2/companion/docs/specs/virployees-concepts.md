@@ -47,7 +47,7 @@ Evaluation criteria:
 | `virployee_profile` | no | no | yes | yes | partial | `out` | Do not store a snapshot in the Virployee CRUD model now. Exact prompt/config snapshots belong later in runtime or audit logs. |
 | `autonomy` | no | partial | yes | yes | yes | `core` | Optional in `POST`, default `A1`. Values: `A0` to `A5`. This is the minimum runtime safety control. |
 | `capability_ids` | no | yes | yes | yes | partial | `deferred-core` | Essential later, but wait for Capability design. Do not store opaque capability lists before the registry contract is clear. |
-| `memory_id` | no | partial | yes | yes | partial | `deferred-core` | Essential for persistent employee memory, but wait for Memory design. Omit from v2.1 create/update. |
+| governed memory | no | partial | yes | yes | yes | `core` | Implemented as records scoped by tenant and Virployee; it is not a `memory_id` field on Virployee. |
 | `created_at` | no | no | no | no | yes | `metadata` | Server-generated resource metadata. |
 | `updated_at` | no | no | no | no | yes | `metadata` | Server-generated resource metadata. |
 | `archived_at` | no | no | no | partial | yes | `metadata` | Lifecycle metadata. |
@@ -129,19 +129,15 @@ References stored as opaque values in v2.1:
 - `supervisor_user_id`: opaque string; no auth or user module yet.
 - `job_role_id`: UUID; must reference an active Job Role in the same tenant.
 
-References intentionally not stored yet:
-
-- `memory_id`
-
-Those references affect runtime behavior and should wait until their modules or
-contracts exist in `companion`.
+Memory is intentionally not stored as `memory_id` on the Virployee. The
+standalone `memories` module owns multiple governed records scoped by tenant and
+Virployee and supplies safe references to runtime contracts.
 
 ## Explicit Non-Goals
 
 - Do not import or depend on Axis v1.
 - Do not design public tenants, orgs or product surfaces in this step.
-- Do not add tasks, runtime execution, LLM providers or memory
-  to the Virployee module yet.
+- Do not add tasks or LLM providers to the Virployee module.
 - Do not treat `job_role_id` as authorization. Permissions and approvals remain
   separate concerns.
 
@@ -154,6 +150,6 @@ contracts exist in `companion`.
 - Profile Templates are reusable catalog records; Virployees reference them
   directly by `profile_template_id`.
 - Runtime/audit snapshots are deferred until execution exists.
-- `memory_id` remains deferred.
+- Governed memory is a separate one-to-many module, not a Virployee field.
 - Lifecycle metadata remains technical metadata, separate from operational
   `status`.

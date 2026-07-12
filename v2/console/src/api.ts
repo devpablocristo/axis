@@ -163,7 +163,15 @@ export type VirployeeRuntimeContext = {
     name: string
     required_autonomy: VirployeeAutonomy
   }>
+  memory_references: MemoryReference[]
+  memory_context_hash: string
 }
+
+export type MemoryReference = { id:string; title:string; type:'fact'|'preference'|'procedure'|'note'; version:number; hash:string; sensitivity:'normal'|'sensitive'; score:number }
+export type VirployeeMemory = { id:string; virployee_id:string; title:string; type:MemoryReference['type']; content?:string; preview?:string; sensitivity:MemoryReference['sensitivity']; provenance:'human'|'system'; actor_id:string; source_reference?:string; content_hash:string; version:number; state:'active'|'archived'|'trash'; created_at:string; updated_at:string }
+export type MemoryInput = { title:string; type:MemoryReference['type']; content:string; sensitivity:MemoryReference['sensitivity'] }
+export type MemoryPage = { items:VirployeeMemory[]; next_cursor?:string }
+export type MemoryRecall = { items:MemoryReference[]; memory_context_hash:string }
 
 export type VirployeeDryRun = {
   input: string
@@ -762,6 +770,15 @@ export function getVirployeeRuntimeContext(
     { tenantId, principalId },
   )
 }
+
+export function listVirployeeMemories(id:string, state:string, query:string, cursor:string, tenantId:string, principalId:string):Promise<MemoryPage> {
+  const params = new URLSearchParams({state, q:query, limit:'50'}); if(cursor) params.set('cursor',cursor)
+  return axisFetch<MemoryPage>(`/api/virployees/${encodeURIComponent(id)}/memories?${params}`,{tenantId,principalId})
+}
+export function createVirployeeMemory(id:string,input:MemoryInput,tenantId:string,principalId:string):Promise<VirployeeMemory>{return axisFetch(`/api/virployees/${encodeURIComponent(id)}/memories`,{method:'POST',tenantId,principalId,body:input})}
+export function updateVirployeeMemory(virployeeId:string,id:string,input:MemoryInput,expectedVersion:number,tenantId:string,principalId:string):Promise<VirployeeMemory>{return axisFetch(`/api/virployees/${encodeURIComponent(virployeeId)}/memories/${encodeURIComponent(id)}`,{method:'PUT',tenantId,principalId,body:{...input,expected_version:expectedVersion}})}
+export function recallVirployeeMemories(id:string,query:string,tenantId:string,principalId:string):Promise<MemoryRecall>{return axisFetch(`/api/virployees/${encodeURIComponent(id)}/memories/recall`,{method:'POST',tenantId,principalId,body:{query}})}
+export function lifecycleVirployeeMemory(virployeeId:string,id:string,action:'archive'|'unarchive'|'trash'|'restore'|'purge',tenantId:string,principalId:string):Promise<void>{return axisFetch(`/api/virployees/${encodeURIComponent(virployeeId)}/memories/${encodeURIComponent(id)}/${action}`,{method:action==='purge'?'DELETE':'POST',tenantId,principalId})}
 
 export function dryRunVirployee(
   id: string,

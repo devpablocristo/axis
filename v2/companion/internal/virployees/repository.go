@@ -256,6 +256,10 @@ func (r *Repository) CreateRunTrace(ctx context.Context, tenantID string, input 
 	if err != nil {
 		return runtraces.Trace{}, fmt.Errorf("marshal gate checks trace: %w", err)
 	}
+	memoryReferences, err := json.Marshal(input.MemoryReferences)
+	if err != nil {
+		return runtraces.Trace{}, fmt.Errorf("marshal memory references: %w", err)
+	}
 	var nexusResult any
 	if input.NexusResult != nil {
 		redacted := runtraces.RedactValue(map[string]any{
@@ -323,6 +327,8 @@ func (r *Repository) CreateRunTrace(ctx context.Context, tenantID string, input 
 			nexus_result,
 			execution_result,
 			binding_hash,
+			memory_references,
+			memory_context_hash,
 			created_at
 		)
 		VALUES (
@@ -341,7 +347,9 @@ func (r *Repository) CreateRunTrace(ctx context.Context, tenantID string, input 
 			$13::jsonb,
 			$14::jsonb,
 			$15,
-			$16
+			$16::jsonb,
+			$17,
+			$18
 		)
 		RETURNING
 			id::text,
@@ -359,8 +367,10 @@ func (r *Repository) CreateRunTrace(ctx context.Context, tenantID string, input 
 			nexus_result,
 			execution_result,
 			binding_hash,
+			memory_references,
+			memory_context_hash,
 			created_at
-	`, id.String(), tenantID, input.VirployeeID.String(), string(input.Operation), inputHash, inputPreview, string(intent), nullableUUID(input.CapabilityID), input.CapabilityKey, input.DryRunDecision, input.GateDecision, string(checks), nexusResult, executionResult, input.BindingHash, now)
+	`, id.String(), tenantID, input.VirployeeID.String(), string(input.Operation), inputHash, inputPreview, string(intent), nullableUUID(input.CapabilityID), input.CapabilityKey, input.DryRunDecision, input.GateDecision, string(checks), nexusResult, executionResult, input.BindingHash, string(memoryReferences), input.MemoryContextHash, now)
 	return scanRunTrace(row)
 }
 
@@ -382,6 +392,8 @@ func (r *Repository) ListRunTraces(ctx context.Context, tenantID string, virploy
 			nexus_result,
 			execution_result,
 			binding_hash,
+			memory_references,
+			memory_context_hash,
 			created_at
 		FROM companion_run_traces
 		WHERE tenant_id = $1
@@ -428,6 +440,8 @@ func (r *Repository) FindExecutionGateTraceByApproval(
 			nexus_result,
 			execution_result,
 			binding_hash,
+			memory_references,
+			memory_context_hash,
 			created_at
 		FROM companion_run_traces
 		WHERE tenant_id = $1
@@ -463,6 +477,8 @@ func (r *Repository) FindSimulatedExecutionTraceByApproval(
 			nexus_result,
 			execution_result,
 			binding_hash,
+			memory_references,
+			memory_context_hash,
 			created_at
 		FROM companion_run_traces
 		WHERE tenant_id = $1
@@ -485,7 +501,7 @@ func (r *Repository) FindExecutionTraceByApproval(
 		SELECT
 			id::text, tenant_id, virployee_id::text, operation, input_hash, input_preview,
 			intent, capability_id::text, capability_key, dry_run_decision, gate_decision,
-			gate_checks, nexus_result, execution_result, binding_hash, created_at
+			gate_checks, nexus_result, execution_result, binding_hash, memory_references, memory_context_hash, created_at
 		FROM companion_run_traces
 		WHERE tenant_id = $1 AND virployee_id = $2::uuid AND operation = 'execution'
 			AND execution_result->>'approval_id' = $3
@@ -633,6 +649,7 @@ func scanRunTrace(row scanner) (runtraces.Trace, error) {
 	var checksRaw []byte
 	var nexusRaw []byte
 	var executionRaw []byte
+	var memoryReferencesRaw []byte
 	var item runtraces.Trace
 	err := row.Scan(
 		&idText,
@@ -650,6 +667,8 @@ func scanRunTrace(row scanner) (runtraces.Trace, error) {
 		&nexusRaw,
 		&executionRaw,
 		&item.BindingHash,
+		&memoryReferencesRaw,
+		&item.MemoryContextHash,
 		&item.CreatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -698,6 +717,11 @@ func scanRunTrace(row scanner) (runtraces.Trace, error) {
 			return runtraces.Trace{}, err
 		}
 		item.ExecutionResult = &execution
+	}
+	if len(memoryReferencesRaw) > 0 {
+		if err := json.Unmarshal(memoryReferencesRaw, &item.MemoryReferences); err != nil {
+			return runtraces.Trace{}, err
+		}
 	}
 	return item, nil
 }

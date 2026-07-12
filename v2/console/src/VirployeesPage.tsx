@@ -7,6 +7,7 @@ import {
 import { useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react'
 import { crudPrimaryStickyColumn, crudSelectionStickyColumn } from './crudTableColumns'
 import { formatDateTime24 } from './formatters'
+import { VirployeeMemoryPanel } from './VirployeeMemoryPanel'
 import {
   type Approval,
   type Capability,
@@ -175,6 +176,7 @@ export function VirployeesPage({
   const [editValues, setEditValues] = useState<VirployeeEditValues | null>(null)
   const [editSaving, setEditSaving] = useState(false)
   const [editError, setEditError] = useState('')
+	const [memoryRow, setMemoryRow] = useState<Virployee | null>(null)
   const isActive = Boolean(tenantId && principalId)
   const jobRoleByID = useMemo(() => {
     return new Map(jobRoles.map((jobRole) => [jobRole.id, jobRole]))
@@ -231,7 +233,7 @@ export function VirployeesPage({
     return new Map(virployeeRows.map((virployee) => [virployee.id, virployee]))
   }, [virployeeRows])
   const selectedVirployee = selectedIds.length === 1 ? virployeeByID.get(selectedIds[0]) ?? null : null
-  const inlinePanelOpen = createOpen || previewRow != null || dryRunRow != null || editRow != null
+  const inlinePanelOpen = createOpen || previewRow != null || dryRunRow != null || editRow != null || memoryRow != null
 
   const dataSource: NonNullable<CrudPageProps<Virployee>['dataSource']> = useMemo(() => ({
     list: async () => {
@@ -481,6 +483,7 @@ export function VirployeesPage({
   }
 
   const openCreate = () => {
+	closeMemory()
     closePreview()
     closeDryRun()
     closeEdit()
@@ -531,6 +534,7 @@ export function VirployeesPage({
   }
 
   const openEdit = (row: Virployee) => {
+	closeMemory()
     closeCreate()
     closePreview()
     closeDryRun()
@@ -548,6 +552,7 @@ export function VirployeesPage({
   }
 
   const openPreview = (row: Virployee) => {
+	closeMemory()
     closeCreate()
     closeEdit()
     closeDryRun()
@@ -581,6 +586,7 @@ export function VirployeesPage({
   }
 
   const openDryRun = (row: Virployee) => {
+	closeMemory()
     closeCreate()
     closePreview()
     closeEdit()
@@ -624,6 +630,17 @@ export function VirployeesPage({
     setCalendarDraftValues(null)
     setConfirmedDraft(null)
   }
+
+	const openMemory = (row: Virployee) => {
+		closeCreate()
+		closePreview()
+		closeDryRun()
+		closeEdit()
+		setActionError('')
+		setMemoryRow(row)
+	}
+
+	const closeMemory = () => setMemoryRow(null)
 
   useEffect(() => {
     if (!focusDryRunVirployeeId || !isActive) return
@@ -849,6 +866,7 @@ export function VirployeesPage({
               onEdit={openEdit}
               onPreview={openPreview}
               onDryRun={openDryRun}
+			  onMemory={openMemory}
               onClear={clearSelected}
               onBulkAction={(action) => void applyBulkAction(action)}
             />
@@ -938,6 +956,7 @@ export function VirployeesPage({
                 onSave={() => void saveEdit()}
               />
             ) : null}
+			{memoryRow ? <VirployeeMemoryPanel row={memoryRow} tenantId={tenantId} principalId={principalId} onClose={closeMemory}/> : null}
           </div>
         )}
         toolbarActions={lifecycleToolbarActions(lifecycleView, inlinePanelOpen, setExternalLifecycleView)}
@@ -2325,6 +2344,7 @@ function CreateAndBulkActions(props: {
   onEdit: (row: Virployee) => void
   onPreview: (row: Virployee) => void
   onDryRun: (row: Virployee) => void
+	onMemory: (row: Virployee) => void
   onClear: () => void
   onBulkAction: (action: BulkAction) => void
 }) {
@@ -2374,6 +2394,7 @@ function CreateAndBulkActions(props: {
             >
               Dry Run
             </button>
+			<button type="button" className="btn-sm btn-secondary" disabled={singleActionDisabled} onClick={()=>{if(props.selectedRow)props.onMemory(props.selectedRow)}}>Memory</button>
             <button type="button" className="btn-sm btn-secondary" disabled={actionsDisabled} onClick={props.onClear}>Clear</button>
           </div>
         ) : null}
