@@ -27,6 +27,11 @@ type Config struct {
 	DevPrincipalID    string
 	DevPrincipalEmail string
 	DevOrgID          string
+
+	ServiceVersion string
+	OTelExporter   string
+	OTelEndpoint   string
+	OTelInsecure   bool
 }
 
 func Load() Config {
@@ -52,6 +57,10 @@ func Load() Config {
 		DevPrincipalID:         envconfig.Get("BFF_V2_DEV_PRINCIPAL_ID", envconfig.Get("BFF_V2_DEV_ACTOR_ID", "dev-user")),
 		DevPrincipalEmail:      envconfig.Get("BFF_V2_DEV_PRINCIPAL_EMAIL", envconfig.Get("BFF_V2_DEV_ACTOR_EMAIL", "dev@example.local")),
 		DevOrgID:               envconfig.Get("BFF_V2_DEV_ORG_ID", "dev-org"),
+		ServiceVersion:         envconfig.Get("BFF_V2_SERVICE_VERSION", ""),
+		OTelExporter:           strings.ToLower(strings.TrimSpace(envconfig.Get("BFF_V2_OTEL_EXPORTER", "none"))),
+		OTelEndpoint:           strings.TrimSpace(envconfig.Get("BFF_V2_OTEL_OTLP_ENDPOINT", "")),
+		OTelInsecure:           envconfig.Bool("BFF_V2_OTEL_OTLP_INSECURE", true),
 	}
 }
 

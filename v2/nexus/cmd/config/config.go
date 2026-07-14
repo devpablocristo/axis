@@ -14,6 +14,11 @@ type Config struct {
 	MaxBodyBytes       int64
 	CORSOrigins        []string
 	InternalAuthSecret string
+
+	ServiceVersion string
+	OTelExporter   string
+	OTelEndpoint   string
+	OTelInsecure   bool
 }
 
 func Load() Config {
@@ -25,6 +30,10 @@ func Load() Config {
 		MaxBodyBytes:       int64(envconfig.Int("NEXUS_V2_MAX_BODY_BYTES", 1<<20)),
 		CORSOrigins:        splitCSV(envconfig.Get("NEXUS_V2_CORS_ORIGINS", "")),
 		InternalAuthSecret: strings.TrimSpace(envconfig.Get("NEXUS_V2_INTERNAL_AUTH_SECRET", envconfig.Get("AXIS_V2_INTERNAL_AUTH_SECRET", ""))),
+		ServiceVersion:     envconfig.Get("NEXUS_V2_SERVICE_VERSION", ""),
+		OTelExporter:       strings.ToLower(strings.TrimSpace(envconfig.Get("NEXUS_V2_OTEL_EXPORTER", "none"))),
+		OTelEndpoint:       strings.TrimSpace(envconfig.Get("NEXUS_V2_OTEL_OTLP_ENDPOINT", "")),
+		OTelInsecure:       envconfig.Bool("NEXUS_V2_OTEL_OTLP_INSECURE", true),
 	}
 }
 

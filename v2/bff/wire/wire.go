@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -22,13 +23,15 @@ import (
 	authnoidc "github.com/devpablocristo/platform/authn/go/oidc"
 	postgres "github.com/devpablocristo/platform/databases/postgres/go"
 	ginmw "github.com/devpablocristo/platform/http/gin/go"
+	observability "github.com/devpablocristo/platform/observability/go"
 )
 
 type Dependencies struct {
-	Config cfg.Config
-	DB     *postgres.DB
-	Router *gin.Engine
-	Server *http.Server
+	Config         cfg.Config
+	DB             *postgres.DB
+	Router         *gin.Engine
+	Server         *http.Server
+	tracerShutdown func(context.Context) error
 }
 
 func Initialize(ctx context.Context) (*Dependencies, error) {
@@ -60,6 +63,20 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 			db.Close()
 			return nil, err
 		}
+	}
+
+	logger := observability.NewJSONLogger("bff-v2")
+	tracerShutdown, err := observability.NewTracerProvider(ctx, observability.TracingConfig{
+		ServiceName:    "bff-v2",
+		ServiceVersion: config.ServiceVersion,
+		Environment:    config.Environment,
+		Exporter:       config.OTelExporter,
+		OTLPEndpoint:   config.OTelEndpoint,
+		OTLPInsecure:   config.OTelInsecure,
+	})
+	if err != nil {
+		db.Close()
+		return nil, err
 	}
 
 	identityRepo := identity.NewRepository(db.Pool())
@@ -144,14 +161,15 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 
 	server := &http.Server{
 		Addr:    config.Addr(),
-		Handler: router,
+		Handler: observability.Middleware(logger, router),
 	}
 
 	return &Dependencies{
-		Config: config,
-		DB:     db,
-		Router: router,
-		Server: server,
+		Config:         config,
+		DB:             db,
+		Router:         router,
+		Server:         server,
+		tracerShutdown: tracerShutdown,
 	}, nil
 }
 
@@ -192,8 +210,15 @@ func identityProviders(config cfg.Config) (
 }
 
 func (d *Dependencies) Close() {
-	if d == nil || d.DB == nil {
+	if d == nil {
 		return
 	}
-	d.DB.Close()
+	if d.tracerShutdown != nil {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = d.tracerShutdown(shutdownCtx)
+		cancel()
+	}
+	if d.DB != nil {
+		d.DB.Close()
+	}
 }
