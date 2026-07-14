@@ -15,17 +15,35 @@ import (
 )
 
 type Client struct {
-	baseURL string
-	http    *http.Client
+	baseURL            string
+	http               *http.Client
+	internalAuthSecret string
 }
 
-func New(baseURL string, client *http.Client) *Client {
+func New(baseURL string, client *http.Client, internalAuthSecret ...string) *Client {
 	if client == nil {
 		client = &http.Client{Timeout: 5 * time.Second}
 	}
+	secret := ""
+	if len(internalAuthSecret) > 0 {
+		secret = strings.TrimSpace(internalAuthSecret[0])
+	}
 	return &Client{
-		baseURL: strings.TrimRight(strings.TrimSpace(baseURL), "/"),
-		http:    client,
+		baseURL:            strings.TrimRight(strings.TrimSpace(baseURL), "/"),
+		http:               client,
+		internalAuthSecret: secret,
+	}
+}
+
+func (c *Client) setTrustedHeaders(req *http.Request, tenantID, actorID string) {
+	if c.internalAuthSecret != "" {
+		req.Header.Set("X-Axis-Internal-Token", c.internalAuthSecret)
+	}
+	if strings.TrimSpace(tenantID) != "" {
+		req.Header.Set("X-Tenant-ID", tenantID)
+	}
+	if strings.TrimSpace(actorID) != "" {
+		req.Header.Set("X-Actor-ID", actorID)
 	}
 }
 
@@ -50,9 +68,7 @@ func (c *Client) Check(ctx context.Context, input executiongate.GovernanceCheckI
 		return executiongate.GovernanceCheckResult{}, fmt.Errorf("build governance check request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if input.TenantID != "" {
-		req.Header.Set("X-Tenant-ID", input.TenantID)
-	}
+	c.setTrustedHeaders(req, input.TenantID, input.RequesterID)
 
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -85,9 +101,7 @@ func (c *Client) GetApproval(ctx context.Context, tenantID string, id uuid.UUID)
 	if err != nil {
 		return executiongate.GovernanceApproval{}, fmt.Errorf("build approval request: %w", err)
 	}
-	if tenantID != "" {
-		req.Header.Set("X-Tenant-ID", tenantID)
-	}
+	c.setTrustedHeaders(req, tenantID, "companion-v2")
 
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -158,7 +172,7 @@ func (c *Client) ReportExecutionResult(ctx context.Context, tenantID, checkID, i
 		return fmt.Errorf("build execution result request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Tenant-ID", tenantID)
+	c.setTrustedHeaders(req, tenantID, "companion-v2")
 	req.Header.Set("Idempotency-Key", idempotencyKey)
 	resp, err := c.http.Do(req)
 	if err != nil {

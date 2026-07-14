@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -32,6 +33,9 @@ type Dependencies struct {
 
 func Initialize(ctx context.Context) (*Dependencies, error) {
 	config := cfg.Load()
+	if err := validateAuthConfig(config); err != nil {
+		return nil, err
+	}
 	if config.DatabaseURL == "" {
 		return nil, fmt.Errorf("BFF_V2_DATABASE_URL or DATABASE_URL is required")
 	}
@@ -98,6 +102,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	}
 	gatewayHandler := gateway.NewHandler(gatewayUC, gateway.Options{
 		DefaultPrincipalID:  config.DevPrincipalID,
+		InternalAuthSecret:  config.InternalAuthSecret,
 		SupervisorValidator: usersUC,
 	})
 
@@ -120,20 +125,22 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 
 	api := router.Group("/api")
 	identity.NewWebhookHandler(identityUC, tenancyUC, config.ClerkWebhookSecret).Routes(api)
-	sessionHandler.Routes(api)
+	protected := api.Group("")
+	protected.Use(session.NewAuthenticationMiddleware(sessionUC, config.IdentityProvider == "dev" || config.Environment == "test"))
+	sessionHandler.Routes(protected)
 	orgs.NewHandler(orgsUC, orgs.HandlerOptions{
 		DefaultPrincipalID: config.DevPrincipalID,
-	}).Routes(api)
+	}).Routes(protected)
 	products.NewHandler(productsUC, products.HandlerOptions{
 		DefaultPrincipalID: config.DevPrincipalID,
-	}).Routes(api)
+	}).Routes(protected)
 	tenancy.NewHandler(tenancyUC, tenancy.HandlerOptions{
 		DefaultPrincipalID: config.DevPrincipalID,
-	}).Routes(api)
+	}).Routes(protected)
 	users.NewHandler(usersUC, users.HandlerOptions{
 		DefaultPrincipalID: config.DevPrincipalID,
-	}).Routes(api)
-	gatewayHandler.Routes(api)
+	}).Routes(protected)
+	gatewayHandler.Routes(protected)
 
 	server := &http.Server{
 		Addr:    config.Addr(),
@@ -146,6 +153,25 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		Router: router,
 		Server: server,
 	}, nil
+}
+
+func validateAuthConfig(config cfg.Config) error {
+	if strings.TrimSpace(config.InternalAuthSecret) == "" {
+		return fmt.Errorf("BFF_V2_INTERNAL_AUTH_SECRET is required")
+	}
+	switch config.IdentityProvider {
+	case "clerk":
+		if config.Environment != "test" && strings.TrimSpace(config.ClerkIssuerURL) == "" {
+			return fmt.Errorf("BFF_V2_CLERK_ISSUER_URL is required when Clerk authentication is enabled")
+		}
+	case "dev":
+		if config.Environment != "development" && config.Environment != "test" {
+			return fmt.Errorf("development identity provider is not allowed in %s", config.Environment)
+		}
+	default:
+		return fmt.Errorf("unsupported BFF_V2_IDENTITY_PROVIDER %q", config.IdentityProvider)
+	}
+	return nil
 }
 
 func identityProviders(config cfg.Config) (

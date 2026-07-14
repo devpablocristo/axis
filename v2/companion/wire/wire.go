@@ -32,6 +32,9 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	if config.DatabaseURL == "" {
 		return nil, fmt.Errorf("COMPANION_V2_DATABASE_URL or DATABASE_URL is required")
 	}
+	if config.InternalAuthSecret == "" {
+		return nil, fmt.Errorf("COMPANION_V2_INTERNAL_AUTH_SECRET is required")
+	}
 
 	dbConfig, err := postgres.ConfigFromEnv("COMPANION_V2_DB", "companion_v2")
 	if err != nil {
@@ -82,7 +85,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	virployeesUsecases.SetCapabilityValidator(capabilitiesUsecases)
 	virployeesUsecases.SetProfileTemplateReader(profileTemplatesUsecases)
 	if config.NexusBaseURL != "" {
-		nexusClient := nexusclient.New(config.NexusBaseURL, &http.Client{Timeout: 5 * time.Second})
+		nexusClient := nexusclient.New(config.NexusBaseURL, &http.Client{Timeout: 5 * time.Second}, config.InternalAuthSecret)
 		virployeesUsecases.SetGovernanceChecker(nexusClient)
 		virployeesUsecases.SetApprovalReader(nexusClient)
 		virployeesUsecases.SetExecutionResultReporter(nexusClient)
@@ -105,6 +108,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	}))
 	ginmw.RegisterHealthEndpoints(router, db.Ping)
 	api := router.Group("/v1")
+	api.Use(internalAuthMiddleware(config.InternalAuthSecret))
 	jobRolesHandler.Routes(api)
 	capabilitiesHandler.Routes(api)
 	profileTemplatesHandler.Routes(api)

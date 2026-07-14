@@ -27,6 +27,7 @@ type SupervisorValidatorPort interface {
 
 type Options struct {
 	DefaultPrincipalID  string
+	InternalAuthSecret  string
 	Client              *http.Client
 	SupervisorValidator SupervisorValidatorPort
 }
@@ -104,12 +105,14 @@ func (h *Handler) forward(c *gin.Context, targetURL func(string, string) string,
 	req.Header.Del("Cookie")
 	req.Header.Del("Authorization")
 	req.Header.Del("X-Axis-Tenant-Role")
+	req.Header.Del("X-Axis-Internal-Token")
 	req.Header.Set("X-Actor-ID", resolved.PrincipalID)
 	req.Header.Set("X-Tenant-ID", resolved.TenantID)
 	req.Header.Set("X-Axis-Org-ID", resolved.OrgID)
 	req.Header.Set("X-Product-Surface", resolved.ProductSurface)
 	req.Header.Set("X-Axis-Forwarded-By", "bff-v2")
 	req.Header.Set("X-Axis-Tenant-Role", resolved.MembershipRole)
+	req.Header.Set("X-Axis-Internal-Token", h.options.InternalAuthSecret)
 
 	resp, err := h.client.Do(req)
 	if err != nil {

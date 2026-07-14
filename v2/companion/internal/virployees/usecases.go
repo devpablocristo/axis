@@ -338,8 +338,20 @@ func (u *UseCases) ExecutionGate(
 	if err != nil {
 		return executiongate.Result{}, err
 	}
-	if u.governance == nil || gate.Gate.Decision != executiongate.DecisionPass {
+	if gate.Gate.Decision != executiongate.DecisionPass {
 		if err := u.recordExecutionGateTrace(ctx, tenantID, gate, nil, bindingHash); err != nil {
+			return executiongate.Result{}, err
+		}
+		return gate, nil
+	}
+	if u.governance == nil {
+		gate = executiongate.ApplyGovernanceUnavailable(gate)
+		nexus := &runtraces.NexusResult{
+			Available:   false,
+			BindingHash: bindingHash,
+			Error:       "governance checker is not configured",
+		}
+		if err := u.recordExecutionGateTrace(ctx, tenantID, gate, nexus, bindingHash); err != nil {
 			return executiongate.Result{}, err
 		}
 		return gate, nil

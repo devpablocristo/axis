@@ -114,14 +114,39 @@ func NormalizeExecutionResultInput(in ExecutionResultInput) (ExecutionResultInpu
 func sanitizeResult(in map[string]any) map[string]any {
 	out := make(map[string]any, len(in))
 	for key, value := range in {
-		normalized := strings.ToLower(strings.TrimSpace(key))
-		if strings.Contains(normalized, "token") || strings.Contains(normalized, "secret") || strings.Contains(normalized, "password") || strings.Contains(normalized, "authorization") {
+		if sensitiveResultKey(key) {
 			out[key] = "[REDACTED]"
 			continue
 		}
-		out[key] = value
+		out[key] = sanitizeResultValue(value)
 	}
 	return out
+}
+
+func sanitizeResultValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return sanitizeResult(typed)
+	case []any:
+		out := make([]any, 0, len(typed))
+		for _, item := range typed {
+			out = append(out, sanitizeResultValue(item))
+		}
+		return out
+	default:
+		return value
+	}
+}
+
+func sensitiveResultKey(key string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(key))
+	normalized = strings.ReplaceAll(normalized, "-", "_")
+	for _, sensitive := range []string{"token", "secret", "password", "authorization", "api_key", "cookie", "credential"} {
+		if normalized == sensitive || strings.Contains(normalized, sensitive) {
+			return true
+		}
+	}
+	return false
 }
 
 func NormalizeCheckInput(in CheckInput) (NormalizedCheckInput, error) {

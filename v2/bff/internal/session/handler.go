@@ -28,6 +28,10 @@ func (h *Handler) Routes(router gin.IRouter) {
 }
 
 func (h *Handler) Get(c *gin.Context) {
+	if out, ok := authenticatedSession(c); ok {
+		ginmw.WriteJSON(c, http.StatusOK, dto.SessionFromDomain(out))
+		return
+	}
 	out, err := h.ucs.Resolve(c.Request.Context(), sessiondomain.ResolveInput{
 		PrincipalID:   c.GetHeader("X-Actor-ID"),
 		Email:         c.GetHeader("X-Actor-Email"),

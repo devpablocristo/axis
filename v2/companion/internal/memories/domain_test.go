@@ -2,6 +2,7 @@ package memories
 
 import (
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -16,6 +17,28 @@ func TestNormalizeAndHashAreDeterministic(t *testing.T) {
 	}
 	if ContentHash(in.Content) != ContentHash(" America/Argentina/Buenos_Aires ") {
 		t.Fatal("hash must ignore surrounding whitespace")
+	}
+}
+
+func TestMemoryCursorRoundTrip(t *testing.T) {
+	wantID := uuid.New()
+	wantTime := time.Date(2026, 7, 13, 12, 34, 56, 789, time.UTC)
+	encoded, err := encodeMemoryCursor(Memory{ID: wantID, UpdatedAt: wantTime})
+	if err != nil {
+		t.Fatalf("encodeMemoryCursor: %v", err)
+	}
+	gotTime, gotID, ok, err := decodeMemoryCursor(encoded)
+	if err != nil {
+		t.Fatalf("decodeMemoryCursor: %v", err)
+	}
+	if !ok || gotID != wantID || !gotTime.Equal(wantTime) {
+		t.Fatalf("cursor mismatch: ok=%v id=%s time=%s", ok, gotID, gotTime)
+	}
+}
+
+func TestMemoryCursorRejectsMalformedValue(t *testing.T) {
+	if _, _, _, err := decodeMemoryCursor("not-a-cursor"); err == nil {
+		t.Fatal("expected malformed cursor to fail")
 	}
 }
 

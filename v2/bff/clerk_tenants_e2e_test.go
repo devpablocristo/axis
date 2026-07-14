@@ -28,6 +28,8 @@ func TestClerkUsersAndTenantsE2E(t *testing.T) {
 	clerk := newFakeClerkE2E(t)
 
 	t.Setenv("BFF_V2_DATABASE_URL", databaseURL)
+	t.Setenv("BFF_V2_ENV", "test")
+	t.Setenv("BFF_V2_INTERNAL_AUTH_SECRET", "test-internal-secret")
 	t.Setenv("BFF_V2_COMPANION_BASE_URL", "http://127.0.0.1:1")
 	t.Setenv("BFF_V2_IDENTITY_PROVIDER", "clerk")
 	t.Setenv("BFF_V2_CLERK_SECRET_KEY", "sk_test_fake")

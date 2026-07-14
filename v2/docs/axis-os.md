@@ -20,9 +20,9 @@ when services collaborate.
 
 - `principal` is the IAM subject that performs an action. It can be a human,
   Virployee, internal service, or background job.
-- `actor` is the audit/event wording for who did something. Public/dev headers
-  can still use `X-Actor-ID`, but BFF maps that value to `principal_id`
-  internally.
+- `actor` is the audit/event wording for who did something. In deployed
+  environments BFF derives it from the verified Clerk session and replaces
+  caller-supplied identity headers. Development mode may use `X-Actor-ID`.
 - `tenant` is the product work context for an organization:
   `tenant = org_id + product_surface`.
 - `membership` connects a principal/user to a tenant and grants a tenant role.
@@ -39,22 +39,31 @@ Every request forwarded by BFF to Companion must be resolved into:
 - `product_surface`: product surface for the tenant.
 - `membership_role`: principal role in the tenant.
 
-BFF currently forwards that context to Companion with:
+BFF forwards that context to Companion and Nexus with:
 
 - `X-Tenant-ID`
 - `X-Axis-Org-ID`
 - `X-Product-Surface`
 - `X-Actor-ID`
 - `X-Axis-Forwarded-By`
+- `X-Axis-Tenant-Role`
+
+Downstream services accept business routes only when the request also carries
+the shared internal authentication token. Companion uses the same protected
+channel for governance calls to Nexus. Health endpoints remain public.
 
 ## Current Scope
 
-- Clerk integration is deferred.
+- Clerk sessions are verified at the BFF boundary; production cannot start in
+  development identity mode or without its issuer configuration.
 - Nexus is implemented as a minimal governance checkpoint: `allow`, `deny`,
   `require_approval`, durable approvals, and binding hashes.
 - Companion can manually execute an approved, durable prepared action through
   the local calendar executor after validating the approval binding hash.
+- Execution Gate fails closed when Nexus is unavailable or not configured.
 - Companion tenancy storage is deferred; BFF validates tenancy before forwarding.
 - Virployees remain the first workforce primitive.
+- Virployee-owned lexical memory supports controlled CRUD, recall, lifecycle,
+  audit hashes, and safe references in runtime traces.
 - Policy engines, callbacks, break-glass, audit chains, external providers,
-  tasks, and memory are future modules.
+  and tasks are future modules.

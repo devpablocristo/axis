@@ -142,8 +142,8 @@ jobs:
             --project="$PROJECT_ID" --region="$REGION" --image="$IMAGE_URI" \
             --service-account="$NEXUS_RUNTIME_SA" \
             --add-cloudsql-instances="$CLOUDSQL_INSTANCE" \
-            --set-env-vars="^|^NEXUS_ENV=prd|NEXUS_INTERNAL_JWT_ISSUER=axis-bff|NEXUS_INTERNAL_JWT_AUDIENCE=nexus|APPROVAL_DEFAULT_TTL=3600|NEXUS_ATTESTATION_VERIFIER=none" \
-            --set-secrets="DATABASE_URL=${NEXUS_DATABASE_SECRET}:latest,NEXUS_API_KEYS=${NEXUS_API_KEYS_SECRET}:latest,NEXUS_SIGNING_KEY=${NEXUS_SIGNING_KEY_SECRET}:latest,NEXUS_CALLBACK_TOKEN=${NEXUS_CALLBACK_TOKEN_SECRET}:latest,NEXUS_INTERNAL_JWT_SECRET=${INTERNAL_JWT_SECRET}:latest" \
+            --set-env-vars="NEXUS_V2_ENV=prd" \
+            --set-secrets="NEXUS_V2_DATABASE_URL=${NEXUS_DATABASE_SECRET}:latest,NEXUS_V2_INTERNAL_AUTH_SECRET=${INTERNAL_JWT_SECRET}:latest" \
             --allow-unauthenticated --ingress=all --port=8080 --min-instances=0 --max-instances=3
       - name: Smoke
         run: |
@@ -185,8 +185,8 @@ jobs:
             --project="$PROJECT_ID" --region="$REGION" --image="$IMAGE_URI" \
             --service-account="$COMPANION_RUNTIME_SA" \
             --add-cloudsql-instances="$CLOUDSQL_INSTANCE" \
-            --set-env-vars="^|^NEXUS_BASE_URL=${NEXUS_URL}|PONTI_BASE_URL=${PONTI_BASE_URL}|COMPANION_INTERNAL_JWT_ISSUER=axis-bff|COMPANION_INTERNAL_JWT_AUDIENCE=companion|COMPANION_LLM_PROVIDER=vertex|COMPANION_LLM_MODEL=gemini-2.5-flash-lite|COMPANION_LLM_VERTEX_PROJECT=${PROJECT_ID}|COMPANION_LLM_VERTEX_LOCATION=${REGION}|COMPANION_EMBEDDING_PROVIDER=vertex|COMPANION_EMBEDDING_MODEL=text-embedding-005|COMPANION_EMBEDDING_VERTEX_PROJECT=${PROJECT_ID}|COMPANION_EMBEDDING_VERTEX_LOCATION=${REGION}|COMPANION_EMBEDDING_DIMENSIONS=768|COMPANION_NEXUS_SYNC_INTERVAL_SEC=30|COMPANION_STRICT_NEXUS=true|COMPANION_DEFAULT_AUTONOMY_LEVEL=A2|COMPANION_WATCHER_INTERVAL_SEC=0|COMPANION_WATCHER_SYNC_INTERVAL_SEC=0" \
-            --set-secrets="DATABASE_URL=${COMPANION_DATABASE_SECRET}:latest,COMPANION_API_KEYS=${COMPANION_API_KEYS_SECRET}:latest,NEXUS_API_KEY=${COMPANION_NEXUS_API_KEY_SECRET}:latest,COMPANION_INTERNAL_JWT_SECRET=${INTERNAL_JWT_SECRET}:latest" \
+            --set-env-vars="^|^COMPANION_V2_ENV=prd|COMPANION_V2_NEXUS_BASE_URL=${NEXUS_URL}|COMPANION_V2_EXECUTION_MODE=local" \
+            --set-secrets="COMPANION_V2_DATABASE_URL=${COMPANION_DATABASE_SECRET}:latest,COMPANION_V2_INTERNAL_AUTH_SECRET=${INTERNAL_JWT_SECRET}:latest" \
             --allow-unauthenticated --ingress=all --port=8080 --min-instances=0 --max-instances=3
       - name: Smoke
         run: |
@@ -232,7 +232,7 @@ jobs:
             --service-account="$BFF_RUNTIME_SA" \
             --add-cloudsql-instances="$CLOUDSQL_INSTANCE" \
             --set-env-vars="^|^BFF_V2_ENV=prd|BFF_V2_IDENTITY_PROVIDER=${AXIS_BFF_AUTH_MODE}|BFF_V2_CLERK_ISSUER_URL=${AXIS_AUTH_ISSUER_URL}|BFF_V2_CORS_ORIGINS=${AXIS_ALLOWED_ORIGIN}|BFF_V2_COMPANION_BASE_URL=${COMPANION_URL}|BFF_V2_NEXUS_BASE_URL=${NEXUS_URL}" \
-            --set-secrets="BFF_V2_DATABASE_URL=${BFF_DATABASE_SECRET}:latest,BFF_V2_CLERK_SECRET_KEY=${BFF_CLERK_SECRET_KEY_SECRET}:latest" \
+            --set-secrets="BFF_V2_DATABASE_URL=${BFF_DATABASE_SECRET}:latest,BFF_V2_CLERK_SECRET_KEY=${BFF_CLERK_SECRET_KEY_SECRET}:latest,BFF_V2_INTERNAL_AUTH_SECRET=${INTERNAL_JWT_SECRET}:latest" \
             --allow-unauthenticated --ingress=all --port=8080 --min-instances=0 --max-instances=3
       - name: Smoke
         run: |

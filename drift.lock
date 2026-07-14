@@ -13,7 +13,7 @@ sig = "b22621816837edf5"
 [[bindings]]
 doc = "v2/companion/docs/specs/memories.md"
 target = "v2/companion/internal/memories/repository.go"
-sig = "e6c2b36cbfef32bf"
+sig = "0821aedef2561c44"
 
 [[bindings]]
 doc = "v2/companion/docs/specs/memories.md"
@@ -24,3 +24,18 @@ sig = "00dd0bdc0dc071de"
 doc = "v2/companion/docs/specs/memories.md"
 target = "v2/companion/migrations/0017_companion_memories.sql"
 sig = "87af823eed635b05"
+
+[[bindings]]
+doc = "v2/docs/axis-os.md"
+target = "v2/bff/wire/wire.go"
+sig = "2b3a46a6cb09183c"
+
+[[bindings]]
+doc = "v2/docs/axis-os.md"
+target = "v2/companion/wire/wire.go"
+sig = "79c51c46eb1bf43b"
+
+[[bindings]]
+doc = "v2/docs/axis-os.md"
+target = "v2/nexus/wire/wire.go"
+sig = "28cc018d95c95892"

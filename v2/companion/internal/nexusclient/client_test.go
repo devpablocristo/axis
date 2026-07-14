@@ -14,6 +14,8 @@ import (
 
 func TestCheckSendsGovernanceRequestToNexus(t *testing.T) {
 	var gotTenant string
+	var gotActor string
+	var gotInternalToken string
 	var gotBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -23,6 +25,8 @@ func TestCheckSendsGovernanceRequestToNexus(t *testing.T) {
 			t.Fatalf("unexpected path %s", r.URL.Path)
 		}
 		gotTenant = r.Header.Get("X-Tenant-ID")
+		gotActor = r.Header.Get("X-Actor-ID")
+		gotInternalToken = r.Header.Get("X-Axis-Internal-Token")
 		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
 			t.Fatalf("decode request: %v", err)
 		}
@@ -41,7 +45,7 @@ func TestCheckSendsGovernanceRequestToNexus(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := New(srv.URL, srv.Client())
+	client := New(srv.URL, srv.Client(), "trusted-secret")
 	out, err := client.Check(context.Background(), executiongate.GovernanceCheckInput{
 		TenantID:       "tenant-1",
 		RequesterType:  "virployee",
@@ -59,6 +63,9 @@ func TestCheckSendsGovernanceRequestToNexus(t *testing.T) {
 	}
 	if gotTenant != "tenant-1" {
 		t.Fatalf("expected tenant header tenant-1, got %q", gotTenant)
+	}
+	if gotActor != "virployee-1" || gotInternalToken != "trusted-secret" {
+		t.Fatalf("expected trusted actor and token headers, got actor=%q token=%q", gotActor, gotInternalToken)
 	}
 	if gotBody["action_type"] != "calendar.events.delete" || gotBody["requester_id"] != "virployee-1" {
 		t.Fatalf("unexpected request body: %+v", gotBody)

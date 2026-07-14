@@ -2,13 +2,12 @@ package memories
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
 	"github.com/devpablocristo/platform/errors/go/domainerr"
+	"github.com/devpablocristo/platform/http/go/pagination"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -65,7 +64,7 @@ func (r *Repository) Create(ctx context.Context, tenant string, virployee uuid.U
 	if err != nil {
 		return Memory{}, err
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 	m, err := scanMemory(tx.QueryRow(ctx, `INSERT INTO companion_memories(tenant_id,virployee_id,title,content,memory_type,sensitivity,provenance,actor_id,source_reference,content_hash) VALUES($1,$2,$3,$4,$5,$6,$7,$8,NULLIF($9,''),$10) RETURNING `+memoryColumns, tenant, virployee, in.Title, in.Content, in.Type, in.Sensitivity, in.Provenance, in.ActorID, in.SourceReference, hash))
 	if err != nil {
 		return Memory{}, err
@@ -97,28 +96,9 @@ func (r *Repository) List(ctx context.Context, tenant string, virployee uuid.UUI
 	if in.Limit > 100 {
 		in.Limit = 100
 	}
-	var cursorTime time.Time
-	var cursorID uuid.UUID
-	hasCursor := false
-	if in.Cursor != "" {
-		raw, e := base64.RawURLEncoding.DecodeString(in.Cursor)
-		if e != nil {
-			return Page{}, domainerr.Validation("invalid cursor")
-		}
-		_, e = fmt.Sscanf(string(raw), "%s|%s", new(string), new(string))
-		parts := strings.Split(string(raw), "|")
-		if e != nil || len(parts) != 2 {
-			return Page{}, domainerr.Validation("invalid cursor")
-		}
-		cursorTime, e = time.Parse(time.RFC3339Nano, parts[0])
-		if e != nil {
-			return Page{}, domainerr.Validation("invalid cursor")
-		}
-		cursorID, e = uuid.Parse(parts[1])
-		if e != nil {
-			return Page{}, domainerr.Validation("invalid cursor")
-		}
-		hasCursor = true
+	cursorTime, cursorID, hasCursor, err := decodeMemoryCursor(in.Cursor)
+	if err != nil {
+		return Page{}, err
 	}
 	q := `SELECT ` + memoryColumns + ` FROM companion_memories WHERE tenant_id=$1 AND virployee_id=$2 AND lifecycle_state=$3 AND ($4='' OR to_tsvector('simple',title||' '||content) @@ websearch_to_tsquery('simple',$4)) AND (NOT $5 OR (updated_at,id)<($6,$7)) ORDER BY updated_at DESC,id DESC LIMIT $8`
 	rows, err := r.db.Query(ctx, q, tenant, virployee, state, strings.TrimSpace(in.Query), hasCursor, cursorTime, cursorID, in.Limit+1)
@@ -140,9 +120,34 @@ func (r *Repository) List(ctx context.Context, tenant string, virployee uuid.UUI
 	if len(out.Items) > in.Limit {
 		last := out.Items[in.Limit-1]
 		out.Items = out.Items[:in.Limit]
-		out.NextCursor = base64.RawURLEncoding.EncodeToString([]byte(last.UpdatedAt.Format(time.RFC3339Nano) + "|" + last.ID.String()))
+		out.NextCursor, err = encodeMemoryCursor(last)
+		if err != nil {
+			return Page{}, err
+		}
 	}
 	return out, nil
+}
+
+func decodeMemoryCursor(raw string) (time.Time, uuid.UUID, bool, error) {
+	cursor, ok, err := pagination.DecodeTimeIDCursor(strings.TrimSpace(raw))
+	if err != nil {
+		return time.Time{}, uuid.Nil, false, domainerr.Validation("invalid cursor")
+	}
+	if !ok {
+		return time.Time{}, uuid.Nil, false, nil
+	}
+	id, err := uuid.Parse(cursor.ID)
+	if err != nil {
+		return time.Time{}, uuid.Nil, false, domainerr.Validation("invalid cursor")
+	}
+	return cursor.CreatedAt.UTC(), id, true, nil
+}
+
+func encodeMemoryCursor(memory Memory) (string, error) {
+	return pagination.EncodeTimeIDCursor(pagination.TimeIDCursor{
+		CreatedAt: memory.UpdatedAt.UTC(),
+		ID:        memory.ID.String(),
+	})
 }
 
 func (r *Repository) Update(ctx context.Context, tenant string, virployee, id uuid.UUID, in UpdateInput) (Memory, error) {
@@ -158,7 +163,7 @@ func (r *Repository) Update(ctx context.Context, tenant string, virployee, id uu
 	if err != nil {
 		return Memory{}, err
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 	old, err := scanMemory(tx.QueryRow(ctx, `SELECT `+memoryColumns+` FROM companion_memories WHERE tenant_id=$1 AND virployee_id=$2 AND id=$3 FOR UPDATE`, tenant, virployee, id))
 	if err != nil {
 		return Memory{}, err
@@ -189,7 +194,7 @@ func (r *Repository) Lifecycle(ctx context.Context, tenant string, virployee, id
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 	m, err := scanMemory(tx.QueryRow(ctx, `UPDATE companion_memories SET lifecycle_state=$4,archived_at=CASE WHEN $4='archived' THEN now() ELSE NULL END,trashed_at=CASE WHEN $4='trash' THEN now() ELSE trashed_at END,purge_after=CASE WHEN $4='trash' THEN now()+interval '30 days' ELSE NULL END,updated_at=now() WHERE tenant_id=$1 AND virployee_id=$2 AND id=$3 AND (lifecycle_state=$5 OR ($6 AND lifecycle_state='archived')) RETURNING `+memoryColumns, tenant, virployee, id, to, from, action == "trash"))
 	if err != nil {
 		return mapError(err)

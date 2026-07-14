@@ -21,3 +21,23 @@ func TestNormalizeExecutionResultInputRejectsInvalidStatus(t *testing.T) {
 		t.Fatal("expected invalid status to fail")
 	}
 }
+
+func TestNormalizeExecutionResultInputRedactsNestedSecrets(t *testing.T) {
+	input, err := NormalizeExecutionResultInput(ExecutionResultInput{
+		IdempotencyKey: "result-1",
+		BindingHash:    "binding",
+		Status:         "succeeded",
+		Result: map[string]any{
+			"nested": map[string]any{"api_key": "secret", "safe": "value"},
+			"items":  []any{map[string]any{"authorization": "Bearer secret"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NormalizeExecutionResultInput: %v", err)
+	}
+	nested := input.Result["nested"].(map[string]any)
+	items := input.Result["items"].([]any)
+	if nested["api_key"] != "[REDACTED]" || nested["safe"] != "value" || items[0].(map[string]any)["authorization"] != "[REDACTED]" {
+		t.Fatalf("nested secret leaked: %+v", input.Result)
+	}
+}

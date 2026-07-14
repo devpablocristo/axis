@@ -584,15 +584,20 @@ func TestUseCasesExecutionGateBlocksCreateBelowExecutionAutonomy(t *testing.T) {
 	}
 }
 
-func TestUseCasesExecutionGatePassesCreateAtExecutionAutonomy(t *testing.T) {
+func TestUseCasesExecutionGateFailsClosedWithoutGovernance(t *testing.T) {
 	uc, created := setupExecutionGateUseCase(t, domain.AutonomyA3)
 
 	result, err := uc.ExecutionGate(context.Background(), "tenant-1", created.ID, "Agendá una reunión mañana a las 15 con ana@example.com", nil)
 	if err != nil {
 		t.Fatalf("ExecutionGate: %v", err)
 	}
-	if result.Gate.Decision != "pass" || result.Gate.WillExecute {
+	if result.Gate.Decision != "blocked" || result.Gate.WillExecute {
 		t.Fatalf("unexpected execution gate: %+v", result.Gate)
+	}
+	assertExecutionGateCheck(t, result.Gate.Checks, "governance_check", executiongate.CheckStatusBlocked)
+	repo := uc.repo.(*fakeRepo)
+	if len(repo.traces) != 1 || repo.traces[0].NexusResult == nil || repo.traces[0].NexusResult.Available {
+		t.Fatalf("expected unavailable governance trace, got %+v", repo.traces)
 	}
 }
 
@@ -789,6 +794,10 @@ func TestUseCasesSimulateApprovedExecutionRejectsBindingMismatch(t *testing.T) {
 
 func TestUseCasesExecutionGateUsesConfirmedDraft(t *testing.T) {
 	uc, created := setupExecutionGateUseCase(t, domain.AutonomyA3)
+	uc.SetGovernanceChecker(&fakeGovernanceChecker{result: executiongate.GovernanceCheckResult{
+		Decision: "allow",
+		Status:   "allowed",
+	}})
 
 	result, err := uc.ExecutionGate(context.Background(), "tenant-1", created.ID, "Agendá una reunión para mañana", &executiongate.ConfirmedDraft{
 		Action: "calendar.events.create",

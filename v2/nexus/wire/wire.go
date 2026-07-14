@@ -28,6 +28,9 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	if config.DatabaseURL == "" {
 		return nil, fmt.Errorf("NEXUS_V2_DATABASE_URL or DATABASE_URL is required")
 	}
+	if config.InternalAuthSecret == "" {
+		return nil, fmt.Errorf("NEXUS_V2_INTERNAL_AUTH_SECRET is required")
+	}
 
 	dbConfig, err := postgres.ConfigFromEnv("NEXUS_V2_DB", "nexus_v2")
 	if err != nil {
@@ -73,6 +76,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	ginmw.RegisterHealthEndpoints(router, db.Ping)
 
 	api := router.Group("/v1")
+	api.Use(internalAuthMiddleware(config.InternalAuthSecret))
 	actionTypeHandler.Routes(api)
 	governanceHandler.Routes(api)
 	approvalsHandler.Routes(api)
