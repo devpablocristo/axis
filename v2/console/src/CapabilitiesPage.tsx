@@ -12,6 +12,8 @@ import { formatDateTime24 } from './formatters'
 import {
   type Capability,
   type CapabilityInput,
+  type CapabilityRiskClass,
+  type CapabilitySideEffectClass,
   type VirployeeAutonomy,
   archiveCapability,
   createCapability,
@@ -37,6 +39,29 @@ const REQUIRED_AUTONOMY_OPTIONS: Array<{ label: string; value: VirployeeAutonomy
   { label: 'A2 - Draft', value: 'A2' },
   { label: 'A3 - Limited execution', value: 'A3' },
   { label: 'A4 - Governed execution', value: 'A4' },
+]
+
+// Governance contract options (Fase 1). Empty selection falls back to the
+// fail-safe default enforced by the backend (high risk, write, approval required).
+const RISK_CLASS_OPTIONS: Array<{ label: string; value: CapabilityRiskClass }> = [
+  { label: 'Low', value: 'low' },
+  { label: 'Medium', value: 'medium' },
+  { label: 'High', value: 'high' },
+]
+
+const SIDE_EFFECT_OPTIONS: Array<{ label: string; value: CapabilitySideEffectClass }> = [
+  { label: 'Read-only', value: 'read' },
+  { label: 'Write', value: 'write' },
+]
+
+const APPROVAL_OPTIONS: Array<{ label: string; value: string }> = [
+  { label: 'Requires Nexus approval', value: 'true' },
+  { label: 'No approval needed', value: 'false' },
+]
+
+const EVIDENCE_OPTIONS: Array<{ label: string; value: string }> = [
+  { label: 'Not required', value: 'false' },
+  { label: 'Required', value: 'true' },
 ]
 
 const CrudPage = PlatformCrudPage as unknown as <T extends { id: string }>(
@@ -470,6 +495,40 @@ function capabilityFormFields(): CrudPageProps<Capability>['formFields'] {
       placeholder: 'Select...',
       options: REQUIRED_AUTONOMY_OPTIONS,
     },
+    {
+      key: 'risk_class',
+      label: 'Risk class',
+      type: 'select' as const,
+      placeholder: 'High (default)',
+      options: RISK_CLASS_OPTIONS,
+    },
+    {
+      key: 'side_effect_class',
+      label: 'Side effect',
+      type: 'select' as const,
+      placeholder: 'Write (default)',
+      options: SIDE_EFFECT_OPTIONS,
+    },
+    {
+      key: 'requires_nexus_approval',
+      label: 'Nexus approval',
+      type: 'select' as const,
+      placeholder: 'Requires approval (default)',
+      options: APPROVAL_OPTIONS,
+    },
+    {
+      key: 'evidence_required',
+      label: 'Evidence',
+      type: 'select' as const,
+      placeholder: 'Not required (default)',
+      options: EVIDENCE_OPTIONS,
+    },
+    {
+      key: 'rollback_capability_key',
+      label: 'Rollback capability key (optional)',
+      placeholder: 'calendar.events.delete',
+      fullWidth: true,
+    },
     { key: 'description', label: 'Description (optional)', type: 'textarea' as const, rows: 3, fullWidth: true },
   ]
 }
@@ -479,6 +538,11 @@ function capabilityToFormValues(row: Capability): CrudFormValues {
     capability_key: row.capability_key,
     name: row.name,
     required_autonomy: row.required_autonomy,
+    risk_class: row.risk_class,
+    side_effect_class: row.side_effect_class,
+    requires_nexus_approval: row.requires_nexus_approval ? 'true' : 'false',
+    evidence_required: row.evidence_required ? 'true' : 'false',
+    rollback_capability_key: row.rollback_capability_key ?? '',
     description: row.description ?? '',
   }
 }
@@ -489,7 +553,31 @@ function capabilityPayload(values: CrudFormValues): CapabilityInput {
     name: stringValue(values.name),
     description: stringValue(values.description),
     required_autonomy: requiredAutonomyValue(values.required_autonomy),
+    risk_class: riskClassValue(values.risk_class),
+    side_effect_class: sideEffectValue(values.side_effect_class),
+    requires_nexus_approval: booleanSelectValue(values.requires_nexus_approval),
+    evidence_required: stringValue(values.evidence_required) === 'true' ? true : undefined,
+    rollback_capability_key: capabilityKeyValue(values.rollback_capability_key) || undefined,
   }
+}
+
+function riskClassValue(value: CrudFormValues[string]): CapabilityRiskClass | undefined {
+  const raw = stringValue(value).toLowerCase()
+  return RISK_CLASS_OPTIONS.some((option) => option.value === raw) ? (raw as CapabilityRiskClass) : undefined
+}
+
+function sideEffectValue(value: CrudFormValues[string]): CapabilitySideEffectClass | undefined {
+  const raw = stringValue(value).toLowerCase()
+  return SIDE_EFFECT_OPTIONS.some((option) => option.value === raw) ? (raw as CapabilitySideEffectClass) : undefined
+}
+
+// Returns undefined when unset so the backend applies its fail-safe default
+// (approval required) rather than coercing to false.
+function booleanSelectValue(value: CrudFormValues[string]): boolean | undefined {
+  const raw = stringValue(value)
+  if (raw === 'true') return true
+  if (raw === 'false') return false
+  return undefined
 }
 
 function isValidCapabilityForm(values: CrudFormValues): boolean {
