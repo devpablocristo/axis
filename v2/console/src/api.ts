@@ -336,6 +336,9 @@ export type JobRoleInput = {
 
 export type CapabilityState = 'active' | 'archived' | 'trashed'
 
+export type CapabilityRiskClass = 'low' | 'medium' | 'high'
+export type CapabilitySideEffectClass = 'read' | 'write'
+
 export type Capability = {
   id: string
   tenant_id: string
@@ -343,6 +346,11 @@ export type Capability = {
   name: string
   description: string
   required_autonomy: VirployeeAutonomy
+  risk_class: CapabilityRiskClass
+  side_effect_class: CapabilitySideEffectClass
+  requires_nexus_approval: boolean
+  evidence_required: boolean
+  rollback_capability_key: string
   state: CapabilityState
   created_at: string
   updated_at: string
@@ -359,6 +367,11 @@ export type CapabilityInput = {
   name: string
   description: string
   required_autonomy: VirployeeAutonomy | ''
+  risk_class?: CapabilityRiskClass
+  side_effect_class?: CapabilitySideEffectClass
+  requires_nexus_approval?: boolean
+  evidence_required?: boolean
+  rollback_capability_key?: string
 }
 
 export type ProfileTemplateState = 'active' | 'archived' | 'trashed'
@@ -958,6 +971,11 @@ export function createCapability(input: CapabilityInput, tenantId: string, princ
       name: input.name,
       description: input.description,
       required_autonomy: input.required_autonomy,
+      risk_class: input.risk_class,
+      side_effect_class: input.side_effect_class,
+      requires_nexus_approval: input.requires_nexus_approval,
+      evidence_required: input.evidence_required,
+      rollback_capability_key: input.rollback_capability_key,
     },
   })
 }
@@ -976,6 +994,11 @@ export function updateCapability(
       name: input.name,
       description: input.description,
       required_autonomy: input.required_autonomy,
+      risk_class: input.risk_class,
+      side_effect_class: input.side_effect_class,
+      requires_nexus_approval: input.requires_nexus_approval,
+      evidence_required: input.evidence_required,
+      rollback_capability_key: input.rollback_capability_key,
     },
   })
 }

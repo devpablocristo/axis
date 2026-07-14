@@ -31,12 +31,17 @@ func (r *Repository) Create(ctx context.Context, tenantID string, input domain.N
 	now := time.Now().UTC()
 	row := r.pool.QueryRow(ctx, `
 		INSERT INTO capabilities (
-			id, tenant_id, capability_key, name, description, required_autonomy, created_at, updated_at
+			id, tenant_id, capability_key, name, description, required_autonomy,
+			risk_class, side_effect_class, requires_nexus_approval, evidence_required, rollback_capability_key,
+			created_at, updated_at
 		)
-		VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $7)
+		VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12)
 		RETURNING id::text, tenant_id, capability_key, name, description, required_autonomy,
+			risk_class, side_effect_class, requires_nexus_approval, evidence_required, rollback_capability_key,
 			created_at, updated_at, archived_at, trashed_at, purge_after
-	`, id.String(), tenantID, input.CapabilityKey, input.Name, input.Description, string(input.RequiredAutonomy), now)
+	`, id.String(), tenantID, input.CapabilityKey, input.Name, input.Description, string(input.RequiredAutonomy),
+		input.Governance.RiskClass, input.Governance.SideEffectClass, input.Governance.RequiresNexusApproval,
+		input.Governance.EvidenceRequired, input.Governance.RollbackCapabilityKey, now)
 	return scanCapability(row)
 }
 
@@ -55,6 +60,7 @@ func (r *Repository) List(ctx context.Context, tenantID string, state domain.Sta
 
 	rows, err := r.pool.Query(ctx, `
 		SELECT id::text, tenant_id, capability_key, name, description, required_autonomy,
+			risk_class, side_effect_class, requires_nexus_approval, evidence_required, rollback_capability_key,
 			created_at, updated_at, archived_at, trashed_at, purge_after
 		FROM capabilities
 		WHERE `+where+`
@@ -82,6 +88,7 @@ func (r *Repository) List(ctx context.Context, tenantID string, state domain.Sta
 func (r *Repository) Get(ctx context.Context, tenantID string, id uuid.UUID) (domain.Capability, error) {
 	row := r.pool.QueryRow(ctx, `
 		SELECT id::text, tenant_id, capability_key, name, description, required_autonomy,
+			risk_class, side_effect_class, requires_nexus_approval, evidence_required, rollback_capability_key,
 			created_at, updated_at, archived_at, trashed_at, purge_after
 		FROM capabilities
 		WHERE tenant_id = $1 AND id = $2::uuid AND trashed_at IS NULL
@@ -95,14 +102,22 @@ func (r *Repository) Update(ctx context.Context, tenantID string, id uuid.UUID, 
 		SET name = $3,
 			description = $4,
 			required_autonomy = $5,
-			updated_at = $6
+			risk_class = $6,
+			side_effect_class = $7,
+			requires_nexus_approval = $8,
+			evidence_required = $9,
+			rollback_capability_key = $10,
+			updated_at = $11
 		WHERE tenant_id = $1
 			AND id = $2::uuid
 			AND archived_at IS NULL
 			AND trashed_at IS NULL
 		RETURNING id::text, tenant_id, capability_key, name, description, required_autonomy,
+			risk_class, side_effect_class, requires_nexus_approval, evidence_required, rollback_capability_key,
 			created_at, updated_at, archived_at, trashed_at, purge_after
-	`, tenantID, id.String(), input.Name, input.Description, string(input.RequiredAutonomy), time.Now().UTC())
+	`, tenantID, id.String(), input.Name, input.Description, string(input.RequiredAutonomy),
+		input.Governance.RiskClass, input.Governance.SideEffectClass, input.Governance.RequiresNexusApproval,
+		input.Governance.EvidenceRequired, input.Governance.RollbackCapabilityKey, time.Now().UTC())
 	item, err := scanCapability(row)
 	if err == nil {
 		return item, nil
@@ -253,6 +268,11 @@ func scanCapability(row scanner) (domain.Capability, error) {
 		&model.Name,
 		&model.Description,
 		&requiredAutonomy,
+		&model.RiskClass,
+		&model.SideEffectClass,
+		&model.RequiresNexusApproval,
+		&model.EvidenceRequired,
+		&model.RollbackCapabilityKey,
 		&model.CreatedAt,
 		&model.UpdatedAt,
 		&model.ArchivedAt,

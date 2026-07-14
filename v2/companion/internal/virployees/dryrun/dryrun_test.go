@@ -157,7 +157,10 @@ func TestEvaluateCalendarDeleteIntent(t *testing.T) {
 	}
 }
 
-func TestEvaluateBlocksCalendarCreateWhenCapabilityIsMissing(t *testing.T) {
+func TestEvaluateIgnoresUnassignedCapabilities(t *testing.T) {
+	// Data-driven per tenant: with no capabilities assigned the catalog is
+	// empty, so an action request is not recognized at all. The deterministic
+	// matcher can never infer an intent for an unassigned capability.
 	result := Evaluate("Agendá una reunión para mañana", runtimecontext.Context{
 		Virployee: virployeedomain.Virployee{
 			ID:       uuid.New(),
@@ -166,14 +169,45 @@ func TestEvaluateBlocksCalendarCreateWhenCapabilityIsMissing(t *testing.T) {
 		},
 	})
 
-	if result.Decision != DecisionBlocked {
-		t.Fatalf("expected blocked, got %+v", result)
+	if result.Intent.Matched {
+		t.Fatalf("expected no intent for an unassigned capability, got %+v", result.Intent)
 	}
-	if result.RequiredCapability == nil || result.RequiredCapability.CapabilityKey != "calendar.events.create" || result.RequiredCapability.Matched {
-		t.Fatalf("unexpected required capability: %+v", result.RequiredCapability)
+	if result.RequiredCapability != nil {
+		t.Fatalf("expected no required capability, got %+v", result.RequiredCapability)
 	}
-	if result.Draft.Status != DraftStatusBlocked {
-		t.Fatalf("expected blocked draft, got %+v", result.Draft)
+	if result.Decision != DecisionAllowed {
+		t.Fatalf("expected conversational allowed, got %+v", result)
+	}
+	if result.Draft.Status != DraftStatusNotApplicable {
+		t.Fatalf("expected not applicable draft, got %+v", result.Draft)
+	}
+}
+
+func TestEvaluateNeverInfersUnassignedAction(t *testing.T) {
+	// A virployee with only read assigned must never have a create intent
+	// inferred, even from an explicit "agendá" request: the create capability
+	// is invisible to the matcher unless assigned.
+	result := Evaluate("Agendá una reunión para mañana", runtimecontext.Context{
+		Virployee: virployeedomain.Virployee{
+			ID:       uuid.New(),
+			Name:     "Sofia",
+			Autonomy: virployeedomain.AutonomyA3,
+		},
+		Capabilities: []capabilitydomain.Capability{
+			{
+				ID:               uuid.New(),
+				CapabilityKey:    "calendar.events.read",
+				Name:             "Read calendar events",
+				RequiredAutonomy: virployeedomain.AutonomyA1,
+			},
+		},
+	})
+
+	if result.Intent.CapabilityKey == "calendar.events.create" {
+		t.Fatalf("create intent must not be inferred without the capability assigned, got %+v", result.Intent)
+	}
+	if result.RequiredCapability != nil && result.RequiredCapability.CapabilityKey == "calendar.events.create" {
+		t.Fatalf("must not require an unassigned create capability, got %+v", result.RequiredCapability)
 	}
 }
 

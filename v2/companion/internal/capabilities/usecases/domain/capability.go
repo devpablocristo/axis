@@ -26,6 +26,14 @@ type Capability struct {
 	Description      string
 	RequiredAutonomy virployeedomain.AutonomyLevel
 
+	// Governance contract (Fase 1). Fail-safe defaults treat an unconfigured
+	// capability as maximally governed.
+	RiskClass             string // low | medium | high
+	SideEffectClass       string // read | write
+	RequiresNexusApproval bool
+	EvidenceRequired      bool
+	RollbackCapabilityKey string // optional capability_key that undoes this one; "" = none
+
 	CreatedAt time.Time
 	UpdatedAt time.Time
 
@@ -34,17 +42,38 @@ type Capability struct {
 	PurgeAfter *time.Time
 }
 
+// GovernanceInput carries the optional governance-contract fields shared by
+// create and update. RequiresNexusApproval is a pointer so an omitted value can
+// default fail-safe (approval required) rather than to Go's false zero value.
+type GovernanceInput struct {
+	RiskClass             string
+	SideEffectClass       string
+	RequiresNexusApproval *bool
+	EvidenceRequired      bool
+	RollbackCapabilityKey string
+}
+
 type CreateInput struct {
 	CapabilityKey    string
 	Name             string
 	Description      string
 	RequiredAutonomy string
+	Governance       GovernanceInput
 }
 
 type UpdateInput struct {
 	Name             string
 	Description      string
 	RequiredAutonomy string
+	Governance       GovernanceInput
+}
+
+type NormalizedGovernance struct {
+	RiskClass             string
+	SideEffectClass       string
+	RequiresNexusApproval bool
+	EvidenceRequired      bool
+	RollbackCapabilityKey string
 }
 
 type NormalizedCreateInput struct {
@@ -52,12 +81,14 @@ type NormalizedCreateInput struct {
 	Name             string
 	Description      string
 	RequiredAutonomy virployeedomain.AutonomyLevel
+	Governance       NormalizedGovernance
 }
 
 type NormalizedUpdateInput struct {
 	Name             string
 	Description      string
 	RequiredAutonomy virployeedomain.AutonomyLevel
+	Governance       NormalizedGovernance
 }
 
 func (c Capability) State() State {
@@ -85,11 +116,16 @@ func NormalizeCreateInput(in CreateInput) (NormalizedCreateInput, error) {
 	if name == "" {
 		return NormalizedCreateInput{}, domainerr.Validation("name is required")
 	}
+	governance, err := normalizeGovernance(in.Governance)
+	if err != nil {
+		return NormalizedCreateInput{}, err
+	}
 	return NormalizedCreateInput{
 		CapabilityKey:    key,
 		Name:             name,
 		Description:      description,
 		RequiredAutonomy: requiredAutonomy,
+		Governance:       governance,
 	}, nil
 }
 
@@ -103,11 +139,57 @@ func NormalizeUpdateInput(in UpdateInput) (NormalizedUpdateInput, error) {
 	if name == "" {
 		return NormalizedUpdateInput{}, domainerr.Validation("name is required")
 	}
+	governance, err := normalizeGovernance(in.Governance)
+	if err != nil {
+		return NormalizedUpdateInput{}, err
+	}
 	return NormalizedUpdateInput{
 		Name:             name,
 		Description:      description,
 		RequiredAutonomy: requiredAutonomy,
+		Governance:       governance,
 	}, nil
+}
+
+// normalizeGovernance applies fail-safe defaults: unset risk is high, unset
+// side effect is write, and approval is required unless explicitly disabled.
+func normalizeGovernance(in GovernanceInput) (NormalizedGovernance, error) {
+	riskClass, err := normalizeChoice("risk_class", in.RiskClass, "high", []string{"low", "medium", "high"})
+	if err != nil {
+		return NormalizedGovernance{}, err
+	}
+	sideEffectClass, err := normalizeChoice("side_effect_class", in.SideEffectClass, "write", []string{"read", "write"})
+	if err != nil {
+		return NormalizedGovernance{}, err
+	}
+	requiresApproval := true
+	if in.RequiresNexusApproval != nil {
+		requiresApproval = *in.RequiresNexusApproval
+	}
+	rollback := strings.TrimSpace(in.RollbackCapabilityKey)
+	if rollback != "" && !validCapabilityKey(rollback) {
+		return NormalizedGovernance{}, domainerr.Validation("rollback_capability_key must use domain.resource.action with lowercase letters only")
+	}
+	return NormalizedGovernance{
+		RiskClass:             riskClass,
+		SideEffectClass:       sideEffectClass,
+		RequiresNexusApproval: requiresApproval,
+		EvidenceRequired:      in.EvidenceRequired,
+		RollbackCapabilityKey: rollback,
+	}, nil
+}
+
+func normalizeChoice(field, raw, def string, allowed []string) (string, error) {
+	value := strings.TrimSpace(strings.ToLower(raw))
+	if value == "" {
+		value = def
+	}
+	for _, candidate := range allowed {
+		if value == candidate {
+			return value, nil
+		}
+	}
+	return "", domainerr.Validation(field + " must be one of " + strings.Join(allowed, ", "))
 }
 
 var capabilityKeyPattern = regexp.MustCompile(`^[a-zñ]+\.[a-zñ]+\.[a-zñ]+$`)
