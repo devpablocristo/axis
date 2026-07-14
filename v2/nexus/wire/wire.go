@@ -16,6 +16,7 @@ import (
 	postgres "github.com/devpablocristo/platform/databases/postgres/go"
 	ginmw "github.com/devpablocristo/platform/http/gin/go"
 	observability "github.com/devpablocristo/platform/observability/go"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 type Dependencies struct {
@@ -100,7 +101,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 
 	server := &http.Server{
 		Addr:    config.Addr(),
-		Handler: observability.Middleware(logger, router),
+		Handler: tracedServerHandler("nexus-v2", observability.Middleware(logger, router)),
 	}
 
 	return &Dependencies{
@@ -110,6 +111,21 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		Server:         server,
 		tracerShutdown: tracerShutdown,
 	}, nil
+}
+
+// tracedServerHandler wraps an HTTP handler with an OTel server span per
+// request, extracting incoming trace context so the trace continues across
+// services. Health probes are excluded to avoid flooding traces.
+func tracedServerHandler(service string, h http.Handler) http.Handler {
+	return otelhttp.NewHandler(h, service,
+		otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string {
+			return r.Method + " " + r.URL.Path
+		}),
+		otelhttp.WithFilter(func(r *http.Request) bool {
+			p := r.URL.Path
+			return p != "/readyz" && p != "/healthz"
+		}),
+	)
 }
 
 func (d *Dependencies) Close() {
