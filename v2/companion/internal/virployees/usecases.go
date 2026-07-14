@@ -84,6 +84,13 @@ type MemoryReaderPort interface {
 	RecallInternal(context.Context, string, uuid.UUID, string, int) ([]memories.Recalled, error)
 }
 
+// RuntimePlannerPort proposes an intent + draft for a natural-language input.
+// The planner only proposes; Go decides on the proposal (dryrun.EvaluateWithProposal).
+// When unset, dry-run falls back to the deterministic matcher.
+type RuntimePlannerPort interface {
+	Propose(ctx context.Context, input string, rc runtimecontext.Context) (dryrun.Proposal, error)
+}
+
 type UseCases struct {
 	repo             RepositoryPort
 	executionRepo    ExecutionRepositoryPort
@@ -95,6 +102,7 @@ type UseCases struct {
 	resultReporter   ExecutionResultReporterPort
 	executors        map[string]ActionExecutorPort
 	memories         MemoryReaderPort
+	runtime          RuntimePlannerPort
 	lifecycle        *lifecycle.Service
 }
 
@@ -162,6 +170,8 @@ func (u *UseCases) SetExecutionResultReporter(reporter ExecutionResultReporterPo
 }
 
 func (u *UseCases) SetMemoryReader(reader MemoryReaderPort) { u.memories = reader }
+
+func (u *UseCases) SetRuntimePlanner(planner RuntimePlannerPort) { u.runtime = planner }
 
 func (u *UseCases) RegisterExecutor(action string, executor ActionExecutorPort) {
 	action = strings.TrimSpace(action)
@@ -303,6 +313,15 @@ func (u *UseCases) dryRun(ctx context.Context, tenantID string, id uuid.UUID, in
 			runtimeCtx.MemoryReferences = append(runtimeCtx.MemoryReferences, item.Reference)
 		}
 		runtimeCtx.MemoryContextHash = memories.ContextHash(runtimeCtx.MemoryReferences)
+	}
+	if u.runtime != nil {
+		proposal, err := u.runtime.Propose(ctx, input, runtimeCtx)
+		if err != nil {
+			// Fase 2 (PR3) hardens this into an explicit fail-closed fallback;
+			// today no runtime is wired so this branch is inert.
+			return dryrun.Result{}, err
+		}
+		return dryrun.EvaluateWithProposal(input, runtimeCtx, proposal), nil
 	}
 	return dryrun.Evaluate(input, runtimeCtx), nil
 }

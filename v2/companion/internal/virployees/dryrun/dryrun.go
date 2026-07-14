@@ -102,13 +102,33 @@ type intentDefinition struct {
 	ActionKeywords   []string
 }
 
+// Proposal is what a planner (the deterministic matcher today, the LLM runtime
+// in Fase 2) proposes for an input: an intent and a fallback required autonomy.
+// Go always decides on the proposal; the planner never decides by itself.
+type Proposal struct {
+	Intent           Intent
+	RequiredAutonomy virployeedomain.AutonomyLevel
+}
+
+// Evaluate runs the deterministic proposer and then decides on the proposal.
 func Evaluate(input string, ctx runtimecontext.Context) Result {
+	matched := MatchIntent(strings.TrimSpace(input), ctx.Capabilities)
+	return EvaluateWithProposal(input, ctx, Proposal{
+		Intent:           matched.Intent,
+		RequiredAutonomy: matched.requiredAutonomy,
+	})
+}
+
+// EvaluateWithProposal applies the governance decision to a proposal from any
+// planner. Recognition can be replaced (deterministic or LLM), but the decision
+// — assignment check, autonomy, draft — stays here in Go.
+func EvaluateWithProposal(input string, ctx runtimecontext.Context, proposal Proposal) Result {
 	input = strings.TrimSpace(input)
-	intent := MatchIntent(input, ctx.Capabilities)
+	intent := proposal.Intent
 	result := Result{
 		Input:             input,
 		RuntimeContext:    ctx,
-		Intent:            intent.Intent,
+		Intent:            intent,
 		VirployeeAutonomy: ctx.Virployee.Autonomy,
 	}
 
@@ -123,7 +143,7 @@ func Evaluate(input string, ctx runtimecontext.Context) Result {
 
 	required := RequiredCapability{
 		CapabilityKey:    intent.CapabilityKey,
-		RequiredAutonomy: intent.requiredAutonomy,
+		RequiredAutonomy: proposal.RequiredAutonomy,
 		Matched:          false,
 	}
 	if matched, ok := findCapability(ctx.Capabilities, intent.CapabilityKey); ok {
@@ -147,7 +167,7 @@ func Evaluate(input string, ctx runtimecontext.Context) Result {
 		return result
 	}
 
-	result.RequiredAutonomy = intent.requiredAutonomy
+	result.RequiredAutonomy = proposal.RequiredAutonomy
 	result.RequiredCapability = &required
 	result.Decision = DecisionBlocked
 	result.Reason = "required capability is not assigned to the virployee"
@@ -346,7 +366,7 @@ func deriveIntentDefinition(capability capabilitydomain.Capability) (intentDefin
 	}, true
 }
 
-func buildDraft(input string, intent matchedIntent, decision Decision) Draft {
+func buildDraft(input string, intent Intent, decision Decision) Draft {
 	if !intent.Matched {
 		return Draft{
 			Status:  DraftStatusNotApplicable,
@@ -380,7 +400,7 @@ func buildDraft(input string, intent matchedIntent, decision Decision) Draft {
 	}
 }
 
-func buildCalendarEventCreateDraft(input string, intent matchedIntent, decision Decision) Draft {
+func buildCalendarEventCreateDraft(input string, intent Intent, decision Decision) Draft {
 	fields := []DraftField{}
 	missing := []DraftMissingField{}
 
@@ -416,7 +436,7 @@ func buildCalendarEventCreateDraft(input string, intent matchedIntent, decision 
 	}
 }
 
-func buildCalendarEventReadDraft(input string, intent matchedIntent, decision Decision) Draft {
+func buildCalendarEventReadDraft(input string, intent Intent, decision Decision) Draft {
 	fields := []DraftField{{Key: "search_text", Label: "Search text", Value: input, Source: "input"}}
 	if dateHint := calendarEventDateHint(input); dateHint != "" {
 		fields = append(fields, DraftField{Key: "date_hint", Label: "Date", Value: dateHint, Source: "input"})
@@ -431,7 +451,7 @@ func buildCalendarEventReadDraft(input string, intent matchedIntent, decision De
 	}
 }
 
-func buildCalendarEventUpdateDraft(input string, intent matchedIntent, decision Decision) Draft {
+func buildCalendarEventUpdateDraft(input string, intent Intent, decision Decision) Draft {
 	fields := []DraftField{}
 	if title, source := calendarEventTitle(input); title != "" {
 		fields = append(fields, DraftField{Key: "title", Label: "Title", Value: title, Source: source})
@@ -457,7 +477,7 @@ func buildCalendarEventUpdateDraft(input string, intent matchedIntent, decision 
 	}
 }
 
-func buildCalendarEventDeleteDraft(input string, intent matchedIntent, decision Decision) Draft {
+func buildCalendarEventDeleteDraft(input string, intent Intent, decision Decision) Draft {
 	fields := []DraftField{}
 	if title, source := calendarEventTitle(input); title != "" {
 		fields = append(fields, DraftField{Key: "title", Label: "Title", Value: title, Source: source})

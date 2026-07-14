@@ -237,6 +237,62 @@ func TestEvaluateConversationWhenNoCapabilityIsInferred(t *testing.T) {
 	}
 }
 
+func TestEvaluateWithProposalAllowsAssignedProposedCapability(t *testing.T) {
+	// A planner proposes an intent; Go decides. When the proposed capability is
+	// assigned and autonomy allows, it is allowed and bound to the assigned
+	// capability (its id and required autonomy win over the proposal's).
+	capabilityID := uuid.New()
+	result := EvaluateWithProposal(
+		`Agendá "Demo" mañana a las 15 con ana@example.com`,
+		runtimecontext.Context{
+			Virployee: virployeedomain.Virployee{ID: uuid.New(), Name: "Sofia", Autonomy: virployeedomain.AutonomyA2},
+			Capabilities: []capabilitydomain.Capability{
+				{ID: capabilityID, CapabilityKey: "calendar.events.create", Name: "Create calendar events", RequiredAutonomy: virployeedomain.AutonomyA2},
+			},
+		},
+		Proposal{
+			Intent:           Intent{Matched: true, CapabilityKey: "calendar.events.create"},
+			RequiredAutonomy: virployeedomain.AutonomyA2,
+		},
+	)
+
+	if result.Decision != DecisionAllowed {
+		t.Fatalf("expected allowed, got %+v", result)
+	}
+	if result.RequiredCapability == nil || !result.RequiredCapability.Matched || result.RequiredCapability.ID != capabilityID.String() {
+		t.Fatalf("unexpected required capability: %+v", result.RequiredCapability)
+	}
+}
+
+func TestEvaluateWithProposalBlocksUnassignedProposedCapability(t *testing.T) {
+	// Safety net for Fase 2: a planner (LLM) may propose a capability the
+	// virployee does not have assigned. Go must block it regardless of the
+	// proposal — the assignment check is not something the planner can bypass.
+	result := EvaluateWithProposal(
+		"schedule a meeting",
+		runtimecontext.Context{
+			Virployee: virployeedomain.Virployee{ID: uuid.New(), Name: "Sofia", Autonomy: virployeedomain.AutonomyA3},
+			Capabilities: []capabilitydomain.Capability{
+				{ID: uuid.New(), CapabilityKey: "calendar.events.read", RequiredAutonomy: virployeedomain.AutonomyA1},
+			},
+		},
+		Proposal{
+			Intent:           Intent{Matched: true, CapabilityKey: "calendar.events.create", Domain: "calendar", Resource: "events", Action: "create"},
+			RequiredAutonomy: virployeedomain.AutonomyA2,
+		},
+	)
+
+	if result.Decision != DecisionBlocked {
+		t.Fatalf("expected blocked for unassigned proposed capability, got %+v", result)
+	}
+	if result.RequiredCapability == nil || result.RequiredCapability.CapabilityKey != "calendar.events.create" || result.RequiredCapability.Matched {
+		t.Fatalf("unexpected required capability: %+v", result.RequiredCapability)
+	}
+	if result.Reason != "required capability is not assigned to the virployee" {
+		t.Fatalf("unexpected reason: %q", result.Reason)
+	}
+}
+
 func hasDraftField(draft Draft, key string, value string) bool {
 	for _, field := range draft.Fields {
 		if field.Key == key && field.Value == value {
