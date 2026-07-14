@@ -50,6 +50,14 @@ services:
       timeout: 3s
       retries: 30
 
+  jaeger:
+    image: jaegertracing/all-in-one:1.62.0
+    restart: unless-stopped
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "${JAEGER_UI_PORT:-19686}:16686"
+
   companion-v2:
     build:
       context: .
@@ -66,6 +74,9 @@ services:
       COMPANION_V2_EXECUTION_MODE: ${COMPANION_V2_EXECUTION_MODE:-local}
       COMPANION_V2_INTERNAL_AUTH_SECRET: ${AXIS_V2_INTERNAL_AUTH_SECRET:-axis-v2-local-internal}
       COMPANION_V2_DATABASE_URL: postgres://${COMPANION_V2_POSTGRES_USER:-postgres}:${COMPANION_V2_POSTGRES_PASSWORD:-postgres}@companion-v2-postgres:5432/${COMPANION_V2_POSTGRES_DB:-companion_v2}?sslmode=disable
+      COMPANION_V2_OTEL_EXPORTER: ${COMPANION_V2_OTEL_EXPORTER:-otlp}
+      COMPANION_V2_OTEL_OTLP_ENDPOINT: ${COMPANION_V2_OTEL_OTLP_ENDPOINT:-jaeger:4318}
+      COMPANION_V2_OTEL_OTLP_INSECURE: ${COMPANION_V2_OTEL_OTLP_INSECURE:-true}
     volumes:
       - ./companion:/src/companion
       - ./air.companion.toml:/src/air.companion.toml:ro
@@ -97,6 +108,9 @@ services:
       NEXUS_V2_CORS_ORIGINS: ${NEXUS_V2_CORS_ORIGINS:-http://localhost:19173,http://127.0.0.1:19173,http://console-v2:19173,http://console-v2-e2e:19173}
       NEXUS_V2_INTERNAL_AUTH_SECRET: ${AXIS_V2_INTERNAL_AUTH_SECRET:-axis-v2-local-internal}
       NEXUS_V2_DATABASE_URL: postgres://${NEXUS_V2_POSTGRES_USER:-postgres}:${NEXUS_V2_POSTGRES_PASSWORD:-postgres}@nexus-v2-postgres:5432/${NEXUS_V2_POSTGRES_DB:-nexus_v2}?sslmode=disable
+      NEXUS_V2_OTEL_EXPORTER: ${NEXUS_V2_OTEL_EXPORTER:-otlp}
+      NEXUS_V2_OTEL_OTLP_ENDPOINT: ${NEXUS_V2_OTEL_OTLP_ENDPOINT:-jaeger:4318}
+      NEXUS_V2_OTEL_OTLP_INSECURE: ${NEXUS_V2_OTEL_OTLP_INSECURE:-true}
     volumes:
       - ./nexus:/src/nexus
       - ./air.nexus.toml:/src/air.nexus.toml:ro
@@ -139,6 +153,9 @@ services:
       BFF_V2_DEV_ACTOR_EMAIL: ${BFF_V2_DEV_ACTOR_EMAIL:-dev@example.local}
       BFF_V2_DEV_ORG_ID: ${BFF_V2_DEV_ORG_ID:-dev-org}
       BFF_V2_DATABASE_URL: postgres://${BFF_V2_POSTGRES_USER:-postgres}:${BFF_V2_POSTGRES_PASSWORD:-postgres}@bff-v2-postgres:5432/${BFF_V2_POSTGRES_DB:-bff_v2}?sslmode=disable
+      BFF_V2_OTEL_EXPORTER: ${BFF_V2_OTEL_EXPORTER:-otlp}
+      BFF_V2_OTEL_OTLP_ENDPOINT: ${BFF_V2_OTEL_OTLP_ENDPOINT:-jaeger:4318}
+      BFF_V2_OTEL_OTLP_INSECURE: ${BFF_V2_OTEL_OTLP_INSECURE:-true}
     volumes:
       - ./bff:/src/bff
       - ../../platform:/platform:ro

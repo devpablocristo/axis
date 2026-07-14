@@ -28,14 +28,14 @@ sig = "87af823eed635b05"
 [[bindings]]
 doc = "v2/docs/axis-os.md"
 target = "v2/bff/wire/wire.go"
-sig = "2b3a46a6cb09183c"
+sig = "aab016c89edd13e5"
 
 [[bindings]]
 doc = "v2/docs/axis-os.md"
 target = "v2/companion/wire/wire.go"
-sig = "79c51c46eb1bf43b"
+sig = "6f21027c77501ba3"
 
 [[bindings]]
 doc = "v2/docs/axis-os.md"
 target = "v2/nexus/wire/wire.go"
-sig = "28cc018d95c95892"
+sig = "75bd39e901edf31c"

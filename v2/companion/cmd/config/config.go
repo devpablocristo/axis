@@ -16,6 +16,11 @@ type Config struct {
 	NexusBaseURL       string
 	ExecutionMode      string
 	InternalAuthSecret string
+
+	ServiceVersion string
+	OTelExporter   string
+	OTelEndpoint   string
+	OTelInsecure   bool
 }
 
 func Load() Config {
@@ -29,6 +34,10 @@ func Load() Config {
 		NexusBaseURL:       strings.TrimRight(envconfig.Get("COMPANION_V2_NEXUS_BASE_URL", ""), "/"),
 		ExecutionMode:      strings.ToLower(strings.TrimSpace(envconfig.Get("COMPANION_V2_EXECUTION_MODE", "disabled"))),
 		InternalAuthSecret: strings.TrimSpace(envconfig.Get("COMPANION_V2_INTERNAL_AUTH_SECRET", envconfig.Get("AXIS_V2_INTERNAL_AUTH_SECRET", ""))),
+		ServiceVersion:     envconfig.Get("COMPANION_V2_SERVICE_VERSION", ""),
+		OTelExporter:       strings.ToLower(strings.TrimSpace(envconfig.Get("COMPANION_V2_OTEL_EXPORTER", "none"))),
+		OTelEndpoint:       strings.TrimSpace(envconfig.Get("COMPANION_V2_OTEL_OTLP_ENDPOINT", "")),
+		OTelInsecure:       envconfig.Bool("COMPANION_V2_OTEL_OTLP_INSECURE", true),
 	}
 }
 
