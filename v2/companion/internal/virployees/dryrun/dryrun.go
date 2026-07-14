@@ -104,7 +104,7 @@ type intentDefinition struct {
 
 func Evaluate(input string, ctx runtimecontext.Context) Result {
 	input = strings.TrimSpace(input)
-	intent := MatchIntent(input)
+	intent := MatchIntent(input, ctx.Capabilities)
 	result := Result{
 		Input:             input,
 		RuntimeContext:    ctx,
@@ -156,12 +156,12 @@ func Evaluate(input string, ctx runtimecontext.Context) Result {
 	return result
 }
 
-func MatchIntent(input string) matchedIntent {
+func MatchIntent(input string, capabilities []capabilitydomain.Capability) matchedIntent {
 	text := normalizeText(input)
 	if text == "" {
 		return matchedIntent{Intent: Intent{Rules: []IntentRule{}, MatchedBy: []string{}}}
 	}
-	definitions := IntentCatalog()
+	definitions := catalogForCapabilities(capabilities)
 	var defaultRead *intentDefinition
 	var resourceMatch string
 	for _, definition := range definitions {
@@ -224,7 +224,11 @@ func MatchIntent(input string) matchedIntent {
 	return matchedIntent{Intent: Intent{Rules: []IntentRule{}, MatchedBy: []string{}}}
 }
 
-func IntentCatalog() []intentDefinition {
+// knownIntentDefinitions holds the deterministic keyword recognition for known
+// capability keys, in canonical action order. The RequiredAutonomy here is only
+// a fallback; catalogForCapabilities overrides it with the assigned
+// capability's actual required autonomy.
+func knownIntentDefinitions() []intentDefinition {
 	resourceKeywords := []string{
 		"calendar",
 		"calendario",
@@ -275,6 +279,71 @@ func IntentCatalog() []intentDefinition {
 			ActionKeywords:   []string{"eliminar", "elimina", "borrar", "borra", "cancelar", "cancela", "delete", "remove", "cancel"},
 		},
 	}
+}
+
+// catalogForCapabilities builds the intent catalog from ONLY the capabilities
+// assigned to the virployee (data-driven per tenant, replacing the former
+// global literal). An action the virployee does not have assigned is not
+// recognizable, so the deterministic matcher can never infer an intent for an
+// unassigned capability. This is the Fase 1 gate that scopes what the runtime
+// can act on; the Fase 2 LLM proposer consumes the same assigned-only set.
+func catalogForCapabilities(capabilities []capabilitydomain.Capability) []intentDefinition {
+	assigned := make(map[string]capabilitydomain.Capability, len(capabilities))
+	order := make([]string, 0, len(capabilities))
+	for _, capability := range capabilities {
+		if _, exists := assigned[capability.CapabilityKey]; exists {
+			continue
+		}
+		assigned[capability.CapabilityKey] = capability
+		order = append(order, capability.CapabilityKey)
+	}
+
+	known := knownIntentDefinitions()
+	knownKeys := make(map[string]bool, len(known))
+	out := make([]intentDefinition, 0, len(capabilities))
+	// Curated keyword definitions first, in canonical order, only when assigned.
+	for _, definition := range known {
+		knownKeys[definition.CapabilityKey] = true
+		if capability, ok := assigned[definition.CapabilityKey]; ok {
+			definition.RequiredAutonomy = capability.RequiredAutonomy
+			out = append(out, definition)
+		}
+	}
+	// Assigned capabilities without a curated definition get a derived one so
+	// they remain recognizable by their capability_key segments.
+	for _, key := range order {
+		if knownKeys[key] {
+			continue
+		}
+		if definition, ok := deriveIntentDefinition(assigned[key]); ok {
+			out = append(out, definition)
+		}
+	}
+	return out
+}
+
+// deriveIntentDefinition builds a minimal keyword definition from a
+// domain.resource.action capability key for capabilities without curated
+// keywords.
+func deriveIntentDefinition(capability capabilitydomain.Capability) (intentDefinition, bool) {
+	parts := strings.Split(capability.CapabilityKey, ".")
+	if len(parts) != 3 {
+		return intentDefinition{}, false
+	}
+	domain, resource, action := parts[0], parts[1], parts[2]
+	resourceKeywords := []string{resource}
+	if domain != resource {
+		resourceKeywords = append(resourceKeywords, domain)
+	}
+	return intentDefinition{
+		Domain:           domain,
+		Resource:         resource,
+		Action:           action,
+		CapabilityKey:    capability.CapabilityKey,
+		RequiredAutonomy: capability.RequiredAutonomy,
+		ResourceKeywords: resourceKeywords,
+		ActionKeywords:   []string{action},
+	}, true
 }
 
 func buildDraft(input string, intent matchedIntent, decision Decision) Draft {

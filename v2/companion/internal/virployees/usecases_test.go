@@ -506,7 +506,7 @@ func TestUseCasesDryRunAllowsMatchedCapability(t *testing.T) {
 	}
 }
 
-func TestUseCasesDryRunBlocksMissingCapability(t *testing.T) {
+func TestUseCasesDryRunIgnoresUnassignedCapability(t *testing.T) {
 	repo := newFakeRepo()
 	jobRoleID := uuid.New()
 	profileTemplateID := uuid.New()
@@ -538,21 +538,24 @@ func TestUseCasesDryRunBlocksMissingCapability(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Data-driven per tenant: with no capability assigned the create action is
+	// not recognizable, so the dry-run treats the input as conversational
+	// instead of inferring an unassigned capability.
 	result, err := uc.DryRun(context.Background(), "tenant-1", created.ID, "Agendá una reunión para mañana")
 	if err != nil {
 		t.Fatalf("DryRun: %v", err)
 	}
-	if result.Decision != "blocked" {
-		t.Fatalf("expected blocked, got %+v", result)
+	if result.Intent.Matched {
+		t.Fatalf("expected no intent for an unassigned capability, got %+v", result.Intent)
 	}
-	if result.RequiredCapability == nil || result.RequiredCapability.CapabilityKey != "calendar.events.create" || result.RequiredCapability.Matched {
-		t.Fatalf("unexpected required capability: %+v", result.RequiredCapability)
+	if result.RequiredCapability != nil {
+		t.Fatalf("expected no required capability, got %+v", result.RequiredCapability)
 	}
-	if result.RequiredAutonomy != domain.AutonomyA2 || result.Reason != "required capability is not assigned to the virployee" {
-		t.Fatalf("unexpected blocked result: %+v", result)
+	if result.Decision != "allowed" {
+		t.Fatalf("expected conversational allowed, got %+v", result)
 	}
-	if result.Draft.Status != "blocked" {
-		t.Fatalf("expected blocked draft, got %+v", result.Draft)
+	if result.Draft.Status != "not_applicable" {
+		t.Fatalf("expected not applicable draft, got %+v", result.Draft)
 	}
 }
 
