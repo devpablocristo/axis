@@ -949,6 +949,24 @@ export function purgeJobRole(id: string, tenantId: string, principalId: string):
   })
 }
 
+export type CapabilityStats = {
+  capability_key: string
+  dry_runs: number
+  dry_runs_allowed: number
+  gates: number
+  gates_passed: number
+  executions_succeeded: number
+  executions_failed: number
+  // -1 is the "no data" sentinel: no finished executions to rate.
+  success_rate: number
+}
+
+export function listCapabilityStats(tenantId: string, principalId: string): Promise<CapabilityStats[]> {
+  return axisFetch<{ data: CapabilityStats[] }>('/api/capability-stats', { tenantId, principalId }).then(
+    (payload) => payload.data ?? [],
+  )
+}
+
 export function listCapabilities(
   lifecycle: 'active' | 'archived' | 'trash',
   tenantId: string,
