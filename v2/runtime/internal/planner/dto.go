@@ -28,8 +28,9 @@ type MemoryRef struct {
 // ProposeResponse is the proposal: which capability the input maps to (if any).
 // Go (Companion) decides on it; the planner never decides.
 type ProposeResponse struct {
-	Intent ProposedIntent `json:"intent"`
-	Model  string         `json:"model,omitempty"`
+	Intent        ProposedIntent `json:"intent"`
+	Model         string         `json:"model,omitempty"`
+	PromptVersion string         `json:"prompt_version,omitempty"`
 }
 
 type ProposedIntent struct {

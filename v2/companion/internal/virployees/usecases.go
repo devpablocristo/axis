@@ -2,6 +2,7 @@ package virployees
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 
 	capabilitydomain "github.com/devpablocristo/companion-v2/internal/capabilities/usecases/domain"
@@ -317,9 +318,12 @@ func (u *UseCases) dryRun(ctx context.Context, tenantID string, id uuid.UUID, in
 	if u.runtime != nil {
 		proposal, err := u.runtime.Propose(ctx, input, runtimeCtx)
 		if err != nil {
-			// Fase 2 (PR3) hardens this into an explicit fail-closed fallback;
-			// today no runtime is wired so this branch is inert.
-			return dryrun.Result{}, err
+			// Fail-closed transport: if the runtime is unavailable or errors, do
+			// not act on a half-formed proposal — fall back to the deterministic
+			// matcher, which is scoped to the assigned capabilities and still
+			// passes through the execution gate and Nexus.
+			slog.WarnContext(ctx, "runtime_propose_failed_fallback_deterministic", "error", runtraces.RedactText(err.Error()))
+			return dryrun.Evaluate(input, runtimeCtx), nil
 		}
 		return dryrun.EvaluateWithProposal(input, runtimeCtx, proposal), nil
 	}
@@ -701,6 +705,10 @@ func actionBinding(tenantID string, result dryrun.Result, prepared *preparedacti
 	if !result.Intent.Matched {
 		return nil
 	}
+	proposedBy := result.Intent.ProposedBy
+	if proposedBy == "" {
+		proposedBy = "deterministic"
+	}
 	binding := map[string]any{
 		"schema_version":      "tool_intent.v1",
 		"tenant_id":           normalizeTenantID(tenantID),
@@ -712,6 +720,13 @@ func actionBinding(tenantID string, result dryrun.Result, prepared *preparedacti
 		"target_resource":     result.Intent.Resource,
 		"input_hash":          runtraces.HashString(result.Input),
 		"memory_context_hash": result.RuntimeContext.MemoryContextHash,
+		// Proposal provenance: a change of proposer, model or prompt version
+		// changes the binding, so an approval cannot be replayed against a
+		// different runtime than the one that produced it.
+		"proposed_by":       proposedBy,
+		"model_id":          result.Intent.ModelID,
+		"prompt_version":    result.Intent.PromptVersion,
+		"intent_confidence": result.Intent.Confidence,
 	}
 	if prepared != nil {
 		payloadHash, err := prepared.PayloadHash()

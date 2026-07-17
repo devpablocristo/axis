@@ -34,7 +34,20 @@ type Intent struct {
 	Confidence    float64
 	MatchedBy     []string
 	Rules         []IntentRule
+
+	// Provenance of the proposal. The deterministic matcher sets
+	// ProposedBy="deterministic"; the LLM runtime sets "llm" plus ModelID and
+	// PromptVersion. These are bound into the action binding so a change of
+	// model or prompt invalidates prior approvals.
+	ProposedBy    string
+	ModelID       string
+	PromptVersion string
 }
+
+// ConfidenceThreshold is the minimum confidence a matched proposal needs to be
+// acted on. Below it, the proposal is treated as no intent (conversational),
+// so low-confidence guesses never reach governance or execution.
+const ConfidenceThreshold = 0.4
 
 type IntentRule struct {
 	Type   string
@@ -113,8 +126,12 @@ type Proposal struct {
 // Evaluate runs the deterministic proposer and then decides on the proposal.
 func Evaluate(input string, ctx runtimecontext.Context) Result {
 	matched := MatchIntent(strings.TrimSpace(input), ctx.Capabilities)
+	intent := matched.Intent
+	if intent.Matched {
+		intent.ProposedBy = "deterministic"
+	}
 	return EvaluateWithProposal(input, ctx, Proposal{
-		Intent:           matched.Intent,
+		Intent:           intent,
 		RequiredAutonomy: matched.requiredAutonomy,
 	})
 }
@@ -125,6 +142,11 @@ func Evaluate(input string, ctx runtimecontext.Context) Result {
 func EvaluateWithProposal(input string, ctx runtimecontext.Context, proposal Proposal) Result {
 	input = strings.TrimSpace(input)
 	intent := proposal.Intent
+	// Confidence gate: a low-confidence proposal is not acted on. Treat it as no
+	// intent so it never reaches capability assignment, governance or execution.
+	if intent.Matched && intent.Confidence > 0 && intent.Confidence < ConfidenceThreshold {
+		intent.Matched = false
+	}
 	result := Result{
 		Input:             input,
 		RuntimeContext:    ctx,

@@ -293,6 +293,34 @@ func TestEvaluateWithProposalBlocksUnassignedProposedCapability(t *testing.T) {
 	}
 }
 
+func TestEvaluateWithProposalDropsLowConfidenceProposal(t *testing.T) {
+	// A matched proposal below the confidence threshold is treated as no intent,
+	// so it never reaches capability assignment, governance or execution.
+	result := EvaluateWithProposal(
+		"agendá una reunión",
+		runtimecontext.Context{
+			Virployee: virployeedomain.Virployee{ID: uuid.New(), Autonomy: virployeedomain.AutonomyA2},
+			Capabilities: []capabilitydomain.Capability{
+				{ID: uuid.New(), CapabilityKey: "calendar.events.create", RequiredAutonomy: virployeedomain.AutonomyA2},
+			},
+		},
+		Proposal{
+			Intent:           Intent{Matched: true, CapabilityKey: "calendar.events.create", Confidence: 0.2},
+			RequiredAutonomy: virployeedomain.AutonomyA2,
+		},
+	)
+
+	if result.Intent.Matched {
+		t.Fatalf("low-confidence proposal must be treated as no intent, got %+v", result.Intent)
+	}
+	if result.RequiredCapability != nil {
+		t.Fatalf("expected no required capability for a dropped proposal, got %+v", result.RequiredCapability)
+	}
+	if result.Decision != DecisionAllowed {
+		t.Fatalf("expected conversational allowed, got %+v", result)
+	}
+}
+
 func hasDraftField(draft Draft, key string, value string) bool {
 	for _, field := range draft.Fields {
 		if field.Key == key && field.Value == value {

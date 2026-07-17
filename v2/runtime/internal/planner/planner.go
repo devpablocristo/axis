@@ -13,7 +13,10 @@ import (
 	ai "github.com/devpablocristo/platform/kernels/ai/go"
 )
 
-const proposeToolName = "propose_intent"
+const (
+	proposeToolName = "propose_intent"
+	promptVersion   = "propose.v1"
+)
 
 type Planner struct {
 	provider ai.Provider
@@ -25,8 +28,15 @@ func New(provider ai.Provider, model string) *Planner {
 }
 
 func (p *Planner) Propose(ctx context.Context, req ProposeRequest) (ProposeResponse, error) {
+	noIntent := ProposeResponse{Intent: ProposedIntent{Matched: false}, Model: p.model, PromptVersion: promptVersion}
 	if strings.TrimSpace(req.Input) == "" || len(req.Capabilities) == 0 {
-		return ProposeResponse{Intent: ProposedIntent{Matched: false}, Model: p.model}, nil
+		return noIntent, nil
+	}
+	// Prompt-injection defense: do not feed obviously adversarial input to the
+	// model. Defense in depth — the model only has the constrained
+	// propose_intent tool and Companion re-checks assignment and governance.
+	if looksAdversarial(req.Input) {
+		return noIntent, nil
 	}
 
 	resp, err := p.provider.Chat(ctx, ai.ChatRequest{
@@ -39,7 +49,24 @@ func (p *Planner) Propose(ctx context.Context, req ProposeRequest) (ProposeRespo
 		return ProposeResponse{}, err
 	}
 
-	return ProposeResponse{Intent: interpret(resp, req.Capabilities), Model: p.model}, nil
+	return ProposeResponse{Intent: interpret(resp, req.Capabilities), Model: p.model, PromptVersion: promptVersion}, nil
+}
+
+// looksAdversarial flags obvious prompt-injection attempts in the user input.
+func looksAdversarial(input string) bool {
+	lower := strings.ToLower(input)
+	markers := []string{
+		"ignore previous", "ignore all previous", "disregard previous",
+		"ignore the above", "system prompt", "you are now", "new instructions",
+		"ignora las instrucciones", "ignora todas las instrucciones",
+		"olvida las instrucciones", "olvida todo", "override your", "jailbreak",
+	}
+	for _, marker := range markers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func buildProposeTool(capabilities []CapabilityInfo) ai.Tool {

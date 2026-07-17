@@ -111,6 +111,9 @@ func toProposal(resp proposeResponse) dryrun.Proposal {
 	}
 	if intent.Matched {
 		intent.MatchedBy = []string{"runtime"}
+		intent.ProposedBy = "llm"
+		intent.ModelID = resp.Model
+		intent.PromptVersion = resp.PromptVersion
 	}
 	return dryrun.Proposal{
 		Intent:           intent,
@@ -141,8 +144,9 @@ type memoryRef struct {
 }
 
 type proposeResponse struct {
-	Intent proposedIntent `json:"intent"`
-	Model  string         `json:"model,omitempty"`
+	Intent        proposedIntent `json:"intent"`
+	Model         string         `json:"model,omitempty"`
+	PromptVersion string         `json:"prompt_version,omitempty"`
 }
 
 type proposedIntent struct {
