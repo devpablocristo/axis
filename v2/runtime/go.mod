@@ -9,9 +9,11 @@ require (
 	github.com/devpablocristo/platform/observability/go v0.2.1
 	github.com/gin-gonic/gin v1.12.0
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.68.0
+	golang.org/x/oauth2 v0.36.0
 )
 
 require (
+	cloud.google.com/go/compute/metadata v0.9.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bytedance/gopkg v0.1.3 // indirect
 	github.com/bytedance/sonic v1.15.0 // indirect

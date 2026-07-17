@@ -13,10 +13,11 @@ when services collaborate.
   their job roles, capabilities, autonomy, memory, and execution runtime.
 - `nexus` is the minimum governance service. It owns action types,
   request/decision evaluation, durable approvals, and approval decisions.
-- `runtime` proposes intents from natural language using an LLM. It only
-  proposes which assigned capability an input maps to; Companion always
-  decides. With no API key it uses an Echo provider, so it is inert until
-  configured, and Companion only consults it when pointed at it.
+- `runtime` proposes intents from natural language using an LLM (Gemini via
+  Vertex AI by default, authenticated with Application Default Credentials). It
+  only proposes which assigned capability an input maps to; Companion always
+  decides. Without credentials it falls back to an Echo provider (no external
+  calls), and Companion only consults it when pointed at it.
 - Services communicate through HTTP. No service imports another service's
   internal packages.
 

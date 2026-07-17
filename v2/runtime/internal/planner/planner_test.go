@@ -77,6 +77,29 @@ func TestProposeShortCircuitsAdversarialInput(t *testing.T) {
 	}
 }
 
+func TestInterpretMatchesTextJSON(t *testing.T) {
+	// Gemini/Vertex returns the structured proposal as JSON text via ResponseSchema.
+	resp := ai.ChatResponse{Text: `{"capability_key":"calendar.events.create","confidence":0.87}`}
+	intent := interpret(resp, testCapabilities)
+	if !intent.Matched || intent.CapabilityKey != "calendar.events.create" || intent.Action != "create" {
+		t.Fatalf("expected matched create from text JSON, got %+v", intent)
+	}
+}
+
+func TestInterpretMatchesFencedTextJSON(t *testing.T) {
+	resp := ai.ChatResponse{Text: "```json\n{\"capability_key\":\"calendar.events.create\",\"confidence\":0.9}\n```"}
+	if !interpret(resp, testCapabilities).Matched {
+		t.Fatal("expected matched from fenced JSON text")
+	}
+}
+
+func TestInterpretTextJSONRejectsUnassignedKey(t *testing.T) {
+	resp := ai.ChatResponse{Text: `{"capability_key":"calendar.events.delete","confidence":0.9}`}
+	if interpret(resp, testCapabilities).Matched {
+		t.Fatal("an unassigned key in text JSON must not match")
+	}
+}
+
 func TestProposeWithEchoReturnsNoIntent(t *testing.T) {
 	// The Echo provider (no API key) never calls a tool, so the proposal is
 	// "no intent" — the safe default until a real model is configured.

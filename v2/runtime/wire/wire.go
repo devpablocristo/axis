@@ -8,11 +8,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	ginmw "github.com/devpablocristo/platform/http/gin/go"
+	observability "github.com/devpablocristo/platform/observability/go"
 	cfg "github.com/devpablocristo/runtime-v2/cmd/config"
 	"github.com/devpablocristo/runtime-v2/internal/planner"
-	ginmw "github.com/devpablocristo/platform/http/gin/go"
-	ai "github.com/devpablocristo/platform/kernels/ai/go"
-	observability "github.com/devpablocristo/platform/observability/go"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
@@ -42,8 +41,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		return nil, err
 	}
 
-	// Empty API key => kernels/ai returns the Echo provider (no external calls).
-	provider := ai.NewProvider(config.LLMProvider, config.LLMAPIKey, config.LLMModel)
+	provider := buildProvider(ctx, config)
 	plannerHandler := planner.NewHandler(planner.New(provider, config.LLMModel))
 
 	gin.SetMode(gin.ReleaseMode)
