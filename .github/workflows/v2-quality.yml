@@ -143,7 +143,7 @@ jobs:
           go install github.com/google/osv-scanner/v2/cmd/osv-scanner@v2.3.8
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
       - name: Install pinned Trivy
-        uses: aquasecurity/setup-trivy@3fb12ec12f41e471780db15c232d5dd185dcb514 # v0.2.6
+        uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
         with:
           version: v0.69.3
           cache: true
