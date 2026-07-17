@@ -1529,14 +1529,17 @@ function VirployeeDryRunInline(props: {
 
 function DryRunIntentView(props: { intent: VirployeeDryRun['intent'] }) {
   const intent = props.intent
+  const proposedByLLM = intent.proposed_by === 'llm'
   return (
     <section className="virployee-preview__section" aria-label="Intent">
-      <SectionHeading title="Intent match" eyebrow="Parser" />
+      <SectionHeading title="Intent match" eyebrow={proposedByLLM ? 'AI runtime' : 'Deterministic'} />
       <div className="virployee-preview__grid">
         <PreviewField label="Matched" value={intent.matched ? 'Yes' : 'No'} />
         <PreviewField label="Capability key" value={intent.capability_key || '-'} />
         <PreviewField label="Action" value={intent.action || '-'} />
         <PreviewField label="Confidence" value={formatConfidence(intent.confidence)} />
+        <PreviewField label="Proposed by" value={proposedByLLM ? 'AI model' : (intent.proposed_by || 'deterministic')} />
+        <PreviewField label="Model" value={intent.model_id || '-'} />
       </div>
       {intent.matched_by.length > 0 ? (
         <div className="virployee-dry-run__draft-list" aria-label="Intent matched by">

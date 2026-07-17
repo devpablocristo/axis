@@ -137,6 +137,8 @@ type DryRunIntentResponse struct {
 	Confidence    float64                    `json:"confidence"`
 	MatchedBy     []string                   `json:"matched_by"`
 	Rules         []DryRunIntentRuleResponse `json:"rules"`
+	ProposedBy    string                     `json:"proposed_by"`
+	ModelID       string                     `json:"model_id"`
 }
 
 type DryRunIntentRuleResponse struct {
@@ -462,6 +464,8 @@ func IntentFromDomain(intent dryrun.Intent) DryRunIntentResponse {
 		Confidence:    intent.Confidence,
 		MatchedBy:     intent.MatchedBy,
 		Rules:         rules,
+		ProposedBy:    intent.ProposedBy,
+		ModelID:       intent.ModelID,
 	}
 }
 
