@@ -150,7 +150,7 @@ func TestInvariantActionBindingCarriesAllFields(t *testing.T) {
 	requiredKeys := []string{
 		"schema_version", "tenant_id", "virployee_id", "operation",
 		"capability_key", "action", "target_system", "target_resource",
-		"input_hash", "memory_context_hash",
+		"input_hash", "memory_context_hash", "proposed_by",
 	}
 	for _, key := range requiredKeys {
 		value, ok := binding[key]
@@ -159,6 +159,13 @@ func TestInvariantActionBindingCarriesAllFields(t *testing.T) {
 		}
 		if s, isStr := value.(string); isStr && s == "" {
 			t.Fatalf("binding field %q must not be empty", key)
+		}
+	}
+	// Proposal-provenance keys must be present (may be empty for the
+	// deterministic proposer) so a change of model/prompt changes the binding.
+	for _, key := range []string{"model_id", "prompt_version", "intent_confidence"} {
+		if _, ok := binding[key]; !ok {
+			t.Fatalf("binding is missing provenance field %q: %+v", key, binding)
 		}
 	}
 
@@ -288,6 +295,33 @@ func TestInvariantExecuteApprovedActionRebindsBeforeExecuting(t *testing.T) {
 			t.Fatal("executor must run when the binding fully matches the approval")
 		}
 	})
+}
+
+// Invariant 5 — Fail-closed transport for the runtime proposer.
+// If the runtime errors or is unavailable, dry-run must not error or act on a
+// half-formed proposal: it falls back to the deterministic matcher (scoped to
+// the assigned capabilities and still gated). The fallback carries
+// deterministic provenance.
+func TestInvariantDryRunFailsClosedToDeterministicWhenRuntimeErrors(t *testing.T) {
+	uc, created := setupExecutionGateUseCase(t, domain.AutonomyA3)
+	uc.SetRuntimePlanner(erroringPlanner{})
+
+	result, err := uc.DryRun(context.Background(), "tenant-1", created.ID, "Agendá una reunión mañana")
+	if err != nil {
+		t.Fatalf("dry-run must not error when the runtime fails, got %v", err)
+	}
+	if !result.Intent.Matched || result.Intent.CapabilityKey != "calendar.events.create" {
+		t.Fatalf("expected deterministic fallback create intent, got %+v", result.Intent)
+	}
+	if result.Intent.ProposedBy != "deterministic" {
+		t.Fatalf("expected deterministic provenance on fallback, got %q", result.Intent.ProposedBy)
+	}
+}
+
+type erroringPlanner struct{}
+
+func (erroringPlanner) Propose(context.Context, string, runtimecontext.Context) (dryrun.Proposal, error) {
+	return dryrun.Proposal{}, errors.New("runtime unavailable")
 }
 
 // --- fakes used only by invariant 4 (execution path) ---

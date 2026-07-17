@@ -205,6 +205,8 @@ export type VirployeeDryRunIntent = {
     target: string
     value: string
   }>
+  proposed_by: string
+  model_id: string
 }
 
 export type VirployeeDryRunDraft = {

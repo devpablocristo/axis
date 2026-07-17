@@ -14,6 +14,7 @@ type Config struct {
 	MaxBodyBytes       int64
 	CORSOrigins        []string
 	NexusBaseURL       string
+	RuntimeBaseURL     string
 	ExecutionMode      string
 	InternalAuthSecret string
 
@@ -32,6 +33,7 @@ func Load() Config {
 		MaxBodyBytes:       int64(envconfig.Int("COMPANION_V2_MAX_BODY_BYTES", 1<<20)),
 		CORSOrigins:        splitCSV(envconfig.Get("COMPANION_V2_CORS_ORIGINS", "")),
 		NexusBaseURL:       strings.TrimRight(envconfig.Get("COMPANION_V2_NEXUS_BASE_URL", ""), "/"),
+		RuntimeBaseURL:     strings.TrimRight(envconfig.Get("COMPANION_V2_RUNTIME_BASE_URL", ""), "/"),
 		ExecutionMode:      strings.ToLower(strings.TrimSpace(envconfig.Get("COMPANION_V2_EXECUTION_MODE", "disabled"))),
 		InternalAuthSecret: strings.TrimSpace(envconfig.Get("COMPANION_V2_INTERNAL_AUTH_SECRET", envconfig.Get("AXIS_V2_INTERNAL_AUTH_SECRET", ""))),
 		ServiceVersion:     envconfig.Get("COMPANION_V2_SERVICE_VERSION", ""),

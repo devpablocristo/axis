@@ -15,6 +15,7 @@ import (
 	"github.com/devpablocristo/companion-v2/internal/memories"
 	"github.com/devpablocristo/companion-v2/internal/nexusclient"
 	"github.com/devpablocristo/companion-v2/internal/profiletemplates"
+	"github.com/devpablocristo/companion-v2/internal/runtimeclient"
 	"github.com/devpablocristo/companion-v2/internal/virployees"
 	postgres "github.com/devpablocristo/platform/databases/postgres/go"
 	ginmw "github.com/devpablocristo/platform/http/gin/go"
@@ -106,6 +107,10 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		virployeesUsecases.SetGovernanceChecker(nexusClient)
 		virployeesUsecases.SetApprovalReader(nexusClient)
 		virployeesUsecases.SetExecutionResultReporter(nexusClient)
+	}
+	if config.RuntimeBaseURL != "" {
+		runtimePlanner := runtimeclient.New(config.RuntimeBaseURL, &http.Client{Timeout: 30 * time.Second, Transport: otelhttp.NewTransport(http.DefaultTransport)}, config.InternalAuthSecret)
+		virployeesUsecases.SetRuntimePlanner(runtimePlanner)
 	}
 	if config.ExecutionMode == "local" {
 		virployeesUsecases.RegisterExecutor("calendar.events.create", virployees.NewLocalCalendarExecutor(virployeesRepo))
