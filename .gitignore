@@ -10,3 +10,4 @@ coverage/
 *.log
 *.test
 vendor/
+docker-compose.override.yml
