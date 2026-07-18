@@ -49,6 +49,7 @@ func NewHandler(ucs UseCasesPort, options Options) *Handler {
 func (h *Handler) Routes(router gin.IRouter) {
 	router.Any("/capabilities", h.ForwardCompanion)
 	router.Any("/capabilities/*path", h.ForwardCompanion)
+	router.Any("/capability-stats", h.ForwardCompanion)
 	router.Any("/job-roles", h.ForwardCompanion)
 	router.Any("/job-roles/*path", h.ForwardCompanion)
 	router.Any("/profile-templates", h.ForwardCompanion)

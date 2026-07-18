@@ -14,10 +14,12 @@ import {
   type CapabilityInput,
   type CapabilityRiskClass,
   type CapabilitySideEffectClass,
+  type CapabilityStats,
   type VirployeeAutonomy,
   archiveCapability,
   createCapability,
   listCapabilities,
+  listCapabilityStats,
   purgeCapability,
   restoreCapability,
   trashCapability,
@@ -68,6 +70,38 @@ const CrudPage = PlatformCrudPage as unknown as <T extends { id: string }>(
   props: CrudPageProps<T>,
 ) => ReactElement
 
+// Capability row extended with pre-formatted stat cells (Fase 3). Computed at
+// fetch time so CrudColumn keys stay real row fields (keyof T constraint).
+type CapabilityRow = Capability & {
+  stats_activity: string
+  stats_executions: string
+  stats_success: string
+}
+
+function toCapabilityRows(capabilities: Capability[], stats: CapabilityStats[]): CapabilityRow[] {
+  const byKey = new Map(stats.map((item) => [item.capability_key, item]))
+  return capabilities.map((capability) => {
+    const item = byKey.get(capability.capability_key)
+    return {
+      ...capability,
+      stats_activity: item ? `${item.dry_runs} dry · ${item.gates} gate` : '—',
+      stats_executions: formatStatsExecutions(item),
+      stats_success: formatStatsSuccess(item),
+    }
+  })
+}
+
+function formatStatsExecutions(item?: CapabilityStats): string {
+  if (!item || (item.executions_succeeded === 0 && item.executions_failed === 0)) return '—'
+  return `${item.executions_succeeded} ok · ${item.executions_failed} fail`
+}
+
+function formatStatsSuccess(item?: CapabilityStats): string {
+  // success_rate -1 is the backend's "no finished executions" sentinel.
+  if (!item || item.success_rate < 0) return '—'
+  return `${Math.round(item.success_rate * 100)}%`
+}
+
 export function CapabilitiesPage({ tenantId, principalId }: CapabilitiesPageProps) {
   const rootRef = useRef<HTMLElement | null>(null)
   const [lifecycleView, setLifecycleView] = useState<CrudLifecycleView>('active')
@@ -83,8 +117,15 @@ export function CapabilitiesPage({ tenantId, principalId }: CapabilitiesPageProp
   const formFields = useMemo(() => capabilityFormFields(), [])
   const selectedRow = selectedIds.length === 1 ? selectedRowsById[selectedIds[0]] ?? null : null
 
-  const dataSource: NonNullable<CrudPageProps<Capability>['dataSource']> = useMemo(() => ({
-    list: () => isActive ? listCapabilities(lifecycleView, tenantId, principalId) : Promise.resolve([]),
+  const dataSource: NonNullable<CrudPageProps<CapabilityRow>['dataSource']> = useMemo(() => ({
+    list: () => {
+      if (!isActive) return Promise.resolve([])
+      // Stats degrade gracefully: a stats hiccup must not break the CRUD list.
+      return Promise.all([
+        listCapabilities(lifecycleView, tenantId, principalId),
+        listCapabilityStats(tenantId, principalId).catch(() => [] as CapabilityStats[]),
+      ]).then(([capabilities, stats]) => toCapabilityRows(capabilities, stats))
+    },
   }), [isActive, lifecycleView, principalId, tenantId])
 
   useEffect(() => {
@@ -259,7 +300,7 @@ export function CapabilitiesPage({ tenantId, principalId }: CapabilitiesPageProp
 
   return (
     <section ref={rootRef} className="page-section iam-control axis-crud-host capabilities-control">
-      <CrudPage<Capability>
+      <CrudPage<CapabilityRow>
         key={`capabilities-${tenantId}-${lifecycleView}-${reloadVersion}`}
         dataSource={dataSource}
         stringsBase={defaultCrudStrings}
@@ -467,13 +508,16 @@ function requiredAutonomyDefinition(value: string): {
 function capabilityColumns(
   selectedIds: string[],
   onToggle: (row: Capability, checked: boolean) => void,
-): CrudPageProps<Capability>['columns'] {
+): CrudPageProps<CapabilityRow>['columns'] {
   return [
-    selectionColumn<Capability>(selectedIds, onToggle),
+    selectionColumn<CapabilityRow>(selectedIds, onToggle),
     { key: 'capability_key', header: 'Key', className: 'iam-control__primary-col', ...crudPrimaryStickyColumn },
     { key: 'created_at', header: 'Created', className: 'iam-control__created-col', render: (value) => formatDateTime24(String(value ?? '')) },
     { key: 'name', header: 'Name' },
     { key: 'required_autonomy', header: 'Required autonomy', render: (value) => formatRequiredAutonomy(String(value ?? '')) },
+    { key: 'stats_activity', header: 'Activity' },
+    { key: 'stats_executions', header: 'Executions' },
+    { key: 'stats_success', header: 'Success' },
     { key: 'state', header: 'State', render: (value) => formatState(String(value ?? '')) },
   ]
 }
