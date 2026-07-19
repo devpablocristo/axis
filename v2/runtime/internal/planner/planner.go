@@ -15,7 +15,7 @@ import (
 
 const (
 	proposeToolName = "propose_intent"
-	promptVersion   = "propose.v1"
+	promptVersion   = "propose.v2"
 )
 
 type Planner struct {
@@ -122,7 +122,9 @@ func buildSystemPrompt(req ProposeRequest) string {
 	b.WriteString("Classify the user's request into one of your assigned capabilities. ")
 	b.WriteString("Call ")
 	b.WriteString(proposeToolName)
-	b.WriteString(" with the capability_key that best matches, or empty when none applies. Do not invent keys.\n\nAssigned capabilities:\n")
+	b.WriteString(" with the capability_key that best matches. ")
+	b.WriteString("When the user asks for an operational task (create, change, find or look something up), pick the capability that best covers it even if the phrasing is loose, indirect, or includes extra conditions to resolve later; lower the confidence instead of refusing. ")
+	b.WriteString("Use an empty capability_key only for greetings, small talk, or requests unrelated to every assigned capability. Never invent a key.\n\nAssigned capabilities:\n")
 	for _, capability := range req.Capabilities {
 		b.WriteString("- ")
 		b.WriteString(capability.CapabilityKey)

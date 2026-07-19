@@ -1,5 +1,7 @@
 SHELL := /bin/bash
-DC := docker compose --project-directory $(CURDIR) -f $(CURDIR)/docker-compose.yml
+# Honor the local docker-compose.override.yml when present (compose only
+# auto-loads it without -f, and make targets pin -f explicitly).
+DC := docker compose --project-directory $(CURDIR) -f $(CURDIR)/docker-compose.yml $(if $(wildcard $(CURDIR)/docker-compose.override.yml),-f $(CURDIR)/docker-compose.override.yml,)
 
 .PHONY: up down seed-demo test-console-e2e test-approval-flow-e2e test-console-real-e2e test-e2e
 
