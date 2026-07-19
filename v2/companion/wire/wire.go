@@ -13,6 +13,7 @@ import (
 	"github.com/devpablocristo/companion-v2/internal/executionstats"
 	"github.com/devpablocristo/companion-v2/internal/infra/migrations"
 	"github.com/devpablocristo/companion-v2/internal/jobroles"
+	"github.com/devpablocristo/companion-v2/internal/learning"
 	"github.com/devpablocristo/companion-v2/internal/memories"
 	"github.com/devpablocristo/companion-v2/internal/nexusclient"
 	"github.com/devpablocristo/companion-v2/internal/profiletemplates"
@@ -121,6 +122,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	virployeesHandler := virployees.NewHandler(virployeesUsecases)
 	memoriesHandler := memories.NewHandler(memoriesUsecases)
 	executionStatsHandler := executionstats.NewHandler(executionstats.NewUseCases(executionstats.NewRepository(db.Pool())))
+	learningHandler := learning.NewHandler(learning.NewUseCases(learning.NewRepository(db.Pool())))
 
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
@@ -139,6 +141,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	virployeesHandler.Routes(api)
 	memoriesHandler.Routes(api)
 	executionStatsHandler.Routes(api)
+	learningHandler.Routes(api)
 
 	server := &http.Server{
 		Addr:    config.Addr(),
