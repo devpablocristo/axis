@@ -122,7 +122,9 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	virployeesHandler := virployees.NewHandler(virployeesUsecases)
 	memoriesHandler := memories.NewHandler(memoriesUsecases)
 	executionStatsHandler := executionstats.NewHandler(executionstats.NewUseCases(executionstats.NewRepository(db.Pool())))
-	learningHandler := learning.NewHandler(learning.NewUseCases(learning.NewRepository(db.Pool())))
+	learningUsecases := learning.NewUseCases(learning.NewRepository(db.Pool()))
+	learningUsecases.SetMinExecutions(config.LearningMinExecutions)
+	learningHandler := learning.NewHandler(learningUsecases)
 
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()

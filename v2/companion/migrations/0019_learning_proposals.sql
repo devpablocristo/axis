@@ -17,6 +17,10 @@ CREATE TABLE companion_learning_proposals (
     source_trace_ids jsonb NOT NULL DEFAULT '[]'::jsonb,
     status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'dismissed')),
     proposed_by text NOT NULL DEFAULT 'analyzer' CHECK (proposed_by IN ('analyzer', 'llm')),
+    -- Typed watermark: successful executions seen at proposal time. After a
+    -- dismissal the analyzer only re-proposes when the live count exceeds this
+    -- value, so a human dismissal cannot be resurrected without new evidence.
+    succeeded_watermark bigint NOT NULL DEFAULT 0,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT companion_learning_proposals_key_format_check CHECK (
@@ -32,3 +36,8 @@ CREATE UNIQUE INDEX companion_learning_proposals_pending_uq
 
 CREATE INDEX companion_learning_proposals_list_idx
     ON companion_learning_proposals (tenant_id, status, created_at DESC, id DESC);
+
+-- Serves the analyzer's latest-proposal-per-pair lookup and per-virployee
+-- listings without falling back to a tenant-wide filter-and-sort.
+CREATE INDEX companion_learning_proposals_pair_idx
+    ON companion_learning_proposals (tenant_id, virployee_id, capability_key, created_at DESC, id DESC);

@@ -37,29 +37,35 @@ type Proposal struct {
 	SourceTraceIDs []string       `json:"source_trace_ids"`
 	Status         string         `json:"status"`
 	ProposedBy     string         `json:"proposed_by"`
-	CreatedAt      time.Time      `json:"created_at"`
-	UpdatedAt      time.Time      `json:"updated_at"`
+	// SucceededWatermark is the successful-execution count observed when the
+	// proposal was filed; the analyzer's dismissed-re-proposal rule compares
+	// against it (typed here, never recovered from the evidence JSON).
+	SucceededWatermark int64     `json:"succeeded_watermark"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
 }
 
 type CreateInput struct {
-	VirployeeID    uuid.UUID
-	CapabilityKey  string
-	Title          string
-	Content        string
-	Evidence       map[string]any
-	SourceTraceIDs []string
-	ProposedBy     string
+	VirployeeID        uuid.UUID
+	CapabilityKey      string
+	Title              string
+	Content            string
+	Evidence           map[string]any
+	SourceTraceIDs     []string
+	ProposedBy         string
+	SucceededWatermark int64
 }
 
 type NormalizedCreateInput struct {
-	VirployeeID    uuid.UUID
-	CapabilityKey  string
-	Title          string
-	Content        string
-	ContentHash    string
-	Evidence       map[string]any
-	SourceTraceIDs []string
-	ProposedBy     string
+	VirployeeID        uuid.UUID
+	CapabilityKey      string
+	Title              string
+	Content            string
+	ContentHash        string
+	Evidence           map[string]any
+	SourceTraceIDs     []string
+	ProposedBy         string
+	SucceededWatermark int64
 }
 
 var capabilityKeyPattern = regexp.MustCompile(`^[a-zñ]+\.[a-zñ]+\.[a-zñ]+$`)
@@ -100,15 +106,20 @@ func NormalizeCreateInput(in CreateInput) (NormalizedCreateInput, error) {
 			sources = append(sources, trimmed)
 		}
 	}
+	watermark := in.SucceededWatermark
+	if watermark < 0 {
+		watermark = 0
+	}
 	return NormalizedCreateInput{
-		VirployeeID:    in.VirployeeID,
-		CapabilityKey:  key,
-		Title:          title,
-		Content:        content,
-		ContentHash:    memories.ContentHash(content),
-		Evidence:       evidence,
-		SourceTraceIDs: sources,
-		ProposedBy:     proposedBy,
+		VirployeeID:        in.VirployeeID,
+		CapabilityKey:      key,
+		Title:              title,
+		Content:            content,
+		ContentHash:        memories.ContentHash(content),
+		Evidence:           evidence,
+		SourceTraceIDs:     sources,
+		ProposedBy:         proposedBy,
+		SucceededWatermark: watermark,
 	}, nil
 }
 

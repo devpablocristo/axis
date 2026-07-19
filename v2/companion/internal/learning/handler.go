@@ -2,6 +2,8 @@ package learning
 
 import (
 	"context"
+	"errors"
+	"io"
 	"net/http"
 	"strings"
 
@@ -15,6 +17,7 @@ import (
 type UseCasesPort interface {
 	List(ctx context.Context, tenantID, statusFilter string, virployeeID *uuid.UUID) ([]Proposal, error)
 	Get(ctx context.Context, tenantID string, id uuid.UUID) (Proposal, error)
+	Scan(ctx context.Context, tenantID string, minExecutions int) (ScanResult, error)
 }
 
 type Handler struct {
@@ -30,7 +33,31 @@ func (h *Handler) Routes(router gin.IRouter) {
 	{
 		group.GET("/proposals", h.List)
 		group.GET("/proposals/:proposal_id", h.Get)
+		group.POST("/scan", h.Scan)
 	}
+}
+
+// Scan triggers one analyzer pass for the tenant. min_executions is optional
+// and can only RAISE the configured threshold (the usecase clamps to the
+// configured floor); 0 or absent uses the default. The body guard mirrors the
+// sibling handlers: BFF-proxied requests arrive chunked (ContentLength -1)
+// and must still be bound.
+func (h *Handler) Scan(c *gin.Context) {
+	var req struct {
+		MinExecutions int `json:"min_executions"`
+	}
+	if c.Request.Body != nil && c.Request.ContentLength != 0 {
+		if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
+			ginmw.Respond(c, domainerr.Validation("invalid scan request"))
+			return
+		}
+	}
+	out, err := h.ucs.Scan(c.Request.Context(), tenantID(c), req.MinExecutions)
+	if err != nil {
+		ginmw.Respond(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, out)
 }
 
 func (h *Handler) List(c *gin.Context) {

@@ -22,7 +22,7 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 }
 
 const proposalColumns = `id::text, tenant_id, virployee_id::text, capability_key, title, content, content_hash,
-	evidence, source_trace_ids, status, proposed_by, created_at, updated_at`
+	evidence, source_trace_ids, status, proposed_by, succeeded_watermark, created_at, updated_at`
 
 func (r *Repository) Create(ctx context.Context, tenantID string, input NormalizedCreateInput) (Proposal, error) {
 	evidence, err := json.Marshal(input.Evidence)
@@ -37,12 +37,12 @@ func (r *Repository) Create(ctx context.Context, tenantID string, input Normaliz
 	row := r.pool.QueryRow(ctx, `
 		INSERT INTO companion_learning_proposals (
 			id, tenant_id, virployee_id, capability_key, title, content, content_hash,
-			evidence, source_trace_ids, status, proposed_by, created_at, updated_at
+			evidence, source_trace_ids, status, proposed_by, succeeded_watermark, created_at, updated_at
 		)
-		VALUES ($1::uuid, $2, $3::uuid, $4, $5, $6, $7, $8, $9, 'pending', $10, $11, $11)
+		VALUES ($1::uuid, $2, $3::uuid, $4, $5, $6, $7, $8, $9, 'pending', $10, $11, $12, $12)
 		RETURNING `+proposalColumns+`
 	`, uuid.New().String(), tenantID, input.VirployeeID.String(), input.CapabilityKey, input.Title,
-		input.Content, input.ContentHash, evidence, sources, input.ProposedBy, now)
+		input.Content, input.ContentHash, evidence, sources, input.ProposedBy, input.SucceededWatermark, now)
 	return scanProposal(row)
 }
 
@@ -84,19 +84,6 @@ func (r *Repository) Get(ctx context.Context, tenantID string, id uuid.UUID) (Pr
 	return scanProposal(row)
 }
 
-// HasPending reports whether an open proposal already exists for the
-// (virployee, capability) pair — the analyzer's idempotence check (PR2).
-func (r *Repository) HasPending(ctx context.Context, tenantID string, virployeeID uuid.UUID, capabilityKey string) (bool, error) {
-	var exists bool
-	err := r.pool.QueryRow(ctx, `
-		SELECT EXISTS (
-			SELECT 1 FROM companion_learning_proposals
-			WHERE tenant_id = $1 AND virployee_id = $2::uuid AND capability_key = $3 AND status = 'pending'
-		)
-	`, tenantID, virployeeID.String(), capabilityKey).Scan(&exists)
-	return exists, err
-}
-
 type scanner interface {
 	Scan(dest ...any) error
 }
@@ -107,7 +94,7 @@ func scanProposal(row scanner) (Proposal, error) {
 	var out Proposal
 	err := row.Scan(
 		&idText, &out.TenantID, &virployeeText, &out.CapabilityKey, &out.Title, &out.Content,
-		&out.ContentHash, &evidence, &sources, &out.Status, &out.ProposedBy, &out.CreatedAt, &out.UpdatedAt,
+		&out.ContentHash, &evidence, &sources, &out.Status, &out.ProposedBy, &out.SucceededWatermark, &out.CreatedAt, &out.UpdatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Proposal{}, domainerr.NotFound("learning proposal not found")
