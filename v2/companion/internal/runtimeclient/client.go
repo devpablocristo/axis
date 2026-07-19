@@ -109,11 +109,14 @@ func toProposal(resp proposeResponse) dryrun.Proposal {
 		MatchedBy:     []string{},
 		Rules:         []dryrun.IntentRule{},
 	}
+	// Provenance is stamped whenever the runtime answered — also on "no
+	// capability applies" — so the console never misattributes an LLM answer
+	// to the deterministic matcher.
+	intent.ProposedBy = "llm"
+	intent.ModelID = resp.Model
+	intent.PromptVersion = resp.PromptVersion
 	if intent.Matched {
 		intent.MatchedBy = []string{"runtime"}
-		intent.ProposedBy = "llm"
-		intent.ModelID = resp.Model
-		intent.PromptVersion = resp.PromptVersion
 	}
 	return dryrun.Proposal{
 		Intent:           intent,
