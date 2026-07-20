@@ -40,9 +40,15 @@ type Proposal struct {
 	// SucceededWatermark is the successful-execution count observed when the
 	// proposal was filed; the analyzer's dismissed-re-proposal rule compares
 	// against it (typed here, never recovered from the evidence JSON).
-	SucceededWatermark int64     `json:"succeeded_watermark"`
-	CreatedAt          time.Time `json:"created_at"`
-	UpdatedAt          time.Time `json:"updated_at"`
+	SucceededWatermark int64 `json:"succeeded_watermark"`
+	// DecidedBy/DecidedAt/MemoryID record the human decision (PR3). MemoryID is
+	// the procedure memory installed on accept (nil for pending/dismissed, or
+	// when an equivalent memory already existed).
+	DecidedBy string     `json:"decided_by,omitempty"`
+	DecidedAt *time.Time `json:"decided_at,omitempty"`
+	MemoryID  *uuid.UUID `json:"memory_id,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
 }
 
 type CreateInput struct {

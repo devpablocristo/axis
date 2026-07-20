@@ -2,6 +2,7 @@ package learning
 
 import (
 	"context"
+	"strings"
 
 	"github.com/devpablocristo/platform/errors/go/domainerr"
 	"github.com/google/uuid"
@@ -11,6 +12,8 @@ type RepositoryPort interface {
 	Create(ctx context.Context, tenantID string, input NormalizedCreateInput) (Proposal, error)
 	List(ctx context.Context, tenantID, status string, virployeeID *uuid.UUID) ([]Proposal, error)
 	Get(ctx context.Context, tenantID string, id uuid.UUID) (Proposal, error)
+	Decide(ctx context.Context, tenantID string, id uuid.UUID, status, decidedBy string, memoryID *uuid.UUID) (Proposal, error)
+	AttachMemory(ctx context.Context, tenantID string, id, memoryID uuid.UUID) (Proposal, error)
 	Candidates(ctx context.Context, tenantID string, minExecutions int) ([]Candidate, error)
 	LatestForPair(ctx context.Context, tenantID string, virployeeID uuid.UUID, capabilityKey string) (*Proposal, error)
 	SuccessfulExecutionTraceIDs(ctx context.Context, tenantID string, virployeeID uuid.UUID, capabilityKey string, limit int) ([]string, error)
@@ -19,11 +22,17 @@ type RepositoryPort interface {
 const (
 	defaultMinExecutions = 3
 	maxSourceTraceIDs    = 20
+	// DefaultActorID stamps decisions when the trusted actor header is absent
+	// (mirrors the sibling modules).
+	DefaultActorID = "system"
 )
 
 type UseCases struct {
 	repo          RepositoryPort
 	minExecutions int
+	capabilities  CapabilityChecker
+	memory        MemoryInstaller
+	authz         Authorizer
 }
 
 func NewUseCases(repo RepositoryPort) *UseCases {
@@ -36,6 +45,24 @@ func (u *UseCases) SetMinExecutions(n int) {
 	if n >= 1 {
 		u.minExecutions = n
 	}
+}
+
+// SetCapabilityChecker wires the eval's capability-existence gate.
+func (u *UseCases) SetCapabilityChecker(checker CapabilityChecker) {
+	u.capabilities = checker
+}
+
+// SetMemoryInstaller wires the write port used by Accept to install the
+// procedure memory. Without it, Accept fails closed (nothing is installed).
+func (u *UseCases) SetMemoryInstaller(installer MemoryInstaller) {
+	u.memory = installer
+}
+
+// SetAuthorizer wires the per-virployee role gate. Without it, Accept/Dismiss
+// fail closed — a decision that installs into (or discards for) a virployee
+// must be authorized exactly as a human memory write for that virployee.
+func (u *UseCases) SetAuthorizer(authz Authorizer) {
+	u.authz = authz
 }
 
 // Ingest files a proposal into the inbox as pending. It is the ONLY entry
@@ -59,6 +86,137 @@ func (u *UseCases) List(ctx context.Context, tenantID, statusFilter string, virp
 
 func (u *UseCases) Get(ctx context.Context, tenantID string, id uuid.UUID) (Proposal, error) {
 	return u.repo.Get(ctx, tenantID, id)
+}
+
+// AcceptResult carries the accepted proposal and the eval that gated it.
+type AcceptResult struct {
+	Proposal Proposal   `json:"proposal"`
+	Eval     EvalReport `json:"eval"`
+}
+
+// acceptedEvalReport is the report returned on the idempotent replay of an
+// already-accepted proposal: the gate demonstrably passed when it was first
+// accepted, so the replay must not report passed=false.
+func acceptedEvalReport() EvalReport {
+	return EvalReport{Passed: true, Checks: []EvalCheck{{Key: "already_accepted", Status: EvalPass, Reason: "proposal was previously accepted"}}}
+}
+
+// Accept runs the mandatory eval (G4.2) and, only if it passes, marks the
+// proposal accepted and installs it as a procedure memory (provenance=system).
+// This is the single path by which a learned procedure becomes memory, and it
+// is authorized exactly as a human memory write for the target virployee — the
+// agent can never take it (G4.3).
+//
+// The pending→accepted CLAIM happens before the install, so a concurrent
+// Dismiss (or a second Accept) can never leave a memory installed for a
+// proposal that ended dismissed, and only one caller ever installs. If the
+// install fails after the claim, the proposal stays accepted with no memory id
+// and a retry self-heals (the accepted branch re-installs). Idempotent.
+func (u *UseCases) Accept(ctx context.Context, tenantID string, id uuid.UUID, actor, role string) (AcceptResult, error) {
+	actor = orDefaultActor(actor)
+	// Fail closed before any mutation: without these the gate is not enforceable.
+	if u.memory == nil || u.authz == nil {
+		return AcceptResult{}, domainerr.Validation("learning accept is not fully configured")
+	}
+	proposal, err := u.repo.Get(ctx, tenantID, id)
+	if err != nil {
+		return AcceptResult{}, err
+	}
+	if err := u.authz.Authorize(ctx, tenantID, proposal.VirployeeID, actor, role); err != nil {
+		return AcceptResult{}, err
+	}
+
+	switch proposal.Status {
+	case StatusAccepted:
+		return u.ensureInstalled(ctx, tenantID, proposal, actor, acceptedEvalReport())
+	case StatusDismissed:
+		return AcceptResult{}, domainerr.Validation("cannot accept a dismissed proposal")
+	}
+
+	report, err := Evaluate(ctx, u.capabilities, proposal)
+	if err != nil {
+		return AcceptResult{}, err
+	}
+	if !report.Passed {
+		return AcceptResult{Eval: report}, domainerr.Validation("proposal failed evaluation: " + report.FirstFailure())
+	}
+
+	// Claim the transition first (atomic, single winner). Only the winner installs.
+	claimed, err := u.repo.Decide(ctx, tenantID, id, StatusAccepted, actor, nil)
+	if err != nil {
+		if domainerr.IsConflict(err) {
+			// Lost the race. Resolve against the latest state.
+			latest, gErr := u.repo.Get(ctx, tenantID, id)
+			if gErr != nil {
+				return AcceptResult{}, gErr
+			}
+			if latest.Status == StatusAccepted {
+				return u.ensureInstalled(ctx, tenantID, latest, actor, acceptedEvalReport())
+			}
+			return AcceptResult{}, domainerr.Conflict("proposal is no longer pending")
+		}
+		return AcceptResult{}, err
+	}
+	return u.ensureInstalled(ctx, tenantID, claimed, actor, report)
+}
+
+// ensureInstalled installs the procedure memory for an already-accepted
+// proposal and pins its id. It is idempotent: if the memory id is already
+// pinned it returns immediately, and a memory-dedup conflict is treated as
+// already-installed.
+func (u *UseCases) ensureInstalled(ctx context.Context, tenantID string, proposal Proposal, actor string, report EvalReport) (AcceptResult, error) {
+	if proposal.MemoryID != nil {
+		return AcceptResult{Proposal: proposal, Eval: report}, nil
+	}
+	source := "learning-proposal:" + proposal.ID.String()
+	memoryID, err := u.memory.InstallProcedure(ctx, tenantID, proposal.VirployeeID, actor, source, proposal.Title, proposal.Content)
+	if err != nil {
+		if domainerr.IsConflict(err) {
+			// An equivalent active memory already exists; treat as installed.
+			// Its id is unknown, so leave memory_id unset.
+			return AcceptResult{Proposal: proposal, Eval: report}, nil
+		}
+		// Claimed accepted but install failed transiently: a retry re-enters the
+		// accepted branch and self-heals.
+		return AcceptResult{Proposal: proposal, Eval: report}, err
+	}
+	if attached, aErr := u.repo.AttachMemory(ctx, tenantID, proposal.ID, memoryID); aErr == nil {
+		proposal = attached
+	} else {
+		proposal.MemoryID = &memoryID
+	}
+	return AcceptResult{Proposal: proposal, Eval: report}, nil
+}
+
+// Dismiss discards a pending proposal. Idempotent; an accepted proposal cannot
+// be dismissed (it is already a memory — dismissing would not remove it).
+// Authorized as a human memory decision for the target virployee.
+func (u *UseCases) Dismiss(ctx context.Context, tenantID string, id uuid.UUID, actor, role string) (Proposal, error) {
+	actor = orDefaultActor(actor)
+	if u.authz == nil {
+		return Proposal{}, domainerr.Validation("learning dismiss is not fully configured")
+	}
+	proposal, err := u.repo.Get(ctx, tenantID, id)
+	if err != nil {
+		return Proposal{}, err
+	}
+	if err := u.authz.Authorize(ctx, tenantID, proposal.VirployeeID, actor, role); err != nil {
+		return Proposal{}, err
+	}
+	switch proposal.Status {
+	case StatusDismissed:
+		return proposal, nil
+	case StatusAccepted:
+		return Proposal{}, domainerr.Validation("cannot dismiss an accepted proposal")
+	}
+	return u.repo.Decide(ctx, tenantID, id, StatusDismissed, actor, nil)
+}
+
+func orDefaultActor(actor string) string {
+	if actor = strings.TrimSpace(actor); actor != "" {
+		return actor
+	}
+	return DefaultActorID
 }
 
 // ProposalRef is a slim pointer to a filed proposal; the inbox List endpoint

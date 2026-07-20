@@ -79,6 +79,12 @@ func (f *fakeLearningRepo) Candidates(_ context.Context, _ string, minExecutions
 func (f *fakeLearningRepo) LatestForPair(_ context.Context, _ string, virployeeID uuid.UUID, capabilityKey string) (*Proposal, error) {
 	return f.latest[virployeeID.String()+"|"+capabilityKey], nil
 }
+func (f *fakeLearningRepo) Decide(context.Context, string, uuid.UUID, string, string, *uuid.UUID) (Proposal, error) {
+	return Proposal{}, nil
+}
+func (f *fakeLearningRepo) AttachMemory(context.Context, string, uuid.UUID, uuid.UUID) (Proposal, error) {
+	return Proposal{}, nil
+}
 func (f *fakeLearningRepo) SuccessfulExecutionTraceIDs(context.Context, string, uuid.UUID, string, int) ([]string, error) {
 	return []string{"trace-a", "trace-b"}, nil
 }

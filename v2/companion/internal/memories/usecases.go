@@ -16,6 +16,13 @@ func NewUseCases(repo *Repository) *UseCases { return &UseCases{repo: repo} }
 func (u *UseCases) authorize(ctx context.Context, tenant string, virployee uuid.UUID, actor, role string) error {
 	return u.repo.Authorized(ctx, strings.TrimSpace(tenant), virployee, strings.TrimSpace(actor), strings.ToLower(strings.TrimSpace(role)))
 }
+
+// Authorize exposes the same per-virployee role gate the human write paths use
+// (owner/admin, or the assigned supervisor), so other modules that install
+// memories on a human's behalf (e.g. learning's accept) enforce it too.
+func (u *UseCases) Authorize(ctx context.Context, tenant string, virployee uuid.UUID, actor, role string) error {
+	return u.authorize(ctx, tenant, virployee, actor, role)
+}
 func (u *UseCases) Create(ctx context.Context, tenant string, virployee uuid.UUID, actor, role string, in CreateInput) (Memory, error) {
 	if err := u.authorize(ctx, tenant, virployee, actor, role); err != nil {
 		return Memory{}, err

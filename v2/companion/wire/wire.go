@@ -124,6 +124,9 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	executionStatsHandler := executionstats.NewHandler(executionstats.NewUseCases(executionstats.NewRepository(db.Pool())))
 	learningUsecases := learning.NewUseCases(learning.NewRepository(db.Pool()))
 	learningUsecases.SetMinExecutions(config.LearningMinExecutions)
+	learningUsecases.SetCapabilityChecker(learning.NewCapabilityChecker(capabilitiesUsecases))
+	learningUsecases.SetMemoryInstaller(learning.NewMemoriesInstaller(memoriesUsecases))
+	learningUsecases.SetAuthorizer(memoriesUsecases)
 	learningHandler := learning.NewHandler(learningUsecases)
 
 	gin.SetMode(gin.ReleaseMode)

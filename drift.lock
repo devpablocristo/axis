@@ -33,7 +33,7 @@ sig = "aab016c89edd13e5"
 [[bindings]]
 doc = "v2/docs/axis-os.md"
 target = "v2/companion/wire/wire.go"
-sig = "6260fd8c165d21c0"
+sig = "fddbd848dd1fb4b9"
 
 [[bindings]]
 doc = "v2/docs/axis-os.md"
