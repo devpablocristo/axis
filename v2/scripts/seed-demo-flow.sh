@@ -176,28 +176,46 @@ ensure_capability() {
   local key="$1"
   local name="$2"
   local autonomy="$3"
-  local list id payload
+  local risk="$4"
+  local side_effect="$5"
+  local requires_approval="$6"
+  local evidence="$7"
+  local rollback_key="$8"
+  local list id create_payload update_payload
 
-  list="$(api GET "/api/capabilities")"
-  id="$(jq -r --arg key "$key" '.data[]? | select(.capability_key == $key) | .id' <<<"$list" | head -n 1)"
-  if [[ -n "$id" ]]; then
-    echo "$id"
-    return
-  fi
-
-  payload="$(
+  create_payload="$(
     jq -n \
       --arg key "$key" \
       --arg name "$name" \
       --arg autonomy "$autonomy" \
+      --arg risk "$risk" \
+      --arg side "$side_effect" \
+      --argjson approval "$requires_approval" \
+      --argjson evidence "$evidence" \
+      --arg rollback "$rollback_key" \
       '{
         capability_key: $key,
         name: $name,
         description: "Demo approval flow capability",
-        required_autonomy: $autonomy
+        required_autonomy: $autonomy,
+        risk_class: $risk,
+        side_effect_class: $side,
+        requires_nexus_approval: $approval,
+        evidence_required: $evidence,
+        rollback_capability_key: $rollback
       }'
   )"
-  api POST "/api/capabilities" "$payload" | jq -r '.id'
+
+  list="$(api GET "/api/capabilities")"
+  id="$(jq -r --arg key "$key" '.data[]? | select(.capability_key == $key) | .id' <<<"$list" | head -n 1)"
+  if [[ -n "$id" ]]; then
+    # Upsert the governance contract on re-runs (capabilities are not purged).
+    update_payload="$(jq 'del(.capability_key)' <<<"$create_payload")"
+    api PUT "/api/capabilities/$id" "$update_payload" >/dev/null
+    echo "$id"
+    return
+  fi
+  api POST "/api/capabilities" "$create_payload" | jq -r '.id'
 }
 
 ensure_job_role() {
@@ -247,6 +265,7 @@ ensure_virployee() {
   local profile_template_id="$2"
   local read_capability_id="$3"
   local create_capability_id="$4"
+  local delete_capability_id="$5"
   local list id payload
 
   payload="$(
@@ -257,11 +276,12 @@ ensure_virployee() {
       --arg supervisorUserID "$PRINCIPAL_ID" \
       --arg readCapabilityID "$read_capability_id" \
       --arg createCapabilityID "$create_capability_id" \
+      --arg deleteCapabilityID "$delete_capability_id" \
       '{
         name: $name,
         job_role_id: $jobRoleID,
         profile_template_id: $profileTemplateID,
-        capability_ids: [$readCapabilityID, $createCapabilityID],
+        capability_ids: [$readCapabilityID, $createCapabilityID, $deleteCapabilityID],
         description: "Demo approval flow virployee",
         supervisor_user_id: $supervisorUserID,
         autonomy: "A3"
@@ -332,12 +352,17 @@ fi
 
 read_action_id="$(ensure_action_type "calendar.events.read" "Read calendar events" "low" "true")"
 create_action_id="$(ensure_action_type "calendar.events.create" "Create calendar events" "high" "true")"
+delete_action_id="$(ensure_action_type "calendar.events.delete" "Delete calendar events" "high" "true")"
 
-read_capability_id="$(ensure_capability "calendar.events.read" "Read calendar events" "A1")"
-create_capability_id="$(ensure_capability "calendar.events.create" "Create calendar events" "A2")"
+# calendar.events.delete is the compensation (rollback) for create, so it is
+# created first and referenced by the create capability's rollback_capability_key.
+# create/delete are write actions that require human approval (F6, G3.4/G3.5).
+read_capability_id="$(ensure_capability "calendar.events.read" "Read calendar events" "A1" "low" "read" "false" "false" "")"
+delete_capability_id="$(ensure_capability "calendar.events.delete" "Delete calendar events" "A3" "high" "write" "true" "true" "")"
+create_capability_id="$(ensure_capability "calendar.events.create" "Create calendar events" "A2" "high" "write" "true" "true" "calendar.events.delete")"
 job_role_id="$(ensure_job_role)"
 profile_template_id="$(ensure_profile_template)"
-virployee_id="$(ensure_virployee "$job_role_id" "$profile_template_id" "$read_capability_id" "$create_capability_id")"
+virployee_id="$(ensure_virployee "$job_role_id" "$profile_template_id" "$read_capability_id" "$create_capability_id" "$delete_capability_id")"
 
 read_input="Que reuniones tengo manana"
 create_input="Agenda una reunion \"$DEMO_TITLE\" manana a las 15 con ana@example.com"
@@ -370,6 +395,10 @@ org_id=$ORG_ID
 principal_id=$PRINCIPAL_ID
 read_action_id=$read_action_id
 create_action_id=$create_action_id
+delete_action_id=$delete_action_id
+read_capability_id=$read_capability_id
+create_capability_id=$create_capability_id
+delete_capability_id=$delete_capability_id
 virployee_name=$DEMO_VIRPLOYEE_NAME
 virployee_id=$virployee_id
 approval_id=$approval_id
