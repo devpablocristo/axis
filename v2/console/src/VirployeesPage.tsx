@@ -177,7 +177,10 @@ export function VirployeesPage({
   const [editSaving, setEditSaving] = useState(false)
   const [editError, setEditError] = useState('')
 	const [memoryRow, setMemoryRow] = useState<Virployee | null>(null)
-  const isActive = Boolean(tenantId && principalId)
+  // Gate on tenant only: the browser's principalId is not authoritative (the BFF
+  // overwrites X-Actor-ID from the resolved session), and gating on it made the
+  // lifecycle actions silently no-op when it was momentarily empty.
+  const isActive = Boolean(tenantId)
   const jobRoleByID = useMemo(() => {
     return new Map(jobRoles.map((jobRole) => [jobRole.id, jobRole]))
   }, [jobRoles])

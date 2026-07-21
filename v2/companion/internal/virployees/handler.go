@@ -69,6 +69,8 @@ func (h *Handler) Routes(router gin.IRouter) {
 		group.POST("/:virployee_id/unarchive", h.Unarchive)
 		group.POST("/:virployee_id/trash", h.Trash)
 		group.POST("/:virployee_id/"+paths.SegmentRestore, h.Restore)
+		// POST alongside DELETE: browser ad blockers silently drop DELETE requests.
+		group.POST("/:virployee_id/purge", h.Purge)
 		group.DELETE("/:virployee_id/purge", h.Purge)
 	}
 }

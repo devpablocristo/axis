@@ -881,8 +881,9 @@ export function restoreVirployee(id: string, tenantId: string, principalId: stri
 }
 
 export function purgeVirployee(id: string, tenantId: string, principalId: string): Promise<void> {
+  // POST, not DELETE: browser extensions (ad blockers) silently block DELETE.
   return axisFetch<void>(`/api/virployees/${encodeURIComponent(id)}/purge`, {
-    method: 'DELETE',
+    method: 'POST',
     tenantId,
     principalId,
   })
