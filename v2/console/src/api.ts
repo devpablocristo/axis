@@ -967,6 +967,113 @@ export function listCapabilityStats(tenantId: string, principalId: string): Prom
   )
 }
 
+// --- Fase 4: procedural-learning proposals (the review queue) ---
+
+export type LearningProposalStatus = 'pending' | 'accepted' | 'dismissed'
+
+export type LearningProposal = {
+  id: string
+  tenant_id: string
+  virployee_id: string
+  capability_key: string
+  title: string
+  content: string
+  content_hash: string
+  evidence: Record<string, unknown>
+  source_trace_ids: string[]
+  status: LearningProposalStatus
+  proposed_by: 'analyzer' | 'llm'
+  succeeded_watermark: number
+  decided_by?: string
+  decided_at?: string | null
+  memory_id?: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type LearningEvalCheck = {
+  key: string
+  status: 'pass' | 'blocked'
+  reason: string
+}
+
+export type LearningEvalReport = {
+  passed: boolean
+  checks: LearningEvalCheck[]
+}
+
+export type LearningAcceptResult = {
+  proposal: LearningProposal
+  eval: LearningEvalReport
+}
+
+export type LearningScanResult = {
+  threshold: number
+  candidates: number
+  proposed: number
+  skipped: number
+  proposals: Array<{ id: string; virployee_id: string; capability_key: string; title: string }>
+}
+
+export function listLearningProposals(
+  tenantId: string,
+  principalId: string,
+  status: LearningProposalStatus = 'pending',
+  virployeeId?: string,
+): Promise<LearningProposal[]> {
+  const params = new URLSearchParams()
+  params.set('status', status)
+  if (virployeeId) {
+    params.set('virployee_id', virployeeId)
+  }
+  return axisFetch<{ data: LearningProposal[] }>(`/api/learning/proposals?${params.toString()}`, {
+    tenantId,
+    principalId,
+  }).then((payload) => payload.data ?? [])
+}
+
+export function getLearningProposal(id: string, tenantId: string, principalId: string): Promise<LearningProposal> {
+  return axisFetch<LearningProposal>(`/api/learning/proposals/${encodeURIComponent(id)}`, {
+    tenantId,
+    principalId,
+  })
+}
+
+export function acceptLearningProposal(
+  id: string,
+  tenantId: string,
+  principalId: string,
+): Promise<LearningAcceptResult> {
+  return axisFetch<LearningAcceptResult>(`/api/learning/proposals/${encodeURIComponent(id)}/accept`, {
+    method: 'POST',
+    tenantId,
+    principalId,
+    body: {},
+  })
+}
+
+export function dismissLearningProposal(
+  id: string,
+  tenantId: string,
+  principalId: string,
+): Promise<LearningProposal> {
+  return axisFetch<LearningProposal>(`/api/learning/proposals/${encodeURIComponent(id)}/dismiss`, {
+    method: 'POST',
+    tenantId,
+    principalId,
+    body: {},
+  })
+}
+
+export function scanLearning(tenantId: string, principalId: string): Promise<LearningScanResult> {
+  return axisFetch<LearningScanResult>('/api/learning/scan', {
+    method: 'POST',
+    tenantId,
+    principalId,
+    body: {},
+  })
+}
+
 export function listCapabilities(
   lifecycle: 'active' | 'archived' | 'trash',
   tenantId: string,

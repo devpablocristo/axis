@@ -41,6 +41,9 @@ func (r *Repository) TraceRows(ctx context.Context, tenantID string) ([]TraceRow
 	return out, rows.Err()
 }
 
+// KEEP IN SYNC: learning.Repository.Candidates counts successful executions
+// with this same predicate (attempts JOIN prepared_actions, status
+// 'succeeded'); change both together.
 func (r *Repository) ExecutionRows(ctx context.Context, tenantID string) ([]ExecutionRow, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT pa.capability_key, ea.status, count(*)

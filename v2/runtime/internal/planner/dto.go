@@ -42,3 +42,24 @@ type ProposedIntent struct {
 	RequiredAutonomy string  `json:"required_autonomy,omitempty"`
 	Confidence       float64 `json:"confidence,omitempty"`
 }
+
+// EnrichRequest is what Companion sends to improve the WORDING of a distilled
+// procedure before it is filed as a proposal. It carries only the structural,
+// already-PII-free distilled text plus the capability_key and job role — never
+// draft values or memory content.
+type EnrichRequest struct {
+	CapabilityKey string `json:"capability_key"`
+	Title         string `json:"title"`
+	Content       string `json:"content"`
+}
+
+// EnrichResponse returns the rewritten text. Enriched is true only when the
+// model actually produced a usable rewrite; with Echo (no credentials) it is
+// false and Companion keeps the deterministic distillation.
+type EnrichResponse struct {
+	Title         string `json:"title"`
+	Content       string `json:"content"`
+	Enriched      bool   `json:"enriched"`
+	Model         string `json:"model,omitempty"`
+	PromptVersion string `json:"prompt_version,omitempty"`
+}

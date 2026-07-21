@@ -1,7 +1,8 @@
-import { Bot, BriefcaseBusiness, ClipboardCheck, RefreshCw, Settings, ShieldCheck, SlidersHorizontal, Wrench } from 'lucide-react'
+import { Bot, BriefcaseBusiness, ClipboardCheck, GraduationCap, RefreshCw, Settings, ShieldCheck, SlidersHorizontal, Wrench } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { ApprovalsPage } from './ApprovalsPage'
 import { CapabilitiesPage } from './CapabilitiesPage'
+import { LearningProposalsPage } from './LearningProposalsPage'
 import { JobRolesPage } from './JobRolesPage'
 import { ProfileTemplatesPage } from './ProfileTemplatesPage'
 import { TenancyPage } from './TenancyPage'
@@ -131,6 +132,14 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
             <ClipboardCheck aria-hidden="true" />
             Approvals
           </button>
+          <button
+            type="button"
+            className={activePage === 'learning-proposals' ? 'active' : ''}
+            onClick={() => setActivePage('learning-proposals')}
+          >
+            <GraduationCap aria-hidden="true" />
+            Learning
+          </button>
           <span className="nav-section-label nav-section-label--builder">Builder</span>
           <button
             type="button"
@@ -227,6 +236,8 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
           <JobRolesPage tenantId={selectedTenant.id} principalId={principalId} />
         ) : activePage === 'capabilities' ? (
           <CapabilitiesPage tenantId={selectedTenant.id} principalId={principalId} />
+        ) : activePage === 'learning-proposals' ? (
+          <LearningProposalsPage tenantId={selectedTenant.id} principalId={principalId} />
         ) : activePage === 'profile-templates' ? (
           <ProfileTemplatesPage tenantId={selectedTenant.id} principalId={principalId} />
         ) : activePage === 'approvals' ? (
@@ -264,7 +275,7 @@ function unique(values: string[]): string[] {
   return Array.from(new Set(values.filter(Boolean))).sort((left, right) => left.localeCompare(right))
 }
 
-type Page = 'virployees' | 'job-roles' | 'capabilities' | 'profile-templates' | 'approvals' | 'admin'
+type Page = 'virployees' | 'job-roles' | 'capabilities' | 'learning-proposals' | 'profile-templates' | 'approvals' | 'admin'
 
 type ApprovalReviewContext = {
   approvalId: string
@@ -274,6 +285,7 @@ type ApprovalReviewContext = {
 function pageTitle(page: Page): string {
   if (page === 'job-roles') return 'Job Roles'
   if (page === 'capabilities') return 'Capabilities'
+  if (page === 'learning-proposals') return 'Learning'
   if (page === 'profile-templates') return 'Profile Templates'
   if (page === 'approvals') return 'Approvals'
   if (page === 'admin') return 'Admin'

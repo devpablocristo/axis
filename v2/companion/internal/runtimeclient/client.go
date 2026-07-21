@@ -75,6 +75,66 @@ func (c *Client) Propose(ctx context.Context, input string, rc runtimecontext.Co
 	return toProposal(out), nil
 }
 
+// EnrichRequest carries the deterministic distilled procedure text to be
+// reworded by the LLM. Only structural, PII-free fields — never draft values.
+type EnrichRequest struct {
+	CapabilityKey string
+	Title         string
+	Content       string
+}
+
+// EnrichResult is the reworded procedure. Enriched is false when the runtime
+// could not improve it (e.g. Echo/no model); the caller then keeps the
+// deterministic text.
+type EnrichResult struct {
+	Title         string
+	Content       string
+	Enriched      bool
+	ModelID       string
+	PromptVersion string
+}
+
+// Enrich asks the runtime to improve the wording of a distilled procedure.
+func (c *Client) Enrich(ctx context.Context, in EnrichRequest) (EnrichResult, error) {
+	raw, err := json.Marshal(enrichRequest{
+		CapabilityKey: in.CapabilityKey,
+		Title:         in.Title,
+		Content:       in.Content,
+	})
+	if err != nil {
+		return EnrichResult{}, fmt.Errorf("encode enrich request: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/enrich", bytes.NewReader(raw))
+	if err != nil {
+		return EnrichResult{}, fmt.Errorf("build enrich request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if c.internalAuthSecret != "" {
+		req.Header.Set("X-Axis-Internal-Token", c.internalAuthSecret)
+	}
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return EnrichResult{}, fmt.Errorf("enrich: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return EnrichResult{}, fmt.Errorf("enrich: status %d", resp.StatusCode)
+	}
+
+	var out enrichResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return EnrichResult{}, fmt.Errorf("decode enrich response: %w", err)
+	}
+	return EnrichResult{
+		Title:         out.Title,
+		Content:       out.Content,
+		Enriched:      out.Enriched,
+		ModelID:       out.Model,
+		PromptVersion: out.PromptVersion,
+	}, nil
+}
+
 func capabilitiesFrom(items []capabilitydomain.Capability) []capabilityInfo {
 	out := make([]capabilityInfo, 0, len(items))
 	for _, item := range items {
@@ -160,4 +220,18 @@ type proposedIntent struct {
 	Action           string  `json:"action,omitempty"`
 	RequiredAutonomy string  `json:"required_autonomy,omitempty"`
 	Confidence       float64 `json:"confidence,omitempty"`
+}
+
+type enrichRequest struct {
+	CapabilityKey string `json:"capability_key"`
+	Title         string `json:"title"`
+	Content       string `json:"content"`
+}
+
+type enrichResponse struct {
+	Title         string `json:"title"`
+	Content       string `json:"content"`
+	Enriched      bool   `json:"enriched"`
+	Model         string `json:"model,omitempty"`
+	PromptVersion string `json:"prompt_version,omitempty"`
 }

@@ -2062,6 +2062,28 @@ tbody tr:focus-within {
   background: color-mix(in srgb, var(--axis-danger) 10%, transparent);
 }
 
+.virployee-memory__badge--system {
+  color: var(--axis-accent, #2563eb);
+  background: color-mix(in srgb, var(--axis-accent, #2563eb) 12%, transparent);
+}
+
+.learning-proposals__intro {
+  flex: 1 1 auto;
+  margin: 0;
+  color: var(--axis-text-muted, #64748b);
+  font-size: 13px;
+}
+
+.learning-proposals__notice {
+  margin: 0 0 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  color: var(--axis-success, #16a34a);
+  background: color-mix(in srgb, var(--axis-success, #16a34a) 10%, transparent);
+  font-size: 13px;
+  font-weight: 600;
+}
+
 .virployee-memory__row-actions {
   flex-wrap: nowrap;
 }

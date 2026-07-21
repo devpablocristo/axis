@@ -16,6 +16,9 @@ import (
 const (
 	proposeToolName = "propose_intent"
 	promptVersion   = "propose.v2"
+
+	enrichToolName      = "rewrite_procedure"
+	enrichPromptVersion = "enrich.v1"
 )
 
 type Planner struct {
@@ -54,6 +57,127 @@ func (p *Planner) Propose(ctx context.Context, req ProposeRequest) (ProposeRespo
 	}
 
 	return ProposeResponse{Intent: interpret(resp, req.Capabilities), Model: p.model, PromptVersion: promptVersion}, nil
+}
+
+// Enrich rewrites the wording of a distilled procedure to be clearer, without
+// changing its meaning. It never decides anything and never invents steps the
+// procedure does not imply — Companion re-validates the output and a human
+// still accepts it. With Echo (no model) the structured output does not parse,
+// so Enriched is false and the original text is returned unchanged (the safe
+// default: Companion then keeps the deterministic distillation).
+func (p *Planner) Enrich(ctx context.Context, req EnrichRequest) (EnrichResponse, error) {
+	original := EnrichResponse{
+		Title:         req.Title,
+		Content:       req.Content,
+		Enriched:      false,
+		Model:         p.model,
+		PromptVersion: enrichPromptVersion,
+	}
+	if strings.TrimSpace(req.Title) == "" || strings.TrimSpace(req.Content) == "" {
+		return original, nil
+	}
+	// Defense in depth: the distilled text is our own structural output, but the
+	// same injection guard as Propose keeps a poisoned distillation from steering
+	// the rewrite.
+	if looksAdversarial(req.Title) || looksAdversarial(req.Content) {
+		return original, nil
+	}
+
+	resp, err := p.provider.Chat(ctx, ai.ChatRequest{
+		SystemPrompt:   buildEnrichSystemPrompt(req),
+		Messages:       []ai.Message{{Role: "user", Content: "Title: " + req.Title + "\n\nProcedure:\n" + req.Content}},
+		Tools:          []ai.Tool{buildEnrichTool()},
+		ResponseSchema: enrichSchema(),
+		MaxTokens:      2048,
+	})
+	if err != nil {
+		return EnrichResponse{}, err
+	}
+
+	title, content, ok := interpretEnrich(resp)
+	if !ok {
+		return original, nil
+	}
+	return EnrichResponse{
+		Title:         title,
+		Content:       content,
+		Enriched:      true,
+		Model:         p.model,
+		PromptVersion: enrichPromptVersion,
+	}, nil
+}
+
+func enrichSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"title": map[string]any{
+				"type":        "string",
+				"description": "A concise, clear title for the procedure.",
+			},
+			"content": map[string]any{
+				"type":        "string",
+				"description": "The rewritten procedure: clear, ordered steps. Same meaning, better wording.",
+			},
+		},
+		"required": []string{"title", "content"},
+	}
+}
+
+func buildEnrichTool() ai.Tool {
+	return ai.Tool{
+		Name:        enrichToolName,
+		Description: "Return an improved title and step-by-step wording for a learned procedure. Do not change what it does.",
+		Parameters:  enrichSchema(),
+	}
+}
+
+func buildEnrichSystemPrompt(req EnrichRequest) string {
+	var b strings.Builder
+	b.WriteString("You improve the WORDING of a learned operating procedure so a supervisor can read it quickly. ")
+	b.WriteString("Rewrite it as clear, ordered steps in the same language as the input. ")
+	b.WriteString("Keep the exact meaning: do NOT add, remove, or reorder actions, and do NOT invent details. ")
+	b.WriteString("The procedure is for the capability \"")
+	b.WriteString(req.CapabilityKey)
+	b.WriteString("\"; keep that capability_key referenced in the text. ")
+	b.WriteString("Never include secrets, credentials, emails, or any personal data. ")
+	b.WriteString("Call ")
+	b.WriteString(enrichToolName)
+	b.WriteString(" with the improved title and content.")
+	return b.String()
+}
+
+func interpretEnrich(resp ai.ChatResponse) (title, content string, ok bool) {
+	for _, call := range resp.ToolCalls {
+		if call.Name != enrichToolName {
+			continue
+		}
+		if t, c, valid := enrichFromArgs(call.Args); valid {
+			return t, c, true
+		}
+	}
+	if text := stripCodeFences(resp.Text); text != "" {
+		if t, c, valid := enrichFromArgs([]byte(text)); valid {
+			return t, c, true
+		}
+	}
+	return "", "", false
+}
+
+func enrichFromArgs(raw []byte) (title, content string, ok bool) {
+	var args struct {
+		Title   string `json:"title"`
+		Content string `json:"content"`
+	}
+	if err := json.Unmarshal(raw, &args); err != nil {
+		return "", "", false
+	}
+	title = strings.TrimSpace(args.Title)
+	content = strings.TrimSpace(args.Content)
+	if title == "" || content == "" {
+		return "", "", false
+	}
+	return title, content, true
 }
 
 // looksAdversarial flags obvious prompt-injection attempts in the user input.

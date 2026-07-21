@@ -69,3 +69,47 @@ func TestProposeErrorsOnNonOKStatus(t *testing.T) {
 		t.Fatal("expected an error on a non-200 status")
 	}
 }
+
+func TestEnrichMapsResponseAndForwardsToken(t *testing.T) {
+	var gotToken, gotPath string
+	var gotBody enrichRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotToken = r.Header.Get("X-Axis-Internal-Token")
+		gotPath = r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		_ = json.NewEncoder(w).Encode(enrichResponse{
+			Title: "Agendar reunión", Content: "1. Confirmar. 2. Ejecutar.",
+			Enriched: true, Model: "gemini-x", PromptVersion: "enrich.v1",
+		})
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, srv.Client(), "secret-token")
+	out, err := client.Enrich(context.Background(), EnrichRequest{
+		CapabilityKey: "calendar.events.create", Title: "T", Content: "C",
+	})
+	if err != nil {
+		t.Fatalf("Enrich: %v", err)
+	}
+	if gotToken != "secret-token" || gotPath != "/v1/enrich" {
+		t.Fatalf("unexpected token/path: %q %q", gotToken, gotPath)
+	}
+	if gotBody.CapabilityKey != "calendar.events.create" || gotBody.Title != "T" {
+		t.Fatalf("unexpected request body: %+v", gotBody)
+	}
+	if !out.Enriched || out.Title != "Agendar reunión" || out.ModelID != "gemini-x" || out.PromptVersion != "enrich.v1" {
+		t.Fatalf("unexpected enrich result: %+v", out)
+	}
+}
+
+func TestEnrichErrorsOnNonOKStatus(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, srv.Client(), "")
+	if _, err := client.Enrich(context.Background(), EnrichRequest{Title: "T", Content: "C"}); err == nil {
+		t.Fatal("expected an error on a non-200 status")
+	}
+}

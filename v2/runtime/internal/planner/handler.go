@@ -18,6 +18,7 @@ func NewHandler(planner *Planner) *Handler {
 
 func (h *Handler) Routes(router gin.IRouter) {
 	router.POST("/propose", h.Propose)
+	router.POST("/enrich", h.Enrich)
 }
 
 func (h *Handler) Propose(c *gin.Context) {
@@ -29,6 +30,20 @@ func (h *Handler) Propose(c *gin.Context) {
 	resp, err := h.planner.Propose(c.Request.Context(), req)
 	if err != nil {
 		ginmw.WriteError(c, http.StatusBadGateway, "runtime_error", "runtime proposal failed")
+		return
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+func (h *Handler) Enrich(c *gin.Context) {
+	var req EnrichRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		ginmw.WriteError(c, http.StatusBadRequest, "invalid_request", "invalid enrich request")
+		return
+	}
+	resp, err := h.planner.Enrich(c.Request.Context(), req)
+	if err != nil {
+		ginmw.WriteError(c, http.StatusBadGateway, "runtime_error", "runtime enrichment failed")
 		return
 	}
 	c.JSON(http.StatusOK, resp)
