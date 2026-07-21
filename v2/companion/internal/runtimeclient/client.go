@@ -135,6 +135,70 @@ func (c *Client) Enrich(ctx context.Context, in EnrichRequest) (EnrichResult, er
 	}, nil
 }
 
+// AnswerRequest carries the input data to be processed under the virployee's
+// system-prompt role, and an optional response schema for a structured answer.
+// It is the "process and respond" path (read/explain), not classification.
+type AnswerRequest struct {
+	SystemPrompt   string
+	JobRole        string
+	InputJSON      json.RawMessage
+	ResponseSchema map[string]any
+}
+
+// AnswerResult is the runtime's answer. Answered is false when the model did not
+// produce a usable answer (e.g. Echo / no model configured); the caller then
+// marks the run as degraded rather than treating the canned text as a real answer.
+type AnswerResult struct {
+	OutputText    string
+	OutputJSON    json.RawMessage
+	Answered      bool
+	ModelID       string
+	PromptVersion string
+}
+
+// Answer asks the runtime to process the input JSON and respond. A transport or
+// non-200 error is returned to the caller (fail-closed: no silent success).
+func (c *Client) Answer(ctx context.Context, in AnswerRequest) (AnswerResult, error) {
+	raw, err := json.Marshal(answerRequest{
+		SystemPrompt:   in.SystemPrompt,
+		JobRole:        in.JobRole,
+		InputJSON:      in.InputJSON,
+		ResponseSchema: in.ResponseSchema,
+	})
+	if err != nil {
+		return AnswerResult{}, fmt.Errorf("encode answer request: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/answer", bytes.NewReader(raw))
+	if err != nil {
+		return AnswerResult{}, fmt.Errorf("build answer request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if c.internalAuthSecret != "" {
+		req.Header.Set("X-Axis-Internal-Token", c.internalAuthSecret)
+	}
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return AnswerResult{}, fmt.Errorf("answer: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return AnswerResult{}, fmt.Errorf("answer: status %d", resp.StatusCode)
+	}
+
+	var out answerResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return AnswerResult{}, fmt.Errorf("decode answer response: %w", err)
+	}
+	return AnswerResult{
+		OutputText:    out.OutputText,
+		OutputJSON:    out.OutputJSON,
+		Answered:      out.Answered,
+		ModelID:       out.Model,
+		PromptVersion: out.PromptVersion,
+	}, nil
+}
+
 func capabilitiesFrom(items []capabilitydomain.Capability) []capabilityInfo {
 	out := make([]capabilityInfo, 0, len(items))
 	for _, item := range items {
@@ -234,4 +298,19 @@ type enrichResponse struct {
 	Enriched      bool   `json:"enriched"`
 	Model         string `json:"model,omitempty"`
 	PromptVersion string `json:"prompt_version,omitempty"`
+}
+
+type answerRequest struct {
+	SystemPrompt   string          `json:"system_prompt,omitempty"`
+	JobRole        string          `json:"job_role,omitempty"`
+	InputJSON      json.RawMessage `json:"input_json"`
+	ResponseSchema map[string]any  `json:"response_schema,omitempty"`
+}
+
+type answerResponse struct {
+	OutputText    string          `json:"output_text,omitempty"`
+	OutputJSON    json.RawMessage `json:"output_json,omitempty"`
+	Answered      bool            `json:"answered"`
+	Model         string          `json:"model,omitempty"`
+	PromptVersion string          `json:"prompt_version,omitempty"`
 }
