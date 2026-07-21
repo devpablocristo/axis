@@ -232,7 +232,7 @@ export function VirployeeMemoryPanel(props: {
                     <td><strong>{item.title}</strong>{item.preview ? <small>{item.preview}</small> : null}</td>
                     <td>{typeLabel(item.type)}</td>
                     <td><span className={`virployee-memory__badge virployee-memory__badge--${item.sensitivity}`}>{item.sensitivity === 'sensitive' ? 'Sensitive' : 'Normal'}</span></td>
-                    <td>{item.provenance === 'system' ? 'System' : 'Human'}</td>
+                    <td><span className={`virployee-memory__badge virployee-memory__badge--${item.provenance === 'system' ? 'system' : 'human'}`}>{item.provenance === 'system' ? 'Learned' : 'Human'}</span></td>
                     <td>v{item.version}</td>
                     <td>{formatDateTime24(item.updated_at)}</td>
                     <td><MemoryRowActions view={view} item={item} busy={busyID === item.id} onAction={applyAction} /></td>
