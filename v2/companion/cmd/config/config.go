@@ -7,14 +7,14 @@ import (
 )
 
 type Config struct {
-	Environment        string
-	Port               string
-	DatabaseURL        string
-	RunMigrations      bool
-	MaxBodyBytes       int64
-	CORSOrigins        []string
-	NexusBaseURL       string
-	RuntimeBaseURL     string
+	Environment    string
+	Port           string
+	DatabaseURL    string
+	RunMigrations  bool
+	MaxBodyBytes   int64
+	CORSOrigins    []string
+	NexusBaseURL   string
+	RuntimeBaseURL string
 	// ExecutionMode is the raw COMPANION_V2_EXECUTION_MODE value (kept for logging).
 	ExecutionMode string
 	// ExecutionModes is the parsed set of enabled executor modes. The variable is a

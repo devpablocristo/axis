@@ -14,8 +14,8 @@ import (
 func TestCalendarEventID(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"abcdef0123456789", "abcdef0123456789"}, // hex passes through unchanged
-		{"AB", "axis0ab"},                         // short + lowercased + padded
-		{"xyz", "axis0"},                          // x/y/z are outside base32hex (>v) → stripped
+		{"AB", "axis0ab"},                        // short + lowercased + padded
+		{"xyz", "axis0"},                         // x/y/z are outside base32hex (>v) → stripped
 	}
 	for _, tc := range cases {
 		if got := calendarEventID(tc.in); got != tc.want {
