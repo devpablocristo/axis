@@ -127,6 +127,13 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	learningUsecases.SetCapabilityChecker(learning.NewCapabilityChecker(capabilitiesUsecases))
 	learningUsecases.SetMemoryInstaller(learning.NewMemoriesInstaller(memoriesUsecases))
 	learningUsecases.SetAuthorizer(memoriesUsecases)
+	// Optional LLM procedure enricher (PR5): double opt-in — needs the runtime
+	// configured AND the flag on. Off by default, so CI/dev keep the deterministic
+	// distillation and never call the model.
+	if config.RuntimeBaseURL != "" && config.LearningEnricherEnabled {
+		enrichClient := runtimeclient.New(config.RuntimeBaseURL, &http.Client{Timeout: 30 * time.Second, Transport: otelhttp.NewTransport(http.DefaultTransport)}, config.InternalAuthSecret)
+		learningUsecases.SetProcedureEnricher(learning.NewRuntimeEnricher(enrichClient))
+	}
 	learningHandler := learning.NewHandler(learningUsecases)
 
 	gin.SetMode(gin.ReleaseMode)

@@ -95,10 +95,21 @@ func Evaluate(ctx context.Context, checker CapabilityChecker, proposal Proposal)
 	// 3. No obvious secrets and 4. no obvious PII in what would become memory
 	//    (best-effort screen — see the pattern comments).
 	blob := proposal.Title + "\n" + proposal.Content
-	noSecrets := !secretPattern.MatchString(blob) && !bearerPattern.MatchString(blob) &&
-		!privateKeyPattern.MatchString(blob) && !tokenPattern.MatchString(blob)
-	add("no_secrets", "content must not contain secret assignments, keys, or bearer/credential tokens", noSecrets)
-	add("no_pii", "content must not contain email-like personal data (best-effort)", !emailPattern.MatchString(blob))
+	add("no_secrets", "content must not contain secret assignments, keys, or bearer/credential tokens", !containsSecret(blob))
+	add("no_pii", "content must not contain email-like personal data (best-effort)", !containsPII(blob))
 
 	return report, nil
+}
+
+// containsSecret / containsPII are the reusable best-effort screens behind the
+// eval's no_secrets / no_pii checks. Scan also runs them on LLM-authored text
+// before Ingest, so poisoned model output never lands in the DB or the inbox —
+// not only when a human tries to accept it.
+func containsSecret(text string) bool {
+	return secretPattern.MatchString(text) || bearerPattern.MatchString(text) ||
+		privateKeyPattern.MatchString(text) || tokenPattern.MatchString(text)
+}
+
+func containsPII(text string) bool {
+	return emailPattern.MatchString(text)
 }

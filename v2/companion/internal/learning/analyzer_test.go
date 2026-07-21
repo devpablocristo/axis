@@ -157,3 +157,119 @@ func TestScanRejectsInvalidThreshold(t *testing.T) {
 		t.Fatal("expected validation error for negative threshold")
 	}
 }
+
+// --- PR5: optional LLM enricher in Scan ---
+
+type fakeEnricher struct {
+	out    EnrichOutput
+	err    error
+	called int
+}
+
+func (f *fakeEnricher) Enrich(context.Context, EnrichInput) (EnrichOutput, error) {
+	f.called++
+	return f.out, f.err
+}
+
+func scanOneCandidate(t *testing.T, enricher ProcedureEnricher) (*fakeLearningRepo, ScanResult) {
+	t.Helper()
+	now := time.Now().UTC()
+	repo := &fakeLearningRepo{candidates: []Candidate{
+		{VirployeeID: uuid.NewString(), CapabilityKey: "calendar.events.create", Succeeded: 5, FirstAt: now, LastAt: now},
+	}}
+	ucs := NewUseCases(repo)
+	if enricher != nil {
+		ucs.SetProcedureEnricher(enricher)
+	}
+	result, err := ucs.Scan(context.Background(), "tenant-1", 0)
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	return repo, result
+}
+
+func TestScanUsesEnrichmentWhenUsable(t *testing.T) {
+	enricher := &fakeEnricher{out: EnrichOutput{
+		Title:    "Cómo agendar una reunión",
+		Content:  "Procedimiento para calendar.events.create:\n1. Confirmar datos.\n2. Pasar por el gate.",
+		Enriched: true, ModelID: "gemini-x", PromptVersion: "enrich.v1",
+	}}
+	repo, _ := scanOneCandidate(t, enricher)
+	if enricher.called != 1 || len(repo.created) != 1 {
+		t.Fatalf("expected one enrich + one proposal, got called=%d created=%d", enricher.called, len(repo.created))
+	}
+	got := repo.created[0]
+	if got.ProposedBy != ProposedByLLM {
+		t.Fatalf("expected proposed_by llm, got %q", got.ProposedBy)
+	}
+	if got.Title != "Cómo agendar una reunión" || got.Evidence["enriched_by_model"] != "gemini-x" {
+		t.Fatalf("expected enriched text + model evidence, got %+v", got)
+	}
+}
+
+func TestScanFallsBackWhenEnricherErrors(t *testing.T) {
+	enricher := &fakeEnricher{err: context.DeadlineExceeded}
+	repo, _ := scanOneCandidate(t, enricher)
+	if len(repo.created) != 1 || repo.created[0].ProposedBy != ProposedByAnalyzer {
+		t.Fatalf("an enricher error must fall back to the deterministic analyzer text, got %+v", repo.created)
+	}
+}
+
+func TestScanFallsBackWhenNotEnriched(t *testing.T) {
+	// Enriched=false (the Echo/no-model default whenever the enricher is wired):
+	// must file the deterministic distillation as analyzer, never the model text.
+	enricher := &fakeEnricher{out: EnrichOutput{Title: "ignored", Content: "ignored", Enriched: false}}
+	repo, _ := scanOneCandidate(t, enricher)
+	if len(repo.created) != 1 || repo.created[0].ProposedBy != ProposedByAnalyzer {
+		t.Fatalf("Enriched=false must fall back to analyzer, got %+v", repo.created)
+	}
+	if !strings.Contains(repo.created[0].Content, "calendar.events.create") {
+		t.Fatalf("fallback content must be the deterministic distillation, got %q", repo.created[0].Content)
+	}
+}
+
+func TestScanFallsBackWhenEnrichmentHasSecrets(t *testing.T) {
+	// Defense in depth: an enriched rewrite carrying a secret/PII must be rejected
+	// before it reaches the DB/inbox, not only blocked later at Accept.
+	enricher := &fakeEnricher{out: EnrichOutput{
+		Title:    "calendar.events.create",
+		Content:  "Use calendar.events.create. token: DUMMY_TEST_MARKER",
+		Enriched: true,
+	}}
+	repo, _ := scanOneCandidate(t, enricher)
+	if len(repo.created) != 1 || repo.created[0].ProposedBy != ProposedByAnalyzer {
+		t.Fatalf("a rewrite with a secret must fall back to analyzer, got %+v", repo.created)
+	}
+	if strings.Contains(repo.created[0].Content, "DUMMY_TEST_MARKER") {
+		t.Fatalf("secret-bearing model text must never be filed, got %q", repo.created[0].Content)
+	}
+}
+
+func TestScanFallsBackWhenEnrichmentUnusable(t *testing.T) {
+	// Enriched=true but the text drops the capability_key (e.g. an Echo reply):
+	// must fall back to the deterministic distillation, not file garbage.
+	enricher := &fakeEnricher{out: EnrichOutput{Title: "Hi", Content: "Recibido (modo echo).", Enriched: true}}
+	repo, _ := scanOneCandidate(t, enricher)
+	if len(repo.created) != 1 || repo.created[0].ProposedBy != ProposedByAnalyzer {
+		t.Fatalf("an unusable rewrite must fall back to analyzer, got %+v", repo.created)
+	}
+	if !strings.Contains(repo.created[0].Content, "calendar.events.create") {
+		t.Fatalf("fallback content must be the deterministic distillation, got %q", repo.created[0].Content)
+	}
+}
+
+func TestUsableEnrichment(t *testing.T) {
+	ok := EnrichOutput{Title: "T", Content: "does calendar.events.create"}
+	if !usableEnrichment(ok, "calendar.events.create") {
+		t.Fatal("expected a within-limits, key-anchored rewrite to be usable")
+	}
+	if usableEnrichment(EnrichOutput{Title: "T", Content: "no key here"}, "calendar.events.create") {
+		t.Fatal("content without the capability_key must be rejected")
+	}
+	if usableEnrichment(EnrichOutput{Title: "", Content: "calendar.events.create"}, "calendar.events.create") {
+		t.Fatal("empty title must be rejected")
+	}
+	if usableEnrichment(EnrichOutput{Title: strings.Repeat("a", 201), Content: "calendar.events.create"}, "calendar.events.create") {
+		t.Fatal("oversized title must be rejected")
+	}
+}

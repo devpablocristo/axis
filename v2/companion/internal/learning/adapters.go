@@ -6,6 +6,7 @@ import (
 
 	capabilitydomain "github.com/devpablocristo/companion-v2/internal/capabilities/usecases/domain"
 	"github.com/devpablocristo/companion-v2/internal/memories"
+	"github.com/devpablocristo/companion-v2/internal/runtimeclient"
 	"github.com/google/uuid"
 )
 
@@ -23,6 +24,62 @@ type MemoryInstaller interface {
 // memories.UseCases satisfies this directly.
 type Authorizer interface {
 	Authorize(ctx context.Context, tenant string, virployee uuid.UUID, actor, role string) error
+}
+
+// ProcedureEnricher rewrites a distilled procedure's wording via the runtime
+// LLM (PR5, optional). It only PROPOSES text — it never writes memory (that
+// stays behind the human Accept gate). When unset, Scan keeps the deterministic
+// distillation; on error or an unusable rewrite the caller also falls back.
+type ProcedureEnricher interface {
+	Enrich(ctx context.Context, in EnrichInput) (EnrichOutput, error)
+}
+
+type EnrichInput struct {
+	CapabilityKey string
+	Title         string
+	Content       string
+}
+
+type EnrichOutput struct {
+	Title         string
+	Content       string
+	Enriched      bool
+	ModelID       string
+	PromptVersion string
+}
+
+// --- runtime enricher adapter ---
+
+type enricherTransport interface {
+	Enrich(ctx context.Context, in runtimeclient.EnrichRequest) (runtimeclient.EnrichResult, error)
+}
+
+type runtimeEnricher struct {
+	rt enricherTransport
+}
+
+// NewRuntimeEnricher adapts the runtime client's Enrich to the ProcedureEnricher
+// port. *runtimeclient.Client satisfies enricherTransport.
+func NewRuntimeEnricher(rt enricherTransport) ProcedureEnricher {
+	return runtimeEnricher{rt: rt}
+}
+
+func (e runtimeEnricher) Enrich(ctx context.Context, in EnrichInput) (EnrichOutput, error) {
+	res, err := e.rt.Enrich(ctx, runtimeclient.EnrichRequest{
+		CapabilityKey: in.CapabilityKey,
+		Title:         in.Title,
+		Content:       in.Content,
+	})
+	if err != nil {
+		return EnrichOutput{}, err
+	}
+	return EnrichOutput{
+		Title:         res.Title,
+		Content:       res.Content,
+		Enriched:      res.Enriched,
+		ModelID:       res.ModelID,
+		PromptVersion: res.PromptVersion,
+	}, nil
 }
 
 // --- capabilities adapter (CapabilityChecker) ---

@@ -2,11 +2,18 @@ package learning
 
 import (
 	"context"
+	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/devpablocristo/platform/errors/go/domainerr"
 	"github.com/google/uuid"
 )
+
+// enrichTimeout bounds a single per-candidate LLM rewrite so a slow runtime
+// cannot stall a Scan pass on any one candidate (each timeout falls back to the
+// deterministic distillation).
+const enrichTimeout = 15 * time.Second
 
 type RepositoryPort interface {
 	Create(ctx context.Context, tenantID string, input NormalizedCreateInput) (Proposal, error)
@@ -33,6 +40,7 @@ type UseCases struct {
 	capabilities  CapabilityChecker
 	memory        MemoryInstaller
 	authz         Authorizer
+	enricher      ProcedureEnricher
 }
 
 func NewUseCases(repo RepositoryPort) *UseCases {
@@ -63,6 +71,13 @@ func (u *UseCases) SetMemoryInstaller(installer MemoryInstaller) {
 // must be authorized exactly as a human memory write for that virployee.
 func (u *UseCases) SetAuthorizer(authz Authorizer) {
 	u.authz = authz
+}
+
+// SetProcedureEnricher wires the optional LLM rewriter (PR5). When unset, Scan
+// files the deterministic distillation. It only affects the proposal's wording;
+// the human Accept gate and eval are unchanged.
+func (u *UseCases) SetProcedureEnricher(enricher ProcedureEnricher) {
+	u.enricher = enricher
 }
 
 // Ingest files a proposal into the inbox as pending. It is the ONLY entry
@@ -277,14 +292,16 @@ func (u *UseCases) Scan(ctx context.Context, tenantID string, minExecutions int)
 			return ScanResult{}, err
 		}
 		title, content := Distill(candidate)
+		evidence := BuildEvidence(candidate)
+		title, content, proposedBy := u.applyEnrichment(ctx, candidate, title, content, evidence)
 		proposal, err := u.Ingest(ctx, tenantID, CreateInput{
 			VirployeeID:        virployeeID,
 			CapabilityKey:      candidate.CapabilityKey,
 			Title:              title,
 			Content:            content,
-			Evidence:           BuildEvidence(candidate),
+			Evidence:           evidence,
 			SourceTraceIDs:     sources,
-			ProposedBy:         ProposedByAnalyzer,
+			ProposedBy:         proposedBy,
 			SucceededWatermark: candidate.Succeeded,
 		})
 		if err != nil {
@@ -307,4 +324,67 @@ func (u *UseCases) Scan(ctx context.Context, tenantID string, minExecutions int)
 		})
 	}
 	return result, nil
+}
+
+// applyEnrichment optionally rewrites the wording of a distilled procedure via
+// the LLM (PR5). It is FAIL-SAFE: with no enricher wired, a timeout/error, or an
+// unusable rewrite, it returns the deterministic distillation unchanged and
+// ProposedByAnalyzer. Only a clean, usable rewrite is used (ProposedByLLM), with
+// the model/prompt recorded in evidence. It only shapes the proposal's wording;
+// the human Accept gate and eval are unchanged.
+func (u *UseCases) applyEnrichment(ctx context.Context, candidate Candidate, title, content string, evidence map[string]any) (string, string, string) {
+	if u.enricher == nil {
+		return title, content, ProposedByAnalyzer
+	}
+	ectx, cancel := context.WithTimeout(ctx, enrichTimeout)
+	defer cancel()
+	out, err := u.enricher.Enrich(ectx, EnrichInput{
+		CapabilityKey: candidate.CapabilityKey,
+		Title:         title,
+		Content:       content,
+	})
+	if err != nil {
+		slog.WarnContext(ctx, "learning_enrich_failed_fallback_deterministic",
+			"capability_key", candidate.CapabilityKey, "error", err.Error())
+		return title, content, ProposedByAnalyzer
+	}
+	if !out.Enriched || !usableEnrichment(out, candidate.CapabilityKey) {
+		if out.Enriched {
+			// The model answered but the rewrite was rejected (off-topic, over
+			// size, or tripped the secret/PII screen): a systematic misfire is
+			// visible here instead of silently always falling back.
+			slog.InfoContext(ctx, "learning_enrich_rejected_fallback_deterministic",
+				"capability_key", candidate.CapabilityKey)
+		}
+		return title, content, ProposedByAnalyzer
+	}
+	evidence["enriched_by_model"] = out.ModelID
+	evidence["enrich_prompt_version"] = out.PromptVersion
+	return out.Title, out.Content, ProposedByLLM
+}
+
+// usableEnrichment decides whether an LLM rewrite is safe to file instead of the
+// deterministic distillation: within the memory size limits, free of obvious
+// secrets/PII (so poisoned model output never reaches the DB or the inbox — the
+// Accept eval also screens, but only after storage), and still anchored to the
+// capability_key. The anchor makes a degenerate rewrite (e.g. an Echo reply that
+// never mentions the capability) fall back automatically, without coupling to
+// any provider's internals. It is a usability heuristic, not the security gate.
+func usableEnrichment(out EnrichOutput, capabilityKey string) bool {
+	key := strings.TrimSpace(strings.ToLower(capabilityKey))
+	if key == "" {
+		return false
+	}
+	title := strings.TrimSpace(out.Title)
+	content := strings.TrimSpace(out.Content)
+	if title == "" || len([]rune(title)) > 200 {
+		return false
+	}
+	if content == "" || len([]rune(content)) > 20000 {
+		return false
+	}
+	if blob := out.Title + "\n" + out.Content; containsSecret(blob) || containsPII(blob) {
+		return false
+	}
+	return strings.Contains(strings.ToLower(content), key)
 }
