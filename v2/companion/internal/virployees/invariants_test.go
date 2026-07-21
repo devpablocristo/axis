@@ -295,6 +295,38 @@ func TestInvariantExecuteApprovedActionRebindsBeforeExecuting(t *testing.T) {
 			t.Fatal("executor must run when the binding fully matches the approval")
 		}
 	})
+
+	t.Run("trace records the executor's mode and external_effects, not hardcoded", func(t *testing.T) {
+		prepared := preparedTemplate()
+		uc, executor, id, approvalID := newCase(prepared)
+		repo := uc.executionRepo.(*fakeExecRepo)
+		// Force the real trace-build path (no short-circuit) and seed the
+		// execution-gate trace it reads as the source.
+		repo.existingExecTrace = nil
+		repo.fakeRepo.traces = append(repo.fakeRepo.traces, runtraces.Trace{
+			TenantID:    "tenant-1",
+			VirployeeID: id,
+			Operation:   runtraces.OperationExecutionGate,
+			NexusResult: &runtraces.NexusResult{ApprovalID: approvalID.String()},
+		})
+
+		trace, err := uc.ExecuteApprovedAction(context.Background(), "tenant-1", id, approvalID)
+		if err != nil {
+			t.Fatalf("ExecuteApprovedAction: %v", err)
+		}
+		if !executor.called {
+			t.Fatal("executor must run on a full binding match")
+		}
+		if trace.ExecutionResult == nil {
+			t.Fatal("expected an execution result on the built trace")
+		}
+		if trace.ExecutionResult.Mode != "local" {
+			t.Fatalf("trace mode must come from the executor outcome, got %q", trace.ExecutionResult.Mode)
+		}
+		if trace.ExecutionResult.ExternalEffects {
+			t.Fatal("the local executor must report external_effects=false")
+		}
+	})
 }
 
 // Invariant 5 — Fail-closed transport for the runtime proposer.
@@ -331,9 +363,9 @@ type fakeActionExecutor struct {
 	resourceID string
 }
 
-func (e *fakeActionExecutor) Execute(context.Context, string, uuid.UUID, ExecutionAttempt, preparedactions.Action) (string, map[string]any, error) {
+func (e *fakeActionExecutor) Execute(context.Context, string, uuid.UUID, ExecutionAttempt, preparedactions.Action) (ExecutionOutcome, error) {
 	e.called = true
-	return e.resourceID, map[string]any{"mode": "local"}, nil
+	return ExecutionOutcome{ResourceID: e.resourceID, Mode: "local", ExternalEffects: false, Result: map[string]any{"mode": "local"}}, nil
 }
 
 // fakeExecRepo embeds fakeRepo (RepositoryPort) and adds ExecutionRepositoryPort

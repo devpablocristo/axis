@@ -77,8 +77,21 @@ type ExecutionResultReporterPort interface {
 	ReportExecutionResult(ctx context.Context, tenantID, checkID, idempotencyKey, bindingHash, status string, durationMS int64, result map[string]any) error
 }
 
+// ExecutionOutcome is what an executor reports after acting. Mode identifies the
+// executor that ran (e.g. "local", "google_calendar") and ExternalEffects is true
+// when the action wrote to a real external system. Both are persisted with the
+// attempt and surfaced verbatim in the run trace — never hardcoded at the call site.
+// Executors should set Mode even when returning an error so a failed attempt still
+// records which executor was responsible.
+type ExecutionOutcome struct {
+	ResourceID      string
+	Mode            string
+	ExternalEffects bool
+	Result          map[string]any
+}
+
 type ActionExecutorPort interface {
-	Execute(ctx context.Context, tenantID string, virployeeID uuid.UUID, attempt ExecutionAttempt, action preparedactions.Action) (string, map[string]any, error)
+	Execute(ctx context.Context, tenantID string, virployeeID uuid.UUID, attempt ExecutionAttempt, action preparedactions.Action) (ExecutionOutcome, error)
 }
 
 type MemoryReaderPort interface {

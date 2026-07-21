@@ -20,16 +20,41 @@ func NewLocalCalendarExecutor(repo ExecutionRepositoryPort) *LocalCalendarExecut
 	return &LocalCalendarExecutor{repo: repo}
 }
 
-func (e *LocalCalendarExecutor) Execute(ctx context.Context, tenantID string, virployeeID uuid.UUID, attempt ExecutionAttempt, action preparedactions.Action) (string, map[string]any, error) {
+func (e *LocalCalendarExecutor) Execute(ctx context.Context, tenantID string, virployeeID uuid.UUID, attempt ExecutionAttempt, action preparedactions.Action) (ExecutionOutcome, error) {
 	resourceID, err := e.repo.CreateLocalCalendarEvent(ctx, tenantID, virployeeID, attempt, action)
 	if err != nil {
-		return "", nil, err
+		return ExecutionOutcome{Mode: "local"}, err
 	}
-	return resourceID, map[string]any{
-		"mode":          "local",
-		"resource_id":   resourceID,
-		"resource_type": "calendar_event",
+	return ExecutionOutcome{
+		ResourceID:      resourceID,
+		Mode:            "local",
+		ExternalEffects: false,
+		Result: map[string]any{
+			"mode":          "local",
+			"resource_id":   resourceID,
+			"resource_type": "calendar_event",
+		},
 	}, nil
+}
+
+// resultString / resultBool read persisted execution metadata (stored in the
+// attempt's Result map by the executor) so the run trace reflects the real mode and
+// external-effects flag on both the first execution and any idempotent re-entry.
+func resultString(m map[string]any, key, fallback string) string {
+	if m != nil {
+		if v, ok := m[key].(string); ok && v != "" {
+			return v
+		}
+	}
+	return fallback
+}
+
+func resultBool(m map[string]any, key string) bool {
+	if m == nil {
+		return false
+	}
+	v, _ := m[key].(bool)
+	return v
 }
 
 func (u *UseCases) ExecuteApprovedAction(ctx context.Context, tenantID string, id, approvalID uuid.UUID) (runtraces.Trace, error) {
@@ -74,14 +99,24 @@ func (u *UseCases) ExecuteApprovedAction(ctx context.Context, tenantID string, i
 	}
 	if created {
 		started := time.Now()
-		resourceID, result, executeErr := executor.Execute(ctx, tenantID, id, attempt, prepared.Action)
+		outcome, executeErr := executor.Execute(ctx, tenantID, id, attempt, prepared.Action)
 		durationMS := time.Since(started).Milliseconds()
 		status := "succeeded"
 		errorMessage := ""
+		resourceID := outcome.ResourceID
+		result := outcome.Result
+		if result == nil {
+			result = map[string]any{}
+		}
+		if outcome.Mode != "" {
+			result["mode"] = outcome.Mode
+		}
+		// Persist the effect flag with the attempt so the trace is accurate on
+		// idempotent re-entry (where the executor is not called again).
+		result["external_effects"] = outcome.ExternalEffects
 		if executeErr != nil {
 			status = "failed"
 			errorMessage = runtraces.RedactText(executeErr.Error())
-			result = map[string]any{"mode": "local"}
 		}
 		attempt, err = u.executionRepo.CompleteExecution(ctx, tenantID, attempt.ID, status, resourceID, result, errorMessage, durationMS)
 		if err != nil {
@@ -115,6 +150,8 @@ func (u *UseCases) ExecuteApprovedAction(ctx context.Context, tenantID string, i
 		copy.ApprovalStatus = approval.Status
 		nexus = &copy
 	}
+	mode := resultString(attempt.Result, "mode", "local")
+	externalEffects := resultBool(attempt.Result, "external_effects")
 	message := "Local calendar event created."
 	if attempt.Status == "failed" {
 		message = attempt.Error
@@ -127,8 +164,8 @@ func (u *UseCases) ExecuteApprovedAction(ctx context.Context, tenantID string, i
 		NexusResult: nexus, BindingHash: prepared.BindingHash,
 		MemoryReferences: source.MemoryReferences, MemoryContextHash: source.MemoryContextHash,
 		ExecutionResult: &runtraces.ExecutionResult{
-			Status: attempt.Status, Mode: "local", ApprovalID: approval.ID, ApprovalStatus: approval.Status,
-			BindingHash: prepared.BindingHash, Message: message, ExternalEffects: false,
+			Status: attempt.Status, Mode: mode, ApprovalID: approval.ID, ApprovalStatus: approval.Status,
+			BindingHash: prepared.BindingHash, Message: message, ExternalEffects: externalEffects,
 			ResourceID: attempt.ResourceID, DurationMS: attempt.DurationMS, NexusReportStatus: reportStatus,
 		},
 	})
