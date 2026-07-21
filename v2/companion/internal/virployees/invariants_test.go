@@ -326,6 +326,11 @@ func TestInvariantExecuteApprovedActionRebindsBeforeExecuting(t *testing.T) {
 		if trace.ExecutionResult.ExternalEffects {
 			t.Fatal("the local executor must report external_effects=false")
 		}
+		// G3.3: the executor receives the attempt's idempotency key so a real
+		// external executor can propagate it to the downstream API.
+		if executor.gotAttempt.IdempotencyKey == "" {
+			t.Fatal("executor must receive the attempt's idempotency key")
+		}
 	})
 }
 
@@ -361,10 +366,12 @@ func (erroringPlanner) Propose(context.Context, string, runtimecontext.Context) 
 type fakeActionExecutor struct {
 	called     bool
 	resourceID string
+	gotAttempt ExecutionAttempt
 }
 
-func (e *fakeActionExecutor) Execute(context.Context, string, uuid.UUID, ExecutionAttempt, preparedactions.Action) (ExecutionOutcome, error) {
+func (e *fakeActionExecutor) Execute(_ context.Context, _ string, _ uuid.UUID, attempt ExecutionAttempt, _ preparedactions.Action) (ExecutionOutcome, error) {
 	e.called = true
+	e.gotAttempt = attempt
 	return ExecutionOutcome{ResourceID: e.resourceID, Mode: "local", ExternalEffects: false, Result: map[string]any{"mode": "local"}}, nil
 }
 

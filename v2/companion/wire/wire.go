@@ -114,7 +114,10 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		runtimePlanner := runtimeclient.New(config.RuntimeBaseURL, &http.Client{Timeout: 30 * time.Second, Transport: otelhttp.NewTransport(http.DefaultTransport)}, config.InternalAuthSecret)
 		virployeesUsecases.SetRuntimePlanner(runtimePlanner)
 	}
-	if config.ExecutionMode == "local" {
+	// Executors are wired per enabled mode (COMPANION_V2_EXECUTION_MODE is a set).
+	// The local simulator and a real external executor can coexist on different
+	// capabilities; with no mode enabled, execution stays simulation-only.
+	if config.HasExecutionMode("local") {
 		virployeesUsecases.RegisterExecutor("calendar.events.create", virployees.NewLocalCalendarExecutor(virployeesRepo))
 	}
 	memoriesUsecases := memories.NewUseCases(memories.NewRepository(db.Pool()))

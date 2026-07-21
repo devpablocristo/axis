@@ -15,7 +15,12 @@ type Config struct {
 	CORSOrigins        []string
 	NexusBaseURL       string
 	RuntimeBaseURL     string
-	ExecutionMode      string
+	// ExecutionMode is the raw COMPANION_V2_EXECUTION_MODE value (kept for logging).
+	ExecutionMode string
+	// ExecutionModes is the parsed set of enabled executor modes. The variable is a
+	// comma-separated list (e.g. "local", "local,google_calendar"); "disabled" and
+	// empty entries yield an empty set (no executor wired = simulation only).
+	ExecutionModes     []string
 	InternalAuthSecret string
 
 	// LearningMinExecutions is the default number of successful executions of a
@@ -42,6 +47,7 @@ func Load() Config {
 		NexusBaseURL:            strings.TrimRight(envconfig.Get("COMPANION_V2_NEXUS_BASE_URL", ""), "/"),
 		RuntimeBaseURL:          strings.TrimRight(envconfig.Get("COMPANION_V2_RUNTIME_BASE_URL", ""), "/"),
 		ExecutionMode:           strings.ToLower(strings.TrimSpace(envconfig.Get("COMPANION_V2_EXECUTION_MODE", "disabled"))),
+		ExecutionModes:          parseExecutionModes(envconfig.Get("COMPANION_V2_EXECUTION_MODE", "disabled")),
 		InternalAuthSecret:      strings.TrimSpace(envconfig.Get("COMPANION_V2_INTERNAL_AUTH_SECRET", envconfig.Get("AXIS_V2_INTERNAL_AUTH_SECRET", ""))),
 		LearningMinExecutions:   envconfig.Int("COMPANION_V2_LEARNING_MIN_EXECUTIONS", 3),
 		LearningEnricherEnabled: envconfig.Bool("COMPANION_V2_LEARNING_ENRICHER_ENABLED", false),
@@ -54,6 +60,33 @@ func Load() Config {
 
 func (c Config) Addr() string {
 	return ":" + c.Port
+}
+
+// HasExecutionMode reports whether the given executor mode is enabled. Comparison
+// is case-insensitive; "disabled" is never a member of the set.
+func (c Config) HasExecutionMode(mode string) bool {
+	want := strings.ToLower(strings.TrimSpace(mode))
+	for _, m := range c.ExecutionModes {
+		if m == want {
+			return true
+		}
+	}
+	return false
+}
+
+// parseExecutionModes turns the comma-separated COMPANION_V2_EXECUTION_MODE value
+// into a lowercased set of enabled modes. "disabled" and empty entries are dropped,
+// so `disabled` (the default) yields an empty set — no executor is wired.
+func parseExecutionModes(raw string) []string {
+	out := make([]string, 0)
+	for _, part := range strings.Split(raw, ",") {
+		mode := strings.ToLower(strings.TrimSpace(part))
+		if mode == "" || mode == "disabled" {
+			continue
+		}
+		out = append(out, mode)
+	}
+	return out
 }
 
 func splitCSV(value string) []string {
