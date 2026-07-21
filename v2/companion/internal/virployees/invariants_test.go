@@ -332,6 +332,75 @@ func TestInvariantExecuteApprovedActionRebindsBeforeExecuting(t *testing.T) {
 			t.Fatal("executor must receive the attempt's idempotency key")
 		}
 	})
+
+	// G3.4: a real (external-effect) executor can never run without a human-granted
+	// approval. A matching binding on a not-yet-approved approval is still refused.
+	t.Run("unapproved approval is refused without executing", func(t *testing.T) {
+		prepared := preparedTemplate()
+		uc, executor, id, approvalID := newCase(prepared)
+		uc.SetApprovalReader(&fakeApprovalReader{approval: executiongate.GovernanceApproval{
+			ID:                approvalID.String(),
+			GovernanceCheckID: checkID.String(),
+			RequesterID:       id.String(),
+			BindingHash:       bindingHash,
+			Status:            "pending",
+		}})
+
+		_, err := uc.ExecuteApprovedAction(context.Background(), "tenant-1", id, approvalID)
+		if !domainerr.IsConflict(err) {
+			t.Fatalf("expected conflict for a non-approved approval, got %v", err)
+		}
+		if executor.called {
+			t.Fatal("executor must not run without an approved approval")
+		}
+	})
+}
+
+// G3.4: the durable, executable prepared action — the only thing
+// ExecuteApprovedAction can act on — is persisted ONLY when governance requires
+// approval. Even when governance ALLOWS a side-effecting write, no executable
+// artifact is created, so a real external effect can never happen without a human
+// in the loop. "allow" and "deny" must persist nothing.
+func TestInvariantPreparedActionPersistedOnlyOnRequireApproval(t *testing.T) {
+	readyDraft := &executiongate.ConfirmedDraft{
+		Action: "calendar.events.create",
+		Kind:   "calendar_event",
+		Fields: []executiongate.ConfirmedDraftField{
+			{Key: "title", Value: "Reunión"},
+			{Key: "date", Value: "2026-07-12"},
+			{Key: "time", Value: "15:00"},
+			{Key: "timezone", Value: "America/Argentina/Buenos_Aires"},
+			{Key: "duration_minutes", Value: "60"},
+			{Key: "attendees", Value: "ana@example.com"},
+		},
+	}
+	cases := []struct {
+		decision  string
+		wantSaves int
+	}{
+		{"allow", 0},
+		{"require_approval", 1},
+		{"deny", 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.decision, func(t *testing.T) {
+			uc, created := setupExecutionGateUseCase(t, domain.AutonomyA3)
+			execRepo := &fakeExecRepo{fakeRepo: newFakeRepo(), beginCreated: true}
+			uc.executionRepo = execRepo
+			uc.SetGovernanceChecker(&fakeGovernanceChecker{result: executiongate.GovernanceCheckResult{
+				Decision:   tc.decision,
+				Status:     tc.decision,
+				ApprovalID: "approval-1",
+			}})
+
+			if _, err := uc.ExecutionGate(context.Background(), "tenant-1", created.ID, "Agendá una reunión para mañana", readyDraft); err != nil {
+				t.Fatalf("ExecutionGate(%s): %v", tc.decision, err)
+			}
+			if execRepo.savePreparedCalls != tc.wantSaves {
+				t.Fatalf("decision %q: prepared action saves = %d, want %d", tc.decision, execRepo.savePreparedCalls, tc.wantSaves)
+			}
+		})
+	}
 }
 
 // Invariant 5 — Fail-closed transport for the runtime proposer.
@@ -383,6 +452,7 @@ type fakeExecRepo struct {
 	preparedErr       error
 	beginCreated      bool
 	existingExecTrace *runtraces.Trace
+	savePreparedCalls int
 }
 
 func (r *fakeExecRepo) FindExecutionTraceByApproval(_ context.Context, _ string, _ uuid.UUID, _ string) (runtraces.Trace, error) {
@@ -393,6 +463,7 @@ func (r *fakeExecRepo) FindExecutionTraceByApproval(_ context.Context, _ string,
 }
 
 func (r *fakeExecRepo) SavePreparedAction(_ context.Context, _ string, _ uuid.UUID, _, _ string, _, _, _ string, _ preparedactions.Action) (PreparedActionRecord, error) {
+	r.savePreparedCalls++
 	return r.prepared, nil
 }
 
