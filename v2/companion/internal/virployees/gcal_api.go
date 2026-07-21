@@ -104,6 +104,28 @@ func (a *googleCalendarAPI) InsertEvent(ctx context.Context, calendarID, idempot
 	}
 }
 
+func (a *googleCalendarAPI) DeleteEvent(ctx context.Context, calendarID, eventID string) error {
+	endpoint := fmt.Sprintf("%s/calendars/%s/events/%s", a.baseURL, url.QueryEscape(calendarID), url.QueryEscape(eventID))
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, endpoint, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := a.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("call calendar api: %w", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+
+	switch resp.StatusCode {
+	case http.StatusOK, http.StatusNoContent, http.StatusNotFound, http.StatusGone:
+		// 404/410: the event is already gone — an idempotent, safe compensation.
+		return nil
+	default:
+		return fmt.Errorf("calendar delete failed: %s: %s", resp.Status, googleErrorMessage(body))
+	}
+}
+
 func attendeePayload(emails []string) []map[string]string {
 	out := make([]map[string]string, 0, len(emails))
 	for _, e := range emails {

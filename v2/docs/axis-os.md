@@ -70,6 +70,10 @@ channel for governance calls to Nexus. Health endpoints remain public.
   account, `COMPANION_V2_GOOGLE_CALENDAR_ID`) with the attempt's idempotency key as
   the event id. Each execution records its mode and whether it produced external
   effects; both flow through the same fail-closed, binding-checked path.
+- Deleting an event (`calendar.events.delete`) is a compensating action: it runs
+  through the same governed path as the create and carries its own binding hash,
+  so a create's approval can never authorize the rollback. The delete is
+  idempotent (an already-gone event is a success).
 - Execution Gate fails closed when Nexus is unavailable or not configured.
 - Companion tenancy storage is deferred; BFF validates tenancy before forwarding.
 - Virployees remain the first workforce primitive.

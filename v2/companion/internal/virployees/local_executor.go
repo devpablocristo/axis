@@ -21,6 +21,22 @@ func NewLocalCalendarExecutor(repo ExecutionRepositoryPort) *LocalCalendarExecut
 }
 
 func (e *LocalCalendarExecutor) Execute(ctx context.Context, tenantID string, virployeeID uuid.UUID, attempt ExecutionAttempt, action preparedactions.Action) (ExecutionOutcome, error) {
+	// The local executor is a simulator with no external effects. A delete
+	// (compensation) is a simulated no-op that still flows through the governed
+	// path with its own binding — it just does not touch a real system.
+	if action.Action == preparedactions.ActionDelete {
+		return ExecutionOutcome{
+			ResourceID:      action.EventID,
+			Mode:            "local",
+			ExternalEffects: false,
+			Result: map[string]any{
+				"mode":          "local",
+				"operation":     "delete",
+				"resource_id":   action.EventID,
+				"resource_type": "calendar_event",
+			},
+		}, nil
+	}
 	resourceID, err := e.repo.CreateLocalCalendarEvent(ctx, tenantID, virployeeID, attempt, action)
 	if err != nil {
 		return ExecutionOutcome{Mode: "local"}, err
@@ -31,6 +47,7 @@ func (e *LocalCalendarExecutor) Execute(ctx context.Context, tenantID string, vi
 		ExternalEffects: false,
 		Result: map[string]any{
 			"mode":          "local",
+			"operation":     "create",
 			"resource_id":   resourceID,
 			"resource_type": "calendar_event",
 		},

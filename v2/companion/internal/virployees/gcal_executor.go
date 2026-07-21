@@ -31,10 +31,12 @@ type CalendarInsertResult struct {
 
 // CalendarAPI is the narrow port the Google Calendar executor depends on.
 // Implementations MUST use idempotencyKey to dedupe retries so a partial failure
-// followed by a retry never creates two events (G3.3), and MUST never log or
+// followed by a retry never creates two events (G3.3), MUST treat a delete of an
+// already-gone event as success (idempotent compensation), and MUST never log or
 // return credential material (G3.2).
 type CalendarAPI interface {
 	InsertEvent(ctx context.Context, calendarID, idempotencyKey string, event CalendarEvent) (CalendarInsertResult, error)
+	DeleteEvent(ctx context.Context, calendarID, eventID string) error
 }
 
 // GoogleCalendarExecutor creates real Google Calendar events for approved
@@ -60,6 +62,17 @@ func (e *GoogleCalendarExecutor) Execute(ctx context.Context, tenantID string, v
 	if strings.TrimSpace(e.calendarID) == "" {
 		return outcome, fmt.Errorf("google calendar id is not configured")
 	}
+	switch action.Action {
+	case preparedactions.ActionCreate:
+		return e.create(ctx, attempt, action, outcome)
+	case preparedactions.ActionDelete:
+		return e.delete(ctx, action, outcome)
+	default:
+		return outcome, fmt.Errorf("unsupported action for google calendar executor: %s", action.Action)
+	}
+}
+
+func (e *GoogleCalendarExecutor) create(ctx context.Context, attempt ExecutionAttempt, action preparedactions.Action, outcome ExecutionOutcome) (ExecutionOutcome, error) {
 	startsAt, err := action.StartsAt()
 	if err != nil {
 		return outcome, err
@@ -79,10 +92,32 @@ func (e *GoogleCalendarExecutor) Execute(ctx context.Context, tenantID string, v
 	// no credentials, no secret refs (G3.2).
 	outcome.Result = map[string]any{
 		"mode":              "google_calendar",
+		"operation":         "create",
 		"resource_id":       res.EventID,
 		"resource_type":     "calendar_event",
 		"html_link":         res.HTMLLink,
 		"idempotent_replay": res.AlreadyExisted,
+	}
+	return outcome, nil
+}
+
+// delete is the compensating action (rollback). It runs through the same governed
+// path as any other execution, carrying its own binding hash (G3.5), and is
+// idempotent: deleting an already-gone event succeeds.
+func (e *GoogleCalendarExecutor) delete(ctx context.Context, action preparedactions.Action, outcome ExecutionOutcome) (ExecutionOutcome, error) {
+	eventID := strings.TrimSpace(action.EventID)
+	if eventID == "" {
+		return outcome, fmt.Errorf("event id is required to delete a calendar event")
+	}
+	if err := e.api.DeleteEvent(ctx, e.calendarID, eventID); err != nil {
+		return outcome, err
+	}
+	outcome.ResourceID = eventID
+	outcome.Result = map[string]any{
+		"mode":          "google_calendar",
+		"operation":     "delete",
+		"resource_id":   eventID,
+		"resource_type": "calendar_event",
 	}
 	return outcome, nil
 }

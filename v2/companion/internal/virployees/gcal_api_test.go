@@ -101,3 +101,42 @@ func TestGoogleCalendarAPISurfacesErrorStatusAndMessage(t *testing.T) {
 		t.Fatalf("expected a surfaced permission error, got %v", err)
 	}
 }
+
+func TestGoogleCalendarAPIDeleteEvent(t *testing.T) {
+	t.Run("204 no content succeeds and hits the right path/method", func(t *testing.T) {
+		var method, uri string
+		api, srv := newTestCalendarAPI(func(w http.ResponseWriter, r *http.Request) {
+			method, uri = r.Method, r.RequestURI
+			w.WriteHeader(http.StatusNoContent)
+		})
+		defer srv.Close()
+		if err := api.DeleteEvent(context.Background(), "team@group.calendar.google.com", "evt-1"); err != nil {
+			t.Fatalf("DeleteEvent: %v", err)
+		}
+		if method != http.MethodDelete || !strings.Contains(uri, "team%40group.calendar.google.com/events/evt-1") {
+			t.Fatalf("unexpected delete request: %s %s", method, uri)
+		}
+	})
+
+	t.Run("404 is an idempotent success (already gone)", func(t *testing.T) {
+		api, srv := newTestCalendarAPI(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"error":{"message":"not found"}}`))
+		})
+		defer srv.Close()
+		if err := api.DeleteEvent(context.Background(), "cal", "gone"); err != nil {
+			t.Fatalf("404 on delete must be a silent success, got %v", err)
+		}
+	})
+
+	t.Run("other errors surface", func(t *testing.T) {
+		api, srv := newTestCalendarAPI(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"error":{"message":"nope"}}`))
+		})
+		defer srv.Close()
+		if err := api.DeleteEvent(context.Background(), "cal", "x"); err == nil {
+			t.Fatal("expected a surfaced error on 403")
+		}
+	})
+}

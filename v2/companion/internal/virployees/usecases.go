@@ -362,12 +362,12 @@ func (u *UseCases) ExecutionGate(
 		}
 	}
 	var preparedAction *preparedactions.Action
-	if confirmedDraft != nil && result.Intent.CapabilityKey == preparedactions.ActionCreate && result.Draft.Status == dryrun.DraftStatusReady {
-		prepared, prepareErr := preparedactions.FromDraft(result.Draft)
+	if confirmedDraft != nil && result.Draft.Status == dryrun.DraftStatusReady {
+		prepared, prepareErr := preparedactions.FromReadyDraft(result.Draft)
 		if prepareErr != nil {
 			return executiongate.Result{}, domainerr.Validation(prepareErr.Error())
 		}
-		preparedAction = &prepared
+		preparedAction = prepared
 	}
 	gate := executiongate.Evaluate(result)
 	bindingHash, err := bindingHashFor(tenantID, result, preparedAction)

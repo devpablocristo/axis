@@ -120,7 +120,9 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	// both are enabled for calendar.events.create, google_calendar is wired last
 	// and wins (real effects over simulation).
 	if config.HasExecutionMode("local") {
-		virployeesUsecases.RegisterExecutor("calendar.events.create", virployees.NewLocalCalendarExecutor(virployeesRepo))
+		localExecutor := virployees.NewLocalCalendarExecutor(virployeesRepo)
+		virployeesUsecases.RegisterExecutor("calendar.events.create", localExecutor)
+		virployeesUsecases.RegisterExecutor("calendar.events.delete", localExecutor)
 	}
 	if config.HasExecutionMode("google_calendar") {
 		if config.GoogleCalendarID == "" {
@@ -132,7 +134,12 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 			db.Close()
 			return nil, fmt.Errorf("google calendar executor: %w", err)
 		}
-		virployeesUsecases.RegisterExecutor("calendar.events.create", virployees.NewGoogleCalendarExecutor(calendarAPI, config.GoogleCalendarID))
+		// Both the forward action and its compensation (delete) run through the
+		// same executor and the same governed path; the delete carries its own
+		// binding (G3.5).
+		googleExecutor := virployees.NewGoogleCalendarExecutor(calendarAPI, config.GoogleCalendarID)
+		virployeesUsecases.RegisterExecutor("calendar.events.create", googleExecutor)
+		virployeesUsecases.RegisterExecutor("calendar.events.delete", googleExecutor)
 	}
 	memoriesUsecases := memories.NewUseCases(memories.NewRepository(db.Pool()))
 	virployeesUsecases.SetMemoryReader(memoriesUsecases)

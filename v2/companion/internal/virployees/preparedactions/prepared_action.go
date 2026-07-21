@@ -15,8 +15,10 @@ import (
 )
 
 const (
-	SchemaVersion = "calendar.event.create.v1"
-	ActionCreate  = "calendar.events.create"
+	SchemaVersion       = "calendar.event.create.v1"
+	DeleteSchemaVersion = "calendar.event.delete.v1"
+	ActionCreate        = "calendar.events.create"
+	ActionDelete        = "calendar.events.delete"
 )
 
 type Action struct {
@@ -28,16 +30,67 @@ type Action struct {
 	Timezone        string   `json:"timezone"`
 	DurationMinutes int      `json:"duration_minutes"`
 	Attendees       []string `json:"attendees"`
+	// EventID identifies the target of a delete (compensation) action. It is
+	// omitempty so create actions serialize exactly as before — their payload
+	// hash, and therefore their binding hash, is unchanged.
+	EventID string `json:"event_id,omitempty"`
+}
+
+// FromReadyDraft builds a prepared action for the executable actions (create and
+// delete). Non-executable or not-yet-supported actions (read, update, generic)
+// return (nil, nil): they never produce a prepared action, a payload, or a
+// binding. A delete carries a different payload than a create, so it necessarily
+// gets its own binding hash (G3.5) — a create's approval can never authorize it.
+func FromReadyDraft(draft dryrun.Draft) (*Action, error) {
+	switch strings.TrimSpace(draft.Action) {
+	case ActionCreate:
+		action, err := FromDraft(draft)
+		if err != nil {
+			return nil, err
+		}
+		return &action, nil
+	case ActionDelete:
+		action, err := FromDeleteDraft(draft)
+		if err != nil {
+			return nil, err
+		}
+		return &action, nil
+	default:
+		return nil, nil
+	}
+}
+
+// FromDeleteDraft builds a compensating delete action from a ready delete draft.
+// The event to delete is identified by the confirmed "event_reference" field.
+func FromDeleteDraft(draft dryrun.Draft) (Action, error) {
+	if strings.TrimSpace(draft.Action) != ActionDelete {
+		return Action{}, fmt.Errorf("delete prepared action is only supported for %s", ActionDelete)
+	}
+	fields := draftFieldMap(draft)
+	eventID := fields["event_reference"]
+	if eventID == "" {
+		return Action{}, fmt.Errorf("event_reference is required")
+	}
+	return Action{
+		SchemaVersion: DeleteSchemaVersion,
+		Action:        ActionDelete,
+		EventID:       eventID,
+	}, nil
+}
+
+func draftFieldMap(draft dryrun.Draft) map[string]string {
+	fields := make(map[string]string, len(draft.Fields))
+	for _, field := range draft.Fields {
+		fields[strings.TrimSpace(field.Key)] = strings.TrimSpace(field.Value)
+	}
+	return fields
 }
 
 func FromDraft(draft dryrun.Draft) (Action, error) {
 	if strings.TrimSpace(draft.Action) != ActionCreate {
 		return Action{}, fmt.Errorf("prepared action is only supported for %s", ActionCreate)
 	}
-	fields := make(map[string]string, len(draft.Fields))
-	for _, field := range draft.Fields {
-		fields[strings.TrimSpace(field.Key)] = strings.TrimSpace(field.Value)
-	}
+	fields := draftFieldMap(draft)
 	duration := 60
 	if value := fields["duration_minutes"]; value != "" {
 		parsed, err := strconv.Atoi(value)
