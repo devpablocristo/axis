@@ -1,5 +1,7 @@
 package planner
 
+import "encoding/json"
+
 // ProposeRequest is what Companion sends: the natural-language input plus the
 // runtime context needed to classify it — the assigned capabilities, the
 // system prompt/job role, and safe memory references (no content).
@@ -41,6 +43,32 @@ type ProposedIntent struct {
 	Action           string  `json:"action,omitempty"`
 	RequiredAutonomy string  `json:"required_autonomy,omitempty"`
 	Confidence       float64 `json:"confidence,omitempty"`
+}
+
+// AnswerRequest is what Companion sends when a virployee must PROCESS input data
+// and RESPOND (e.g. a product like medmory sends structured facts and expects a
+// governed answer). Unlike Propose, this does not classify into a capability: the
+// system prompt bounds the role and the model answers directly. InputJSON is the
+// product's opaque payload; ResponseSchema, when set, forces a structured JSON
+// answer that must conform to it.
+type AnswerRequest struct {
+	SystemPrompt   string          `json:"system_prompt,omitempty"`
+	JobRole        string          `json:"job_role,omitempty"`
+	InputJSON      json.RawMessage `json:"input_json"`
+	ResponseSchema map[string]any  `json:"response_schema,omitempty"`
+}
+
+// AnswerResponse carries the model's answer. Answered is true only when the model
+// produced a usable answer: a parseable JSON object when a ResponseSchema was
+// requested, or non-empty text otherwise. With Echo (no credentials) the canned
+// text is not valid JSON, so a structured request degrades cleanly to
+// Answered=false and Companion can flag the run as degraded.
+type AnswerResponse struct {
+	OutputText    string          `json:"output_text,omitempty"`
+	OutputJSON    json.RawMessage `json:"output_json,omitempty"`
+	Answered      bool            `json:"answered"`
+	Model         string          `json:"model,omitempty"`
+	PromptVersion string          `json:"prompt_version,omitempty"`
 }
 
 // EnrichRequest is what Companion sends to improve the WORDING of a distilled
