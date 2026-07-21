@@ -845,17 +845,17 @@ h4 {
   padding: 0;
 }
 
-button:hover:not(:disabled),
-.btn-secondary:hover:not(:disabled) {
+button:hover:not(:disabled) {
   border-color: var(--axis-color-subtle);
   background: var(--axis-surface-subtle);
 }
 
+.btn-secondary:hover:not(:disabled),
 .axis-crud-host .actions-row .btn-secondary:hover:not(:disabled),
 .axis-crud-host .crud-row-actions .btn-secondary:hover:not(:disabled),
 .iam-control__create-inline .btn-secondary:hover:not(:disabled) {
   border-color: var(--axis-color-subtle);
-  background: var(--axis-surface-subtle);
+  background: #cbd5e1;
 }
 
 button:disabled,
@@ -905,8 +905,8 @@ button:disabled,
 
 .btn-primary:disabled {
   border-color: var(--axis-primary);
-  background: var(--axis-primary);
-  color: #ffffff;
+  background: var(--axis-surface);
+  color: var(--axis-primary);
 }
 
 .axis-crud-host .actions-row .btn-primary,
@@ -930,6 +930,42 @@ button:disabled,
   border-color: var(--axis-primary-strong);
   background: var(--axis-primary-strong);
 }
+
+/* Primary (e.g. Restore) inverts to an outline when disabled (nothing selected). */
+.axis-crud-host .actions-row .btn-primary:disabled,
+.axis-crud-host .crud-row-actions .btn-primary:disabled,
+.iam-control__create-inline .btn-primary:disabled,
+.tenancy-section__tabs .btn-primary:disabled {
+  border-color: var(--axis-primary);
+  background: var(--axis-surface);
+  color: var(--axis-primary);
+}
+
+/* Secondary (New/Clear, inactive tabs): filled neutral when enabled, outline when disabled. */
+.btn-secondary {
+  border-color: var(--axis-border-strong);
+  background: #e2e8f0;
+  color: var(--axis-text);
+}
+
+.btn-secondary:disabled {
+  background: var(--axis-surface);
+}
+
+.axis-crud-host .actions-row .btn-secondary,
+.axis-crud-host .crud-row-actions .btn-secondary,
+.iam-control__create-inline .btn-secondary {
+  border-color: var(--axis-border-strong);
+  background: #e2e8f0;
+  color: var(--axis-text);
+}
+
+.axis-crud-host .actions-row .btn-secondary:disabled,
+.axis-crud-host .crud-row-actions .btn-secondary:disabled,
+.iam-control__create-inline .btn-secondary:disabled {
+  background: var(--axis-surface);
+}
+
 
 .btn-success {
   border-color: var(--axis-color-success);
@@ -963,10 +999,11 @@ button:disabled,
   background: var(--axis-color-success-hover);
 }
 
+/* Enabled = filled (an actionable button is painted); disabled = outline. */
 .btn-danger {
-  border-color: var(--axis-color-danger-border);
-  color: var(--axis-danger);
-  background: var(--axis-surface);
+  border-color: var(--axis-color-danger);
+  color: #ffffff;
+  background: var(--axis-color-danger);
 }
 
 .btn-danger:disabled {
@@ -978,21 +1015,29 @@ button:disabled,
 .axis-crud-host .actions-row .btn-danger,
 .axis-crud-host .crud-row-actions .btn-danger,
 .iam-control__create-inline .btn-danger {
+  border-color: var(--axis-color-danger);
+  color: #ffffff;
+  background: var(--axis-color-danger);
+}
+
+.axis-crud-host .actions-row .btn-danger:disabled,
+.axis-crud-host .crud-row-actions .btn-danger:disabled,
+.iam-control__create-inline .btn-danger:disabled {
   border-color: var(--axis-color-danger-border);
   color: var(--axis-danger);
   background: var(--axis-surface);
 }
 
 .btn-danger:hover:not(:disabled) {
-  border-color: var(--axis-color-danger);
-  background: var(--axis-danger-soft);
+  border-color: var(--axis-color-danger-hover);
+  background: var(--axis-color-danger-hover);
 }
 
 .axis-crud-host .actions-row .btn-danger:hover:not(:disabled),
 .axis-crud-host .crud-row-actions .btn-danger:hover:not(:disabled),
 .iam-control__create-inline .btn-danger:hover:not(:disabled) {
-  border-color: var(--axis-color-danger);
-  background: var(--axis-danger-soft);
+  border-color: var(--axis-color-danger-hover);
+  background: var(--axis-color-danger-hover);
 }
 
 .btn-sm {
