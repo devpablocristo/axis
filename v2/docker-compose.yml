@@ -72,6 +72,12 @@ services:
       COMPANION_V2_CORS_ORIGINS: ${COMPANION_V2_CORS_ORIGINS:-http://localhost:19173,http://127.0.0.1:19173,http://console-v2:19173,http://console-v2-e2e:19173}
       COMPANION_V2_NEXUS_BASE_URL: ${COMPANION_V2_NEXUS_BASE_URL:-http://nexus-v2:8080}
       COMPANION_V2_EXECUTION_MODE: ${COMPANION_V2_EXECUTION_MODE:-local}
+      # F6 real Google Calendar executor. Enable by setting EXECUTION_MODE to
+      # include "google_calendar" plus a calendar id; credentials come from ADC
+      # (GOOGLE_APPLICATION_CREDENTIALS -> a key mounted via the override, or a
+      # workload service account in prod). See docs/f6-google-calendar-runbook.md.
+      COMPANION_V2_GOOGLE_CALENDAR_ID: ${COMPANION_V2_GOOGLE_CALENDAR_ID:-}
+      GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-}
       COMPANION_V2_INTERNAL_AUTH_SECRET: ${AXIS_V2_INTERNAL_AUTH_SECRET:-axis-v2-local-internal}
       COMPANION_V2_DATABASE_URL: postgres://${COMPANION_V2_POSTGRES_USER:-postgres}:${COMPANION_V2_POSTGRES_PASSWORD:-postgres}@companion-v2-postgres:5432/${COMPANION_V2_POSTGRES_DB:-companion_v2}?sslmode=disable
       COMPANION_V2_OTEL_EXPORTER: ${COMPANION_V2_OTEL_EXPORTER:-otlp}
