@@ -2,6 +2,7 @@ package virployees
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"strings"
 
@@ -92,6 +93,37 @@ type RuntimePlannerPort interface {
 	Propose(ctx context.Context, input string, rc runtimecontext.Context) (dryrun.Proposal, error)
 }
 
+// AnswerInput/AnswerOutput are the companion-owned shapes for the "process and
+// respond" path, so the runtime transport can be injected without virployees
+// importing runtimeclient.
+type AnswerInput struct {
+	SystemPrompt   string
+	JobRole        string
+	InputJSON      json.RawMessage
+	ResponseSchema map[string]any
+}
+
+type AnswerOutput struct {
+	OutputText    string
+	OutputJSON    json.RawMessage
+	Answered      bool
+	ModelID       string
+	PromptVersion string
+}
+
+// RuntimeAnswererPort asks the runtime to process input and answer (read/explain,
+// no governance decision). Unset ⇒ the Assist usecase is unavailable (fail-closed).
+type RuntimeAnswererPort interface {
+	Answer(ctx context.Context, in AnswerInput) (AnswerOutput, error)
+}
+
+// AssistRepositoryPort persists product assist runs (reserve-before-LLM).
+type AssistRepositoryPort interface {
+	BeginAssistRun(ctx context.Context, tenantID string, virployeeID uuid.UUID, assistType, idempotencyKey, inputHash, inputPreview string) (AssistRun, bool, error)
+	CompleteAssistRun(ctx context.Context, tenantID string, id uuid.UUID, status string, output json.RawMessage, outputText string, answered, degraded bool, model, promptVersion, runErr string, durationMS int64) (AssistRun, error)
+	GetAssistRunByKey(ctx context.Context, tenantID string, virployeeID uuid.UUID, idempotencyKey string) (AssistRun, error)
+}
+
 type UseCases struct {
 	repo             RepositoryPort
 	executionRepo    ExecutionRepositoryPort
@@ -104,6 +136,8 @@ type UseCases struct {
 	executors        map[string]ActionExecutorPort
 	memories         MemoryReaderPort
 	runtime          RuntimePlannerPort
+	answerer         RuntimeAnswererPort
+	assistRepo       AssistRepositoryPort
 	lifecycle        *lifecycle.Service
 }
 
@@ -139,6 +173,9 @@ func NewUseCases(repo RepositoryPort, jobRoles ...JobRoleReaderPort) (*UseCases,
 	if executionRepo, ok := repo.(ExecutionRepositoryPort); ok {
 		uc.executionRepo = executionRepo
 	}
+	if assistRepo, ok := repo.(AssistRepositoryPort); ok {
+		uc.assistRepo = assistRepo
+	}
 	return uc, nil
 }
 
@@ -173,6 +210,8 @@ func (u *UseCases) SetExecutionResultReporter(reporter ExecutionResultReporterPo
 func (u *UseCases) SetMemoryReader(reader MemoryReaderPort) { u.memories = reader }
 
 func (u *UseCases) SetRuntimePlanner(planner RuntimePlannerPort) { u.runtime = planner }
+
+func (u *UseCases) SetRuntimeAnswerer(answerer RuntimeAnswererPort) { u.answerer = answerer }
 
 func (u *UseCases) RegisterExecutor(action string, executor ActionExecutorPort) {
 	action = strings.TrimSpace(action)

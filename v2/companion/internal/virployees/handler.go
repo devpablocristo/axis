@@ -2,6 +2,7 @@ package virployees
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -32,6 +33,7 @@ type UseCasesPort interface {
 	ExecutionGate(context.Context, string, uuid.UUID, string, *executiongate.ConfirmedDraft) (executiongate.Result, error)
 	SimulateApprovedExecution(context.Context, string, uuid.UUID, uuid.UUID) (runtraces.Trace, error)
 	ExecuteApprovedAction(context.Context, string, uuid.UUID, uuid.UUID) (runtraces.Trace, error)
+	Assist(context.Context, string, uuid.UUID, json.RawMessage, string) (AssistRun, error)
 	ListRuns(context.Context, string, uuid.UUID, int) ([]runtraces.Trace, error)
 	Update(context.Context, string, uuid.UUID, domain.UpdateInput) (domain.Virployee, error)
 	Archive(context.Context, string, uuid.UUID, string, string) error
@@ -62,6 +64,7 @@ func (h *Handler) Routes(router gin.IRouter) {
 		group.POST("/:virployee_id/execution-gate", h.ExecutionGate)
 		group.POST("/:virployee_id/simulated-executions", h.SimulateApprovedExecution)
 		group.POST("/:virployee_id/executions", h.ExecuteApprovedAction)
+		group.POST("/:virployee_id/assist", h.Assist)
 		group.GET("/:virployee_id/runs", h.ListRuns)
 		group.GET("/:virployee_id", h.Get)
 		group.PUT("/:virployee_id", h.Update)
@@ -93,6 +96,42 @@ func (h *Handler) ExecuteApprovedAction(c *gin.Context) {
 		return
 	}
 	ginmw.WriteJSON(c, http.StatusOK, dto.RunTraceFromDomain(out))
+}
+
+func (h *Handler) Assist(c *gin.Context) {
+	id, ok := ginmw.ParseUUIDParam(c, "virployee_id")
+	if !ok {
+		return
+	}
+	var req dto.AssistRequest
+	if err := ginmw.BindJSON(c, &req); err != nil {
+		return
+	}
+	idem := strings.TrimSpace(req.IdempotencyKey)
+	if idem == "" {
+		idem = strings.TrimSpace(c.GetHeader("Idempotency-Key"))
+	}
+	run, err := h.ucs.Assist(c.Request.Context(), tenantID(c), id, req.InputJSON, idem)
+	if err != nil {
+		ginmw.Respond(c, err)
+		return
+	}
+	ginmw.WriteJSON(c, http.StatusOK, assistRunToDTO(run))
+}
+
+func assistRunToDTO(run AssistRun) dto.AssistRunResponse {
+	return dto.AssistRunResponse{
+		ID:            run.ID.String(),
+		Status:        run.Status,
+		Output:        run.Output,
+		OutputText:    run.OutputText,
+		Answered:      run.Answered,
+		Degraded:      run.Degraded,
+		Model:         run.Model,
+		PromptVersion: run.PromptVersion,
+		Error:         run.Error,
+		DurationMS:    run.DurationMS,
+	}
 }
 
 func (h *Handler) ListRuns(c *gin.Context) {

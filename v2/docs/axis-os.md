@@ -66,6 +66,11 @@ channel for governance calls to Nexus. Health endpoints remain public.
 - Companion can manually execute an approved, durable prepared action through
   the local calendar executor after validating the approval binding hash.
 - Execution Gate fails closed when Nexus is unavailable or not configured.
+- A virployee can also "process and respond" to input without external effects or
+  approval (read/explain): the Assist usecase reserves an idempotent assist run,
+  asks the runtime to answer under the virployee's system prompt, and records the
+  run (degraded when no model answered). This is not the action path — anything
+  with external effects still routes through the Execution Gate and Nexus.
 - Companion tenancy storage is deferred; BFF validates tenancy before forwarding.
 - Virployees remain the first workforce primitive.
 - Virployee-owned lexical memory supports controlled CRUD, recall, lifecycle,
