@@ -116,9 +116,23 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	}
 	// Executors are wired per enabled mode (COMPANION_V2_EXECUTION_MODE is a set).
 	// The local simulator and a real external executor can coexist on different
-	// capabilities; with no mode enabled, execution stays simulation-only.
+	// capabilities; with no mode enabled, execution stays simulation-only. When
+	// both are enabled for calendar.events.create, google_calendar is wired last
+	// and wins (real effects over simulation).
 	if config.HasExecutionMode("local") {
 		virployeesUsecases.RegisterExecutor("calendar.events.create", virployees.NewLocalCalendarExecutor(virployeesRepo))
+	}
+	if config.HasExecutionMode("google_calendar") {
+		if config.GoogleCalendarID == "" {
+			db.Close()
+			return nil, fmt.Errorf("google_calendar execution mode requires COMPANION_V2_GOOGLE_CALENDAR_ID")
+		}
+		calendarAPI, err := virployees.NewGoogleCalendarAPI(ctx)
+		if err != nil {
+			db.Close()
+			return nil, fmt.Errorf("google calendar executor: %w", err)
+		}
+		virployeesUsecases.RegisterExecutor("calendar.events.create", virployees.NewGoogleCalendarExecutor(calendarAPI, config.GoogleCalendarID))
 	}
 	memoriesUsecases := memories.NewUseCases(memories.NewRepository(db.Pool()))
 	virployeesUsecases.SetMemoryReader(memoriesUsecases)

@@ -65,9 +65,11 @@ channel for governance calls to Nexus. Health endpoints remain public.
   `require_approval`, durable approvals, and binding hashes.
 - Companion can manually execute an approved, durable prepared action after
   validating the approval binding hash. Executors are selected per capability by
-  the `COMPANION_V2_EXECUTION_MODE` set (currently the local calendar simulator);
-  each execution records its mode and whether it produced external effects, so a
-  real external executor plugs into the same governed path.
+  the `COMPANION_V2_EXECUTION_MODE` set: `local` runs the calendar simulator,
+  `google_calendar` creates real events in a shared Google Calendar (ADC service
+  account, `COMPANION_V2_GOOGLE_CALENDAR_ID`) with the attempt's idempotency key as
+  the event id. Each execution records its mode and whether it produced external
+  effects; both flow through the same fail-closed, binding-checked path.
 - Execution Gate fails closed when Nexus is unavailable or not configured.
 - Companion tenancy storage is deferred; BFF validates tenancy before forwarding.
 - Virployees remain the first workforce primitive.
