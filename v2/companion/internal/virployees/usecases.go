@@ -79,6 +79,12 @@ type ExecutionResultReporterPort interface {
 
 type ActionExecutorPort interface {
 	Execute(ctx context.Context, tenantID string, virployeeID uuid.UUID, attempt ExecutionAttempt, action preparedactions.Action) (string, map[string]any, error)
+	// Mode is the executor's provenance label recorded on the run trace
+	// (e.g. "local", "google_calendar").
+	Mode() string
+	// ExternalEffects reports whether Execute causes real effects in an external
+	// system. The run trace records this per executor instead of hardcoding it.
+	ExternalEffects() bool
 }
 
 type MemoryReaderPort interface {

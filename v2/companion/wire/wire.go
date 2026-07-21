@@ -114,8 +114,29 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		runtimePlanner := runtimeclient.New(config.RuntimeBaseURL, &http.Client{Timeout: 30 * time.Second, Transport: otelhttp.NewTransport(http.DefaultTransport)}, config.InternalAuthSecret)
 		virployeesUsecases.SetRuntimePlanner(runtimePlanner)
 	}
-	if config.ExecutionMode == "local" {
+	switch config.ExecutionMode {
+	case "disabled":
+		// no executor registered: dry-run/gate only.
+	case "local":
 		virployeesUsecases.RegisterExecutor("calendar.events.create", virployees.NewLocalCalendarExecutor(virployeesRepo))
+	case "google_calendar":
+		calendarClient, err := virployees.NewGoogleCalendarClient(ctx)
+		if err != nil {
+			db.Close()
+			if tracerShutdown != nil {
+				_ = tracerShutdown(ctx)
+			}
+			return nil, fmt.Errorf("google calendar executor: %w", err)
+		}
+		virployeesUsecases.RegisterExecutor("calendar.events.create", virployees.NewGoogleCalendarExecutor(calendarClient, config.GoogleCalendarID))
+	default:
+		// Fail closed on a misconfigured mode rather than booting healthy with no
+		// executor (a silent "can't execute" that looks like a runtime bug).
+		db.Close()
+		if tracerShutdown != nil {
+			_ = tracerShutdown(ctx)
+		}
+		return nil, fmt.Errorf("invalid COMPANION_V2_EXECUTION_MODE %q (want disabled|local|google_calendar)", config.ExecutionMode)
 	}
 	memoriesUsecases := memories.NewUseCases(memories.NewRepository(db.Pool()))
 	virployeesUsecases.SetMemoryReader(memoriesUsecases)

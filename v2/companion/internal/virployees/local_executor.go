@@ -20,6 +20,12 @@ func NewLocalCalendarExecutor(repo ExecutionRepositoryPort) *LocalCalendarExecut
 	return &LocalCalendarExecutor{repo: repo}
 }
 
+func (e *LocalCalendarExecutor) Mode() string { return "local" }
+
+// ExternalEffects is false: the local executor only persists a row in Companion,
+// it never touches an external system.
+func (e *LocalCalendarExecutor) ExternalEffects() bool { return false }
+
 func (e *LocalCalendarExecutor) Execute(ctx context.Context, tenantID string, virployeeID uuid.UUID, attempt ExecutionAttempt, action preparedactions.Action) (string, map[string]any, error) {
 	resourceID, err := e.repo.CreateLocalCalendarEvent(ctx, tenantID, virployeeID, attempt, action)
 	if err != nil {
@@ -69,10 +75,14 @@ func (u *UseCases) ExecuteApprovedAction(ctx context.Context, tenantID string, i
 	if err != nil {
 		return runtraces.Trace{}, err
 	}
-	if !created && attempt.Status == "running" {
-		return runtraces.Trace{}, domainerr.Conflict("execution is already running")
-	}
-	if created {
+	// Re-drive any attempt that has not succeeded yet — a fresh one, one wedged
+	// at 'running' by a crash between the external write and the status update,
+	// or one marked 'failed' by a client timeout after the effect actually
+	// committed. Both executors are idempotent (local: dedup by idempotency_key;
+	// Google: deterministic event id + 409-as-existing), so re-running never
+	// double-creates; it reconciles an orphaned external effect instead of
+	// leaving it stuck forever with no Nexus report (G3.5 recovery).
+	if created || attempt.Status != "succeeded" {
 		started := time.Now()
 		resourceID, result, executeErr := executor.Execute(ctx, tenantID, id, attempt, prepared.Action)
 		durationMS := time.Since(started).Milliseconds()
@@ -81,7 +91,7 @@ func (u *UseCases) ExecuteApprovedAction(ctx context.Context, tenantID string, i
 		if executeErr != nil {
 			status = "failed"
 			errorMessage = runtraces.RedactText(executeErr.Error())
-			result = map[string]any{"mode": "local"}
+			result = map[string]any{"mode": executor.Mode()}
 		}
 		attempt, err = u.executionRepo.CompleteExecution(ctx, tenantID, attempt.ID, status, resourceID, result, errorMessage, durationMS)
 		if err != nil {
@@ -115,7 +125,7 @@ func (u *UseCases) ExecuteApprovedAction(ctx context.Context, tenantID string, i
 		copy.ApprovalStatus = approval.Status
 		nexus = &copy
 	}
-	message := "Local calendar event created."
+	message := "Calendar event created."
 	if attempt.Status == "failed" {
 		message = attempt.Error
 	}
@@ -127,8 +137,8 @@ func (u *UseCases) ExecuteApprovedAction(ctx context.Context, tenantID string, i
 		NexusResult: nexus, BindingHash: prepared.BindingHash,
 		MemoryReferences: source.MemoryReferences, MemoryContextHash: source.MemoryContextHash,
 		ExecutionResult: &runtraces.ExecutionResult{
-			Status: attempt.Status, Mode: "local", ApprovalID: approval.ID, ApprovalStatus: approval.Status,
-			BindingHash: prepared.BindingHash, Message: message, ExternalEffects: false,
+			Status: attempt.Status, Mode: executor.Mode(), ApprovalID: approval.ID, ApprovalStatus: approval.Status,
+			BindingHash: prepared.BindingHash, Message: message, ExternalEffects: executor.ExternalEffects(),
 			ResourceID: attempt.ResourceID, DurationMS: attempt.DurationMS, NexusReportStatus: reportStatus,
 		},
 	})

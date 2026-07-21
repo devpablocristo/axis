@@ -295,6 +295,41 @@ func TestInvariantExecuteApprovedActionRebindsBeforeExecuting(t *testing.T) {
 			t.Fatal("executor must run when the binding fully matches the approval")
 		}
 	})
+
+	// Invariant 4b — a real external effect must be recoverable, not orphaned.
+	// An attempt wedged at 'running' (a crash/timeout between the external write
+	// and the local status update) must be RE-DRIVEN on retry — the executor is
+	// idempotent, so this reconciles the orphaned effect instead of blocking
+	// forever with no Nexus report. A succeeded attempt must NOT re-run.
+	t.Run("stuck running attempt is re-driven, succeeded is not", func(t *testing.T) {
+		prepared := preparedTemplate()
+		uc, executor, id, approvalID := newCase(prepared)
+		repo := uc.executionRepo.(*fakeExecRepo)
+		repo.beginCreated = false // attempt already exists
+		repo.beginStatus = "running"
+		// Short-circuit trace assembly (the executor runs before this lookup).
+		repo.existingExecTrace = &runtraces.Trace{ID: uuid.New(), ExecutionResult: &runtraces.ExecutionResult{Status: "succeeded"}}
+
+		if _, err := uc.ExecuteApprovedAction(context.Background(), "tenant-1", id, approvalID); err != nil {
+			t.Fatalf("re-drive of a running attempt: %v", err)
+		}
+		if !executor.called {
+			t.Fatal("a wedged 'running' attempt must be re-driven (idempotent), not left orphaned")
+		}
+
+		uc2, executor2, id2, approvalID2 := newCase(preparedTemplate())
+		repo2 := uc2.executionRepo.(*fakeExecRepo)
+		repo2.beginCreated = false
+		repo2.beginStatus = "succeeded" // already done
+		repo2.existingExecTrace = &runtraces.Trace{ID: uuid.New(), ExecutionResult: &runtraces.ExecutionResult{Status: "succeeded"}}
+
+		if _, err := uc2.ExecuteApprovedAction(context.Background(), "tenant-1", id2, approvalID2); err != nil {
+			t.Fatalf("re-report of a succeeded attempt: %v", err)
+		}
+		if executor2.called {
+			t.Fatal("a succeeded attempt must NOT re-run the executor")
+		}
+	})
 }
 
 // Invariant 5 — Fail-closed transport for the runtime proposer.
@@ -336,6 +371,10 @@ func (e *fakeActionExecutor) Execute(context.Context, string, uuid.UUID, Executi
 	return e.resourceID, map[string]any{"mode": "local"}, nil
 }
 
+func (e *fakeActionExecutor) Mode() string { return "local" }
+
+func (e *fakeActionExecutor) ExternalEffects() bool { return false }
+
 // fakeExecRepo embeds fakeRepo (RepositoryPort) and adds ExecutionRepositoryPort
 // so NewUseCases wires it as the execution repository.
 type fakeExecRepo struct {
@@ -343,6 +382,7 @@ type fakeExecRepo struct {
 	prepared          PreparedActionRecord
 	preparedErr       error
 	beginCreated      bool
+	beginStatus       string // status of the existing attempt when beginCreated is false
 	existingExecTrace *runtraces.Trace
 }
 
@@ -365,7 +405,7 @@ func (r *fakeExecRepo) GetPreparedActionByApproval(_ context.Context, _ string, 
 }
 
 func (r *fakeExecRepo) BeginExecution(_ context.Context, _ string, _ uuid.UUID, preparedActionID uuid.UUID, idempotencyKey string) (ExecutionAttempt, bool, error) {
-	return ExecutionAttempt{ID: uuid.New(), PreparedActionID: preparedActionID, IdempotencyKey: idempotencyKey}, r.beginCreated, nil
+	return ExecutionAttempt{ID: uuid.New(), PreparedActionID: preparedActionID, IdempotencyKey: idempotencyKey, Status: r.beginStatus}, r.beginCreated, nil
 }
 
 func (r *fakeExecRepo) GetExecutionByPreparedAction(_ context.Context, _ string, _ uuid.UUID) (ExecutionAttempt, error) {

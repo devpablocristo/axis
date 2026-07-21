@@ -17,6 +17,9 @@ type Config struct {
 	RuntimeBaseURL     string
 	ExecutionMode      string
 	InternalAuthSecret string
+	// GoogleCalendarID is the target calendar for the real executor
+	// (ExecutionMode=google_calendar). Defaults to "primary".
+	GoogleCalendarID string
 
 	// LearningMinExecutions is the default number of successful executions of a
 	// capability a virployee needs before the analyzer proposes a procedure.
@@ -43,6 +46,7 @@ func Load() Config {
 		RuntimeBaseURL:          strings.TrimRight(envconfig.Get("COMPANION_V2_RUNTIME_BASE_URL", ""), "/"),
 		ExecutionMode:           strings.ToLower(strings.TrimSpace(envconfig.Get("COMPANION_V2_EXECUTION_MODE", "disabled"))),
 		InternalAuthSecret:      strings.TrimSpace(envconfig.Get("COMPANION_V2_INTERNAL_AUTH_SECRET", envconfig.Get("AXIS_V2_INTERNAL_AUTH_SECRET", ""))),
+		GoogleCalendarID:        strings.TrimSpace(envconfig.Get("COMPANION_V2_GOOGLE_CALENDAR_ID", "primary")),
 		LearningMinExecutions:   envconfig.Int("COMPANION_V2_LEARNING_MIN_EXECUTIONS", 3),
 		LearningEnricherEnabled: envconfig.Bool("COMPANION_V2_LEARNING_ENRICHER_ENABLED", false),
 		ServiceVersion:          envconfig.Get("COMPANION_V2_SERVICE_VERSION", ""),
