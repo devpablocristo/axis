@@ -13,7 +13,7 @@ sig = "b22621816837edf5"
 [[bindings]]
 doc = "v2/companion/docs/specs/memories.md"
 target = "v2/companion/internal/memories/repository.go"
-sig = "0821aedef2561c44"
+sig = "f87329c2069b694f"
 
 [[bindings]]
 doc = "v2/companion/docs/specs/memories.md"

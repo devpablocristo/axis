@@ -207,7 +207,7 @@ func (r *Repository) Lifecycle(ctx context.Context, tenant string, virployee, id
 }
 
 func (r *Repository) Purge(ctx context.Context, tenant string, virployee, id uuid.UUID, actor string) error {
-	tag, err := r.db.Exec(ctx, `WITH deleted AS (DELETE FROM companion_memories WHERE tenant_id=$1 AND virployee_id=$2 AND id=$3 AND lifecycle_state='trash' AND purge_after<=now() RETURNING content_hash,version) INSERT INTO companion_memory_audit(tenant_id,virployee_id,memory_id,action,actor_id,previous_hash,previous_version) SELECT $1,$2,$3,'purge',$4,content_hash,version FROM deleted`, tenant, virployee, id, actor)
+	tag, err := r.db.Exec(ctx, `WITH deleted AS (DELETE FROM companion_memories WHERE tenant_id=$1 AND virployee_id=$2 AND id=$3 AND lifecycle_state='trash' RETURNING content_hash,version) INSERT INTO companion_memory_audit(tenant_id,virployee_id,memory_id,action,actor_id,previous_hash,previous_version) SELECT $1,$2,$3,'purge',$4,content_hash,version FROM deleted`, tenant, virployee, id, actor)
 	if err != nil {
 		return mapError(err)
 	}

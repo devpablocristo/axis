@@ -22,8 +22,9 @@ actor, role and supervisor. List responses redact sensitive content. Authorized
 detail is the only public response containing full sensitive content.
 
 States are `active`, `archived` and `trash`. Recall includes active records
-only. Purge is allowed after 30 days in trash. Create, update and lifecycle
-actions append an audit record containing hashes and versions, never content.
+only. Purge deletes a trashed record immediately (trash is required first, but
+there is no retention wait). Create, update and lifecycle actions append an
+audit record containing hashes and versions, never content.
 
 ## Retrieval and runtime
 

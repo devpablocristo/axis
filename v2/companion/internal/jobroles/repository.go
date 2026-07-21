@@ -151,8 +151,6 @@ func (r *Repository) Purge(ctx context.Context, tenantID string, resourceID uuid
 		DELETE FROM job_roles
 		WHERE tenant_id = $1 AND id = $2::uuid
 			AND trashed_at IS NOT NULL
-			AND purge_after IS NOT NULL
-			AND purge_after <= now()
 	`, tenantID, resourceID.String())
 	return r.lifecycleResult(ctx, tenantID, resourceID, tag, err)
 }
