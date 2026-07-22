@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/devpablocristo/companion-v2/internal/attestation"
 	"github.com/devpablocristo/companion-v2/internal/outbox"
 	"github.com/devpablocristo/companion-v2/internal/virployees/repository/models"
 	"github.com/devpablocristo/companion-v2/internal/virployees/runtraces"
@@ -23,9 +24,12 @@ import (
 )
 
 type Repository struct {
-	pool   *pgxpool.Pool
-	outbox *outbox.Repository
+	pool     *pgxpool.Pool
+	outbox   *outbox.Repository
+	attestor *attestation.Signer
 }
+
+func (r *Repository) SetExecutionAttestor(signer *attestation.Signer) { r.attestor = signer }
 
 func NewRepository(pool *pgxpool.Pool) *Repository {
 	return &Repository{pool: pool, outbox: outbox.NewRepository(pool)}

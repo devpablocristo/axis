@@ -84,12 +84,13 @@ func TestHandlerApproveApproval(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Tenant-ID", "tenant-1")
 	req.Header.Set("X-Actor-ID", "approver-1")
+	req.Header.Set("X-Axis-Tenant-Role", "admin")
 	router.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
-	if fake.lastID != id || fake.lastActor != "approver-1" || fake.lastNote != "approved" || fake.lastDecision != "approve" {
+	if fake.lastID != id || fake.lastActor.ID != "approver-1" || fake.lastActor.Role != "admin" || fake.lastNote != "approved" || fake.lastDecision != "approve" {
 		t.Fatalf("unexpected approve call: %+v", fake)
 	}
 }
@@ -112,7 +113,7 @@ type handlerFakeUseCases struct {
 	lastTenant   string
 	lastInput    domain.ListInput
 	lastID       uuid.UUID
-	lastActor    string
+	lastActor    domain.DecisionActor
 	lastNote     string
 	lastDecision string
 }
@@ -135,29 +136,36 @@ func (f *handlerFakeUseCases) Get(_ context.Context, tenantID string, id uuid.UU
 	return item, nil
 }
 
-func (f *handlerFakeUseCases) Approve(_ context.Context, tenantID string, id uuid.UUID, actorID string, input domain.DecisionInput) (domain.Approval, error) {
+func (f *handlerFakeUseCases) Approve(_ context.Context, tenantID string, id uuid.UUID, actor domain.DecisionActor, input domain.DecisionInput) (domain.Approval, error) {
 	f.lastTenant = tenantID
 	f.lastID = id
-	f.lastActor = actorID
+	f.lastActor = actor
 	f.lastNote = input.Note
 	f.lastDecision = "approve"
 	item := fakeApproval(tenantID, domain.StatusApproved)
 	item.ID = id
-	item.DecidedBy = actorID
+	item.DecidedBy = actor.ID
 	item.DecisionNote = input.Note
 	return item, nil
 }
 
-func (f *handlerFakeUseCases) Reject(_ context.Context, tenantID string, id uuid.UUID, actorID string, input domain.DecisionInput) (domain.Approval, error) {
+func (f *handlerFakeUseCases) Reject(_ context.Context, tenantID string, id uuid.UUID, actor domain.DecisionActor, input domain.DecisionInput) (domain.Approval, error) {
 	f.lastTenant = tenantID
 	f.lastID = id
-	f.lastActor = actorID
+	f.lastActor = actor
 	f.lastNote = input.Note
 	f.lastDecision = "reject"
 	item := fakeApproval(tenantID, domain.StatusRejected)
 	item.ID = id
-	item.DecidedBy = actorID
+	item.DecidedBy = actor.ID
 	item.DecisionNote = input.Note
+	return item, nil
+}
+
+func (f *handlerFakeUseCases) Review(_ context.Context, tenantID string, id uuid.UUID, actor domain.DecisionActor, input domain.DecisionInput) (domain.Approval, error) {
+	f.lastTenant, f.lastID, f.lastActor, f.lastNote, f.lastDecision = tenantID, id, actor, input.Note, "review"
+	item := fakeApproval(tenantID, domain.StatusApproved)
+	item.ID, item.ReviewedBy, item.ReviewNote = id, actor.ID, input.Note
 	return item, nil
 }
 
@@ -175,6 +183,10 @@ func fakeApproval(tenantID string, status domain.Status) domain.Approval {
 		Reason:            "delete event",
 		BindingHash:       "binding-hash",
 		Status:            status,
+		ApprovalKind:      "normal",
+		SupervisorUserID:  "supervisor-1",
+		QuorumRequired:    1,
+		ExpiresAt:         now.Add(time.Hour),
 		CreatedAt:         now,
 		UpdatedAt:         now,
 	}

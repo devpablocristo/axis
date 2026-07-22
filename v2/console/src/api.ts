@@ -73,6 +73,7 @@ export type ProductInput = {
 
 export type Approval = {
 	id: string
+	governance_check_id: string
 	requester_id: string
 	action_type: string
 	target_system: string
@@ -81,6 +82,22 @@ export type Approval = {
 	reason: string
 	binding_hash: string
 	status: 'pending' | 'approved' | 'rejected' | 'expired'
+	approval_kind: 'normal' | 'break_glass'
+	supervisor_user_id: string
+	quorum_required: number
+	approval_count: number
+	decisions: Array<{
+		id: string
+		actor_id: string
+		actor_role: string
+		decision: 'approve' | 'reject'
+		note: string
+		decided_at: string
+	}>
+	post_review_required: boolean
+	reviewed_by: string
+	review_note: string
+	reviewed_at: string | null
 	decided_by: string
 	decision_note: string
 	decided_at: string | null
@@ -339,7 +356,7 @@ export type JobRoleInput = {
 
 export type CapabilityState = 'active' | 'archived' | 'trashed'
 
-export type CapabilityRiskClass = 'low' | 'medium' | 'high'
+export type CapabilityRiskClass = 'low' | 'medium' | 'high' | 'critical'
 export type CapabilitySideEffectClass = 'read' | 'write'
 
 export type Capability = {
@@ -675,6 +692,15 @@ export function approveApproval(id: string, tenantId: string, principalId: strin
 
 export function rejectApproval(id: string, tenantId: string, principalId: string, note = ''): Promise<Approval> {
 	return axisFetch<Approval>(`/api/approvals/${encodeURIComponent(id)}/reject`, {
+		method: 'POST',
+		tenantId,
+		principalId,
+		body: { note },
+	})
+}
+
+export function reviewApproval(id: string, tenantId: string, principalId: string, note: string): Promise<Approval> {
+	return axisFetch<Approval>(`/api/approvals/${encodeURIComponent(id)}/review`, {
 		method: 'POST',
 		tenantId,
 		principalId,

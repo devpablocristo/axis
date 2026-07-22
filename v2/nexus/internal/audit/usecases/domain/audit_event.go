@@ -36,11 +36,13 @@ type AuditEvent struct {
 
 // Event types emitted into the ledger.
 const (
-	EventAssistCompleted    = "assist_completed"
-	EventAssistFailed       = "assist_failed"
-	EventExecutionSucceeded = "execution_succeeded"
-	EventExecutionFailed    = "execution_failed"
-	EventGovernanceDecided  = "governance_decided"
+	EventAssistCompleted     = "assist_completed"
+	EventAssistFailed        = "assist_failed"
+	EventExecutionSucceeded  = "execution_succeeded"
+	EventExecutionFailed     = "execution_failed"
+	EventGovernanceDecided   = "governance_decided"
+	EventBreakGlassReviewed  = "break_glass_reviewed"
+	EventAttestationVerified = "executor_attestation_verified"
 )
 
 // ChainScopeFor builds the per-virployee chain scope. Tenant is always included

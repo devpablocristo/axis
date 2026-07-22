@@ -45,13 +45,16 @@ type Message struct {
 }
 
 type NexusExecutionResult struct {
-	VirployeeID       string         `json:"virployee_id"`
-	GovernanceCheckID string         `json:"governance_check_id"`
-	IdempotencyKey    string         `json:"idempotency_key"`
-	BindingHash       string         `json:"binding_hash"`
-	Status            string         `json:"status"`
-	DurationMS        int64          `json:"duration_ms"`
-	Result            map[string]any `json:"result"`
+	VirployeeID        string         `json:"virployee_id"`
+	GovernanceCheckID  string         `json:"governance_check_id"`
+	IdempotencyKey     string         `json:"idempotency_key"`
+	BindingHash        string         `json:"binding_hash"`
+	Status             string         `json:"status"`
+	DurationMS         int64          `json:"duration_ms"`
+	Result             map[string]any `json:"result"`
+	AttestationVersion string         `json:"attestation_version"`
+	ExecutorVersion    string         `json:"executor_version"`
+	Attestation        string         `json:"attestation"`
 }
 
 type EnqueueInput struct {

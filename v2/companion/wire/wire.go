@@ -13,6 +13,7 @@ import (
 	cfg "github.com/devpablocristo/companion-v2/cmd/config"
 	"github.com/devpablocristo/companion-v2/internal/artifactindex"
 	"github.com/devpablocristo/companion-v2/internal/artifacts"
+	"github.com/devpablocristo/companion-v2/internal/attestation"
 	"github.com/devpablocristo/companion-v2/internal/capabilities"
 	"github.com/devpablocristo/companion-v2/internal/executionstats"
 	"github.com/devpablocristo/companion-v2/internal/infra/migrations"
@@ -157,6 +158,20 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	profileTemplatesHandler := profiletemplates.NewHandler(profileTemplatesUsecases)
 
 	virployeesRepo := virployees.NewRepository(db.Pool())
+	attestationKey, err := resolveAttestationKey(ctx, config)
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	attestor, err := attestation.NewSigner(attestationKey, config.ServiceVersion)
+	for i := range attestationKey {
+		attestationKey[i] = 0
+	}
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	virployeesRepo.SetExecutionAttestor(attestor)
 	virployeesUsecases, err := virployees.NewUseCases(virployeesRepo, jobRolesUsecases)
 	if err != nil {
 		db.Close()
@@ -245,7 +260,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 			db.Close()
 			return nil, fmt.Errorf("google_calendar execution mode requires COMPANION_V2_GOOGLE_CALENDAR_ID")
 		}
-		calendarAPI, err := virployees.NewGoogleCalendarAPI(ctx)
+		calendarAPI, err := resolveGoogleCalendarAPI(ctx, config)
 		if err != nil {
 			db.Close()
 			return nil, fmt.Errorf("google calendar executor: %w", err)
@@ -353,7 +368,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 			if payload.GovernanceCheckID == "" || payload.IdempotencyKey == "" || payload.BindingHash == "" || payload.Status == "" {
 				return outbox.Permanent("invalid_outbox_payload", fmt.Errorf("required delivery metadata is missing"))
 			}
-			if err := nexusClient.ReportExecutionResult(deliveryCtx, message.TenantID, payload.GovernanceCheckID, payload.IdempotencyKey, payload.BindingHash, payload.Status, payload.DurationMS, payload.Result); err != nil {
+			if err := nexusClient.ReportExecutionResult(deliveryCtx, message.TenantID, payload.GovernanceCheckID, payload.IdempotencyKey, payload.BindingHash, payload.Status, payload.DurationMS, payload.Result, payload.AttestationVersion, payload.ExecutorVersion, payload.Attestation); err != nil {
 				return outbox.Retryable("nexus_unavailable", err)
 			}
 			return nil

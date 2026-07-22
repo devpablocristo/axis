@@ -56,12 +56,17 @@ func (r *Repository) RecordCheck(ctx context.Context, tenantID string, input dom
 	if result.Decision == domain.DecisionRequireApproval {
 		approvalID := uuid.New()
 		expiresAt := now.Add(r.approvalTTL)
+		approvalKind, quorum, postReview := "normal", 1, false
+		if result.RiskLevel == "critical" {
+			approvalKind, quorum, postReview = "break_glass", 2, true
+		}
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO approvals (
 				id,
 				tenant_id,
 				governance_check_id,
 				requester_id,
+				supervisor_user_id,
 				action_type,
 				target_system,
 				target_resource,
@@ -69,12 +74,15 @@ func (r *Repository) RecordCheck(ctx context.Context, tenantID string, input dom
 				reason,
 				binding_hash,
 				status,
+				approval_kind,
+				quorum_required,
+				post_review_required,
 				expires_at,
 				created_at,
 				updated_at
 			)
-			VALUES ($1::uuid, $2, $3::uuid, $4, $5, $6, $7, $8, $9, $10, 'pending', $11, $12, $12)
-		`, approvalID.String(), tenantID, checkID.String(), input.RequesterID, input.ActionType, input.TargetSystem, input.TargetResource, result.RiskLevel, input.Reason, result.BindingHash, expiresAt, now); err != nil {
+			VALUES ($1::uuid, $2, $3::uuid, $4, $5, $6, $7, $8, $9, $10, $11, 'pending', $12, $13, $14, $15, $16, $16)
+		`, approvalID.String(), tenantID, checkID.String(), input.RequesterID, input.SupervisorUserID, input.ActionType, input.TargetSystem, input.TargetResource, result.RiskLevel, input.Reason, result.BindingHash, approvalKind, quorum, postReview, expiresAt, now); err != nil {
 			return domain.RecordedCheck{}, fmt.Errorf("create approval: %w", err)
 		}
 		recorded.ApprovalID = approvalID.String()

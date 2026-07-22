@@ -5,7 +5,8 @@ import "testing"
 func TestNormalizeExecutionResultInput(t *testing.T) {
 	input, err := NormalizeExecutionResultInput(ExecutionResultInput{
 		IdempotencyKey: " result-1 ", BindingHash: " binding ", Status: "succeeded", DurationMS: 12,
-		Result: map[string]any{"resource_id": "event-1", "access_token": "secret"},
+		Result:             map[string]any{"resource_id": "event-1", "access_token": "secret"},
+		AttestationVersion: "axis.executor-attestation.v1", ExecutorVersion: "executor-v1", Attestation: "signature",
 	})
 	if err != nil {
 		t.Fatalf("NormalizeExecutionResultInput: %v", err)
@@ -31,6 +32,7 @@ func TestNormalizeExecutionResultInputRedactsNestedSecrets(t *testing.T) {
 			"nested": map[string]any{"api_key": "secret", "safe": "value"},
 			"items":  []any{map[string]any{"authorization": "Bearer secret"}},
 		},
+		AttestationVersion: "axis.executor-attestation.v1", ExecutorVersion: "executor-v1", Attestation: "signature",
 	})
 	if err != nil {
 		t.Fatalf("NormalizeExecutionResultInput: %v", err)

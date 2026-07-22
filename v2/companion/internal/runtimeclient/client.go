@@ -96,11 +96,7 @@ type EnrichResult struct {
 
 // Enrich asks the runtime to improve the wording of a distilled procedure.
 func (c *Client) Enrich(ctx context.Context, in EnrichRequest) (EnrichResult, error) {
-	raw, err := json.Marshal(enrichRequest{
-		CapabilityKey: in.CapabilityKey,
-		Title:         in.Title,
-		Content:       in.Content,
-	})
+	raw, err := json.Marshal(enrichRequest(in))
 	if err != nil {
 		return EnrichResult{}, fmt.Errorf("encode enrich request: %w", err)
 	}
@@ -223,13 +219,7 @@ func (c *Client) Embed(ctx context.Context, in EmbedRequest) (EmbedResult, error
 // Answer asks the runtime to process the input JSON and respond. A transport or
 // non-200 error is returned to the caller (fail-closed: no silent success).
 func (c *Client) Answer(ctx context.Context, in AnswerRequest) (AnswerResult, error) {
-	raw, err := json.Marshal(answerRequest{
-		SystemPrompt:   in.SystemPrompt,
-		JobRole:        in.JobRole,
-		InputJSON:      in.InputJSON,
-		ResponseSchema: in.ResponseSchema,
-		ContentParts:   in.ContentParts,
-	})
+	raw, err := json.Marshal(answerRequest(in))
 	if err != nil {
 		return AnswerResult{}, fmt.Errorf("encode answer request: %w", err)
 	}

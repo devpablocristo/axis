@@ -45,16 +45,17 @@ type Result struct {
 }
 
 type GovernanceCheckInput struct {
-	TenantID       string
-	RequesterType  string
-	RequesterID    string
-	ActionType     string
-	TargetSystem   string
-	TargetResource string
-	Params         map[string]any
-	Reason         string
-	Context        string
-	BindingHash    string
+	TenantID         string
+	RequesterType    string
+	RequesterID      string
+	SupervisorUserID string
+	ActionType       string
+	TargetSystem     string
+	TargetResource   string
+	Params           map[string]any
+	Reason           string
+	Context          string
+	BindingHash      string
 }
 
 type GovernanceCheckResult struct {

@@ -15,6 +15,7 @@ const (
 	RiskClassLow    RiskClass = "low"
 	RiskClassMedium RiskClass = "medium"
 	RiskClassHigh   RiskClass = "high"
+	RiskClassCritical RiskClass = "critical"
 )
 
 type ActionType struct {
@@ -129,9 +130,9 @@ func normalizeRiskClass(raw string) (RiskClass, error) {
 		return RiskClassLow, nil
 	}
 	switch value {
-	case RiskClassLow, RiskClassMedium, RiskClassHigh:
+	case RiskClassLow, RiskClassMedium, RiskClassHigh, RiskClassCritical:
 		return value, nil
 	default:
-		return "", domainerr.Validation("risk_class must be one of low, medium, high")
+		return "", domainerr.Validation("risk_class must be one of low, medium, high, critical")
 	}
 }

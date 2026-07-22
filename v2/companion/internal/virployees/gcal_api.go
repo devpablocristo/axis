@@ -49,6 +49,35 @@ func NewGoogleCalendarAPI(ctx context.Context) (CalendarAPI, error) {
 	return &googleCalendarAPI{httpClient: client, baseURL: calendarBaseURL}, nil
 }
 
+// NewGoogleCalendarAPIFromJSON constructs the adapter from credential bytes
+// resolved from Secret Manager. The caller must destroy the source bytes after
+// this returns; credential material is never retained as a config value.
+func NewGoogleCalendarAPIFromJSON(ctx context.Context, credentialJSON []byte) (CalendarAPI, error) {
+	var envelope struct {
+		Type        string `json:"type"`
+		ClientEmail string `json:"client_email"`
+		PrivateKey  string `json:"private_key"`
+	}
+	if err := json.Unmarshal(credentialJSON, &envelope); err != nil {
+		return nil, fmt.Errorf("parse resolved google credentials: %w", err)
+	}
+	if envelope.Type != "service_account" || strings.TrimSpace(envelope.ClientEmail) == "" || strings.TrimSpace(envelope.PrivateKey) == "" {
+		return nil, fmt.Errorf("parse resolved google credentials: only complete service-account credentials are accepted")
+	}
+	creds, err := google.CredentialsFromJSONWithParams(ctx, credentialJSON, google.CredentialsParams{
+		Scopes:         []string{calendarEventsScope},
+		TokenURL:       "https://oauth2.googleapis.com/token",
+		UniverseDomain: "googleapis.com",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("parse resolved google credentials: %w", err)
+	}
+	client := oauth2.NewClient(ctx, creds.TokenSource)
+	client.Transport = otelhttp.NewTransport(client.Transport)
+	client.Timeout = 20 * time.Second
+	return &googleCalendarAPI{httpClient: client, baseURL: calendarBaseURL}, nil
+}
+
 func (a *googleCalendarAPI) InsertEvent(ctx context.Context, calendarID, idempotencyKey string, ev CalendarEvent) (CalendarInsertResult, error) {
 	eventID := calendarEventID(idempotencyKey)
 	end := ev.StartsAt.Add(time.Duration(ev.DurationMinutes) * time.Minute)
@@ -82,7 +111,7 @@ func (a *googleCalendarAPI) InsertEvent(ctx context.Context, calendarID, idempot
 	if err != nil {
 		return CalendarInsertResult{}, fmt.Errorf("call calendar api: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 
 	switch resp.StatusCode {
@@ -114,7 +143,7 @@ func (a *googleCalendarAPI) DeleteEvent(ctx context.Context, calendarID, eventID
 	if err != nil {
 		return fmt.Errorf("call calendar api: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 
 	switch resp.StatusCode {

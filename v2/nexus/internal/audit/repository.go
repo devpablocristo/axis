@@ -175,13 +175,21 @@ func (r *Repository) VerifySignatures(events []auditdomain.AuditEvent) error {
 		return nil
 	}
 	for _, event := range events {
-		if strings.TrimSpace(event.Signature) == "" {
+		signature := strings.TrimSpace(event.Signature)
+		keyID := strings.TrimSpace(event.SignatureKeyID)
+		if signature == "" && keyID == "" {
+			// Signing is optional and can be enabled after a chain already exists.
+			// Historical unsigned entries remain protected by the append-only hash
+			// chain; only entries that claim a signature must authenticate.
+			continue
+		}
+		if signature == "" || keyID == "" {
 			return fmt.Errorf("audit event %s is missing signature", event.ID)
 		}
 		mac := hmac.New(sha256.New, r.signingKey)
 		_, _ = mac.Write([]byte(event.EventHash))
 		expected := hex.EncodeToString(mac.Sum(nil))
-		if !hmac.Equal([]byte(expected), []byte(event.Signature)) {
+		if !hmac.Equal([]byte(expected), []byte(signature)) {
 			return fmt.Errorf("audit event %s signature mismatch", event.ID)
 		}
 	}

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/devpablocristo/companion-v2/internal/attestation"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -23,6 +24,11 @@ func TestCompleteExecutionAtomicallyCreatesImmutableOutboxMessage(t *testing.T) 
 	}
 	defer pool.Close()
 	repository := NewRepository(pool)
+	signer, err := attestation.NewSigner(attestation.DeriveDevelopmentKey("integration"), "test-executor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository.SetExecutionAttestor(signer)
 	tenantID := "execution-outbox-test-" + uuid.NewString()
 	jobRoleID, profileID, virployeeID := uuid.New(), uuid.New(), uuid.New()
 	preparedID, executionID := uuid.New(), uuid.New()
@@ -77,6 +83,9 @@ func TestCompleteExecutionAtomicallyCreatesImmutableOutboxMessage(t *testing.T) 
 	}
 	if payload["binding_hash"] != "sha256:binding" || payload["governance_check_id"] != governanceCheckID.String() {
 		t.Fatalf("unexpected immutable delivery payload: %+v", payload)
+	}
+	if payload["attestation_version"] != attestation.Version || payload["executor_version"] != "test-executor" || payload["attestation"] == "" {
+		t.Fatalf("missing signed attestation: %+v", payload)
 	}
 
 	if _, err := pool.Exec(ctx, `UPDATE companion_nexus_outbox SET status='delivered', delivered_at=now() WHERE tenant_id=$1 AND aggregate_id=$2`, tenantID, executionID); err != nil {

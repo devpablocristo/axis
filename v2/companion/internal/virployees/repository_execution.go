@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/devpablocristo/companion-v2/internal/attestation"
 	"github.com/devpablocristo/companion-v2/internal/outbox"
 	"github.com/devpablocristo/companion-v2/internal/virployees/preparedactions"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
@@ -168,10 +169,18 @@ func (r *Repository) CompleteExecution(ctx context.Context, tenantID string, id 
 	`, tenantID, preparedActionID).Scan(&governanceCheckID, &bindingHash); err != nil {
 		return ExecutionAttempt{}, err
 	}
+	signed, err := r.attestor.Sign(attestation.Payload{
+		TenantID: tenantID, GovernanceCheckID: governanceCheckID.String(), BindingHash: bindingHash,
+		IdempotencyKey: idempotencyKey, Status: status, DurationMS: durationMS, Result: result,
+	})
+	if err != nil {
+		return ExecutionAttempt{}, err
+	}
 	payload, err := json.Marshal(outbox.NexusExecutionResult{
 		VirployeeID: virployeeID.String(), GovernanceCheckID: governanceCheckID.String(),
 		IdempotencyKey: idempotencyKey, BindingHash: bindingHash, Status: status,
 		DurationMS: durationMS, Result: result,
+		AttestationVersion: signed.Version, ExecutorVersion: signed.ExecutorVersion, Attestation: signed.Signature,
 	})
 	if err != nil {
 		return ExecutionAttempt{}, err

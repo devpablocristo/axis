@@ -675,16 +675,17 @@ func normalizeActor(actor string) string {
 
 func governanceInput(tenantID string, result dryrun.Result, bindingHash string) executiongate.GovernanceCheckInput {
 	return executiongate.GovernanceCheckInput{
-		TenantID:       normalizeTenantID(tenantID),
-		RequesterType:  "virployee",
-		RequesterID:    result.RuntimeContext.Virployee.ID.String(),
-		ActionType:     result.Intent.CapabilityKey,
-		TargetSystem:   result.Intent.Domain,
-		TargetResource: result.Intent.Resource,
-		Params:         governanceParams(result),
-		Reason:         result.Input,
-		Context:        result.RuntimeContext.JobRole.Name,
-		BindingHash:    bindingHash,
+		TenantID:         normalizeTenantID(tenantID),
+		RequesterType:    "virployee",
+		RequesterID:      result.RuntimeContext.Virployee.ID.String(),
+		SupervisorUserID: result.RuntimeContext.Virployee.SupervisorUserID,
+		ActionType:       result.Intent.CapabilityKey,
+		TargetSystem:     result.Intent.Domain,
+		TargetResource:   result.Intent.Resource,
+		Params:           governanceParams(result),
+		Reason:           result.Input,
+		Context:          result.RuntimeContext.JobRole.Name,
+		BindingHash:      bindingHash,
 	}
 }
 

@@ -28,7 +28,7 @@ type Capability struct {
 
 	// Governance contract (Fase 1). Fail-safe defaults treat an unconfigured
 	// capability as maximally governed.
-	RiskClass             string // low | medium | high
+	RiskClass             string // low | medium | high | critical
 	SideEffectClass       string // read | write
 	RequiresNexusApproval bool
 	EvidenceRequired      bool
@@ -154,7 +154,7 @@ func NormalizeUpdateInput(in UpdateInput) (NormalizedUpdateInput, error) {
 // normalizeGovernance applies fail-safe defaults: unset risk is high, unset
 // side effect is write, and approval is required unless explicitly disabled.
 func normalizeGovernance(in GovernanceInput) (NormalizedGovernance, error) {
-	riskClass, err := normalizeChoice("risk_class", in.RiskClass, "high", []string{"low", "medium", "high"})
+	riskClass, err := normalizeChoice("risk_class", in.RiskClass, "high", []string{"low", "medium", "high", "critical"})
 	if err != nil {
 		return NormalizedGovernance{}, err
 	}

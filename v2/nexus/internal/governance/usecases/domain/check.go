@@ -25,27 +25,29 @@ const (
 )
 
 type CheckInput struct {
-	RequesterType  string
-	RequesterID    string
-	ActionType     string
-	TargetSystem   string
-	TargetResource string
-	Params         map[string]any
-	Reason         string
-	Context        string
-	BindingHash    string
+	RequesterType    string
+	RequesterID      string
+	SupervisorUserID string
+	ActionType       string
+	TargetSystem     string
+	TargetResource   string
+	Params           map[string]any
+	Reason           string
+	Context          string
+	BindingHash      string
 }
 
 type NormalizedCheckInput struct {
-	RequesterType  string
-	RequesterID    string
-	ActionType     string
-	TargetSystem   string
-	TargetResource string
-	Params         map[string]any
-	Reason         string
-	Context        string
-	BindingHash    string
+	RequesterType    string
+	RequesterID      string
+	SupervisorUserID string
+	ActionType       string
+	TargetSystem     string
+	TargetResource   string
+	Params           map[string]any
+	Reason           string
+	Context          string
+	BindingHash      string
 }
 
 type CheckResult struct {
@@ -68,26 +70,39 @@ type RecordedCheck struct {
 }
 
 type ExecutionResultInput struct {
-	IdempotencyKey string
-	BindingHash    string
-	Status         string
-	DurationMS     int64
-	Result         map[string]any
+	IdempotencyKey     string
+	BindingHash        string
+	Status             string
+	DurationMS         int64
+	Result             map[string]any
+	AttestationVersion string
+	ExecutorVersion    string
+	Attestation        string
 }
 
 type ExecutionResult struct {
-	ID                string
-	GovernanceCheckID string
-	BindingHash       string
-	Status            string
-	DurationMS        int64
-	Result            map[string]any
+	ID                 string
+	GovernanceCheckID  string
+	RequesterID        string
+	BindingHash        string
+	Status             string
+	DurationMS         int64
+	Result             map[string]any
+	Created            bool
+	IdempotencyKey     string
+	AttestationVersion string
+	ExecutorVersion    string
+	Attestation        string
+	ResultHash         string
 }
 
 func NormalizeExecutionResultInput(in ExecutionResultInput) (ExecutionResultInput, error) {
 	in.IdempotencyKey = strings.TrimSpace(in.IdempotencyKey)
 	in.BindingHash = strings.TrimSpace(in.BindingHash)
 	in.Status = strings.TrimSpace(in.Status)
+	in.AttestationVersion = strings.TrimSpace(in.AttestationVersion)
+	in.ExecutorVersion = strings.TrimSpace(in.ExecutorVersion)
+	in.Attestation = strings.TrimSpace(in.Attestation)
 	if in.IdempotencyKey == "" {
 		return ExecutionResultInput{}, domainerr.Validation("Idempotency-Key is required")
 	}
@@ -99,6 +114,9 @@ func NormalizeExecutionResultInput(in ExecutionResultInput) (ExecutionResultInpu
 	}
 	if in.DurationMS < 0 {
 		return ExecutionResultInput{}, domainerr.Validation("duration_ms cannot be negative")
+	}
+	if in.AttestationVersion == "" || in.ExecutorVersion == "" || in.Attestation == "" {
+		return ExecutionResultInput{}, domainerr.Validation("executor attestation is required")
 	}
 	if in.Result == nil {
 		in.Result = map[string]any{}
@@ -167,14 +185,15 @@ func NormalizeCheckInput(in CheckInput) (NormalizedCheckInput, error) {
 		params = make(map[string]any)
 	}
 	return NormalizedCheckInput{
-		RequesterType:  requesterType,
-		RequesterID:    requesterID,
-		ActionType:     actionType,
-		TargetSystem:   strings.TrimSpace(in.TargetSystem),
-		TargetResource: strings.TrimSpace(in.TargetResource),
-		Params:         params,
-		Reason:         strings.TrimSpace(in.Reason),
-		Context:        strings.TrimSpace(in.Context),
-		BindingHash:    strings.TrimSpace(in.BindingHash),
+		RequesterType:    requesterType,
+		RequesterID:      requesterID,
+		SupervisorUserID: strings.TrimSpace(in.SupervisorUserID),
+		ActionType:       actionType,
+		TargetSystem:     strings.TrimSpace(in.TargetSystem),
+		TargetResource:   strings.TrimSpace(in.TargetResource),
+		Params:           params,
+		Reason:           strings.TrimSpace(in.Reason),
+		Context:          strings.TrimSpace(in.Context),
+		BindingHash:      strings.TrimSpace(in.BindingHash),
 	}, nil
 }

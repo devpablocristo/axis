@@ -151,6 +151,29 @@ func TestUnsignedRepoSkipsSignatureCheck(t *testing.T) {
 	}
 }
 
+func TestSignedRepoAcceptsHistoricalUnsignedPrefix(t *testing.T) {
+	unsigned := sealChain(t, NewRepository(nil), sampleEvents()[:1])
+	signedRepo := NewRepository(nil, WithSigner("super-secret", "k1"))
+	next := sampleEvents()[1]
+	next.ID = uuid.New()
+	next.CreatedAt = unsigned[0].CreatedAt.Add(time.Second)
+	next.ChainScope = unsigned[0].ChainScope
+	next.PreviousHash = unsigned[0].EventHash
+	ph, eh, signature, err := signedRepo.sealEvent(next)
+	if err != nil {
+		t.Fatalf("seal signed suffix: %v", err)
+	}
+	next.PayloadHash, next.EventHash, next.Signature = ph, eh, signature
+	next.SignatureKeyID = signedRepo.signingKeyID
+	events := append(unsigned, next)
+	if err := signedRepo.VerifySignatures(events); err != nil {
+		t.Fatalf("historical unsigned prefix must remain verifiable: %v", err)
+	}
+	if out := verifyEvents(events); out.Status != "ok" || !out.Signed {
+		t.Fatalf("mixed chain must be valid and report signatures: %+v", out)
+	}
+}
+
 // --- usecases (validation + replay) with a fake repo ---
 
 type fakeRepo struct {

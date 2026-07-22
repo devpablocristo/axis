@@ -49,6 +49,7 @@ const RISK_CLASS_OPTIONS: Array<{ label: string; value: CapabilityRiskClass }> =
   { label: 'Low', value: 'low' },
   { label: 'Medium', value: 'medium' },
   { label: 'High', value: 'high' },
+  { label: 'Critical / break-glass', value: 'critical' },
 ]
 
 const SIDE_EFFECT_OPTIONS: Array<{ label: string; value: CapabilitySideEffectClass }> = [

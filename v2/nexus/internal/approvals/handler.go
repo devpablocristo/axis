@@ -16,8 +16,9 @@ import (
 type UseCasesPort interface {
 	List(context.Context, string, domain.ListInput) (domain.ListPage, error)
 	Get(context.Context, string, uuid.UUID) (domain.Approval, error)
-	Approve(context.Context, string, uuid.UUID, string, domain.DecisionInput) (domain.Approval, error)
-	Reject(context.Context, string, uuid.UUID, string, domain.DecisionInput) (domain.Approval, error)
+	Approve(context.Context, string, uuid.UUID, domain.DecisionActor, domain.DecisionInput) (domain.Approval, error)
+	Reject(context.Context, string, uuid.UUID, domain.DecisionActor, domain.DecisionInput) (domain.Approval, error)
+	Review(context.Context, string, uuid.UUID, domain.DecisionActor, domain.DecisionInput) (domain.Approval, error)
 }
 
 type Handler struct {
@@ -35,6 +36,7 @@ func (h *Handler) Routes(router gin.IRouter) {
 		group.GET("/:approval_id", h.Get)
 		group.POST("/:approval_id/approve", h.Approve)
 		group.POST("/:approval_id/reject", h.Reject)
+		group.POST("/:approval_id/review", h.Review)
 	}
 }
 
@@ -72,9 +74,13 @@ func (h *Handler) Reject(c *gin.Context) {
 	h.decide(c, h.ucs.Reject)
 }
 
+func (h *Handler) Review(c *gin.Context) {
+	h.decide(c, h.ucs.Review)
+}
+
 func (h *Handler) decide(
 	c *gin.Context,
-	fn func(context.Context, string, uuid.UUID, string, domain.DecisionInput) (domain.Approval, error),
+	fn func(context.Context, string, uuid.UUID, domain.DecisionActor, domain.DecisionInput) (domain.Approval, error),
 ) {
 	id, ok := ginmw.ParseUUIDParam(c, "approval_id")
 	if !ok {
@@ -84,7 +90,7 @@ func (h *Handler) decide(
 	if err := ginmw.BindJSON(c, &req); err != nil {
 		return
 	}
-	out, err := fn(c.Request.Context(), tenantID(c), id, actorID(c), req.ToDomain())
+	out, err := fn(c.Request.Context(), tenantID(c), id, domain.DecisionActor{ID: actorID(c), Role: actorRole(c)}, req.ToDomain())
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -113,9 +119,9 @@ func tenantID(c *gin.Context) string {
 }
 
 func actorID(c *gin.Context) string {
-	actor := strings.TrimSpace(c.GetHeader("X-Actor-ID"))
-	if actor == "" {
-		return "system"
-	}
-	return actor
+	return strings.TrimSpace(c.GetHeader("X-Actor-ID"))
+}
+
+func actorRole(c *gin.Context) string {
+	return strings.TrimSpace(c.GetHeader("X-Axis-Tenant-Role"))
 }

@@ -36,9 +36,19 @@ func TestNormalizeCreateInputRejectsInvalidRisk(t *testing.T) {
 	_, err := NormalizeCreateInput(CreateInput{
 		ActionTypeKey: "calendar.events.create",
 		Name:          "Create event",
-		RiskClass:     "critical",
+		RiskClass:     "extreme",
 	})
 	if !domainerr.IsValidation(err) {
 		t.Fatalf("expected validation error, got %v", err)
+	}
+}
+
+func TestNormalizeCreateInputAcceptsCriticalRisk(t *testing.T) {
+	out, err := NormalizeCreateInput(CreateInput{ActionTypeKey: "clinical.records.destroy", Name: "Destroy records", RiskClass: "critical"})
+	if err != nil {
+		t.Fatalf("NormalizeCreateInput: %v", err)
+	}
+	if out.RiskClass != RiskClassCritical {
+		t.Fatalf("risk class = %q", out.RiskClass)
 	}
 }

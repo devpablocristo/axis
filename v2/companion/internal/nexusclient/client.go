@@ -49,15 +49,16 @@ func (c *Client) setTrustedHeaders(req *http.Request, tenantID, actorID string) 
 
 func (c *Client) Check(ctx context.Context, input executiongate.GovernanceCheckInput) (executiongate.GovernanceCheckResult, error) {
 	body := checkRequest{
-		RequesterType:  input.RequesterType,
-		RequesterID:    input.RequesterID,
-		ActionType:     input.ActionType,
-		TargetSystem:   input.TargetSystem,
-		TargetResource: input.TargetResource,
-		Params:         input.Params,
-		Reason:         input.Reason,
-		Context:        input.Context,
-		BindingHash:    input.BindingHash,
+		RequesterType:    input.RequesterType,
+		RequesterID:      input.RequesterID,
+		SupervisorUserID: input.SupervisorUserID,
+		ActionType:       input.ActionType,
+		TargetSystem:     input.TargetSystem,
+		TargetResource:   input.TargetResource,
+		Params:           input.Params,
+		Reason:           input.Reason,
+		Context:          input.Context,
+		BindingHash:      input.BindingHash,
 	}
 	raw, err := json.Marshal(body)
 	if err != nil {
@@ -129,15 +130,16 @@ func (c *Client) GetApproval(ctx context.Context, tenantID string, id uuid.UUID)
 }
 
 type checkRequest struct {
-	RequesterType  string         `json:"requester_type,omitempty"`
-	RequesterID    string         `json:"requester_id"`
-	ActionType     string         `json:"action_type"`
-	TargetSystem   string         `json:"target_system,omitempty"`
-	TargetResource string         `json:"target_resource,omitempty"`
-	Params         map[string]any `json:"params,omitempty"`
-	Reason         string         `json:"reason,omitempty"`
-	Context        string         `json:"context,omitempty"`
-	BindingHash    string         `json:"binding_hash,omitempty"`
+	RequesterType    string         `json:"requester_type,omitempty"`
+	RequesterID      string         `json:"requester_id"`
+	SupervisorUserID string         `json:"supervisor_user_id,omitempty"`
+	ActionType       string         `json:"action_type"`
+	TargetSystem     string         `json:"target_system,omitempty"`
+	TargetResource   string         `json:"target_resource,omitempty"`
+	Params           map[string]any `json:"params,omitempty"`
+	Reason           string         `json:"reason,omitempty"`
+	Context          string         `json:"context,omitempty"`
+	BindingHash      string         `json:"binding_hash,omitempty"`
 }
 
 type approvalResponse struct {
@@ -210,8 +212,11 @@ func (c *Client) AppendAuditEvent(ctx context.Context, tenantID string, e AuditE
 	return nil
 }
 
-func (c *Client) ReportExecutionResult(ctx context.Context, tenantID, checkID, idempotencyKey, bindingHash, status string, durationMS int64, result map[string]any) error {
-	body := map[string]any{"binding_hash": bindingHash, "status": status, "duration_ms": durationMS, "result": result}
+func (c *Client) ReportExecutionResult(ctx context.Context, tenantID, checkID, idempotencyKey, bindingHash, status string, durationMS int64, result map[string]any, attestationVersion, executorVersion, signature string) error {
+	body := map[string]any{
+		"binding_hash": bindingHash, "status": status, "duration_ms": durationMS, "result": result,
+		"attestation_version": attestationVersion, "executor_version": executorVersion, "attestation": signature,
+	}
 	raw, err := json.Marshal(body)
 	if err != nil {
 		return fmt.Errorf("encode execution result: %w", err)

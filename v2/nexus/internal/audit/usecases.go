@@ -162,8 +162,11 @@ func scopeFor(tenantID, virployeeID string) (string, error) {
 // and reports "failed" with the offending index in CheckedEvents.
 func verifyEvents(events []auditdomain.AuditEvent) IntegrityOutput {
 	out := IntegrityOutput{Status: "ok", CheckedEvents: len(events)}
-	if len(events) > 0 {
-		out.Signed = strings.TrimSpace(events[0].SignatureKeyID) != ""
+	for _, event := range events {
+		if strings.TrimSpace(event.SignatureKeyID) != "" {
+			out.Signed = true
+			break
+		}
 	}
 	var previous string
 	for i, event := range events {

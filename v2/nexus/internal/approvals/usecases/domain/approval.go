@@ -18,23 +18,46 @@ const (
 )
 
 type Approval struct {
-	ID                uuid.UUID
-	TenantID          string
-	GovernanceCheckID uuid.UUID
-	RequesterID       string
-	ActionType        string
-	TargetSystem      string
-	TargetResource    string
-	RiskLevel         string
-	Reason            string
-	BindingHash       string
-	Status            Status
-	DecidedBy         string
-	DecisionNote      string
-	DecidedAt         *time.Time
-	ExpiresAt         time.Time
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
+	ID                 uuid.UUID
+	TenantID           string
+	GovernanceCheckID  uuid.UUID
+	RequesterID        string
+	ActionType         string
+	TargetSystem       string
+	TargetResource     string
+	RiskLevel          string
+	Reason             string
+	BindingHash        string
+	Status             Status
+	ApprovalKind       string
+	SupervisorUserID   string
+	QuorumRequired     int
+	ApprovalCount      int
+	Decisions          []Decision
+	PostReviewRequired bool
+	ReviewedBy         string
+	ReviewNote         string
+	ReviewedAt         *time.Time
+	DecidedBy          string
+	DecisionNote       string
+	DecidedAt          *time.Time
+	ExpiresAt          time.Time
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+}
+
+type Decision struct {
+	ID        uuid.UUID
+	ActorID   string
+	ActorRole string
+	Decision  string
+	Note      string
+	DecidedAt time.Time
+}
+
+type DecisionActor struct {
+	ID   string
+	Role string
 }
 
 type ListInput struct {

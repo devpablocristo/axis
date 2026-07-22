@@ -21,23 +21,25 @@ type Config struct {
 	// ExecutionModes is the parsed set of enabled executor modes. The variable is a
 	// comma-separated list (e.g. "local", "local,google_calendar"); "disabled" and
 	// empty entries yield an empty set (no executor wired = simulation only).
-	ExecutionModes            []string
-	InternalAuthSecret        string
-	WatcherInterval           time.Duration
-	StaleAssistAfter          time.Duration
-	StaleExecutionAfter       time.Duration
-	WatcherLease              time.Duration
-	OutboxBaseBackoff         time.Duration
-	WatcherBatchSize          int
-	WatcherMaxRecoveries      int
-	JobWorkerConcurrency      int
-	JobPollInterval           time.Duration
-	JobTimeout                time.Duration
-	ArtifactStagingBucket     string
-	ArtifactStagingPrefix     string
-	ArtifactCMEKKey           string
-	MalwareScannerAddress     string
-	ArtifactFetchAllowedHosts []string
+	ExecutionModes               []string
+	InternalAuthSecret           string
+	WatcherInterval              time.Duration
+	StaleAssistAfter             time.Duration
+	StaleExecutionAfter          time.Duration
+	WatcherLease                 time.Duration
+	OutboxBaseBackoff            time.Duration
+	WatcherBatchSize             int
+	WatcherMaxRecoveries         int
+	JobWorkerConcurrency         int
+	JobPollInterval              time.Duration
+	JobTimeout                   time.Duration
+	ArtifactStagingBucket        string
+	ArtifactStagingPrefix        string
+	ArtifactCMEKKey              string
+	MalwareScannerAddress        string
+	ArtifactFetchAllowedHosts    []string
+	GoogleCalendarSecretRef      string
+	ExecutorAttestationSecretRef string
 
 	// GoogleCalendarID is the calendar the google_calendar executor writes to
 	// (a calendar shared with the workload's service account). Required when
@@ -59,39 +61,41 @@ type Config struct {
 
 func Load() Config {
 	return Config{
-		Environment:               envconfig.NormalizeEnv(envconfig.Get("COMPANION_V2_ENV", "development")),
-		Port:                      envconfig.Get("PORT", "19086"),
-		DatabaseURL:               envconfig.Get("COMPANION_V2_DATABASE_URL", envconfig.Get("DATABASE_URL", "")),
-		RunMigrations:             envconfig.Bool("COMPANION_V2_RUN_MIGRATIONS", true),
-		MaxBodyBytes:              int64(envconfig.Int("COMPANION_V2_MAX_BODY_BYTES", 1<<20)),
-		CORSOrigins:               splitCSV(envconfig.Get("COMPANION_V2_CORS_ORIGINS", "")),
-		NexusBaseURL:              strings.TrimRight(envconfig.Get("COMPANION_V2_NEXUS_BASE_URL", ""), "/"),
-		RuntimeBaseURL:            strings.TrimRight(envconfig.Get("COMPANION_V2_RUNTIME_BASE_URL", ""), "/"),
-		ExecutionMode:             strings.ToLower(strings.TrimSpace(envconfig.Get("COMPANION_V2_EXECUTION_MODE", "disabled"))),
-		ExecutionModes:            parseExecutionModes(envconfig.Get("COMPANION_V2_EXECUTION_MODE", "disabled")),
-		GoogleCalendarID:          strings.TrimSpace(envconfig.Get("COMPANION_V2_GOOGLE_CALENDAR_ID", "")),
-		InternalAuthSecret:        strings.TrimSpace(envconfig.Get("COMPANION_V2_INTERNAL_AUTH_SECRET", envconfig.Get("AXIS_V2_INTERNAL_AUTH_SECRET", ""))),
-		WatcherInterval:           time.Duration(envconfig.Int("COMPANION_V2_WATCHER_INTERVAL_SEC", 30)) * time.Second,
-		StaleAssistAfter:          time.Duration(envconfig.Int("COMPANION_V2_STALE_ASSIST_SEC", 300)) * time.Second,
-		StaleExecutionAfter:       time.Duration(envconfig.Int("COMPANION_V2_STALE_EXECUTION_SEC", 300)) * time.Second,
-		WatcherLease:              time.Duration(envconfig.Int("COMPANION_V2_WATCHER_LEASE_SEC", 30)) * time.Second,
-		OutboxBaseBackoff:         time.Duration(envconfig.Int("COMPANION_V2_OUTBOX_BACKOFF_SEC", envconfig.Int("COMPANION_V2_REPORT_BACKOFF_SEC", 5))) * time.Second,
-		WatcherBatchSize:          envconfig.Int("COMPANION_V2_WATCHER_BATCH_SIZE", 50),
-		WatcherMaxRecoveries:      envconfig.Int("COMPANION_V2_RECOVERY_MAX_ATTEMPTS", 3),
-		JobWorkerConcurrency:      envconfig.Int("COMPANION_V2_JOB_WORKER_CONCURRENCY", 2),
-		JobPollInterval:           time.Duration(envconfig.Int("COMPANION_V2_JOB_POLL_INTERVAL_SEC", 1)) * time.Second,
-		JobTimeout:                time.Duration(envconfig.Int("COMPANION_V2_JOB_TIMEOUT_SEC", 300)) * time.Second,
-		ArtifactStagingBucket:     strings.TrimSpace(envconfig.Get("COMPANION_V2_ARTIFACT_STAGING_BUCKET", "")),
-		ArtifactStagingPrefix:     strings.TrimSpace(envconfig.Get("COMPANION_V2_ARTIFACT_STAGING_PREFIX", "axis-v2/staging")),
-		ArtifactCMEKKey:           strings.TrimSpace(envconfig.Get("COMPANION_V2_ARTIFACT_CMEK_KEY", "")),
-		MalwareScannerAddress:     strings.TrimSpace(envconfig.Get("COMPANION_V2_MALWARE_SCANNER_ADDRESS", "")),
-		ArtifactFetchAllowedHosts: splitCSV(envconfig.Get("COMPANION_V2_ARTIFACT_FETCH_ALLOWED_HOSTS", "")),
-		LearningMinExecutions:     envconfig.Int("COMPANION_V2_LEARNING_MIN_EXECUTIONS", 3),
-		LearningEnricherEnabled:   envconfig.Bool("COMPANION_V2_LEARNING_ENRICHER_ENABLED", false),
-		ServiceVersion:            envconfig.Get("COMPANION_V2_SERVICE_VERSION", ""),
-		OTelExporter:              strings.ToLower(strings.TrimSpace(envconfig.Get("COMPANION_V2_OTEL_EXPORTER", "none"))),
-		OTelEndpoint:              strings.TrimSpace(envconfig.Get("COMPANION_V2_OTEL_OTLP_ENDPOINT", "")),
-		OTelInsecure:              envconfig.Bool("COMPANION_V2_OTEL_OTLP_INSECURE", true),
+		Environment:                  envconfig.NormalizeEnv(envconfig.Get("COMPANION_V2_ENV", "development")),
+		Port:                         envconfig.Get("PORT", "19086"),
+		DatabaseURL:                  envconfig.Get("COMPANION_V2_DATABASE_URL", envconfig.Get("DATABASE_URL", "")),
+		RunMigrations:                envconfig.Bool("COMPANION_V2_RUN_MIGRATIONS", true),
+		MaxBodyBytes:                 int64(envconfig.Int("COMPANION_V2_MAX_BODY_BYTES", 1<<20)),
+		CORSOrigins:                  splitCSV(envconfig.Get("COMPANION_V2_CORS_ORIGINS", "")),
+		NexusBaseURL:                 strings.TrimRight(envconfig.Get("COMPANION_V2_NEXUS_BASE_URL", ""), "/"),
+		RuntimeBaseURL:               strings.TrimRight(envconfig.Get("COMPANION_V2_RUNTIME_BASE_URL", ""), "/"),
+		ExecutionMode:                strings.ToLower(strings.TrimSpace(envconfig.Get("COMPANION_V2_EXECUTION_MODE", "disabled"))),
+		ExecutionModes:               parseExecutionModes(envconfig.Get("COMPANION_V2_EXECUTION_MODE", "disabled")),
+		GoogleCalendarID:             strings.TrimSpace(envconfig.Get("COMPANION_V2_GOOGLE_CALENDAR_ID", "")),
+		InternalAuthSecret:           strings.TrimSpace(envconfig.Get("COMPANION_V2_INTERNAL_AUTH_SECRET", envconfig.Get("AXIS_V2_INTERNAL_AUTH_SECRET", ""))),
+		WatcherInterval:              time.Duration(envconfig.Int("COMPANION_V2_WATCHER_INTERVAL_SEC", 30)) * time.Second,
+		StaleAssistAfter:             time.Duration(envconfig.Int("COMPANION_V2_STALE_ASSIST_SEC", 300)) * time.Second,
+		StaleExecutionAfter:          time.Duration(envconfig.Int("COMPANION_V2_STALE_EXECUTION_SEC", 300)) * time.Second,
+		WatcherLease:                 time.Duration(envconfig.Int("COMPANION_V2_WATCHER_LEASE_SEC", 30)) * time.Second,
+		OutboxBaseBackoff:            time.Duration(envconfig.Int("COMPANION_V2_OUTBOX_BACKOFF_SEC", envconfig.Int("COMPANION_V2_REPORT_BACKOFF_SEC", 5))) * time.Second,
+		WatcherBatchSize:             envconfig.Int("COMPANION_V2_WATCHER_BATCH_SIZE", 50),
+		WatcherMaxRecoveries:         envconfig.Int("COMPANION_V2_RECOVERY_MAX_ATTEMPTS", 3),
+		JobWorkerConcurrency:         envconfig.Int("COMPANION_V2_JOB_WORKER_CONCURRENCY", 2),
+		JobPollInterval:              time.Duration(envconfig.Int("COMPANION_V2_JOB_POLL_INTERVAL_SEC", 1)) * time.Second,
+		JobTimeout:                   time.Duration(envconfig.Int("COMPANION_V2_JOB_TIMEOUT_SEC", 300)) * time.Second,
+		ArtifactStagingBucket:        strings.TrimSpace(envconfig.Get("COMPANION_V2_ARTIFACT_STAGING_BUCKET", "")),
+		ArtifactStagingPrefix:        strings.TrimSpace(envconfig.Get("COMPANION_V2_ARTIFACT_STAGING_PREFIX", "axis-v2/staging")),
+		ArtifactCMEKKey:              strings.TrimSpace(envconfig.Get("COMPANION_V2_ARTIFACT_CMEK_KEY", "")),
+		MalwareScannerAddress:        strings.TrimSpace(envconfig.Get("COMPANION_V2_MALWARE_SCANNER_ADDRESS", "")),
+		ArtifactFetchAllowedHosts:    splitCSV(envconfig.Get("COMPANION_V2_ARTIFACT_FETCH_ALLOWED_HOSTS", "")),
+		GoogleCalendarSecretRef:      strings.TrimSpace(envconfig.Get("COMPANION_V2_GOOGLE_CALENDAR_SECRET_REF", "")),
+		ExecutorAttestationSecretRef: strings.TrimSpace(envconfig.Get("COMPANION_V2_EXECUTOR_ATTESTATION_SECRET_REF", "")),
+		LearningMinExecutions:        envconfig.Int("COMPANION_V2_LEARNING_MIN_EXECUTIONS", 3),
+		LearningEnricherEnabled:      envconfig.Bool("COMPANION_V2_LEARNING_ENRICHER_ENABLED", false),
+		ServiceVersion:               envconfig.Get("COMPANION_V2_SERVICE_VERSION", ""),
+		OTelExporter:                 strings.ToLower(strings.TrimSpace(envconfig.Get("COMPANION_V2_OTEL_EXPORTER", "none"))),
+		OTelEndpoint:                 strings.TrimSpace(envconfig.Get("COMPANION_V2_OTEL_OTLP_ENDPOINT", "")),
+		OTelInsecure:                 envconfig.Bool("COMPANION_V2_OTEL_OTLP_INSECURE", true),
 	}
 }
 

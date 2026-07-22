@@ -6,6 +6,7 @@ import {
 	getApproval,
 	listApprovalsPage,
 	rejectApproval,
+	reviewApproval,
 } from './api'
 
 type ApprovalsPageProps = {
@@ -142,15 +143,21 @@ export function ApprovalsPage({ tenantId, principalId, focusApprovalId = '', onR
     }
   }
 
-  async function decide(id: string, decision: 'approve' | 'reject') {
+  async function decide(approval: Approval, decision: 'approve' | 'reject' | 'review') {
     if (busyID) return
-    setBusyID(id)
+    const note = approval.approval_kind === 'break_glass' || decision === 'review'
+      ? window.prompt(decision === 'review' ? 'Post-action review note' : 'Break-glass justification')?.trim()
+      : ''
+    if ((approval.approval_kind === 'break_glass' || decision === 'review') && !note) return
+    setBusyID(approval.id)
     setError('')
     try {
       if (decision === 'approve') {
-        await approveApproval(id, tenantId, principalId)
-      } else {
-        await rejectApproval(id, tenantId, principalId)
+        await approveApproval(approval.id, tenantId, principalId, note)
+      } else if (decision === 'reject') {
+        await rejectApproval(approval.id, tenantId, principalId, note)
+	  } else {
+		await reviewApproval(approval.id, tenantId, principalId, note ?? '')
       }
       await load()
     } catch (decisionError) {
@@ -253,7 +260,7 @@ function ApprovalColumn(props: {
   busyID: string
   focusApprovalId: string
   focusedCardRef: MutableRefObject<HTMLElement | null>
-  onDecide: (id: string, decision: 'approve' | 'reject') => void
+  onDecide: (approval: Approval, decision: 'approve' | 'reject' | 'review') => void
   onLoadMore: () => void
 }) {
   return (
@@ -311,7 +318,7 @@ function ApprovalCard(props: {
   disabled: boolean
   focused: boolean
   cardRef?: (node: HTMLElement | null) => void
-  onDecide: (id: string, decision: 'approve' | 'reject') => void
+  onDecide: (approval: Approval, decision: 'approve' | 'reject' | 'review') => void
 }) {
   const approval = props.approval
   return (
@@ -338,6 +345,7 @@ function ApprovalCard(props: {
       <div className="approvals-board__facts">
         <MetaValue label="Requester" value={shortHash(approval.requester_id)} />
         <MetaValue label="Risk" value={approval.risk_level || 'unknown'} />
+		<MetaValue label="Quorum" value={`${approval.approval_count}/${approval.quorum_required}`} />
         <MetaValue label="Resource" value={`${approval.target_system || '-'} / ${approval.target_resource || '-'}`} />
         <MetaValue label="Created" value={formatDate(approval.created_at)} />
         <MetaValue label="Expires" value={formatDate(approval.expires_at)} />
@@ -358,7 +366,7 @@ function ApprovalCard(props: {
             type="button"
             className="btn-danger"
             disabled={props.disabled}
-            onClick={() => props.onDecide(approval.id, 'reject')}
+            onClick={() => props.onDecide(approval, 'reject')}
           >
             {props.busy ? 'Working...' : 'Reject'}
           </button>
@@ -366,12 +374,18 @@ function ApprovalCard(props: {
             type="button"
             className="btn-success"
             disabled={props.disabled}
-            onClick={() => props.onDecide(approval.id, 'approve')}
+            onClick={() => props.onDecide(approval, 'approve')}
           >
             {props.busy ? 'Working...' : 'Approve'}
           </button>
         </div>
-      ) : (
+      ) : approval.status === 'approved' && approval.post_review_required && !approval.reviewed_at ? (
+		<div className="approvals-board__actions">
+		  <button type="button" className="btn-secondary" disabled={props.disabled} onClick={() => props.onDecide(approval, 'review')}>
+			{props.busy ? 'Working...' : 'Record post-action review'}
+		  </button>
+		</div>
+	  ) : (
         <div className="approvals-board__settled">
           {approval.decided_at ? formatDate(approval.decided_at) : 'Decision recorded'}
         </div>

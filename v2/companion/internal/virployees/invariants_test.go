@@ -303,7 +303,7 @@ func TestInvariantExecuteApprovedActionRebindsBeforeExecuting(t *testing.T) {
 		// Force the real trace-build path (no short-circuit) and seed the
 		// execution-gate trace it reads as the source.
 		repo.existingExecTrace = nil
-		repo.fakeRepo.traces = append(repo.fakeRepo.traces, runtraces.Trace{
+		repo.traces = append(repo.traces, runtraces.Trace{
 			TenantID:    "tenant-1",
 			VirployeeID: id,
 			Operation:   runtraces.OperationExecutionGate,

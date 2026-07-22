@@ -27,6 +27,13 @@ func TestCalendarEventID(t *testing.T) {
 	}
 }
 
+func TestGoogleCalendarCredentialsRejectExternalConfiguration(t *testing.T) {
+	_, err := NewGoogleCalendarAPIFromJSON(context.Background(), []byte(`{"type":"external_account","credential_source":{"url":"https://attacker.invalid/token"}}`))
+	if err == nil || !strings.Contains(err.Error(), "only complete service-account credentials") {
+		t.Fatalf("externally sourced credentials must be rejected, got %v", err)
+	}
+}
+
 func newTestCalendarAPI(handler http.HandlerFunc) (*googleCalendarAPI, *httptest.Server) {
 	srv := httptest.NewServer(handler)
 	return &googleCalendarAPI{httpClient: srv.Client(), baseURL: srv.URL}, srv

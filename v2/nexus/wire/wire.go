@@ -13,6 +13,7 @@ import (
 	cfg "github.com/devpablocristo/nexus-v2/cmd/config"
 	"github.com/devpablocristo/nexus-v2/internal/actiontypes"
 	"github.com/devpablocristo/nexus-v2/internal/approvals"
+	"github.com/devpablocristo/nexus-v2/internal/attestation"
 	"github.com/devpablocristo/nexus-v2/internal/audit"
 	"github.com/devpablocristo/nexus-v2/internal/evidence"
 	"github.com/devpablocristo/nexus-v2/internal/governance"
@@ -81,6 +82,20 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 
 	governanceRepo := governance.NewRepository(db.Pool(), config.ApprovalTTL)
 	governanceUseCases := governance.NewUseCases(actionTypeUseCases, governanceRepo)
+	attestationKey, err := resolveAttestationKey(ctx, config)
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	attestationVerifier, err := attestation.NewVerifier(attestationKey)
+	for i := range attestationKey {
+		attestationKey[i] = 0
+	}
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	governanceUseCases.SetAttestationVerifier(attestationVerifier)
 	governanceHandler := governance.NewHandler(governanceUseCases)
 
 	approvalsRepo := approvals.NewRepository(db.Pool())
@@ -92,6 +107,8 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	// leaves signatures blank (local-first; production sets the key).
 	auditRepo := audit.NewRepository(db.Pool(), audit.WithSigner(config.SigningKey, ""))
 	auditUseCases := audit.NewUseCases(auditRepo)
+	approvalsUseCases.SetAuditEmitter(auditUseCases)
+	governanceUseCases.SetAuditEmitter(auditUseCases)
 	auditHandler := audit.NewHandler(auditUseCases)
 
 	// Signed, exportable evidence packs built over the audit ledger. Shares the
@@ -126,6 +143,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 			"Content-Type",
 			"X-Actor-ID",
 			"X-Tenant-ID",
+			"X-Axis-Tenant-Role",
 		},
 	}))
 	ginmw.RegisterHealthEndpoints(router, db.Ping)

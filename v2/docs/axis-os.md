@@ -160,6 +160,25 @@ Runtime owns the Vertex embedding adapter and exposes it only on the internal
 authenticated surface. Document and query task types stay distinct and input
 truncation is disabled so incomplete clinical evidence fails visibly.
 
+Executor credentials and attestation keys are resolved through opaque
+`secret_ref` values by service-local Secret Manager adapters. Secret bytes are
+held only long enough to construct a credential or signer and are never stored
+in PostgreSQL, memory records, logs, jobs, audit events, or evidence. Production
+fails closed when a required reference is absent; development may derive the
+attestation key from the already configured internal token under a distinct
+domain separator, but never persists that derived key.
+
+Nexus owns approval separation of duties. Only forwarded human supervisors,
+tenant admins, or owners may decide; the requester, virployee identities and
+service principals cannot approve their own work. Normal high-risk approvals
+need one decision. Critical break-glass approvals need two different approvers,
+a non-empty justification and later review; any rejection terminates the chain.
+Every decision is an append-only row and an event in the virployee ledger.
+Executor results carry a canonical HMAC-SHA256 attestation over the tenant,
+governance check, binding, idempotency key, status, duration, result and executor
+version. Nexus verifies it before persisting an external effect, and the signed
+evidence pack includes the resulting decision and attestation ledger events.
+
 Each artifact is capped at 250 MiB, one diagnosis at 500 MiB and a product
 repository at 5 GiB. Fetching is streamed through a bounded spool, verifies the
 declared byte count and SHA-256, sniffs the actual MIME, and fails closed on a
