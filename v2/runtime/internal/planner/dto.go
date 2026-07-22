@@ -56,6 +56,19 @@ type AnswerRequest struct {
 	JobRole        string          `json:"job_role,omitempty"`
 	InputJSON      json.RawMessage `json:"input_json"`
 	ResponseSchema map[string]any  `json:"response_schema,omitempty"`
+	ContentParts   []ContentPart   `json:"content_parts,omitempty"`
+}
+
+type ContentPart struct {
+	Kind       string          `json:"kind"`
+	Text       string          `json:"text,omitempty"`
+	Data       []byte          `json:"data,omitempty"`
+	URI        string          `json:"uri,omitempty"`
+	MIMEType   string          `json:"mime_type,omitempty"`
+	Name       string          `json:"name,omitempty"`
+	SHA256     string          `json:"sha256,omitempty"`
+	DocumentID string          `json:"document_id,omitempty"`
+	Locator    json.RawMessage `json:"locator,omitempty"`
 }
 
 // AnswerResponse carries the model's answer. Answered is true only when the model

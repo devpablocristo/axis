@@ -33,8 +33,8 @@ type UseCasesPort interface {
 	ExecutionGate(context.Context, string, uuid.UUID, string, *executiongate.ConfirmedDraft) (executiongate.Result, error)
 	SimulateApprovedExecution(context.Context, string, uuid.UUID, uuid.UUID) (runtraces.Trace, error)
 	ExecuteApprovedAction(context.Context, string, uuid.UUID, uuid.UUID) (runtraces.Trace, error)
-	Assist(context.Context, string, uuid.UUID, json.RawMessage, string) (AssistRun, error)
-	SubmitAssistAsync(context.Context, string, uuid.UUID, json.RawMessage, string) (AssistRun, error)
+	Assist(context.Context, string, uuid.UUID, json.RawMessage, string, AssistMetadata) (AssistRun, error)
+	SubmitAssistAsync(context.Context, string, uuid.UUID, json.RawMessage, string, AssistMetadata) (AssistRun, error)
 	GetAssistRun(context.Context, string, uuid.UUID, uuid.UUID) (AssistRun, error)
 	ListRuns(context.Context, string, uuid.UUID, int) ([]runtraces.Trace, error)
 	Update(context.Context, string, uuid.UUID, domain.UpdateInput) (domain.Virployee, error)
@@ -95,7 +95,11 @@ func (h *Handler) SubmitAssistRun(c *gin.Context) {
 	if idem == "" {
 		idem = strings.TrimSpace(c.GetHeader("Idempotency-Key"))
 	}
-	run, err := h.ucs.SubmitAssistAsync(c.Request.Context(), tenantID(c), id, req.InputJSON, idem)
+	metadata := AssistMetadata{
+		AssistType: req.AssistType, ProductSurface: req.ProductSurface,
+		SubjectID: req.SubjectID, RepositoryGeneration: req.RepositoryGeneration,
+	}
+	run, err := h.ucs.SubmitAssistAsync(c.Request.Context(), tenantID(c), id, req.InputJSON, idem, metadata)
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -159,7 +163,11 @@ func (h *Handler) Assist(c *gin.Context) {
 	if idem == "" {
 		idem = strings.TrimSpace(c.GetHeader("Idempotency-Key"))
 	}
-	run, err := h.ucs.Assist(c.Request.Context(), tenantID(c), id, req.InputJSON, idem)
+	metadata := AssistMetadata{
+		AssistType: req.AssistType, ProductSurface: req.ProductSurface,
+		SubjectID: req.SubjectID, RepositoryGeneration: req.RepositoryGeneration,
+	}
+	run, err := h.ucs.Assist(c.Request.Context(), tenantID(c), id, req.InputJSON, idem, metadata)
 	if err != nil {
 		ginmw.Respond(c, err)
 		return

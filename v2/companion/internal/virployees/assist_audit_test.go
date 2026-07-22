@@ -34,7 +34,7 @@ func TestAssistEmitsAuditEventOnSuccess(t *testing.T) {
 	uc.answerer = ans
 	uc.auditEmitter = emitter
 
-	run, err := uc.Assist(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"documents":[]}`), "idem-1")
+	run, err := uc.Assist(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"documents":[]}`), "idem-1", AssistMetadata{})
 	if err != nil {
 		t.Fatalf("Assist: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestAssistEmitsAuditEventOnFailure(t *testing.T) {
 	emitter := &fakeAuditEmitter{}
 	uc.auditEmitter = emitter
 
-	if _, err := uc.Assist(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"x":1}`), "idem-f"); err == nil {
+	if _, err := uc.Assist(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"x":1}`), "idem-f", AssistMetadata{}); err == nil {
 		t.Fatal("expected an error when the runtime fails")
 	}
 	if len(emitter.events) != 1 || emitter.events[0].EventType != "assist_failed" {
@@ -82,7 +82,7 @@ func TestAssistSucceedsWhenAuditEmitFails(t *testing.T) {
 	uc.answerer = &fakeAnswerer{out: AnswerOutput{OutputJSON: json.RawMessage(`{"summary":"ok"}`), Answered: true}}
 	uc.auditEmitter = &fakeAuditEmitter{err: errors.New("nexus down")}
 
-	run, err := uc.Assist(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"x":1}`), "idem-e")
+	run, err := uc.Assist(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"x":1}`), "idem-e", AssistMetadata{})
 	if err != nil {
 		t.Fatalf("assist must succeed despite a best-effort audit failure: %v", err)
 	}

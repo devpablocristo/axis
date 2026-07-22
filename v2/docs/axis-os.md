@@ -106,10 +106,14 @@ channel for governance calls to Nexus. Health endpoints remain public.
   check. Each service schedules reconciliation ticks in its own durable
   PostgreSQL queue; tickers only materialize due work, while bounded workers claim it with
   `FOR UPDATE SKIP LOCKED`, renewable leases, heartbeats, retries, expired-lease
-  recovery, and a replayable dead-letter state. The job dedupe scope is tenant +
+  recovery, and a replayable dead-letter state. A lost lease may resume
+  `staging|extracting|indexing` from the verified staged original, but never
+  replays an `answering` state because the model call may already have occurred.
+  The job dedupe scope is tenant +
   product + kind + logical key, so replicas cannot process the same logical tick
-  twice. Reconciliation re-enqueues received assist rows, finalizes stale
-  answering runs, recovers stale governed
+  twice. Reconciliation re-enqueues received assist rows, safely resets stale
+  pre-answer assists within a bounded recovery budget, finalizes stale answering
+  runs, and recovers stale governed
   executions with the original idempotency key, and retries failed execution
   result reports to Nexus. Execution completion and creation of its Nexus outbox
   message are one Companion database transaction. A bounded dispatcher delivers
@@ -125,3 +129,32 @@ channel for governance calls to Nexus. Health endpoints remain public.
   audit hashes, and safe references in runtime traces.
 - Policy engines, callbacks, break-glass, external providers, and tasks are
   future modules.
+
+## Multimodal artifact ingestion boundary
+
+Companion owns a separate `artifacts` bounded context for product documents;
+Virployees consume its result but do not fetch or interpret product storage
+directly. A product submission carries a stable repository generation plus a
+manifest (`document_id`, subject, SHA-256, MIME and size). Signed read URLs are
+transport hints only: they never participate in idempotency, the durable job
+payload, logs, audit events or evidence.
+
+The ingestion application core depends on hexagonal ports:
+`ArtifactCatalogPort`, `ArtifactFetcherPort`, `MalwareScannerPort`,
+`ArtifactStorePort`, `FormatAdapter`, `ExtractionPort`, `ChunkerPort`,
+`EmbeddingPort`, `VectorStorePort`, `ArtifactRetrieverPort` and
+`MultimodalAnswerPort`. Adapters may fetch from product URLs, scan, stage in a
+tenant-prefixed GCS bucket, extract or preserve native media, and later index
+derived chunks. The original remains authoritative; text, OCR, captions,
+transcripts, tables and keyframes are versioned derivatives and never replace
+it.
+
+Each artifact is capped at 250 MiB, one diagnosis at 500 MiB and a product
+repository at 5 GiB. Fetching is streamed through a bounded spool, verifies the
+declared byte count and SHA-256, sniffs the actual MIME, and fails closed on a
+corrupt, unsupported or required unreadable artifact. A binary is never
+represented as empty text. Staged objects are tenant/virployee/subject scoped,
+carry a 24-hour expiry contract and, in production, require a dedicated GCS
+bucket with CMEK. Assist states progress through `received`, `staging`,
+`extracting`, `indexing`, `answering` and `completed|failed`; PostgreSQL and the
+durable job lease, rather than a process-local goroutine, own the work.

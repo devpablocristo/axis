@@ -15,6 +15,7 @@ type TimedOutAssist struct {
 	VirployeeID uuid.UUID
 	InputHash   string
 	StartedAt   time.Time
+	Outcome     string
 }
 
 type ExecutionWork struct {
@@ -23,24 +24,43 @@ type ExecutionWork struct {
 }
 
 type OperationalRepositoryPort interface {
-	FailStaleAssistRuns(context.Context, time.Time, int) ([]TimedOutAssist, error)
+	ReconcileStaleAssistRuns(context.Context, time.Time, int, int) ([]TimedOutAssist, error)
 	ClaimStaleExecutions(context.Context, time.Time, int, string, time.Duration, int) ([]ExecutionWork, error)
 	ReleaseExecutionRecovery(context.Context, string, uuid.UUID, string) error
 }
 
-func (r *Repository) FailStaleAssistRuns(ctx context.Context, cutoff time.Time, limit int) ([]TimedOutAssist, error) {
+func (r *Repository) ReconcileStaleAssistRuns(ctx context.Context, cutoff time.Time, limit, maxAttempts int) ([]TimedOutAssist, error) {
 	rows, err := r.pool.Query(ctx, `
 		WITH stale AS (
-			SELECT id FROM companion_assist_runs
-			WHERE status IN ('running', 'answering') AND updated_at <= $1
+			SELECT id, status, recovery_attempts FROM companion_assist_runs
+			WHERE status IN ('staging', 'extracting', 'indexing', 'answering') AND updated_at <= $1
 			ORDER BY updated_at, id LIMIT $2 FOR UPDATE SKIP LOCKED
 		)
 		UPDATE companion_assist_runs a
-		SET status = 'failed', error = 'assist run exceeded watchdog timeout',
-			completed_at = now(), updated_at = now(), duration_ms = GREATEST(0, EXTRACT(EPOCH FROM (now() - started_at)) * 1000)::bigint
+		SET status = CASE
+				WHEN stale.status = 'answering' OR stale.recovery_attempts + 1 >= $3 THEN 'failed'
+				ELSE 'received'
+			END,
+			error = CASE
+				WHEN stale.status = 'answering' THEN 'assist answer state became stale'
+				WHEN stale.recovery_attempts + 1 >= $3 THEN 'assist recovery exhausted'
+				ELSE ''
+			END,
+			recovery_attempts = stale.recovery_attempts + 1,
+			completed_at = CASE
+				WHEN stale.status = 'answering' OR stale.recovery_attempts + 1 >= $3 THEN now()
+				ELSE NULL
+			END,
+			updated_at = now(),
+			duration_ms = CASE
+				WHEN stale.status = 'answering' OR stale.recovery_attempts + 1 >= $3
+				THEN GREATEST(0, EXTRACT(EPOCH FROM (now() - started_at)) * 1000)::bigint
+				ELSE duration_ms
+			END
 		FROM stale WHERE a.id = stale.id
-		RETURNING a.id, a.tenant_id, a.virployee_id, a.input_hash, a.started_at
-	`, cutoff.UTC(), limit)
+		RETURNING a.id, a.tenant_id, a.virployee_id, a.input_hash, a.started_at,
+			CASE WHEN a.status = 'received' THEN 'recovered' ELSE 'timed_out' END
+	`, cutoff.UTC(), limit, maxAttempts)
 	if err != nil {
 		return nil, err
 	}
@@ -48,7 +68,7 @@ func (r *Repository) FailStaleAssistRuns(ctx context.Context, cutoff time.Time, 
 	var out []TimedOutAssist
 	for rows.Next() {
 		var item TimedOutAssist
-		if err := rows.Scan(&item.ID, &item.TenantID, &item.VirployeeID, &item.InputHash, &item.StartedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.TenantID, &item.VirployeeID, &item.InputHash, &item.StartedAt, &item.Outcome); err != nil {
 			return nil, err
 		}
 		out = append(out, item)

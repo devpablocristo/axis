@@ -597,12 +597,12 @@ func (f *handlerFakeUseCases) ExecuteApprovedAction(_ context.Context, tenantID 
 	}, nil
 }
 
-func (f *handlerFakeUseCases) Assist(_ context.Context, tenantID string, id uuid.UUID, _ json.RawMessage, _ string) (AssistRun, error) {
+func (f *handlerFakeUseCases) Assist(_ context.Context, tenantID string, id uuid.UUID, _ json.RawMessage, _ string, _ AssistMetadata) (AssistRun, error) {
 	f.lastTenant = tenantID
 	return AssistRun{ID: uuid.New(), VirployeeID: id, Status: "done", Answered: true, Output: json.RawMessage(`{"summary":"ok"}`)}, nil
 }
 
-func (f *handlerFakeUseCases) SubmitAssistAsync(_ context.Context, tenantID string, id uuid.UUID, _ json.RawMessage, _ string) (AssistRun, error) {
+func (f *handlerFakeUseCases) SubmitAssistAsync(_ context.Context, tenantID string, id uuid.UUID, _ json.RawMessage, _ string, _ AssistMetadata) (AssistRun, error) {
 	f.lastTenant = tenantID
 	return AssistRun{ID: uuid.New(), TenantID: tenantID, VirployeeID: id, Status: "received"}, nil
 }

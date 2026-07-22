@@ -31,12 +31,16 @@ func (u *UseCases) RunOperationalWatchersOnce(ctx context.Context, config Watche
 		return fmt.Errorf("operational watcher durations must be positive")
 	}
 	now := time.Now().UTC()
-	assists, err := repo.FailStaleAssistRuns(ctx, now.Add(-config.StaleAssistAfter), config.BatchSize)
+	assists, err := repo.ReconcileStaleAssistRuns(ctx, now.Add(-config.StaleAssistAfter), config.BatchSize, config.MaxRecoveryAttempts)
 	if err != nil {
 		return fmt.Errorf("expire stale assists: %w", err)
 	}
 	for _, item := range assists {
-		u.emitWatcherAudit(ctx, item.TenantID, item.VirployeeID.String(), "assist_run", item.ID.String(), "assist_timed_out", "stale assist run finalized", map[string]any{
+		eventType, summary := "assist_timed_out", "stale assist run finalized"
+		if item.Outcome == "recovered" {
+			eventType, summary = "assist_recovered", "stale pre-answer assist run queued for recovery"
+		}
+		u.emitWatcherAudit(ctx, item.TenantID, item.VirployeeID.String(), "assist_run", item.ID.String(), eventType, summary, map[string]any{
 			"run_id": item.ID.String(), "input_hash": item.InputHash,
 		})
 	}

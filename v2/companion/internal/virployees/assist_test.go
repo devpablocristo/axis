@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/devpablocristo/companion-v2/internal/artifacts"
 	"github.com/devpablocristo/companion-v2/internal/virployees/runtraces"
 	"github.com/devpablocristo/companion-v2/internal/virployees/usecases/domain"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
@@ -22,21 +23,29 @@ type fakeAssistRepo struct {
 	current       AssistRun
 }
 
-func (r *fakeAssistRepo) BeginAssistRun(_ context.Context, tenant string, vid uuid.UUID, _, idem, inputHash, _ string, input json.RawMessage) (AssistRun, bool, error) {
+func (r *fakeAssistRepo) BeginAssistRun(_ context.Context, tenant string, vid uuid.UUID, metadata AssistMetadata, idem, inputHash, _ string, input json.RawMessage) (AssistRun, bool, error) {
 	r.beginCalls++
 	if !r.reserved {
 		return r.existing, false, nil
 	}
-	r.current = AssistRun{ID: uuid.New(), TenantID: tenant, VirployeeID: vid, IdempotencyKey: idem, Status: "received", InputHash: inputHash, InputJSON: input}
+	r.current = AssistRun{ID: uuid.New(), TenantID: tenant, VirployeeID: vid, AssistType: metadata.AssistType, ProductSurface: metadata.ProductSurface, SubjectID: metadata.SubjectID, RepositoryGeneration: metadata.RepositoryGeneration, IdempotencyKey: idem, Status: "received", InputHash: inputHash, InputJSON: input}
 	return r.current, true, nil
 }
 
-func (r *fakeAssistRepo) ClaimAssistRun(_ context.Context, _ string, id uuid.UUID) (AssistRun, bool, error) {
-	if r.current.ID == id {
-		r.current.Status = "answering"
+func (r *fakeAssistRepo) ClaimAssistRun(_ context.Context, _ string, id uuid.UUID, recoverPreAnswer bool) (AssistRun, bool, error) {
+	if r.current.ID == id && (r.current.Status == "received" || (recoverPreAnswer && (r.current.Status == "staging" || r.current.Status == "extracting" || r.current.Status == "indexing"))) {
+		r.current.Status = "staging"
 		return r.current, true, nil
 	}
 	return r.existing, false, nil
+}
+
+func (r *fakeAssistRepo) SetAssistRunStatus(_ context.Context, _ string, id uuid.UUID, status string) (AssistRun, error) {
+	if r.current.ID == id {
+		r.current.Status = status
+		return r.current, nil
+	}
+	return r.existing, nil
 }
 
 func (r *fakeAssistRepo) CompleteAssistRun(_ context.Context, _ string, id uuid.UUID, status string, output json.RawMessage, outputText string, answered, degraded bool, model, pv, runErr string, dur int64) (AssistRun, error) {
@@ -88,6 +97,17 @@ type fakeAssistQueue struct {
 	err  error
 }
 
+type fakeArtifactIngestor struct {
+	request artifacts.IngestRequest
+	result  artifacts.IngestResult
+	err     error
+}
+
+func (f *fakeArtifactIngestor) Ingest(_ context.Context, request artifacts.IngestRequest) (artifacts.IngestResult, error) {
+	f.request = request
+	return f.result, f.err
+}
+
 func (q *fakeAssistQueue) EnqueueAssist(_ context.Context, run AssistRun) error {
 	q.runs = append(q.runs, run)
 	return q.err
@@ -108,7 +128,7 @@ func TestAssistProcessesAndPersistsAnswer(t *testing.T) {
 	uc.assistRepo = repo
 	uc.answerer = ans
 
-	run, err := uc.Assist(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"documents":[]}`), "idem-1")
+	run, err := uc.Assist(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"documents":[]}`), "idem-1", AssistMetadata{})
 	if err != nil {
 		t.Fatalf("Assist: %v", err)
 	}
@@ -135,7 +155,7 @@ func TestAssistFetchesDocumentsAndPassesContentToModel(t *testing.T) {
 	uc.docFetcher = fetcher
 
 	input := json.RawMessage(`{"schema_version":"medmory.diagnosis_input.v1","documents":[{"key":"labs.txt","read_url":"https://x/labs","content_type":"text/plain"}]}`)
-	if _, err := uc.Assist(context.Background(), "tenant-1", created.ID, input, "idem-docs"); err != nil {
+	if _, err := uc.Assist(context.Background(), "tenant-1", created.ID, input, "idem-docs", AssistMetadata{}); err != nil {
 		t.Fatalf("Assist: %v", err)
 	}
 	if fetcher.calls != 1 {
@@ -151,12 +171,44 @@ func TestAssistFetchesDocumentsAndPassesContentToModel(t *testing.T) {
 	}
 }
 
+func TestAssistUsesArtifactPipelineAndNeverForwardsSignedURLToRuntime(t *testing.T) {
+	uc, created := setupExecutionGateUseCase(t, domain.AutonomyA3)
+	repo := &fakeAssistRepo{reserved: true}
+	answerer := &fakeAnswerer{out: AnswerOutput{OutputJSON: json.RawMessage(`{"summary":"ok"}`), Answered: true}}
+	legacyFetcher := &fakeDocFetcher{}
+	ingestor := &fakeArtifactIngestor{result: artifacts.IngestResult{Parts: []artifacts.ContentPart{{
+		Kind: artifacts.PartText, Text: "Glucosa 126 mg/dL", DocumentID: "doc-1", SHA256: "abc",
+	}}}}
+	uc.assistRepo = repo
+	uc.answerer = answerer
+	uc.docFetcher = legacyFetcher
+	uc.artifactIngestor = ingestor
+
+	input := json.RawMessage(`{"documents":[{"document_id":"doc-1","key":"labs.pdf","read_url":"https://signed.example/labs?secret=yes","content_type":"application/pdf","sha256":"abc","size_bytes":120}]}`)
+	metadata := AssistMetadata{AssistType: "clinical_diagnosis", ProductSurface: "medmory", SubjectID: "patient-a", RepositoryGeneration: "generation-a"}
+	if _, err := uc.Assist(context.Background(), "tenant-1", created.ID, input, "idem-artifacts", metadata); err != nil {
+		t.Fatalf("Assist: %v", err)
+	}
+	if legacyFetcher.calls != 0 {
+		t.Fatal("legacy document fetcher must be bypassed when artifact ingestion is configured")
+	}
+	if ingestor.request.Scope.SubjectID != "patient-a" || ingestor.request.Scope.RepositoryGeneration != "generation-a" || len(ingestor.request.Artifacts) != 1 || !ingestor.request.Artifacts[0].Required {
+		t.Fatalf("artifact manifest scope not propagated: %+v", ingestor.request)
+	}
+	if len(answerer.lastInput.ContentParts) != 1 || answerer.lastInput.ContentParts[0].Text != "Glucosa 126 mg/dL" {
+		t.Fatalf("verified content parts not propagated: %+v", answerer.lastInput.ContentParts)
+	}
+	if got := string(answerer.lastInput.InputJSON); strings.Contains(got, "signed.example") || strings.Contains(got, "read_url") {
+		t.Fatalf("runtime input must not contain signed URL after staging: %s", got)
+	}
+}
+
 func TestAssistMarksDegradedWhenModelDidNotAnswer(t *testing.T) {
 	uc, created := setupExecutionGateUseCase(t, domain.AutonomyA3)
 	uc.assistRepo = &fakeAssistRepo{reserved: true}
 	uc.answerer = &fakeAnswerer{out: AnswerOutput{OutputText: "Recibido (modo echo).", Answered: false}}
 
-	run, err := uc.Assist(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"x":1}`), "idem-2")
+	run, err := uc.Assist(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"x":1}`), "idem-2", AssistMetadata{})
 	if err != nil {
 		t.Fatalf("Assist: %v", err)
 	}
@@ -174,7 +226,7 @@ func TestAssistReplayReturnsExistingRunWithoutCallingModel(t *testing.T) {
 	uc.assistRepo = repo
 	uc.answerer = ans
 
-	run, err := uc.Assist(context.Background(), "tenant-1", created.ID, input, "idem-dup")
+	run, err := uc.Assist(context.Background(), "tenant-1", created.ID, input, "idem-dup", AssistMetadata{})
 	if err != nil {
 		t.Fatalf("Assist: %v", err)
 	}
@@ -195,7 +247,7 @@ func TestSubmitAssistAsyncPersistsAndQueuesIdentifiersWithoutCallingModel(t *tes
 	uc.assistQueue = queue
 	uc.answerer = answerer
 
-	run, err := uc.SubmitAssistAsync(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"document_id":"doc-1"}`), "manifest-generation-1")
+	run, err := uc.SubmitAssistAsync(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"document_id":"doc-1"}`), "manifest-generation-1", AssistMetadata{})
 	if err != nil {
 		t.Fatalf("SubmitAssistAsync: %v", err)
 	}
@@ -215,7 +267,7 @@ func TestRequeueReceivedAssistRunsClosesPersistEnqueueGap(t *testing.T) {
 	uc.assistQueue = queue
 	uc.answerer = &fakeAnswerer{}
 
-	run, _, err := uc.SubmitAssist(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"x":1}`), "generation-a")
+	run, _, err := uc.SubmitAssist(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"x":1}`), "generation-a", AssistMetadata{})
 	if err != nil {
 		t.Fatalf("SubmitAssist: %v", err)
 	}
@@ -228,12 +280,49 @@ func TestRequeueReceivedAssistRunsClosesPersistEnqueueGap(t *testing.T) {
 	}
 }
 
+func TestProcessAssistRunRecoversPreAnswerStateOnDurableJobRetry(t *testing.T) {
+	uc, created := setupExecutionGateUseCase(t, domain.AutonomyA3)
+	repo := &fakeAssistRepo{reserved: true}
+	answerer := &fakeAnswerer{out: AnswerOutput{OutputJSON: json.RawMessage(`{"summary":"recovered"}`), Answered: true}}
+	uc.assistRepo = repo
+	uc.answerer = answerer
+	run, _, err := uc.SubmitAssist(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"documents":[]}`), "generation-a", AssistMetadata{})
+	if err != nil {
+		t.Fatalf("SubmitAssist: %v", err)
+	}
+	repo.current.Status = "extracting" // previous worker died before the model call
+	completed, err := uc.ProcessAssistRun(context.Background(), "tenant-1", run.ID, true)
+	if err != nil {
+		t.Fatalf("ProcessAssistRun recovery: %v", err)
+	}
+	if completed.Status != "done" || !answerer.called {
+		t.Fatalf("expected safe pre-answer recovery, got %+v called=%v", completed, answerer.called)
+	}
+}
+
+func TestProcessAssistRunNeverReplaysStaleAnsweringState(t *testing.T) {
+	uc, created := setupExecutionGateUseCase(t, domain.AutonomyA3)
+	repo := &fakeAssistRepo{reserved: true}
+	answerer := &fakeAnswerer{out: AnswerOutput{Answered: true}}
+	uc.assistRepo = repo
+	uc.answerer = answerer
+	run, _, err := uc.SubmitAssist(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"documents":[]}`), "generation-a", AssistMetadata{})
+	if err != nil {
+		t.Fatalf("SubmitAssist: %v", err)
+	}
+	repo.current.Status = "answering"
+	_, err = uc.ProcessAssistRun(context.Background(), "tenant-1", run.ID, true)
+	if !domainerr.IsConflict(err) || answerer.called {
+		t.Fatalf("answering must not be replayed, err=%v called=%v", err, answerer.called)
+	}
+}
+
 func TestSubmitAssistRejectsIdempotencyKeyReusedWithDifferentInput(t *testing.T) {
 	uc, created := setupExecutionGateUseCase(t, domain.AutonomyA3)
 	uc.assistRepo = &fakeAssistRepo{reserved: false, existing: AssistRun{ID: uuid.New(), Status: "done", InputHash: runtraces.HashString(`{"x":1}`)}}
 	uc.answerer = &fakeAnswerer{}
 
-	_, _, err := uc.SubmitAssist(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"x":2}`), "generation-a")
+	_, _, err := uc.SubmitAssist(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"x":2}`), "generation-a", AssistMetadata{})
 	if !domainerr.IsConflict(err) {
 		t.Fatalf("expected idempotency conflict, got %v", err)
 	}
@@ -245,7 +334,7 @@ func TestAssistFailsClosedOnRuntimeError(t *testing.T) {
 	uc.assistRepo = repo
 	uc.answerer = &fakeAnswerer{err: errors.New("runtime down")}
 
-	_, err := uc.Assist(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"x":1}`), "idem-3")
+	_, err := uc.Assist(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"x":1}`), "idem-3", AssistMetadata{})
 	if err == nil {
 		t.Fatal("expected an error when the runtime fails")
 	}
@@ -258,7 +347,7 @@ func TestAssistRequiresAnswerer(t *testing.T) {
 	uc, created := setupExecutionGateUseCase(t, domain.AutonomyA3)
 	uc.assistRepo = &fakeAssistRepo{reserved: true}
 	// answerer intentionally nil
-	_, err := uc.Assist(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"x":1}`), "k")
+	_, err := uc.Assist(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"x":1}`), "k", AssistMetadata{})
 	if !domainerr.IsConflict(err) {
 		t.Fatalf("expected conflict when the answerer is not configured, got %v", err)
 	}

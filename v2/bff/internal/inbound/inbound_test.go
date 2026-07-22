@@ -51,7 +51,7 @@ func TestAssistRunProxiesAndMapsResponse(t *testing.T) {
 	}))
 	defer companion.Close()
 
-	body := `{"owner_system":"medmory","product_surface":"medmory","assist_type":"clinical_diagnosis","subject_type":"repository","subject_id":"default","input":{"schema_version":"medmory.diagnosis_input.v1","documents":[{"key":"labs.txt","read_url":"https://x/labs","content_type":"text/plain"}]}}`
+	body := `{"owner_system":"medmory","product_surface":"medmory","assist_type":"clinical_diagnosis","subject_type":"repository","subject_id":"patient-a","repository_generation":"generation-a","input":{"schema_version":"medmory.diagnosis_input.v1","documents":[{"key":"labs.txt","read_url":"https://x/labs","content_type":"text/plain"}]}}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/assist-runs", strings.NewReader(body))
 	req.Header.Set("X-API-Key", "secret-key")
 	req.Header.Set("Idempotency-Key", "doc-123")
@@ -71,6 +71,9 @@ func TestAssistRunProxiesAndMapsResponse(t *testing.T) {
 	}
 	if idem := string(gotBody["idempotency_key"]); !strings.Contains(idem, "doc-123") {
 		t.Fatalf("idempotency key must be forwarded, got %s", idem)
+	}
+	if string(gotBody["subject_id"]) != `"patient-a"` || string(gotBody["repository_generation"]) != `"generation-a"` || string(gotBody["assist_type"]) != `"clinical_diagnosis"` {
+		t.Fatalf("stable artifact scope must be forwarded, got %+v", gotBody)
 	}
 	// Response mapped to the product contract (done -> completed).
 	var out assistRunResult

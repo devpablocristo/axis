@@ -14,42 +14,46 @@ import (
 // raw input is persisted for the worker, but never returned by HTTP or emitted
 // to logs/evidence.
 type AssistRun struct {
-	ID             uuid.UUID
-	TenantID       string
-	VirployeeID    uuid.UUID
-	AssistType     string
-	IdempotencyKey string
-	Status         string // received | answering | done | failed
-	InputHash      string
-	InputPreview   string
-	InputJSON      json.RawMessage
-	Output         json.RawMessage
-	OutputText     string
-	Answered       bool
-	Degraded       bool
-	Model          string
-	PromptVersion  string
-	Error          string
-	DurationMS     int64
-	StartedAt      time.Time
-	CompletedAt    *time.Time
+	ID                   uuid.UUID
+	TenantID             string
+	VirployeeID          uuid.UUID
+	AssistType           string
+	ProductSurface       string
+	SubjectID            string
+	RepositoryGeneration string
+	IdempotencyKey       string
+	Status               string // received | answering | done | failed
+	InputHash            string
+	InputPreview         string
+	InputJSON            json.RawMessage
+	Output               json.RawMessage
+	OutputText           string
+	Answered             bool
+	Degraded             bool
+	Model                string
+	PromptVersion        string
+	Error                string
+	DurationMS           int64
+	StartedAt            time.Time
+	CompletedAt          *time.Time
 }
 
 // BeginAssistRun stores the full input before a durable job is enqueued. A
 // concurrent retry receives the existing run and cannot create a second model
 // invocation for the same stable idempotency key.
-func (r *Repository) BeginAssistRun(ctx context.Context, tenantID string, virployeeID uuid.UUID, assistType, idempotencyKey, inputHash, inputPreview string, inputJSON json.RawMessage) (AssistRun, bool, error) {
+func (r *Repository) BeginAssistRun(ctx context.Context, tenantID string, virployeeID uuid.UUID, metadata AssistMetadata, idempotencyKey, inputHash, inputPreview string, inputJSON json.RawMessage) (AssistRun, bool, error) {
 	if len(inputJSON) == 0 {
 		inputJSON = json.RawMessage(`{}`)
 	}
 	id := uuid.New()
 	tag, err := r.pool.Exec(ctx, `
 		INSERT INTO companion_assist_runs (
-			id, tenant_id, virployee_id, assist_type, idempotency_key,
-			status, input_hash, input_preview, input_json, started_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, 'received', $6, $7, $8::jsonb, now(), now())
+			id, tenant_id, virployee_id, assist_type, product_surface, subject_id, repository_generation,
+			idempotency_key, status, input_hash, input_preview, input_json, started_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'received', $9, $10, $11::jsonb, now(), now())
 		ON CONFLICT (tenant_id, virployee_id, idempotency_key) DO NOTHING
-	`, id, tenantID, virployeeID, assistType, idempotencyKey, inputHash, inputPreview, []byte(inputJSON))
+	`, id, tenantID, virployeeID, metadata.AssistType, metadata.ProductSurface, metadata.SubjectID, metadata.RepositoryGeneration,
+		idempotencyKey, inputHash, inputPreview, []byte(inputJSON))
 	if err != nil {
 		return AssistRun{}, false, err
 	}
@@ -60,17 +64,29 @@ func (r *Repository) BeginAssistRun(ctx context.Context, tenantID string, virplo
 // ClaimAssistRun provides a second idempotency barrier at the work item. The
 // queue lease is renewable; this transition ensures a duplicate delivery still
 // cannot execute the model twice.
-func (r *Repository) ClaimAssistRun(ctx context.Context, tenantID string, id uuid.UUID) (AssistRun, bool, error) {
+func (r *Repository) ClaimAssistRun(ctx context.Context, tenantID string, id uuid.UUID, recoverPreAnswer bool) (AssistRun, bool, error) {
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE companion_assist_runs
-		SET status = 'answering', updated_at = now()
-		WHERE tenant_id = $1 AND id = $2 AND status = 'received'
-	`, tenantID, id)
+		SET status = 'staging', updated_at = now()
+		WHERE tenant_id = $1 AND id = $2
+		  AND (status = 'received' OR ($3 AND status IN ('staging','extracting','indexing')))
+	`, tenantID, id, recoverPreAnswer)
 	if err != nil {
 		return AssistRun{}, false, err
 	}
 	run, err := r.GetAssistRunByID(ctx, tenantID, id)
 	return run, tag.RowsAffected() == 1, err
+}
+
+func (r *Repository) SetAssistRunStatus(ctx context.Context, tenantID string, id uuid.UUID, status string) (AssistRun, error) {
+	_, err := r.pool.Exec(ctx, `
+		UPDATE companion_assist_runs SET status=$3, updated_at=now()
+		WHERE tenant_id=$1 AND id=$2 AND status NOT IN ('done','failed')
+	`, tenantID, id, status)
+	if err != nil {
+		return AssistRun{}, err
+	}
+	return r.GetAssistRunByID(ctx, tenantID, id)
 }
 
 func (r *Repository) CompleteAssistRun(ctx context.Context, tenantID string, id uuid.UUID, status string, output json.RawMessage, outputText string, answered, degraded bool, model, promptVersion, runErr string, durationMS int64) (AssistRun, error) {
@@ -126,7 +142,8 @@ func (r *Repository) ListReceivedAssistRuns(ctx context.Context, limit int) ([]A
 }
 
 const assistRunSelect = `
-	SELECT id, tenant_id, virployee_id, assist_type, idempotency_key, status, input_hash, input_preview,
+	SELECT id, tenant_id, virployee_id, assist_type, product_surface, subject_id, repository_generation,
+	       idempotency_key, status, input_hash, input_preview,
 	       input_json, output, output_text, answered, degraded, model, prompt_version, error, duration_ms,
 	       started_at, completed_at
 	FROM companion_assist_runs
@@ -138,7 +155,8 @@ func (r *Repository) scanAssistRun(row rowScanner) (AssistRun, error) {
 	var out AssistRun
 	var input, output []byte
 	err := row.Scan(
-		&out.ID, &out.TenantID, &out.VirployeeID, &out.AssistType, &out.IdempotencyKey, &out.Status,
+		&out.ID, &out.TenantID, &out.VirployeeID, &out.AssistType, &out.ProductSurface, &out.SubjectID,
+		&out.RepositoryGeneration, &out.IdempotencyKey, &out.Status,
 		&out.InputHash, &out.InputPreview, &input, &output, &out.OutputText, &out.Answered, &out.Degraded,
 		&out.Model, &out.PromptVersion, &out.Error, &out.DurationMS, &out.StartedAt, &out.CompletedAt,
 	)

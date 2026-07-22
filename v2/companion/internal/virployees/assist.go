@@ -7,15 +7,20 @@ import (
 	"strings"
 	"time"
 
+	"github.com/devpablocristo/companion-v2/internal/artifacts"
 	"github.com/devpablocristo/companion-v2/internal/virployees/runtraces"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
 	"github.com/google/uuid"
 )
 
 type assistDocRef struct {
+	DocumentID  string `json:"document_id"`
 	Key         string `json:"key"`
 	ReadURL     string `json:"read_url"`
 	ContentType string `json:"content_type"`
+	SHA256      string `json:"sha256"`
+	SizeBytes   int64  `json:"size_bytes"`
+	Required    *bool  `json:"required,omitempty"`
 }
 
 func (u *UseCases) resolveDocuments(ctx context.Context, inputJSON json.RawMessage) json.RawMessage {
@@ -40,7 +45,7 @@ func (u *UseCases) resolveDocuments(ctx context.Context, inputJSON json.RawMessa
 }
 
 // SubmitAssist durably stores an idempotent run without performing model work.
-func (u *UseCases) SubmitAssist(ctx context.Context, tenantID string, id uuid.UUID, inputJSON json.RawMessage, idempotencyKey string) (AssistRun, bool, error) {
+func (u *UseCases) SubmitAssist(ctx context.Context, tenantID string, id uuid.UUID, inputJSON json.RawMessage, idempotencyKey string, metadata AssistMetadata) (AssistRun, bool, error) {
 	tenantID = normalizeTenantID(tenantID)
 	if u.answerer == nil {
 		return AssistRun{}, false, domainerr.Conflict("runtime answerer is not configured")
@@ -59,7 +64,7 @@ func (u *UseCases) SubmitAssist(ctx context.Context, tenantID string, id uuid.UU
 		idempotencyKey = runtraces.HashString(tenantID + ":" + id.String() + ":" + string(inputJSON))
 	}
 	inputHash := runtraces.HashString(string(inputJSON))
-	run, reserved, err := u.assistRepo.BeginAssistRun(ctx, tenantID, id, "", idempotencyKey, inputHash, runtraces.InputPreview(string(inputJSON)), inputJSON)
+	run, reserved, err := u.assistRepo.BeginAssistRun(ctx, tenantID, id, metadata, idempotencyKey, inputHash, runtraces.InputPreview(string(inputJSON)), inputJSON)
 	if err != nil {
 		return AssistRun{}, false, err
 	}
@@ -72,11 +77,11 @@ func (u *UseCases) SubmitAssist(ctx context.Context, tenantID string, id uuid.UU
 // SubmitAssistAsync persists then enqueues identifier-only work. If enqueueing
 // is interrupted, operational reconciliation finds the received row and queues
 // it later; no request depends on a process-local goroutine.
-func (u *UseCases) SubmitAssistAsync(ctx context.Context, tenantID string, id uuid.UUID, inputJSON json.RawMessage, idempotencyKey string) (AssistRun, error) {
+func (u *UseCases) SubmitAssistAsync(ctx context.Context, tenantID string, id uuid.UUID, inputJSON json.RawMessage, idempotencyKey string, metadata AssistMetadata) (AssistRun, error) {
 	if u.assistQueue == nil {
 		return AssistRun{}, domainerr.Conflict("assist queue is not configured")
 	}
-	run, reserved, err := u.SubmitAssist(ctx, tenantID, id, inputJSON, idempotencyKey)
+	run, reserved, err := u.SubmitAssist(ctx, tenantID, id, inputJSON, idempotencyKey, metadata)
 	if err != nil {
 		return AssistRun{}, err
 	}
@@ -93,8 +98,8 @@ func (u *UseCases) SubmitAssistAsync(ctx context.Context, tenantID string, id uu
 
 // Assist preserves the synchronous internal endpoint while sharing the same
 // durable reservation and claim semantics as asynchronous product work.
-func (u *UseCases) Assist(ctx context.Context, tenantID string, id uuid.UUID, inputJSON json.RawMessage, idempotencyKey string) (AssistRun, error) {
-	run, reserved, err := u.SubmitAssist(ctx, tenantID, id, inputJSON, idempotencyKey)
+func (u *UseCases) Assist(ctx context.Context, tenantID string, id uuid.UUID, inputJSON json.RawMessage, idempotencyKey string, metadata AssistMetadata) (AssistRun, error) {
+	run, reserved, err := u.SubmitAssist(ctx, tenantID, id, inputJSON, idempotencyKey, metadata)
 	if err != nil {
 		return AssistRun{}, err
 	}
@@ -108,13 +113,13 @@ func (u *UseCases) Assist(ctx context.Context, tenantID string, id uuid.UUID, in
 			return AssistRun{}, domainerr.Conflict("assist run already in progress")
 		}
 	}
-	return u.ProcessAssistRun(ctx, run.TenantID, run.ID)
+	return u.ProcessAssistRun(ctx, run.TenantID, run.ID, false)
 }
 
 // ProcessAssistRun is the durable job handler's domain operation.
-func (u *UseCases) ProcessAssistRun(ctx context.Context, tenantID string, runID uuid.UUID) (AssistRun, error) {
+func (u *UseCases) ProcessAssistRun(ctx context.Context, tenantID string, runID uuid.UUID, recoverPreAnswer bool) (AssistRun, error) {
 	tenantID = normalizeTenantID(tenantID)
-	run, claimed, err := u.assistRepo.ClaimAssistRun(ctx, tenantID, runID)
+	run, claimed, err := u.assistRepo.ClaimAssistRun(ctx, tenantID, runID, recoverPreAnswer)
 	if err != nil {
 		return AssistRun{}, err
 	}
@@ -134,12 +139,32 @@ func (u *UseCases) ProcessAssistRun(ctx context.Context, tenantID string, runID 
 		return failed, err
 	}
 
-	answerInputJSON := u.resolveDocuments(ctx, run.InputJSON)
+	contentParts, ingested, ingestErr := u.ingestArtifacts(ctx, run)
+	if ingestErr != nil {
+		failed, _ := u.assistRepo.CompleteAssistRun(ctx, tenantID, run.ID, "failed", nil, "", false, false, "", "", artifacts.StableErrorCode(ingestErr), 0)
+		u.emitAssistAudit(ctx, tenantID, run.VirployeeID, failed, run.InputHash)
+		return failed, domainerr.Unavailable("required artifact processing failed")
+	}
+	answerInputJSON := run.InputJSON
+	if ingested {
+		enriched, err := json.Marshal(map[string]any{"content_parts": contentParts})
+		if err != nil {
+			return AssistRun{}, err
+		}
+		answerInputJSON = enriched
+	} else {
+		answerInputJSON = u.resolveDocuments(ctx, run.InputJSON)
+	}
+	run, err = u.assistRepo.SetAssistRunStatus(ctx, tenantID, run.ID, "answering")
+	if err != nil {
+		return AssistRun{}, err
+	}
 	started := time.Now()
 	out, answerErr := u.answerer.Answer(ctx, AnswerInput{
 		SystemPrompt: runtimeContext.ProfileTemplate.SystemPrompt,
 		JobRole:      runtimeContext.JobRole.Name,
 		InputJSON:    answerInputJSON,
+		ContentParts: contentParts,
 	})
 	durationMS := time.Since(started).Milliseconds()
 	if answerErr != nil {
@@ -155,6 +180,43 @@ func (u *UseCases) ProcessAssistRun(ctx context.Context, tenantID string, runID 
 	}
 	u.emitAssistAudit(ctx, tenantID, run.VirployeeID, done, run.InputHash)
 	return done, nil
+}
+
+func (u *UseCases) ingestArtifacts(ctx context.Context, run AssistRun) ([]artifacts.ContentPart, bool, error) {
+	if u.artifactIngestor == nil {
+		return nil, false, nil
+	}
+	var parsed struct {
+		Documents []assistDocRef `json:"documents"`
+	}
+	if err := json.Unmarshal(run.InputJSON, &parsed); err != nil || len(parsed.Documents) == 0 {
+		return nil, false, nil
+	}
+	if strings.TrimSpace(run.SubjectID) == "" || strings.TrimSpace(run.ProductSurface) == "" || strings.TrimSpace(run.RepositoryGeneration) == "" {
+		return nil, false, domainerr.Validation("artifact assist metadata is incomplete")
+	}
+	manifests := make([]artifacts.Manifest, 0, len(parsed.Documents))
+	for _, doc := range parsed.Documents {
+		required := true
+		if doc.Required != nil {
+			required = *doc.Required
+		}
+		manifests = append(manifests, artifacts.Manifest{
+			DocumentID: doc.DocumentID, Name: doc.Key, SourceRef: doc.Key, ReadURL: doc.ReadURL,
+			SHA256: doc.SHA256, MIMEType: doc.ContentType, SizeBytes: doc.SizeBytes, Required: required,
+		})
+	}
+	result, err := u.artifactIngestor.Ingest(ctx, artifacts.IngestRequest{
+		Scope: artifacts.Scope{
+			TenantID: run.TenantID, VirployeeID: run.VirployeeID, ProductSurface: run.ProductSurface,
+			SubjectID: run.SubjectID, RepositoryGeneration: run.RepositoryGeneration,
+		},
+		Artifacts: manifests,
+	})
+	if err != nil {
+		return nil, true, err
+	}
+	return result.Parts, true, nil
 }
 
 func (u *UseCases) GetAssistRun(ctx context.Context, tenantID string, virployeeID, runID uuid.UUID) (AssistRun, error) {

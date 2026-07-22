@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/devpablocristo/companion-v2/internal/artifacts"
 	capabilitydomain "github.com/devpablocristo/companion-v2/internal/capabilities/usecases/domain"
 	jobroledomain "github.com/devpablocristo/companion-v2/internal/jobroles/usecases/domain"
 	"github.com/devpablocristo/companion-v2/internal/memories"
@@ -131,6 +132,7 @@ type AnswerInput struct {
 	JobRole        string
 	InputJSON      json.RawMessage
 	ResponseSchema map[string]any
+	ContentParts   []artifacts.ContentPart
 }
 
 type AnswerOutput struct {
@@ -147,10 +149,22 @@ type RuntimeAnswererPort interface {
 	Answer(ctx context.Context, in AnswerInput) (AnswerOutput, error)
 }
 
+type ArtifactIngestorPort interface {
+	Ingest(context.Context, artifacts.IngestRequest) (artifacts.IngestResult, error)
+}
+
+type AssistMetadata struct {
+	AssistType           string
+	ProductSurface       string
+	SubjectID            string
+	RepositoryGeneration string
+}
+
 // AssistRepositoryPort persists product assist runs (reserve-before-LLM).
 type AssistRepositoryPort interface {
-	BeginAssistRun(ctx context.Context, tenantID string, virployeeID uuid.UUID, assistType, idempotencyKey, inputHash, inputPreview string, inputJSON json.RawMessage) (AssistRun, bool, error)
-	ClaimAssistRun(ctx context.Context, tenantID string, id uuid.UUID) (AssistRun, bool, error)
+	BeginAssistRun(ctx context.Context, tenantID string, virployeeID uuid.UUID, metadata AssistMetadata, idempotencyKey, inputHash, inputPreview string, inputJSON json.RawMessage) (AssistRun, bool, error)
+	ClaimAssistRun(ctx context.Context, tenantID string, id uuid.UUID, recoverPreAnswer bool) (AssistRun, bool, error)
+	SetAssistRunStatus(ctx context.Context, tenantID string, id uuid.UUID, status string) (AssistRun, error)
 	CompleteAssistRun(ctx context.Context, tenantID string, id uuid.UUID, status string, output json.RawMessage, outputText string, answered, degraded bool, model, promptVersion, runErr string, durationMS int64) (AssistRun, error)
 	GetAssistRunByKey(ctx context.Context, tenantID string, virployeeID uuid.UUID, idempotencyKey string) (AssistRun, error)
 	GetAssistRunByID(ctx context.Context, tenantID string, id uuid.UUID) (AssistRun, error)
@@ -178,6 +192,7 @@ type UseCases struct {
 	assistRepo       AssistRepositoryPort
 	assistQueue      AssistQueuePort
 	docFetcher       DocumentFetcherPort
+	artifactIngestor ArtifactIngestorPort
 	auditEmitter     AuditEmitterPort
 	lifecycle        *lifecycle.Service
 }
@@ -253,6 +268,8 @@ func (u *UseCases) SetRuntimePlanner(planner RuntimePlannerPort) { u.runtime = p
 func (u *UseCases) SetRuntimeAnswerer(answerer RuntimeAnswererPort) { u.answerer = answerer }
 
 func (u *UseCases) SetDocumentFetcher(fetcher DocumentFetcherPort) { u.docFetcher = fetcher }
+
+func (u *UseCases) SetArtifactIngestor(ingestor ArtifactIngestorPort) { u.artifactIngestor = ingestor }
 
 func (u *UseCases) SetAuditEmitter(emitter AuditEmitterPort) { u.auditEmitter = emitter }
 

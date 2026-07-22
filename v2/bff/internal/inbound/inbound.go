@@ -45,12 +45,13 @@ func (h *Handler) Routes(router gin.IRouter) {
 }
 
 type assistRunEnvelope struct {
-	OwnerSystem    string          `json:"owner_system"`
-	ProductSurface string          `json:"product_surface"`
-	AssistType     string          `json:"assist_type"`
-	SubjectType    string          `json:"subject_type"`
-	SubjectID      string          `json:"subject_id"`
-	Input          json.RawMessage `json:"input"`
+	OwnerSystem          string          `json:"owner_system"`
+	ProductSurface       string          `json:"product_surface"`
+	AssistType           string          `json:"assist_type"`
+	SubjectType          string          `json:"subject_type"`
+	SubjectID            string          `json:"subject_id"`
+	RepositoryGeneration string          `json:"repository_generation"`
+	Input                json.RawMessage `json:"input"`
 }
 
 type assistRunResult struct {
@@ -88,7 +89,7 @@ func (h *Handler) AssistRun(c *gin.Context) {
 		return
 	}
 
-	run, err := h.submit(c, binding, envelope.Input, idempotencyKey)
+	run, err := h.submit(c, binding, envelope, idempotencyKey)
 	if err != nil {
 		ginmw.WriteError(c, http.StatusBadGateway, "downstream_unavailable", "assist service unavailable")
 		return
@@ -168,8 +169,12 @@ func (h *Handler) AssistCapabilities(c *gin.Context) {
 	})
 }
 
-func (h *Handler) submit(c *gin.Context, binding Binding, input json.RawMessage, idempotencyKey string) (companionAssistResponse, error) {
-	body, err := json.Marshal(map[string]any{"input_json": input, "idempotency_key": idempotencyKey})
+func (h *Handler) submit(c *gin.Context, binding Binding, envelope assistRunEnvelope, idempotencyKey string) (companionAssistResponse, error) {
+	body, err := json.Marshal(map[string]any{
+		"input_json": envelope.Input, "idempotency_key": idempotencyKey,
+		"assist_type": envelope.AssistType, "product_surface": binding.ProductSurface,
+		"subject_id": envelope.SubjectID, "repository_generation": envelope.RepositoryGeneration,
+	})
 	if err != nil {
 		return companionAssistResponse{}, err
 	}

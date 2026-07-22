@@ -143,6 +143,19 @@ type AnswerRequest struct {
 	JobRole        string
 	InputJSON      json.RawMessage
 	ResponseSchema map[string]any
+	ContentParts   []ContentPart
+}
+
+type ContentPart struct {
+	Kind       string          `json:"kind"`
+	Text       string          `json:"text,omitempty"`
+	Data       []byte          `json:"data,omitempty"`
+	URI        string          `json:"uri,omitempty"`
+	MIMEType   string          `json:"mime_type,omitempty"`
+	Name       string          `json:"name,omitempty"`
+	SHA256     string          `json:"sha256,omitempty"`
+	DocumentID string          `json:"document_id,omitempty"`
+	Locator    json.RawMessage `json:"locator,omitempty"`
 }
 
 // AnswerResult is the runtime's answer. Answered is false when the model did not
@@ -164,6 +177,7 @@ func (c *Client) Answer(ctx context.Context, in AnswerRequest) (AnswerResult, er
 		JobRole:        in.JobRole,
 		InputJSON:      in.InputJSON,
 		ResponseSchema: in.ResponseSchema,
+		ContentParts:   in.ContentParts,
 	})
 	if err != nil {
 		return AnswerResult{}, fmt.Errorf("encode answer request: %w", err)
@@ -305,6 +319,7 @@ type answerRequest struct {
 	JobRole        string          `json:"job_role,omitempty"`
 	InputJSON      json.RawMessage `json:"input_json"`
 	ResponseSchema map[string]any  `json:"response_schema,omitempty"`
+	ContentParts   []ContentPart   `json:"content_parts,omitempty"`
 }
 
 type answerResponse struct {

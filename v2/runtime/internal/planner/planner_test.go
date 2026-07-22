@@ -3,6 +3,7 @@ package planner
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	ai "github.com/devpablocristo/platform/kernels/ai/go"
@@ -202,13 +203,43 @@ func TestEnrichWithEchoReturnsOriginalNotEnriched(t *testing.T) {
 // --- Answer ---
 
 type answerProvider struct {
-	called bool
-	resp   ai.ChatResponse
+	called  bool
+	resp    ai.ChatResponse
+	request ai.ChatRequest
 }
 
-func (a *answerProvider) Chat(context.Context, ai.ChatRequest) (ai.ChatResponse, error) {
+func (a *answerProvider) Chat(_ context.Context, request ai.ChatRequest) (ai.ChatResponse, error) {
 	a.called = true
+	a.request = request
 	return a.resp, nil
+}
+
+func TestAnswerFailsClosedWhenOnlyNativeMediaRequiresUnpublishedKernel(t *testing.T) {
+	prov := &answerProvider{resp: ai.ChatResponse{Text: `{"summary":"should not run"}`}}
+	_, err := New(prov, "m").Answer(context.Background(), AnswerRequest{
+		InputJSON:    json.RawMessage(`{"documents":[{"document_id":"scan-1"}]}`),
+		ContentParts: []ContentPart{{Kind: "file_data", URI: "gs://stage/scan-1", MIMEType: "application/pdf", DocumentID: "scan-1"}},
+	})
+	if err == nil || prov.called {
+		t.Fatalf("native-only input must fail closed until kernel v0.3.0, err=%v called=%v", err, prov.called)
+	}
+}
+
+func TestAnswerUsesVerifiedTextDerivativeWhilePreservingNativePart(t *testing.T) {
+	prov := &answerProvider{resp: ai.ChatResponse{Text: `{"summary":"ok"}`}}
+	_, err := New(prov, "m").Answer(context.Background(), AnswerRequest{
+		InputJSON: json.RawMessage(`{"content_parts":2}`),
+		ContentParts: []ContentPart{
+			{Kind: "text", Text: "Glucosa 126 mg/dL", SHA256: "abc", DocumentID: "lab-1"},
+			{Kind: "file_data", URI: "gs://stage/lab-1", MIMEType: "application/pdf", SHA256: "abc", DocumentID: "lab-1"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Answer: %v", err)
+	}
+	if !prov.called || len(prov.request.Messages) != 1 || !strings.Contains(prov.request.Messages[0].Content, "Glucosa 126 mg/dL") || strings.Contains(prov.request.Messages[0].Content, "gs://") {
+		t.Fatalf("expected verified text without staging URI in v0.2 request: %+v", prov.request.Messages)
+	}
 }
 
 var diagnosisSchema = map[string]any{"type": "object", "properties": map[string]any{"summary": map[string]any{"type": "string"}}}

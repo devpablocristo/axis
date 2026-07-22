@@ -8,6 +8,7 @@ package planner
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	ai "github.com/devpablocristo/platform/kernels/ai/go"
@@ -127,9 +128,17 @@ func (p *Planner) Answer(ctx context.Context, req AnswerRequest) (AnswerResponse
 		return base, nil
 	}
 
+	partText, hasNativeMedia := materializeTextParts(req.ContentParts)
+	if hasNativeMedia && strings.TrimSpace(partText) == "" {
+		return AnswerResponse{}, fmt.Errorf("native media requires kernels/ai/go v0.3.0")
+	}
+	userContent := "Input JSON:\n" + input
+	if strings.TrimSpace(partText) != "" {
+		userContent += "\n\nVerified extracted document content:\n" + partText
+	}
 	chatReq := ai.ChatRequest{
 		SystemPrompt: buildAnswerSystemPrompt(req),
-		Messages:     []ai.Message{{Role: "user", Content: "Input JSON:\n" + input}},
+		Messages:     []ai.Message{{Role: "user", Content: userContent}},
 		MaxTokens:    4096,
 	}
 	if len(req.ResponseSchema) > 0 {
@@ -150,6 +159,29 @@ func (p *Planner) Answer(ctx context.Context, req AnswerRequest) (AnswerResponse
 		base.Answered = true
 	}
 	return base, nil
+}
+
+func materializeTextParts(parts []ContentPart) (string, bool) {
+	var b strings.Builder
+	hasNativeMedia := false
+	for _, part := range parts {
+		switch part.Kind {
+		case "text":
+			if strings.TrimSpace(part.Text) == "" {
+				continue
+			}
+			b.WriteString("[document_id=")
+			b.WriteString(part.DocumentID)
+			b.WriteString(" sha256=")
+			b.WriteString(part.SHA256)
+			b.WriteString("]\n")
+			b.WriteString(part.Text)
+			b.WriteString("\n")
+		case "inline_data", "file_data":
+			hasNativeMedia = true
+		}
+	}
+	return b.String(), hasNativeMedia
 }
 
 // asJSONObject returns the text as a JSON object/array if it is valid structured

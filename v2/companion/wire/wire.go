@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	cfg "github.com/devpablocristo/companion-v2/cmd/config"
+	"github.com/devpablocristo/companion-v2/internal/artifacts"
 	"github.com/devpablocristo/companion-v2/internal/capabilities"
 	"github.com/devpablocristo/companion-v2/internal/executionstats"
 	"github.com/devpablocristo/companion-v2/internal/infra/migrations"
@@ -28,6 +29,7 @@ import (
 	observability "github.com/devpablocristo/platform/observability/go"
 	"github.com/google/uuid"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"golang.org/x/oauth2/google"
 )
 
 type Dependencies struct {
@@ -45,11 +47,21 @@ type Dependencies struct {
 type runtimeAnswererAdapter struct{ client *runtimeclient.Client }
 
 func (a runtimeAnswererAdapter) Answer(ctx context.Context, in virployees.AnswerInput) (virployees.AnswerOutput, error) {
+	parts := make([]runtimeclient.ContentPart, 0, len(in.ContentParts))
+	for _, part := range in.ContentParts {
+		locator, _ := json.Marshal(part.Locator)
+		parts = append(parts, runtimeclient.ContentPart{
+			Kind: string(part.Kind), Text: part.Text, Data: part.Data, URI: part.URI,
+			MIMEType: part.MIMEType, Name: part.Name, SHA256: part.SHA256,
+			DocumentID: part.DocumentID, Locator: locator,
+		})
+	}
 	res, err := a.client.Answer(ctx, runtimeclient.AnswerRequest{
 		SystemPrompt:   in.SystemPrompt,
 		JobRole:        in.JobRole,
 		InputJSON:      in.InputJSON,
 		ResponseSchema: in.ResponseSchema,
+		ContentParts:   parts,
 	})
 	if err != nil {
 		return virployees.AnswerOutput{}, err
@@ -166,6 +178,44 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		virployeesUsecases.SetRuntimeAnswerer(runtimeAnswererAdapter{client: runtimePlanner})
 		virployeesUsecases.SetDocumentFetcher(virployees.NewHTTPDocumentFetcher(&http.Client{Timeout: 15 * time.Second, Transport: otelhttp.NewTransport(http.DefaultTransport)}))
 	}
+	if config.ArtifactStagingBucket != "" {
+		tokens, err := google.DefaultTokenSource(ctx, "https://www.googleapis.com/auth/devstorage.read_write")
+		if err != nil {
+			db.Close()
+			return nil, fmt.Errorf("artifact staging credentials: %w", err)
+		}
+		store, err := artifacts.NewGCSStore(artifacts.GCSStoreConfig{
+			Bucket: config.ArtifactStagingBucket, CMEKKey: config.ArtifactCMEKKey,
+			Prefix: config.ArtifactStagingPrefix, RequireCMEK: config.Environment == "production",
+		}, tokens, &http.Client{Timeout: 10 * time.Minute, Transport: otelhttp.NewTransport(http.DefaultTransport)})
+		if err != nil {
+			db.Close()
+			return nil, err
+		}
+		var scanner artifacts.MalwareScannerPort = artifacts.DevelopmentScanner{}
+		if config.MalwareScannerAddress != "" {
+			scanner = artifacts.ClamAVScanner{Address: config.MalwareScannerAddress, Timeout: 2 * time.Minute}
+		} else if config.Environment == "production" {
+			db.Close()
+			return nil, fmt.Errorf("production artifact ingestion requires COMPANION_V2_MALWARE_SCANNER_ADDRESS")
+		}
+		fetcher, err := artifacts.NewHTTPFetcher(
+			&http.Client{Timeout: 5 * time.Minute, Transport: otelhttp.NewTransport(http.DefaultTransport)},
+			config.ArtifactFetchAllowedHosts,
+		)
+		if err != nil {
+			db.Close()
+			return nil, err
+		}
+		artifactPipeline := artifacts.NewPipeline(
+			artifacts.NewRepository(db.Pool()),
+			fetcher,
+			scanner,
+			store,
+			artifacts.TextFormatAdapter{}, artifacts.PDFFormatAdapter{}, artifacts.NativeMediaAdapter{},
+		)
+		virployeesUsecases.SetArtifactIngestor(artifactPipeline)
+	}
 	// Executors are wired per enabled mode (COMPANION_V2_EXECUTION_MODE is a set).
 	// The local simulator and a real external executor can coexist on different
 	// capabilities; with no mode enabled, execution stays simulation-only. When
@@ -269,7 +319,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		if err != nil {
 			return nil, jobs.Permanent("invalid_assist_job", err)
 		}
-		run, processErr := virployeesUsecases.ProcessAssistRun(jobCtx, job.TenantID, runID)
+		run, processErr := virployeesUsecases.ProcessAssistRun(jobCtx, job.TenantID, runID, job.Attempts > 1)
 		evidence, _ := json.Marshal(map[string]any{"run_id": runID.String(), "status": run.Status})
 		if processErr != nil {
 			if run.Status == "failed" || run.Status == "done" {

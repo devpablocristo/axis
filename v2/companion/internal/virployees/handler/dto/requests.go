@@ -11,8 +11,12 @@ import (
 // data and an optional idempotency key (also accepted via the Idempotency-Key
 // header). No prompt is sent by the caller — the virployee's profile holds it.
 type AssistRequest struct {
-	InputJSON      json.RawMessage `json:"input_json"`
-	IdempotencyKey string          `json:"idempotency_key,omitempty"`
+	InputJSON            json.RawMessage `json:"input_json"`
+	IdempotencyKey       string          `json:"idempotency_key,omitempty"`
+	AssistType           string          `json:"assist_type,omitempty"`
+	ProductSurface       string          `json:"product_surface,omitempty"`
+	SubjectID            string          `json:"subject_id,omitempty"`
+	RepositoryGeneration string          `json:"repository_generation,omitempty"`
 }
 
 type CreateVirployeeRequest struct {
