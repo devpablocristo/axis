@@ -56,6 +56,23 @@ func (a runtimeAnswererAdapter) Answer(ctx context.Context, in virployees.Answer
 	}, nil
 }
 
+// auditEmitterAdapter maps the companion-owned audit event onto the Nexus audit
+// client, keeping the virployees package free of nexusclient.
+type auditEmitterAdapter struct{ client *nexusclient.Client }
+
+func (a auditEmitterAdapter) AppendAuditEvent(ctx context.Context, in virployees.AuditEventInput) error {
+	return a.client.AppendAuditEvent(ctx, in.TenantID, nexusclient.AuditEvent{
+		VirployeeID: in.VirployeeID,
+		ActorType:   in.ActorType,
+		ActorID:     in.ActorID,
+		SubjectType: in.SubjectType,
+		SubjectID:   in.SubjectID,
+		EventType:   in.EventType,
+		Summary:     in.Summary,
+		Data:        in.Data,
+	})
+}
+
 func Initialize(ctx context.Context) (*Dependencies, error) {
 	config := cfg.Load()
 	if config.DatabaseURL == "" {
@@ -132,6 +149,9 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		virployeesUsecases.SetGovernanceChecker(nexusClient)
 		virployeesUsecases.SetApprovalReader(nexusClient)
 		virployeesUsecases.SetExecutionResultReporter(nexusClient)
+		// Emit tamper-evident audit events (assist + governed executions) into the
+		// Nexus ledger. Best-effort: emission failures never fail the work.
+		virployeesUsecases.SetAuditEmitter(auditEmitterAdapter{client: nexusClient})
 	}
 	if config.RuntimeBaseURL != "" {
 		runtimePlanner := runtimeclient.New(config.RuntimeBaseURL, &http.Client{Timeout: 30 * time.Second, Transport: otelhttp.NewTransport(http.DefaultTransport)}, config.InternalAuthSecret)

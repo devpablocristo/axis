@@ -78,6 +78,28 @@ type ExecutionResultReporterPort interface {
 	ReportExecutionResult(ctx context.Context, tenantID, checkID, idempotencyKey, bindingHash, status string, durationMS int64, result map[string]any) error
 }
 
+// AuditEventInput is a companion-owned audit event, mapped to the Nexus audit
+// ledger by the wire adapter. Data must hold only hashes + non-sensitive
+// metadata (never PHI or raw content).
+type AuditEventInput struct {
+	TenantID    string
+	VirployeeID string
+	ActorType   string
+	ActorID     string
+	SubjectType string
+	SubjectID   string
+	EventType   string
+	Summary     string
+	Data        map[string]any
+}
+
+// AuditEmitterPort records an event in the tamper-evident ledger (Nexus). It is
+// optional and best-effort: emission failures must never fail the underlying
+// work. Gaps stay detectable because the ledger's subject_id is the run id.
+type AuditEmitterPort interface {
+	AppendAuditEvent(ctx context.Context, in AuditEventInput) error
+}
+
 // ExecutionOutcome is what an executor reports after acting. Mode identifies the
 // executor that ran (e.g. "local", "google_calendar") and ExternalEffects is true
 // when the action wrote to a real external system. Both are persisted with the
@@ -152,6 +174,7 @@ type UseCases struct {
 	answerer         RuntimeAnswererPort
 	assistRepo       AssistRepositoryPort
 	docFetcher       DocumentFetcherPort
+	auditEmitter     AuditEmitterPort
 	lifecycle        *lifecycle.Service
 }
 
@@ -228,6 +251,8 @@ func (u *UseCases) SetRuntimePlanner(planner RuntimePlannerPort) { u.runtime = p
 func (u *UseCases) SetRuntimeAnswerer(answerer RuntimeAnswererPort) { u.answerer = answerer }
 
 func (u *UseCases) SetDocumentFetcher(fetcher DocumentFetcherPort) { u.docFetcher = fetcher }
+
+func (u *UseCases) SetAuditEmitter(emitter AuditEmitterPort) { u.auditEmitter = emitter }
 
 func (u *UseCases) RegisterExecutor(action string, executor ActionExecutorPort) {
 	action = strings.TrimSpace(action)

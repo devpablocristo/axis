@@ -11,6 +11,8 @@ import (
 	cfg "github.com/devpablocristo/nexus-v2/cmd/config"
 	"github.com/devpablocristo/nexus-v2/internal/actiontypes"
 	"github.com/devpablocristo/nexus-v2/internal/approvals"
+	"github.com/devpablocristo/nexus-v2/internal/audit"
+	"github.com/devpablocristo/nexus-v2/internal/evidence"
 	"github.com/devpablocristo/nexus-v2/internal/governance"
 	"github.com/devpablocristo/nexus-v2/internal/infra/migrations"
 	postgres "github.com/devpablocristo/platform/databases/postgres/go"
@@ -78,6 +80,18 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	approvalsUseCases := approvals.NewUseCases(approvalsRepo)
 	approvalsHandler := approvals.NewHandler(approvalsUseCases)
 
+	// Tamper-evident audit ledger (hash-chained per virployee). Signing is
+	// optional: with NEXUS_V2_SIGNING_KEY unset the chain still hashes, it just
+	// leaves signatures blank (local-first; production sets the key).
+	auditRepo := audit.NewRepository(db.Pool(), audit.WithSigner(config.SigningKey, ""))
+	auditUseCases := audit.NewUseCases(auditRepo)
+	auditHandler := audit.NewHandler(auditUseCases)
+
+	// Signed, exportable evidence packs built over the audit ledger. Shares the
+	// same signing key; nil signer (no key) emits packs with algorithm "none".
+	evidenceUseCases := evidence.NewUseCases(auditUseCases, evidence.NewSigner(config.SigningKey, ""))
+	evidenceHandler := evidence.NewHandler(evidenceUseCases)
+
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
 	router.Use(gin.Recovery())
@@ -98,6 +112,8 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	actionTypeHandler.Routes(api)
 	governanceHandler.Routes(api)
 	approvalsHandler.Routes(api)
+	auditHandler.Routes(api)
+	evidenceHandler.Routes(api)
 
 	server := &http.Server{
 		Addr:    config.Addr(),

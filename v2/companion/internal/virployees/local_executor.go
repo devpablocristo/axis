@@ -3,6 +3,7 @@ package virployees
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -139,6 +140,10 @@ func (u *UseCases) ExecuteApprovedAction(ctx context.Context, tenantID string, i
 		if err != nil {
 			return runtraces.Trace{}, err
 		}
+		// Record the real execution in the tamper-evident ledger (best-effort:
+		// emitted once, on the created attempt, so idempotent re-entry does not
+		// duplicate it). Keyed by binding_hash — no external payload/PII.
+		u.emitExecutionAudit(ctx, tenantID, id, prepared.BindingHash, prepared.Action.Action, prepared.GovernanceCheckID.String(), attempt)
 	}
 	reportStatus := attempt.NexusReportStatus
 	if reportStatus != "reported" && u.resultReporter != nil {
@@ -186,4 +191,44 @@ func (u *UseCases) ExecuteApprovedAction(ctx context.Context, tenantID string, i
 			ResourceID: attempt.ResourceID, DurationMS: attempt.DurationMS, NexusReportStatus: reportStatus,
 		},
 	})
+}
+
+// emitExecutionAudit records a governed execution in the tamper-evident ledger
+// (Nexus). Best-effort: an audit sink failure never fails the execution. Keyed
+// by binding_hash so it chains alongside the virployee's other events.
+func (u *UseCases) emitExecutionAudit(ctx context.Context, tenantID string, virployeeID uuid.UUID, bindingHash, capabilityKey, governanceCheckID string, attempt ExecutionAttempt) {
+	if u.auditEmitter == nil {
+		return
+	}
+	eventType, summary := "execution_succeeded", "governed action executed"
+	if attempt.Status != "succeeded" {
+		eventType, summary = "execution_failed", "governed action failed"
+	}
+	data := map[string]any{
+		"binding_hash":        bindingHash,
+		"capability_key":      capabilityKey,
+		"governance_check_id": governanceCheckID,
+		"status":              attempt.Status,
+		"duration_ms":         attempt.DurationMS,
+	}
+	if v, ok := attempt.Result["external_effects"]; ok {
+		data["external_effects"] = v
+	}
+	if attempt.ResourceID != "" {
+		data["resource_id"] = attempt.ResourceID
+	}
+	if err := u.auditEmitter.AppendAuditEvent(ctx, AuditEventInput{
+		TenantID:    tenantID,
+		VirployeeID: virployeeID.String(),
+		ActorType:   "virployee",
+		ActorID:     virployeeID.String(),
+		SubjectType: "binding",
+		SubjectID:   bindingHash,
+		EventType:   eventType,
+		Summary:     summary,
+		Data:        data,
+	}); err != nil {
+		slog.ErrorContext(ctx, "audit emit failed for execution",
+			"error", err, "tenant_id", tenantID, "virployee_id", virployeeID.String(), "binding_hash", bindingHash)
+	}
 }

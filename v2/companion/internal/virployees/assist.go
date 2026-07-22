@@ -3,6 +3,7 @@ package virployees
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -107,11 +108,61 @@ func (u *UseCases) Assist(ctx context.Context, tenantID string, id uuid.UUID, in
 
 	if answerErr != nil {
 		// Fail-closed: record the failure and surface it — never a silent success.
-		_, _ = u.assistRepo.CompleteAssistRun(ctx, tenantID, run.ID, "failed", nil, "", false, false, "", "", runtraces.RedactText(answerErr.Error()), durationMS)
+		failedErr := runtraces.RedactText(answerErr.Error())
+		_, _ = u.assistRepo.CompleteAssistRun(ctx, tenantID, run.ID, "failed", nil, "", false, false, "", "", failedErr, durationMS)
+		u.emitAssistAudit(ctx, tenantID, id, AssistRun{ID: run.ID, Status: "failed", Error: failedErr, DurationMS: durationMS}, inputHash)
 		return AssistRun{}, domainerr.Unavailable("assist runtime failed")
 	}
 
 	// degraded = the model did not produce a usable answer (Echo / no credentials).
 	degraded := !out.Answered
-	return u.assistRepo.CompleteAssistRun(ctx, tenantID, run.ID, "done", out.OutputJSON, out.OutputText, out.Answered, degraded, out.ModelID, out.PromptVersion, "", durationMS)
+	done, err := u.assistRepo.CompleteAssistRun(ctx, tenantID, run.ID, "done", out.OutputJSON, out.OutputText, out.Answered, degraded, out.ModelID, out.PromptVersion, "", durationMS)
+	if err != nil {
+		return AssistRun{}, err
+	}
+	u.emitAssistAudit(ctx, tenantID, id, done, inputHash)
+	return done, nil
+}
+
+// emitAssistAudit records the run in the tamper-evident ledger (Nexus). It is
+// best-effort: the diagnosis is never failed because the audit sink is down.
+// Data carries only hashes + metadata — the output_hash binds the event to the
+// exact answer without ever copying PHI into the ledger.
+func (u *UseCases) emitAssistAudit(ctx context.Context, tenantID string, virployeeID uuid.UUID, run AssistRun, inputHash string) {
+	if u.auditEmitter == nil {
+		return
+	}
+	eventType, summary := "assist_completed", "assist run completed"
+	if run.Status == "failed" {
+		eventType, summary = "assist_failed", "assist run failed"
+	}
+	data := map[string]any{
+		"input_hash":     inputHash,
+		"model":          run.Model,
+		"prompt_version": run.PromptVersion,
+		"answered":       run.Answered,
+		"degraded":       run.Degraded,
+		"status":         run.Status,
+		"duration_ms":    run.DurationMS,
+	}
+	if len(run.Output) > 0 {
+		data["output_hash"] = runtraces.HashString(string(run.Output))
+	}
+	if run.Error != "" {
+		data["error"] = run.Error
+	}
+	if err := u.auditEmitter.AppendAuditEvent(ctx, AuditEventInput{
+		TenantID:    tenantID,
+		VirployeeID: virployeeID.String(),
+		ActorType:   "virployee",
+		ActorID:     virployeeID.String(),
+		SubjectType: "assist_run",
+		SubjectID:   run.ID.String(),
+		EventType:   eventType,
+		Summary:     summary,
+		Data:        data,
+	}); err != nil {
+		slog.ErrorContext(ctx, "audit emit failed for assist run",
+			"error", err, "tenant_id", tenantID, "virployee_id", virployeeID.String(), "assist_run_id", run.ID.String())
+	}
 }

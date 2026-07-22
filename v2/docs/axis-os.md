@@ -85,8 +85,17 @@ channel for governance calls to Nexus. Health endpoints remain public.
   `POST /v1/assist-runs` with an API key that maps to a tenant + virployee; the
   request is proxied to the virployee's assist endpoint. This edge is separate
   from the human-session `/api` surface.
+- Every virployee has a tamper-evident audit ledger held by Nexus: assist runs
+  and governed executions append a hash-chained, optionally HMAC-signed event
+  (`POST /v1/audit/events`), chained per virployee (`chain_scope =
+  <tenant>/<virployee>`). The ledger is append-only at the DB level;
+  `GET /v1/audit/virployees/:id/verify` recomputes the chain and
+  `GET /v1/evidence/virployees/:id` returns a signed, exportable evidence pack
+  (`?subject=` focuses it on one run). Events carry only hashes + metadata — an
+  `output_hash` binds a diagnosis to its exact content, never PHI. Signing is on
+  when `NEXUS_V2_SIGNING_KEY` is set; Companion emission is best-effort.
 - Virployees remain the first workforce primitive.
 - Virployee-owned lexical memory supports controlled CRUD, recall, lifecycle,
   audit hashes, and safe references in runtime traces.
-- Policy engines, callbacks, break-glass, audit chains, external providers,
-  and tasks are future modules.
+- Policy engines, callbacks, break-glass, external providers, and tasks are
+  future modules.

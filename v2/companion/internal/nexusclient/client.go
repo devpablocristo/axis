@@ -161,6 +161,55 @@ type checkResponse struct {
 	ApprovalStatus       string `json:"approval_status"`
 }
 
+// AuditEvent is one entry to append to a virployee's tamper-evident ledger in
+// Nexus. Data must carry only hashes + non-sensitive metadata, never PHI.
+type AuditEvent struct {
+	VirployeeID string
+	ActorType   string
+	ActorID     string
+	SubjectType string
+	SubjectID   string
+	EventType   string
+	Summary     string
+	Data        map[string]any
+}
+
+// AppendAuditEvent records an event in the Nexus audit ledger. Nexus seals it
+// (hash-chains + optionally signs) and holds it append-only, so companion cannot
+// forge or rewrite history. The caller treats failures as best-effort.
+func (c *Client) AppendAuditEvent(ctx context.Context, tenantID string, e AuditEvent) error {
+	body := map[string]any{
+		"virployee_id": e.VirployeeID,
+		"subject_type": e.SubjectType,
+		"subject_id":   e.SubjectID,
+		"event_type":   e.EventType,
+		"actor_type":   e.ActorType,
+		"actor_id":     e.ActorID,
+		"summary":      e.Summary,
+		"data":         e.Data,
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("encode audit event: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/audit/events", bytes.NewReader(raw))
+	if err != nil {
+		return fmt.Errorf("build audit event request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	// Nexus requires a non-empty X-Actor-ID; the acting virployee is the actor.
+	c.setTrustedHeaders(req, tenantID, e.ActorID)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("append audit event: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("append audit event: status %d", resp.StatusCode)
+	}
+	return nil
+}
+
 func (c *Client) ReportExecutionResult(ctx context.Context, tenantID, checkID, idempotencyKey, bindingHash, status string, durationMS int64, result map[string]any) error {
 	body := map[string]any{"binding_hash": bindingHash, "status": status, "duration_ms": durationMS, "result": result}
 	raw, err := json.Marshal(body)
