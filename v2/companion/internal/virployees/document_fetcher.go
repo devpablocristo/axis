@@ -1,12 +1,15 @@
 package virployees
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/ledongthuc/pdf"
 )
 
 // FetchedDocument is a document the assist flow pulled from its presigned URL.
@@ -69,18 +72,44 @@ func (f *HTTPDocumentFetcher) Fetch(ctx context.Context, key, readURL, declaredC
 	if ct := strings.TrimSpace(resp.Header.Get("Content-Type")); ct != "" {
 		doc.ContentType = ct
 	}
-	if !isTextContentType(doc.ContentType) {
-		doc.Note = "non-text content not read yet (multimodal pending)"
-		return doc
-	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxDocumentBytes))
 	if err != nil {
 		doc.Note = "could not read document body"
 		return doc
 	}
-	doc.Content = string(body)
+	if isPDFContentType(doc.ContentType) {
+		reader, err := pdf.NewReader(bytes.NewReader(body), int64(len(body)))
+		if err != nil {
+			doc.Note = "could not parse PDF document"
+			return doc
+		}
+		plainText, err := reader.GetPlainText()
+		if err != nil {
+			doc.Note = "could not extract text from PDF document"
+			return doc
+		}
+		extracted, err := io.ReadAll(plainText)
+		if err != nil || strings.TrimSpace(string(extracted)) == "" {
+			doc.Note = "PDF document has no extractable text"
+			return doc
+		}
+		doc.Content = string(extracted)
+	} else if isTextContentType(doc.ContentType) {
+		doc.Content = string(body)
+	} else {
+		doc.Note = "non-text content not read yet (multimodal pending)"
+		return doc
+	}
 	doc.Readable = true
 	return doc
+}
+
+func isPDFContentType(contentType string) bool {
+	ct := strings.ToLower(strings.TrimSpace(contentType))
+	if i := strings.IndexByte(ct, ';'); i >= 0 {
+		ct = strings.TrimSpace(ct[:i])
+	}
+	return ct == "application/pdf"
 }
 
 func isTextContentType(contentType string) bool {

@@ -55,8 +55,9 @@ Repetir con la misma `Idempotency-Key` devuelve la misma corrida sin re-invocar 
 En medmory, apuntá `AXIS_COMPANION_BASE_URL` al Axis real y usá su `AXIS_COMPANION_API_KEY`
 (= la key configurada arriba). **Cero cambios de código en medmory** — el contrato es el mismo.
 
-## Fuera de alcance (por ahora)
+## Soporte documental y límites actuales
 
-Imágenes/PDF (multimodal) — hoy Axis solo lee documentos de texto; los binarios se marcan
-"multimodal pending". Orquestación de especialistas (el médico deriva pero no llama a otros
-virployees todavía). Ambos son fases siguientes.
+Axis lee documentos de texto y extrae el texto embebido en archivos PDF. Los PDF escaneados
+sin capa de texto y las imágenes todavía requieren soporte multimodal/OCR. La orquestación de
+especialistas también queda fuera de alcance: el médico puede derivar, pero todavía no llama a
+otros virployees.
