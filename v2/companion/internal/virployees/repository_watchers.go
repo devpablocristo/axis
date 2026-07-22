@@ -32,7 +32,7 @@ func (r *Repository) FailStaleAssistRuns(ctx context.Context, cutoff time.Time, 
 	rows, err := r.pool.Query(ctx, `
 		WITH stale AS (
 			SELECT id FROM companion_assist_runs
-			WHERE status = 'running' AND updated_at <= $1
+			WHERE status IN ('running', 'answering') AND updated_at <= $1
 			ORDER BY updated_at, id LIMIT $2 FOR UPDATE SKIP LOCKED
 		)
 		UPDATE companion_assist_runs a

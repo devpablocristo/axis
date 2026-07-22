@@ -62,7 +62,7 @@ func TestAssistRunProxiesAndMapsResponse(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 	// Forwarded to the bound virployee's assist endpoint with internal auth + context.
-	if gotPath != "/v1/virployees/vp-1/assist" || gotToken != "internal-token" || gotTenant != "tenant-1" || gotActor != "service:medmory" {
+	if gotPath != "/v1/virployees/vp-1/assist-runs" || gotToken != "internal-token" || gotTenant != "tenant-1" || gotActor != "service:medmory" {
 		t.Fatalf("bad forward: path=%s token=%s tenant=%s actor=%s", gotPath, gotToken, gotTenant, gotActor)
 	}
 	// Only the product's `input` object is forwarded as input_json.
@@ -77,6 +77,72 @@ func TestAssistRunProxiesAndMapsResponse(t *testing.T) {
 	_ = json.Unmarshal(rec.Body.Bytes(), &out)
 	if out.Status != "completed" || out.ID != "run-1" || !strings.Contains(string(out.Output), "paciente estable") {
 		t.Fatalf("unexpected mapped response: %+v", out)
+	}
+}
+
+func TestAssistRunReturns202AndStatusURLWhileDurableWorkContinues(t *testing.T) {
+	companion := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"id":"run-2","status":"received"}`))
+	}))
+	defer companion.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/assist-runs", strings.NewReader(`{"product_surface":"medmory","input":{"documents":[]}}`))
+	req.Header.Set("X-API-Key", "secret-key")
+	req.Header.Set("Idempotency-Key", "manifest-generation-2")
+	rec := httptest.NewRecorder()
+	newTestEngine(companion.URL).ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var out assistRunResult
+	_ = json.Unmarshal(rec.Body.Bytes(), &out)
+	if out.ID != "run-2" || out.Status != "received" || out.StatusURL != "/v1/assist-runs/run-2" {
+		t.Fatalf("unexpected async result: %+v", out)
+	}
+}
+
+func TestAssistRunPreferWaitObservesCompletion(t *testing.T) {
+	gets := 0
+	companion := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte(`{"id":"run-3","status":"received"}`))
+			return
+		}
+		gets++
+		_, _ = w.Write([]byte(`{"id":"run-3","status":"done","output":{"summary":"ready"}}`))
+	}))
+	defer companion.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/assist-runs", strings.NewReader(`{"product_surface":"medmory","input":{"documents":[]}}`))
+	req.Header.Set("X-API-Key", "secret-key")
+	req.Header.Set("Idempotency-Key", "manifest-generation-3")
+	req.Header.Set("Prefer", "wait=1")
+	rec := httptest.NewRecorder()
+	newTestEngine(companion.URL).ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || gets == 0 || !strings.Contains(rec.Body.String(), `"status":"completed"`) {
+		t.Fatalf("wait did not observe completion: code=%d gets=%d body=%s", rec.Code, gets, rec.Body.String())
+	}
+}
+
+func TestAssistRunRequiresStableIdempotencyKey(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/v1/assist-runs", strings.NewReader(`{"product_surface":"medmory","input":{}}`))
+	req.Header.Set("X-API-Key", "secret-key")
+	rec := httptest.NewRecorder()
+	newTestEngine("http://unused").ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAssistCapabilitiesAreMachineAuthenticatedAndConservative(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/v1/assist-capabilities", nil)
+	req.Header.Set("X-API-Key", "secret-key")
+	rec := httptest.NewRecorder()
+	newTestEngine("http://unused").ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "application/pdf") || !strings.Contains(rec.Body.String(), "pending") {
+		t.Fatalf("unexpected capabilities: code=%d body=%s", rec.Code, rec.Body.String())
 	}
 }
 

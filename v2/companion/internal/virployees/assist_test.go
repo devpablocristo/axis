@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/devpablocristo/companion-v2/internal/virployees/runtraces"
 	"github.com/devpablocristo/companion-v2/internal/virployees/usecases/domain"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
 	"github.com/google/uuid"
@@ -18,24 +19,50 @@ type fakeAssistRepo struct {
 	beginCalls    int
 	completeCalls int
 	lastComplete  AssistRun
+	current       AssistRun
 }
 
-func (r *fakeAssistRepo) BeginAssistRun(_ context.Context, _ string, vid uuid.UUID, _, idem, _, _ string) (AssistRun, bool, error) {
+func (r *fakeAssistRepo) BeginAssistRun(_ context.Context, tenant string, vid uuid.UUID, _, idem, inputHash, _ string, input json.RawMessage) (AssistRun, bool, error) {
 	r.beginCalls++
 	if !r.reserved {
 		return r.existing, false, nil
 	}
-	return AssistRun{ID: uuid.New(), VirployeeID: vid, IdempotencyKey: idem, Status: "running"}, true, nil
+	r.current = AssistRun{ID: uuid.New(), TenantID: tenant, VirployeeID: vid, IdempotencyKey: idem, Status: "received", InputHash: inputHash, InputJSON: input}
+	return r.current, true, nil
+}
+
+func (r *fakeAssistRepo) ClaimAssistRun(_ context.Context, _ string, id uuid.UUID) (AssistRun, bool, error) {
+	if r.current.ID == id {
+		r.current.Status = "answering"
+		return r.current, true, nil
+	}
+	return r.existing, false, nil
 }
 
 func (r *fakeAssistRepo) CompleteAssistRun(_ context.Context, _ string, id uuid.UUID, status string, output json.RawMessage, outputText string, answered, degraded bool, model, pv, runErr string, dur int64) (AssistRun, error) {
 	r.completeCalls++
 	r.lastComplete = AssistRun{ID: id, Status: status, Output: output, OutputText: outputText, Answered: answered, Degraded: degraded, Model: model, PromptVersion: pv, Error: runErr, DurationMS: dur}
+	r.lastComplete.TenantID = r.current.TenantID
+	r.lastComplete.VirployeeID = r.current.VirployeeID
 	return r.lastComplete, nil
 }
 
 func (r *fakeAssistRepo) GetAssistRunByKey(context.Context, string, uuid.UUID, string) (AssistRun, error) {
 	return r.existing, nil
+}
+
+func (r *fakeAssistRepo) GetAssistRunByID(context.Context, string, uuid.UUID) (AssistRun, error) {
+	if r.current.ID != uuid.Nil {
+		return r.current, nil
+	}
+	return r.existing, nil
+}
+
+func (r *fakeAssistRepo) ListReceivedAssistRuns(context.Context, int) ([]AssistRun, error) {
+	if r.current.Status == "received" {
+		return []AssistRun{r.current}, nil
+	}
+	return nil, nil
 }
 
 type fakeAnswerer struct {
@@ -54,6 +81,16 @@ func (a *fakeAnswerer) Answer(_ context.Context, in AnswerInput) (AnswerOutput, 
 type fakeDocFetcher struct {
 	calls int
 	docs  map[string]FetchedDocument
+}
+
+type fakeAssistQueue struct {
+	runs []AssistRun
+	err  error
+}
+
+func (q *fakeAssistQueue) EnqueueAssist(_ context.Context, run AssistRun) error {
+	q.runs = append(q.runs, run)
+	return q.err
 }
 
 func (f *fakeDocFetcher) Fetch(_ context.Context, key, _, _ string) FetchedDocument {
@@ -130,13 +167,14 @@ func TestAssistMarksDegradedWhenModelDidNotAnswer(t *testing.T) {
 
 func TestAssistReplayReturnsExistingRunWithoutCallingModel(t *testing.T) {
 	uc, created := setupExecutionGateUseCase(t, domain.AutonomyA3)
-	existing := AssistRun{ID: uuid.New(), Status: "done", Answered: true, Output: json.RawMessage(`{"summary":"prev"}`)}
+	input := json.RawMessage(`{"x":1}`)
+	existing := AssistRun{ID: uuid.New(), Status: "done", Answered: true, InputHash: runtraces.HashString(string(input)), Output: json.RawMessage(`{"summary":"prev"}`)}
 	repo := &fakeAssistRepo{reserved: false, existing: existing}
 	ans := &fakeAnswerer{out: AnswerOutput{Answered: true}}
 	uc.assistRepo = repo
 	uc.answerer = ans
 
-	run, err := uc.Assist(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"x":1}`), "idem-dup")
+	run, err := uc.Assist(context.Background(), "tenant-1", created.ID, input, "idem-dup")
 	if err != nil {
 		t.Fatalf("Assist: %v", err)
 	}
@@ -145,6 +183,59 @@ func TestAssistReplayReturnsExistingRunWithoutCallingModel(t *testing.T) {
 	}
 	if run.ID != existing.ID || string(run.Output) != `{"summary":"prev"}` {
 		t.Fatalf("replay must return the stored run, got %+v", run)
+	}
+}
+
+func TestSubmitAssistAsyncPersistsAndQueuesIdentifiersWithoutCallingModel(t *testing.T) {
+	uc, created := setupExecutionGateUseCase(t, domain.AutonomyA3)
+	repo := &fakeAssistRepo{reserved: true}
+	queue := &fakeAssistQueue{}
+	answerer := &fakeAnswerer{out: AnswerOutput{Answered: true}}
+	uc.assistRepo = repo
+	uc.assistQueue = queue
+	uc.answerer = answerer
+
+	run, err := uc.SubmitAssistAsync(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"document_id":"doc-1"}`), "manifest-generation-1")
+	if err != nil {
+		t.Fatalf("SubmitAssistAsync: %v", err)
+	}
+	if run.Status != "received" || len(queue.runs) != 1 || queue.runs[0].ID != run.ID {
+		t.Fatalf("expected one received run queued, run=%+v queue=%+v", run, queue.runs)
+	}
+	if answerer.called {
+		t.Fatal("request path must not invoke the model")
+	}
+}
+
+func TestRequeueReceivedAssistRunsClosesPersistEnqueueGap(t *testing.T) {
+	uc, created := setupExecutionGateUseCase(t, domain.AutonomyA3)
+	repo := &fakeAssistRepo{reserved: true}
+	queue := &fakeAssistQueue{}
+	uc.assistRepo = repo
+	uc.assistQueue = queue
+	uc.answerer = &fakeAnswerer{}
+
+	run, _, err := uc.SubmitAssist(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"x":1}`), "generation-a")
+	if err != nil {
+		t.Fatalf("SubmitAssist: %v", err)
+	}
+	count, err := uc.RequeueReceivedAssistRuns(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("RequeueReceivedAssistRuns: %v", err)
+	}
+	if count != 1 || len(queue.runs) != 1 || queue.runs[0].ID != run.ID {
+		t.Fatalf("expected persisted run to be requeued: count=%d runs=%+v", count, queue.runs)
+	}
+}
+
+func TestSubmitAssistRejectsIdempotencyKeyReusedWithDifferentInput(t *testing.T) {
+	uc, created := setupExecutionGateUseCase(t, domain.AutonomyA3)
+	uc.assistRepo = &fakeAssistRepo{reserved: false, existing: AssistRun{ID: uuid.New(), Status: "done", InputHash: runtraces.HashString(`{"x":1}`)}}
+	uc.answerer = &fakeAnswerer{}
+
+	_, _, err := uc.SubmitAssist(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"x":2}`), "generation-a")
+	if !domainerr.IsConflict(err) {
+		t.Fatalf("expected idempotency conflict, got %v", err)
 	}
 }
 

@@ -149,9 +149,18 @@ type RuntimeAnswererPort interface {
 
 // AssistRepositoryPort persists product assist runs (reserve-before-LLM).
 type AssistRepositoryPort interface {
-	BeginAssistRun(ctx context.Context, tenantID string, virployeeID uuid.UUID, assistType, idempotencyKey, inputHash, inputPreview string) (AssistRun, bool, error)
+	BeginAssistRun(ctx context.Context, tenantID string, virployeeID uuid.UUID, assistType, idempotencyKey, inputHash, inputPreview string, inputJSON json.RawMessage) (AssistRun, bool, error)
+	ClaimAssistRun(ctx context.Context, tenantID string, id uuid.UUID) (AssistRun, bool, error)
 	CompleteAssistRun(ctx context.Context, tenantID string, id uuid.UUID, status string, output json.RawMessage, outputText string, answered, degraded bool, model, promptVersion, runErr string, durationMS int64) (AssistRun, error)
 	GetAssistRunByKey(ctx context.Context, tenantID string, virployeeID uuid.UUID, idempotencyKey string) (AssistRun, error)
+	GetAssistRunByID(ctx context.Context, tenantID string, id uuid.UUID) (AssistRun, error)
+	ListReceivedAssistRuns(ctx context.Context, limit int) ([]AssistRun, error)
+}
+
+// AssistQueuePort keeps the domain independent of the PostgreSQL jobs adapter.
+// Payloads contain only identifiers; the input remains in companion_assist_runs.
+type AssistQueuePort interface {
+	EnqueueAssist(ctx context.Context, run AssistRun) error
 }
 
 type UseCases struct {
@@ -167,10 +176,13 @@ type UseCases struct {
 	runtime          RuntimePlannerPort
 	answerer         RuntimeAnswererPort
 	assistRepo       AssistRepositoryPort
+	assistQueue      AssistQueuePort
 	docFetcher       DocumentFetcherPort
 	auditEmitter     AuditEmitterPort
 	lifecycle        *lifecycle.Service
 }
+
+func (u *UseCases) SetAssistQueue(queue AssistQueuePort) { u.assistQueue = queue }
 
 func NewUseCases(repo RepositoryPort, jobRoles ...JobRoleReaderPort) (*UseCases, error) {
 	policy := &lifecycle.LifecyclePolicy{

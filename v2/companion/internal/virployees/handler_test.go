@@ -432,6 +432,37 @@ func TestHandlerInvalidUUID(t *testing.T) {
 	}
 }
 
+func TestHandlerSubmitAssistRunReturns202AndPollingReturnsRun(t *testing.T) {
+	fake := &handlerFakeUseCases{}
+	router := testRouter(fake)
+	virployeeID := uuid.New()
+
+	post := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/virployees/"+virployeeID.String()+"/assist-runs", strings.NewReader(`{"input":{"documents":[]}}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Tenant-ID", "tenant-1")
+	req.Header.Set("Idempotency-Key", "generation-a")
+	router.ServeHTTP(post, req)
+	if post.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d body=%s", post.Code, post.Body.String())
+	}
+	var submitted struct {
+		ID     string `json:"id"`
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(post.Body.Bytes(), &submitted); err != nil || submitted.ID == "" || submitted.Status != "received" {
+		t.Fatalf("unexpected submit response: %s (%v)", post.Body.String(), err)
+	}
+
+	poll := httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/v1/virployees/"+virployeeID.String()+"/assist-runs/"+submitted.ID, nil)
+	req.Header.Set("X-Tenant-ID", "tenant-1")
+	router.ServeHTTP(poll, req)
+	if poll.Code != http.StatusOK || !strings.Contains(poll.Body.String(), `"status":"done"`) {
+		t.Fatalf("expected completed poll response, got %d body=%s", poll.Code, poll.Body.String())
+	}
+}
+
 func testRouter(ucs UseCasesPort) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
@@ -569,6 +600,16 @@ func (f *handlerFakeUseCases) ExecuteApprovedAction(_ context.Context, tenantID 
 func (f *handlerFakeUseCases) Assist(_ context.Context, tenantID string, id uuid.UUID, _ json.RawMessage, _ string) (AssistRun, error) {
 	f.lastTenant = tenantID
 	return AssistRun{ID: uuid.New(), VirployeeID: id, Status: "done", Answered: true, Output: json.RawMessage(`{"summary":"ok"}`)}, nil
+}
+
+func (f *handlerFakeUseCases) SubmitAssistAsync(_ context.Context, tenantID string, id uuid.UUID, _ json.RawMessage, _ string) (AssistRun, error) {
+	f.lastTenant = tenantID
+	return AssistRun{ID: uuid.New(), TenantID: tenantID, VirployeeID: id, Status: "received"}, nil
+}
+
+func (f *handlerFakeUseCases) GetAssistRun(_ context.Context, tenantID string, virployeeID, runID uuid.UUID) (AssistRun, error) {
+	f.lastTenant = tenantID
+	return AssistRun{ID: runID, TenantID: tenantID, VirployeeID: virployeeID, Status: "done", Answered: true, Output: json.RawMessage(`{"summary":"ok"}`)}, nil
 }
 
 func (f *handlerFakeUseCases) ListRuns(_ context.Context, tenantID string, id uuid.UUID, _ int) ([]runtraces.Trace, error) {

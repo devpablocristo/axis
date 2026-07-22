@@ -18,10 +18,6 @@ type assistDocRef struct {
 	ContentType string `json:"content_type"`
 }
 
-// resolveDocuments implements the pull model: when the input references documents
-// (a product sends read_url references, not content), Axis fetches each and hands
-// the model the fetched content. Inputs without documents pass through unchanged,
-// and if no fetcher is configured the original input is used as-is (fail-safe).
 func (u *UseCases) resolveDocuments(ctx context.Context, inputJSON json.RawMessage) json.RawMessage {
 	if u.docFetcher == nil {
 		return inputJSON
@@ -43,91 +39,151 @@ func (u *UseCases) resolveDocuments(ctx context.Context, inputJSON json.RawMessa
 	return enriched
 }
 
-// Assist runs the "process and respond" path: the virployee interprets the input
-// and answers, with NO external effects and NO governance approval (read/explain).
-// It reserves the run before calling the model (idempotent) and fails closed.
-//
-// Governance seam: this is intentionally NOT the action path. When a product later
-// needs the virployee to take an ACTION with external effects, that must route
-// through DryRun → ExecutionGate → Nexus → ExecuteApprovedAction — never here.
-func (u *UseCases) Assist(ctx context.Context, tenantID string, id uuid.UUID, inputJSON json.RawMessage, idempotencyKey string) (AssistRun, error) {
+// SubmitAssist durably stores an idempotent run without performing model work.
+func (u *UseCases) SubmitAssist(ctx context.Context, tenantID string, id uuid.UUID, inputJSON json.RawMessage, idempotencyKey string) (AssistRun, bool, error) {
 	tenantID = normalizeTenantID(tenantID)
 	if u.answerer == nil {
-		return AssistRun{}, domainerr.Conflict("runtime answerer is not configured")
+		return AssistRun{}, false, domainerr.Conflict("runtime answerer is not configured")
 	}
 	if u.assistRepo == nil {
-		return AssistRun{}, domainerr.Conflict("assist repository is not configured")
+		return AssistRun{}, false, domainerr.Conflict("assist repository is not configured")
 	}
-	if strings.TrimSpace(string(inputJSON)) == "" {
-		return AssistRun{}, domainerr.Validation("input_json is required")
+	if strings.TrimSpace(string(inputJSON)) == "" || !json.Valid(inputJSON) {
+		return AssistRun{}, false, domainerr.Validation("input_json must be valid JSON")
 	}
-
-	// Validates the virployee, its (active) job role/profile and autonomy, and
-	// assembles the system prompt the answer runs under.
-	rc, err := u.RuntimeContext(ctx, tenantID, id)
-	if err != nil {
-		return AssistRun{}, err
+	// Fail before accepting work when the virployee/profile is not executable.
+	if _, err := u.RuntimeContext(ctx, tenantID, id); err != nil {
+		return AssistRun{}, false, err
 	}
-
 	if strings.TrimSpace(idempotencyKey) == "" {
 		idempotencyKey = runtraces.HashString(tenantID + ":" + id.String() + ":" + string(inputJSON))
 	}
 	inputHash := runtraces.HashString(string(inputJSON))
-	inputPreview := runtraces.InputPreview(string(inputJSON))
+	run, reserved, err := u.assistRepo.BeginAssistRun(ctx, tenantID, id, "", idempotencyKey, inputHash, runtraces.InputPreview(string(inputJSON)), inputJSON)
+	if err != nil {
+		return AssistRun{}, false, err
+	}
+	if !reserved && run.InputHash != "" && run.InputHash != inputHash {
+		return AssistRun{}, false, domainerr.Conflict("idempotency key was already used with different input")
+	}
+	return run, reserved, nil
+}
 
-	run, reserved, err := u.assistRepo.BeginAssistRun(ctx, tenantID, id, "", idempotencyKey, inputHash, inputPreview)
+// SubmitAssistAsync persists then enqueues identifier-only work. If enqueueing
+// is interrupted, operational reconciliation finds the received row and queues
+// it later; no request depends on a process-local goroutine.
+func (u *UseCases) SubmitAssistAsync(ctx context.Context, tenantID string, id uuid.UUID, inputJSON json.RawMessage, idempotencyKey string) (AssistRun, error) {
+	if u.assistQueue == nil {
+		return AssistRun{}, domainerr.Conflict("assist queue is not configured")
+	}
+	run, reserved, err := u.SubmitAssist(ctx, tenantID, id, inputJSON, idempotencyKey)
+	if err != nil {
+		return AssistRun{}, err
+	}
+	if run.Status == "done" || run.Status == "failed" {
+		return run, nil
+	}
+	if reserved || run.Status == "received" {
+		if err := u.assistQueue.EnqueueAssist(ctx, run); err != nil {
+			return AssistRun{}, err
+		}
+	}
+	return run, nil
+}
+
+// Assist preserves the synchronous internal endpoint while sharing the same
+// durable reservation and claim semantics as asynchronous product work.
+func (u *UseCases) Assist(ctx context.Context, tenantID string, id uuid.UUID, inputJSON json.RawMessage, idempotencyKey string) (AssistRun, error) {
+	run, reserved, err := u.SubmitAssist(ctx, tenantID, id, inputJSON, idempotencyKey)
 	if err != nil {
 		return AssistRun{}, err
 	}
 	if !reserved {
-		// Idempotent replay: a completed run returns its stored answer without a
-		// second (expensive) model call; a still-running one is a conflict. A
-		// previously failed run falls through and is retried.
 		switch run.Status {
 		case "done":
 			return run, nil
-		case "running":
+		case "failed":
+			return AssistRun{}, domainerr.Unavailable("assist run failed")
+		default:
 			return AssistRun{}, domainerr.Conflict("assist run already in progress")
 		}
 	}
+	return u.ProcessAssistRun(ctx, run.TenantID, run.ID)
+}
 
-	// Pull model: if the input references documents, fetch their content and give
-	// the model the content, not just the references (the product never sends the
-	// content itself). Non-document inputs are passed through unchanged.
-	answerInputJSON := u.resolveDocuments(ctx, inputJSON)
-
-	started := time.Now()
-	out, answerErr := u.answerer.Answer(ctx, AnswerInput{
-		SystemPrompt: rc.ProfileTemplate.SystemPrompt,
-		JobRole:      rc.JobRole.Name,
-		InputJSON:    answerInputJSON,
-		// No response schema: the médico's system prompt dictates the exact JSON
-		// shape. A loose {"type":"object"} schema makes Gemini return an empty {}.
-	})
-	durationMS := time.Since(started).Milliseconds()
-
-	if answerErr != nil {
-		// Fail-closed: record the failure and surface it — never a silent success.
-		failedErr := runtraces.RedactText(answerErr.Error())
-		_, _ = u.assistRepo.CompleteAssistRun(ctx, tenantID, run.ID, "failed", nil, "", false, false, "", "", failedErr, durationMS)
-		u.emitAssistAudit(ctx, tenantID, id, AssistRun{ID: run.ID, Status: "failed", Error: failedErr, DurationMS: durationMS}, inputHash)
-		return AssistRun{}, domainerr.Unavailable("assist runtime failed")
-	}
-
-	// degraded = the model did not produce a usable answer (Echo / no credentials).
-	degraded := !out.Answered
-	done, err := u.assistRepo.CompleteAssistRun(ctx, tenantID, run.ID, "done", out.OutputJSON, out.OutputText, out.Answered, degraded, out.ModelID, out.PromptVersion, "", durationMS)
+// ProcessAssistRun is the durable job handler's domain operation.
+func (u *UseCases) ProcessAssistRun(ctx context.Context, tenantID string, runID uuid.UUID) (AssistRun, error) {
+	tenantID = normalizeTenantID(tenantID)
+	run, claimed, err := u.assistRepo.ClaimAssistRun(ctx, tenantID, runID)
 	if err != nil {
 		return AssistRun{}, err
 	}
-	u.emitAssistAudit(ctx, tenantID, id, done, inputHash)
+	if !claimed {
+		switch run.Status {
+		case "done":
+			return run, nil
+		case "failed":
+			return run, domainerr.Unavailable("assist run failed")
+		default:
+			return run, domainerr.Conflict("assist run is already being processed")
+		}
+	}
+	runtimeContext, err := u.RuntimeContext(ctx, tenantID, run.VirployeeID)
+	if err != nil {
+		failed, _ := u.assistRepo.CompleteAssistRun(ctx, tenantID, run.ID, "failed", nil, "", false, false, "", "", "runtime_context_unavailable", 0)
+		return failed, err
+	}
+
+	answerInputJSON := u.resolveDocuments(ctx, run.InputJSON)
+	started := time.Now()
+	out, answerErr := u.answerer.Answer(ctx, AnswerInput{
+		SystemPrompt: runtimeContext.ProfileTemplate.SystemPrompt,
+		JobRole:      runtimeContext.JobRole.Name,
+		InputJSON:    answerInputJSON,
+	})
+	durationMS := time.Since(started).Milliseconds()
+	if answerErr != nil {
+		failedErr := runtraces.RedactText(answerErr.Error())
+		failed, _ := u.assistRepo.CompleteAssistRun(ctx, tenantID, run.ID, "failed", nil, "", false, false, "", "", failedErr, durationMS)
+		u.emitAssistAudit(ctx, tenantID, run.VirployeeID, failed, run.InputHash)
+		return failed, domainerr.Unavailable("assist runtime failed")
+	}
+
+	done, err := u.assistRepo.CompleteAssistRun(ctx, tenantID, run.ID, "done", out.OutputJSON, out.OutputText, out.Answered, !out.Answered, out.ModelID, out.PromptVersion, "", durationMS)
+	if err != nil {
+		return AssistRun{}, err
+	}
+	u.emitAssistAudit(ctx, tenantID, run.VirployeeID, done, run.InputHash)
 	return done, nil
 }
 
-// emitAssistAudit records the run in the tamper-evident ledger (Nexus). It is
-// best-effort: the diagnosis is never failed because the audit sink is down.
-// Data carries only hashes + metadata — the output_hash binds the event to the
-// exact answer without ever copying PHI into the ledger.
+func (u *UseCases) GetAssistRun(ctx context.Context, tenantID string, virployeeID, runID uuid.UUID) (AssistRun, error) {
+	run, err := u.assistRepo.GetAssistRunByID(ctx, normalizeTenantID(tenantID), runID)
+	if err != nil {
+		return AssistRun{}, err
+	}
+	if run.VirployeeID != virployeeID {
+		return AssistRun{}, domainerr.NotFound("assist run not found")
+	}
+	return run, nil
+}
+
+func (u *UseCases) RequeueReceivedAssistRuns(ctx context.Context, limit int) (int, error) {
+	if u.assistQueue == nil {
+		return 0, domainerr.Conflict("assist queue is not configured")
+	}
+	runs, err := u.assistRepo.ListReceivedAssistRuns(ctx, limit)
+	if err != nil {
+		return 0, err
+	}
+	for _, run := range runs {
+		if err := u.assistQueue.EnqueueAssist(ctx, run); err != nil {
+			return 0, err
+		}
+	}
+	return len(runs), nil
+}
+
 func (u *UseCases) emitAssistAudit(ctx context.Context, tenantID string, virployeeID uuid.UUID, run AssistRun, inputHash string) {
 	if u.auditEmitter == nil {
 		return
@@ -137,13 +193,8 @@ func (u *UseCases) emitAssistAudit(ctx context.Context, tenantID string, virploy
 		eventType, summary = "assist_failed", "assist run failed"
 	}
 	data := map[string]any{
-		"input_hash":     inputHash,
-		"model":          run.Model,
-		"prompt_version": run.PromptVersion,
-		"answered":       run.Answered,
-		"degraded":       run.Degraded,
-		"status":         run.Status,
-		"duration_ms":    run.DurationMS,
+		"input_hash": inputHash, "model": run.Model, "prompt_version": run.PromptVersion,
+		"answered": run.Answered, "degraded": run.Degraded, "status": run.Status, "duration_ms": run.DurationMS,
 	}
 	if len(run.Output) > 0 {
 		data["output_hash"] = runtraces.HashString(string(run.Output))
@@ -152,17 +203,9 @@ func (u *UseCases) emitAssistAudit(ctx context.Context, tenantID string, virploy
 		data["error"] = run.Error
 	}
 	if err := u.auditEmitter.AppendAuditEvent(ctx, AuditEventInput{
-		TenantID:    tenantID,
-		VirployeeID: virployeeID.String(),
-		ActorType:   "virployee",
-		ActorID:     virployeeID.String(),
-		SubjectType: "assist_run",
-		SubjectID:   run.ID.String(),
-		EventType:   eventType,
-		Summary:     summary,
-		Data:        data,
+		TenantID: tenantID, VirployeeID: virployeeID.String(), ActorType: "virployee", ActorID: virployeeID.String(),
+		SubjectType: "assist_run", SubjectID: run.ID.String(), EventType: eventType, Summary: summary, Data: data,
 	}); err != nil {
-		slog.ErrorContext(ctx, "audit emit failed for assist run",
-			"error", err, "tenant_id", tenantID, "virployee_id", virployeeID.String(), "assist_run_id", run.ID.String())
+		slog.ErrorContext(ctx, "audit emit failed for assist run", "error", err, "tenant_id", tenantID, "virployee_id", virployeeID.String(), "assist_run_id", run.ID.String())
 	}
 }

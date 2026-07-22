@@ -34,6 +34,8 @@ type UseCasesPort interface {
 	SimulateApprovedExecution(context.Context, string, uuid.UUID, uuid.UUID) (runtraces.Trace, error)
 	ExecuteApprovedAction(context.Context, string, uuid.UUID, uuid.UUID) (runtraces.Trace, error)
 	Assist(context.Context, string, uuid.UUID, json.RawMessage, string) (AssistRun, error)
+	SubmitAssistAsync(context.Context, string, uuid.UUID, json.RawMessage, string) (AssistRun, error)
+	GetAssistRun(context.Context, string, uuid.UUID, uuid.UUID) (AssistRun, error)
 	ListRuns(context.Context, string, uuid.UUID, int) ([]runtraces.Trace, error)
 	Update(context.Context, string, uuid.UUID, domain.UpdateInput) (domain.Virployee, error)
 	Archive(context.Context, string, uuid.UUID, string, string) error
@@ -65,6 +67,8 @@ func (h *Handler) Routes(router gin.IRouter) {
 		group.POST("/:virployee_id/simulated-executions", h.SimulateApprovedExecution)
 		group.POST("/:virployee_id/executions", h.ExecuteApprovedAction)
 		group.POST("/:virployee_id/assist", h.Assist)
+		group.POST("/:virployee_id/assist-runs", h.SubmitAssistRun)
+		group.GET("/:virployee_id/assist-runs/:run_id", h.GetAssistRun)
 		group.GET("/:virployee_id/runs", h.ListRuns)
 		group.GET("/:virployee_id", h.Get)
 		group.PUT("/:virployee_id", h.Update)
@@ -76,6 +80,48 @@ func (h *Handler) Routes(router gin.IRouter) {
 		group.POST("/:virployee_id/purge", h.Purge)
 		group.DELETE("/:virployee_id/purge", h.Purge)
 	}
+}
+
+func (h *Handler) SubmitAssistRun(c *gin.Context) {
+	id, ok := ginmw.ParseUUIDParam(c, "virployee_id")
+	if !ok {
+		return
+	}
+	var req dto.AssistRequest
+	if err := ginmw.BindJSON(c, &req); err != nil {
+		return
+	}
+	idem := strings.TrimSpace(req.IdempotencyKey)
+	if idem == "" {
+		idem = strings.TrimSpace(c.GetHeader("Idempotency-Key"))
+	}
+	run, err := h.ucs.SubmitAssistAsync(c.Request.Context(), tenantID(c), id, req.InputJSON, idem)
+	if err != nil {
+		ginmw.Respond(c, err)
+		return
+	}
+	status := http.StatusAccepted
+	if run.Status == "done" || run.Status == "failed" {
+		status = http.StatusOK
+	}
+	ginmw.WriteJSON(c, status, assistRunToDTO(run))
+}
+
+func (h *Handler) GetAssistRun(c *gin.Context) {
+	virployeeID, ok := ginmw.ParseUUIDParam(c, "virployee_id")
+	if !ok {
+		return
+	}
+	runID, ok := ginmw.ParseUUIDParam(c, "run_id")
+	if !ok {
+		return
+	}
+	run, err := h.ucs.GetAssistRun(c.Request.Context(), tenantID(c), virployeeID, runID)
+	if err != nil {
+		ginmw.Respond(c, err)
+		return
+	}
+	ginmw.WriteJSON(c, http.StatusOK, assistRunToDTO(run))
 }
 
 func (h *Handler) ExecuteApprovedAction(c *gin.Context) {

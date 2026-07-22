@@ -237,6 +237,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	}
 	backgroundCtx, backgroundCancel := context.WithCancel(ctx)
 	jobsRepository := jobs.NewPostgresRepository(db.Pool())
+	virployeesUsecases.SetAssistQueue(assistQueueAdapter{repository: jobsRepository})
 	jobsWorker := jobs.NewWorker(jobsRepository, jobs.WorkerConfig{
 		WorkerID: "companion-jobs-" + uuid.NewString(), Concurrency: config.JobWorkerConcurrency,
 		PollInterval: config.JobPollInterval, LeaseDuration: config.WatcherLease,
@@ -252,7 +253,31 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		if err := virployeesUsecases.RunOperationalWatchersOnce(jobCtx, watcherConfig); err != nil {
 			return nil, jobs.Retryable("operational_reconcile_failed", err)
 		}
-		return json.RawMessage(`{"reconciled":true}`), nil
+		requeued, err := virployeesUsecases.RequeueReceivedAssistRuns(jobCtx, watcherConfig.BatchSize)
+		if err != nil {
+			return nil, jobs.Retryable("assist_reconcile_failed", err)
+		}
+		evidence, _ := json.Marshal(map[string]any{"reconciled": true, "assist_runs_requeued": requeued})
+		return evidence, nil
+	})
+	jobsWorker.Register(assistProcessJobKind, func(jobCtx context.Context, job jobs.Job) (json.RawMessage, error) {
+		var payload assistJobPayload
+		if err := json.Unmarshal(job.Payload, &payload); err != nil {
+			return nil, jobs.Permanent("invalid_assist_job", err)
+		}
+		runID, err := uuid.Parse(payload.RunID)
+		if err != nil {
+			return nil, jobs.Permanent("invalid_assist_job", err)
+		}
+		run, processErr := virployeesUsecases.ProcessAssistRun(jobCtx, job.TenantID, runID)
+		evidence, _ := json.Marshal(map[string]any{"run_id": runID.String(), "status": run.Status})
+		if processErr != nil {
+			if run.Status == "failed" || run.Status == "done" {
+				return evidence, nil
+			}
+			return evidence, jobs.Retryable("assist_processing_failed", processErr)
+		}
+		return evidence, nil
 	})
 	var nexusOutbox *outbox.Dispatcher
 	if nexusClient != nil {

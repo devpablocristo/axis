@@ -76,15 +76,22 @@ channel for governance calls to Nexus. Health endpoints remain public.
   idempotent (an already-gone event is a success).
 - Execution Gate fails closed when Nexus is unavailable or not configured.
 - A virployee can also "process and respond" to input without external effects or
-  approval (read/explain): the Assist usecase reserves an idempotent assist run,
-  asks the runtime to answer under the virployee's system prompt, and records the
-  run (degraded when no model answered). This is not the action path — anything
-  with external effects still routes through the Execution Gate and Nexus.
+  approval (read/explain): the Assist usecase durably reserves an idempotent run
+  in `received`, queues identifier-only work, claims it as `answering`, asks the
+  runtime under the virployee's system prompt, and records `done|failed`
+  (degraded when no model answered). Raw input stays in the scoped assist row;
+  jobs, logs and evidence contain only identifiers, hashes and status metadata.
+  This is not the action path — anything with external effects still routes
+  through the Execution Gate and Nexus.
 - Companion tenancy storage is deferred; BFF validates tenancy before forwarding.
 - A product (machine, not a Clerk user) can call the BFF inbound edge
   `POST /v1/assist-runs` with an API key that maps to a tenant + virployee; the
-  request is proxied to the virployee's assist endpoint. This edge is separate
-  from the human-session `/api` surface.
+  request is submitted to Companion's durable assist queue. BFF returns `200`
+  when an optional bounded synchronous wait observes completion, otherwise
+  `202` with `id` and `status_url`; `GET /v1/assist-runs/:id` polls the same
+  tenant/virployee-scoped row. `GET /v1/assist-capabilities` exposes the current
+  ingress contract and limits. This edge is separate from the human-session
+  `/api` surface.
 - Every virployee has a tamper-evident audit ledger held by Nexus: assist runs
   and governed executions append a hash-chained, optionally HMAC-signed event
   (`POST /v1/audit/events`), chained per virployee (`chain_scope =
@@ -101,7 +108,8 @@ channel for governance calls to Nexus. Health endpoints remain public.
   `FOR UPDATE SKIP LOCKED`, renewable leases, heartbeats, retries, expired-lease
   recovery, and a replayable dead-letter state. The job dedupe scope is tenant +
   product + kind + logical key, so replicas cannot process the same logical tick
-  twice. Reconciliation finalizes stale assist runs, recovers stale governed
+  twice. Reconciliation re-enqueues received assist rows, finalizes stale
+  answering runs, recovers stale governed
   executions with the original idempotency key, and retries failed execution
   result reports to Nexus. Execution completion and creation of its Nexus outbox
   message are one Companion database transaction. A bounded dispatcher delivers

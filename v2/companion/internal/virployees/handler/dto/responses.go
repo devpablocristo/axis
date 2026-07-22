@@ -13,7 +13,7 @@ import (
 )
 
 // AssistRunResponse is the generic result of a process-and-respond run. Status is
-// running|done|failed; Output is the virployee's structured answer; Degraded is
+// received|answering|done|failed; Output is the virployee's structured answer; Degraded is
 // true when no real model answered (Echo / no credentials). The product-facing
 // edge (BFF) maps this to the product's own contract.
 type AssistRunResponse struct {
