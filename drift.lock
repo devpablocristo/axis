@@ -138,7 +138,7 @@ sig = "c9d85ce13dacd9a3"
 [[bindings]]
 doc = "v2/companion/docs/specs/memories.md"
 target = "v2/companion/internal/memories/repository.go"
-sig = "0ae6c60d24347c19"
+sig = "47d31b8ddb3ec52e"
 
 [[bindings]]
 doc = "v2/companion/docs/specs/memories.md"
@@ -308,7 +308,7 @@ sig = "c2864d411133faa3"
 [[bindings]]
 doc = "v2/docs/axis-os.md"
 target = "v2/companion/internal/operations/repository.go"
-sig = "0a2d6c327110aecc"
+sig = "c86b4e4d8a5ee22a"
 
 [[bindings]]
 doc = "v2/docs/axis-os.md"
