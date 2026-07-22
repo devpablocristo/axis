@@ -1,7 +1,7 @@
 SET lock_timeout = '5s';
 SET statement_timeout = '30s';
 
-CREATE TABLE IF NOT EXISTS companion_jobs (
+CREATE TABLE IF NOT EXISTS companion_runtime_jobs (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id text NOT NULL CHECK (btrim(tenant_id) <> ''),
     product_surface text NOT NULL DEFAULT 'companion' CHECK (btrim(product_surface) <> ''),
@@ -29,29 +29,29 @@ CREATE TABLE IF NOT EXISTS companion_jobs (
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_companion_jobs_dedupe
-    ON companion_jobs (tenant_id, product_surface, kind, dedupe_key);
+    ON companion_runtime_jobs (tenant_id, product_surface, kind, dedupe_key);
 
 CREATE INDEX IF NOT EXISTS idx_companion_jobs_claim
-    ON companion_jobs (priority DESC, run_after, created_at)
+    ON companion_runtime_jobs (priority DESC, run_after, created_at)
     WHERE status IN ('queued', 'running');
 
 CREATE INDEX IF NOT EXISTS idx_companion_jobs_tenant_kind
-    ON companion_jobs (tenant_id, product_surface, kind, created_at DESC);
+    ON companion_runtime_jobs (tenant_id, product_surface, kind, created_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_companion_jobs_expired_lease
-    ON companion_jobs (lease_until, id)
+    ON companion_runtime_jobs (lease_until, id)
     WHERE status = 'running';
 
-CREATE TABLE IF NOT EXISTS companion_job_events (
+CREATE TABLE IF NOT EXISTS companion_runtime_job_events (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    job_id uuid NOT NULL REFERENCES companion_jobs(id) ON DELETE CASCADE,
+    job_id uuid NOT NULL REFERENCES companion_runtime_jobs(id) ON DELETE CASCADE,
     event text NOT NULL CHECK (btrim(event) <> ''),
     metadata_json jsonb NOT NULL DEFAULT '{}'::jsonb,
     created_at timestamptz NOT NULL DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS idx_companion_job_events_job_created
-    ON companion_job_events (job_id, created_at, id);
+    ON companion_runtime_job_events (job_id, created_at, id);
 
-COMMENT ON COLUMN companion_job_events.metadata_json IS
+COMMENT ON COLUMN companion_runtime_job_events.metadata_json IS
     'Operational metadata only: never payloads, PHI, secrets, signed URLs, or raw errors.';

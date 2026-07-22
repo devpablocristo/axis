@@ -28,7 +28,7 @@ func TestPostgresRepositoryConcurrentClaimRecoveryAndReplay(t *testing.T) {
 	var created []uuid.UUID
 	t.Cleanup(func() {
 		for _, id := range created {
-			_, _ = pool.Exec(context.Background(), `DELETE FROM companion_jobs WHERE org_id=$1 AND id=$2`, orgID, id)
+			_, _ = pool.Exec(context.Background(), `DELETE FROM companion_runtime_jobs WHERE org_id=$1 AND id=$2`, orgID, id)
 		}
 	})
 
@@ -95,7 +95,7 @@ func TestPostgresRepositoryConcurrentClaimRecoveryAndReplay(t *testing.T) {
 	if err != nil || len(claimed) != 1 || claimed[0].ID != deadJob.ID {
 		t.Fatalf("dead-letter claim=%+v err=%v", claimed, err)
 	}
-	if _, err := pool.Exec(ctx, `UPDATE companion_jobs SET lease_until=now()-interval '1 second' WHERE org_id=$1 AND id=$2`, orgID, deadJob.ID); err != nil {
+	if _, err := pool.Exec(ctx, `UPDATE companion_runtime_jobs SET lease_until=now()-interval '1 second' WHERE org_id=$1 AND id=$2`, orgID, deadJob.ID); err != nil {
 		t.Fatal(err)
 	}
 	recovery, err := repository.RecoverExpiredLeases(ctx, 10)
@@ -123,7 +123,7 @@ func TestPostgresRepositoryWorkerControlAndCircuitBreaker(t *testing.T) {
 	orgID := "jobs-test-" + uuid.NewString()
 	product, kind := "tests", "test.circuit."+uuid.NewString()
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM companion_jobs WHERE org_id=$1`, orgID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM companion_runtime_jobs WHERE org_id=$1`, orgID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM companion_worker_controls WHERE org_id=$1`, orgID)
 	})
 
@@ -150,7 +150,7 @@ func TestPostgresRepositoryWorkerControlAndCircuitBreaker(t *testing.T) {
 		if _, err = repository.Fail(ctx, FailInput{JobID: claimed[0].ID, WorkerID: "failing-worker", ErrorCode: "dependency_unavailable", Retryable: true, Backoff: time.Millisecond}); err != nil {
 			t.Fatal(err)
 		}
-		_, _ = pool.Exec(ctx, `UPDATE companion_jobs SET run_after=now() WHERE org_id=$1 AND status='queued'`, orgID)
+		_, _ = pool.Exec(ctx, `UPDATE companion_runtime_jobs SET run_after=now() WHERE org_id=$1 AND status='queued'`, orgID)
 	}
 	var state string
 	var failures int

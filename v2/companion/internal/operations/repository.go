@@ -32,7 +32,7 @@ FROM virployees v LEFT JOIN job_roles j ON j.org_id=v.org_id AND j.id=v.job_role
 LEFT JOIN virployee_capabilities vc ON vc.org_id=v.org_id AND vc.virployee_id=v.id LEFT JOIN capabilities c ON c.org_id=vc.org_id AND c.id=vc.capability_id
 LEFT JOIN companion_knowledge_bindings kb ON kb.org_id=v.org_id AND (kb.virployee_id=v.id OR (kb.scope_type='professional' AND kb.job_role_id=v.job_role_id))
 LEFT JOIN companion_routing_pool_members pm ON pm.org_id=v.org_id AND pm.virployee_id=v.id AND pm.enabled LEFT JOIN companion_continuity_assignments a ON a.org_id=pm.org_id AND a.pool_id=pm.pool_id AND a.virployee_id=v.id
-LEFT JOIN companion_jobs q ON q.org_id=v.org_id AND q.product_surface=$2 AND q.payload_json->>'virployee_id'=v.id::text LEFT JOIN companion_assist_runs ar ON ar.org_id=v.org_id AND ar.virployee_id=v.id
+LEFT JOIN companion_runtime_jobs q ON q.org_id=v.org_id AND q.product_surface=$2 AND q.payload_json->>'virployee_id'=v.id::text LEFT JOIN companion_assist_runs ar ON ar.org_id=v.org_id AND ar.virployee_id=v.id
 LEFT JOIN professional_scope_policies sp ON sp.org_id=v.org_id AND sp.virployee_id=v.id WHERE v.org_id=$1
 GROUP BY v.id,v.name,v.job_role_id,j.name,v.profile_template_id,v.autonomy,v.grounding_mode,v.archived_at,v.trashed_at,sp.virployee_id ORDER BY v.name,v.id`, organization, product)
 	if err != nil {
@@ -72,13 +72,13 @@ func (r *Repository) Overview(ctx context.Context, t, p string) (Overview, error
 	for _, x := range fleet {
 		out.Fleet[string(x.Status)]++
 	}
-	if err = r.groupCounts(ctx, `SELECT status,count(*)::int FROM companion_jobs WHERE org_id=$1 AND ($2='' OR product_surface=$2) GROUP BY status`, []any{t, p}, out.Jobs); err != nil {
+	if err = r.groupCounts(ctx, `SELECT status,count(*)::int FROM companion_runtime_jobs WHERE org_id=$1 AND ($2='' OR product_surface=$2) GROUP BY status`, []any{t, p}, out.Jobs); err != nil {
 		return out, err
 	}
 	if err = r.groupCounts(ctx, `SELECT status,count(*)::int FROM companion_nexus_outbox WHERE org_id=$1 GROUP BY status`, []any{t}, out.Outbox); err != nil {
 		return out, err
 	}
-	_ = r.pool.QueryRow(ctx, `SELECT COALESCE(EXTRACT(epoch FROM now()-min(run_after))::bigint,0) FROM companion_jobs WHERE org_id=$1 AND status='queued'`, t).Scan(&out.OldestQueuedJobAge)
+	_ = r.pool.QueryRow(ctx, `SELECT COALESCE(EXTRACT(epoch FROM now()-min(run_after))::bigint,0) FROM companion_runtime_jobs WHERE org_id=$1 AND status='queued'`, t).Scan(&out.OldestQueuedJobAge)
 	_ = r.pool.QueryRow(ctx, `SELECT COALESCE(EXTRACT(epoch FROM now()-min(available_at))::bigint,0) FROM companion_nexus_outbox WHERE org_id=$1 AND status='pending'`, t).Scan(&out.OldestOutboxAge)
 	if out.Fleet["blocked"] > 0 || out.Jobs["dead_letter"] > 0 || out.Outbox["dead"] > 0 {
 		out.Status = "degraded"
@@ -111,8 +111,8 @@ var reconChecks = []reconSpec{
 	{"assignment.capacity_exceeded", "high", "virployee", "manual", `SELECT m.virployee_id::text FROM companion_routing_pool_members m LEFT JOIN companion_continuity_assignments a ON a.org_id=m.org_id AND a.pool_id=m.pool_id AND a.virployee_id=m.virployee_id WHERE m.org_id=$1 GROUP BY m.virployee_id,m.pool_id,m.max_active_subjects HAVING count(a.id)>m.max_active_subjects`},
 	{"assist.stalled", "warning", "assist_run", "automatic_safe", `SELECT id::text FROM companion_assist_runs WHERE org_id=$1 AND status='running' AND started_at<now()-interval '15 minutes'`},
 	{"execution.stalled", "critical", "execution_attempt", "manual", `SELECT id::text FROM companion_execution_attempts WHERE org_id=$1 AND status='running' AND started_at<now()-interval '15 minutes'`},
-	{"job.dead_letter", "high", "job", "manual", `SELECT id::text FROM companion_jobs WHERE org_id=$1 AND status='dead_letter'`},
-	{"job.expired_lease", "warning", "job", "automatic_safe", `SELECT id::text FROM companion_jobs WHERE org_id=$1 AND status='running' AND lease_until<now()`},
+	{"job.dead_letter", "high", "job", "manual", `SELECT id::text FROM companion_runtime_jobs WHERE org_id=$1 AND status='dead_letter'`},
+	{"job.expired_lease", "warning", "job", "automatic_safe", `SELECT id::text FROM companion_runtime_jobs WHERE org_id=$1 AND status='running' AND lease_until<now()`},
 	{"outbox.dead", "critical", "outbox", "manual", `SELECT id::text FROM companion_nexus_outbox WHERE org_id=$1 AND status='dead'`},
 	{"outbox.expired_lease", "warning", "outbox", "automatic_safe", `SELECT id::text FROM companion_nexus_outbox WHERE org_id=$1 AND status='processing' AND lease_until<now()`},
 	{"runtime.orphan_virployee_reference", "critical", "runtime_reference", "manual", `SELECT DISTINCT t.virployee_id::text FROM companion_run_traces t LEFT JOIN virployees v ON v.org_id=t.org_id AND v.id=t.virployee_id WHERE t.org_id=$1 AND v.id IS NULL`},
@@ -211,7 +211,7 @@ func (r *Repository) safeRepair(ctx context.Context, tx pgx.Tx, f Finding) (bool
 	var tag pgconn.CommandTag
 	switch f.FindingType {
 	case "job.expired_lease":
-		tag, err = tx.Exec(ctx, `UPDATE companion_jobs SET status=CASE WHEN attempts<max_attempts THEN 'queued' ELSE 'dead_letter' END,run_after=now(),lease_owner='',lease_until=NULL,heartbeat_at=NULL,last_error_code='lease_expired',updated_at=now() WHERE org_id=$1 AND id=$2 AND status='running' AND lease_until<now()`, f.OrgID, id)
+		tag, err = tx.Exec(ctx, `UPDATE companion_runtime_jobs SET status=CASE WHEN attempts<max_attempts THEN 'queued' ELSE 'dead_letter' END,run_after=now(),lease_owner='',lease_until=NULL,heartbeat_at=NULL,last_error_code='lease_expired',updated_at=now() WHERE org_id=$1 AND id=$2 AND status='running' AND lease_until<now()`, f.OrgID, id)
 	case "outbox.expired_lease":
 		tag, err = tx.Exec(ctx, `UPDATE companion_nexus_outbox SET status=CASE WHEN attempts<max_attempts THEN 'pending' ELSE 'dead' END,available_at=now(),lease_owner='',lease_until=NULL,heartbeat_at=NULL,last_error_code='lease_expired',updated_at=now() WHERE org_id=$1 AND id=$2 AND status='processing' AND lease_until<now()`, f.OrgID, id)
 	case "assist.stalled":
@@ -303,7 +303,7 @@ func scanRun(row scanner, x *ReconciliationRun) error {
 	return row.Scan(&x.ID, &x.OrgID, &x.ProductSurface, &x.Mode, &x.TriggerType, &x.Status, &x.ActorID, &x.IdempotencyKey, &x.FindingsCount, &x.RepairedCount, &x.ReportHash, &x.ErrorCode, &x.StartedAt, &x.CompletedAt, &x.CreatedAt)
 }
 
-const jobSelect = `SELECT 'companion',j.id,j.product_surface,j.kind,j.dedupe_key,j.status,COALESCE(d.effect_class,'internal_write'),COALESCE(d.replay_policy,'forbidden'),j.attempts,j.max_attempts,j.run_after,j.lease_until,j.deadline_at,j.last_error_code,j.last_error_code,j.evidence_json,j.created_at,j.updated_at,j.completed_at FROM companion_jobs j LEFT JOIN companion_job_definitions d ON d.product_surface=j.product_surface AND d.kind=j.kind`
+const jobSelect = `SELECT 'companion',j.id,j.product_surface,j.kind,j.dedupe_key,j.status,COALESCE(d.effect_class,'internal_write'),COALESCE(d.replay_policy,'forbidden'),j.attempts,j.max_attempts,j.run_after,j.lease_until,j.deadline_at,j.last_error_code,j.last_error_code,j.evidence_json,j.created_at,j.updated_at,j.completed_at FROM companion_runtime_jobs j LEFT JOIN companion_job_definitions d ON d.product_surface=j.product_surface AND d.kind=j.kind`
 
 func scanJob(row scanner) (OperationalJob, error) {
 	var x OperationalJob
@@ -352,7 +352,7 @@ func (r *Repository) CancelJob(ctx context.Context, t, actor string, id uuid.UUI
 		return x, commitResult(ctx, tx, getErr)
 	}
 	var status string
-	err = tx.QueryRow(ctx, `UPDATE companion_jobs SET status=CASE WHEN status='running' THEN 'cancel_requested' ELSE 'cancelled' END,cancel_requested_at=now(),last_error_code=$3,completed_at=CASE WHEN status='queued' THEN now() ELSE completed_at END,updated_at=now() WHERE org_id=$1 AND id=$2 AND status IN('queued','running') RETURNING status`, t, id, reason).Scan(&status)
+	err = tx.QueryRow(ctx, `UPDATE companion_runtime_jobs SET status=CASE WHEN status='running' THEN 'cancel_requested' ELSE 'cancelled' END,cancel_requested_at=now(),last_error_code=$3,completed_at=CASE WHEN status='queued' THEN now() ELSE completed_at END,updated_at=now() WHERE org_id=$1 AND id=$2 AND status IN('queued','running') RETURNING status`, t, id, reason).Scan(&status)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return OperationalJob{}, domainerr.Conflict("job cannot be cancelled from its current state")
 	}
@@ -360,7 +360,7 @@ func (r *Repository) CancelJob(ctx context.Context, t, actor string, id uuid.UUI
 		return OperationalJob{}, err
 	}
 	metadata, _ := json.Marshal(map[string]string{"reason_code": reason, "actor_id": actor})
-	if _, err = tx.Exec(ctx, `INSERT INTO companion_job_events(job_id,event,metadata_json)VALUES($1,$2,$3)`, id, status, metadata); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO companion_runtime_job_events(job_id,event,metadata_json)VALUES($1,$2,$3)`, id, status, metadata); err != nil {
 		return OperationalJob{}, err
 	}
 	x, err := scanJob(tx.QueryRow(ctx, jobSelect+` WHERE j.org_id=$1 AND j.id=$2`, t, id))
@@ -388,13 +388,13 @@ func (r *Repository) ReplayJob(ctx context.Context, t, actor string, id uuid.UUI
 		return x, tx.Commit(ctx)
 	}
 	var policy, effect, dedupe string
-	if err = tx.QueryRow(ctx, `SELECT COALESCE(d.replay_policy,'forbidden'),COALESCE(d.effect_class,'external_write'),j.dedupe_key FROM companion_jobs j LEFT JOIN companion_job_definitions d ON d.product_surface=j.product_surface AND d.kind=j.kind WHERE j.org_id=$1 AND j.id=$2 AND j.status='dead_letter' FOR UPDATE OF j`, t, id).Scan(&policy, &effect, &dedupe); err != nil {
+	if err = tx.QueryRow(ctx, `SELECT COALESCE(d.replay_policy,'forbidden'),COALESCE(d.effect_class,'external_write'),j.dedupe_key FROM companion_runtime_jobs j LEFT JOIN companion_job_definitions d ON d.product_surface=j.product_surface AND d.kind=j.kind WHERE j.org_id=$1 AND j.id=$2 AND j.status='dead_letter' FOR UPDATE OF j`, t, id).Scan(&policy, &effect, &dedupe); err != nil {
 		return OperationalJob{}, domainerr.Conflict("job is not replayable")
 	}
 	if policy == "forbidden" || (effect == "external_write" && strings.TrimSpace(dedupe) == "") {
 		return OperationalJob{}, domainerr.Forbidden("job replay is not safely idempotent")
 	}
-	_, err = tx.Exec(ctx, `UPDATE companion_jobs SET status='queued',attempts=0,run_after=now(),lease_owner='',lease_until=NULL,heartbeat_at=NULL,last_error_code='',completed_at=NULL,updated_at=now() WHERE org_id=$1 AND id=$2`, t, id)
+	_, err = tx.Exec(ctx, `UPDATE companion_runtime_jobs SET status='queued',attempts=0,run_after=now(),lease_owner='',lease_until=NULL,heartbeat_at=NULL,last_error_code='',completed_at=NULL,updated_at=now() WHERE org_id=$1 AND id=$2`, t, id)
 	if err != nil {
 		return OperationalJob{}, err
 	}
@@ -403,7 +403,7 @@ func (r *Repository) ReplayJob(ctx context.Context, t, actor string, id uuid.UUI
 		return x, err
 	}
 	metadata, _ := json.Marshal(map[string]string{"actor_id": actor})
-	if _, err = tx.Exec(ctx, `INSERT INTO companion_job_events(job_id,event,metadata_json)VALUES($1,'replayed',$2)`, id, metadata); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO companion_runtime_job_events(job_id,event,metadata_json)VALUES($1,'replayed',$2)`, id, metadata); err != nil {
 		return x, err
 	}
 	if err = storeOperation(ctx, tx, t, actor, key, "job.replay", id, x); err != nil {

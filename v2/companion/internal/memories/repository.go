@@ -592,7 +592,7 @@ func enqueueMemoryIndex(ctx context.Context, tx pgx.Tx, organization string, mem
 	jobID := uuid.New()
 	dedupe := memory.ID.String() + ":" + strconv.Itoa(memory.Version)
 	tag, err := tx.Exec(ctx, `
-		INSERT INTO companion_jobs(
+		INSERT INTO companion_runtime_jobs(
 			id,org_id,product_surface,kind,shard_key,dedupe_key,payload_json,
 			status,max_attempts,run_after,timeout_seconds
 		) VALUES($1,$2,'companion','memory.index',$3,$4,$5,'queued',5,now(),120)
@@ -603,7 +603,7 @@ func enqueueMemoryIndex(ctx context.Context, tx pgx.Tx, organization string, mem
 	}
 	if tag.RowsAffected() == 1 {
 		_, err = tx.Exec(ctx, `
-			INSERT INTO companion_job_events(job_id,event,metadata_json)
+			INSERT INTO companion_runtime_job_events(job_id,event,metadata_json)
 			VALUES($1,'queued','{"source":"memory_write"}'::jsonb)
 		`, jobID)
 	}

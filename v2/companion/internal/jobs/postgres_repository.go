@@ -53,7 +53,7 @@ func (r *PostgresRepository) EnqueueTx(ctx context.Context, tx pgx.Tx, input Enq
 	}
 
 	row := tx.QueryRow(ctx, `
-        INSERT INTO companion_jobs
+        INSERT INTO companion_runtime_jobs
             (id, org_id, product_surface, kind, shard_key, dedupe_key, payload_json,
              status, priority, max_attempts, run_after, deadline_at, timeout_seconds)
         VALUES ($1,$2,$3,$4,$5,$6,$7,'queued',$8,$9,$10,$11,$12)
@@ -79,7 +79,7 @@ func (r *PostgresRepository) EnqueueTx(ctx context.Context, tx pgx.Tx, input Enq
 	}
 	if input.ReplacePayload && existing.Status == StatusQueued {
 		row = tx.QueryRow(ctx, `
-            UPDATE companion_jobs
+            UPDATE companion_runtime_jobs
             SET payload_json=$2, run_after=$3, priority=$4, deadline_at=$5,
                 timeout_seconds=$6, updated_at=now()
             WHERE id=$1 AND status='queued'
@@ -121,7 +121,7 @@ func (r *PostgresRepository) Claim(ctx context.Context, options ClaimOptions) ([
                        PARTITION BY job.org_id,job.product_surface,job.kind
                        ORDER BY job.priority DESC,job.run_after,job.created_at,job.id
                    ) AS control_rank
-            FROM companion_jobs AS job
+            FROM companion_runtime_jobs AS job
             LEFT JOIN companion_worker_controls AS control
               ON control.org_id=job.org_id
              AND control.product_surface=job.product_surface
@@ -134,14 +134,14 @@ func (r *PostgresRepository) Claim(ctx context.Context, options ClaimOptions) ([
               AND COALESCE(control.state,'closed') NOT IN ('paused','open')
         ), picked AS (
             SELECT job.id
-            FROM companion_jobs AS job
+            FROM companion_runtime_jobs AS job
             JOIN candidates ON candidates.id=job.id
             WHERE candidates.control_state<>'half_open' OR candidates.control_rank=1
             ORDER BY candidates.priority DESC,candidates.run_after,candidates.created_at
             LIMIT $5
             FOR UPDATE OF job SKIP LOCKED
         )
-        UPDATE companion_jobs AS job
+        UPDATE companion_runtime_jobs AS job
         SET status='running', attempts=attempts+1, lease_owner=$1,
             lease_until=now()+make_interval(secs => $6),
             locked_at=COALESCE(locked_at, now()), heartbeat_at=now(), updated_at=now()
@@ -180,7 +180,7 @@ func (r *PostgresRepository) Claim(ctx context.Context, options ClaimOptions) ([
 
 func (r *PostgresRepository) Heartbeat(ctx context.Context, jobID uuid.UUID, workerID string, lease time.Duration) error {
 	cancelled, err := r.pool.Exec(ctx, `
-		UPDATE companion_jobs SET status='cancelled',lease_owner='',lease_until=NULL,
+		UPDATE companion_runtime_jobs SET status='cancelled',lease_owner='',lease_until=NULL,
 			completed_at=now(),updated_at=now()
 		WHERE id=$1 AND lease_owner=$2 AND status='cancel_requested'
 	`, jobID, strings.TrimSpace(workerID))
@@ -191,7 +191,7 @@ func (r *PostgresRepository) Heartbeat(ctx context.Context, jobID uuid.UUID, wor
 		return ErrJobCancelled
 	}
 	tag, err := r.pool.Exec(ctx, `
-        UPDATE companion_jobs
+        UPDATE companion_runtime_jobs
         SET heartbeat_at=now(), lease_until=now()+make_interval(secs => $3), updated_at=now()
         WHERE id=$1 AND lease_owner=$2 AND status='running'
     `, jobID, strings.TrimSpace(workerID), durationSeconds(defaultDuration(lease, DefaultLease)))
@@ -214,7 +214,7 @@ func (r *PostgresRepository) Complete(ctx context.Context, jobID uuid.UUID, work
 	var finalStatus Status
 	var orgID, productSurface, kind string
 	err = tx.QueryRow(ctx, `
-        UPDATE companion_jobs
+        UPDATE companion_runtime_jobs
         SET status=CASE WHEN status='cancel_requested' THEN 'cancelled' ELSE 'succeeded' END,
 			lease_owner='', lease_until=NULL, evidence_json=CASE WHEN status='running' THEN $3 ELSE evidence_json END,
             completed_at=now(), updated_at=now()
@@ -248,7 +248,7 @@ func (r *PostgresRepository) Fail(ctx context.Context, input FailInput) (Job, er
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	row := tx.QueryRow(ctx, `
-        UPDATE companion_jobs
+        UPDATE companion_runtime_jobs
         SET status=CASE WHEN status='cancel_requested' THEN 'cancelled' WHEN $4 AND attempts < max_attempts THEN 'queued' ELSE 'dead_letter' END,
             run_after=CASE WHEN $4 AND attempts < max_attempts
                            THEN now()+make_interval(secs => $5) ELSE run_after END,
@@ -297,7 +297,7 @@ func (r *PostgresRepository) Cancel(ctx context.Context, orgID string, jobID uui
 	defer func() { _ = tx.Rollback(ctx) }()
 	var status Status
 	err = tx.QueryRow(ctx, `
-        UPDATE companion_jobs
+        UPDATE companion_runtime_jobs
 		SET status=CASE WHEN status='running' THEN 'cancel_requested' ELSE 'cancelled' END,
 			cancel_requested_at=now(), last_error_code=$3,
 			lease_owner=CASE WHEN status='running' THEN lease_owner ELSE '' END,
@@ -320,7 +320,7 @@ func (r *PostgresRepository) Cancel(ctx context.Context, orgID string, jobID uui
 }
 
 func (r *PostgresRepository) Get(ctx context.Context, orgID string, jobID uuid.UUID) (Job, error) {
-	job, err := scanJob(r.pool.QueryRow(ctx, `SELECT `+jobColumns+` FROM companion_jobs WHERE org_id=$1 AND id=$2`, strings.TrimSpace(orgID), jobID))
+	job, err := scanJob(r.pool.QueryRow(ctx, `SELECT `+jobColumns+` FROM companion_runtime_jobs WHERE org_id=$1 AND id=$2`, strings.TrimSpace(orgID), jobID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Job{}, ErrJobNotFound
 	}
@@ -334,7 +334,7 @@ func (r *PostgresRepository) List(ctx context.Context, orgID, productSurface, st
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	query := `SELECT ` + jobColumns + ` FROM companion_jobs WHERE org_id=$1`
+	query := `SELECT ` + jobColumns + ` FROM companion_runtime_jobs WHERE org_id=$1`
 	args := []any{strings.TrimSpace(orgID)}
 	if productSurface = strings.TrimSpace(strings.ToLower(productSurface)); productSurface != "" {
 		args = append(args, productSurface)
@@ -374,13 +374,13 @@ func (r *PostgresRepository) RecoverExpiredLeases(ctx context.Context, limit int
 	rows, err := tx.Query(ctx, `
         WITH picked AS (
             SELECT id
-            FROM companion_jobs
+            FROM companion_runtime_jobs
             WHERE status='running' AND lease_until < now()
             ORDER BY lease_until, id
             LIMIT $1
             FOR UPDATE SKIP LOCKED
         )
-        UPDATE companion_jobs AS job
+        UPDATE companion_runtime_jobs AS job
         SET status=CASE WHEN attempts < max_attempts THEN 'queued' ELSE 'dead_letter' END,
             lease_owner='', lease_until=NULL, heartbeat_at=NULL,
             run_after=CASE WHEN attempts < max_attempts THEN now() ELSE run_after END,
@@ -441,7 +441,7 @@ func (r *PostgresRepository) ReplayDeadLetter(ctx context.Context, orgID string,
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	job, err := scanJob(tx.QueryRow(ctx, `
-        UPDATE companion_jobs
+        UPDATE companion_runtime_jobs
         SET status='queued', attempts=0, run_after=$3, lease_owner='', lease_until=NULL,
             locked_at=NULL, heartbeat_at=NULL, last_error_code='', completed_at=NULL, updated_at=now()
         WHERE org_id=$1 AND id=$2 AND status='dead_letter'
@@ -465,7 +465,7 @@ func (r *PostgresRepository) ReplayDeadLetter(ctx context.Context, orgID string,
 func getByDedupe(ctx context.Context, tx pgx.Tx, input EnqueueInput) (Job, error) {
 	job, err := scanJob(tx.QueryRow(ctx, `
         SELECT `+jobColumns+`
-        FROM companion_jobs
+        FROM companion_runtime_jobs
         WHERE org_id=$1 AND product_surface=$2 AND kind=$3 AND dedupe_key=$4
         ORDER BY created_at
         LIMIT 1
@@ -505,7 +505,7 @@ func scanJob(row rowScanner) (Job, error) {
 
 func recordEvent(ctx context.Context, tx pgx.Tx, jobID uuid.UUID, event string, metadata json.RawMessage) error {
 	_, err := tx.Exec(ctx, `
-        INSERT INTO companion_job_events (job_id, event, metadata_json)
+        INSERT INTO companion_runtime_job_events (job_id, event, metadata_json)
         VALUES ($1,$2,$3)
     `, jobID, event, defaultJSON(metadata))
 	if err != nil {

@@ -1,8 +1,8 @@
 SET lock_timeout = '5s';
 SET statement_timeout = '30s';
 
-ALTER TABLE companion_jobs DROP CONSTRAINT IF EXISTS companion_jobs_status_check;
-ALTER TABLE companion_jobs
+ALTER TABLE companion_runtime_jobs DROP CONSTRAINT IF EXISTS companion_jobs_status_check;
+ALTER TABLE companion_runtime_jobs
     ADD COLUMN IF NOT EXISTS cancel_requested_at timestamptz NULL,
     ADD CONSTRAINT companion_jobs_status_check
         CHECK (status IN ('queued','running','cancel_requested','succeeded','dead_letter','cancelled'));

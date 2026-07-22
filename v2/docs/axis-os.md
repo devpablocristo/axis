@@ -119,7 +119,9 @@ channel for governance calls to Nexus. Health endpoints remain public.
   replays an `answering` state because the model call may already have occurred.
   The job dedupe scope is organization +
   product + kind + logical key, so replicas cannot process the same logical tick
-  twice. Reconciliation re-enqueues received assist rows, safely resets stale
+  twice. V2 stores this queue in `companion_runtime_*` tables, deliberately
+  separate from the differently shaped v1 operational queue when both versions
+  share a database. Reconciliation re-enqueues received assist rows, safely resets stale
   pre-answer assists within a bounded recovery budget, finalizes stale answering
   runs, and recovers stale governed
   executions with the original idempotency key, and retries failed execution

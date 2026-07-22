@@ -31,7 +31,7 @@ func TestCoordinationPlanIsAtomicAndHandoffDecisionIsSingleWinner(t *testing.T) 
 	ownerID, specialistID, capabilityID := uuid.New(), uuid.New(), uuid.New()
 	t.Cleanup(func() {
 		cleanupCtx := context.Background()
-		_, _ = pool.Exec(cleanupCtx, `DELETE FROM companion_jobs WHERE org_id=$1`, orgID)
+		_, _ = pool.Exec(cleanupCtx, `DELETE FROM companion_runtime_jobs WHERE org_id=$1`, orgID)
 		_, _ = pool.Exec(cleanupCtx, `DELETE FROM companion_human_reviews WHERE org_id=$1`, orgID)
 		_, _ = pool.Exec(cleanupCtx, `DELETE FROM companion_handoffs WHERE org_id=$1`, orgID)
 		_, _ = pool.Exec(cleanupCtx, `UPDATE companion_assist_runs SET orchestration_plan_id=NULL WHERE org_id=$1`, orgID)
@@ -105,7 +105,7 @@ func TestCoordinationPlanIsAtomicAndHandoffDecisionIsSingleWinner(t *testing.T) 
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM companion_specialist_consultations WHERE org_id=$1 AND plan_id=$2`, orgID, plan.ID).Scan(&consultationCount); err != nil {
 		t.Fatal(err)
 	}
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM companion_jobs WHERE org_id=$1 AND kind=$2`, orgID, JobKindSpecialistConsult).Scan(&jobCount); err != nil {
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM companion_runtime_jobs WHERE org_id=$1 AND kind=$2`, orgID, JobKindSpecialistConsult).Scan(&jobCount); err != nil {
 		t.Fatal(err)
 	}
 	if planCount != 1 || consultationCount != 1 || jobCount != 1 {
