@@ -253,7 +253,7 @@ func (r *Repository) validateAssistCitation(ctx context.Context, orgID string, v
 func (r *Repository) validateAssistMemoryReference(ctx context.Context, orgID string, virployeeID uuid.UUID, reference memories.Reference) error {
 	var valid bool
 	err := r.pool.QueryRow(ctx, `SELECT EXISTS(
-		SELECT 1 FROM companion_memories
+		SELECT 1 FROM companion_virployee_memories
 		WHERE org_id=$1 AND virployee_id=$2 AND id=$3
 		  AND version=$4 AND content_hash=$5 AND title=$6 AND memory_type=$7 AND sensitivity=$8
 		  AND scope_type=$9 AND subject_id=$10 AND case_id IS NOT DISTINCT FROM $11::uuid

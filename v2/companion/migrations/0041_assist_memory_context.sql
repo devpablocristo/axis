@@ -2,7 +2,7 @@ SET lock_timeout = '5s';
 SET statement_timeout = '30s';
 
 -- Bind general-mode answers to the exact approved memory references supplied
--- to Runtime. Bodies remain in companion_memories; Assist stores metadata and
+-- to Runtime. Bodies remain in companion_virployee_memories; Assist stores metadata and
 -- hashes only so execution can revalidate them without replaying retrieval.
 ALTER TABLE companion_assist_runs
     ADD COLUMN IF NOT EXISTS memory_context_hash text NOT NULL DEFAULT '',
