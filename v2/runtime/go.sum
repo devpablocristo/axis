@@ -28,8 +28,8 @@ github.com/devpablocristo/platform/http/gin/go v0.2.3 h1:py98qKf2fCLpC0iEYxqlk3i
 github.com/devpablocristo/platform/http/gin/go v0.2.3/go.mod h1:Ni+Hek8a+klpqFlW1gt92bmnXFguSPLQLeAzBNKHm1U=
 github.com/devpablocristo/platform/http/go v0.2.1 h1:gyHLftz7bIYZ/VJI/Q0nOILc0rCvWke02O9AXgUKHv4=
 github.com/devpablocristo/platform/http/go v0.2.1/go.mod h1:qinUKdGJ51xbKMLYWF96bSGu8JSRAbWPsAqTusrg5tk=
-github.com/devpablocristo/platform/kernels/ai/go v0.2.0 h1:jinnJJvq6qZy3s2QQodWt1KkNDX9OQdHb4rl4AMqmOE=
-github.com/devpablocristo/platform/kernels/ai/go v0.2.0/go.mod h1:ACh3XVzWoqiU963vxBi/ph+d3GkhHr87K36+cG+Lkgw=
+github.com/devpablocristo/platform/kernels/ai/go v0.3.0 h1:dEUmQWWQXMDcUiv6Tkp2uFJT8Szdulqpk/5PCK6HYF8=
+github.com/devpablocristo/platform/kernels/ai/go v0.3.0/go.mod h1:ImER5sjhgsopmB9oA+L1S5c3T4/Dpzdibe89XUtddL8=
 github.com/devpablocristo/platform/observability/go v0.2.1 h1:lu5nefAmX6NTHbjRs4lhx6WUyvG2ubE3Jw1vP7q0Oec=
 github.com/devpablocristo/platform/observability/go v0.2.1/go.mod h1:5wQDDBbjRN2m1S1rcmZzfavQeXN6CPnDvGpgF19uU38=
 github.com/devpablocristo/platform/security/go v0.2.2 h1:qVHSXm659qnzUf4qCFFf4WD1aVWnAz5TWgkKinknvyk=

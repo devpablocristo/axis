@@ -5,7 +5,7 @@ go 1.26.5
 require (
 	github.com/devpablocristo/platform/config/go v0.1.0
 	github.com/devpablocristo/platform/http/gin/go v0.2.3
-	github.com/devpablocristo/platform/kernels/ai/go v0.2.0
+	github.com/devpablocristo/platform/kernels/ai/go v0.3.0
 	github.com/devpablocristo/platform/observability/go v0.2.1
 	github.com/gin-gonic/gin v1.12.0
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.68.0
