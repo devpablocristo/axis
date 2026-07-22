@@ -18,19 +18,39 @@ func (r *Repository) EnsureAssistCase(ctx context.Context, tenantID string, entr
 	if strings.TrimSpace(metadata.SubjectID) == "" || strings.TrimSpace(metadata.ProductSurface) == "" || strings.TrimSpace(metadata.AssistType) == "" {
 		return AssistCase{}, domainerr.Validation("case-enabled assist requires product_surface, assist_type and subject_id")
 	}
+	productSurface := strings.TrimSpace(metadata.ProductSurface)
+	assistType := strings.TrimSpace(metadata.AssistType)
+	subjectID := strings.TrimSpace(metadata.SubjectID)
+	// A handoff changes owner, not case identity. Resolve by either original
+	// entrypoint or current owner before attempting to create a new live case.
+	existing, err := r.scanAssistCase(r.pool.QueryRow(ctx, assistCaseSelect+`
+		WHERE tenant_id=$1 AND product_surface=$2 AND assist_type=$3 AND subject_id=$4
+		  AND status IN ('open','needs_human')
+		  AND (entrypoint_virployee_id=$5 OR owner_virployee_id=$5)
+		ORDER BY updated_at DESC,id LIMIT 1
+	`, tenantID, productSurface, assistType, subjectID, entrypoint))
+	if err == nil {
+		return existing, nil
+	}
+	if !domainerr.IsNotFound(err) {
+		return AssistCase{}, err
+	}
+
 	id := uuid.New()
-	_, err := r.pool.Exec(ctx, `
+	_, err = r.pool.Exec(ctx, `
 		INSERT INTO companion_assist_cases (
 			id,tenant_id,product_surface,assist_type,subject_id,entrypoint_virployee_id,owner_virployee_id
 		) VALUES ($1,$2,$3,$4,$5,$6,$6)
-		ON CONFLICT (tenant_id,product_surface,assist_type,subject_id,entrypoint_virployee_id) DO NOTHING
-	`, id, tenantID, strings.TrimSpace(metadata.ProductSurface), strings.TrimSpace(metadata.AssistType), strings.TrimSpace(metadata.SubjectID), entrypoint)
+		ON CONFLICT (tenant_id,product_surface,assist_type,subject_id,entrypoint_virployee_id)
+		WHERE status IN ('open','needs_human') DO NOTHING
+	`, id, tenantID, productSurface, assistType, subjectID, entrypoint)
 	if err != nil {
 		return AssistCase{}, err
 	}
 	return r.scanAssistCase(r.pool.QueryRow(ctx, assistCaseSelect+`
-		WHERE tenant_id=$1 AND product_surface=$2 AND assist_type=$3 AND subject_id=$4 AND entrypoint_virployee_id=$5
-	`, tenantID, strings.TrimSpace(metadata.ProductSurface), strings.TrimSpace(metadata.AssistType), strings.TrimSpace(metadata.SubjectID), entrypoint))
+		WHERE tenant_id=$1 AND product_surface=$2 AND assist_type=$3 AND subject_id=$4
+		  AND entrypoint_virployee_id=$5 AND status IN ('open','needs_human')
+	`, tenantID, productSurface, assistType, subjectID, entrypoint))
 }
 
 func (r *Repository) GetAssistCase(ctx context.Context, tenantID string, id uuid.UUID) (AssistCase, error) {

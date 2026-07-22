@@ -26,7 +26,54 @@ func NewPipeline(catalog ArtifactCatalogPort, fetcher ArtifactFetcherPort, scann
 }
 
 func (p *Pipeline) Ingest(ctx context.Context, req IngestRequest) (IngestResult, error) {
-	if p.catalog == nil || p.fetcher == nil || p.scanner == nil || p.store == nil {
+	return p.ingest(ctx, req, p.fetcher)
+}
+
+// IngestUpload accepts a local stream while preserving the remote-ingestion
+// security path. It first establishes server-observed immutable provenance,
+// then runs the usual catalog, malware scan, staging, extraction and indexing
+// stages with a private replayable fetcher.
+func (p *Pipeline) IngestUpload(ctx context.Context, req UploadRequest) (IngestResult, error) {
+	if p.catalog == nil || p.scanner == nil || p.store == nil || (req.RequireIndexing && p.indexer == nil) {
+		return IngestResult{}, errors.New("artifact pipeline is not fully configured")
+	}
+	if req.Content == nil {
+		return IngestResult{}, errors.New("artifact upload content is required")
+	}
+	prepared, _, checksum, err := spool(func(dst io.Writer) (string, int64, error) {
+		written, copyErr := io.Copy(dst, req.Content)
+		return req.ContentType, written, copyErr
+	})
+	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			return IngestResult{}, ErrArtifactTooLarge
+		}
+		return IngestResult{}, err
+	}
+	defer func() { _ = prepared.Close() }()
+
+	if req.Manifest.SizeBytes > 0 && req.Manifest.SizeBytes != prepared.Size() {
+		return IngestResult{}, ErrSizeMismatch
+	}
+	if declared := strings.ToLower(strings.TrimSpace(req.Manifest.SHA256)); declared != "" && declared != checksum {
+		return IngestResult{}, ErrChecksumMismatch
+	}
+	req.Manifest.SHA256 = checksum
+	req.Manifest.SizeBytes = prepared.Size()
+	if strings.TrimSpace(req.Manifest.MIMEType) == "" {
+		req.Manifest.MIMEType = normalizeMIME(req.ContentType)
+	}
+	// ReadURL remains an ephemeral transport hint: Repository.UpsertManifest
+	// deliberately never persists it.
+	req.Manifest.ReadURL = "upload://local/" + req.Manifest.DocumentID
+	return p.ingest(ctx, IngestRequest{
+		Scope: req.Scope, Artifacts: []Manifest{req.Manifest}, RequireIndexing: req.RequireIndexing, Progress: req.Progress,
+	}, localBlobFetcher{blob: prepared, contentType: req.ContentType})
+}
+
+func (p *Pipeline) ingest(ctx context.Context, req IngestRequest, fetcher ArtifactFetcherPort) (IngestResult, error) {
+	if p.catalog == nil || fetcher == nil || p.scanner == nil || p.store == nil || (req.RequireIndexing && p.indexer == nil) {
 		return IngestResult{}, errors.New("artifact pipeline is not fully configured")
 	}
 	if err := validateRequest(req); err != nil {
@@ -48,7 +95,7 @@ func (p *Pipeline) Ingest(ctx context.Context, req IngestRequest) (IngestResult,
 			record, _ = p.catalog.SetStatus(ctx, req.Scope.TenantID, record.ID, StatusStaging, "", "", "")
 		}
 
-		parts, updated, err := p.ingestOne(ctx, req.Scope, record)
+		parts, updated, err := p.ingestOne(ctx, req.Scope, record, fetcher)
 		if err != nil {
 			code := stableErrorCode(err)
 			failed, _ := p.catalog.SetStatus(ctx, req.Scope.TenantID, record.ID, StatusFailed, "", "", code)
@@ -92,7 +139,7 @@ func (p *Pipeline) Ingest(ctx context.Context, req IngestRequest) (IngestResult,
 	return result, nil
 }
 
-func (p *Pipeline) ingestOne(ctx context.Context, scope Scope, record Record) ([]ContentPart, Record, error) {
+func (p *Pipeline) ingestOne(ctx context.Context, scope Scope, record Record, fetcher ArtifactFetcherPort) ([]ContentPart, Record, error) {
 	fromStaging := record.StagedURI != ""
 	stored := StoredArtifact{
 		URI: record.StagedURI, MIMEType: record.ActualMIME, SHA256: record.Manifest.SHA256,
@@ -102,7 +149,7 @@ func (p *Pipeline) ingestOne(ctx context.Context, scope Scope, record Record) ([
 		if fromStaging {
 			return p.store.GetOriginal(ctx, stored, dst)
 		}
-		return p.fetcher.Fetch(ctx, record.Manifest, dst)
+		return fetcher.Fetch(ctx, record.Manifest, dst)
 	})
 	if err != nil {
 		return nil, record, err
@@ -151,6 +198,21 @@ func (p *Pipeline) ingestOne(ctx context.Context, scope Scope, record Record) ([
 	}
 	record, err = p.catalog.SetStatus(ctx, scope.TenantID, record.ID, StatusExtracted, stored.URI, actualMIME, "")
 	return parts, record, err
+}
+
+type localBlobFetcher struct {
+	blob        Blob
+	contentType string
+}
+
+func (f localBlobFetcher) Fetch(_ context.Context, _ Manifest, dst io.Writer) (string, int64, error) {
+	reader, err := f.blob.Open()
+	if err != nil {
+		return "", 0, err
+	}
+	defer func() { _ = reader.Close() }()
+	written, err := io.Copy(dst, reader)
+	return f.contentType, written, err
 }
 
 func validateRequest(req IngestRequest) error {
@@ -278,6 +340,8 @@ func stableErrorCode(err error) string {
 		return "artifact_indexing_failed"
 	case errors.Is(err, ErrExtractionUnavailable):
 		return "artifact_extraction_unavailable"
+	case errors.Is(err, ErrArtifactStoreFull):
+		return "artifact_store_full"
 	default:
 		return "artifact_processing_failed"
 	}

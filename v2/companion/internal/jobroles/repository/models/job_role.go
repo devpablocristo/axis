@@ -8,29 +8,37 @@ import (
 )
 
 type JobRole struct {
-	ID         uuid.UUID
-	TenantID   string
-	Name       string
-	Slug       string
-	Mission    string
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
-	ArchivedAt *time.Time
-	TrashedAt  *time.Time
-	PurgeAfter *time.Time
+	ID               uuid.UUID
+	TenantID         string
+	Name             string
+	Slug             string
+	Mission          string
+	Responsibilities []domain.Responsibility
+	SuccessCriteria  []domain.SuccessCriterion
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+	ArchivedAt       *time.Time
+	TrashedAt        *time.Time
+	PurgeAfter       *time.Time
 }
 
 func (m JobRole) ToDomain() domain.JobRole {
+	responsibilities := make([]domain.Responsibility, len(m.Responsibilities))
+	copy(responsibilities, m.Responsibilities)
+	successCriteria := make([]domain.SuccessCriterion, len(m.SuccessCriteria))
+	copy(successCriteria, m.SuccessCriteria)
 	return domain.JobRole{
-		ID:         m.ID,
-		TenantID:   m.TenantID,
-		Name:       m.Name,
-		Slug:       m.Slug,
-		Mission:    m.Mission,
-		CreatedAt:  m.CreatedAt,
-		UpdatedAt:  m.UpdatedAt,
-		ArchivedAt: m.ArchivedAt,
-		TrashedAt:  m.TrashedAt,
-		PurgeAfter: m.PurgeAfter,
+		ID:               m.ID,
+		TenantID:         m.TenantID,
+		Name:             m.Name,
+		Slug:             m.Slug,
+		Mission:          m.Mission,
+		Responsibilities: responsibilities,
+		SuccessCriteria:  successCriteria,
+		CreatedAt:        m.CreatedAt,
+		UpdatedAt:        m.UpdatedAt,
+		ArchivedAt:       m.ArchivedAt,
+		TrashedAt:        m.TrashedAt,
+		PurgeAfter:       m.PurgeAfter,
 	}
 }

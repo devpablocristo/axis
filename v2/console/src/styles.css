@@ -91,6 +91,273 @@
   --axis-shadow: var(--axis-shadow-sm);
 }
 
+.governance-page {
+  display: grid;
+  gap: var(--axis-space-250);
+}
+
+.governance-brief {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--axis-space-300);
+  align-items: end;
+  padding: var(--axis-space-300);
+  color: var(--axis-color-sidebar-text);
+  background: linear-gradient(118deg, #14243a 0%, #1b365d 64%, #244a7f 100%);
+  border: 1px solid #345d8d;
+  border-radius: var(--axis-radius-lg);
+  box-shadow: var(--axis-shadow-md);
+}
+
+.governance-brief h2,
+.governance-brief p {
+  margin: 0;
+}
+
+.governance-brief h2 {
+  max-width: 760px;
+  margin-top: var(--axis-space-075);
+  font-size: clamp(20px, 2.4vw, 30px);
+  letter-spacing: -0.025em;
+}
+
+.governance-brief p {
+  max-width: 700px;
+  margin-top: var(--axis-space-100);
+  color: #b9cce2;
+}
+
+.governance-eyebrow,
+.governance-kicker {
+  color: #8db7e3;
+  font-size: var(--axis-font-size-xs);
+  font-weight: var(--axis-font-weight-bold);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.governance-kicker {
+  color: var(--axis-primary);
+}
+
+.decision-precedence {
+  display: grid;
+  grid-template-columns: repeat(5, auto);
+  align-items: center;
+  gap: var(--axis-space-075);
+  min-width: 360px;
+  padding: var(--axis-space-150);
+  background: rgba(7, 17, 31, 0.46);
+  border: 1px solid rgba(185, 204, 226, 0.26);
+  border-radius: var(--axis-radius-md);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.decision-precedence strong {
+  grid-column: 1 / -1;
+  margin-bottom: var(--axis-space-050);
+  color: #b9cce2;
+  font-size: var(--axis-font-size-xs);
+  text-transform: uppercase;
+}
+
+.decision-precedence span {
+  padding: var(--axis-space-075) var(--axis-space-100);
+  border-radius: var(--axis-radius-sm);
+  font-size: var(--axis-font-size-sm);
+  font-weight: var(--axis-font-weight-bold);
+}
+
+.decision-precedence i {
+  color: #8299b4;
+  font-size: var(--axis-font-size-xs);
+  font-style: normal;
+}
+
+.precedence-deny { color: #ffb3b8; background: rgba(218, 30, 40, 0.18); }
+.precedence-approval { color: #f4d58b; background: rgba(183, 121, 31, 0.2); }
+.precedence-allow { color: #9ce6ae; background: rgba(25, 128, 56, 0.2); }
+
+.governance-layout,
+.governance-audit-grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.85fr) minmax(520px, 1.65fr);
+  gap: var(--axis-space-200);
+  align-items: start;
+}
+
+.governance-audit-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.governance-panel {
+  padding: var(--axis-space-200);
+}
+
+.governance-panel .card-header h2,
+.governance-promotion-list h3 {
+  margin: var(--axis-space-025) 0 0;
+  font-size: 16px;
+}
+
+.governance-panel .card-header small {
+  color: var(--axis-muted);
+}
+
+.governance-form,
+.governance-artifact-form,
+.governance-version-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--axis-space-100);
+  margin-top: var(--axis-space-150);
+}
+
+.governance-artifact-form,
+.governance-version-form {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.governance-wide,
+.governance-cel {
+  grid-column: 1 / -1;
+}
+
+.governance-cel textarea,
+.governance-version-list code,
+.governance-audit-list code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.governance-cel textarea {
+  color: #dbe7f5;
+  background: #101c2d;
+  border-color: #345d8d;
+  line-height: 1.55;
+}
+
+.governance-ledger-list,
+.governance-version-list,
+.governance-audit-list,
+.governance-promotion-list {
+  display: grid;
+  gap: var(--axis-space-075);
+  margin-top: var(--axis-space-150);
+}
+
+.governance-ledger-list > div,
+.governance-promotion-list > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: var(--axis-space-100);
+  align-items: center;
+  padding: var(--axis-space-100);
+  border: 1px solid var(--axis-border);
+  border-radius: var(--axis-radius-md);
+  background: var(--axis-surface-subtle);
+}
+
+.governance-ledger-list > div > div,
+.governance-promotion-list span {
+  display: grid;
+}
+
+.governance-ledger-list small,
+.governance-promotion-list small,
+.governance-version-list small {
+  color: var(--axis-muted);
+}
+
+.governance-ledger-list .is-muted {
+  opacity: 0.62;
+}
+
+.governance-version-list {
+  grid-template-columns: repeat(3, minmax(260px, 1fr));
+}
+
+.governance-version-list article {
+  min-width: 0;
+  padding: var(--axis-space-150);
+  border: 1px solid var(--axis-border);
+  border-top: 3px solid var(--axis-primary-border);
+  border-radius: var(--axis-radius-md);
+  background: var(--axis-surface-subtle);
+}
+
+.governance-version-list article > div:first-child,
+.governance-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--axis-space-075);
+  align-items: center;
+}
+
+.governance-version-list p {
+  overflow: hidden;
+  margin: var(--axis-space-100) 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--axis-font-size-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.governance-actions {
+  margin-top: var(--axis-space-125);
+}
+
+.policy-state,
+.policy-mode {
+  padding: 3px 7px;
+  border: 1px solid var(--axis-border);
+  border-radius: var(--axis-radius-pill);
+  font-size: 10px;
+  font-weight: var(--axis-font-weight-bold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.policy-state--active,
+.policy-mode--enforced { color: var(--axis-color-success); background: var(--axis-color-success-soft); border-color: var(--axis-color-success-border); }
+.policy-state--shadow,
+.policy-mode--shadow { color: var(--axis-color-warning); background: var(--axis-color-warning-soft); border-color: var(--axis-color-warning-border); }
+.policy-state--retired { color: var(--axis-muted); background: var(--axis-color-surface-muted); }
+
+.governance-audit-list > div {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto auto;
+  gap: var(--axis-space-075);
+  align-items: center;
+  padding: var(--axis-space-075) 0;
+  border-bottom: 1px solid var(--axis-border);
+  font-size: var(--axis-font-size-sm);
+}
+
+.governance-audit-list time {
+  color: var(--axis-muted);
+  font-size: var(--axis-font-size-xs);
+}
+
+@media (max-width: 1100px) {
+  .governance-brief,
+  .governance-layout,
+  .governance-audit-grid { grid-template-columns: 1fr; }
+  .decision-precedence { min-width: 0; }
+  .governance-version-list { grid-template-columns: repeat(2, minmax(260px, 1fr)); }
+}
+
+@media (max-width: 720px) {
+  .governance-artifact-form,
+  .governance-version-form,
+  .governance-form,
+  .governance-version-list { grid-template-columns: 1fr; }
+  .governance-wide,
+  .governance-cel { grid-column: auto; }
+  .governance-audit-list > div { grid-template-columns: auto minmax(0, 1fr); }
+  .governance-audit-list time,
+  .governance-audit-list code { grid-column: 2; }
+}
+
 * {
   box-sizing: border-box;
 }
@@ -1975,6 +2242,283 @@ tbody tr:focus-within {
   gap: var(--axis-space-100);
 }
 
+.job-role-definition-panel form {
+  display: grid;
+  gap: var(--axis-space-200);
+  padding: var(--axis-space-200);
+}
+
+.job-role-definition-list {
+  display: grid;
+  gap: var(--axis-space-150);
+  padding-top: var(--axis-space-100);
+  border-top: 1px solid var(--axis-border);
+}
+
+.job-role-definition-list .card-header {
+  padding: 0;
+  border: 0;
+}
+
+.job-role-definition-row {
+  display: grid;
+  grid-template-columns: auto repeat(3, minmax(0, 1fr)) auto;
+  align-items: end;
+  gap: var(--axis-space-100);
+}
+
+.job-role-definition-row__order {
+  align-self: center;
+  color: var(--axis-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 900px) {
+  .job-role-definition-row {
+    grid-template-columns: auto 1fr;
+  }
+
+  .job-role-definition-row .form-group {
+    grid-column: 2;
+  }
+}
+
+.workforce-page {
+  display: grid;
+  gap: var(--axis-space-200);
+}
+
+.workforce-summary,
+.workforce-card {
+  padding: var(--axis-space-200);
+}
+
+.workforce-summary .card-header,
+.workforce-card .card-header {
+  padding: 0 0 var(--axis-space-150);
+}
+
+.workforce-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--axis-space-200);
+}
+
+.workforce-card--wide {
+  grid-column: 1 / -1;
+}
+
+.workforce-form {
+  display: grid;
+  gap: var(--axis-space-100);
+  margin-bottom: var(--axis-space-200);
+}
+
+.workforce-form--inline {
+  grid-template-columns: minmax(0, 2fr) minmax(160px, 1fr) auto;
+  align-items: end;
+}
+
+.workforce-list {
+  display: grid;
+  gap: var(--axis-space-100);
+  max-height: 320px;
+  overflow: auto;
+}
+
+.workforce-list > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--axis-space-150);
+  padding: var(--axis-space-100);
+  border: 1px solid var(--axis-border);
+  border-radius: var(--axis-radius-md);
+}
+
+.workforce-member-row,
+.workforce-list > .workforce-assignment-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.4fr) minmax(180px, 1fr) minmax(180px, 1fr) auto;
+  align-items: end;
+  gap: var(--axis-space-150);
+  padding: var(--axis-space-100);
+  border: 1px solid var(--axis-border);
+  border-radius: var(--axis-radius-md);
+}
+
+.workforce-row-identity {
+  display: grid;
+  align-self: center;
+  gap: var(--axis-space-050);
+}
+
+.workforce-row-identity span {
+  color: var(--axis-muted);
+  text-align: left;
+}
+
+.workforce-member-enabled {
+  min-height: var(--axis-control-height);
+  display: flex;
+  align-items: center;
+  gap: var(--axis-space-100);
+}
+
+.workforce-member-enabled input {
+  width: auto;
+}
+
+.workforce-list > .workforce-assignment-row {
+  grid-template-columns: minmax(180px, 1fr) minmax(0, 3fr);
+}
+
+.workforce-reassignment-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(160px, 1fr)) auto;
+  align-items: end;
+  gap: var(--axis-space-100);
+}
+
+.workforce-list span {
+  color: var(--axis-muted);
+  text-align: right;
+}
+
+.work-relationships-editor {
+  display: grid;
+  gap: var(--axis-space-100);
+}
+
+.work-relationship-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) minmax(220px, 2fr) auto auto;
+  align-items: end;
+  gap: var(--axis-space-100);
+}
+
+.work-relationship-primary {
+  min-height: var(--axis-control-height);
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: var(--axis-space-100);
+}
+
+.professional-policies-page,
+.policy-pack-list,
+.knowledge-bases-page {
+  display: grid;
+  gap: var(--axis-space-200);
+}
+
+.knowledge-base-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--axis-space-150);
+  margin-top: var(--axis-space-150);
+  padding-top: var(--axis-space-150);
+  border-top: 1px solid var(--axis-border);
+}
+
+.knowledge-base-summary span {
+  color: var(--axis-muted);
+}
+
+.knowledge-binding-form {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) auto;
+  align-items: end;
+  gap: var(--axis-space-100);
+  margin-bottom: var(--axis-space-150);
+}
+
+.knowledge-binding-list {
+  margin-bottom: var(--axis-space-150);
+}
+
+.knowledge-save-bindings {
+  justify-self: end;
+}
+
+.virployee-authority-editor {
+  display: grid;
+  gap: var(--axis-space-150);
+}
+
+.policy-binding-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--axis-space-100);
+}
+
+.policy-binding-option {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--axis-space-100);
+  padding: var(--axis-space-100);
+  border: 1px solid var(--axis-border);
+  border-radius: var(--axis-radius-md);
+}
+
+.policy-binding-option span {
+  display: grid;
+}
+
+.policy-binding-option small {
+  color: var(--axis-muted);
+}
+
+.delegation-create-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  align-items: end;
+  gap: var(--axis-space-100);
+}
+
+.policy-pack-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--axis-space-150);
+}
+
+.policy-pack-form > button,
+.policy-pack-check {
+  align-self: end;
+}
+
+.policy-pack-list {
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+@media (max-width: 900px) {
+  .workforce-grid,
+  .workforce-form--inline,
+  .workforce-member-row,
+  .workforce-assignment-row,
+  .workforce-reassignment-form,
+  .work-relationship-row,
+  .policy-pack-form,
+  .delegation-create-row,
+  .knowledge-binding-form {
+    grid-template-columns: 1fr;
+  }
+
+  .workforce-card--wide {
+    grid-column: auto;
+  }
+
+  .workforce-list > div {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .workforce-list span {
+    text-align: left;
+  }
+}
+
 .virployee-form-actions,
 .virployee-panel-actions {
   display: flex;
@@ -2119,6 +2663,12 @@ tbody tr:focus-within {
 .virployee-memory__section h3 {
   margin: 0;
   font-size: 15px;
+}
+
+.virployee-memory__scope-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--axis-space-100);
 }
 
 .virployee-memory__form {
@@ -2809,6 +3359,10 @@ tbody tr:focus-within {
   }
 
   .virployee-memory__form {
+    grid-template-columns: 1fr;
+  }
+
+  .virployee-memory__scope-grid {
     grid-template-columns: 1fr;
   }
 

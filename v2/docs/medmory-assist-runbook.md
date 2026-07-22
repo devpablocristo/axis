@@ -22,10 +22,13 @@ information_needed, disclaimer).
 
 - **companion:** `COMPANION_V2_RUNTIME_BASE_URL=http://runtime-v2:8080` (ya en el compose;
   sin esto el answerer queda nil y el assist devuelve "runtime answerer is not configured").
-- **BFF:** `BFF_V2_PRODUCT_API_KEYS` con la credencial de medmory. Formato
+- **BFF:** `BFF_V2_PRODUCT_API_KEYS` con la credencial de medmory. El quinto
+  campo (`routing_pool_id`) es opcional; cuando está presente el BFF resuelve la
+  asignación estable antes de enviar Assist. Sin él se conserva el Virployee
+  fijo sólo para integraciones legacy fuera de pools. Formato
   `<apiKey>=<tenant>|<virployee>|<actor>|<product>`. Ejemplo (tenant cristo.tech × medmory):
   ```
-  BFF_V2_PRODUCT_API_KEYS=medmory-local-key=8c3a623a-f9d2-44d2-a71e-e9c14992031e|3e5a24e1-cfe2-44c9-8c15-698de5dade5a|service:medmory|medmory
+  BFF_V2_PRODUCT_API_KEYS=medmory-local-key=8c3a623a-f9d2-44d2-a71e-e9c14992031e|3e5a24e1-cfe2-44c9-8c15-698de5dade5a|service:medmory|medmory|POOL_UUID
   ```
   Ponelo en `.env` o `docker-compose.override.yml` (no commitear la key real).
 - El **médico** (virployee "Médico clínico (medmory)", A2, con el system prompt clínico)

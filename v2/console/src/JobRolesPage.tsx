@@ -5,13 +5,14 @@ import {
   type CrudPageProps,
 } from '@devpablocristo/platform-crud-ui'
 import { useEffect, useMemo, useState, type ReactElement } from 'react'
-import { EntityFormPanel, emptyFormValues } from './EntityFormPanel'
 import { LifecycleBulkActions } from './LifecycleBulkActions'
 import { crudPrimaryStickyColumn, crudSelectionStickyColumn } from './crudTableColumns'
 import { formatDateTime24 } from './formatters'
 import {
   type JobRole,
   type JobRoleInput,
+  type JobRoleResponsibility,
+  type JobRoleSuccessCriterion,
   archiveJobRole,
   createJobRole,
   listJobRoles,
@@ -40,6 +41,8 @@ export function JobRolesPage({ tenantId, principalId }: JobRolesPageProps) {
   const [selectedRowsById, setSelectedRowsById] = useState<Record<string, JobRole>>({})
   const [formMode, setFormMode] = useState<'create' | 'edit' | null>(null)
   const [formValues, setFormValues] = useState<CrudFormValues>({})
+  const [responsibilities, setResponsibilities] = useState<JobRoleResponsibility[]>([])
+  const [successCriteria, setSuccessCriteria] = useState<JobRoleSuccessCriterion[]>([])
   const [formSaving, setFormSaving] = useState(false)
   const [bulkBusy, setBulkBusy] = useState(false)
   const [reloadVersion, setReloadVersion] = useState(0)
@@ -85,7 +88,9 @@ export function JobRolesPage({ tenantId, principalId }: JobRolesPageProps) {
 
   const openCreate = () => {
     setFormMode('create')
-    setFormValues(emptyFormValues<JobRole>(formFields))
+    setFormValues({ name: '', mission: '' })
+    setResponsibilities([])
+    setSuccessCriteria([])
     setActionError('')
   }
 
@@ -93,24 +98,28 @@ export function JobRolesPage({ tenantId, principalId }: JobRolesPageProps) {
     if (!selectedRow) return
     setFormMode('edit')
     setFormValues(jobRoleToFormValues(selectedRow))
+    setResponsibilities(selectedRow.responsibilities ?? [])
+    setSuccessCriteria(selectedRow.success_criteria ?? [])
     setActionError('')
   }
 
   function closeForm() {
     setFormMode(null)
     setFormValues({})
+    setResponsibilities([])
+    setSuccessCriteria([])
     setFormSaving(false)
   }
 
   const submitForm = async () => {
-    if (!isActive || !formMode || !isValidJobRoleForm(formValues) || formSaving) return
+    if (!isActive || !formMode || !isValidJobRoleDefinition(formValues, responsibilities, successCriteria) || formSaving) return
     setFormSaving(true)
     setActionError('')
     try {
       if (formMode === 'create') {
-        await createJobRole(jobRolePayload(formValues), tenantId, principalId)
+        await createJobRole(jobRolePayload(formValues, responsibilities, successCriteria), tenantId, principalId)
       } else if (selectedRow) {
-        await updateJobRole(selectedRow.id, jobRolePayload(formValues), tenantId, principalId)
+        await updateJobRole(selectedRow.id, jobRolePayload(formValues, responsibilities, successCriteria), tenantId, principalId)
       }
       closeForm()
       clearSelected()
@@ -207,15 +216,17 @@ export function JobRolesPage({ tenantId, principalId }: JobRolesPageProps) {
             />
             {actionError ? <p role="alert" className="iam-control__inline-error">{actionError}</p> : null}
             {formMode ? (
-              <EntityFormPanel<JobRole>
+              <JobRoleDefinitionPanel
                 title={formMode === 'create' ? 'New job role' : 'Edit job role'}
-                mode={formMode}
-                fields={formFields}
                 values={formValues}
+                responsibilities={responsibilities}
+                successCriteria={successCriteria}
                 saving={formSaving}
                 primaryLabel={formMode === 'create' ? 'Create' : 'Save'}
-                valid={isValidJobRoleForm(formValues)}
+                valid={isValidJobRoleDefinition(formValues, responsibilities, successCriteria)}
                 onChange={setFormValues}
+                onResponsibilitiesChange={setResponsibilities}
+                onSuccessCriteriaChange={setSuccessCriteria}
                 onSubmit={() => void submitForm()}
                 onCancel={closeForm}
               />
@@ -236,6 +247,8 @@ function jobRoleColumns(
   return [
     selectionColumn<JobRole>(selectedIds, onToggle),
     { key: 'name', header: 'Name', className: 'iam-control__primary-col', ...crudPrimaryStickyColumn },
+    { key: 'responsibilities', header: 'Responsibilities', render: (_value, row) => String(row.responsibilities?.length ?? 0) },
+    { key: 'success_criteria', header: 'Success criteria', render: (_value, row) => String(row.success_criteria?.length ?? 0) },
     { key: 'created_at', header: 'Created', className: 'iam-control__created-col', render: (value) => formatDateTime24(String(value ?? '')) },
     { key: 'state', header: 'State', render: (value) => formatState(String(value ?? '')) },
   ]
@@ -255,15 +268,43 @@ function jobRoleToFormValues(row: JobRole): CrudFormValues {
   }
 }
 
-function jobRolePayload(values: CrudFormValues): JobRoleInput {
+function jobRolePayload(
+  values: CrudFormValues,
+  responsibilities: JobRoleResponsibility[],
+  successCriteria: JobRoleSuccessCriterion[],
+): JobRoleInput {
   return {
     name: stringValue(values.name),
     mission: stringValue(values.mission),
+    responsibilities: responsibilities.map((item, index) => ({
+      ...item,
+      title: item.title.trim(),
+      description: item.description.trim(),
+      expected_outcome: item.expected_outcome.trim(),
+      priority: index + 1,
+    })),
+    success_criteria: successCriteria.map((item, index) => ({
+      ...item,
+      title: item.title.trim(),
+      description: item.description.trim(),
+      target_value: item.target_value.trim(),
+      priority: index + 1,
+    })),
   }
 }
 
 function isValidJobRoleForm(values: CrudFormValues): boolean {
   return stringValue(values.name).length > 0
+}
+
+function isValidJobRoleDefinition(
+  values: CrudFormValues,
+  responsibilities: JobRoleResponsibility[],
+  successCriteria: JobRoleSuccessCriterion[],
+): boolean {
+  return isValidJobRoleForm(values)
+    && responsibilities.every((item) => item.title.trim().length > 0)
+    && successCriteria.every((item) => item.title.trim().length > 0)
 }
 
 function jobRoleSearchText(row: JobRole): string {
@@ -272,8 +313,124 @@ function jobRoleSearchText(row: JobRole): string {
     row.name,
     row.slug,
     row.mission,
+    ...(row.responsibilities ?? []).flatMap((item) => [item.title, item.description, item.expected_outcome]),
+    ...(row.success_criteria ?? []).flatMap((item) => [item.title, item.description, item.target_value]),
     row.state,
   ].join(' ')
+}
+
+function JobRoleDefinitionPanel(props: {
+  title: string
+  values: CrudFormValues
+  responsibilities: JobRoleResponsibility[]
+  successCriteria: JobRoleSuccessCriterion[]
+  saving: boolean
+  primaryLabel: string
+  valid: boolean
+  onChange: (values: CrudFormValues) => void
+  onResponsibilitiesChange: (items: JobRoleResponsibility[]) => void
+  onSuccessCriteriaChange: (items: JobRoleSuccessCriterion[]) => void
+  onSubmit: () => void
+  onCancel: () => void
+}) {
+  const updateValue = (key: string, value: string) => props.onChange({ ...props.values, [key]: value })
+
+  return (
+    <div className="card crud-form-card job-role-definition-panel">
+      <div className="card-header"><h2>{props.title}</h2></div>
+      <form onSubmit={(event) => { event.preventDefault(); props.onSubmit() }}>
+        <div className="crud-form-grid">
+          <label className="form-group">
+            Name
+            <input value={String(props.values.name ?? '')} onChange={(event) => updateValue('name', event.currentTarget.value)} />
+          </label>
+          <label className="form-group full-width">
+            Mission
+            <textarea rows={3} value={String(props.values.mission ?? '')} onChange={(event) => updateValue('mission', event.currentTarget.value)} />
+          </label>
+        </div>
+
+        <DefinitionRows
+          title="Responsibilities"
+          addLabel="Add responsibility"
+          items={props.responsibilities}
+          fields={[
+            { key: 'title', label: 'Title' },
+            { key: 'description', label: 'Description' },
+            { key: 'expected_outcome', label: 'Expected outcome' },
+          ]}
+          onChange={props.onResponsibilitiesChange}
+          createItem={() => ({ title: '', description: '', expected_outcome: '', priority: props.responsibilities.length + 1 })}
+        />
+
+        <DefinitionRows
+          title="Success criteria"
+          addLabel="Add criterion"
+          items={props.successCriteria}
+          fields={[
+            { key: 'title', label: 'Title' },
+            { key: 'description', label: 'Description' },
+            { key: 'target_value', label: 'Target value' },
+          ]}
+          onChange={props.onSuccessCriteriaChange}
+          createItem={() => ({ title: '', description: '', target_value: '', priority: props.successCriteria.length + 1 })}
+        />
+
+        <footer className="virployee-edit-form__footer">
+          <button type="submit" className="btn-primary" disabled={props.saving || !props.valid}>
+            {props.saving ? 'Saving...' : props.primaryLabel}
+          </button>
+          <button type="button" className="btn-secondary" disabled={props.saving} onClick={props.onCancel}>Cancel</button>
+        </footer>
+      </form>
+    </div>
+  )
+}
+
+function DefinitionRows<T extends { priority: number }>(props: {
+  title: string
+  addLabel: string
+  items: T[]
+  fields: Array<{ key: keyof T & string; label: string }>
+  onChange: (items: T[]) => void
+  createItem: () => T
+}) {
+  return (
+    <section className="job-role-definition-list" aria-label={props.title}>
+      <div className="card-header">
+        <h3>{props.title}</h3>
+        <button type="button" className="btn-secondary" onClick={() => props.onChange([...props.items, props.createItem()])}>
+          {props.addLabel}
+        </button>
+      </div>
+      {props.items.length === 0 ? <p className="axis-muted">None configured.</p> : null}
+      {props.items.map((item, index) => (
+        <div key={index} className="job-role-definition-row">
+          <span className="job-role-definition-row__order">{index + 1}</span>
+          {props.fields.map((field) => (
+            <label key={field.key} className="form-group">
+              {field.label}
+              <input
+                value={String(item[field.key] ?? '')}
+                onChange={(event) => {
+                  const next = [...props.items]
+                  next[index] = { ...item, [field.key]: event.currentTarget.value, priority: index + 1 }
+                  props.onChange(next)
+                }}
+              />
+            </label>
+          ))}
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => props.onChange(props.items.filter((_current, itemIndex) => itemIndex !== index))}
+          >
+            Remove
+          </button>
+        </div>
+      ))}
+    </section>
+  )
 }
 
 function selectionColumn<T extends JobRole>(

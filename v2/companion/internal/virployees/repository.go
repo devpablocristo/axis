@@ -47,16 +47,34 @@ func (r *Repository) Create(ctx context.Context, tenantID string, input domain.N
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	row := tx.QueryRow(ctx, `
-		INSERT INTO virployees (id, tenant_id, name, job_role_id, profile_template_id, description, supervisor_user_id, autonomy, created_at, updated_at)
-		VALUES ($1::uuid, $2, $3, $4::uuid, $5::uuid, $6, $7, $8, $9, $9)
-		RETURNING id::text, name, job_role_id::text, profile_template_id::text, description, supervisor_user_id::text, autonomy, created_at, updated_at, archived_at, trashed_at, purge_after
-	`, id.String(), tenantID, input.Name, input.JobRoleID.String(), input.ProfileTemplateID.String(), input.Description, input.SupervisorUserID, string(input.Autonomy), now)
+		INSERT INTO virployees (id, tenant_id, name, job_role_id, profile_template_id, description, supervisor_user_id, autonomy, grounding_mode, created_at, updated_at)
+		VALUES ($1::uuid, $2, $3, $4::uuid, $5::uuid, $6, $7, $8, $9, $10, $10)
+		RETURNING id::text, name, job_role_id::text, profile_template_id::text, description, supervisor_user_id::text, autonomy, grounding_mode, created_at, updated_at, archived_at, trashed_at, purge_after
+	`, id.String(), tenantID, input.Name, input.JobRoleID.String(), input.ProfileTemplateID.String(), input.Description, input.SupervisorUserID, string(input.Autonomy), string(input.GroundingMode), now)
 	item, err := scanVirployee(row)
 	if err != nil {
 		return domain.Virployee{}, err
 	}
 	if err := replaceVirployeeCapabilities(ctx, tx, tenantID, id, input.CapabilityIDs); err != nil {
 		return domain.Virployee{}, err
+	}
+	if input.EmployerSubjectID != uuid.Nil {
+		var employerExists bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(
+			SELECT 1 FROM companion_work_subjects
+			WHERE tenant_id=$1 AND id=$2 AND archived_at IS NULL
+		)`, tenantID, input.EmployerSubjectID).Scan(&employerExists); err != nil {
+			return domain.Virployee{}, err
+		}
+		if !employerExists {
+			return domain.Virployee{}, domainerr.Validation("employer_subject_id must reference an active work subject in the tenant")
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO companion_virployee_relationships(
+			id,tenant_id,virployee_id,subject_id,relationship_type,is_primary)
+			VALUES ($1,$2,$3,$4,'works_for',true)
+		`, uuid.New(), tenantID, id, input.EmployerSubjectID); err != nil {
+			return domain.Virployee{}, mapVirployeeStorageError(err)
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return domain.Virployee{}, err
@@ -79,7 +97,7 @@ func (r *Repository) List(ctx context.Context, tenantID string, state domain.Sta
 	}
 
 	rows, err := r.pool.Query(ctx, `
-		SELECT id::text, name, job_role_id::text, profile_template_id::text, description, supervisor_user_id::text, autonomy, created_at, updated_at, archived_at, trashed_at, purge_after
+		SELECT id::text, name, job_role_id::text, profile_template_id::text, description, supervisor_user_id::text, autonomy, grounding_mode, created_at, updated_at, archived_at, trashed_at, purge_after
 		FROM virployees
 		WHERE `+where+`
 		ORDER BY created_at DESC, id DESC
@@ -105,7 +123,7 @@ func (r *Repository) List(ctx context.Context, tenantID string, state domain.Sta
 
 func (r *Repository) Get(ctx context.Context, tenantID string, id uuid.UUID) (domain.Virployee, error) {
 	row := r.pool.QueryRow(ctx, `
-		SELECT id::text, name, job_role_id::text, profile_template_id::text, description, supervisor_user_id::text, autonomy, created_at, updated_at, archived_at, trashed_at, purge_after
+		SELECT id::text, name, job_role_id::text, profile_template_id::text, description, supervisor_user_id::text, autonomy, grounding_mode, created_at, updated_at, archived_at, trashed_at, purge_after
 		FROM virployees
 		WHERE tenant_id = $1 AND id = $2::uuid
 	`, tenantID, id.String())
@@ -136,13 +154,14 @@ func (r *Repository) Update(ctx context.Context, tenantID string, id uuid.UUID, 
 			description = $6,
 			supervisor_user_id = $7,
 			autonomy = $8,
-			updated_at = $9
+			grounding_mode = COALESCE(NULLIF($9, ''), grounding_mode),
+			updated_at = $10
 		WHERE tenant_id = $1
 			AND id = $2::uuid
 			AND archived_at IS NULL
 			AND trashed_at IS NULL
-		RETURNING id::text, name, job_role_id::text, profile_template_id::text, description, supervisor_user_id::text, autonomy, created_at, updated_at, archived_at, trashed_at, purge_after
-	`, tenantID, id.String(), input.Name, input.JobRoleID.String(), input.ProfileTemplateID.String(), input.Description, input.SupervisorUserID, string(input.Autonomy), time.Now().UTC())
+		RETURNING id::text, name, job_role_id::text, profile_template_id::text, description, supervisor_user_id::text, autonomy, grounding_mode, created_at, updated_at, archived_at, trashed_at, purge_after
+	`, tenantID, id.String(), input.Name, input.JobRoleID.String(), input.ProfileTemplateID.String(), input.Description, input.SupervisorUserID, string(input.Autonomy), string(input.GroundingMode), time.Now().UTC())
 	item, err := scanVirployee(row)
 	if err == nil {
 		if err := replaceVirployeeCapabilities(ctx, tx, tenantID, id, input.CapabilityIDs); err != nil {
@@ -607,6 +626,7 @@ func scanVirployee(row scanner) (domain.Virployee, error) {
 	var profileTemplateIDText string
 	var supervisorUserIDText string
 	var autonomyText string
+	var groundingModeText string
 	var model models.Virployee
 	err := row.Scan(
 		&idText,
@@ -616,6 +636,7 @@ func scanVirployee(row scanner) (domain.Virployee, error) {
 		&model.Description,
 		&supervisorUserIDText,
 		&autonomyText,
+		&groundingModeText,
 		&model.CreatedAt,
 		&model.UpdatedAt,
 		&model.ArchivedAt,
@@ -645,6 +666,7 @@ func scanVirployee(row scanner) (domain.Virployee, error) {
 	model.ProfileTemplateID = profileTemplateID
 	model.SupervisorUserID = supervisorUserIDText
 	model.Autonomy = domain.AutonomyLevel(autonomyText)
+	model.GroundingMode = domain.GroundingMode(groundingModeText)
 	return model.ToDomain(), nil
 }
 
@@ -760,6 +782,8 @@ func mapVirployeeStorageError(err error) error {
 			return domainerr.Validation("profile_template_id must reference an existing profile template")
 		case "virployee_capabilities_capability_id_fkey":
 			return domainerr.Validation("capability_ids must reference existing capabilities")
+		case "companion_virployee_relationships_subject_fkey":
+			return domainerr.Validation("employer_subject_id must reference an existing work subject")
 		default:
 			return domainerr.Validation("related resource does not exist")
 		}

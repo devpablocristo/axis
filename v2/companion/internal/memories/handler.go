@@ -76,6 +76,7 @@ type createRequest struct {
 	Type        string `json:"type"`
 	Content     string `json:"content"`
 	Sensitivity string `json:"sensitivity"`
+	Scope       Scope  `json:"scope"`
 }
 
 func (h *Handler) Create(c *gin.Context) {
@@ -88,7 +89,7 @@ func (h *Handler) Create(c *gin.Context) {
 		return
 	}
 	t, a, r := auth(c)
-	m, err := h.u.Create(c, t, v, a, r, CreateInput{Title: q.Title, Type: q.Type, Content: q.Content, Sensitivity: q.Sensitivity})
+	m, err := h.u.Create(c, t, v, a, r, CreateInput{Title: q.Title, Type: q.Type, Content: q.Content, Sensitivity: q.Sensitivity, Scope: q.Scope})
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -123,7 +124,12 @@ func (h *Handler) List(c *gin.Context) {
 		limit = n
 	}
 	t, a, r := auth(c)
-	out, err := h.u.List(c, t, v, a, r, ListInput{State: c.Query("state"), Query: c.Query("q"), Cursor: c.Query("cursor"), Limit: limit})
+	scope, err := scopeFromQuery(c)
+	if err != nil {
+		ginmw.Respond(c, err)
+		return
+	}
+	out, err := h.u.List(c, t, v, a, r, ListInput{State: c.Query("state"), Query: c.Query("q"), Cursor: c.Query("cursor"), Limit: limit, Scope: scope})
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -157,6 +163,7 @@ func (h *Handler) Update(c *gin.Context) {
 type recallRequest struct {
 	Query string `json:"query"`
 	Limit int    `json:"limit"`
+	Scope Scope  `json:"scope"`
 }
 
 func (h *Handler) Recall(c *gin.Context) {
@@ -169,12 +176,24 @@ func (h *Handler) Recall(c *gin.Context) {
 		return
 	}
 	t, a, r := auth(c)
-	out, err := h.u.Recall(c, t, v, a, r, q.Query, q.Limit)
+	out, err := h.u.RecallScoped(c, t, v, a, r, q.Scope, q.Query, q.Limit)
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
 	}
 	ginmw.WriteJSON(c, http.StatusOK, gin.H{"items": out, "memory_context_hash": ContextHash(out)})
+}
+
+func scopeFromQuery(c *gin.Context) (Scope, error) {
+	scope := Scope{Type: c.Query("scope_type"), SubjectID: c.Query("subject_id")}
+	if raw := strings.TrimSpace(c.Query("case_id")); raw != "" {
+		id, err := uuid.Parse(raw)
+		if err != nil || id == uuid.Nil {
+			return Scope{}, domainerr.Validation("case_id must be a valid UUID")
+		}
+		scope.CaseID = &id
+	}
+	return NormalizeScope(scope)
 }
 func (h *Handler) lifecycle(c *gin.Context, action string) {
 	v, m, ok := ids(c)

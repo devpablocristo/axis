@@ -8,7 +8,9 @@ import (
 	"testing"
 
 	"github.com/devpablocristo/companion-v2/internal/artifacts"
+	"github.com/devpablocristo/companion-v2/internal/knowledgebases"
 	"github.com/devpablocristo/companion-v2/internal/quotas"
+	"github.com/devpablocristo/companion-v2/internal/virployees/executiongate"
 	"github.com/devpablocristo/companion-v2/internal/virployees/runtraces"
 	"github.com/devpablocristo/companion-v2/internal/virployees/usecases/domain"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
@@ -29,7 +31,12 @@ func (r *fakeAssistRepo) BeginAssistRun(_ context.Context, tenant string, vid uu
 	if !r.reserved {
 		return r.existing, false, nil
 	}
-	r.current = AssistRun{ID: uuid.New(), TenantID: tenant, VirployeeID: vid, AssistType: metadata.AssistType, ProductSurface: metadata.ProductSurface, SubjectID: metadata.SubjectID, RepositoryGeneration: metadata.RepositoryGeneration, IdempotencyKey: idem, Status: "received", InputHash: inputHash, InputJSON: input}
+	r.current = AssistRun{ID: uuid.New(), TenantID: tenant, VirployeeID: vid, CaseID: metadata.CaseID, AssignmentID: metadata.AssignmentID,
+		AssignmentVersion: metadata.AssignmentVersion, AssistType: metadata.AssistType, ProductSurface: metadata.ProductSurface,
+		SubjectID: metadata.SubjectID, RepositoryGeneration: metadata.RepositoryGeneration, GroundingMode: metadata.GroundingMode,
+		ContextHash: metadata.ContextHash, JobRoleSnapshotHash: metadata.JobRoleSnapshotHash,
+		SourceAuthorizationHash: metadata.SourceAuthorizationHash,
+		IdempotencyKey:          idem, Status: "received", InputHash: inputHash, InputJSON: input}
 	return r.current, true, nil
 }
 
@@ -51,10 +58,28 @@ func (r *fakeAssistRepo) SetAssistRunStatus(_ context.Context, _ string, id uuid
 
 func (r *fakeAssistRepo) CompleteAssistRun(_ context.Context, _ string, id uuid.UUID, status string, output json.RawMessage, outputText string, answered, degraded bool, model, pv, runErr string, dur int64) (AssistRun, error) {
 	r.completeCalls++
-	r.lastComplete = AssistRun{ID: id, Status: status, Output: output, OutputText: outputText, Answered: answered, Degraded: degraded, Model: model, PromptVersion: pv, Error: runErr, DurationMS: dur}
-	r.lastComplete.TenantID = r.current.TenantID
-	r.lastComplete.VirployeeID = r.current.VirployeeID
+	r.lastComplete = r.current
+	r.lastComplete.ID, r.lastComplete.Status = id, status
+	r.lastComplete.Output, r.lastComplete.OutputText = output, outputText
+	r.lastComplete.Answered, r.lastComplete.Degraded = answered, degraded
+	r.lastComplete.Model, r.lastComplete.PromptVersion, r.lastComplete.Error, r.lastComplete.DurationMS = model, pv, runErr, dur
 	return r.lastComplete, nil
+}
+
+func (r *fakeAssistRepo) CompleteAssistRunWithGrounding(_ context.Context, _ string, id uuid.UUID, completion AssistCompletion) (AssistRun, error) {
+	r.completeCalls++
+	r.current.ID = id
+	r.current.Status, r.current.Output, r.current.OutputText = completion.Status, completion.Output, completion.OutputText
+	r.current.Answered, r.current.Degraded = completion.Answered, completion.Degraded
+	r.current.Model, r.current.PromptVersion = completion.Model, completion.PromptVersion
+	r.current.Error, r.current.DurationMS = completion.RunError, completion.DurationMS
+	r.current.GroundingMode, r.current.AnswerStatus, r.current.ContextHash = completion.GroundingMode, completion.AnswerStatus, completion.ContextHash
+	r.current.Citations, r.current.SourceContext = completion.Citations, completion.SourceContext
+	r.current.MemoryContextHash, r.current.MemoryReferences = completion.MemoryContextHash, completion.MemoryReferences
+	r.current.JobRoleSnapshotHash = completion.JobRoleSnapshotHash
+	r.current.SourceAuthorizationHash = completion.SourceAuthorizationHash
+	r.lastComplete = r.current
+	return r.current, nil
 }
 
 func (r *fakeAssistRepo) GetAssistRunByKey(context.Context, string, uuid.UUID, string) (AssistRun, error) {
@@ -125,6 +150,67 @@ type fakeArtifactIngestor struct {
 	err     error
 }
 
+type fakeKnowledgeRetriever struct {
+	evidence knowledgebases.Evidence
+	err      error
+}
+
+type fakeContinuityValidator struct {
+	versions         []int64
+	errors           []error
+	expectedVersion  []int64
+	assignmentID     uuid.UUID
+	subjectID        uuid.UUID
+	virployeeID      uuid.UUID
+	requires         bool
+	requirementErr   error
+	requirementCalls int
+}
+
+func (f *fakeContinuityValidator) RequiresAssistAssignment(_ context.Context, _ string, _ uuid.UUID, _ uuid.UUID) (bool, error) {
+	f.requirementCalls++
+	return f.requires, f.requirementErr
+}
+
+func (f *fakeContinuityValidator) ValidateAssistAssignment(_ context.Context, _ string, assignmentID, subjectID, virployeeID uuid.UUID, expectedVersion int64) (int64, error) {
+	call := len(f.expectedVersion)
+	f.expectedVersion = append(f.expectedVersion, expectedVersion)
+	f.assignmentID, f.subjectID, f.virployeeID = assignmentID, subjectID, virployeeID
+	if call < len(f.errors) && f.errors[call] != nil {
+		return 0, f.errors[call]
+	}
+	if call < len(f.versions) {
+		return f.versions[call], nil
+	}
+	return 1, nil
+}
+
+type trackingKnowledgeRetriever struct{ calls int }
+
+func (f *trackingKnowledgeRetriever) Retrieve(context.Context, knowledgebases.RetrievalScope, string, int) (knowledgebases.Evidence, error) {
+	f.calls++
+	return knowledgebases.Evidence{}, nil
+}
+
+type fakeConversationAuthority struct {
+	result executiongate.ConversationScopeResult
+	err    error
+	calls  int
+}
+
+func (f *fakeConversationAuthority) EvaluateAuthority(context.Context, executiongate.AuthorityCheckInput) (executiongate.AuthorityCheckResult, error) {
+	return executiongate.AuthorityCheckResult{Allowed: true}, nil
+}
+
+func (f *fakeConversationAuthority) EvaluateConversationScope(_ context.Context, _ executiongate.ConversationScopeInput) (executiongate.ConversationScopeResult, error) {
+	f.calls++
+	return f.result, f.err
+}
+
+func (f fakeKnowledgeRetriever) Retrieve(context.Context, knowledgebases.RetrievalScope, string, int) (knowledgebases.Evidence, error) {
+	return f.evidence, f.err
+}
+
 func (f *fakeArtifactIngestor) Ingest(_ context.Context, request artifacts.IngestRequest) (artifacts.IngestResult, error) {
 	f.request = request
 	return f.result, f.err
@@ -162,6 +248,184 @@ func TestAssistProcessesAndPersistsAnswer(t *testing.T) {
 	}
 	if string(run.Output) != `{"summary":"ok"}` || repo.completeCalls != 1 {
 		t.Fatalf("expected the model output persisted once, got %+v (completes=%d)", run, repo.completeCalls)
+	}
+}
+
+func TestAssistBindsAndRevalidatesStableAssignment(t *testing.T) {
+	uc, created := setupExecutionGateUseCase(t, domain.AutonomyA3)
+	row := uc.repo.(*fakeRepo).rows[created.ID]
+	row.GroundingMode = domain.GroundingGeneral
+	uc.repo.(*fakeRepo).rows[created.ID] = row
+	repo := &fakeAssistRepo{reserved: true}
+	answerer := &fakeAnswerer{out: AnswerOutput{OutputJSON: json.RawMessage(`{"summary":"ok"}`), Answered: true, Status: "answered"}}
+	validator := &fakeContinuityValidator{versions: []int64{7, 7}}
+	uc.assistRepo, uc.answerer = repo, answerer
+	uc.SetContinuityAssignmentValidator(validator)
+	subjectID, assignmentID := uuid.New(), uuid.New()
+
+	run, err := uc.Assist(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"question":"hello"}`), "stable-assignment", AssistMetadata{
+		SubjectID: subjectID.String(), AssignmentID: assignmentID,
+	})
+	if err != nil {
+		t.Fatalf("Assist: %v", err)
+	}
+	if len(validator.expectedVersion) != 2 || validator.expectedVersion[0] != 0 || validator.expectedVersion[1] != 7 {
+		t.Fatalf("assignment must be resolved then revalidated: %+v", validator.expectedVersion)
+	}
+	if validator.assignmentID != assignmentID || validator.subjectID != subjectID || validator.virployeeID != created.ID {
+		t.Fatalf("wrong assignment scope was validated: %+v", validator)
+	}
+	if run.AssignmentID != assignmentID || run.AssignmentVersion != 7 || run.ContextHash == "" || !answerer.called {
+		t.Fatalf("assignment/context was not preserved: %+v", run)
+	}
+}
+
+func TestAssistCannotOmitAssignmentWhenRoutingIsAuthoritative(t *testing.T) {
+	uc, created := setupExecutionGateUseCase(t, domain.AutonomyA3)
+	repo := &fakeAssistRepo{reserved: true}
+	validator := &fakeContinuityValidator{requires: true}
+	uc.assistRepo, uc.answerer = repo, &fakeAnswerer{}
+	uc.SetContinuityAssignmentValidator(validator)
+
+	_, err := uc.Assist(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"question":"hello"}`), "routing-bypass", AssistMetadata{
+		SubjectID: uuid.NewString(),
+	})
+	if !domainerr.IsConflict(err) {
+		t.Fatalf("routed Assist without assignment_id must be rejected, got %v", err)
+	}
+	if validator.requirementCalls != 1 || repo.beginCalls != 0 {
+		t.Fatalf("routing must be checked before reserving work: validator=%d begin=%d", validator.requirementCalls, repo.beginCalls)
+	}
+}
+
+func TestAssistStopsBeforeContextWhenAssignmentChanged(t *testing.T) {
+	uc, created := setupExecutionGateUseCase(t, domain.AutonomyA3)
+	repo := &fakeAssistRepo{reserved: true}
+	answerer := &fakeAnswerer{out: AnswerOutput{Answered: true}}
+	validator := &fakeContinuityValidator{
+		versions: []int64{2},
+		errors:   []error{nil, domainerr.Conflict("assignment changed")},
+	}
+	uc.assistRepo, uc.answerer = repo, answerer
+	uc.SetContinuityAssignmentValidator(validator)
+
+	_, err := uc.Assist(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"question":"hello"}`), "changed-assignment", AssistMetadata{
+		SubjectID: uuid.NewString(), AssignmentID: uuid.New(),
+	})
+	if !domainerr.IsConflict(err) || answerer.called {
+		t.Fatalf("changed assignment must fail before runtime, err=%v called=%v", err, answerer.called)
+	}
+	if repo.lastComplete.Error != "assignment_changed" {
+		t.Fatalf("expected stable failure code, got %+v", repo.lastComplete)
+	}
+}
+
+func TestAssistSourcesOnlyAbstainsWithoutEvidenceBeforeRuntime(t *testing.T) {
+	uc, created := setupExecutionGateUseCase(t, domain.AutonomyA3)
+	row := uc.repo.(*fakeRepo).rows[created.ID]
+	row.GroundingMode = domain.GroundingSourcesOnly
+	uc.repo.(*fakeRepo).rows[created.ID] = row
+	repo := &fakeAssistRepo{reserved: true}
+	answerer := &fakeAnswerer{out: AnswerOutput{Answered: true}}
+	uc.assistRepo, uc.answerer = repo, answerer
+
+	run, err := uc.Assist(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"question":"unknown"}`), "sources-none", AssistMetadata{})
+	if err != nil {
+		t.Fatalf("Assist: %v", err)
+	}
+	if answerer.called || run.Answered || run.AnswerStatus != "abstained" || run.Degraded {
+		t.Fatalf("expected non-degraded abstention before runtime, got %+v called=%v", run, answerer.called)
+	}
+}
+
+func TestAssistScopePolicyStopsBeforeKnowledgeAndRuntime(t *testing.T) {
+	uc, created := setupExecutionGateUseCase(t, domain.AutonomyA3)
+	repo := &fakeAssistRepo{reserved: true}
+	answerer := &fakeAnswerer{out: AnswerOutput{Answered: true}}
+	retriever := &trackingKnowledgeRetriever{}
+	authority := &fakeConversationAuthority{result: executiongate.ConversationScopeResult{
+		Allowed: false, Decision: "abstain", Reason: "prohibited_topic",
+	}}
+	uc.assistRepo, uc.answerer, uc.knowledge = repo, answerer, retriever
+	uc.SetAuthorityEvaluator(authority)
+
+	run, err := uc.Assist(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"question":"tema prohibido"}`), "scope-abstain", AssistMetadata{})
+	if err != nil {
+		t.Fatalf("Assist: %v", err)
+	}
+	if authority.calls != 1 || retriever.calls != 0 || answerer.called {
+		t.Fatalf("scope must be evaluated before knowledge/runtime: authority=%d retrieval=%d runtime=%v", authority.calls, retriever.calls, answerer.called)
+	}
+	if run.Status != "done" || run.AnswerStatus != "abstained" || run.Answered || run.Degraded {
+		t.Fatalf("expected safe non-degraded abstention, got %+v", run)
+	}
+	if strings.Contains(string(run.Output), "tema prohibido") || !strings.Contains(run.OutputText, "fuera de mi alcance") {
+		t.Fatalf("scope response must not echo the query, got output=%s text=%q", run.Output, run.OutputText)
+	}
+}
+
+func TestAssistScopePolicyEscalatesWithoutCallingRuntime(t *testing.T) {
+	uc, created := setupExecutionGateUseCase(t, domain.AutonomyA3)
+	repo := &fakeAssistRepo{reserved: true}
+	answerer := &fakeAnswerer{out: AnswerOutput{Answered: true}}
+	authority := &fakeConversationAuthority{result: executiongate.ConversationScopeResult{
+		Allowed: false, Decision: "escalate", Reason: "outside_allowed_topics",
+	}}
+	uc.assistRepo, uc.answerer = repo, answerer
+	uc.SetAuthorityEvaluator(authority)
+
+	run, err := uc.Assist(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"question":"fuera del area"}`), "scope-escalate", AssistMetadata{})
+	if err != nil {
+		t.Fatalf("Assist: %v", err)
+	}
+	if answerer.called || run.Status != AssistStatusNeedsHuman || run.AnswerStatus != "escalation_required" {
+		t.Fatalf("expected human escalation before runtime, got %+v called=%v", run, answerer.called)
+	}
+}
+
+func TestAssistScopeEvaluationFailureFailsClosed(t *testing.T) {
+	uc, created := setupExecutionGateUseCase(t, domain.AutonomyA3)
+	repo := &fakeAssistRepo{reserved: true}
+	answerer := &fakeAnswerer{out: AnswerOutput{Answered: true}}
+	uc.assistRepo, uc.answerer = repo, answerer
+	uc.SetAuthorityEvaluator(&fakeConversationAuthority{err: errors.New("database unavailable")})
+
+	run, err := uc.Assist(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"question":"agenda"}`), "scope-error", AssistMetadata{})
+	if err != nil {
+		t.Fatalf("Assist: %v", err)
+	}
+	if answerer.called || run.AnswerStatus != "abstained" || !strings.Contains(string(run.Output), "scope_evaluation_unavailable") {
+		t.Fatalf("scope evaluator failure must abstain before runtime, got %+v called=%v", run, answerer.called)
+	}
+}
+
+func TestAssistSourcesOnlyCanonicalizesValidCitation(t *testing.T) {
+	uc, created := setupExecutionGateUseCase(t, domain.AutonomyA3)
+	row := uc.repo.(*fakeRepo).rows[created.ID]
+	row.GroundingMode = domain.GroundingSourcesOnly
+	uc.repo.(*fakeRepo).rows[created.ID] = row
+	documentID, baseID := uuid.NewString(), uuid.New()
+	sha := strings.Repeat("a", 64)
+	canonical := knowledgebases.Citation{KnowledgeBaseID: &baseID, DocumentID: documentID, SourceVersion: "v1", SHA256: sha, Locator: json.RawMessage(`{"page":2}`)}
+	uc.knowledge = fakeKnowledgeRetriever{evidence: knowledgebases.Evidence{
+		Parts:     []artifacts.ContentPart{{Kind: artifacts.PartText, Text: "Verified fact", DocumentID: documentID, SHA256: sha, Locator: &artifacts.Locator{Page: 2}}},
+		Citations: []knowledgebases.Citation{canonical},
+	}}
+	answerer := &fakeAnswerer{out: AnswerOutput{
+		OutputJSON: json.RawMessage(`{"status":"answered","answer":"Verified fact","citations":[{"document_id":"` + documentID + `"}]}`),
+		Answered:   true, Status: "answered", Citations: []RuntimeCitation{{DocumentID: documentID}},
+	}}
+	uc.assistRepo, uc.answerer = &fakeAssistRepo{reserved: true}, answerer
+
+	run, err := uc.Assist(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"question":"fact?"}`), "sources-cited", AssistMetadata{})
+	if err != nil {
+		t.Fatalf("Assist: %v", err)
+	}
+	if !run.Answered || run.AnswerStatus != "answered" || len(run.Citations) != 1 || run.Citations[0].DocumentID != documentID {
+		t.Fatalf("expected canonical grounded citation, got %+v", run)
+	}
+	if run.Citations[0].KnowledgeBaseID == nil || *run.Citations[0].KnowledgeBaseID != baseID {
+		t.Fatalf("expected canonical knowledge base id, got %+v", run.Citations)
 	}
 }
 

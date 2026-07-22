@@ -7,6 +7,7 @@ import (
 
 	auditdomain "github.com/devpablocristo/nexus-v2/internal/audit/usecases/domain"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
+	"github.com/google/uuid"
 )
 
 // RepositoryPort is the persistence contract the usecases depend on.
@@ -56,6 +57,13 @@ func (u *UseCases) Append(ctx context.Context, tenantID string, in auditdomain.A
 		ActorID:     strings.TrimSpace(in.ActorID),
 		Summary:     in.Summary,
 		Data:        in.Data,
+	}
+	if key := strings.TrimSpace(in.IdempotencyKey); key != "" {
+		id, err := uuid.Parse(key)
+		if err != nil {
+			return auditdomain.AuditEvent{}, domainerr.Validation("Idempotency-Key must be a UUID")
+		}
+		event.ID = id
 	}
 	return u.repo.Append(ctx, event)
 }

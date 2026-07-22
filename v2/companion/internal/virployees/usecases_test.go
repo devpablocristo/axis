@@ -635,6 +635,9 @@ func TestUseCasesExecutionGateChecksGovernanceWhenLocalGatePasses(t *testing.T) 
 	if checker.last.BindingHash == "" {
 		t.Fatal("expected governance input binding hash")
 	}
+	if checker.last.Reason != "Virployee capability invocation" {
+		t.Fatalf("Nexus must receive a metadata-only reason, got %q", checker.last.Reason)
+	}
 	assertExecutionGateCheck(t, result.Gate.Checks, "governance_check", executiongate.CheckStatusPass)
 	repo := uc.repo.(*fakeRepo)
 	if len(repo.traces) != 1 || repo.traces[0].Operation != runtraces.OperationExecutionGate || repo.traces[0].BindingHash == "" {
@@ -1293,6 +1296,17 @@ type fakeGovernanceChecker struct {
 	result executiongate.GovernanceCheckResult
 	err    error
 	last   executiongate.GovernanceCheckInput
+}
+
+type fakeGovernanceRevalidator struct {
+	result executiongate.GovernanceRevalidationResult
+	err    error
+	last   executiongate.GovernanceRevalidationInput
+}
+
+func (f *fakeGovernanceRevalidator) Revalidate(_ context.Context, input executiongate.GovernanceRevalidationInput) (executiongate.GovernanceRevalidationResult, error) {
+	f.last = input
+	return f.result, f.err
 }
 
 type fakeApprovalReader struct {

@@ -12,7 +12,7 @@ import (
 )
 
 func TestParseBindings(t *testing.T) {
-	raw := "medkey=8c3a623a|3e5a24e1|service:medmory|medmory\n other=t2|v2|a2|ponti"
+	raw := "medkey=8c3a623a|3e5a24e1|service:medmory|medmory|clinical-pool\n other=t2|v2|a2|ponti"
 	b := ParseBindings(raw)
 	if len(b) != 2 {
 		t.Fatalf("expected 2 bindings, got %d", len(b))
@@ -21,8 +21,78 @@ func TestParseBindings(t *testing.T) {
 	if m.TenantID != "8c3a623a" || m.VirployeeID != "3e5a24e1" || m.ActorID != "service:medmory" || m.ProductSurface != "medmory" {
 		t.Fatalf("unexpected binding: %+v", m)
 	}
+	if m.RoutingPoolID != "clinical-pool" {
+		t.Fatalf("routing pool was not parsed: %+v", m)
+	}
 	if _, ok := b["nope"]; ok {
 		t.Fatal("unknown key must not resolve")
+	}
+}
+
+func TestAssistRunResolvesStableAssignmentAndPreservesRouteForPolling(t *testing.T) {
+	var assistBody map[string]json.RawMessage
+	var getPath string
+	companion := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/virployee-routing:resolve":
+			raw, _ := io.ReadAll(r.Body)
+			if !strings.Contains(string(raw), `"pool_id":"pool-clinical"`) || !strings.Contains(string(raw), `"subject_id":"patient-a"`) {
+				t.Errorf("unexpected routing request: %s", raw)
+			}
+			_, _ = w.Write([]byte(`{"status":"assigned","created":false,"assignment":{"id":"assignment-1","virployee_id":"vp-routed"}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/virployees/vp-routed/assist-runs":
+			raw, _ := io.ReadAll(r.Body)
+			_ = json.Unmarshal(raw, &assistBody)
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte(`{"id":"run-routed","responsible_virployee_id":"vp-routed","status":"received"}`))
+		case r.Method == http.MethodGet:
+			getPath = r.URL.Path
+			_, _ = w.Write([]byte(`{"id":"run-routed","responsible_virployee_id":"vp-routed","status":"done","output":{"summary":"ready"}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer companion.Close()
+
+	bindings := map[string]Binding{"routed-key": {
+		TenantID: "tenant-1", VirployeeID: "vp-legacy", ActorID: "service:medmory",
+		ProductSurface: "medmory", RoutingPoolID: "pool-clinical",
+	}}
+	handler := NewHandler(bindings, companion.URL, "internal-token", nil)
+	router := gin.New()
+	handler.Routes(router)
+	body := `{"product_surface":"medmory","assist_type":"clinical","subject_id":"patient-a","case_id":"case-1","input":{"question":"status"}}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/assist-runs", strings.NewReader(body))
+	req.Header.Set("X-API-Key", "routed-key")
+	req.Header.Set("Idempotency-Key", "patient-a-status")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if string(assistBody["assignment_id"]) != `"assignment-1"` || string(assistBody["case_id"]) != `"case-1"` {
+		t.Fatalf("continuity scope was not forwarded: %+v", assistBody)
+	}
+	var pending assistRunResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &pending); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(pending.StatusURL, "route=") {
+		t.Fatalf("routed polling URL must carry a signed route: %q", pending.StatusURL)
+	}
+	poll := httptest.NewRequest(http.MethodGet, pending.StatusURL, nil)
+	poll.Header.Set("X-API-Key", "routed-key")
+	pollRec := httptest.NewRecorder()
+	router.ServeHTTP(pollRec, poll)
+	if pollRec.Code != http.StatusOK || getPath != "/v1/virployees/vp-routed/assist-runs/run-routed" {
+		t.Fatalf("poll did not preserve routed Virployee: code=%d path=%q body=%s", pollRec.Code, getPath, pollRec.Body.String())
+	}
+	tampered := httptest.NewRequest(http.MethodGet, "/v1/assist-runs/run-routed?route=tampered", nil)
+	tampered.Header.Set("X-API-Key", "routed-key")
+	tamperedRec := httptest.NewRecorder()
+	router.ServeHTTP(tamperedRec, tampered)
+	if tamperedRec.Code != http.StatusForbidden {
+		t.Fatalf("tampered routed polling token must be rejected, got %d", tamperedRec.Code)
 	}
 }
 

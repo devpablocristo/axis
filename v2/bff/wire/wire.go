@@ -129,7 +129,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
 	router.Use(gin.Recovery())
-	router.Use(ginmw.NewBodySizeLimit(config.MaxBodyBytes))
+	router.Use(routeAwareBodySizeLimit(config.MaxBodyBytes, config.KnowledgeUploadMaxBodyBytes))
 	router.Use(ginmw.NewCORS(ginmw.CORSConfig{
 		Origins: config.CORSOrigins,
 		AllowHeaders: []string{
@@ -139,6 +139,10 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 			"X-Actor-Email",
 			"X-Axis-Org-ID",
 			"X-Tenant-ID",
+			"X-Axis-Virployee-ID",
+			"X-Axis-Subject-ID",
+			"X-Axis-Case-ID",
+			"X-Idempotency-Key",
 		},
 	}))
 	ginmw.RegisterHealthEndpoints(router, db.Ping)

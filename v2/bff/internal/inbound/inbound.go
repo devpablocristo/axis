@@ -3,7 +3,10 @@ package inbound
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,6 +26,7 @@ type Binding struct {
 	VirployeeID    string
 	ActorID        string
 	ProductSurface string
+	RoutingPoolID  string
 }
 
 type Handler struct {
@@ -51,6 +55,8 @@ type assistRunEnvelope struct {
 	AssistType           string          `json:"assist_type"`
 	SubjectType          string          `json:"subject_type"`
 	SubjectID            string          `json:"subject_id"`
+	CaseID               string          `json:"case_id,omitempty"`
+	AssignmentID         string          `json:"assignment_id,omitempty"`
 	RepositoryGeneration string          `json:"repository_generation"`
 	Input                json.RawMessage `json:"input"`
 }
@@ -76,6 +82,16 @@ type companionAssistResponse struct {
 	Error                  string          `json:"error_message"`
 }
 
+type routingResolution struct {
+	Status     string             `json:"status"`
+	Assignment *routingAssignment `json:"assignment,omitempty"`
+}
+
+type routingAssignment struct {
+	ID          string `json:"id"`
+	VirployeeID string `json:"virployee_id"`
+}
+
 func (h *Handler) AssistRun(c *gin.Context) {
 	binding, ok := h.authenticate(c)
 	if !ok {
@@ -90,13 +106,17 @@ func (h *Handler) AssistRun(c *gin.Context) {
 		ginmw.WriteError(c, http.StatusForbidden, "forbidden", "product_surface does not match the api key")
 		return
 	}
+	if strings.TrimSpace(binding.RoutingPoolID) != "" && strings.TrimSpace(envelope.SubjectID) == "" {
+		ginmw.WriteError(c, http.StatusBadRequest, "subject_required", "subject_id is required for routed assists")
+		return
+	}
 	idempotencyKey := strings.TrimSpace(c.GetHeader("Idempotency-Key"))
 	if idempotencyKey == "" {
 		ginmw.WriteError(c, http.StatusBadRequest, "idempotency_required", "Idempotency-Key must identify a stable input manifest")
 		return
 	}
 
-	run, err := h.submit(c, binding, envelope, idempotencyKey)
+	run, resolvedBinding, err := h.submit(c, binding, envelope, idempotencyKey)
 	if err != nil {
 		var downstream *downstreamError
 		if errors.As(err, &downstream) && downstream.Status == http.StatusTooManyRequests {
@@ -104,6 +124,10 @@ func (h *Handler) AssistRun(c *gin.Context) {
 				c.Header("Retry-After", downstream.RetryAfter)
 			}
 			ginmw.WriteError(c, http.StatusTooManyRequests, "quota_exceeded", "product quota exceeded")
+			return
+		}
+		if errors.As(err, &downstream) && (downstream.Status == http.StatusConflict || downstream.Status == http.StatusServiceUnavailable) {
+			ginmw.WriteError(c, downstream.Status, "routing_unavailable", "no stable Virployee assignment is currently available")
 			return
 		}
 		ginmw.WriteError(c, http.StatusBadGateway, "downstream_unavailable", "assist service unavailable")
@@ -126,11 +150,11 @@ func (h *Handler) AssistRun(c *gin.Context) {
 			case <-c.Request.Context().Done():
 				return
 			case <-deadline.C:
-				result.StatusURL = statusURL(result.ID)
+				result.StatusURL = h.statusURL(result.ID, binding, resolvedBinding)
 				c.JSON(http.StatusAccepted, result)
 				return
 			case <-ticker.C:
-				polled, pollErr := h.get(c, binding, result.ID)
+				polled, pollErr := h.get(c, resolvedBinding, result.ID)
 				if pollErr != nil {
 					continue
 				}
@@ -142,7 +166,7 @@ func (h *Handler) AssistRun(c *gin.Context) {
 			}
 		}
 	}
-	result.StatusURL = statusURL(result.ID)
+	result.StatusURL = h.statusURL(result.ID, binding, resolvedBinding)
 	c.JSON(http.StatusAccepted, result)
 }
 
@@ -156,14 +180,23 @@ func (h *Handler) GetAssistRun(c *gin.Context) {
 		ginmw.WriteError(c, http.StatusBadRequest, "invalid_request", "run id is required")
 		return
 	}
-	run, err := h.get(c, binding, runID)
+	resolvedBinding := binding
+	if token := strings.TrimSpace(c.Query("route")); token != "" {
+		virployeeID, valid := h.verifyRouteToken(token, runID, binding)
+		if !valid {
+			ginmw.WriteError(c, http.StatusForbidden, "forbidden", "invalid assist route")
+			return
+		}
+		resolvedBinding.VirployeeID = virployeeID
+	}
+	run, err := h.get(c, resolvedBinding, runID)
 	if err != nil {
 		ginmw.WriteError(c, http.StatusBadGateway, "downstream_unavailable", "assist service unavailable")
 		return
 	}
 	result := productResult(run)
 	if !isTerminal(result.Status) {
-		result.StatusURL = statusURL(result.ID)
+		result.StatusURL = h.statusURL(result.ID, binding, resolvedBinding)
 	}
 	c.JSON(http.StatusOK, result)
 }
@@ -203,21 +236,74 @@ func (h *Handler) AssistCapabilities(c *gin.Context) {
 	})
 }
 
-func (h *Handler) submit(c *gin.Context, binding Binding, envelope assistRunEnvelope, idempotencyKey string) (companionAssistResponse, error) {
+func (h *Handler) submit(c *gin.Context, binding Binding, envelope assistRunEnvelope, idempotencyKey string) (companionAssistResponse, Binding, error) {
+	resolvedBinding := binding
+	assignmentID := strings.TrimSpace(envelope.AssignmentID)
+	if strings.TrimSpace(binding.RoutingPoolID) != "" {
+		resolution, err := h.resolveRouting(c, binding, envelope.SubjectID)
+		if err != nil {
+			return companionAssistResponse{}, Binding{}, err
+		}
+		if resolution.Status == "unavailable" {
+			return companionAssistResponse{}, Binding{}, &downstreamError{Status: http.StatusServiceUnavailable}
+		}
+		if resolution.Status == "reassignment_required" {
+			return companionAssistResponse{}, Binding{}, &downstreamError{Status: http.StatusConflict}
+		}
+		if resolution.Status != "assigned" || resolution.Assignment == nil || strings.TrimSpace(resolution.Assignment.ID) == "" || strings.TrimSpace(resolution.Assignment.VirployeeID) == "" {
+			return companionAssistResponse{}, Binding{}, errors.New("routing response has no stable assignment")
+		}
+		if assignmentID != "" && assignmentID != resolution.Assignment.ID {
+			return companionAssistResponse{}, Binding{}, &downstreamError{Status: http.StatusConflict}
+		}
+		assignmentID = resolution.Assignment.ID
+		resolvedBinding.VirployeeID = resolution.Assignment.VirployeeID
+	}
 	body, err := json.Marshal(map[string]any{
 		"input_json": envelope.Input, "idempotency_key": idempotencyKey,
 		"assist_type": envelope.AssistType, "product_surface": binding.ProductSurface,
 		"subject_id": envelope.SubjectID, "repository_generation": envelope.RepositoryGeneration,
+		"case_id": envelope.CaseID, "assignment_id": assignmentID,
 	})
 	if err != nil {
-		return companionAssistResponse{}, err
+		return companionAssistResponse{}, Binding{}, err
 	}
-	target := h.companionBaseURL + "/v1/virployees/" + url.PathEscape(binding.VirployeeID) + "/assist-runs"
+	target := h.companionBaseURL + "/v1/virployees/" + url.PathEscape(resolvedBinding.VirployeeID) + "/assist-runs"
 	request, err := h.internalRequest(c, binding, http.MethodPost, target, body)
 	if err != nil {
-		return companionAssistResponse{}, err
+		return companionAssistResponse{}, Binding{}, err
 	}
-	return h.do(request)
+	run, err := h.do(request)
+	return run, resolvedBinding, err
+}
+
+func (h *Handler) resolveRouting(c *gin.Context, binding Binding, subjectID string) (routingResolution, error) {
+	body, err := json.Marshal(map[string]string{"pool_id": binding.RoutingPoolID, "subject_id": strings.TrimSpace(subjectID)})
+	if err != nil {
+		return routingResolution{}, err
+	}
+	target := h.companionBaseURL + "/v1/virployee-routing:resolve"
+	request, err := h.internalRequest(c, binding, http.MethodPost, target, body)
+	if err != nil {
+		return routingResolution{}, err
+	}
+	response, err := h.client.Do(request)
+	if err != nil {
+		return routingResolution{}, err
+	}
+	defer func() { _ = response.Body.Close() }()
+	raw, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+	if err != nil {
+		return routingResolution{}, err
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return routingResolution{}, &downstreamError{Status: response.StatusCode, RetryAfter: response.Header.Get("Retry-After")}
+	}
+	var resolution routingResolution
+	if err := json.Unmarshal(raw, &resolution); err != nil {
+		return routingResolution{}, err
+	}
+	return resolution, nil
 }
 
 func (h *Handler) get(c *gin.Context, binding Binding, runID string) (companionAssistResponse, error) {
@@ -291,6 +377,36 @@ func isTerminal(status string) bool {
 }
 func statusURL(id string) string { return "/v1/assist-runs/" + url.PathEscape(id) }
 
+func (h *Handler) statusURL(runID string, original, resolved Binding) string {
+	base := statusURL(runID)
+	if strings.TrimSpace(resolved.VirployeeID) == "" || resolved.VirployeeID == original.VirployeeID {
+		return base
+	}
+	token := h.routeToken(runID, resolved.VirployeeID, original)
+	return base + "?route=" + url.QueryEscape(token)
+}
+
+func (h *Handler) routeToken(runID, virployeeID string, binding Binding) string {
+	payload := base64.RawURLEncoding.EncodeToString([]byte(strings.TrimSpace(virployeeID)))
+	mac := hmac.New(sha256.New, []byte(h.internalAuthSecret))
+	_, _ = mac.Write([]byte(strings.Join([]string{binding.TenantID, binding.ProductSurface, runID, virployeeID}, "\x00")))
+	return payload + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
+
+func (h *Handler) verifyRouteToken(token, runID string, binding Binding) (string, bool) {
+	payload, signature, ok := strings.Cut(strings.TrimSpace(token), ".")
+	if !ok || payload == "" || signature == "" {
+		return "", false
+	}
+	decoded, err := base64.RawURLEncoding.DecodeString(payload)
+	if err != nil || strings.TrimSpace(string(decoded)) == "" {
+		return "", false
+	}
+	virployeeID := strings.TrimSpace(string(decoded))
+	expected := h.routeToken(runID, virployeeID, binding)
+	return virployeeID, subtle.ConstantTimeCompare([]byte(expected), []byte(token)) == 1
+}
+
 func preferredWait(header string) time.Duration {
 	for _, part := range strings.Split(header, ",") {
 		key, value, ok := strings.Cut(strings.TrimSpace(part), "=")
@@ -360,7 +476,11 @@ func ParseBindings(raw string) map[string]Binding {
 		if key == "" {
 			continue
 		}
-		out[key] = Binding{TenantID: strings.TrimSpace(parts[0]), VirployeeID: strings.TrimSpace(parts[1]), ActorID: strings.TrimSpace(parts[2]), ProductSurface: strings.TrimSpace(parts[3])}
+		binding := Binding{TenantID: strings.TrimSpace(parts[0]), VirployeeID: strings.TrimSpace(parts[1]), ActorID: strings.TrimSpace(parts[2]), ProductSurface: strings.TrimSpace(parts[3])}
+		if len(parts) >= 5 {
+			binding.RoutingPoolID = strings.TrimSpace(parts[4])
+		}
+		out[key] = binding
 	}
 	return out
 }

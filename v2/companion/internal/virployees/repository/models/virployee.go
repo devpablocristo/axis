@@ -17,6 +17,7 @@ type Virployee struct {
 	Description       string
 	SupervisorUserID  string
 	Autonomy          domain.AutonomyLevel
+	GroundingMode     domain.GroundingMode
 
 	CreatedAt time.Time
 	UpdatedAt time.Time
@@ -36,6 +37,7 @@ func (m Virployee) ToDomain() domain.Virployee {
 		Description:       m.Description,
 		SupervisorUserID:  m.SupervisorUserID,
 		Autonomy:          m.Autonomy,
+		GroundingMode:     m.GroundingMode,
 		CreatedAt:         m.CreatedAt,
 		UpdatedAt:         m.UpdatedAt,
 		ArchivedAt:        nullTimePtr(m.ArchivedAt),

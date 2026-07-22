@@ -8,14 +8,15 @@ import (
 )
 
 type Config struct {
-	Environment    string
-	Port           string
-	DatabaseURL    string
-	RunMigrations  bool
-	MaxBodyBytes   int64
-	CORSOrigins    []string
-	NexusBaseURL   string
-	RuntimeBaseURL string
+	Environment                 string
+	Port                        string
+	DatabaseURL                 string
+	RunMigrations               bool
+	MaxBodyBytes                int64
+	KnowledgeUploadMaxBodyBytes int64
+	CORSOrigins                 []string
+	NexusBaseURL                string
+	RuntimeBaseURL              string
 	// ExecutionMode is the raw COMPANION_V2_EXECUTION_MODE value (kept for logging).
 	ExecutionMode string
 	// ExecutionModes is the parsed set of enabled executor modes. The variable is a
@@ -36,6 +37,8 @@ type Config struct {
 	ArtifactStagingBucket        string
 	ArtifactStagingPrefix        string
 	ArtifactCMEKKey              string
+	ArtifactLocalStagingDir      string
+	ArtifactLocalMaxBytes        int64
 	MalwareScannerAddress        string
 	ArtifactFetchAllowedHosts    []string
 	ArtifactExtractorBaseURL     string
@@ -66,7 +69,8 @@ func Load() Config {
 		Port:                         envconfig.Get("PORT", "19086"),
 		DatabaseURL:                  envconfig.Get("COMPANION_V2_DATABASE_URL", envconfig.Get("DATABASE_URL", "")),
 		RunMigrations:                envconfig.Bool("COMPANION_V2_RUN_MIGRATIONS", true),
-		MaxBodyBytes:                 int64(envconfig.Int("COMPANION_V2_MAX_BODY_BYTES", 1<<20)),
+		MaxBodyBytes:                 envconfig.Int64("COMPANION_V2_MAX_BODY_BYTES", 1<<20),
+		KnowledgeUploadMaxBodyBytes:  envconfig.Int64("COMPANION_V2_KNOWLEDGE_UPLOAD_MAX_BODY_BYTES", 251<<20),
 		CORSOrigins:                  splitCSV(envconfig.Get("COMPANION_V2_CORS_ORIGINS", "")),
 		NexusBaseURL:                 strings.TrimRight(envconfig.Get("COMPANION_V2_NEXUS_BASE_URL", ""), "/"),
 		RuntimeBaseURL:               strings.TrimRight(envconfig.Get("COMPANION_V2_RUNTIME_BASE_URL", ""), "/"),
@@ -87,6 +91,8 @@ func Load() Config {
 		ArtifactStagingBucket:        strings.TrimSpace(envconfig.Get("COMPANION_V2_ARTIFACT_STAGING_BUCKET", "")),
 		ArtifactStagingPrefix:        strings.TrimSpace(envconfig.Get("COMPANION_V2_ARTIFACT_STAGING_PREFIX", "axis-v2/staging")),
 		ArtifactCMEKKey:              strings.TrimSpace(envconfig.Get("COMPANION_V2_ARTIFACT_CMEK_KEY", "")),
+		ArtifactLocalStagingDir:      strings.TrimSpace(envconfig.Get("COMPANION_V2_ARTIFACT_LOCAL_STAGING_DIR", "")),
+		ArtifactLocalMaxBytes:        envconfig.Int64("COMPANION_V2_ARTIFACT_LOCAL_MAX_BYTES", 5<<30),
 		MalwareScannerAddress:        strings.TrimSpace(envconfig.Get("COMPANION_V2_MALWARE_SCANNER_ADDRESS", "")),
 		ArtifactFetchAllowedHosts:    splitCSV(envconfig.Get("COMPANION_V2_ARTIFACT_FETCH_ALLOWED_HOSTS", "")),
 		ArtifactExtractorBaseURL:     strings.TrimRight(strings.TrimSpace(envconfig.Get("COMPANION_V2_ARTIFACT_EXTRACTOR_BASE_URL", "")), "/"),

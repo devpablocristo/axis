@@ -47,7 +47,12 @@ Evaluation criteria:
 | `virployee_profile` | no | no | yes | yes | partial | `out` | Do not store a snapshot in the Virployee CRUD model now. Exact prompt/config snapshots belong later in runtime or audit logs. |
 | `autonomy` | no | partial | yes | yes | yes | `core` | Optional in `POST`, default `A1`. Values: `A0` to `A5`. This is the minimum runtime safety control. |
 | `capability_ids` | no | yes | yes | yes | partial | `deferred-core` | Essential later, but wait for Capability design. Do not store opaque capability lists before the registry contract is clear. |
-| governed memory | no | partial | yes | yes | yes | `core` | Implemented as records scoped by tenant and Virployee; it is not a `memory_id` field on Virployee. |
+| `grounding_mode` | no | partial | yes | yes | yes | `core` | `general` or `sources_only`; new Virployees default to `sources_only`. |
+| governed memory | no | partial | yes | yes | yes | `core` | Implemented as separate records nested by Virployee, subject and case; it is not a `memory_id` field on Virployee. |
+| work relationships | partial | yes | no | partial | yes | `out` | `works_for`, `serves` and `reports_to` are nested relationship resources, not columns on Virployee. |
+| continuity assignment | no | yes | no | yes | yes | `out` | The routing bounded context owns stable pool + subject → Virployee assignment and capacity. |
+| knowledge bindings | no | partial | yes | yes | yes | `out` | Knowledge Bases bind separately at profession, Virployee, subject or case scope. |
+| scope policy and delegation | no | partial | yes | yes | yes | `out` | Professional authority is versioned independently and bound into governance. |
 | `created_at` | no | no | no | no | yes | `metadata` | Server-generated resource metadata. |
 | `updated_at` | no | no | no | no | yes | `metadata` | Server-generated resource metadata. |
 | `archived_at` | no | no | no | partial | yes | `metadata` | Lifecycle metadata. |
@@ -72,6 +77,7 @@ Virployee
 - job_role_id: UUID
 - profile_template_id: UUID
 - autonomy: AutonomyLevel
+- grounding_mode: general | sources_only
 
 Metadata
 - description: string
@@ -100,6 +106,7 @@ Suggested `POST /v1/virployees` body:
   "name": "Billing Employee",
   "supervisor_user_id": "user_123",
   "job_role_id": "11111111-1111-4111-8111-111111111111",
+  "employer_subject_id": "22222222-2222-4222-8222-222222222222",
   "autonomy": "A1",
   "description": "Handles billing follow-up."
 }
@@ -110,6 +117,7 @@ Required request fields:
 - `name`
 - `supervisor_user_id`
 - `job_role_id`
+- `employer_subject_id` (active person, organization or team in the tenant)
 
 Optional request fields:
 
@@ -130,8 +138,9 @@ References stored as opaque values in v2.1:
 - `job_role_id`: UUID; must reference an active Job Role in the same tenant.
 
 Memory is intentionally not stored as `memory_id` on the Virployee. The
-standalone `memories` module owns multiple governed records scoped by tenant and
-Virployee and supplies safe references to runtime contracts.
+standalone `memories` module owns multiple governed records scoped by tenant,
+Virployee, subject and optional case and supplies safe references to runtime
+contracts.
 
 ## Explicit Non-Goals
 
@@ -147,6 +156,8 @@ Virployee and supplies safe references to runtime contracts.
 - `supervisor_user_id` entered the v2 API as an opaque string reference to the
   responsible human.
 - `autonomy` enters the core now with safe default `A1`.
+- `grounding_mode` enters the core with `sources_only` as the default for new
+  Virployees and compatibility-preserving `general` for existing rows.
 - Profile Templates are reusable catalog records; Virployees reference them
   directly by `profile_template_id`.
 - Runtime/audit snapshots are deferred until execution exists.

@@ -88,6 +88,36 @@ func TestHandlerCheckDeniesDisabledActionType(t *testing.T) {
 	}
 }
 
+func TestHandlerDerivesMembershipAndDiscardsForgedFunctionalRoles(t *testing.T) {
+	recorder := &fakeCheckRecorder{}
+	router := setupGovernanceRouter(fakeActionTypeReader{
+		"calendar.events.read": {ActionTypeKey: "calendar.events.read", RiskClass: actiondomain.RiskClassLow, Enabled: true},
+	}, recorder)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/governance/check", strings.NewReader(`{
+		"requester_type":"human",
+		"requester_id":"more-privileged-user",
+		"action_type":"calendar.events.read",
+		"membership_role":"owner",
+		"functional_roles":["policy_admin"],
+		"functional_scopes":["*"]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Tenant-ID", "tenant-1")
+	req.Header.Set("X-Axis-Tenant-Role", "member")
+	req.Header.Set("X-Actor-ID", "user-1")
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK || len(recorder.rows) != 1 {
+		t.Fatalf("expected a recorded check, status=%d body=%s rows=%d", rec.Code, rec.Body.String(), len(recorder.rows))
+	}
+	input := recorder.rows[0].input
+	if input.RequesterID != "user-1" || input.MembershipRole != "member" || len(input.FunctionalRoles) != 0 || len(input.FunctionalScopes) != 0 {
+		t.Fatalf("forged request authority was accepted: %+v", input)
+	}
+}
+
 func TestHandlerCheckValidation(t *testing.T) {
 	router := setupGovernanceRouter(fakeActionTypeReader{}, nil)
 

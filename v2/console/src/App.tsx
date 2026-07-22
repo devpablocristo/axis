@@ -1,13 +1,18 @@
-import { Bot, BriefcaseBusiness, ClipboardCheck, GraduationCap, Network, RefreshCw, Settings, ShieldCheck, SlidersHorizontal, Wrench } from 'lucide-react'
+import { BookOpen, Bot, BriefcaseBusiness, ClipboardCheck, GraduationCap, Network, RefreshCw, Scale, ScrollText, ServerCog, Settings, ShieldCheck, SlidersHorizontal, UsersRound, Wrench } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { ApprovalsPage } from './ApprovalsPage'
 import { CapabilitiesPage } from './CapabilitiesPage'
 import { CoordinationPage } from './CoordinationPage'
+import { GovernancePage } from './GovernancePage'
 import { LearningProposalsPage } from './LearningProposalsPage'
 import { JobRolesPage } from './JobRolesPage'
+import { KnowledgeBasesPage } from './KnowledgeBasesPage'
+import { MCPGovernancePage } from './MCPGovernancePage'
 import { ProfileTemplatesPage } from './ProfileTemplatesPage'
+import { ProfessionalPoliciesPage } from './ProfessionalPoliciesPage'
 import { TenancyPage } from './TenancyPage'
 import { VirployeesPage } from './VirployeesPage'
+import { WorkforcePage } from './WorkforcePage'
 import { getSession, type Session, type Tenant } from './api'
 
 type LoadState<T> = {
@@ -143,6 +148,14 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
           </button>
           <button
             type="button"
+            className={activePage === 'workforce' ? 'active' : ''}
+            onClick={() => setActivePage('workforce')}
+          >
+            <UsersRound aria-hidden="true" />
+            Workforce
+          </button>
+          <button
+            type="button"
             className={activePage === 'learning-proposals' ? 'active' : ''}
             onClick={() => setActivePage('learning-proposals')}
           >
@@ -174,7 +187,39 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
             <SlidersHorizontal aria-hidden="true" />
             Profile Templates
           </button>
+          <button
+            type="button"
+            className={activePage === 'knowledge-bases' ? 'active' : ''}
+            onClick={() => setActivePage('knowledge-bases')}
+          >
+            <BookOpen aria-hidden="true" />
+            Knowledge Bases
+          </button>
+          <button
+            type="button"
+            className={activePage === 'professional-policies' ? 'active' : ''}
+            onClick={() => setActivePage('professional-policies')}
+          >
+            <ScrollText aria-hidden="true" />
+            Professional Policies
+          </button>
           <span className="nav-section-label nav-section-label--admin">Admin</span>
+          <button
+            type="button"
+            className={activePage === 'governance' ? 'active' : ''}
+            onClick={() => setActivePage('governance')}
+          >
+            <Scale aria-hidden="true" />
+            Governance
+          </button>
+          <button
+            type="button"
+            className={activePage === 'mcp-governance' ? 'active' : ''}
+            onClick={() => setActivePage('mcp-governance')}
+          >
+            <ServerCog aria-hidden="true" />
+            MCP Governance
+          </button>
           <button
             type="button"
             className={activePage === 'admin' ? 'active' : ''}
@@ -249,6 +294,18 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
           <LearningProposalsPage tenantId={selectedTenant.id} principalId={principalId} />
         ) : activePage === 'profile-templates' ? (
           <ProfileTemplatesPage tenantId={selectedTenant.id} principalId={principalId} />
+        ) : activePage === 'knowledge-bases' ? (
+          <KnowledgeBasesPage
+            tenantId={selectedTenant.id}
+            principalId={principalId}
+            productSurface={selectedTenant.product_surface}
+          />
+        ) : activePage === 'professional-policies' ? (
+          <ProfessionalPoliciesPage tenantId={selectedTenant.id} principalId={principalId} />
+        ) : activePage === 'mcp-governance' ? (
+          <MCPGovernancePage tenantId={selectedTenant.id} principalId={principalId} />
+        ) : activePage === 'governance' ? (
+          <GovernancePage tenantId={selectedTenant.id} principalId={principalId} productSurface={selectedTenant.product_surface} />
         ) : activePage === 'approvals' ? (
           <ApprovalsPage
             tenantId={selectedTenant.id}
@@ -268,6 +325,12 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
             tenantId={selectedTenant.id}
             principalId={principalId}
             productSurface={selectedTenant.product_surface}
+          />
+        ) : activePage === 'workforce' ? (
+          <WorkforcePage
+            tenantId={selectedTenant.id}
+            principalId={principalId}
+            organizationName={selectedTenant.org_name}
           />
         ) : (
           <VirployeesPage
@@ -290,7 +353,7 @@ function unique(values: string[]): string[] {
   return Array.from(new Set(values.filter(Boolean))).sort((left, right) => left.localeCompare(right))
 }
 
-type Page = 'virployees' | 'job-roles' | 'capabilities' | 'learning-proposals' | 'profile-templates' | 'approvals' | 'coordination' | 'admin'
+type Page = 'virployees' | 'job-roles' | 'capabilities' | 'learning-proposals' | 'profile-templates' | 'knowledge-bases' | 'professional-policies' | 'governance' | 'mcp-governance' | 'approvals' | 'coordination' | 'workforce' | 'admin'
 
 type ApprovalReviewContext = {
   approvalId: string
@@ -302,8 +365,13 @@ function pageTitle(page: Page): string {
   if (page === 'capabilities') return 'Capabilities'
   if (page === 'learning-proposals') return 'Learning'
   if (page === 'profile-templates') return 'Profile Templates'
+  if (page === 'knowledge-bases') return 'Knowledge Bases'
+  if (page === 'professional-policies') return 'Professional Policies'
+  if (page === 'governance') return 'Governance'
+  if (page === 'mcp-governance') return 'MCP Governance'
   if (page === 'approvals') return 'Approvals'
   if (page === 'coordination') return 'Specialist coordination'
+  if (page === 'workforce') return 'Workforce continuity'
   if (page === 'admin') return 'Admin'
   return 'Virployees'
 }

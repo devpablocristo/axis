@@ -19,13 +19,18 @@ func TestUseCasesCreateAndListActive(t *testing.T) {
 	}
 
 	created, err := uc.Create(context.Background(), "tenant-1", domain.CreateInput{
-		Name: " Sales Assistant ",
+		Name:             " Sales Assistant ",
+		Responsibilities: []domain.Responsibility{{Title: " Qualify leads ", ExpectedOutcome: " Qualified pipeline ", Priority: 1}},
+		SuccessCriteria:  []domain.SuccessCriterion{{Title: " Response time ", TargetValue: "under 5 minutes", Priority: 1}},
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	if created.TenantID != "tenant-1" || created.Name != "Sales Assistant" || created.Slug != "sales-assistant" {
 		t.Fatalf("unexpected create output: %+v", created)
+	}
+	if len(created.Responsibilities) != 1 || created.Responsibilities[0].Title != "Qualify leads" || len(created.SuccessCriteria) != 1 {
+		t.Fatalf("professional definition was not persisted: %+v", created)
 	}
 
 	active, err := uc.ListActive(context.Background(), "tenant-1")
@@ -129,13 +134,15 @@ func (r *fakeRepo) Create(_ context.Context, tenantID string, input domain.Norma
 		}
 	}
 	row := domain.JobRole{
-		ID:        uuid.New(),
-		TenantID:  tenantID,
-		Name:      input.Name,
-		Slug:      input.Slug,
-		Mission:   input.Mission,
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:               uuid.New(),
+		TenantID:         tenantID,
+		Name:             input.Name,
+		Slug:             input.Slug,
+		Mission:          input.Mission,
+		Responsibilities: append([]domain.Responsibility(nil), input.Responsibilities...),
+		SuccessCriteria:  append([]domain.SuccessCriterion(nil), input.SuccessCriteria...),
+		CreatedAt:        now,
+		UpdatedAt:        now,
 	}
 	r.rows[row.ID] = row
 	return row, nil
@@ -175,6 +182,8 @@ func (r *fakeRepo) Update(_ context.Context, tenantID string, id uuid.UUID, inpu
 	row.Name = input.Name
 	row.Slug = input.Slug
 	row.Mission = input.Mission
+	row.Responsibilities = append([]domain.Responsibility(nil), input.Responsibilities...)
+	row.SuccessCriteria = append([]domain.SuccessCriterion(nil), input.SuccessCriteria...)
 	row.UpdatedAt = time.Now().UTC()
 	r.rows[id] = row
 	return row, nil

@@ -261,6 +261,19 @@ test('all main sections render with coherent action buttons', async ({ page }) =
   }
 })
 
+test('advanced governance renders policy precedence and metadata-only controls', async ({ page }) => {
+  await page.goto('/')
+  await page.locator('.nav').getByRole('button', { name: 'Governance', exact: true }).click()
+  await expect(page.locator('.topbar h1')).toHaveText('Governance')
+  await expect(page.getByRole('heading', { name: 'Policy changes should be explainable before they are active.' })).toBeVisible()
+  await expect(page.getByLabel('Policy decision precedence')).toContainText('Deny')
+  await expect(page.getByLabel('Policy decision precedence')).toContainText('Approval')
+  await expect(page.getByLabel('Policy decision precedence')).toContainText('Allow')
+  await expect(page.getByText('Functional role grants')).toBeVisible()
+  await expect(page.getByText('Versioned CEL policies')).toBeVisible()
+  await expect(page.getByRole('alert')).toHaveCount(0)
+})
+
 test('crud lists use one toolbar and do not render row action columns', async ({ page }) => {
   await page.goto('/')
 
@@ -475,7 +488,7 @@ test('approvals board columns have equal desktop widths', async ({ page }) => {
   const widths = await page.locator('.approvals-board__column').evaluateAll((columns) => (
     columns.map((column) => column.getBoundingClientRect().width)
   ))
-  expect(widths).toHaveLength(3)
+  expect(widths).toHaveLength(4)
   expect(Math.max(...widths) - Math.min(...widths)).toBeLessThanOrEqual(1)
 })
 
@@ -591,6 +604,15 @@ async function installApiFixtures(page: Page) {
     if (path === '/api/tenants') return json(route, { data: session.tenants })
     if (path === '/api/orgs') return json(route, { data: orgs })
     if (path === '/api/products') return json(route, { data: products })
+    if (path === '/api/role-definitions') return json(route, [
+      { key: 'policy_admin', description: 'Manage policies', permissions: ['policies.read', 'policies.write'] },
+      { key: 'auditor', description: 'Read governance history', permissions: ['audit.read', 'policies.read'] },
+    ])
+    if (path === '/api/role-grants') return json(route, [])
+    if (path === '/api/governance-policies') return json(route, [])
+    if (path === '/api/governance-policy-promotions') return json(route, [])
+    if (path === '/api/governance-policy-evaluations') return json(route, [])
+    if (path === '/api/governance-policy-changelog') return json(route, [])
     if (path === '/api/approvals') {
       const status = url.searchParams.get('status') ?? 'pending'
       return json(route, paginatedApprovals(state.approvals, status, url.searchParams))
@@ -928,6 +950,7 @@ async function assertButtonSystem(page: Page) {
           color: style.color,
           border: style.borderColor,
           className: button.className,
+          disabled: button.hasAttribute('disabled'),
         }
       })
   })
@@ -937,7 +960,7 @@ async function assertButtonSystem(page: Page) {
     expect(button.minHeight, button.text).toBeGreaterThanOrEqual(32)
     expect(button.fontFamily, button.text).toContain('Inter')
     if (String(button.className).includes('btn-danger')) {
-      expect(button.color, button.text).toBe('rgb(218, 30, 40)')
+      expect(button.color, button.text).toBe(button.disabled ? 'rgb(218, 30, 40)' : 'rgb(255, 255, 255)')
     }
     if (String(button.className).includes('btn-primary')) {
       expect(button.background, button.text).toBe('rgb(47, 95, 152)')

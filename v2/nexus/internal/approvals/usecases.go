@@ -8,6 +8,7 @@ import (
 	"github.com/devpablocristo/nexus-v2/internal/actiontypes"
 	"github.com/devpablocristo/nexus-v2/internal/approvals/usecases/domain"
 	auditdomain "github.com/devpablocristo/nexus-v2/internal/audit/usecases/domain"
+	"github.com/devpablocristo/nexus-v2/internal/authorization"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
 	"github.com/devpablocristo/platform/http/go/pagination"
 	"github.com/google/uuid"
@@ -24,16 +25,22 @@ type AuditEmitterPort interface {
 	Append(ctx context.Context, tenantID string, in auditdomain.AppendInput) (auditdomain.AuditEvent, error)
 }
 
+type AuthorizationPort interface {
+	Check(context.Context, authorization.CheckInput) (authorization.CheckResult, error)
+}
+
 type UseCases struct {
-	repo  RepositoryPort
-	audit AuditEmitterPort
+	repo       RepositoryPort
+	audit      AuditEmitterPort
+	authorizer AuthorizationPort
 }
 
 func NewUseCases(repo RepositoryPort) *UseCases {
 	return &UseCases{repo: repo}
 }
 
-func (u *UseCases) SetAuditEmitter(emitter AuditEmitterPort) { u.audit = emitter }
+func (u *UseCases) SetAuditEmitter(emitter AuditEmitterPort)   { u.audit = emitter }
+func (u *UseCases) SetAuthorizer(authorizer AuthorizationPort) { u.authorizer = authorizer }
 
 func (u *UseCases) List(ctx context.Context, tenantID string, input domain.ListInput) (domain.ListPage, error) {
 	status, err := domain.NormalizeListStatus(input.StatusRaw)
@@ -85,7 +92,7 @@ func (u *UseCases) decide(ctx context.Context, tenantID string, id uuid.UUID, ac
 	if err != nil {
 		return domain.Approval{}, err
 	}
-	actor, err = authorizeDecision(approval, actor)
+	actor, err = u.authorizeDecision(ctx, approval, actor)
 	if err != nil {
 		return domain.Approval{}, err
 	}
@@ -129,7 +136,7 @@ func (u *UseCases) Review(ctx context.Context, tenantID string, id uuid.UUID, ac
 	return updated, nil
 }
 
-func authorizeDecision(approval domain.Approval, actor domain.DecisionActor) (domain.DecisionActor, error) {
+func (u *UseCases) authorizeDecision(ctx context.Context, approval domain.Approval, actor domain.DecisionActor) (domain.DecisionActor, error) {
 	actor = normalizeActor(actor)
 	if actor.ID == "" {
 		return domain.DecisionActor{}, domainerr.Validation("actor is required")
@@ -143,7 +150,26 @@ func authorizeDecision(approval domain.Approval, actor domain.DecisionActor) (do
 	if (actor.Role == "member" || actor.Role == "supervisor") && actor.ID == strings.TrimSpace(approval.SupervisorUserID) {
 		return actor, nil
 	}
-	return domain.DecisionActor{}, domainerr.Forbidden("approval decision requires the assigned supervisor or an owner/admin")
+	if u.authorizer != nil {
+		result, err := u.authorizer.Check(ctx, authorization.CheckInput{
+			TenantID:       approval.TenantID,
+			ActorID:        actor.ID,
+			ActorRole:      actor.Role,
+			Permission:     "approvals.decide",
+			ProductSurface: approval.ProductSurface,
+			ActionType:     approval.ActionType,
+			ResourceType:   approval.ResourceType,
+			ResourceID:     approval.TargetResource,
+			RiskClass:      approval.RiskLevel,
+		})
+		if err != nil {
+			return domain.DecisionActor{}, err
+		}
+		if result.Allowed {
+			return actor, nil
+		}
+	}
+	return domain.DecisionActor{}, domainerr.Forbidden("approval decision requires an in-scope approver, the assigned supervisor, or an owner/admin")
 }
 
 func normalizeActor(actor domain.DecisionActor) domain.DecisionActor {

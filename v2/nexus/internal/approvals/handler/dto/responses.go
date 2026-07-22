@@ -10,12 +10,15 @@ type ApprovalResponse struct {
 	ID                 string             `json:"id"`
 	GovernanceCheckID  string             `json:"governance_check_id"`
 	RequesterID        string             `json:"requester_id"`
+	ProductSurface     string             `json:"product_surface"`
 	ActionType         string             `json:"action_type"`
 	TargetSystem       string             `json:"target_system"`
 	TargetResource     string             `json:"target_resource"`
+	ResourceType       string             `json:"resource_type"`
 	RiskLevel          string             `json:"risk_level"`
 	Reason             string             `json:"reason"`
 	BindingHash        string             `json:"binding_hash"`
+	PolicySnapshotHash string             `json:"policy_snapshot_hash"`
 	Status             string             `json:"status"`
 	ApprovalKind       string             `json:"approval_kind"`
 	SupervisorUserID   string             `json:"supervisor_user_id"`
@@ -58,12 +61,15 @@ func ApprovalFromDomain(item domain.Approval) ApprovalResponse {
 		ID:                 item.ID.String(),
 		GovernanceCheckID:  item.GovernanceCheckID.String(),
 		RequesterID:        item.RequesterID,
+		ProductSurface:     item.ProductSurface,
 		ActionType:         item.ActionType,
 		TargetSystem:       item.TargetSystem,
 		TargetResource:     item.TargetResource,
+		ResourceType:       item.ResourceType,
 		RiskLevel:          item.RiskLevel,
 		Reason:             item.Reason,
 		BindingHash:        item.BindingHash,
+		PolicySnapshotHash: item.PolicySnapshotHash,
 		Status:             string(item.Status),
 		ApprovalKind:       item.ApprovalKind,
 		SupervisorUserID:   item.SupervisorUserID,

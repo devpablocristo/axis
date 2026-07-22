@@ -19,14 +19,18 @@ import (
 	"github.com/devpablocristo/companion-v2/internal/infra/migrations"
 	"github.com/devpablocristo/companion-v2/internal/jobroles"
 	"github.com/devpablocristo/companion-v2/internal/jobs"
+	"github.com/devpablocristo/companion-v2/internal/knowledgebases"
 	"github.com/devpablocristo/companion-v2/internal/learning"
+	"github.com/devpablocristo/companion-v2/internal/mcpgovernance"
 	"github.com/devpablocristo/companion-v2/internal/memories"
 	"github.com/devpablocristo/companion-v2/internal/nexusclient"
 	"github.com/devpablocristo/companion-v2/internal/outbox"
+	"github.com/devpablocristo/companion-v2/internal/professionalauthority"
 	"github.com/devpablocristo/companion-v2/internal/profiletemplates"
 	"github.com/devpablocristo/companion-v2/internal/quotas"
 	"github.com/devpablocristo/companion-v2/internal/runtimeclient"
 	"github.com/devpablocristo/companion-v2/internal/virployees"
+	"github.com/devpablocristo/companion-v2/internal/workforcerouting"
 	postgres "github.com/devpablocristo/platform/databases/postgres/go"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
 	ginmw "github.com/devpablocristo/platform/http/gin/go"
@@ -81,20 +85,45 @@ func (a runtimeAnswererAdapter) Answer(ctx context.Context, in virployees.Answer
 			DocumentID: part.DocumentID, Locator: locator,
 		})
 	}
+	professional := runtimeclient.ProfessionalContext{
+		JobRoleID: in.ProfessionalContext.JobRoleID,
+		Name:      in.ProfessionalContext.Name,
+		Mission:   in.ProfessionalContext.Mission,
+	}
+	for _, responsibility := range in.ProfessionalContext.Responsibilities {
+		professional.Responsibilities = append(professional.Responsibilities, runtimeclient.ProfessionalResponsibility{
+			Title: responsibility.Title, Description: responsibility.Description,
+			ExpectedOutcome: responsibility.ExpectedOutcome, Priority: responsibility.Priority,
+		})
+	}
+	for _, criterion := range in.ProfessionalContext.SuccessCriteria {
+		professional.SuccessCriteria = append(professional.SuccessCriteria, runtimeclient.ProfessionalSuccessCriterion{
+			Title: criterion.Title, Description: criterion.Description,
+			TargetValue: criterion.TargetValue, Priority: criterion.Priority,
+		})
+	}
 	res, err := a.client.Answer(ctx, runtimeclient.AnswerRequest{
-		SystemPrompt:   in.SystemPrompt,
-		JobRole:        in.JobRole,
-		InputJSON:      in.InputJSON,
-		ResponseSchema: in.ResponseSchema,
-		ContentParts:   parts,
+		SystemPrompt:        in.SystemPrompt,
+		JobRole:             in.JobRole,
+		ProfessionalContext: professional,
+		InputJSON:           in.InputJSON,
+		ResponseSchema:      in.ResponseSchema,
+		ContentParts:        parts,
+		GroundingMode:       in.GroundingMode,
 	})
 	if err != nil {
 		return virployees.AnswerOutput{}, err
+	}
+	citations := make([]virployees.RuntimeCitation, 0, len(res.Citations))
+	for _, citation := range res.Citations {
+		citations = append(citations, virployees.RuntimeCitation{DocumentID: citation.DocumentID, SHA256: citation.SHA256, Locator: citation.Locator})
 	}
 	return virployees.AnswerOutput{
 		OutputText:    res.OutputText,
 		OutputJSON:    res.OutputJSON,
 		Answered:      res.Answered,
+		Status:        res.Status,
+		Citations:     citations,
 		ModelID:       res.ModelID,
 		PromptVersion: res.PromptVersion,
 		InputTokens:   res.Usage.InputTokens, OutputTokens: res.Usage.OutputTokens,
@@ -165,6 +194,11 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		return nil, err
 	}
 	jobRolesHandler := jobroles.NewHandler(jobRolesUsecases)
+	workforceUsecases := workforcerouting.NewUseCases(workforcerouting.NewRepository(db.Pool()))
+	workforceHandler := workforcerouting.NewHandler(workforceUsecases)
+	knowledgeRepository := knowledgebases.NewRepository(db.Pool())
+	knowledgeUsecases := knowledgebases.NewUseCases(knowledgeRepository)
+	knowledgeHandler := knowledgebases.NewHandler(knowledgeUsecases)
 
 	capabilitiesRepo := capabilities.NewRepository(db.Pool())
 	capabilitiesUsecases, err := capabilities.NewUseCases(capabilitiesRepo)
@@ -205,13 +239,25 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		db.Close()
 		return nil, err
 	}
+	virployeesUsecases.SetContinuityAssignmentValidator(workforceUsecases)
 	virployeesUsecases.SetCapabilityValidator(capabilitiesUsecases)
 	virployeesUsecases.SetProfileTemplateReader(profileTemplatesUsecases)
 	virployeesUsecases.SetQuotaPorts(quotaRepository, quotaRepository)
+	authorityUsecases := professionalauthority.NewUseCases(professionalauthority.NewRepository(db.Pool()))
+	virployeesUsecases.SetAuthorityEvaluator(authorityUsecases)
+	mcpRepository := mcpgovernance.NewRepository(db.Pool())
+	mcpUsecases := mcpgovernance.NewToolInvocationGate(
+		mcpRepository, capabilitiesUsecases, virployeesUsecases, authorityUsecases,
+		mcpWriteGateAdapter{virployees: virployeesUsecases},
+	)
+	virployeesUsecases.SetMCPExecutionContextValidator(mcpUsecases)
+	mcpHandler := mcpgovernance.NewHandler(mcpUsecases)
 	var nexusClient *nexusclient.Client
 	if config.NexusBaseURL != "" {
 		nexusClient = nexusclient.New(config.NexusBaseURL, &http.Client{Timeout: 5 * time.Second, Transport: otelhttp.NewTransport(http.DefaultTransport)}, config.InternalAuthSecret)
+		authorityUsecases.SetDelegationAuthorizer(nexusClient)
 		virployeesUsecases.SetGovernanceChecker(nexusClient)
+		virployeesUsecases.SetGovernanceRevalidator(nexusClient)
 		virployeesUsecases.SetApprovalReader(nexusClient)
 		// Emit tamper-evident audit events (assist + governed executions) into the
 		// Nexus ledger. Best-effort: emission failures never fail the work.
@@ -224,6 +270,8 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		virployeesUsecases.SetRuntimeAnswerer(runtimeAnswererAdapter{client: runtimePlanner})
 		virployeesUsecases.SetDocumentFetcher(virployees.NewHTTPDocumentFetcher(&http.Client{Timeout: 15 * time.Second, Transport: otelhttp.NewTransport(http.DefaultTransport)}))
 	}
+	production := config.Environment == "production"
+	var artifactStore artifacts.ArtifactStorePort
 	if config.ArtifactStagingBucket != "" {
 		if runtimePlanner == nil {
 			db.Close()
@@ -234,28 +282,48 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 			db.Close()
 			return nil, fmt.Errorf("artifact staging credentials: %w", err)
 		}
-		store, err := artifacts.NewGCSStore(artifacts.GCSStoreConfig{
+		artifactStore, err = artifacts.NewGCSStore(artifacts.GCSStoreConfig{
 			Bucket: config.ArtifactStagingBucket, CMEKKey: config.ArtifactCMEKKey,
-			Prefix: config.ArtifactStagingPrefix, RequireCMEK: config.Environment == "production",
+			Prefix: config.ArtifactStagingPrefix, RequireCMEK: production,
 		}, tokens, &http.Client{Timeout: 10 * time.Minute, Transport: otelhttp.NewTransport(http.DefaultTransport)})
 		if err != nil {
 			db.Close()
 			return nil, err
 		}
+	} else if production {
+		db.Close()
+		return nil, fmt.Errorf("production artifact ingestion requires COMPANION_V2_ARTIFACT_STAGING_BUCKET with CMEK")
+	} else if config.ArtifactLocalStagingDir != "" {
+		artifactStore, err = artifacts.NewLocalStore(artifacts.LocalStoreConfig{
+			RootDir: config.ArtifactLocalStagingDir, MaxBytes: config.ArtifactLocalMaxBytes,
+		})
+		if err != nil {
+			db.Close()
+			return nil, fmt.Errorf("local artifact staging: %w", err)
+		}
+	}
+	if artifactStore != nil {
+		if runtimePlanner == nil {
+			db.Close()
+			return nil, fmt.Errorf("artifact ingestion requires COMPANION_V2_RUNTIME_BASE_URL")
+		}
 		var scanner artifacts.MalwareScannerPort = artifacts.DevelopmentScanner{}
 		if config.MalwareScannerAddress != "" {
 			scanner = artifacts.ClamAVScanner{Address: config.MalwareScannerAddress, Timeout: 2 * time.Minute}
-		} else if config.Environment == "production" {
+		} else if production {
 			db.Close()
 			return nil, fmt.Errorf("production artifact ingestion requires COMPANION_V2_MALWARE_SCANNER_ADDRESS")
 		}
-		fetcher, err := artifacts.NewHTTPFetcher(
-			&http.Client{Timeout: 5 * time.Minute, Transport: otelhttp.NewTransport(http.DefaultTransport)},
-			config.ArtifactFetchAllowedHosts,
-		)
-		if err != nil {
-			db.Close()
-			return nil, err
+		var fetcher artifacts.ArtifactFetcherPort
+		if len(config.ArtifactFetchAllowedHosts) > 0 {
+			fetcher, err = artifacts.NewHTTPFetcher(
+				&http.Client{Timeout: 5 * time.Minute, Transport: otelhttp.NewTransport(http.DefaultTransport)},
+				config.ArtifactFetchAllowedHosts,
+			)
+			if err != nil {
+				db.Close()
+				return nil, err
+			}
 		}
 		var extractor artifacts.ExtractionPort
 		if config.ArtifactExtractorBaseURL != "" {
@@ -274,7 +342,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 			artifactRepository,
 			fetcher,
 			scanner,
-			store,
+			artifactStore,
 			artifacts.OfficeFormatAdapter{Extractor: extractor},
 			artifacts.DICOMFormatAdapter{Extractor: extractor},
 			artifacts.PDFFormatAdapter{Extractor: extractor},
@@ -293,8 +361,15 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 			return nil, err
 		}
 		artifactPipeline.SetIndexer(indexService)
+		knowledgeUsecases.SetArtifactIngestor(artifactPipeline)
 		virployeesUsecases.SetArtifactIngestor(artifactPipeline)
 		virployeesUsecases.SetArtifactCorpusReader(artifacts.NewCorpusReader(artifactRepository, indexService))
+		knowledgeRetriever, err := knowledgebases.NewRetriever(knowledgeRepository, indexService)
+		if err != nil {
+			db.Close()
+			return nil, err
+		}
+		virployeesUsecases.SetKnowledgeRetriever(knowledgeRetriever)
 	}
 	// Executors are wired per enabled mode (COMPANION_V2_EXECUTION_MODE is a set).
 	// The local simulator and a real external executor can coexist on different
@@ -330,6 +405,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	}
 	virployeesUsecases.SetMemoryReader(memoriesUsecases)
 	virployeesHandler := virployees.NewHandler(virployeesUsecases)
+	authorityHandler := professionalauthority.NewHandler(authorityUsecases)
 	coordinationHandler := virployees.NewCoordinationHandler(virployeesUsecases)
 	memoriesHandler := memories.NewHandler(memoriesUsecases)
 	executionStatsHandler := executionstats.NewHandler(executionstats.NewUseCases(executionstats.NewRepository(db.Pool())))
@@ -351,23 +427,31 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
 	router.Use(gin.Recovery())
-	router.Use(ginmw.NewBodySizeLimit(config.MaxBodyBytes))
+	router.Use(routeAwareBodySizeLimit(config.MaxBodyBytes, config.KnowledgeUploadMaxBodyBytes))
 	router.Use(ginmw.NewCORS(ginmw.CORSConfig{
 		Origins:      config.CORSOrigins,
-		AllowHeaders: []string{"X-Actor-ID", "X-Tenant-ID", "X-Axis-Tenant-Role"},
+		AllowHeaders: []string{"X-Actor-ID", "X-Tenant-ID", "X-Axis-Tenant-Role", "X-Axis-Virployee-ID", "X-Axis-Subject-ID", "X-Axis-Case-ID", "X-Idempotency-Key"},
 	}))
 	ginmw.RegisterHealthEndpoints(router, db.Ping)
 	api := router.Group("/v1")
 	api.Use(internalAuthMiddleware(config.InternalAuthSecret))
+	mcp := router.Group("")
+	mcp.Use(internalAuthMiddleware(config.InternalAuthSecret))
+	mcpHandler.MCPRoutes(mcp)
+	mcpHandler.MCPRoutes(api)
 	jobRolesHandler.Routes(api)
+	workforceHandler.Routes(api)
+	knowledgeHandler.Routes(api)
 	capabilitiesHandler.Routes(api)
 	quotaHandler.Routes(api)
 	profileTemplatesHandler.Routes(api)
 	virployeesHandler.Routes(api)
+	authorityHandler.Routes(api)
 	coordinationHandler.Routes(api)
 	memoriesHandler.Routes(api)
 	executionStatsHandler.Routes(api)
 	learningHandler.Routes(api)
+	mcpHandler.AdminRoutes(api)
 
 	server := &http.Server{
 		Addr:    config.Addr(),
@@ -517,19 +601,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	})
 	var nexusOutbox *outbox.Dispatcher
 	if nexusClient != nil {
-		nexusOutbox = outbox.NewDispatcher(outbox.NewRepository(db.Pool()), outbox.SenderFunc(func(deliveryCtx context.Context, message outbox.Message) error {
-			var payload outbox.NexusExecutionResult
-			if err := json.Unmarshal(message.Payload, &payload); err != nil {
-				return outbox.Permanent("invalid_outbox_payload", err)
-			}
-			if payload.GovernanceCheckID == "" || payload.IdempotencyKey == "" || payload.BindingHash == "" || payload.Status == "" {
-				return outbox.Permanent("invalid_outbox_payload", fmt.Errorf("required delivery metadata is missing"))
-			}
-			if err := nexusClient.ReportExecutionResult(deliveryCtx, message.TenantID, payload.GovernanceCheckID, payload.IdempotencyKey, payload.BindingHash, payload.Status, payload.DurationMS, payload.Result, payload.AttestationVersion, payload.ExecutorVersion, payload.Attestation); err != nil {
-				return outbox.Retryable("nexus_unavailable", err)
-			}
-			return nil
-		}), outbox.DispatcherConfig{
+		nexusOutbox = outbox.NewDispatcher(outbox.NewRepository(db.Pool()), newNexusOutboxSender(nexusClient), outbox.DispatcherConfig{
 			WorkerID:    "companion-nexus-outbox-" + uuid.NewString(),
 			Concurrency: config.JobWorkerConcurrency, PollInterval: config.JobPollInterval,
 			Lease: config.WatcherLease, Timeout: 10 * time.Second,

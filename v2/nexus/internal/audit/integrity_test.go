@@ -200,11 +200,46 @@ func TestAppendValidation(t *testing.T) {
 		{"missing tenant", "", auditdomain.AppendInput{VirployeeID: "vp", EventType: "x"}},
 		{"missing virployee", "t", auditdomain.AppendInput{EventType: "x"}},
 		{"missing event_type", "t", auditdomain.AppendInput{VirployeeID: "vp"}},
+		{"invalid idempotency key", "t", auditdomain.AppendInput{VirployeeID: "vp", EventType: "x", IdempotencyKey: "not-a-uuid"}},
 	}
 	for _, tc := range cases {
 		if _, err := uc.Append(context.Background(), tc.tenant, tc.in); !domainerr.IsValidation(err) {
 			t.Fatalf("%s: expected validation error, got %v", tc.name, err)
 		}
+	}
+}
+
+func TestAppendUsesUUIDIdempotencyKeyAsEventID(t *testing.T) {
+	repo := &fakeRepo{}
+	uc := NewUseCases(repo)
+	id := uuid.New()
+	_, err := uc.Append(context.Background(), "tenant-1", auditdomain.AppendInput{
+		IdempotencyKey: id.String(), VirployeeID: "vp-1", EventType: auditdomain.EventAssistCompleted,
+	})
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	if len(repo.appended) != 1 || repo.appended[0].ID != id {
+		t.Fatalf("idempotency key must become the stable event id: %+v", repo.appended)
+	}
+}
+
+func TestSameAuditAppendRequestIgnoresDeliveryTimeButRejectsChangedPayload(t *testing.T) {
+	base := auditdomain.AuditEvent{
+		ID: uuid.New(), TenantID: "tenant-1", ChainScope: "tenant-1/vp-1", VirployeeID: "vp-1",
+		SubjectType: "delegation", SubjectID: uuid.NewString(), EventType: "delegation_revoked",
+		ActorType: "human", ActorID: "owner-1", Summary: "professional delegation revoked",
+		Data: map[string]any{"revision": float64(2), "snapshot_hash": "abc"}, CreatedAt: time.Now().UTC(),
+	}
+	retry := base
+	retry.CreatedAt = base.CreatedAt.Add(time.Hour)
+	retry.PreviousHash = "ignored-on-retry"
+	if !sameAuditAppendRequest(base, retry) {
+		t.Fatal("same logical append must be idempotent regardless of retry time")
+	}
+	retry.Data = map[string]any{"revision": float64(3), "snapshot_hash": "abc"}
+	if sameAuditAppendRequest(base, retry) {
+		t.Fatal("same id with changed payload must conflict")
 	}
 }
 

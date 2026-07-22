@@ -137,11 +137,35 @@ func (c *Client) Enrich(ctx context.Context, in EnrichRequest) (EnrichResult, er
 // system-prompt role, and an optional response schema for a structured answer.
 // It is the "process and respond" path (read/explain), not classification.
 type AnswerRequest struct {
-	SystemPrompt   string
-	JobRole        string
-	InputJSON      json.RawMessage
-	ResponseSchema map[string]any
-	ContentParts   []ContentPart
+	SystemPrompt        string
+	JobRole             string
+	ProfessionalContext ProfessionalContext
+	InputJSON           json.RawMessage
+	ResponseSchema      map[string]any
+	ContentParts        []ContentPart
+	GroundingMode       string
+}
+
+type ProfessionalContext struct {
+	JobRoleID        string                         `json:"job_role_id,omitempty"`
+	Name             string                         `json:"name,omitempty"`
+	Mission          string                         `json:"mission,omitempty"`
+	Responsibilities []ProfessionalResponsibility   `json:"responsibilities,omitempty"`
+	SuccessCriteria  []ProfessionalSuccessCriterion `json:"success_criteria,omitempty"`
+}
+
+type ProfessionalResponsibility struct {
+	Title           string `json:"title"`
+	Description     string `json:"description"`
+	ExpectedOutcome string `json:"expected_outcome"`
+	Priority        int    `json:"priority"`
+}
+
+type ProfessionalSuccessCriterion struct {
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	TargetValue string `json:"target_value"`
+	Priority    int    `json:"priority"`
 }
 
 type ContentPart struct {
@@ -163,9 +187,17 @@ type AnswerResult struct {
 	OutputText    string
 	OutputJSON    json.RawMessage
 	Answered      bool
+	Status        string
+	Citations     []Citation
 	ModelID       string
 	PromptVersion string
 	Usage         Usage
+}
+
+type Citation struct {
+	DocumentID string          `json:"document_id"`
+	SHA256     string          `json:"sha256,omitempty"`
+	Locator    json.RawMessage `json:"locator,omitempty"`
 }
 
 type Usage struct {
@@ -260,6 +292,8 @@ func (c *Client) Answer(ctx context.Context, in AnswerRequest) (AnswerResult, er
 		OutputText:    out.OutputText,
 		OutputJSON:    out.OutputJSON,
 		Answered:      out.Answered,
+		Status:        out.Status,
+		Citations:     out.Citations,
 		ModelID:       out.Model,
 		PromptVersion: out.PromptVersion,
 		Usage:         out.Usage,
@@ -374,17 +408,21 @@ type enrichResponse struct {
 }
 
 type answerRequest struct {
-	SystemPrompt   string          `json:"system_prompt,omitempty"`
-	JobRole        string          `json:"job_role,omitempty"`
-	InputJSON      json.RawMessage `json:"input_json"`
-	ResponseSchema map[string]any  `json:"response_schema,omitempty"`
-	ContentParts   []ContentPart   `json:"content_parts,omitempty"`
+	SystemPrompt        string              `json:"system_prompt,omitempty"`
+	JobRole             string              `json:"job_role,omitempty"`
+	ProfessionalContext ProfessionalContext `json:"professional_context,omitempty"`
+	InputJSON           json.RawMessage     `json:"input_json"`
+	ResponseSchema      map[string]any      `json:"response_schema,omitempty"`
+	ContentParts        []ContentPart       `json:"content_parts,omitempty"`
+	GroundingMode       string              `json:"grounding_mode,omitempty"`
 }
 
 type answerResponse struct {
 	OutputText    string          `json:"output_text,omitempty"`
 	OutputJSON    json.RawMessage `json:"output_json,omitempty"`
 	Answered      bool            `json:"answered"`
+	Status        string          `json:"status"`
+	Citations     []Citation      `json:"citations"`
 	Model         string          `json:"model,omitempty"`
 	PromptVersion string          `json:"prompt_version,omitempty"`
 	Usage         Usage           `json:"usage"`

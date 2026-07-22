@@ -13,6 +13,7 @@ import (
 
 type UseCasesPort interface {
 	Check(context.Context, string, domain.CheckInput) (domain.CheckResult, error)
+	Revalidate(context.Context, string, string, domain.RevalidationInput) (domain.RevalidationResult, error)
 	ReportExecutionResult(context.Context, string, string, domain.ExecutionResultInput) (domain.ExecutionResult, error)
 }
 
@@ -29,7 +30,26 @@ func (h *Handler) Routes(router gin.IRouter) {
 	{
 		group.POST("/check", h.Check)
 		group.POST("/checks/:check_id/result", h.ReportExecutionResult)
+		group.POST("/checks/:check_id/revalidate", h.Revalidate)
 	}
+}
+
+func (h *Handler) Revalidate(c *gin.Context) {
+	checkID := strings.TrimSpace(c.Param("check_id"))
+	if checkID == "" {
+		ginmw.Respond(c, ginmw.ErrBadInput)
+		return
+	}
+	var req dto.RevalidationRequest
+	if err := ginmw.BindJSON(c, &req); err != nil {
+		return
+	}
+	out, err := h.ucs.Revalidate(c.Request.Context(), tenantID(c), checkID, req.ToDomain())
+	if err != nil {
+		ginmw.Respond(c, err)
+		return
+	}
+	ginmw.WriteJSON(c, 200, dto.RevalidationFromDomain(out))
 }
 
 func (h *Handler) ReportExecutionResult(c *gin.Context) {
@@ -55,7 +75,11 @@ func (h *Handler) Check(c *gin.Context) {
 	if err := ginmw.BindJSON(c, &req); err != nil {
 		return
 	}
-	out, err := h.ucs.Check(c.Request.Context(), tenantID(c), req.ToDomain())
+	input := req.ToDomain(c.GetHeader("X-Axis-Tenant-Role"))
+	if strings.EqualFold(strings.TrimSpace(input.RequesterType), "human") {
+		input.RequesterID = strings.TrimSpace(c.GetHeader("X-Actor-ID"))
+	}
+	out, err := h.ucs.Check(c.Request.Context(), tenantID(c), input)
 	if err != nil {
 		ginmw.Respond(c, err)
 		return

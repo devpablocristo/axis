@@ -2,10 +2,13 @@ package governance
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	actiondomain "github.com/devpablocristo/nexus-v2/internal/actiontypes/usecases/domain"
+	"github.com/devpablocristo/nexus-v2/internal/authorization"
 	"github.com/devpablocristo/nexus-v2/internal/governance/usecases/domain"
+	"github.com/devpablocristo/nexus-v2/internal/governancepolicies"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
 	"github.com/google/uuid"
 )
@@ -81,6 +84,52 @@ func TestCheckRequiresApprovalForHighRisk(t *testing.T) {
 	}
 }
 
+func TestCheckPreservesProfessionalAuthorityBinding(t *testing.T) {
+	recorder := &fakeCheckRecorder{}
+	uc := NewUseCases(fakeActionTypeReader{
+		"medium.action": {ActionTypeKey: "medium.action", RiskClass: actiondomain.RiskClassMedium, Enabled: true},
+	}, recorder)
+	_, err := uc.Check(context.Background(), "tenant-1", domain.CheckInput{
+		RequesterID: "virployee-1", ActionType: "medium.action", BindingHash: "binding-1",
+		AuthorityBindingHash: "authority-1", ScopeRevision: 2, PolicyRevisionHash: "policies-1",
+		DelegationRequired: true, DelegationID: "delegation-1", DelegationRevision: 4,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recorder.rows) != 1 {
+		t.Fatalf("expected recorded governance check, got %d", len(recorder.rows))
+	}
+	in := recorder.rows[0].input
+	if in.AuthorityBindingHash != "authority-1" || in.ScopeRevision != 2 || in.PolicyRevisionHash != "policies-1" || in.DelegationRevision != 4 {
+		t.Fatalf("authority binding metadata was lost: %+v", in)
+	}
+}
+
+func TestCheckDerivesFunctionalRolesFromActiveGrants(t *testing.T) {
+	recorder := &fakeCheckRecorder{}
+	uc := NewUseCases(fakeActionTypeReader{
+		"low.action": {ActionTypeKey: "low.action", RiskClass: actiondomain.RiskClassLow, Enabled: true},
+	}, recorder)
+	grantID := uuid.New()
+	uc.SetFunctionalRoleResolver(fakeFunctionalRoleResolver{grants: []authorization.Grant{{
+		ID: grantID, RoleKey: authorization.RoleAuditor, ActionTypePattern: "*", MaxRiskClass: "critical", Revision: 3,
+	}}})
+
+	out, err := uc.Check(context.Background(), "tenant-1", domain.CheckInput{
+		RequesterType: "human", RequesterID: "user-1", ActionType: "low.action",
+		FunctionalRoles: []string{authorization.RolePolicyAdmin}, FunctionalScopes: []string{"forged"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	roles, _ := out.RoleSnapshot["functional_roles"].([]string)
+	scopes, _ := out.RoleSnapshot["functional_scopes"].([]string)
+	if len(roles) != 1 || roles[0] != authorization.RoleAuditor || len(scopes) != 1 || !strings.Contains(scopes[0], grantID.String()) {
+		t.Fatalf("functional authority was not server-derived: %+v", out.RoleSnapshot)
+	}
+}
+
 func TestCheckRejectsUnknownActionTypes(t *testing.T) {
 	recorder := &fakeCheckRecorder{}
 	uc := NewUseCases(fakeActionTypeReader{}, recorder)
@@ -129,6 +178,58 @@ func TestCheckDeniesDisabledActionTypes(t *testing.T) {
 	}
 }
 
+func TestRevalidateRejectsChangedActivePolicySnapshot(t *testing.T) {
+	recorder := &fakeCheckRecorder{revalidation: domain.RevalidationRecord{
+		Input: domain.NormalizedCheckInput{
+			RequesterType: "agent", RequesterID: "virployee-1", ActionType: "high.action",
+			BindingHash: "binding-1", AuthorityBindingHash: "authority-1", ScopeRevision: 2,
+			PolicyRevisionHash: "professional-1", DelegationID: "delegation-1", DelegationRevision: 4,
+		},
+		Decision: domain.DecisionRequireApproval, RiskLevel: "high", PolicySnapshotHash: "snapshot-a",
+	}}
+	uc := NewUseCases(fakeActionTypeReader{
+		"high.action": {ActionTypeKey: "high.action", RiskClass: actiondomain.RiskClassHigh, Enabled: true},
+	}, recorder)
+	uc.SetPolicyEvaluator(fakePolicyEvaluator{result: governancepolicies.EvaluationResult{
+		Matched: true, Decision: governancepolicies.EffectRequireApproval, EffectiveRisk: "high",
+		PolicySnapshotHash: "snapshot-b", InputHash: "input-b",
+	}})
+
+	out, err := uc.Revalidate(context.Background(), "tenant-1", uuid.NewString(), domain.RevalidationInput{
+		BindingHash: "binding-1", PolicySnapshotHash: "snapshot-a", AuthorityBindingHash: "authority-1",
+		ScopeRevision: 2, PolicyRevisionHash: "professional-1", DelegationID: "delegation-1", DelegationRevision: 4,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Valid || out.Reason != "active policy snapshot changed" || out.PolicySnapshotHash != "snapshot-b" {
+		t.Fatalf("expected stale policy snapshot rejection, got %+v", out)
+	}
+}
+
+func TestRevalidateRejectsExpiredOrRevokedFunctionalGrantSnapshot(t *testing.T) {
+	recorder := &fakeCheckRecorder{revalidation: domain.RevalidationRecord{
+		Input: domain.NormalizedCheckInput{RequesterType: "human", RequesterID: "user-1", ActionType: "low.action",
+			BindingHash: "binding-1", FunctionalRoles: []string{authorization.RoleAuditor}, FunctionalScopes: []string{"grant-snapshot"}},
+		Decision: domain.DecisionAllow, RiskLevel: "low", PolicySnapshotHash: "snapshot-a",
+	}}
+	uc := NewUseCases(fakeActionTypeReader{
+		"low.action": {ActionTypeKey: "low.action", RiskClass: actiondomain.RiskClassLow, Enabled: true},
+	}, recorder)
+	uc.SetFunctionalRoleResolver(fakeFunctionalRoleResolver{grants: nil})
+	uc.SetPolicyEvaluator(fakePolicyEvaluator{result: governancepolicies.EvaluationResult{
+		EffectiveRisk: "low", PolicySnapshotHash: "snapshot-a",
+	}})
+
+	out, err := uc.Revalidate(context.Background(), "tenant-1", uuid.NewString(), domain.RevalidationInput{BindingHash: "binding-1", PolicySnapshotHash: "snapshot-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Valid || out.Reason != "functional role authority changed" {
+		t.Fatalf("expected revoked grant snapshot rejection, got %+v", out)
+	}
+}
+
 type fakeActionTypeReader map[string]actiondomain.ActionType
 
 func (r fakeActionTypeReader) GetByKey(_ context.Context, tenantID string, key string) (actiondomain.ActionType, error) {
@@ -148,8 +249,31 @@ type recordedCheck struct {
 }
 
 type fakeCheckRecorder struct {
-	rows       []recordedCheck
-	approvalID string
+	rows         []recordedCheck
+	approvalID   string
+	revalidation domain.RevalidationRecord
+}
+
+func (r *fakeCheckRecorder) GetCheckForRevalidation(_ context.Context, _, _ string) (domain.RevalidationRecord, error) {
+	return r.revalidation, nil
+}
+
+type fakePolicyEvaluator struct {
+	result governancepolicies.EvaluationResult
+	err    error
+}
+
+func (f fakePolicyEvaluator) Evaluate(context.Context, string, governancepolicies.SafeInput) (governancepolicies.EvaluationResult, error) {
+	return f.result, f.err
+}
+
+type fakeFunctionalRoleResolver struct {
+	grants []authorization.Grant
+	err    error
+}
+
+func (f fakeFunctionalRoleResolver) EffectiveGrants(context.Context, string, string) ([]authorization.Grant, error) {
+	return f.grants, f.err
 }
 
 func (r *fakeCheckRecorder) RecordCheck(_ context.Context, tenantID string, input domain.NormalizedCheckInput, result domain.CheckResult) (domain.RecordedCheck, error) {

@@ -17,19 +17,34 @@ import (
 // true when no real model answered (Echo / no credentials). The product-facing
 // edge (BFF) maps this to the product's own contract.
 type AssistRunResponse struct {
-	ID                     string          `json:"id"`
-	CaseID                 string          `json:"case_id,omitempty"`
-	ResponsibleVirployeeID string          `json:"responsible_virployee_id,omitempty"`
-	Status                 string          `json:"status"`
-	Output                 json.RawMessage `json:"output,omitempty"`
-	OutputText             string          `json:"output_text,omitempty"`
-	Answered               bool            `json:"answered"`
-	Degraded               bool            `json:"degraded"`
-	Model                  string          `json:"model,omitempty"`
-	PromptVersion          string          `json:"prompt_version,omitempty"`
-	Error                  string          `json:"error_message,omitempty"`
-	DurationMS             int64           `json:"duration_ms"`
-	Orchestration          any             `json:"orchestration,omitempty"`
+	ID                     string             `json:"id"`
+	SubjectID              string             `json:"subject_id,omitempty"`
+	CaseID                 string             `json:"case_id,omitempty"`
+	AssignmentID           string             `json:"assignment_id,omitempty"`
+	AssignmentVersion      int64              `json:"assignment_version,omitempty"`
+	ResponsibleVirployeeID string             `json:"responsible_virployee_id,omitempty"`
+	Status                 string             `json:"status"`
+	GroundingMode          string             `json:"grounding_mode"`
+	ContextHash            string             `json:"context_hash,omitempty"`
+	AnswerStatus           string             `json:"answer_status,omitempty"`
+	Citations              []CitationResponse `json:"citations"`
+	Output                 json.RawMessage    `json:"output,omitempty"`
+	OutputText             string             `json:"output_text,omitempty"`
+	Answered               bool               `json:"answered"`
+	Degraded               bool               `json:"degraded"`
+	Model                  string             `json:"model,omitempty"`
+	PromptVersion          string             `json:"prompt_version,omitempty"`
+	Error                  string             `json:"error_message,omitempty"`
+	DurationMS             int64              `json:"duration_ms"`
+	Orchestration          any                `json:"orchestration,omitempty"`
+}
+
+type CitationResponse struct {
+	KnowledgeBaseID string          `json:"knowledge_base_id,omitempty"`
+	DocumentID      string          `json:"document_id"`
+	SourceVersion   string          `json:"source_version,omitempty"`
+	SHA256          string          `json:"sha256,omitempty"`
+	Locator         json.RawMessage `json:"locator,omitempty"`
 }
 
 type VirployeeResponse struct {
@@ -41,6 +56,7 @@ type VirployeeResponse struct {
 	Description       string     `json:"description"`
 	SupervisorUserID  string     `json:"supervisor_user_id"`
 	Autonomy          string     `json:"autonomy"`
+	GroundingMode     string     `json:"grounding_mode"`
 	State             string     `json:"state"`
 	CreatedAt         time.Time  `json:"created_at"`
 	UpdatedAt         time.Time  `json:"updated_at"`
@@ -88,6 +104,7 @@ type RuntimeContextVirployeeResponse struct {
 	Name             string `json:"name"`
 	Description      string `json:"description"`
 	Autonomy         string `json:"autonomy"`
+	GroundingMode    string `json:"grounding_mode"`
 	State            string `json:"state"`
 	SupervisorUserID string `json:"supervisor_user_id"`
 }
@@ -280,6 +297,7 @@ func VirployeeFromDomain(v domain.Virployee) VirployeeResponse {
 		Description:       v.Description,
 		SupervisorUserID:  v.SupervisorUserID,
 		Autonomy:          string(v.Autonomy),
+		GroundingMode:     string(v.GroundingMode),
 		State:             string(v.State()),
 		CreatedAt:         v.CreatedAt,
 		UpdatedAt:         v.UpdatedAt,
@@ -390,12 +408,21 @@ func RuntimeContextFromDomain(ctx runtimecontext.Context) RuntimeContextResponse
 	for _, ref := range ctx.MemoryReferences {
 		memoryReferences = append(memoryReferences, MemoryReferenceResponse{ID: ref.ID.String(), Title: ref.Title, Type: ref.Type, Version: ref.Version, Hash: ref.Hash, Sensitivity: ref.Sensitivity, Score: ref.Score})
 	}
+	responsibilities := make([]RuntimeContextResponsibilityResponse, 0, len(ctx.JobRole.Responsibilities))
+	for _, item := range ctx.JobRole.Responsibilities {
+		responsibilities = append(responsibilities, RuntimeContextResponsibilityResponse{Title: item.Title, Description: item.Description, ExpectedOutcome: item.ExpectedOutcome, Priority: item.Priority})
+	}
+	successCriteria := make([]RuntimeContextSuccessCriterionResponse, 0, len(ctx.JobRole.SuccessCriteria))
+	for _, item := range ctx.JobRole.SuccessCriteria {
+		successCriteria = append(successCriteria, RuntimeContextSuccessCriterionResponse{Title: item.Title, Description: item.Description, TargetValue: item.TargetValue, Priority: item.Priority})
+	}
 	return RuntimeContextResponse{
 		Virployee: RuntimeContextVirployeeResponse{
 			ID:               ctx.Virployee.ID.String(),
 			Name:             ctx.Virployee.Name,
 			Description:      ctx.Virployee.Description,
 			Autonomy:         string(ctx.Virployee.Autonomy),
+			GroundingMode:    string(ctx.Virployee.GroundingMode),
 			State:            string(ctx.Virployee.State()),
 			SupervisorUserID: ctx.Virployee.SupervisorUserID,
 		},
@@ -403,8 +430,8 @@ func RuntimeContextFromDomain(ctx runtimecontext.Context) RuntimeContextResponse
 			ID:               ctx.JobRole.ID.String(),
 			Name:             ctx.JobRole.Name,
 			Mission:          ctx.JobRole.Mission,
-			Responsibilities: []RuntimeContextResponsibilityResponse{},
-			SuccessCriteria:  []RuntimeContextSuccessCriterionResponse{},
+			Responsibilities: responsibilities,
+			SuccessCriteria:  successCriteria,
 		},
 		ProfileTemplate: RuntimeContextProfileTemplateResponse{
 			ID:           ctx.ProfileTemplate.ID.String(),

@@ -13,6 +13,9 @@ import (
 type Memory struct {
 	ID               uuid.UUID  `json:"id"`
 	VirployeeID      uuid.UUID  `json:"virployee_id"`
+	ScopeType        string     `json:"scope_type"`
+	SubjectID        string     `json:"subject_id,omitempty"`
+	CaseID           *uuid.UUID `json:"case_id,omitempty"`
 	Title            string     `json:"title"`
 	Type             string     `json:"type"`
 	Content          string     `json:"content,omitempty"`
@@ -41,7 +44,16 @@ type Memory struct {
 	UpdatedAt        time.Time  `json:"updated_at"`
 }
 
-type CreateInput struct{ Title, Type, Content, Sensitivity, Provenance, ActorID, SourceReference string }
+type Scope struct {
+	Type      string     `json:"type"`
+	SubjectID string     `json:"subject_id,omitempty"`
+	CaseID    *uuid.UUID `json:"case_id,omitempty"`
+}
+
+type CreateInput struct {
+	Title, Type, Content, Sensitivity, Provenance, ActorID, SourceReference string
+	Scope                                                                   Scope
+}
 type UpdateInput struct {
 	Title, Type, Content, Sensitivity, ActorID string
 	ExpectedVersion                            int
@@ -60,19 +72,23 @@ type CuratedInput struct {
 type ListInput struct {
 	State, Query, Cursor string
 	Limit                int
+	Scope                Scope
 }
 type Page struct {
 	Items      []Memory `json:"items"`
 	NextCursor string   `json:"next_cursor,omitempty"`
 }
 type Reference struct {
-	ID          uuid.UUID `json:"id"`
-	Title       string    `json:"title"`
-	Type        string    `json:"type"`
-	Version     int       `json:"version"`
-	Hash        string    `json:"hash"`
-	Sensitivity string    `json:"sensitivity"`
-	Score       float64   `json:"score"`
+	ID          uuid.UUID  `json:"id"`
+	Title       string     `json:"title"`
+	Type        string     `json:"type"`
+	Version     int        `json:"version"`
+	Hash        string     `json:"hash"`
+	Sensitivity string     `json:"sensitivity"`
+	Score       float64    `json:"score"`
+	ScopeType   string     `json:"scope_type"`
+	SubjectID   string     `json:"subject_id,omitempty"`
+	CaseID      *uuid.UUID `json:"case_id,omitempty"`
 }
 type Recalled struct {
 	Memory    Memory
@@ -101,6 +117,9 @@ const (
 	RecallTrustFloor    = 0.60
 	EmbeddingDimensions = 768
 	EmbeddingVersion    = "memory-embed.v1"
+	ScopeVirployee      = "virployee"
+	ScopeSubject        = "subject"
+	ScopeCase           = "case"
 )
 
 func normalizeCreate(in CreateInput) (CreateInput, error) {
@@ -130,7 +149,54 @@ func normalizeCreate(in CreateInput) (CreateInput, error) {
 	if in.ActorID == "" {
 		return in, domainerr.Validation("actor_id is required")
 	}
+	scope, err := NormalizeScope(in.Scope)
+	if err != nil {
+		return in, err
+	}
+	if scope.Type == ScopeVirployee && in.Type != "procedure" {
+		return in, domainerr.Validation("virployee-global memory is reserved for non-personal procedures; facts, preferences, and notes require a subject or case scope")
+	}
+	in.Scope = scope
 	return in, nil
+}
+
+func NormalizeScope(in Scope) (Scope, error) {
+	in.Type = strings.ToLower(strings.TrimSpace(in.Type))
+	in.SubjectID = strings.TrimSpace(in.SubjectID)
+	if in.Type == "" {
+		in.Type = ScopeVirployee
+	}
+	switch in.Type {
+	case ScopeVirployee:
+		if in.SubjectID != "" || in.CaseID != nil {
+			return Scope{}, domainerr.Validation("virployee memory scope cannot include subject_id or case_id")
+		}
+	case ScopeSubject:
+		if in.SubjectID == "" || in.CaseID != nil {
+			return Scope{}, domainerr.Validation("subject memory scope requires subject_id and no case_id")
+		}
+		subjectID, err := uuid.Parse(in.SubjectID)
+		if err != nil || subjectID == uuid.Nil {
+			return Scope{}, domainerr.Validation("subject memory scope requires a valid subject_id")
+		}
+		in.SubjectID = subjectID.String()
+	case ScopeCase:
+		if in.SubjectID == "" || in.CaseID == nil || *in.CaseID == uuid.Nil {
+			return Scope{}, domainerr.Validation("case memory scope requires subject_id and a valid case_id")
+		}
+		subjectID, err := uuid.Parse(in.SubjectID)
+		if err != nil || subjectID == uuid.Nil {
+			return Scope{}, domainerr.Validation("case memory scope requires a valid subject_id and case_id")
+		}
+		in.SubjectID = subjectID.String()
+	default:
+		return Scope{}, domainerr.Validation("memory scope type must be virployee, subject, or case")
+	}
+	return in, nil
+}
+
+func (m Memory) Scope() Scope {
+	return Scope{Type: m.ScopeType, SubjectID: m.SubjectID, CaseID: m.CaseID}
 }
 
 func ContentHash(content string) string {

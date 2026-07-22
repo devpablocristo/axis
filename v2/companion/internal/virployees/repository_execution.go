@@ -16,15 +16,17 @@ import (
 )
 
 type PreparedActionRecord struct {
-	ID                uuid.UUID
-	TenantID          string
-	VirployeeID       uuid.UUID
-	GovernanceCheckID uuid.UUID
-	ApprovalID        uuid.UUID
-	CapabilityKey     string
-	Action            preparedactions.Action
-	PayloadHash       string
-	BindingHash       string
+	ID                      uuid.UUID
+	TenantID                string
+	VirployeeID             uuid.UUID
+	GovernanceCheckID       uuid.UUID
+	ApprovalID              uuid.UUID
+	CapabilityKey           string
+	Action                  preparedactions.Action
+	PayloadHash             string
+	BindingHash             string
+	AuthorityBindingHash    string
+	NexusPolicySnapshotHash string
 }
 
 type ExecutionAttempt struct {
@@ -77,12 +79,14 @@ func (r *Repository) GetPreparedActionByApproval(ctx context.Context, tenantID s
 	var payload []byte
 	err := r.pool.QueryRow(ctx, `
 		SELECT id, tenant_id, virployee_id, governance_check_id, approval_id,
-		       capability_key, action, payload, payload_hash, binding_hash
+		       capability_key, action, payload, payload_hash, binding_hash, authority_binding_hash,
+		       nexus_policy_snapshot_hash
 		FROM companion_prepared_actions
 		WHERE tenant_id = $1 AND virployee_id = $2 AND approval_id = $3
 	`, tenantID, virployeeID, approvalID).Scan(
 		&out.ID, &out.TenantID, &out.VirployeeID, &out.GovernanceCheckID, &out.ApprovalID,
-		&out.CapabilityKey, &out.Action.Action, &payload, &out.PayloadHash, &out.BindingHash,
+		&out.CapabilityKey, &out.Action.Action, &payload, &out.PayloadHash, &out.BindingHash, &out.AuthorityBindingHash,
+		&out.NexusPolicySnapshotHash,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -94,6 +98,52 @@ func (r *Repository) GetPreparedActionByApproval(ctx context.Context, tenantID s
 		return PreparedActionRecord{}, fmt.Errorf("decode prepared action: %w", err)
 	}
 	return out, nil
+}
+
+// BindPreparedActionAuthority makes the authority snapshot durable before an
+// approval can be executed. It is immutable: retries may write the same hash,
+// but can never replace it with a different policy/delegation snapshot.
+func (r *Repository) BindPreparedActionAuthority(ctx context.Context, tenantID string, virployeeID, approvalID uuid.UUID, snapshotHash string) error {
+	snapshotHash = strings.TrimSpace(snapshotHash)
+	if snapshotHash == "" {
+		return domainerr.Validation("professional authority snapshot hash is required")
+	}
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE companion_prepared_actions
+		SET authority_binding_hash=$4
+		WHERE tenant_id=$1 AND virployee_id=$2 AND approval_id=$3
+		  AND (authority_binding_hash='' OR authority_binding_hash=$4)
+	`, tenantID, virployeeID, approvalID, snapshotHash)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return domainerr.Conflict("prepared action authority binding is missing or immutable")
+	}
+	return nil
+}
+
+// BindPreparedActionNexusPolicy persists the exact policy snapshot returned by
+// Nexus. The value is immutable so a later approval cannot be substituted onto
+// an already prepared action.
+func (r *Repository) BindPreparedActionNexusPolicy(ctx context.Context, tenantID string, virployeeID, approvalID uuid.UUID, snapshotHash string) error {
+	snapshotHash = strings.TrimSpace(snapshotHash)
+	if snapshotHash == "" {
+		return domainerr.Validation("Nexus policy snapshot hash is required")
+	}
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE companion_prepared_actions
+		SET nexus_policy_snapshot_hash=$4
+		WHERE tenant_id=$1 AND virployee_id=$2 AND approval_id=$3
+		  AND (nexus_policy_snapshot_hash='' OR nexus_policy_snapshot_hash=$4)
+	`, tenantID, virployeeID, approvalID, snapshotHash)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return domainerr.Conflict("prepared action Nexus policy binding is missing or immutable")
+	}
+	return nil
 }
 
 func (r *Repository) BeginExecution(ctx context.Context, tenantID string, virployeeID uuid.UUID, preparedActionID uuid.UUID, idempotencyKey string) (ExecutionAttempt, bool, error) {

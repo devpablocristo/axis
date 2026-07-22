@@ -22,12 +22,15 @@ type Approval struct {
 	TenantID           string
 	GovernanceCheckID  uuid.UUID
 	RequesterID        string
+	ProductSurface     string
 	ActionType         string
 	TargetSystem       string
 	TargetResource     string
+	ResourceType       string
 	RiskLevel          string
 	Reason             string
 	BindingHash        string
+	PolicySnapshotHash string
 	Status             Status
 	ApprovalKind       string
 	SupervisorUserID   string

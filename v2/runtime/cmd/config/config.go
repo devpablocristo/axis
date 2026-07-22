@@ -24,6 +24,7 @@ type Config struct {
 	VertexLocation                        string
 	EmbeddingModel                        string
 	EmbeddingDim                          int
+	DevelopmentEmbeddingsEnabled          bool
 	LLMInputCostMicroUSDPerMillionTokens  int64
 	LLMOutputCostMicroUSDPerMillionTokens int64
 
@@ -47,6 +48,7 @@ func Load() Config {
 		VertexLocation:                        strings.TrimSpace(envconfig.Get("RUNTIME_V2_VERTEX_LOCATION", "us-central1")),
 		EmbeddingModel:                        strings.TrimSpace(envconfig.Get("RUNTIME_V2_EMBEDDING_MODEL", "gemini-embedding-001")),
 		EmbeddingDim:                          envconfig.Int("RUNTIME_V2_EMBEDDING_DIMENSIONS", 768),
+		DevelopmentEmbeddingsEnabled:          envconfig.Bool("RUNTIME_V2_DEVELOPMENT_EMBEDDINGS_ENABLED", true),
 		LLMInputCostMicroUSDPerMillionTokens:  int64(envconfig.Int("RUNTIME_V2_LLM_INPUT_COST_MICROUSD_PER_MILLION_TOKENS", 0)),
 		LLMOutputCostMicroUSDPerMillionTokens: int64(envconfig.Int("RUNTIME_V2_LLM_OUTPUT_COST_MICROUSD_PER_MILLION_TOKENS", 0)),
 		ServiceVersion:                        envconfig.Get("RUNTIME_V2_SERVICE_VERSION", ""),

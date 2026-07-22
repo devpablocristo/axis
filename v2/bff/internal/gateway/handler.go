@@ -54,8 +54,23 @@ func (h *Handler) Routes(router gin.IRouter) {
 	router.Any("/quota-policies/*path", h.ForwardCompanion)
 	router.Any("/learning", h.ForwardCompanion)
 	router.Any("/learning/*path", h.ForwardCompanion)
+	router.Any("/runtime/mcp-policy", h.ForwardCompanion)
+	router.Any("/runtime/mcp-policy/*path", h.ForwardCompanion)
+	router.Any("/runtime/mcp-invocations", h.ForwardCompanion)
+	router.POST("/mcp", h.ForwardCompanion)
 	router.Any("/job-roles", h.ForwardCompanion)
 	router.Any("/job-roles/*path", h.ForwardCompanion)
+	router.Any("/work-subjects", h.ForwardCompanion)
+	router.Any("/work-subjects/*path", h.ForwardCompanion)
+	router.Any("/routing-pools", h.ForwardCompanion)
+	router.Any("/routing-pools/*path", h.ForwardCompanion)
+	router.Any("/virployee-routing", h.ForwardCompanion)
+	router.Any("/virployee-routing/*path", h.ForwardCompanion)
+	router.Any("/virployee-routing:resolve", h.ForwardCompanion)
+	router.Any("/knowledge-bases", h.ForwardCompanion)
+	router.Any("/knowledge-bases/*path", h.ForwardCompanion)
+	router.Any("/professional-policy-packs", h.ForwardCompanion)
+	router.Any("/professional-policy-packs/*path", h.ForwardCompanion)
 	router.Any("/profile-templates", h.ForwardCompanion)
 	router.Any("/profile-templates/*path", h.ForwardCompanion)
 	router.Any("/virployees", h.ForwardCompanion)
@@ -76,6 +91,17 @@ func (h *Handler) Routes(router gin.IRouter) {
 	router.Any("/governance/*path", h.ForwardNexus)
 	router.Any("/approvals", h.ForwardNexus)
 	router.Any("/approvals/*path", h.ForwardNexus)
+	router.Any("/role-definitions", h.ForwardNexus)
+	router.Any("/role-grants", h.ForwardNexus)
+	router.Any("/role-grants/*path", h.ForwardNexus)
+	router.Any("/governance-policies", h.ForwardNexus)
+	router.Any("/governance-policies/*path", h.ForwardNexus)
+	router.Any("/governance-policy-versions", h.ForwardNexus)
+	router.Any("/governance-policy-versions/*path", h.ForwardNexus)
+	router.Any("/governance-policy-promotions", h.ForwardNexus)
+	router.Any("/governance-policy-promotions/*path", h.ForwardNexus)
+	router.Any("/governance-policy-evaluations", h.ForwardNexus)
+	router.Any("/governance-policy-changelog", h.ForwardNexus)
 }
 
 func (h *Handler) ForwardVirployees(c *gin.Context) {
@@ -105,6 +131,10 @@ func (h *Handler) forward(c *gin.Context, targetURL func(string, string) string,
 			return
 		}
 	}
+	if err := h.validateRoleGrantUser(c, resolved); err != nil {
+		ginmw.Respond(c, err)
+		return
+	}
 
 	req, err := http.NewRequestWithContext(
 		c.Request.Context(),
@@ -121,6 +151,11 @@ func (h *Handler) forward(c *gin.Context, targetURL func(string, string) string,
 	req.Header.Del("Authorization")
 	req.Header.Del("X-Axis-Tenant-Role")
 	req.Header.Del("X-Axis-Internal-Token")
+	req.Header.Del("X-Axis-Functional-Roles")
+	req.Header.Del("X-Axis-Role-Grants")
+	req.Header.Del("X-Axis-Permissions")
+	req.Header.Del("X-Permissions")
+	req.Header.Del("X-Roles")
 	req.Header.Set("X-Actor-ID", resolved.PrincipalID)
 	req.Header.Set("X-Tenant-ID", resolved.TenantID)
 	req.Header.Set("X-Axis-Org-ID", resolved.OrgID)
@@ -131,6 +166,10 @@ func (h *Handler) forward(c *gin.Context, targetURL func(string, string) string,
 
 	resp, err := h.client.Do(req)
 	if err != nil {
+		if ginmw.IsBodyTooLarge(err) {
+			ginmw.WriteError(c, http.StatusRequestEntityTooLarge, "payload_too_large", "request body exceeds the allowed size")
+			return
+		}
 		ginmw.WriteError(c, http.StatusBadGateway, "downstream_unavailable", "downstream request failed")
 		return
 	}
@@ -178,6 +217,34 @@ func requiresSupervisorValidation(method, requestPath string) bool {
 		return len(parts) == 1 && parts[0] == "virployees"
 	}
 	return len(parts) == 2 && parts[0] == "virployees" && parts[1] != ""
+}
+
+func (h *Handler) validateRoleGrantUser(c *gin.Context, resolved gatewaydomain.ResolvedContext) error {
+	if h.options.SupervisorValidator == nil || c.Request.Method != http.MethodPost || !isRoleGrantCollection(c.Request.URL.Path) {
+		return nil
+	}
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		return domainerr.Validation("invalid request body")
+	}
+	c.Request.Body = io.NopCloser(bytes.NewReader(body))
+
+	var payload struct {
+		UserID string `json:"user_id"`
+	}
+	if len(bytes.TrimSpace(body)) == 0 || json.Unmarshal(body, &payload) != nil || strings.TrimSpace(payload.UserID) == "" {
+		return domainerr.Validation("user_id is required")
+	}
+	if err := h.options.SupervisorValidator.EnsureActive(c.Request.Context(), resolved.TenantID, payload.UserID); err != nil {
+		return err
+	}
+	c.Request.Body = io.NopCloser(bytes.NewReader(body))
+	return nil
+}
+
+func isRoleGrantCollection(requestPath string) bool {
+	path := strings.Trim(strings.TrimPrefix(requestPath, "/api"), "/")
+	return path == "role-grants"
 }
 
 func (h *Handler) principalID(c *gin.Context) string {

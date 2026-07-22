@@ -8,6 +8,7 @@ import (
 
 	"github.com/devpablocristo/nexus-v2/internal/approvals/usecases/domain"
 	auditdomain "github.com/devpablocristo/nexus-v2/internal/audit/usecases/domain"
+	"github.com/devpablocristo/nexus-v2/internal/authorization"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
 	"github.com/google/uuid"
 )
@@ -153,6 +154,24 @@ func TestUseCasesEnforcesSupervisorAndHumanSeparationOfDuties(t *testing.T) {
 	}
 }
 
+func TestUseCasesAllowsScopedFunctionalApprover(t *testing.T) {
+	repo := newFakeRepo()
+	item := repo.add("tenant-1", domain.StatusPending)
+	uc := NewUseCases(repo)
+	authorizer := &fakeApprovalAuthorizer{allowed: true}
+	uc.SetAuthorizer(authorizer)
+
+	approved, err := uc.Approve(context.Background(), "tenant-1", item.ID, domain.DecisionActor{ID: "functional-approver", Role: "member"}, domain.DecisionInput{})
+	if err != nil || approved.Status != domain.StatusApproved {
+		t.Fatalf("functional approver should approve in scope: approval=%+v err=%v", approved, err)
+	}
+	if authorizer.last.ProductSurface != "axis" || authorizer.last.ActionType != item.ActionType ||
+		authorizer.last.ResourceType != "event" || authorizer.last.ResourceID != item.TargetResource ||
+		authorizer.last.RiskClass != item.RiskLevel {
+		t.Fatalf("approval authority used the wrong scope: %+v", authorizer.last)
+	}
+}
+
 func TestUseCasesBreakGlassRequiresTwoPeopleAndIndependentReview(t *testing.T) {
 	repo := newFakeRepo()
 	item := repo.add("tenant-1", domain.StatusPending)
@@ -208,9 +227,11 @@ func (r *fakeRepo) addAt(tenantID string, status domain.Status, now time.Time) d
 		TenantID:          tenantID,
 		GovernanceCheckID: uuid.New(),
 		RequesterID:       "virployee-1",
+		ProductSurface:    "axis",
 		ActionType:        "calendar.events.delete",
 		TargetSystem:      "calendar",
 		TargetResource:    "events",
+		ResourceType:      "event",
 		RiskLevel:         "high",
 		Reason:            "delete event",
 		BindingHash:       "binding-hash",
@@ -325,4 +346,14 @@ type fakeAuditEmitter struct{ inputs []auditdomain.AppendInput }
 func (f *fakeAuditEmitter) Append(_ context.Context, _ string, input auditdomain.AppendInput) (auditdomain.AuditEvent, error) {
 	f.inputs = append(f.inputs, input)
 	return auditdomain.AuditEvent{}, nil
+}
+
+type fakeApprovalAuthorizer struct {
+	allowed bool
+	last    authorization.CheckInput
+}
+
+func (f *fakeApprovalAuthorizer) Check(_ context.Context, input authorization.CheckInput) (authorization.CheckResult, error) {
+	f.last = input
+	return authorization.CheckResult{Allowed: f.allowed}, nil
 }

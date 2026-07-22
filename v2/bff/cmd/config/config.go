@@ -12,6 +12,7 @@ type Config struct {
 	DatabaseURL        string
 	RunMigrations      bool
 	MaxBodyBytes       int64
+	KnowledgeUploadMaxBodyBytes int64
 	CORSOrigins        []string
 	CompanionBaseURL   string
 	NexusBaseURL       string
@@ -43,7 +44,8 @@ func Load() Config {
 		Port:               envconfig.Get("PORT", "19080"),
 		DatabaseURL:        envconfig.Get("BFF_V2_DATABASE_URL", envconfig.Get("DATABASE_URL", "")),
 		RunMigrations:      envconfig.Bool("BFF_V2_RUN_MIGRATIONS", true),
-		MaxBodyBytes:       int64(envconfig.Int("BFF_V2_MAX_BODY_BYTES", 1<<20)),
+		MaxBodyBytes:       envconfig.Int64("BFF_V2_MAX_BODY_BYTES", 1<<20),
+		KnowledgeUploadMaxBodyBytes: envconfig.Int64("BFF_V2_KNOWLEDGE_UPLOAD_MAX_BODY_BYTES", 251<<20),
 		CORSOrigins:        splitCSV(envconfig.Get("BFF_V2_CORS_ORIGINS", "")),
 		CompanionBaseURL:   strings.TrimRight(envconfig.Get("BFF_V2_COMPANION_BASE_URL", "http://127.0.0.1:19086"), "/"),
 		NexusBaseURL:       strings.TrimRight(envconfig.Get("BFF_V2_NEXUS_BASE_URL", "http://127.0.0.1:19087"), "/"),

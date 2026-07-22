@@ -128,6 +128,7 @@ func TestAnswerMapsResponseAndForwardsToken(t *testing.T) {
 		_ = json.NewDecoder(r.Body).Decode(&gotBody)
 		_ = json.NewEncoder(w).Encode(answerResponse{
 			OutputJSON: json.RawMessage(`{"summary":"ok"}`), Answered: true,
+			Status: "answered", Citations: []Citation{{DocumentID: "doc-1", SHA256: "sha-1"}},
 			Model: "gemini-x", PromptVersion: "answer.v1",
 		})
 	}))
@@ -135,7 +136,17 @@ func TestAnswerMapsResponseAndForwardsToken(t *testing.T) {
 
 	client := New(srv.URL, srv.Client(), "secret-token")
 	out, err := client.Answer(context.Background(), AnswerRequest{
-		SystemPrompt: "Sos un médico.", InputJSON: json.RawMessage(`{"labs":"x"}`),
+		SystemPrompt: "Sos un médico.", JobRole: "Médico clínico",
+		ProfessionalContext: ProfessionalContext{
+			JobRoleID: "role-1", Name: "Médico clínico", Mission: "Orientar con evidencia.",
+			Responsibilities: []ProfessionalResponsibility{{
+				Title: "Revisar", Description: "Revisar la evidencia", ExpectedOutcome: "Orientación respaldada", Priority: 1,
+			}},
+			SuccessCriteria: []ProfessionalSuccessCriterion{{
+				Title: "Citar", Description: "Citar las fuentes", TargetValue: "100%", Priority: 1,
+			}},
+		},
+		InputJSON: json.RawMessage(`{"labs":"x"}`), GroundingMode: "sources_only",
 		ResponseSchema: map[string]any{"type": "object"},
 	})
 	if err != nil {
@@ -144,10 +155,13 @@ func TestAnswerMapsResponseAndForwardsToken(t *testing.T) {
 	if gotToken != "secret-token" || gotPath != "/v1/answer" {
 		t.Fatalf("unexpected token/path: %q %q", gotToken, gotPath)
 	}
-	if string(gotBody.InputJSON) != `{"labs":"x"}` || len(gotBody.ResponseSchema) == 0 {
+	if string(gotBody.InputJSON) != `{"labs":"x"}` || len(gotBody.ResponseSchema) == 0 || gotBody.GroundingMode != "sources_only" {
 		t.Fatalf("unexpected request body: %+v", gotBody)
 	}
-	if !out.Answered || string(out.OutputJSON) != `{"summary":"ok"}` || out.ModelID != "gemini-x" || out.PromptVersion != "answer.v1" {
+	if gotBody.ProfessionalContext.JobRoleID != "role-1" || len(gotBody.ProfessionalContext.Responsibilities) != 1 || len(gotBody.ProfessionalContext.SuccessCriteria) != 1 {
+		t.Fatalf("professional context was not forwarded: %+v", gotBody.ProfessionalContext)
+	}
+	if !out.Answered || out.Status != "answered" || len(out.Citations) != 1 || out.Citations[0].DocumentID != "doc-1" || string(out.OutputJSON) != `{"summary":"ok"}` || out.ModelID != "gemini-x" || out.PromptVersion != "answer.v1" {
 		t.Fatalf("unexpected answer result: %+v", out)
 	}
 }

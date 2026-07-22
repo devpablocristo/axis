@@ -10,10 +10,17 @@ import (
 
 type State string
 
+type GroundingMode string
+
 const (
 	StateActive   State = "active"
 	StateArchived State = "archived"
 	StateTrashed  State = "trashed"
+)
+
+const (
+	GroundingGeneral     GroundingMode = "general"
+	GroundingSourcesOnly GroundingMode = "sources_only"
 )
 
 type Virployee struct {
@@ -25,6 +32,7 @@ type Virployee struct {
 	Description       string
 	SupervisorUserID  string
 	Autonomy          AutonomyLevel
+	GroundingMode     GroundingMode
 
 	CreatedAt time.Time
 	UpdatedAt time.Time
@@ -42,6 +50,8 @@ type CreateInput struct {
 	Description       string
 	SupervisorUserID  string
 	Autonomy          string
+	GroundingMode     string
+	EmployerSubjectID string
 }
 
 type UpdateInput struct {
@@ -52,6 +62,7 @@ type UpdateInput struct {
 	Description       string
 	SupervisorUserID  string
 	Autonomy          string
+	GroundingMode     string
 }
 
 type NormalizedCreateInput struct {
@@ -62,6 +73,8 @@ type NormalizedCreateInput struct {
 	Description       string
 	SupervisorUserID  string
 	Autonomy          AutonomyLevel
+	GroundingMode     GroundingMode
+	EmployerSubjectID uuid.UUID
 }
 
 type NormalizedUpdateInput struct {
@@ -72,6 +85,7 @@ type NormalizedUpdateInput struct {
 	Description       string
 	SupervisorUserID  string
 	Autonomy          AutonomyLevel
+	GroundingMode     GroundingMode
 }
 
 func (v Virployee) State() State {
@@ -106,6 +120,17 @@ func NormalizeCreateInput(in CreateInput) (NormalizedCreateInput, error) {
 	if err != nil {
 		return NormalizedCreateInput{}, err
 	}
+	groundingMode, err := normalizeGroundingMode(in.GroundingMode, GroundingSourcesOnly)
+	if err != nil {
+		return NormalizedCreateInput{}, err
+	}
+	employerSubjectID := uuid.Nil
+	if strings.TrimSpace(in.EmployerSubjectID) != "" {
+		employerSubjectID, err = parseRequiredUUID(in.EmployerSubjectID, "employer_subject_id")
+		if err != nil {
+			return NormalizedCreateInput{}, err
+		}
+	}
 	out := NormalizedCreateInput{
 		Name:              strings.TrimSpace(in.Name),
 		JobRoleID:         jobRoleID,
@@ -114,6 +139,8 @@ func NormalizeCreateInput(in CreateInput) (NormalizedCreateInput, error) {
 		Description:       strings.TrimSpace(in.Description),
 		SupervisorUserID:  supervisorID,
 		Autonomy:          autonomy,
+		GroundingMode:     groundingMode,
+		EmployerSubjectID: employerSubjectID,
 	}
 	if out.Name == "" {
 		return NormalizedCreateInput{}, domainerr.Validation("name is required")
@@ -142,6 +169,10 @@ func NormalizeUpdateInput(in UpdateInput) (NormalizedUpdateInput, error) {
 	if err != nil {
 		return NormalizedUpdateInput{}, err
 	}
+	groundingMode, err := normalizeGroundingMode(in.GroundingMode, "")
+	if err != nil {
+		return NormalizedUpdateInput{}, err
+	}
 	out := NormalizedUpdateInput{
 		Name:              strings.TrimSpace(in.Name),
 		JobRoleID:         jobRoleID,
@@ -150,11 +181,23 @@ func NormalizeUpdateInput(in UpdateInput) (NormalizedUpdateInput, error) {
 		Description:       strings.TrimSpace(in.Description),
 		SupervisorUserID:  supervisorID,
 		Autonomy:          autonomy,
+		GroundingMode:     groundingMode,
 	}
 	if out.Name == "" {
 		return NormalizedUpdateInput{}, domainerr.Validation("name is required")
 	}
 	return out, nil
+}
+
+func normalizeGroundingMode(raw string, defaultMode GroundingMode) (GroundingMode, error) {
+	mode := GroundingMode(strings.ToLower(strings.TrimSpace(raw)))
+	if mode == "" {
+		return defaultMode, nil
+	}
+	if mode != GroundingGeneral && mode != GroundingSourcesOnly {
+		return "", domainerr.Validation("grounding_mode must be general or sources_only")
+	}
+	return mode, nil
 }
 
 func parseRequiredUUID(raw, field string) (uuid.UUID, error) {

@@ -2,12 +2,15 @@
 
 ## Purpose
 
-Companion v2 starts by modeling Job Roles and managing Virployees.
+Companion v2 models Job Roles and manages Virployees. A Virployee is one digital
+worker definition; its Job Role is the reusable profession shared by one or
+more workers.
 
-A Virployee is a digital employee definition. In this first version, the API
-only creates, reads, updates and manages the lifecycle of Virployees. It does
-not execute work, run LLMs, assign tasks, call tools, evaluate approvals or
-integrate with other Axis services.
+This document specifies the Virployee resource and lifecycle. Execution,
+continuity routing, knowledge and authority are separate bounded contexts that
+refer to the Virployee rather than being embedded as arbitrary prompt fields.
+See [Workforce continuity and routing](workforce-routing.md) and
+[Grounded knowledge and professional authority](grounded-knowledge-and-authority.md).
 
 See `virployees-concepts.md` for the design decision that separates the current
 technical v2 base from the next domain core.
@@ -26,16 +29,15 @@ In scope:
 - Trash and restore.
 - Purge permanently.
 
-Out of scope for this version:
+Out of scope for the Virployee CRUD resource itself:
 
 - Authentication and authorization.
 - Tasks.
-- Runtime execution.
-- LLM providers.
+- Continuity assignments and capacity.
+- Knowledge documents and source bindings.
+- Professional policy and delegations.
 - Model-driven or automatically written memory (governed human memory is
   specified separately in `memories.md`).
-- Tools.
-- Nexus, BFF, Console or any Axis v1 dependency.
 
 ## Architecture Rules
 
@@ -72,6 +74,7 @@ Public representation:
   "description": "Helps with commercial follow-up.",
   "supervisor_user_id": "dev-user",
   "autonomy": "A1",
+  "grounding_mode": "sources_only",
   "state": "active",
   "created_at": "2026-07-02T12:00:00Z",
   "updated_at": "2026-07-02T12:00:00Z",
@@ -95,8 +98,10 @@ Fields:
   responsible for the Virployee. BFF validates it against tenant Users before
   forwarding requests; Companion only stores the reference.
 - `autonomy`: optional input. If empty, it defaults to global `A1`. Accepted
-  values are `A0`, `A1`, `A2`, `A3`, `A4` and `A5`. In this version it is
-  persisted as configuration only; it does not enforce runtime permissions.
+  values are `A0`, `A1`, `A2`, `A3`, `A4` and `A5`; runtime and the Execution
+  Gate enforce the required level for capabilities and side effects.
+- `grounding_mode`: `general` or `sources_only`. New Virployees default to
+  `sources_only`; existing rows retain `general` until explicitly changed.
 - `created_at`: resource metadata; server-generated timestamp.
 - `updated_at`: resource metadata; server-generated timestamp.
 - `state`: derived from lifecycle metadata. It is never accepted as input.
@@ -109,8 +114,8 @@ who performed an action and when. Metadata/lifecycle fields describe the current
 resource row.
 
 Profile Template snapshots are intentionally out of the Virployee CRUD model.
-When runtime/audit exists, execution logs can store the exact prompt/config used
-by a run without freezing every Virployee at creation time.
+Runtime/audit records store the exact prompt/config identifiers used by a run
+without freezing every Virployee at creation time.
 
 Autonomy definitions:
 
@@ -228,6 +233,7 @@ Required columns:
 - `description text not null default ''`
 - `supervisor_user_id text not null`
 - `autonomy text not null default 'A1'`
+- `grounding_mode text not null default 'sources_only'`
 - `created_at timestamptz not null`
 - `updated_at timestamptz not null`
 - `archived_at timestamptz null`
@@ -307,14 +313,20 @@ Request:
 {
   "name": "Sales Assistant",
   "job_role_id": "22222222-2222-4222-8222-222222222222",
+  "employer_subject_id": "44444444-4444-4444-8444-444444444444",
   "profile_template_id": "33333333-3333-4333-8333-333333333333",
   "description": "Helps with commercial follow-up.",
   "supervisor_user_id": "dev-user",
-  "autonomy": ""
+  "autonomy": "",
+  "grounding_mode": "sources_only"
 }
 ```
 
 Response: `201 Created`
+
+`employer_subject_id` is required and is created atomically as the Virployee's
+primary `works_for` relationship. It must reference an active work subject in
+the same tenant.
 
 ```json
 {
@@ -325,6 +337,7 @@ Response: `201 Created`
   "description": "Helps with commercial follow-up.",
   "supervisor_user_id": "dev-user",
   "autonomy": "A1",
+  "grounding_mode": "sources_only",
   "state": "active",
   "created_at": "2026-07-02T12:00:00Z",
   "updated_at": "2026-07-02T12:00:00Z",
@@ -344,6 +357,8 @@ Validation:
 - `supervisor_user_id` is required, trimmed and must be non-empty.
 - `autonomy` is optional. Empty or omitted values default to `A1`.
 - `autonomy` must be one of `A0`, `A1`, `A2`, `A3`, `A4` or `A5`.
+- `grounding_mode` is optional. Empty or omitted values default to
+  `sources_only` on create and must otherwise be `general` or `sources_only`.
 - Unknown fields should be rejected if the HTTP helper supports it without
   custom parsing.
 
@@ -365,6 +380,7 @@ Response: `200 OK`
       "description": "Helps with commercial follow-up.",
       "supervisor_user_id": "dev-user",
       "autonomy": "A1",
+      "grounding_mode": "sources_only",
       "state": "active",
       "created_at": "2026-07-02T12:00:00Z",
       "updated_at": "2026-07-02T12:00:00Z",
@@ -432,7 +448,8 @@ Request:
   "job_role_id": "22222222-2222-4222-8222-222222222222",
   "description": "Updated description.",
   "supervisor_user_id": "dev-user",
-  "autonomy": "A2"
+  "autonomy": "A2",
+  "grounding_mode": "sources_only"
 }
 ```
 
@@ -442,6 +459,7 @@ Rules:
 
 - Only active Virployees can be updated.
 - Updating archived or trashed Virployees returns `409 Conflict`.
+- Omitting `grounding_mode` on update preserves the current value.
 - `state`, lifecycle timestamps and `id` cannot be changed by request body.
 
 ### Archive

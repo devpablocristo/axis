@@ -6,14 +6,22 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	auditdomain "github.com/devpablocristo/nexus-v2/internal/audit/usecases/domain"
+	"github.com/devpablocristo/platform/errors/go/domainerr"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+const auditEventColumns = `
+	id, tenant_id, chain_scope, virployee_id, subject_type, subject_id,
+	event_type, actor_type, actor_id, summary, data, created_at,
+	previous_hash, payload_hash, event_hash, signature_key_id, signature`
 
 // Repository is the append-only persistence port for the audit ledger.
 type Repository struct {
@@ -56,13 +64,10 @@ func (r *Repository) Signed() bool { return len(r.signingKey) > 0 }
 // and inserts it. A per-scope advisory lock serializes concurrent appends to the
 // same chain so PreviousHash always points at the true tip.
 func (r *Repository) Append(ctx context.Context, e auditdomain.AuditEvent) (auditdomain.AuditEvent, error) {
+	idempotent := e.ID != uuid.Nil
 	if e.ID == uuid.Nil {
 		e.ID = uuid.New()
 	}
-	if e.CreatedAt.IsZero() {
-		e.CreatedAt = time.Now().UTC()
-	}
-	e.CreatedAt = e.CreatedAt.UTC().Truncate(time.Microsecond)
 	if e.Data == nil {
 		e.Data = make(map[string]any)
 	}
@@ -75,6 +80,25 @@ func (r *Repository) Append(ctx context.Context, e auditdomain.AuditEvent) (audi
 		return auditdomain.AuditEvent{}, fmt.Errorf("begin audit append: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if idempotent {
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, "audit-idempotency:"+e.ID.String()); err != nil {
+			return auditdomain.AuditEvent{}, fmt.Errorf("lock audit idempotency key: %w", err)
+		}
+		existing, err := scanAuditEvent(tx.QueryRow(ctx, `SELECT `+auditEventColumns+` FROM audit_events WHERE id=$1`, e.ID))
+		switch {
+		case err == nil && sameAuditAppendRequest(existing, e):
+			return existing, nil
+		case err == nil:
+			return auditdomain.AuditEvent{}, domainerr.Conflict("Idempotency-Key was already used for a different audit event")
+		case !errors.Is(err, pgx.ErrNoRows):
+			return auditdomain.AuditEvent{}, fmt.Errorf("read idempotent audit event: %w", err)
+		}
+	}
+
+	if e.CreatedAt.IsZero() {
+		e.CreatedAt = time.Now().UTC()
+	}
+	e.CreatedAt = e.CreatedAt.UTC().Truncate(time.Microsecond)
 
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, e.ChainScope); err != nil {
 		return auditdomain.AuditEvent{}, fmt.Errorf("lock audit chain: %w", err)
@@ -125,9 +149,7 @@ func (r *Repository) Append(ctx context.Context, e auditdomain.AuditEvent) (audi
 // ListByScope returns every event in a chain, oldest first (chain order).
 func (r *Repository) ListByScope(ctx context.Context, chainScope string) ([]auditdomain.AuditEvent, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, tenant_id, chain_scope, virployee_id, subject_type, subject_id,
-		       event_type, actor_type, actor_id, summary, data, created_at,
-		       previous_hash, payload_hash, event_hash, signature_key_id, signature
+		SELECT `+auditEventColumns+`
 		FROM audit_events WHERE chain_scope = $1
 		ORDER BY created_at ASC, id ASC
 	`, chainScope)
@@ -138,30 +160,9 @@ func (r *Repository) ListByScope(ctx context.Context, chainScope string) ([]audi
 
 	out := make([]auditdomain.AuditEvent, 0)
 	for rows.Next() {
-		var e auditdomain.AuditEvent
-		var data []byte
-		var subjectType, subjectID, previousHash, payloadHash, eventHash, signatureKeyID, signature *string
-		if err := rows.Scan(
-			&e.ID, &e.TenantID, &e.ChainScope, &e.VirployeeID, &subjectType, &subjectID,
-			&e.EventType, &e.ActorType, &e.ActorID, &e.Summary, &data, &e.CreatedAt,
-			&previousHash, &payloadHash, &eventHash, &signatureKeyID, &signature,
-		); err != nil {
+		e, err := scanAuditEvent(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scan audit event: %w", err)
-		}
-		e.SubjectType = stringFromPtr(subjectType)
-		e.SubjectID = stringFromPtr(subjectID)
-		e.PreviousHash = stringFromPtr(previousHash)
-		e.PayloadHash = stringFromPtr(payloadHash)
-		e.EventHash = stringFromPtr(eventHash)
-		e.SignatureKeyID = stringFromPtr(signatureKeyID)
-		e.Signature = stringFromPtr(signature)
-		if len(data) > 0 {
-			if err := json.Unmarshal(data, &e.Data); err != nil {
-				return nil, fmt.Errorf("unmarshal audit data: %w", err)
-			}
-		}
-		if e.Data == nil {
-			e.Data = make(map[string]any)
 		}
 		out = append(out, e)
 	}
@@ -294,4 +295,49 @@ func stringFromPtr(value *string) string {
 		return ""
 	}
 	return *value
+}
+
+type rowScanner interface{ Scan(...any) error }
+
+func scanAuditEvent(row rowScanner) (auditdomain.AuditEvent, error) {
+	var e auditdomain.AuditEvent
+	var data []byte
+	var subjectType, subjectID, previousHash, payloadHash, eventHash, signatureKeyID, signature *string
+	err := row.Scan(
+		&e.ID, &e.TenantID, &e.ChainScope, &e.VirployeeID, &subjectType, &subjectID,
+		&e.EventType, &e.ActorType, &e.ActorID, &e.Summary, &data, &e.CreatedAt,
+		&previousHash, &payloadHash, &eventHash, &signatureKeyID, &signature,
+	)
+	if err != nil {
+		return auditdomain.AuditEvent{}, err
+	}
+	e.SubjectType = stringFromPtr(subjectType)
+	e.SubjectID = stringFromPtr(subjectID)
+	e.PreviousHash = stringFromPtr(previousHash)
+	e.PayloadHash = stringFromPtr(payloadHash)
+	e.EventHash = stringFromPtr(eventHash)
+	e.SignatureKeyID = stringFromPtr(signatureKeyID)
+	e.Signature = stringFromPtr(signature)
+	if len(data) > 0 {
+		if err := json.Unmarshal(data, &e.Data); err != nil {
+			return auditdomain.AuditEvent{}, fmt.Errorf("unmarshal audit data: %w", err)
+		}
+	}
+	if e.Data == nil {
+		e.Data = make(map[string]any)
+	}
+	return e, nil
+}
+
+func sameAuditAppendRequest(existing, requested auditdomain.AuditEvent) bool {
+	if existing.TenantID != requested.TenantID || existing.ChainScope != requested.ChainScope ||
+		existing.VirployeeID != requested.VirployeeID || existing.SubjectType != requested.SubjectType ||
+		existing.SubjectID != requested.SubjectID || existing.EventType != requested.EventType ||
+		existing.ActorType != requested.ActorType || existing.ActorID != requested.ActorID ||
+		existing.Summary != requested.Summary {
+		return false
+	}
+	existingData, existingErr := json.Marshal(existing.Data)
+	requestedData, requestedErr := json.Marshal(requested.Data)
+	return existingErr == nil && requestedErr == nil && string(existingData) == string(requestedData)
 }

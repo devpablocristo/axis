@@ -26,6 +26,7 @@ var (
 	ErrEmptyDerivative       = errors.New("artifact adapter returned no usable content")
 	ErrIndexingFailed        = errors.New("artifact indexing failed")
 	ErrExtractionUnavailable = errors.New("isolated artifact extraction is unavailable")
+	ErrArtifactStoreFull     = errors.New("artifact staging store is full")
 )
 
 type Scope struct {
@@ -126,9 +127,26 @@ type AdaptInput struct {
 }
 
 type IngestRequest struct {
-	Scope     Scope
-	Artifacts []Manifest
-	Progress  func(context.Context, Status) error
+	Scope           Scope
+	Artifacts       []Manifest
+	RequireIndexing bool
+	Progress        func(context.Context, Status) error
+}
+
+// UploadRequest carries a caller-owned stream into the same verified
+// scan/stage/extract/index pipeline used by remote manifests. The stream is
+// spooled before the catalog write so its immutable size and checksum, rather
+// than client-provided metadata, become the artifact provenance.
+type UploadRequest struct {
+	Scope       Scope
+	Manifest    Manifest
+	Content     io.Reader
+	ContentType string
+	// RequireIndexing makes missing index infrastructure a pre-processing
+	// failure. Knowledge documents use this because extraction alone is not a
+	// registrable source.
+	RequireIndexing bool
+	Progress        func(context.Context, Status) error
 }
 
 type IngestResult struct {

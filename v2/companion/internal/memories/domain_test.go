@@ -4,11 +4,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/devpablocristo/platform/errors/go/domainerr"
 	"github.com/google/uuid"
 )
 
 func TestNormalizeAndHashAreDeterministic(t *testing.T) {
-	in, err := normalizeCreate(CreateInput{Title: "  Time zone ", Type: "PREFERENCE", Content: "  America/Argentina/Buenos_Aires  ", ActorID: "user_1"})
+	subjectID := uuid.NewString()
+	in, err := normalizeCreate(CreateInput{Title: "  Time zone ", Type: "PREFERENCE", Content: "  America/Argentina/Buenos_Aires  ", ActorID: "user_1", Scope: Scope{Type: ScopeSubject, SubjectID: subjectID}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -17,6 +19,16 @@ func TestNormalizeAndHashAreDeterministic(t *testing.T) {
 	}
 	if ContentHash(in.Content) != ContentHash(" America/Argentina/Buenos_Aires ") {
 		t.Fatal("hash must ignore surrounding whitespace")
+	}
+}
+
+func TestNormalizeCreateReservesVirployeeScopeForProcedures(t *testing.T) {
+	_, err := normalizeCreate(CreateInput{Title: "Patient preference", Type: "preference", Content: "Morning appointments", ActorID: "user_1"})
+	if !domainerr.IsValidation(err) {
+		t.Fatalf("expected personal global memory rejection, got %v", err)
+	}
+	if _, err := normalizeCreate(CreateInput{Title: "Triage procedure", Type: "procedure", Content: "Verify identity before opening a chart", ActorID: "user_1"}); err != nil {
+		t.Fatalf("expected non-personal procedure to allow Virployee scope: %v", err)
 	}
 }
 
@@ -46,6 +58,27 @@ func TestNormalizeRejectsInvalidEnums(t *testing.T) {
 	_, err := normalizeCreate(CreateInput{Title: "x", Type: "belief", Content: "y", ActorID: "actor"})
 	if err == nil {
 		t.Fatal("expected invalid type")
+	}
+}
+
+func TestNormalizeScopeRequiresExactSubjectAndCase(t *testing.T) {
+	caseID := uuid.New()
+	subjectID := uuid.New()
+	got, err := NormalizeScope(Scope{Type: ScopeCase, SubjectID: " " + subjectID.String() + " ", CaseID: &caseID})
+	if err != nil {
+		t.Fatalf("NormalizeScope: %v", err)
+	}
+	if got.SubjectID != subjectID.String() || got.CaseID == nil || *got.CaseID != caseID {
+		t.Fatalf("unexpected scope: %+v", got)
+	}
+	if _, err := NormalizeScope(Scope{Type: ScopeSubject, SubjectID: subjectID.String(), CaseID: &caseID}); !domainerr.IsValidation(err) {
+		t.Fatalf("subject scope must reject case_id, got %v", err)
+	}
+	if _, err := NormalizeScope(Scope{Type: ScopeCase, SubjectID: subjectID.String()}); !domainerr.IsValidation(err) {
+		t.Fatalf("case scope must require case_id, got %v", err)
+	}
+	if _, err := NormalizeScope(Scope{Type: ScopeSubject, SubjectID: "patient-a"}); !domainerr.IsValidation(err) {
+		t.Fatalf("subject scope must require a UUID subject_id, got %v", err)
 	}
 }
 

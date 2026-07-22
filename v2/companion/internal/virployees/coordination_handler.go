@@ -37,6 +37,31 @@ func (h *CoordinationHandler) Routes(router gin.IRouter) {
 func (h *CoordinationHandler) listCases(c *gin.Context) {
 	limit := parseCoordinationLimit(c)
 	items, err := h.ucs.ListAssistCases(c.Request.Context(), tenantID(c), c.Query("status"), limit)
+	if err == nil {
+		subjectID := strings.TrimSpace(c.Query("subject_id"))
+		ownerID := strings.TrimSpace(c.Query("owner_virployee_id"))
+		caseID := strings.TrimSpace(c.Query("case_id"))
+		if ownerID != "" {
+			if parsed, parseErr := uuid.Parse(ownerID); parseErr != nil || parsed == uuid.Nil {
+				ginmw.Respond(c, ginmw.ErrBadInput)
+				return
+			}
+		}
+		filtered := make([]AssistCase, 0, len(items))
+		for _, item := range items {
+			if subjectID != "" && item.SubjectID != subjectID {
+				continue
+			}
+			if ownerID != "" && item.OwnerVirployeeID.String() != ownerID {
+				continue
+			}
+			if caseID != "" && item.ID.String() != caseID {
+				continue
+			}
+			filtered = append(filtered, item)
+		}
+		items = filtered
+	}
 	respondCoordination(c, items, err)
 }
 func (h *CoordinationHandler) getCase(c *gin.Context) {

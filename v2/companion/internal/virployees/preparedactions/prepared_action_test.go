@@ -97,6 +97,38 @@ func TestPayloadHashChangesWithApprovedFields(t *testing.T) {
 	}
 }
 
+func TestPayloadHashBindsPrincipalContext(t *testing.T) {
+	base := Action{SchemaVersion: SchemaVersion, Action: ActionCreate, Title: "Planning", Date: "2026-07-12", Time: "15:30", Timezone: "UTC", DurationMinutes: 60, Attendees: []string{"a@example.com"}}
+	legacy, _ := json.Marshal(base)
+	if strings.Contains(string(legacy), "principal_") {
+		t.Fatalf("legacy action without principal must keep its serialization: %s", legacy)
+	}
+	base.PrincipalType, base.PrincipalID = "person", "patient-a"
+	first, _ := base.PayloadHash()
+	base.PrincipalID = "patient-b"
+	second, _ := base.PayloadHash()
+	if first == second {
+		t.Fatal("changing the represented principal must invalidate the prepared action hash")
+	}
+}
+
+func TestPayloadHashBindsMCPContext(t *testing.T) {
+	base := Action{SchemaVersion: SchemaVersion, Action: ActionCreate, Title: "Consulta", Date: "2026-08-10", Time: "10:00", Timezone: "UTC", DurationMinutes: 30, Attendees: []string{"a@example.com"}}
+	first, _ := base.PayloadHash()
+	base.MCPContext = &MCPContextBinding{
+		TenantID: "tenant-1", ActorID: "actor-1", VirployeeID: "virployee-1", SubjectID: "subject-1",
+		AssignmentID: "assignment-1", AssignmentVersion: 1, CapabilityKey: ActionCreate,
+		CapabilityVersion: "1.0.0", ManifestHash: "manifest", PolicyVersion: 2,
+		AuthorityHash: "authority", ContextHash: "context", PayloadHash: "payload", IdempotencyHash: "idem",
+	}
+	second, _ := base.PayloadHash()
+	base.MCPContext.AssignmentVersion = 2
+	third, _ := base.PayloadHash()
+	if first == second || second == third {
+		t.Fatal("MCP context and assignment revision must change the prepared action hash")
+	}
+}
+
 func TestFromDraftRejectsAmbiguousSchedule(t *testing.T) {
 	_, err := FromDraft(dryrun.Draft{Action: ActionCreate, Fields: []dryrun.DraftField{
 		{Key: "title", Value: "Planning"}, {Key: "date", Value: "tomorrow"}, {Key: "time", Value: "15:00"},

@@ -15,8 +15,10 @@ import (
 	"github.com/devpablocristo/nexus-v2/internal/approvals"
 	"github.com/devpablocristo/nexus-v2/internal/attestation"
 	"github.com/devpablocristo/nexus-v2/internal/audit"
+	"github.com/devpablocristo/nexus-v2/internal/authorization"
 	"github.com/devpablocristo/nexus-v2/internal/evidence"
 	"github.com/devpablocristo/nexus-v2/internal/governance"
+	"github.com/devpablocristo/nexus-v2/internal/governancepolicies"
 	"github.com/devpablocristo/nexus-v2/internal/infra/migrations"
 	"github.com/devpablocristo/nexus-v2/internal/jobs"
 	"github.com/devpablocristo/nexus-v2/internal/watchers"
@@ -80,8 +82,19 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	actionTypeUseCases := actiontypes.NewUseCases(actionTypeRepo)
 	actionTypeHandler := actiontypes.NewHandler(actionTypeUseCases)
 
+	authorizationRepo := authorization.NewRepository(db.Pool())
+	authorizationUseCases := authorization.NewUseCases(authorizationRepo)
+	authorizationHandler := authorization.NewHandler(authorizationUseCases)
+
+	policyRepo := governancepolicies.NewRepository(db.Pool())
+	policyEvaluator := governancepolicies.NewEvaluator(policyRepo)
+	policyUseCases := governancepolicies.NewUseCases(policyRepo, policyEvaluator, authorizationUseCases)
+	policyHandler := governancepolicies.NewHandler(policyUseCases)
+
 	governanceRepo := governance.NewRepository(db.Pool(), config.ApprovalTTL)
 	governanceUseCases := governance.NewUseCases(actionTypeUseCases, governanceRepo)
+	governanceUseCases.SetPolicyEvaluator(policyUseCases)
+	governanceUseCases.SetFunctionalRoleResolver(authorizationUseCases)
 	attestationKey, err := resolveAttestationKey(ctx, config)
 	if err != nil {
 		db.Close()
@@ -100,6 +113,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 
 	approvalsRepo := approvals.NewRepository(db.Pool())
 	approvalsUseCases := approvals.NewUseCases(approvalsRepo)
+	approvalsUseCases.SetAuthorizer(authorizationUseCases)
 	approvalsHandler := approvals.NewHandler(approvalsUseCases)
 
 	// Tamper-evident audit ledger (hash-chained per virployee). Signing is
@@ -151,6 +165,8 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	api := router.Group("/v1")
 	api.Use(internalAuthMiddleware(config.InternalAuthSecret))
 	actionTypeHandler.Routes(api)
+	authorizationHandler.Routes(api)
+	policyHandler.Routes(api)
 	governanceHandler.Routes(api)
 	approvalsHandler.Routes(api)
 	auditHandler.Routes(api)

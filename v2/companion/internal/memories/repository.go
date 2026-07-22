@@ -21,7 +21,11 @@ type Repository struct{ db *pgxpool.Pool }
 
 func NewRepository(db *pgxpool.Pool) *Repository { return &Repository{db: db} }
 
-const memoryColumns = `id, virployee_id, title, memory_type, content, sensitivity, provenance, actor_id,
+type memoryScopeQueryer interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
+const memoryColumns = `id, virployee_id, scope_type, subject_id, case_id, title, memory_type, content, sensitivity, provenance, actor_id,
 COALESCE(source_reference,'') AS source_reference, content_hash, version, lifecycle_state, trust_score, review_state,
 review_reason, poisoning_flags, pii_flags, expires_at, decay_at, last_recalled_at, recall_count,
 reviewed_by, reviewed_at, embedding_model, embedding_version, created_at, updated_at`
@@ -31,7 +35,7 @@ type scanner interface{ Scan(...any) error }
 func scanMemory(s scanner) (Memory, error) {
 	var m Memory
 	err := s.Scan(
-		&m.ID, &m.VirployeeID, &m.Title, &m.Type, &m.Content, &m.Sensitivity, &m.Provenance,
+		&m.ID, &m.VirployeeID, &m.ScopeType, &m.SubjectID, &m.CaseID, &m.Title, &m.Type, &m.Content, &m.Sensitivity, &m.Provenance,
 		&m.ActorID, &m.SourceReference, &m.ContentHash, &m.Version, &m.State, &m.TrustScore,
 		&m.ReviewState, &m.ReviewReason, &m.PoisoningFlags, &m.PIIFlags, &m.ExpiresAt, &m.DecayAt,
 		&m.LastRecalledAt, &m.RecallCount, &m.ReviewedBy, &m.ReviewedAt, &m.EmbeddingModel,
@@ -66,17 +70,23 @@ func (r *Repository) Authorized(ctx context.Context, tenant string, virployee uu
 	return nil
 }
 
-func (r *Repository) HasActiveConflict(ctx context.Context, tenant string, virployee, exclude uuid.UUID, title, memoryType, contentHash string) (bool, error) {
+func (r *Repository) HasActiveConflict(ctx context.Context, tenant string, virployee, exclude uuid.UUID, scope Scope, title, memoryType, contentHash string) (bool, error) {
+	scope, err := NormalizeScope(scope)
+	if err != nil {
+		return false, err
+	}
 	var conflict bool
-	err := r.db.QueryRow(ctx, `
+	err = r.db.QueryRow(ctx, `
 		SELECT EXISTS (
 			SELECT 1 FROM companion_memories
 			WHERE tenant_id=$1 AND virployee_id=$2 AND id<>$3
 			  AND lifecycle_state='active' AND review_state<>'rejected'
 			  AND memory_type=$4 AND lower(btrim(title))=lower(btrim($5))
-			  AND content_hash<>$6
+			  AND content_hash<>$6 AND scope_type=$7 AND subject_id=$8
+			  AND case_id IS NOT DISTINCT FROM $9
 		)
-	`, strings.TrimSpace(tenant), virployee, exclude, memoryType, title, contentHash).Scan(&conflict)
+	`, strings.TrimSpace(tenant), virployee, exclude, memoryType, title, contentHash,
+		scope.Type, scope.SubjectID, scope.CaseID).Scan(&conflict)
 	return conflict, err
 }
 
@@ -87,14 +97,18 @@ func (r *Repository) Create(ctx context.Context, tenant string, virployee uuid.U
 		return Memory{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := validateMemoryScopeAccess(ctx, tx, tenant, virployee, in.Scope); err != nil {
+		return Memory{}, err
+	}
 	m, err := scanMemory(tx.QueryRow(ctx, `
 		INSERT INTO companion_memories(
-			tenant_id,virployee_id,title,content,memory_type,sensitivity,provenance,actor_id,
+			tenant_id,virployee_id,scope_type,subject_id,case_id,title,content,memory_type,sensitivity,provenance,actor_id,
 			source_reference,content_hash,trust_score,review_state,review_reason,
 			poisoning_flags,pii_flags,expires_at,decay_at
-		) VALUES($1,$2,$3,$4,$5,$6,$7,$8,NULLIF($9,''),$10,$11,$12,$13,$14,$15,$16,$17)
+		) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NULLIF($12,''),$13,$14,$15,$16,$17,$18,$19,$20)
 		RETURNING `+memoryColumns,
-		tenant, virployee, in.Title, in.Content, in.Type, in.Sensitivity, in.Provenance, in.ActorID,
+		tenant, virployee, in.Scope.Type, in.Scope.SubjectID, in.Scope.CaseID,
+		in.Title, in.Content, in.Type, in.Sensitivity, in.Provenance, in.ActorID,
 		in.SourceReference, hash, in.TrustScore, in.ReviewState, in.ReviewReason,
 		in.PoisoningFlags, in.PIIFlags, in.ExpiresAt, in.DecayAt))
 	if err != nil {
@@ -105,7 +119,7 @@ func (r *Repository) Create(ctx context.Context, tenant string, virployee uuid.U
 			return Memory{}, err
 		}
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO companion_memory_audit(tenant_id,virployee_id,memory_id,action,actor_id,resulting_hash,resulting_version) VALUES($1,$2,$3,'create',$4,$5,$6)`, tenant, virployee, m.ID, in.ActorID, m.ContentHash, m.Version)
+	_, err = tx.Exec(ctx, `INSERT INTO companion_memory_audit(tenant_id,virployee_id,memory_id,action,actor_id,resulting_hash,resulting_version,scope_type,subject_id,case_id) VALUES($1,$2,$3,'create',$4,$5,$6,$7,$8,$9)`, tenant, virployee, m.ID, in.ActorID, m.ContentHash, m.Version, m.ScopeType, m.SubjectID, m.CaseID)
 	if err != nil {
 		return Memory{}, err
 	}
@@ -119,6 +133,13 @@ func (r *Repository) Get(ctx context.Context, tenant string, virployee, id uuid.
 	return scanMemory(r.db.QueryRow(ctx, `SELECT `+memoryColumns+` FROM companion_memories WHERE tenant_id=$1 AND virployee_id=$2 AND id=$3`, tenant, virployee, id))
 }
 func (r *Repository) List(ctx context.Context, tenant string, virployee uuid.UUID, in ListInput) (Page, error) {
+	scope, err := NormalizeScope(in.Scope)
+	if err != nil {
+		return Page{}, err
+	}
+	if err := validateMemoryScopeAccess(ctx, r.db, tenant, virployee, scope); err != nil {
+		return Page{}, err
+	}
 	state := in.State
 	if state == "" {
 		state = "active"
@@ -136,8 +157,8 @@ func (r *Repository) List(ctx context.Context, tenant string, virployee uuid.UUI
 	if err != nil {
 		return Page{}, err
 	}
-	q := `SELECT ` + memoryColumns + ` FROM companion_memories WHERE tenant_id=$1 AND virployee_id=$2 AND lifecycle_state=$3 AND ($4='' OR to_tsvector('simple',title||' '||content) @@ websearch_to_tsquery('simple',$4)) AND (NOT $5 OR (updated_at,id)<($6,$7)) ORDER BY updated_at DESC,id DESC LIMIT $8`
-	rows, err := r.db.Query(ctx, q, tenant, virployee, state, strings.TrimSpace(in.Query), hasCursor, cursorTime, cursorID, in.Limit+1)
+	q := `SELECT ` + memoryColumns + ` FROM companion_memories WHERE tenant_id=$1 AND virployee_id=$2 AND lifecycle_state=$3 AND scope_type=$4 AND subject_id=$5 AND case_id IS NOT DISTINCT FROM $6 AND ($7='' OR to_tsvector('simple',title||' '||content) @@ websearch_to_tsquery('simple',$7)) AND (NOT $8 OR (updated_at,id)<($9,$10)) ORDER BY updated_at DESC,id DESC LIMIT $11`
+	rows, err := r.db.Query(ctx, q, tenant, virployee, state, scope.Type, scope.SubjectID, scope.CaseID, strings.TrimSpace(in.Query), hasCursor, cursorTime, cursorID, in.Limit+1)
 	if err != nil {
 		return Page{}, err
 	}
@@ -218,7 +239,7 @@ func (r *Repository) Update(ctx context.Context, tenant string, virployee, id uu
 	if err != nil {
 		return Memory{}, err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO companion_memory_audit(tenant_id,virployee_id,memory_id,action,actor_id,previous_hash,resulting_hash,previous_version,resulting_version) VALUES($1,$2,$3,'update',$4,$5,$6,$7,$8)`, tenant, virployee, id, in.ActorID, old.ContentHash, m.ContentHash, old.Version, m.Version)
+	_, err = tx.Exec(ctx, `INSERT INTO companion_memory_audit(tenant_id,virployee_id,memory_id,action,actor_id,previous_hash,resulting_hash,previous_version,resulting_version,scope_type,subject_id,case_id) VALUES($1,$2,$3,'update',$4,$5,$6,$7,$8,$9,$10,$11)`, tenant, virployee, id, in.ActorID, old.ContentHash, m.ContentHash, old.Version, m.Version, m.ScopeType, m.SubjectID, m.CaseID)
 	if err != nil {
 		return Memory{}, err
 	}
@@ -266,9 +287,9 @@ func (r *Repository) Review(ctx context.Context, tenant string, virployee, id uu
 	_, err = tx.Exec(ctx, `
 		INSERT INTO companion_memory_audit(
 			tenant_id,virployee_id,memory_id,action,actor_id,previous_hash,resulting_hash,
-			previous_version,resulting_version,metadata
-		) VALUES($1,$2,$3,$4,$5,$6,$6,$7,$7,$8)
-	`, tenant, virployee, id, "review_"+decision, actor, m.ContentHash, m.Version, metadata)
+			previous_version,resulting_version,metadata,scope_type,subject_id,case_id
+		) VALUES($1,$2,$3,$4,$5,$6,$6,$7,$7,$8,$9,$10,$11)
+	`, tenant, virployee, id, "review_"+decision, actor, m.ContentHash, m.Version, metadata, m.ScopeType, m.SubjectID, m.CaseID)
 	if err != nil {
 		return Memory{}, err
 	}
@@ -290,6 +311,7 @@ func (r *Repository) IndexCandidate(ctx context.Context, tenant string, id uuid.
 		  AND review_state='approved' AND trust_score >= $4
 		  AND sensitivity='normal' AND cardinality(poisoning_flags)=0
 		  AND review_reason<>'conflicting_memory_requires_review'
+		  AND (scope_type<>'virployee' OR memory_type='procedure')
 		  AND (expires_at IS NULL OR expires_at > now())
 	`, tenant, id, version, RecallTrustFloor))
 }
@@ -320,10 +342,10 @@ func (r *Repository) StoreEmbedding(ctx context.Context, tenant string, memory M
 	}
 	_, err = tx.Exec(ctx, `
 		INSERT INTO companion_memory_audit(
-			tenant_id,virployee_id,memory_id,action,actor_id,resulting_hash,resulting_version,metadata
-		) VALUES($1,$2,$3,'index','system:memory-indexer',$4,$5,$6)
+			tenant_id,virployee_id,memory_id,action,actor_id,resulting_hash,resulting_version,metadata,scope_type,subject_id,case_id
+		) VALUES($1,$2,$3,'index','system:memory-indexer',$4,$5,$6,$7,$8,$9)
 	`, tenant, memory.VirployeeID, memory.ID, memory.ContentHash, memory.Version,
-		json.RawMessage(`{"embedding_version":"memory-embed.v1"}`))
+		json.RawMessage(`{"embedding_version":"memory-embed.v1"}`), memory.ScopeType, memory.SubjectID, memory.CaseID)
 	if err != nil {
 		return err
 	}
@@ -347,13 +369,15 @@ func (r *Repository) DecayDue(ctx context.Context, limit int) (int64, error) {
 				decay_at=CASE WHEN expires_at IS NOT NULL AND expires_at<=now() THEN NULL ELSE now()+interval '30 days' END,
 				updated_at=now()
 			FROM picked WHERE memory.id=picked.id
-			RETURNING memory.tenant_id,memory.virployee_id,memory.id,memory.content_hash,memory.version
+			RETURNING memory.tenant_id,memory.virployee_id,memory.id,memory.content_hash,memory.version,
+			          memory.scope_type,memory.subject_id,memory.case_id
 		)
 		INSERT INTO companion_memory_audit(
-			tenant_id,virployee_id,memory_id,action,actor_id,resulting_hash,resulting_version,metadata
+			tenant_id,virployee_id,memory_id,action,actor_id,resulting_hash,resulting_version,metadata,
+			scope_type,subject_id,case_id
 		)
 		SELECT tenant_id,virployee_id,id,'decay','system:memory-decay',content_hash,version,
-		       '{"factor":0.85}'::jsonb FROM changed
+		       '{"factor":0.85}'::jsonb,scope_type,subject_id,case_id FROM changed
 	`, limit)
 	if err != nil {
 		return 0, err
@@ -375,7 +399,7 @@ func (r *Repository) Lifecycle(ctx context.Context, tenant string, virployee, id
 	if err != nil {
 		return mapError(err)
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO companion_memory_audit(tenant_id,virployee_id,memory_id,action,actor_id,previous_hash,resulting_hash,previous_version,resulting_version) VALUES($1,$2,$3,$4,$5,$6,$6,$7,$7)`, tenant, virployee, id, action, actor, m.ContentHash, m.Version)
+	_, err = tx.Exec(ctx, `INSERT INTO companion_memory_audit(tenant_id,virployee_id,memory_id,action,actor_id,previous_hash,resulting_hash,previous_version,resulting_version,scope_type,subject_id,case_id) VALUES($1,$2,$3,$4,$5,$6,$6,$7,$7,$8,$9,$10)`, tenant, virployee, id, action, actor, m.ContentHash, m.Version, m.ScopeType, m.SubjectID, m.CaseID)
 	if err != nil {
 		return err
 	}
@@ -383,7 +407,7 @@ func (r *Repository) Lifecycle(ctx context.Context, tenant string, virployee, id
 }
 
 func (r *Repository) Purge(ctx context.Context, tenant string, virployee, id uuid.UUID, actor string) error {
-	tag, err := r.db.Exec(ctx, `WITH deleted AS (DELETE FROM companion_memories WHERE tenant_id=$1 AND virployee_id=$2 AND id=$3 AND lifecycle_state='trash' RETURNING content_hash,version) INSERT INTO companion_memory_audit(tenant_id,virployee_id,memory_id,action,actor_id,previous_hash,previous_version) SELECT $1,$2,$3,'purge',$4,content_hash,version FROM deleted`, tenant, virployee, id, actor)
+	tag, err := r.db.Exec(ctx, `WITH deleted AS (DELETE FROM companion_memories WHERE tenant_id=$1 AND virployee_id=$2 AND id=$3 AND lifecycle_state='trash' RETURNING content_hash,version,scope_type,subject_id,case_id) INSERT INTO companion_memory_audit(tenant_id,virployee_id,memory_id,action,actor_id,previous_hash,previous_version,scope_type,subject_id,case_id) SELECT $1,$2,$3,'purge',$4,content_hash,version,scope_type,subject_id,case_id FROM deleted`, tenant, virployee, id, actor)
 	if err != nil {
 		return mapError(err)
 	}
@@ -394,8 +418,19 @@ func (r *Repository) Purge(ctx context.Context, tenant string, virployee, id uui
 }
 
 func (r *Repository) Recall(ctx context.Context, tenant string, virployee uuid.UUID, query string, limit int, vector []float32, model string) ([]Recalled, error) {
+	return r.RecallScoped(ctx, tenant, virployee, Scope{}, query, limit, vector, model)
+}
+
+func (r *Repository) RecallScoped(ctx context.Context, tenant string, virployee uuid.UUID, scope Scope, query string, limit int, vector []float32, model string) ([]Recalled, error) {
 	if strings.TrimSpace(query) == "" {
 		return nil, domainerr.Validation("query is required")
+	}
+	scope, err := NormalizeScope(scope)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateMemoryScopeAccess(ctx, r.db, tenant, virployee, scope); err != nil {
+		return nil, err
 	}
 	if limit <= 0 {
 		limit = 5
@@ -404,7 +439,6 @@ func (r *Repository) Recall(ctx context.Context, tenant string, virployee uuid.U
 		limit = 10
 	}
 	var rows pgx.Rows
-	var err error
 	if len(vector) == EmbeddingDimensions && strings.TrimSpace(model) != "" {
 		rows, err = r.db.Query(ctx, `
 			WITH scoped AS MATERIALIZED (
@@ -419,13 +453,17 @@ func (r *Repository) Recall(ctx context.Context, tenant string, virployee uuid.U
 				  AND review_state='approved' AND trust_score >= $7
 				  AND sensitivity='normal' AND cardinality(poisoning_flags)=0
 				  AND review_reason<>'conflicting_memory_requires_review'
+				  AND (scope_type<>'virployee' OR memory_type='procedure')
 				  AND (expires_at IS NULL OR expires_at > now())
+				  AND (scope_type='virployee'
+				       OR ($8 IN ('subject','case') AND scope_type='subject' AND subject_id=$9)
+				       OR ($8='case' AND scope_type='case' AND subject_id=$9 AND case_id=$10))
 			)
 			SELECT `+memoryColumns+`,
 			       (GREATEST(0,1-vector_distance)*0.75 + LEAST(1,text_rank)*0.25) AS score
-			FROM scoped ORDER BY score DESC,updated_at DESC,id DESC LIMIT $8
+			FROM scoped ORDER BY score DESC,updated_at DESC,id DESC LIMIT $11
 		`, tenant, virployee, query, strings.TrimSpace(model), EmbeddingVersion,
-			memoryVectorLiteral(vector), RecallTrustFloor, limit)
+			memoryVectorLiteral(vector), RecallTrustFloor, scope.Type, scope.SubjectID, scope.CaseID, limit)
 	} else {
 		rows, err = r.db.Query(ctx, `
 			SELECT `+memoryColumns+`,
@@ -436,11 +474,15 @@ func (r *Repository) Recall(ctx context.Context, tenant string, virployee uuid.U
 			  AND review_state='approved' AND trust_score >= $5
 			  AND sensitivity='normal' AND cardinality(poisoning_flags)=0
 			  AND review_reason<>'conflicting_memory_requires_review'
+			  AND (scope_type<>'virployee' OR memory_type='procedure')
 			  AND (expires_at IS NULL OR expires_at > now())
+			  AND (scope_type='virployee'
+			       OR ($6 IN ('subject','case') AND scope_type='subject' AND subject_id=$7)
+			       OR ($6='case' AND scope_type='case' AND subject_id=$7 AND case_id=$8))
 			  AND to_tsvector('simple',title||' '||content) @@
 			      websearch_to_tsquery('simple',regexp_replace(trim($3),'\s+',' OR ','g'))
 			ORDER BY score DESC,updated_at DESC,id DESC LIMIT $4
-		`, tenant, virployee, query, limit, RecallTrustFloor)
+		`, tenant, virployee, query, limit, RecallTrustFloor, scope.Type, scope.SubjectID, scope.CaseID)
 	}
 	if err != nil {
 		return nil, err
@@ -453,7 +495,7 @@ func (r *Repository) Recall(ctx context.Context, tenant string, virployee uuid.U
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, Recalled{Memory: m, Reference: Reference{ID: m.ID, Title: m.Title, Type: m.Type, Version: m.Version, Hash: m.ContentHash, Sensitivity: m.Sensitivity, Score: score}})
+		out = append(out, Recalled{Memory: m, Reference: Reference{ID: m.ID, Title: m.Title, Type: m.Type, Version: m.Version, Hash: m.ContentHash, Sensitivity: m.Sensitivity, Score: score, ScopeType: m.ScopeType, SubjectID: m.SubjectID, CaseID: m.CaseID}})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -471,11 +513,69 @@ func (r *Repository) Recall(ctx context.Context, tenant string, virployee uuid.U
 	return out, nil
 }
 
+// validateMemoryScopeAccess prevents a caller from turning a syntactically
+// valid subject or case identifier into a cross-patient lookup. A case belongs
+// only to its current owner; entrypoint_virployee_id is historical metadata and
+// deliberately grants no access after reassignment.
+func validateMemoryScopeAccess(ctx context.Context, queryer memoryScopeQueryer, tenant string, virployee uuid.UUID, scope Scope) error {
+	if scope.Type == ScopeVirployee {
+		return nil
+	}
+	var allowed bool
+	var err error
+	switch scope.Type {
+	case ScopeSubject:
+		err = queryer.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1
+				FROM companion_work_subjects AS subject
+				WHERE subject.tenant_id=$1 AND subject.id=$2 AND subject.archived_at IS NULL
+				  AND (
+					EXISTS (
+						SELECT 1 FROM companion_continuity_assignments AS assignment
+						WHERE assignment.tenant_id=$1 AND assignment.subject_id=subject.id
+						  AND assignment.virployee_id=$3 AND assignment.status='active'
+					)
+					OR EXISTS (
+						SELECT 1 FROM companion_virployee_relationships AS relationship
+						WHERE relationship.tenant_id=$1 AND relationship.subject_id=subject.id
+						  AND relationship.virployee_id=$3
+						  AND relationship.relationship_type IN ('serves','works_for')
+					)
+				  )
+			)
+		`, strings.TrimSpace(tenant), scope.SubjectID, virployee).Scan(&allowed)
+	case ScopeCase:
+		err = queryer.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1
+				FROM companion_assist_cases AS assist_case
+				JOIN companion_work_subjects AS subject
+				  ON subject.tenant_id=assist_case.tenant_id
+				 AND subject.id::text=assist_case.subject_id
+				WHERE assist_case.tenant_id=$1 AND assist_case.id=$2
+				  AND assist_case.subject_id=$3 AND assist_case.owner_virployee_id=$4
+				  AND assist_case.status IN ('open','needs_human')
+				  AND subject.archived_at IS NULL
+			)
+		`, strings.TrimSpace(tenant), scope.CaseID, scope.SubjectID, virployee).Scan(&allowed)
+	default:
+		return domainerr.Validation("memory scope type must be virployee, subject, or case")
+	}
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		return domainerr.Forbidden("memory scope is not assigned to this Virployee")
+	}
+	return nil
+}
+
 func scanRecalled(s scanner) (Memory, float64, error) {
 	var m Memory
 	var score float64
 	err := s.Scan(
-		&m.ID, &m.VirployeeID, &m.Title, &m.Type, &m.Content, &m.Sensitivity, &m.Provenance,
+		&m.ID, &m.VirployeeID, &m.ScopeType, &m.SubjectID, &m.CaseID, &m.Title, &m.Type, &m.Content, &m.Sensitivity, &m.Provenance,
 		&m.ActorID, &m.SourceReference, &m.ContentHash, &m.Version, &m.State, &m.TrustScore,
 		&m.ReviewState, &m.ReviewReason, &m.PoisoningFlags, &m.PIIFlags, &m.ExpiresAt, &m.DecayAt,
 		&m.LastRecalledAt, &m.RecallCount, &m.ReviewedBy, &m.ReviewedAt, &m.EmbeddingModel,

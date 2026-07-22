@@ -13,6 +13,25 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+func TestValidMessageTypeRequiresExactAggregateKindPair(t *testing.T) {
+	tests := []struct {
+		aggregateType string
+		kind          string
+		want          bool
+	}{
+		{AggregateTypeExecutionAttempt, KindExecutionResult, true},
+		{AggregateTypeProfessionalAuthority, KindAuditEvent, true},
+		{AggregateTypeExecutionAttempt, KindAuditEvent, false},
+		{AggregateTypeProfessionalAuthority, KindExecutionResult, false},
+		{"unknown", KindAuditEvent, false},
+	}
+	for _, test := range tests {
+		if got := validMessageType(test.aggregateType, test.kind); got != test.want {
+			t.Fatalf("validMessageType(%q, %q)=%v want %v", test.aggregateType, test.kind, got, test.want)
+		}
+	}
+}
+
 func TestPostgresOutboxTransactionalClaimDeadLetterReplayAndProjection(t *testing.T) {
 	databaseURL := os.Getenv("COMPANION_V2_OUTBOX_TEST_DATABASE_URL")
 	if databaseURL == "" {

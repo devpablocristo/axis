@@ -40,7 +40,7 @@ func TestHandlerCreateReturnsAutonomy(t *testing.T) {
 	rec := httptest.NewRecorder()
 	jobRoleID := uuid.New()
 	profileTemplateID := uuid.New()
-	body := `{"name":"Ops","job_role_id":"` + jobRoleID.String() + `","profile_template_id":"` + profileTemplateID.String() + `","supervisor_user_id":"dev-user","autonomy":"A2"}`
+	body := `{"name":"Ops","job_role_id":"` + jobRoleID.String() + `","profile_template_id":"` + profileTemplateID.String() + `","supervisor_user_id":"dev-user","autonomy":"A2","employer_subject_id":"` + uuid.NewString() + `"}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/virployees", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Tenant-ID", "tenant-1")
@@ -73,6 +73,19 @@ func TestHandlerCreateReturnsAutonomy(t *testing.T) {
 	}
 	if payload.Autonomy != "A2" {
 		t.Fatalf("expected autonomy A2, got %q", payload.Autonomy)
+	}
+}
+
+func TestHandlerCreateRequiresPrimaryEmployer(t *testing.T) {
+	router := testRouter(&handlerFakeUseCases{})
+	rec := httptest.NewRecorder()
+	body := `{"name":"Ops","job_role_id":"` + uuid.NewString() + `","profile_template_id":"` + uuid.NewString() + `","supervisor_user_id":"dev-user"}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/virployees", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Tenant-ID", "tenant-1")
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected missing employer to be rejected, got %d body=%s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -135,9 +148,15 @@ func TestHandlerRuntimeContext(t *testing.T) {
 			SupervisorUserID string `json:"supervisor_user_id"`
 		} `json:"virployee"`
 		JobRole struct {
-			Name             string        `json:"name"`
-			Responsibilities []interface{} `json:"responsibilities"`
-			SuccessCriteria  []interface{} `json:"success_criteria"`
+			Name             string `json:"name"`
+			Responsibilities []struct {
+				Title           string `json:"title"`
+				ExpectedOutcome string `json:"expected_outcome"`
+			} `json:"responsibilities"`
+			SuccessCriteria []struct {
+				Title       string `json:"title"`
+				TargetValue string `json:"target_value"`
+			} `json:"success_criteria"`
 		} `json:"job_role"`
 		ProfileTemplate struct {
 			SystemPrompt string `json:"system_prompt"`
@@ -156,6 +175,10 @@ func TestHandlerRuntimeContext(t *testing.T) {
 	}
 	if payload.JobRole.Name != "Receptionist" || payload.JobRole.Responsibilities == nil || payload.JobRole.SuccessCriteria == nil {
 		t.Fatalf("unexpected job role payload: %+v", payload.JobRole)
+	}
+	if len(payload.JobRole.Responsibilities) != 1 || payload.JobRole.Responsibilities[0].ExpectedOutcome != "Visitors are welcomed" ||
+		len(payload.JobRole.SuccessCriteria) != 1 || payload.JobRole.SuccessCriteria[0].TargetValue != "under 2 minutes" {
+		t.Fatalf("job role definition missing from runtime context: %+v", payload.JobRole)
 	}
 	if payload.ProfileTemplate.SystemPrompt != "Be warm." || payload.ProfileTemplate.MaxAutonomy != "A2" {
 		t.Fatalf("unexpected profile payload: %+v", payload.ProfileTemplate)
@@ -257,8 +280,9 @@ func TestHandlerExecutionGate(t *testing.T) {
 	fake := &handlerFakeUseCases{}
 	router := testRouter(fake)
 	id := uuid.New()
+	assistRunID := uuid.New()
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/v1/virployees/"+id.String()+"/execution-gate", strings.NewReader(`{"input":"Agendá una reunión para mañana","confirmed_draft":{"action":"calendar.events.create","kind":"calendar_event","fields":[{"key":"title","value":"Reunión"},{"key":"date","value":"2026-07-12"},{"key":"time","value":"15:00"},{"key":"timezone","value":"America/Argentina/Buenos_Aires"},{"key":"duration_minutes","value":"60"},{"key":"attendees","value":"ana@example.com"}]}}`))
+	req := httptest.NewRequest(http.MethodPost, "/v1/virployees/"+id.String()+"/execution-gate", strings.NewReader(`{"input":"Agendá una reunión para mañana","assist_run_id":"`+assistRunID.String()+`","principal_type":"person","principal_id":"patient-a","confirmed_draft":{"action":"calendar.events.create","kind":"calendar_event","fields":[{"key":"title","value":"Reunión"},{"key":"date","value":"2026-07-12"},{"key":"time","value":"15:00"},{"key":"timezone","value":"America/Argentina/Buenos_Aires"},{"key":"duration_minutes","value":"60"},{"key":"attendees","value":"ana@example.com"}]}}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Tenant-ID", "tenant-1")
 
@@ -302,6 +326,12 @@ func TestHandlerExecutionGate(t *testing.T) {
 	}
 	if len(payload.ExecutionGate.Checks) == 0 {
 		t.Fatalf("expected checks, got %+v", payload.ExecutionGate)
+	}
+	if fake.lastPrincipal.Type != "person" || fake.lastPrincipal.ID != "patient-a" {
+		t.Fatalf("handler did not forward principal context: %+v", fake.lastPrincipal)
+	}
+	if fake.lastAssistRun != assistRunID {
+		t.Fatalf("handler did not forward assist_run_id: got %s want %s", fake.lastAssistRun, assistRunID)
 	}
 }
 
@@ -472,9 +502,11 @@ func testRouter(ucs UseCasesPort) *gin.Engine {
 }
 
 type handlerFakeUseCases struct {
-	lastAction string
-	lastActor  string
-	lastTenant string
+	lastAction    string
+	lastActor     string
+	lastTenant    string
+	lastPrincipal executiongate.PrincipalContext
+	lastAssistRun uuid.UUID
 }
 
 func (f *handlerFakeUseCases) Create(_ context.Context, tenantID string, input domain.CreateInput) (domain.Virployee, error) {
@@ -518,9 +550,11 @@ func (f *handlerFakeUseCases) RuntimeContext(_ context.Context, tenantID string,
 			Autonomy:          domain.AutonomyA2,
 		},
 		JobRole: jobroledomain.JobRole{
-			ID:      jobRoleID,
-			Name:    "Receptionist",
-			Mission: "Welcome visitors",
+			ID:               jobRoleID,
+			Name:             "Receptionist",
+			Mission:          "Welcome visitors",
+			Responsibilities: []jobroledomain.Responsibility{{Title: "Welcome", ExpectedOutcome: "Visitors are welcomed", Priority: 1}},
+			SuccessCriteria:  []jobroledomain.SuccessCriterion{{Title: "Response time", TargetValue: "under 2 minutes", Priority: 1}},
 		},
 		ProfileTemplate: profiletemplatedomain.ProfileTemplate{
 			ID:           profileTemplateID,
@@ -548,7 +582,17 @@ func (f *handlerFakeUseCases) DryRun(_ context.Context, tenantID string, id uuid
 	return result, nil
 }
 
-func (f *handlerFakeUseCases) ExecutionGate(ctx context.Context, tenantID string, id uuid.UUID, input string, confirmedDraft *executiongate.ConfirmedDraft) (executiongate.Result, error) {
+func (f *handlerFakeUseCases) ExecutionGate(ctx context.Context, tenantID string, id uuid.UUID, input string, confirmedDraft *executiongate.ConfirmedDraft, principalContexts ...executiongate.PrincipalContext) (executiongate.Result, error) {
+	principal := executiongate.PrincipalContext{}
+	if len(principalContexts) > 0 {
+		principal = principalContexts[0]
+	}
+	return f.ExecutionGateWithAssistRun(ctx, tenantID, id, input, confirmedDraft, principal, uuid.Nil)
+}
+
+func (f *handlerFakeUseCases) ExecutionGateWithAssistRun(ctx context.Context, tenantID string, id uuid.UUID, input string, confirmedDraft *executiongate.ConfirmedDraft, principal executiongate.PrincipalContext, assistRunID uuid.UUID) (executiongate.Result, error) {
+	f.lastPrincipal = principal
+	f.lastAssistRun = assistRunID
 	result, err := f.DryRun(ctx, tenantID, id, input)
 	if err != nil {
 		return executiongate.Result{}, err

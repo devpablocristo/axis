@@ -252,6 +252,50 @@ func TestAnswerUsesVerifiedTextDerivativeWhilePreservingNativePart(t *testing.T)
 	}
 }
 
+func TestAnswerSourcesOnlyAbstainsWithoutEvidenceBeforeCallingModel(t *testing.T) {
+	prov := &answerProvider{resp: ai.ChatResponse{Text: `{"status":"answered","answer":"invented","citations":[{"document_id":"missing"}]}`}}
+	out, err := New(prov, "m").Answer(context.Background(), AnswerRequest{
+		InputJSON: json.RawMessage(`{"question":"What is the dose?"}`), GroundingMode: "sources_only",
+	})
+	if err != nil {
+		t.Fatalf("Answer: %v", err)
+	}
+	if prov.called || out.Answered || out.Status != "abstained" || len(out.Citations) != 0 {
+		t.Fatalf("expected fail-closed abstention, got %+v called=%v", out, prov.called)
+	}
+}
+
+func TestAnswerSourcesOnlyRequiresAndReturnsDocumentCitation(t *testing.T) {
+	prov := &answerProvider{resp: ai.ChatResponse{Text: `{"status":"answered","answer":"Use the documented dose.","citations":[{"document_id":"doc-1","sha256":"abc"}]}`}}
+	out, err := New(prov, "m").Answer(context.Background(), AnswerRequest{
+		InputJSON: json.RawMessage(`{"question":"What is the dose?"}`), GroundingMode: "sources_only",
+		ContentParts: []ContentPart{{Kind: "text", Text: "Documented dose: 5 mg", DocumentID: "doc-1", SHA256: "abc"}},
+	})
+	if err != nil {
+		t.Fatalf("Answer: %v", err)
+	}
+	if !out.Answered || out.Status != "answered" || len(out.Citations) != 1 || out.Citations[0].DocumentID != "doc-1" {
+		t.Fatalf("expected cited grounded answer, got %+v", out)
+	}
+	if !strings.Contains(prov.request.SystemPrompt, "untrusted data") {
+		t.Fatalf("expected source injection boundary in prompt, got %q", prov.request.SystemPrompt)
+	}
+}
+
+func TestAnswerSourcesOnlyDoesNotMarkUncitedOutputAnswered(t *testing.T) {
+	prov := &answerProvider{resp: ai.ChatResponse{Text: `{"status":"answered","answer":"uncited","citations":[]}`}}
+	out, err := New(prov, "m").Answer(context.Background(), AnswerRequest{
+		InputJSON: json.RawMessage(`{"question":"What is the dose?"}`), GroundingMode: "sources_only",
+		ContentParts: []ContentPart{{Kind: "text", Text: "Documented dose: 5 mg", DocumentID: "doc-1", SHA256: "abc"}},
+	})
+	if err != nil {
+		t.Fatalf("Answer: %v", err)
+	}
+	if out.Answered {
+		t.Fatalf("uncited output must not be answered: %+v", out)
+	}
+}
+
 var diagnosisSchema = map[string]any{"type": "object", "properties": map[string]any{"summary": map[string]any{"type": "string"}}}
 
 func TestAnswerStructuredReturnsJSONWhenModelAnswers(t *testing.T) {

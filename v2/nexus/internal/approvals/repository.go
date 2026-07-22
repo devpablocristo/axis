@@ -149,7 +149,7 @@ func (r *Repository) get(ctx context.Context, tenantID string, id uuid.UUID) (do
 
 func approvalColumns(alias string) string {
 	p := alias + "."
-	return p + `id::text,` + p + `tenant_id,` + p + `governance_check_id::text,` + p + `requester_id,` + p + `action_type,` + p + `target_system,` + p + `target_resource,` + p + `risk_level,` + p + `reason,` + p + `binding_hash,` + p + `status,` + p + `approval_kind,` + p + `supervisor_user_id,` + p + `quorum_required,(SELECT count(*) FROM approval_decisions dc WHERE dc.tenant_id=` + p + `tenant_id AND dc.approval_id=` + p + `id AND dc.decision='approve'),` + p + `post_review_required,` + p + `reviewed_by,` + p + `review_note,` + p + `reviewed_at,` + p + `decided_by,` + p + `decision_note,` + p + `decided_at,` + p + `expires_at,` + p + `created_at,` + p + `updated_at`
+	return p + `id::text,` + p + `tenant_id,` + p + `governance_check_id::text,` + p + `requester_id,` + p + `product_surface,` + p + `action_type,` + p + `target_system,` + p + `target_resource,` + p + `resource_type,` + p + `risk_level,` + p + `reason,` + p + `binding_hash,` + p + `governance_policy_snapshot_hash,` + p + `status,` + p + `approval_kind,` + p + `supervisor_user_id,` + p + `quorum_required,(SELECT count(*) FROM approval_decisions dc WHERE dc.tenant_id=` + p + `tenant_id AND dc.approval_id=` + p + `id AND dc.decision='approve'),` + p + `post_review_required,` + p + `reviewed_by,` + p + `review_note,` + p + `reviewed_at,` + p + `decided_by,` + p + `decision_note,` + p + `decided_at,` + p + `expires_at,` + p + `created_at,` + p + `updated_at`
 }
 
 type scanner interface {
@@ -168,12 +168,15 @@ func scanApproval(row scanner) (domain.Approval, error) {
 		&item.TenantID,
 		&governanceCheckIDText,
 		&item.RequesterID,
+		&item.ProductSurface,
 		&item.ActionType,
 		&item.TargetSystem,
 		&item.TargetResource,
+		&item.ResourceType,
 		&item.RiskLevel,
 		&item.Reason,
 		&item.BindingHash,
+		&item.PolicySnapshotHash,
 		&status,
 		&item.ApprovalKind,
 		&item.SupervisorUserID,

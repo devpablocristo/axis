@@ -42,3 +42,16 @@ func TestHasExecutionMode(t *testing.T) {
 		t.Fatal("empty set must enable nothing")
 	}
 }
+
+func TestArtifactAndUploadDefaultsAreBounded(t *testing.T) {
+	t.Setenv("COMPANION_V2_KNOWLEDGE_UPLOAD_MAX_BODY_BYTES", "")
+	t.Setenv("COMPANION_V2_ARTIFACT_LOCAL_STAGING_DIR", "")
+	t.Setenv("COMPANION_V2_ARTIFACT_LOCAL_MAX_BYTES", "")
+	config := Load()
+	if config.KnowledgeUploadMaxBodyBytes != 251<<20 {
+		t.Fatalf("upload max=%d", config.KnowledgeUploadMaxBodyBytes)
+	}
+	if config.ArtifactLocalStagingDir != "" || config.ArtifactLocalMaxBytes != 5<<30 {
+		t.Fatalf("unexpected local staging defaults: dir=%q max=%d", config.ArtifactLocalStagingDir, config.ArtifactLocalMaxBytes)
+	}
+}

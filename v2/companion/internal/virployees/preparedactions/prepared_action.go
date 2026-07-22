@@ -30,10 +30,69 @@ type Action struct {
 	Timezone        string   `json:"timezone"`
 	DurationMinutes int      `json:"duration_minutes"`
 	Attendees       []string `json:"attendees"`
+	// Principal binds the approved action to the exact person or organization
+	// on whose behalf it may run. Omitempty preserves legacy payload hashes when
+	// no delegation is required.
+	PrincipalType string `json:"principal_type,omitempty"`
+	PrincipalID   string `json:"principal_id,omitempty"`
+	// AssistContext is populated only when the execution gate was explicitly
+	// tied to a completed Assist run. The server derives every field from the
+	// tenant-scoped run; callers cannot provide a context hash. Because this is
+	// part of the prepared-action payload, Nexus approves the exact Assist,
+	// subject/case/assignment, source set, and conversation-policy snapshot.
+	AssistContext *AssistContextBinding `json:"assist_context,omitempty"`
+	// ProfessionalScope pins the action-shaped topic check independently from
+	// the Assist conversation. It protects legacy execution-gate calls too and
+	// is re-evaluated before an executor can perform side effects.
+	ProfessionalScope *ProfessionalScopeBinding `json:"professional_scope,omitempty"`
+	// MCPContext binds an action initiated through MCP to the exact tenant,
+	// subject/case assignment, capability manifest, policy revision and caller
+	// idempotency key. Only hashes and stable identifiers are stored here.
+	MCPContext *MCPContextBinding `json:"mcp_context,omitempty"`
 	// EventID identifies the target of a delete (compensation) action. It is
 	// omitempty so create actions serialize exactly as before — their payload
 	// hash, and therefore their binding hash, is unchanged.
 	EventID string `json:"event_id,omitempty"`
+}
+
+// AssistContextBinding contains metadata-only provenance. Source bodies,
+// prompts, signed URLs, and patient display data must never be stored here.
+type AssistContextBinding struct {
+	RunID                   string `json:"run_id"`
+	ContextHash             string `json:"context_hash"`
+	SubjectID               string `json:"subject_id,omitempty"`
+	CaseID                  string `json:"case_id,omitempty"`
+	AssignmentID            string `json:"assignment_id,omitempty"`
+	AssignmentVersion       int64  `json:"assignment_version,omitempty"`
+	GroundingMode           string `json:"grounding_mode"`
+	SourcesHash             string `json:"sources_hash"`
+	MemoryContextHash       string `json:"memory_context_hash,omitempty"`
+	JobRoleSnapshotHash     string `json:"job_role_snapshot_hash"`
+	PolicySnapshotHash      string `json:"policy_snapshot_hash,omitempty"`
+	SourceAuthorizationHash string `json:"source_authorization_hash,omitempty"`
+}
+
+type ProfessionalScopeBinding struct {
+	QueryHash    string `json:"query_hash"`
+	SnapshotHash string `json:"snapshot_hash"`
+}
+
+type MCPContextBinding struct {
+	TenantID          string `json:"tenant_id"`
+	ActorID           string `json:"actor_id"`
+	VirployeeID       string `json:"virployee_id"`
+	SubjectID         string `json:"subject_id"`
+	CaseID            string `json:"case_id,omitempty"`
+	AssignmentID      string `json:"assignment_id"`
+	AssignmentVersion int64  `json:"assignment_version"`
+	CapabilityKey     string `json:"capability_key"`
+	CapabilityVersion string `json:"capability_version"`
+	ManifestHash      string `json:"manifest_hash"`
+	PolicyVersion     int64  `json:"policy_version"`
+	AuthorityHash     string `json:"authority_hash"`
+	ContextHash       string `json:"context_hash"`
+	PayloadHash       string `json:"payload_hash"`
+	IdempotencyHash   string `json:"idempotency_hash"`
 }
 
 // FromReadyDraft builds a prepared action for the executable actions (create and

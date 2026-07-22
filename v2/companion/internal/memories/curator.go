@@ -15,7 +15,7 @@ import (
 // virployee scope is mandatory so a write can never compare against another
 // customer's memory corpus.
 type ConflictReader interface {
-	HasActiveConflict(context.Context, string, uuid.UUID, uuid.UUID, string, string, string) (bool, error)
+	HasActiveConflict(context.Context, string, uuid.UUID, uuid.UUID, Scope, string, string, string) (bool, error)
 }
 
 // MemoryCuratorPort is the single admission gate for human, system, and
@@ -113,7 +113,7 @@ func (c *DefaultCurator) Curate(ctx context.Context, tenant string, virployee, e
 	}
 
 	if c.conflicts != nil && oneOf(in.Type, "fact", "preference") {
-		conflict, err := c.conflicts.HasActiveConflict(ctx, strings.TrimSpace(tenant), virployee, exclude, in.Title, in.Type, ContentHash(in.Content))
+		conflict, err := c.conflicts.HasActiveConflict(ctx, strings.TrimSpace(tenant), virployee, exclude, in.Scope, in.Title, in.Type, ContentHash(in.Content))
 		if err != nil {
 			return CuratedInput{}, err
 		}

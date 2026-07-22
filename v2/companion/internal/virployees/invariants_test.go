@@ -13,6 +13,7 @@ import (
 	"errors"
 	"testing"
 
+	capabilitydomain "github.com/devpablocristo/companion-v2/internal/capabilities/usecases/domain"
 	"github.com/devpablocristo/companion-v2/internal/quotas"
 	"github.com/devpablocristo/companion-v2/internal/virployees/dryrun"
 	"github.com/devpablocristo/companion-v2/internal/virployees/executiongate"
@@ -217,16 +218,24 @@ func TestInvariantExecuteApprovedActionRebindsBeforeExecuting(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		capabilityID := uuid.New()
 		created, err := uc.Create(context.Background(), "tenant-1", domain.CreateInput{
 			Name:              "Sofia",
 			JobRoleID:         uuid.NewString(),
 			ProfileTemplateID: uuid.NewString(),
+			CapabilityIDs:     []string{capabilityID.String()},
 			SupervisorUserID:  "dev-user",
 			Autonomy:          "A3",
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
+		uc.SetCapabilityValidator(&fakeCapabilityReader{rows: map[uuid.UUID]capabilitydomain.Capability{
+			capabilityID: {
+				ID: capabilityID, TenantID: "tenant-1", CapabilityKey: preparedactions.ActionCreate,
+				RequiredAutonomy: domain.AutonomyA3, PromotionState: capabilitydomain.PromotionActive,
+			},
+		}})
 		approvalID := uuid.New()
 		uc.SetApprovalReader(&fakeApprovalReader{approval: executiongate.GovernanceApproval{
 			ID:                approvalID.String(),
@@ -241,12 +250,19 @@ func TestInvariantExecuteApprovedActionRebindsBeforeExecuting(t *testing.T) {
 	}
 
 	preparedTemplate := func() PreparedActionRecord {
+		action := preparedactions.Action{SchemaVersion: preparedactions.SchemaVersion, Action: preparedactions.ActionCreate}
+		payloadHash, err := action.PayloadHash()
+		if err != nil {
+			t.Fatal(err)
+		}
 		return PreparedActionRecord{
 			ID:                uuid.New(),
 			TenantID:          "tenant-1",
 			GovernanceCheckID: checkID,
+			CapabilityKey:     preparedactions.ActionCreate,
+			PayloadHash:       payloadHash,
 			BindingHash:       bindingHash,
-			Action:            preparedactions.Action{SchemaVersion: preparedactions.SchemaVersion, Action: "calendar.events.create"},
+			Action:            action,
 		}
 	}
 
@@ -294,6 +310,28 @@ func TestInvariantExecuteApprovedActionRebindsBeforeExecuting(t *testing.T) {
 		}
 		if !executor.called {
 			t.Fatal("executor must run when the binding fully matches the approval")
+		}
+	})
+
+	t.Run("changed Nexus policy snapshot is refused before executing", func(t *testing.T) {
+		prepared := preparedTemplate()
+		prepared.NexusPolicySnapshotHash = "policy-snapshot-a"
+		uc, executor, id, approvalID := newCase(prepared)
+		uc.SetApprovalReader(&fakeApprovalReader{approval: executiongate.GovernanceApproval{
+			ID: approvalID.String(), GovernanceCheckID: checkID.String(), RequesterID: id.String(),
+			BindingHash: bindingHash, Status: "approved", PolicySnapshotHash: "policy-snapshot-a",
+		}})
+		revalidator := &fakeGovernanceRevalidator{result: executiongate.GovernanceRevalidationResult{Valid: false, Reason: "active policy snapshot changed"}}
+		uc.SetGovernanceRevalidator(revalidator)
+
+		if _, err := uc.ExecuteApprovedAction(context.Background(), "tenant-1", id, approvalID); !domainerr.IsConflict(err) {
+			t.Fatalf("expected stale policy conflict, got %v", err)
+		}
+		if executor.called {
+			t.Fatal("executor must not run after governance revalidation fails")
+		}
+		if revalidator.last.PolicySnapshotHash != "policy-snapshot-a" || revalidator.last.CheckID != checkID.String() {
+			t.Fatalf("revalidation lost the approval binding: %+v", revalidator.last)
 		}
 	})
 
@@ -388,10 +426,16 @@ func TestInvariantPreparedActionPersistedOnlyOnRequireApproval(t *testing.T) {
 			uc, created := setupExecutionGateUseCase(t, domain.AutonomyA3)
 			execRepo := &fakeExecRepo{fakeRepo: newFakeRepo(), beginCreated: true}
 			uc.executionRepo = execRepo
+			policySnapshotHash := ""
+			if tc.decision == "require_approval" {
+				policySnapshotHash = "policy-snapshot-a"
+			}
 			uc.SetGovernanceChecker(&fakeGovernanceChecker{result: executiongate.GovernanceCheckResult{
-				Decision:   tc.decision,
-				Status:     tc.decision,
-				ApprovalID: "approval-1",
+				Decision:           tc.decision,
+				Status:             tc.decision,
+				CheckID:            uuid.NewString(),
+				ApprovalID:         uuid.NewString(),
+				PolicySnapshotHash: policySnapshotHash,
 			}})
 
 			if _, err := uc.ExecutionGate(context.Background(), "tenant-1", created.ID, "Agendá una reunión para mañana", readyDraft); err != nil {
@@ -399,6 +443,9 @@ func TestInvariantPreparedActionPersistedOnlyOnRequireApproval(t *testing.T) {
 			}
 			if execRepo.savePreparedCalls != tc.wantSaves {
 				t.Fatalf("decision %q: prepared action saves = %d, want %d", tc.decision, execRepo.savePreparedCalls, tc.wantSaves)
+			}
+			if tc.decision == "require_approval" && execRepo.boundPolicyHash != policySnapshotHash {
+				t.Fatalf("prepared action policy snapshot = %q, want %q", execRepo.boundPolicyHash, policySnapshotHash)
 			}
 		})
 	}
@@ -476,6 +523,7 @@ type fakeExecRepo struct {
 	beginCreated      bool
 	existingExecTrace *runtraces.Trace
 	savePreparedCalls int
+	boundPolicyHash   string
 }
 
 func (r *fakeExecRepo) FindExecutionTraceByApproval(_ context.Context, _ string, _ uuid.UUID, _ string) (runtraces.Trace, error) {
@@ -488,6 +536,12 @@ func (r *fakeExecRepo) FindExecutionTraceByApproval(_ context.Context, _ string,
 func (r *fakeExecRepo) SavePreparedAction(_ context.Context, _ string, _ uuid.UUID, _, _ string, _, _, _ string, _ preparedactions.Action) (PreparedActionRecord, error) {
 	r.savePreparedCalls++
 	return r.prepared, nil
+}
+
+func (r *fakeExecRepo) BindPreparedActionNexusPolicy(_ context.Context, _ string, _, _ uuid.UUID, snapshotHash string) error {
+	r.boundPolicyHash = snapshotHash
+	r.prepared.NexusPolicySnapshotHash = snapshotHash
+	return nil
 }
 
 func (r *fakeExecRepo) GetPreparedActionByApproval(_ context.Context, _ string, _, _ uuid.UUID) (PreparedActionRecord, error) {
