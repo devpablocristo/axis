@@ -608,14 +608,14 @@ func (r *Repository) Reassign(ctx context.Context, orgID string, assignmentID uu
 	}
 	if _, err := tx.Exec(ctx, `
 		WITH archived AS (
-			UPDATE companion_memories old_memory
+			UPDATE companion_virployee_memories old_memory
 			SET lifecycle_state='archived',archived_at=now(),review_state='quarantined',
 			    review_reason='duplicate_memory_on_reassignment',version=version+1,updated_at=now()
 			WHERE old_memory.org_id=$1 AND old_memory.virployee_id=$2
 			  AND old_memory.scope_type IN ('subject','case') AND old_memory.subject_id=$4
 			  AND old_memory.lifecycle_state='active'
 			  AND EXISTS (
-				SELECT 1 FROM companion_memories target_memory
+				SELECT 1 FROM companion_virployee_memories target_memory
 				WHERE target_memory.org_id=old_memory.org_id AND target_memory.virployee_id=$3
 				  AND target_memory.scope_type=old_memory.scope_type
 				  AND target_memory.subject_id=old_memory.subject_id
@@ -625,7 +625,7 @@ func (r *Repository) Reassign(ctx context.Context, orgID string, assignmentID uu
 			  )
 			RETURNING org_id,virployee_id,id,content_hash,version,scope_type,subject_id,case_id
 		)
-		INSERT INTO companion_memory_audit(
+		INSERT INTO companion_virployee_memory_audit(
 			org_id,virployee_id,memory_id,action,actor_id,previous_hash,resulting_hash,
 			previous_version,resulting_version,metadata,scope_type,subject_id,case_id)
 		SELECT org_id,virployee_id,id,'archive',$5,content_hash,content_hash,
@@ -637,14 +637,14 @@ func (r *Repository) Reassign(ctx context.Context, orgID string, assignmentID uu
 	}
 	if _, err := tx.Exec(ctx, `
 		WITH moved AS (
-			UPDATE companion_memories
+			UPDATE companion_virployee_memories
 			SET virployee_id=$3,version=version+1,updated_at=now()
 			WHERE org_id=$1 AND virployee_id=$2
 			  AND scope_type IN ('subject','case') AND subject_id=$4
 			  AND review_reason<>'duplicate_memory_on_reassignment'
 			RETURNING org_id,virployee_id,id,content_hash,version,scope_type,subject_id,case_id
 		)
-		INSERT INTO companion_memory_audit(
+		INSERT INTO companion_virployee_memory_audit(
 			org_id,virployee_id,memory_id,action,actor_id,previous_hash,resulting_hash,
 			previous_version,resulting_version,metadata,scope_type,subject_id,case_id)
 		SELECT org_id,virployee_id,id,'update',$5,content_hash,content_hash,

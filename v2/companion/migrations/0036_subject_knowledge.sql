@@ -15,18 +15,18 @@ ALTER TABLE virployees ALTER COLUMN grounding_mode SET DEFAULT 'sources_only';
 -- Memories written before this migration are deliberately virployee-global.
 -- A scoped recall may include that safe global layer, the exact subject layer,
 -- and (when supplied) the exact case layer; it never scans sibling subjects.
-ALTER TABLE companion_memories
+ALTER TABLE companion_virployee_memories
     ADD COLUMN IF NOT EXISTS scope_type text NOT NULL DEFAULT 'virployee',
     ADD COLUMN IF NOT EXISTS subject_id text NOT NULL DEFAULT '',
     ADD COLUMN IF NOT EXISTS case_id uuid NULL;
-ALTER TABLE companion_memories DROP CONSTRAINT IF EXISTS companion_memories_scope_check;
-ALTER TABLE companion_memories
+ALTER TABLE companion_virployee_memories DROP CONSTRAINT IF EXISTS companion_memories_scope_check;
+ALTER TABLE companion_virployee_memories
     ADD CONSTRAINT companion_memories_scope_check CHECK (
         (scope_type = 'virployee' AND subject_id = '' AND case_id IS NULL) OR
         (scope_type = 'subject' AND btrim(subject_id) <> '' AND case_id IS NULL) OR
         (scope_type = 'case' AND btrim(subject_id) <> '' AND case_id IS NOT NULL)
     ) NOT VALID;
-ALTER TABLE companion_memories VALIDATE CONSTRAINT companion_memories_scope_check;
+ALTER TABLE companion_virployee_memories VALIDATE CONSTRAINT companion_memories_scope_check;
 
 DO $$
 BEGIN
@@ -36,25 +36,25 @@ BEGIN
     END IF;
 END $$;
 
-ALTER TABLE companion_memories
+ALTER TABLE companion_virployee_memories
     ADD CONSTRAINT companion_memories_case_fkey
     FOREIGN KEY (tenant_id, case_id)
     REFERENCES companion_assist_cases (tenant_id, id) NOT VALID;
-ALTER TABLE companion_memories VALIDATE CONSTRAINT companion_memories_case_fkey;
+ALTER TABLE companion_virployee_memories VALIDATE CONSTRAINT companion_memories_case_fkey;
 
 DROP INDEX IF EXISTS companion_memories_active_content_uq;
 CREATE UNIQUE INDEX IF NOT EXISTS companion_memories_active_scoped_content_uq
-    ON companion_memories (
+    ON companion_virployee_memories (
         tenant_id, virployee_id, scope_type, subject_id,
         COALESCE(case_id, '00000000-0000-0000-0000-000000000000'::uuid), content_hash
     ) WHERE lifecycle_state = 'active';
 CREATE INDEX IF NOT EXISTS companion_memories_scoped_recall_idx
-    ON companion_memories (tenant_id, virployee_id, scope_type, subject_id, case_id, updated_at DESC, id DESC)
+    ON companion_virployee_memories (tenant_id, virployee_id, scope_type, subject_id, case_id, updated_at DESC, id DESC)
     WHERE lifecycle_state = 'active' AND review_state = 'approved' AND trust_score >= 0.60
       AND sensitivity = 'normal' AND cardinality(poisoning_flags) = 0
       AND review_reason <> 'conflicting_memory_requires_review';
 
-ALTER TABLE companion_memory_audit
+ALTER TABLE companion_virployee_memory_audit
     ADD COLUMN IF NOT EXISTS scope_type text NOT NULL DEFAULT 'virployee',
     ADD COLUMN IF NOT EXISTS subject_id text NOT NULL DEFAULT '',
     ADD COLUMN IF NOT EXISTS case_id uuid NULL;

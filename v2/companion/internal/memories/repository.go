@@ -78,7 +78,7 @@ func (r *Repository) HasActiveConflict(ctx context.Context, organization string,
 	var conflict bool
 	err = r.db.QueryRow(ctx, `
 		SELECT EXISTS (
-			SELECT 1 FROM companion_memories
+			SELECT 1 FROM companion_virployee_memories
 			WHERE org_id=$1 AND virployee_id=$2 AND id<>$3
 			  AND lifecycle_state='active' AND review_state<>'rejected'
 			  AND memory_type=$4 AND lower(btrim(title))=lower(btrim($5))
@@ -101,7 +101,7 @@ func (r *Repository) Create(ctx context.Context, organization string, virployee 
 		return Memory{}, err
 	}
 	m, err := scanMemory(tx.QueryRow(ctx, `
-		INSERT INTO companion_memories(
+		INSERT INTO companion_virployee_memories(
 			org_id,virployee_id,scope_type,subject_id,case_id,title,content,memory_type,sensitivity,provenance,actor_id,
 			source_reference,content_hash,trust_score,review_state,review_reason,
 			poisoning_flags,pii_flags,expires_at,decay_at
@@ -119,7 +119,7 @@ func (r *Repository) Create(ctx context.Context, organization string, virployee 
 			return Memory{}, err
 		}
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO companion_memory_audit(org_id,virployee_id,memory_id,action,actor_id,resulting_hash,resulting_version,scope_type,subject_id,case_id) VALUES($1,$2,$3,'create',$4,$5,$6,$7,$8,$9)`, organization, virployee, m.ID, in.ActorID, m.ContentHash, m.Version, m.ScopeType, m.SubjectID, m.CaseID)
+	_, err = tx.Exec(ctx, `INSERT INTO companion_virployee_memory_audit(org_id,virployee_id,memory_id,action,actor_id,resulting_hash,resulting_version,scope_type,subject_id,case_id) VALUES($1,$2,$3,'create',$4,$5,$6,$7,$8,$9)`, organization, virployee, m.ID, in.ActorID, m.ContentHash, m.Version, m.ScopeType, m.SubjectID, m.CaseID)
 	if err != nil {
 		return Memory{}, err
 	}
@@ -130,7 +130,7 @@ func (r *Repository) Create(ctx context.Context, organization string, virployee 
 }
 
 func (r *Repository) Get(ctx context.Context, organization string, virployee, id uuid.UUID) (Memory, error) {
-	return scanMemory(r.db.QueryRow(ctx, `SELECT `+memoryColumns+` FROM companion_memories WHERE org_id=$1 AND virployee_id=$2 AND id=$3`, organization, virployee, id))
+	return scanMemory(r.db.QueryRow(ctx, `SELECT `+memoryColumns+` FROM companion_virployee_memories WHERE org_id=$1 AND virployee_id=$2 AND id=$3`, organization, virployee, id))
 }
 func (r *Repository) List(ctx context.Context, organization string, virployee uuid.UUID, in ListInput) (Page, error) {
 	scope, err := NormalizeScope(in.Scope)
@@ -157,7 +157,7 @@ func (r *Repository) List(ctx context.Context, organization string, virployee uu
 	if err != nil {
 		return Page{}, err
 	}
-	q := `SELECT ` + memoryColumns + ` FROM companion_memories WHERE org_id=$1 AND virployee_id=$2 AND lifecycle_state=$3 AND scope_type=$4 AND subject_id=$5 AND case_id IS NOT DISTINCT FROM $6 AND ($7='' OR to_tsvector('simple',title||' '||content) @@ websearch_to_tsquery('simple',$7)) AND (NOT $8 OR (updated_at,id)<($9,$10)) ORDER BY updated_at DESC,id DESC LIMIT $11`
+	q := `SELECT ` + memoryColumns + ` FROM companion_virployee_memories WHERE org_id=$1 AND virployee_id=$2 AND lifecycle_state=$3 AND scope_type=$4 AND subject_id=$5 AND case_id IS NOT DISTINCT FROM $6 AND ($7='' OR to_tsvector('simple',title||' '||content) @@ websearch_to_tsquery('simple',$7)) AND (NOT $8 OR (updated_at,id)<($9,$10)) ORDER BY updated_at DESC,id DESC LIMIT $11`
 	rows, err := r.db.Query(ctx, q, organization, virployee, state, scope.Type, scope.SubjectID, scope.CaseID, strings.TrimSpace(in.Query), hasCursor, cursorTime, cursorID, in.Limit+1)
 	if err != nil {
 		return Page{}, err
@@ -217,7 +217,7 @@ func (r *Repository) Update(ctx context.Context, organization string, virployee,
 		return Memory{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	old, err := scanMemory(tx.QueryRow(ctx, `SELECT `+memoryColumns+` FROM companion_memories WHERE org_id=$1 AND virployee_id=$2 AND id=$3 FOR UPDATE`, organization, virployee, id))
+	old, err := scanMemory(tx.QueryRow(ctx, `SELECT `+memoryColumns+` FROM companion_virployee_memories WHERE org_id=$1 AND virployee_id=$2 AND id=$3 FOR UPDATE`, organization, virployee, id))
 	if err != nil {
 		return Memory{}, err
 	}
@@ -225,7 +225,7 @@ func (r *Repository) Update(ctx context.Context, organization string, virployee,
 		return Memory{}, domainerr.Conflict("memory version conflict")
 	}
 	m, err := scanMemory(tx.QueryRow(ctx, `
-		UPDATE companion_memories
+		UPDATE companion_virployee_memories
 		SET title=$4,content=$5,memory_type=$6,sensitivity=$7,content_hash=$8,
 			trust_score=$9,review_state=$10,review_reason=$11,poisoning_flags=$12,pii_flags=$13,
 			expires_at=$14,decay_at=$15,reviewed_by='',reviewed_at=NULL,
@@ -239,7 +239,7 @@ func (r *Repository) Update(ctx context.Context, organization string, virployee,
 	if err != nil {
 		return Memory{}, err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO companion_memory_audit(org_id,virployee_id,memory_id,action,actor_id,previous_hash,resulting_hash,previous_version,resulting_version,scope_type,subject_id,case_id) VALUES($1,$2,$3,'update',$4,$5,$6,$7,$8,$9,$10,$11)`, organization, virployee, id, in.ActorID, old.ContentHash, m.ContentHash, old.Version, m.Version, m.ScopeType, m.SubjectID, m.CaseID)
+	_, err = tx.Exec(ctx, `INSERT INTO companion_virployee_memory_audit(org_id,virployee_id,memory_id,action,actor_id,previous_hash,resulting_hash,previous_version,resulting_version,scope_type,subject_id,case_id) VALUES($1,$2,$3,'update',$4,$5,$6,$7,$8,$9,$10,$11)`, organization, virployee, id, in.ActorID, old.ContentHash, m.ContentHash, old.Version, m.Version, m.ScopeType, m.SubjectID, m.CaseID)
 	if err != nil {
 		return Memory{}, err
 	}
@@ -263,7 +263,7 @@ func (r *Repository) Review(ctx context.Context, organization string, virployee,
 		return Memory{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	old, err := scanMemory(tx.QueryRow(ctx, `SELECT `+memoryColumns+` FROM companion_memories WHERE org_id=$1 AND virployee_id=$2 AND id=$3 FOR UPDATE`, organization, virployee, id))
+	old, err := scanMemory(tx.QueryRow(ctx, `SELECT `+memoryColumns+` FROM companion_virployee_memories WHERE org_id=$1 AND virployee_id=$2 AND id=$3 FOR UPDATE`, organization, virployee, id))
 	if err != nil {
 		return Memory{}, err
 	}
@@ -275,7 +275,7 @@ func (r *Repository) Review(ctx context.Context, organization string, virployee,
 		next = ReviewRejected
 	}
 	m, err := scanMemory(tx.QueryRow(ctx, `
-		UPDATE companion_memories
+		UPDATE companion_virployee_memories
 		SET review_state=$4, trust_score=CASE WHEN $4='approved' THEN GREATEST(trust_score,0.70) ELSE trust_score END,
 			reviewed_by=$5,reviewed_at=now(),updated_at=now()
 		WHERE org_id=$1 AND virployee_id=$2 AND id=$3
@@ -285,7 +285,7 @@ func (r *Repository) Review(ctx context.Context, organization string, virployee,
 	}
 	metadata, _ := json.Marshal(map[string]string{"previous_review_state": old.ReviewState, "review_state": next})
 	_, err = tx.Exec(ctx, `
-		INSERT INTO companion_memory_audit(
+		INSERT INTO companion_virployee_memory_audit(
 			org_id,virployee_id,memory_id,action,actor_id,previous_hash,resulting_hash,
 			previous_version,resulting_version,metadata,scope_type,subject_id,case_id
 		) VALUES($1,$2,$3,$4,$5,$6,$6,$7,$7,$8,$9,$10,$11)
@@ -306,7 +306,7 @@ func (r *Repository) Review(ctx context.Context, organization string, virployee,
 
 func (r *Repository) IndexCandidate(ctx context.Context, organization string, id uuid.UUID, version int) (Memory, error) {
 	return scanMemory(r.db.QueryRow(ctx, `
-		SELECT `+memoryColumns+` FROM companion_memories
+		SELECT `+memoryColumns+` FROM companion_virployee_memories
 		WHERE org_id=$1 AND id=$2 AND version=$3 AND lifecycle_state='active'
 		  AND review_state='approved' AND trust_score >= $4
 		  AND sensitivity='normal' AND cardinality(poisoning_flags)=0
@@ -326,7 +326,7 @@ func (r *Repository) StoreEmbedding(ctx context.Context, organization string, me
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	tag, err := tx.Exec(ctx, `
-		UPDATE companion_memories
+		UPDATE companion_virployee_memories
 		SET embedding=$5::vector,embedding_model=$6,embedding_version=$7,
 			embedding_content_hash=content_hash,updated_at=now()
 		WHERE org_id=$1 AND virployee_id=$2 AND id=$3 AND version=$4
@@ -341,7 +341,7 @@ func (r *Repository) StoreEmbedding(ctx context.Context, organization string, me
 		return domainerr.Conflict("memory changed before indexing completed")
 	}
 	_, err = tx.Exec(ctx, `
-		INSERT INTO companion_memory_audit(
+		INSERT INTO companion_virployee_memory_audit(
 			org_id,virployee_id,memory_id,action,actor_id,resulting_hash,resulting_version,metadata,scope_type,subject_id,case_id
 		) VALUES($1,$2,$3,'index','system:memory-indexer',$4,$5,$6,$7,$8,$9)
 	`, organization, memory.VirployeeID, memory.ID, memory.ContentHash, memory.Version,
@@ -358,11 +358,11 @@ func (r *Repository) DecayDue(ctx context.Context, limit int) (int64, error) {
 	}
 	tag, err := r.db.Exec(ctx, `
 		WITH picked AS (
-			SELECT id FROM companion_memories
+			SELECT id FROM companion_virployee_memories
 			WHERE lifecycle_state='active' AND decay_at IS NOT NULL AND decay_at <= now()
 			ORDER BY decay_at,id LIMIT $1 FOR UPDATE SKIP LOCKED
 		), changed AS (
-			UPDATE companion_memories AS memory
+			UPDATE companion_virployee_memories AS memory
 			SET trust_score=GREATEST(0,trust_score*0.85),
 				lifecycle_state=CASE WHEN expires_at IS NOT NULL AND expires_at<=now() THEN 'archived' ELSE lifecycle_state END,
 				review_reason=CASE WHEN expires_at IS NOT NULL AND expires_at<=now() THEN 'retention_expired' ELSE review_reason END,
@@ -372,7 +372,7 @@ func (r *Repository) DecayDue(ctx context.Context, limit int) (int64, error) {
 			RETURNING memory.org_id,memory.virployee_id,memory.id,memory.content_hash,memory.version,
 			          memory.scope_type,memory.subject_id,memory.case_id
 		)
-		INSERT INTO companion_memory_audit(
+		INSERT INTO companion_virployee_memory_audit(
 			org_id,virployee_id,memory_id,action,actor_id,resulting_hash,resulting_version,metadata,
 			scope_type,subject_id,case_id
 		)
@@ -395,11 +395,11 @@ func (r *Repository) Lifecycle(ctx context.Context, organization string, virploy
 		return err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	m, err := scanMemory(tx.QueryRow(ctx, `UPDATE companion_memories SET lifecycle_state=$4,archived_at=CASE WHEN $4='archived' THEN now() ELSE NULL END,trashed_at=CASE WHEN $4='trash' THEN now() ELSE trashed_at END,purge_after=CASE WHEN $4='trash' THEN now()+interval '30 days' ELSE NULL END,updated_at=now() WHERE org_id=$1 AND virployee_id=$2 AND id=$3 AND (lifecycle_state=$5 OR ($6 AND lifecycle_state='archived')) RETURNING `+memoryColumns, organization, virployee, id, to, from, action == "trash"))
+	m, err := scanMemory(tx.QueryRow(ctx, `UPDATE companion_virployee_memories SET lifecycle_state=$4,archived_at=CASE WHEN $4='archived' THEN now() ELSE NULL END,trashed_at=CASE WHEN $4='trash' THEN now() ELSE trashed_at END,purge_after=CASE WHEN $4='trash' THEN now()+interval '30 days' ELSE NULL END,updated_at=now() WHERE org_id=$1 AND virployee_id=$2 AND id=$3 AND (lifecycle_state=$5 OR ($6 AND lifecycle_state='archived')) RETURNING `+memoryColumns, organization, virployee, id, to, from, action == "trash"))
 	if err != nil {
 		return mapError(err)
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO companion_memory_audit(org_id,virployee_id,memory_id,action,actor_id,previous_hash,resulting_hash,previous_version,resulting_version,scope_type,subject_id,case_id) VALUES($1,$2,$3,$4,$5,$6,$6,$7,$7,$8,$9,$10)`, organization, virployee, id, action, actor, m.ContentHash, m.Version, m.ScopeType, m.SubjectID, m.CaseID)
+	_, err = tx.Exec(ctx, `INSERT INTO companion_virployee_memory_audit(org_id,virployee_id,memory_id,action,actor_id,previous_hash,resulting_hash,previous_version,resulting_version,scope_type,subject_id,case_id) VALUES($1,$2,$3,$4,$5,$6,$6,$7,$7,$8,$9,$10)`, organization, virployee, id, action, actor, m.ContentHash, m.Version, m.ScopeType, m.SubjectID, m.CaseID)
 	if err != nil {
 		return err
 	}
@@ -407,7 +407,7 @@ func (r *Repository) Lifecycle(ctx context.Context, organization string, virploy
 }
 
 func (r *Repository) Purge(ctx context.Context, organization string, virployee, id uuid.UUID, actor string) error {
-	tag, err := r.db.Exec(ctx, `WITH deleted AS (DELETE FROM companion_memories WHERE org_id=$1 AND virployee_id=$2 AND id=$3 AND lifecycle_state='trash' RETURNING content_hash,version,scope_type,subject_id,case_id) INSERT INTO companion_memory_audit(org_id,virployee_id,memory_id,action,actor_id,previous_hash,previous_version,scope_type,subject_id,case_id) SELECT $1,$2,$3,'purge',$4,content_hash,version,scope_type,subject_id,case_id FROM deleted`, organization, virployee, id, actor)
+	tag, err := r.db.Exec(ctx, `WITH deleted AS (DELETE FROM companion_virployee_memories WHERE org_id=$1 AND virployee_id=$2 AND id=$3 AND lifecycle_state='trash' RETURNING content_hash,version,scope_type,subject_id,case_id) INSERT INTO companion_virployee_memory_audit(org_id,virployee_id,memory_id,action,actor_id,previous_hash,previous_version,scope_type,subject_id,case_id) SELECT $1,$2,$3,'purge',$4,content_hash,version,scope_type,subject_id,case_id FROM deleted`, organization, virployee, id, actor)
 	if err != nil {
 		return mapError(err)
 	}
@@ -448,7 +448,7 @@ func (r *Repository) RecallScoped(ctx context.Context, organization string, virp
 				            THEN embedding <=> $6::vector ELSE 1 END AS vector_distance,
 				       ts_rank_cd(to_tsvector('simple',title||' '||content),
 				                  websearch_to_tsquery('simple',regexp_replace(trim($3),'\s+',' OR ','g'))) AS text_rank
-				FROM companion_memories
+				FROM companion_virployee_memories
 				WHERE org_id=$1 AND virployee_id=$2 AND lifecycle_state='active'
 				  AND review_state='approved' AND trust_score >= $7
 				  AND sensitivity='normal' AND cardinality(poisoning_flags)=0
@@ -469,7 +469,7 @@ func (r *Repository) RecallScoped(ctx context.Context, organization string, virp
 			SELECT `+memoryColumns+`,
 			       ts_rank_cd(to_tsvector('simple',title||' '||content),
 			                  websearch_to_tsquery('simple',regexp_replace(trim($3),'\s+',' OR ','g'))) score
-			FROM companion_memories
+			FROM companion_virployee_memories
 			WHERE org_id=$1 AND virployee_id=$2 AND lifecycle_state='active'
 			  AND review_state='approved' AND trust_score >= $5
 			  AND sensitivity='normal' AND cardinality(poisoning_flags)=0
@@ -506,7 +506,7 @@ func (r *Repository) RecallScoped(ctx context.Context, organization string, virp
 			ids = append(ids, item.Memory.ID)
 		}
 		_, _ = r.db.Exec(ctx, `
-			UPDATE companion_memories SET last_recalled_at=now(),recall_count=recall_count+1
+			UPDATE companion_virployee_memories SET last_recalled_at=now(),recall_count=recall_count+1
 			WHERE org_id=$1 AND virployee_id=$2 AND id=ANY($3)
 		`, organization, virployee, ids)
 	}

@@ -6,6 +6,9 @@ Companion owns one persistent memory model under `org_id + virployee_id`,
 with an explicit nested work scope. It replaces the v1 overlap between
 containers, facts and operational memory. There is no v1 migration and no
 organization-, user- or conversation-shared memory outside these boundaries.
+Its physical tables use the `companion_virployee_*` namespace so a shared
+database can retain v1's unrelated product-memory tables without collision or
+implicit migration.
 
 The valid scopes are:
 

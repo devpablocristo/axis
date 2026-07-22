@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS companion_memories (
+CREATE TABLE IF NOT EXISTS companion_virployee_memories (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id text NOT NULL,
     virployee_id uuid NOT NULL REFERENCES virployees(id) ON DELETE CASCADE,
@@ -32,25 +32,25 @@ BEGIN
             SELECT 1
             FROM information_schema.columns
             WHERE table_schema = current_schema()
-              AND table_name = 'companion_memories'
+              AND table_name = 'companion_virployee_memories'
               AND column_name = 'org_id'
         ) THEN 'org_id'
         ELSE 'tenant_id'
     END INTO boundary_column;
 
     EXECUTE format(
-        'CREATE UNIQUE INDEX IF NOT EXISTS companion_memories_active_content_uq ON companion_memories (%I, virployee_id, content_hash) WHERE lifecycle_state = ''active''',
+        'CREATE UNIQUE INDEX IF NOT EXISTS companion_memories_active_content_uq ON companion_virployee_memories (%I, virployee_id, content_hash) WHERE lifecycle_state = ''active''',
         boundary_column
     );
     EXECUTE format(
-        'CREATE INDEX IF NOT EXISTS companion_memories_list_idx ON companion_memories (%I, virployee_id, lifecycle_state, updated_at DESC, id DESC)',
+        'CREATE INDEX IF NOT EXISTS companion_memories_list_idx ON companion_virployee_memories (%I, virployee_id, lifecycle_state, updated_at DESC, id DESC)',
         boundary_column
     );
 END $$;
 CREATE INDEX IF NOT EXISTS companion_memories_search_idx
-    ON companion_memories USING gin (to_tsvector('simple', title || ' ' || content));
+    ON companion_virployee_memories USING gin (to_tsvector('simple', title || ' ' || content));
 
-CREATE TABLE IF NOT EXISTS companion_memory_audit (
+CREATE TABLE IF NOT EXISTS companion_virployee_memory_audit (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id text NOT NULL,
     virployee_id uuid NOT NULL,
@@ -73,14 +73,14 @@ BEGIN
             SELECT 1
             FROM information_schema.columns
             WHERE table_schema = current_schema()
-              AND table_name = 'companion_memory_audit'
+              AND table_name = 'companion_virployee_memory_audit'
               AND column_name = 'org_id'
         ) THEN 'org_id'
         ELSE 'tenant_id'
     END INTO boundary_column;
 
     EXECUTE format(
-        'CREATE INDEX IF NOT EXISTS companion_memory_audit_lookup_idx ON companion_memory_audit (%I, virployee_id, memory_id, created_at DESC)',
+        'CREATE INDEX IF NOT EXISTS companion_memory_audit_lookup_idx ON companion_virployee_memory_audit (%I, virployee_id, memory_id, created_at DESC)',
         boundary_column
     );
 END $$;
