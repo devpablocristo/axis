@@ -20,11 +20,33 @@ CREATE TABLE IF NOT EXISTS companion_memories (
     UNIQUE (tenant_id, virployee_id, id)
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS companion_memories_active_content_uq
-    ON companion_memories (tenant_id, virployee_id, content_hash)
-    WHERE lifecycle_state = 'active';
-CREATE INDEX IF NOT EXISTS companion_memories_list_idx
-    ON companion_memories (tenant_id, virployee_id, lifecycle_state, updated_at DESC, id DESC);
+DO $$
+DECLARE
+    boundary_column text;
+BEGIN
+    -- Some pre-migration environments already renamed the isolation boundary
+    -- before this historical migration was registered. Keep the migration
+    -- replay-safe for both upgrade paths; 0051 performs the canonical rename.
+    SELECT CASE
+        WHEN EXISTS (
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = current_schema()
+              AND table_name = 'companion_memories'
+              AND column_name = 'org_id'
+        ) THEN 'org_id'
+        ELSE 'tenant_id'
+    END INTO boundary_column;
+
+    EXECUTE format(
+        'CREATE UNIQUE INDEX IF NOT EXISTS companion_memories_active_content_uq ON companion_memories (%I, virployee_id, content_hash) WHERE lifecycle_state = ''active''',
+        boundary_column
+    );
+    EXECUTE format(
+        'CREATE INDEX IF NOT EXISTS companion_memories_list_idx ON companion_memories (%I, virployee_id, lifecycle_state, updated_at DESC, id DESC)',
+        boundary_column
+    );
+END $$;
 CREATE INDEX IF NOT EXISTS companion_memories_search_idx
     ON companion_memories USING gin (to_tsvector('simple', title || ' ' || content));
 
@@ -42,8 +64,26 @@ CREATE TABLE IF NOT EXISTS companion_memory_audit (
     metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
     created_at timestamptz NOT NULL DEFAULT now()
 );
-CREATE INDEX IF NOT EXISTS companion_memory_audit_lookup_idx
-    ON companion_memory_audit (tenant_id, virployee_id, memory_id, created_at DESC);
+DO $$
+DECLARE
+    boundary_column text;
+BEGIN
+    SELECT CASE
+        WHEN EXISTS (
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = current_schema()
+              AND table_name = 'companion_memory_audit'
+              AND column_name = 'org_id'
+        ) THEN 'org_id'
+        ELSE 'tenant_id'
+    END INTO boundary_column;
+
+    EXECUTE format(
+        'CREATE INDEX IF NOT EXISTS companion_memory_audit_lookup_idx ON companion_memory_audit (%I, virployee_id, memory_id, created_at DESC)',
+        boundary_column
+    );
+END $$;
 
 ALTER TABLE companion_run_traces
     ADD COLUMN IF NOT EXISTS memory_references jsonb NOT NULL DEFAULT '[]'::jsonb,
