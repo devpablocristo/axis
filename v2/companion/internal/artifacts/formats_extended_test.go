@@ -78,10 +78,10 @@ func TestNativeMediaKeepsOriginalWhenOptionalExtractionFails(t *testing.T) {
 	extractor := &extractionStub{err: ErrExtractionUnavailable}
 	input := AdaptInput{
 		Manifest: Manifest{DocumentID: "audio-1", Name: "sample.mp3", MIMEType: "audio/mpeg", SHA256: "sha"},
-		Stored:   StoredArtifact{URI: "gs://tenant/sample.mp3"}, Blob: blobFromBytes(t, []byte("audio")),
+		Stored:   StoredArtifact{URI: "gs://organization/sample.mp3"}, Blob: blobFromBytes(t, []byte("audio")),
 	}
 	parts, err := (AudioFormatAdapter{Extractor: extractor}).Adapt(context.Background(), input)
-	if err != nil || len(parts) != 1 || parts[0].Kind != PartFileData || parts[0].URI != "gs://tenant/sample.mp3" {
+	if err != nil || len(parts) != 1 || parts[0].Kind != PartFileData || parts[0].URI != "gs://organization/sample.mp3" {
 		t.Fatalf("native original should remain usable: parts=%+v err=%v", parts, err)
 	}
 }

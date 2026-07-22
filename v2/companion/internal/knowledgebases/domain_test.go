@@ -90,16 +90,16 @@ func TestIngestionUseCasesFailClosedWithoutConfiguredPipeline(t *testing.T) {
 			MIMEType: "text/plain", SizeBytes: 42,
 		},
 	}
-	if _, err := usecases.IngestConnector(t.Context(), "tenant-a", "member", uuid.New(), input); !domainerr.IsForbidden(err) {
+	if _, err := usecases.IngestConnector(t.Context(), "organization-a", "member", uuid.New(), input); !domainerr.IsForbidden(err) {
 		t.Fatalf("expected owner/admin authorization, got %v", err)
 	}
-	if _, err := usecases.IngestConnector(t.Context(), "tenant-a", "owner", uuid.New(), input); !domainerr.IsKind(err, domainerr.KindUnavailable) {
+	if _, err := usecases.IngestConnector(t.Context(), "organization-a", "owner", uuid.New(), input); !domainerr.IsKind(err, domainerr.KindUnavailable) {
 		t.Fatalf("expected fail-closed unavailable pipeline, got %v", err)
 	}
 }
 
 func TestNormalizeArtifactScopeRequiresCompleteIndexedIdentity(t *testing.T) {
-	_, err := normalizeArtifactScope(ArtifactScope{VirployeeID: uuid.New(), ProductSurface: "medmory", SubjectID: "patient-a"})
+	_, err := normalizeArtifactScope(ArtifactScope{VirployeeID: uuid.New(), ProductSurface: "producta", SubjectID: "patient-a"})
 	if !domainerr.IsValidation(err) {
 		t.Fatalf("expected validation, got %v", err)
 	}

@@ -8,16 +8,16 @@ func TestSignerIsCanonicalAndBindsEveryExecutionField(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	base := Payload{TenantID: "tenant", GovernanceCheckID: "check", BindingHash: "binding", IdempotencyKey: "idem", Status: "succeeded", DurationMS: 1, Result: map[string]any{"b": 2, "a": 1}}
+	base := Payload{OrgID: "org", GovernanceCheckID: "check", BindingHash: "binding", IdempotencyKey: "idem", Status: "succeeded", DurationMS: 1, Result: map[string]any{"b": 2, "a": 1}}
 	first, err := signer.Sign(base)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, _ := signer.Sign(Payload{TenantID: "tenant", GovernanceCheckID: "check", BindingHash: "binding", IdempotencyKey: "idem", Status: "succeeded", DurationMS: 1, Result: map[string]any{"a": 1, "b": 2}})
+	second, _ := signer.Sign(Payload{OrgID: "org", GovernanceCheckID: "check", BindingHash: "binding", IdempotencyKey: "idem", Status: "succeeded", DurationMS: 1, Result: map[string]any{"a": 1, "b": 2}})
 	if first.Signature != second.Signature {
 		t.Fatal("map insertion order must not change canonical signature")
 	}
-	if first.Signature != "d0wA1JzU41N4Ab3ldy7Dk_WAqJGBd4sJtH7p3Wp2Q_U" {
+	if first.Signature != "jQxdBPJV0YMOLOyIZIuYJMGRWtWnWaRb2k2OuWXXivk" {
 		t.Fatalf("signature drifted from shared golden vector: %s", first.Signature)
 	}
 	base.BindingHash = "tampered"

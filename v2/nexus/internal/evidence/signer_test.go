@@ -27,12 +27,12 @@ func (f fakeSubjectAuditReader) ReplaySubject(context.Context, string, string) (
 
 func sampleReplay() audit.ReplayOutput {
 	return audit.ReplayOutput{
-		Scope:       "tenant-1/vp-1",
+		Scope:       "organization-1/vp-1",
 		VirployeeID: "vp-1",
 		EventCount:  2,
 		Timeline: []audit.TimelineEntry{
-			{Event: "assist_completed", Actor: "service:medmory", Subject: "assist_run run-1", SubjectID: "run-1", At: "2026-07-21T12:00:00Z", Summary: "dx", Data: map[string]any{"output_hash": "abc"}, EventHash: "h1"},
-			{Event: "assist_completed", Actor: "service:medmory", Subject: "assist_run run-2", SubjectID: "run-2", At: "2026-07-21T12:01:00Z", Summary: "dx2", EventHash: "h2"},
+			{Event: "assist_completed", Actor: "service:producta", Subject: "assist_run run-1", SubjectID: "run-1", At: "2026-07-21T12:00:00Z", Summary: "dx", Data: map[string]any{"output_hash": "abc"}, EventHash: "h1"},
+			{Event: "assist_completed", Actor: "service:producta", Subject: "assist_run run-2", SubjectID: "run-2", At: "2026-07-21T12:01:00Z", Summary: "dx2", EventHash: "h2"},
 		},
 		Integrity: &audit.IntegrityOutput{Status: "ok", CheckedEvents: 2, FirstHash: "h1", LastHash: "h2", Signed: true},
 	}
@@ -40,7 +40,7 @@ func sampleReplay() audit.ReplayOutput {
 
 func TestGenerateSignedPackReverifies(t *testing.T) {
 	uc := NewUseCases(fakeAuditReader{out: sampleReplay()}, NewSigner("super-secret", "k1"))
-	pack, err := uc.Generate(context.Background(), "tenant-1", "vp-1", "")
+	pack, err := uc.Generate(context.Background(), "organization-1", "vp-1", "")
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestGenerateSignedPackReverifies(t *testing.T) {
 
 func TestGenerateUnsignedPack(t *testing.T) {
 	uc := NewUseCases(fakeAuditReader{out: sampleReplay()}, nil)
-	pack, err := uc.Generate(context.Background(), "tenant-1", "vp-1", "")
+	pack, err := uc.Generate(context.Background(), "organization-1", "vp-1", "")
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestGenerateUnsignedPack(t *testing.T) {
 
 func TestGenerateFocusedOnSubject(t *testing.T) {
 	uc := NewUseCases(fakeAuditReader{out: sampleReplay()}, NewSigner("k", ""))
-	pack, err := uc.Generate(context.Background(), "tenant-1", "vp-1", "run-2")
+	pack, err := uc.Generate(context.Background(), "organization-1", "vp-1", "run-2")
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestGenerateFocusedOnSubject(t *testing.T) {
 
 func TestTamperedPackFailsVerification(t *testing.T) {
 	uc := NewUseCases(fakeAuditReader{out: sampleReplay()}, NewSigner("super-secret", "k1"))
-	pack, err := uc.Generate(context.Background(), "tenant-1", "vp-1", "")
+	pack, err := uc.Generate(context.Background(), "organization-1", "vp-1", "")
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestTamperedPackFailsVerification(t *testing.T) {
 func TestFocusedPackLinksAndIndependentlyProvesSpecialistChains(t *testing.T) {
 	primary := sampleReplay()
 	specialist := audit.ReplayOutput{
-		Scope: "tenant-1/vp-specialist", VirployeeID: "vp-specialist", EventCount: 2,
+		Scope: "organization-1/vp-specialist", VirployeeID: "vp-specialist", EventCount: 2,
 		Timeline: []audit.TimelineEntry{
 			{Event: "specialist_consult_completed", Actor: "vp-specialist", SubjectID: "run-2", At: "2026-07-21T12:00:30Z", Summary: "opinion", EventHash: "s1"},
 			{Event: "other", Actor: "vp-specialist", SubjectID: "other-run", At: "2026-07-21T12:02:00Z", Summary: "other", EventHash: "s2"},
@@ -114,7 +114,7 @@ func TestFocusedPackLinksAndIndependentlyProvesSpecialistChains(t *testing.T) {
 	}
 	reader := fakeSubjectAuditReader{primary: primary, chains: []audit.ReplayOutput{primary, specialist}}
 	uc := NewUseCases(reader, NewSigner("linked-secret", "k1"))
-	pack, err := uc.Generate(context.Background(), "tenant-1", "vp-1", "run-2")
+	pack, err := uc.Generate(context.Background(), "organization-1", "vp-1", "run-2")
 	if err != nil {
 		t.Fatal(err)
 	}

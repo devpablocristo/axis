@@ -2,10 +2,10 @@
 
 ## Decision
 
-Companion owns one persistent memory model under `tenant_id + virployee_id`,
+Companion owns one persistent memory model under `org_id + virployee_id`,
 with an explicit nested work scope. It replaces the v1 overlap between
 containers, facts and operational memory. There is no v1 migration and no
-tenant-, user- or conversation-shared memory outside these boundaries.
+organization-, user- or conversation-shared memory outside these boundaries.
 
 The valid scopes are:
 
@@ -19,7 +19,7 @@ The valid scopes are:
 `subject` requires `subject_id` and forbids `case_id`; `case` requires both;
 `virployee` accepts neither. Existing memory rows are retained as
 Virployee-global records. A case-scoped write must reference a case for the same
-tenant, subject and responsible/entrypoint Virployee.
+organization, subject and responsible/entrypoint Virployee.
 
 Memories have a title, lexical content, type (`fact`, `preference`, `procedure`
 or `note`), sensitivity (`normal` or `sensitive`), provenance, actor, content
@@ -31,9 +31,9 @@ available only through Companion's internal port.
 
 ## Security and lifecycle
 
-Only the assigned supervisor or tenant `owner`/`admin` may read, recall or
+Only the assigned supervisor or organization `owner`/`admin` may read, recall or
 mutate a Virployee's memories. BFF discards caller-supplied role headers and
-forwards the resolved membership role; Companion independently checks tenant,
+forwards the resolved membership role; Companion independently checks organization,
 actor, role and supervisor. List responses redact sensitive content. Authorized
 detail is the only public response containing full sensitive content.
 
@@ -50,7 +50,7 @@ hashes, versions and curation metadata, never content.
 ## Retrieval and runtime
 
 F5 recall is hybrid pgvector plus PostgreSQL full-text search, always
-constrained by tenant, Virployee and requested work scope before ranking.
+constrained by organization, Virployee and requested work scope before ranking.
 Embeddings use Runtime's `gemini-embedding-001` adapter at 768 dimensions and
 carry model plus content version so stale vectors never match current text.
 Failed or pending indexing falls back to lexical recall without weakening
@@ -69,9 +69,9 @@ No query scans a sibling subject or case. Conflict detection, active-content
 uniqueness, curation audit and safe Runtime references also carry the scope, so
 two patients assigned to one Virployee cannot collide or leak through recall.
 
-Every memory indexing or vector-query call reserves the tenant's `axis / embeddings`
+Every memory indexing or vector-query call reserves the organization's `axis / embeddings`
 quota before reaching Runtime. A denied indexing job remains retryable; denied
-or unavailable query embedding degrades to the same tenant-scoped lexical
+or unavailable query embedding degrades to the same organization-scoped lexical
 recall. Successful calls append only token estimates, model and operational
 identifiers to the usage ledger—never query text, memory content or vectors.
 

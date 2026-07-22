@@ -53,7 +53,7 @@ func TestGoogleCalendarExecutorInsertsAndReportsExternalEffects(t *testing.T) {
 	exec := NewGoogleCalendarExecutor(api, "team@group.calendar.google.com")
 	attempt := ExecutionAttempt{ID: uuid.New(), IdempotencyKey: "idem-abc"}
 
-	outcome, err := exec.Execute(context.Background(), "tenant-1", uuid.New(), attempt, gcalAction())
+	outcome, err := exec.Execute(context.Background(), "organization-1", uuid.New(), attempt, gcalAction())
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestGoogleCalendarExecutorInsertsAndReportsExternalEffects(t *testing.T) {
 func TestGoogleCalendarExecutorRecordsModeEvenOnError(t *testing.T) {
 	// Missing calendar id: still fails closed, but records the responsible executor.
 	exec := NewGoogleCalendarExecutor(&fakeCalendarAPI{}, "")
-	outcome, err := exec.Execute(context.Background(), "tenant-1", uuid.New(), ExecutionAttempt{IdempotencyKey: "k"}, gcalAction())
+	outcome, err := exec.Execute(context.Background(), "organization-1", uuid.New(), ExecutionAttempt{IdempotencyKey: "k"}, gcalAction())
 	if err == nil {
 		t.Fatal("expected an error when calendar id is not configured")
 	}
@@ -97,7 +97,7 @@ func TestGoogleCalendarExecutorRecordsModeEvenOnError(t *testing.T) {
 func TestGoogleCalendarExecutorPropagatesAPIError(t *testing.T) {
 	api := &fakeCalendarAPI{err: errors.New("boom")}
 	exec := NewGoogleCalendarExecutor(api, "cal-1")
-	_, err := exec.Execute(context.Background(), "tenant-1", uuid.New(), ExecutionAttempt{IdempotencyKey: "k"}, gcalAction())
+	_, err := exec.Execute(context.Background(), "organization-1", uuid.New(), ExecutionAttempt{IdempotencyKey: "k"}, gcalAction())
 	if err == nil {
 		t.Fatal("expected the API error to propagate")
 	}
@@ -111,7 +111,7 @@ func TestGoogleCalendarExecutorDeletesForCompensation(t *testing.T) {
 		Action:        preparedactions.ActionDelete,
 		EventID:       "evt-123",
 	}
-	outcome, err := exec.Execute(context.Background(), "tenant-1", uuid.New(), ExecutionAttempt{IdempotencyKey: "k"}, action)
+	outcome, err := exec.Execute(context.Background(), "organization-1", uuid.New(), ExecutionAttempt{IdempotencyKey: "k"}, action)
 	if err != nil {
 		t.Fatalf("Execute(delete): %v", err)
 	}

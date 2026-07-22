@@ -1,25 +1,23 @@
 import { useState } from 'react'
 import { OrgsPage } from './OrgsPage'
 import { ProductsPage } from './ProductsPage'
-import { TenantsPage } from './TenantsPage'
 import { UsersPage } from './UsersPage'
-import type { Tenant } from './api'
 
-type TenancyView = 'users' | 'tenants' | 'orgs' | 'products'
+type OrganizationAdminView = 'users' | 'orgs' | 'products'
 
-type TenancyPageProps = {
-  tenantId: string
+type OrganizationAdminPageProps = {
+  organizationId: string
+  orgId: string
   principalId: string
-  sessionTenants: Tenant[]
   onSessionChanged: () => void | Promise<void>
 }
 
-export function TenancyPage({ tenantId, principalId, sessionTenants, onSessionChanged }: TenancyPageProps) {
-  const [view, setView] = useState<TenancyView>('users')
+export function OrganizationAdminPage({ organizationId, orgId, principalId, onSessionChanged }: OrganizationAdminPageProps) {
+  const [view, setView] = useState<OrganizationAdminView>('users')
 
   return (
-    <div className="tenancy-section">
-      <div className="tenancy-section__tabs" role="tablist" aria-label="Admin section">
+    <div className="organization-admin-section">
+      <div className="organization-admin-section__tabs" role="tablist" aria-label="Admin section">
         <button
           type="button"
           role="tab"
@@ -28,15 +26,6 @@ export function TenancyPage({ tenantId, principalId, sessionTenants, onSessionCh
           onClick={() => setView('users')}
         >
           Users
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={view === 'tenants'}
-          className={view === 'tenants' ? 'btn-primary active' : 'btn-secondary'}
-          onClick={() => setView('tenants')}
-        >
-          Tenants
         </button>
         <button
           type="button"
@@ -61,11 +50,9 @@ export function TenancyPage({ tenantId, principalId, sessionTenants, onSessionCh
       {view === 'orgs' ? (
         <OrgsPage principalId={principalId} onSessionChanged={onSessionChanged} />
       ) : view === 'products' ? (
-        <ProductsPage principalId={principalId} onSessionChanged={onSessionChanged} />
-      ) : view === 'tenants' ? (
-        <TenantsPage principalId={principalId} sessionTenants={sessionTenants} onSessionChanged={onSessionChanged} />
+        <ProductsPage organizationId={organizationId} principalId={principalId} onSessionChanged={onSessionChanged} />
       ) : (
-        <UsersPage tenantId={tenantId} principalId={principalId} />
+        <UsersPage orgId={orgId} principalId={principalId} />
       )}
     </div>
   )

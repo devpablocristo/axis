@@ -21,7 +21,7 @@ func (f fakeChecker) IsActiveCapability(context.Context, string, string) (bool, 
 func goodProposal() Proposal {
 	return Proposal{
 		ID:            uuid.New(),
-		TenantID:      "tenant-1",
+		OrgID:         "organization-1",
 		VirployeeID:   uuid.New(),
 		CapabilityKey: "calendar.events.create",
 		Title:         "Learned procedure: calendar.events.create",
@@ -166,7 +166,7 @@ func TestAcceptClaimsBeforeInstallingAndPinsMemory(t *testing.T) {
 	inst := &spyInstaller{id: uuid.New()}
 	u := acceptUseCases(repo, inst, fakeChecker{active: true})
 
-	res, err := u.Accept(context.Background(), "tenant-1", p.ID, "user_42", "admin")
+	res, err := u.Accept(context.Background(), "organization-1", p.ID, "user_42", "admin")
 	if err != nil {
 		t.Fatalf("Accept: %v", err)
 	}
@@ -205,7 +205,7 @@ func TestAcceptIdempotentReportsPassed(t *testing.T) {
 	inst := &spyInstaller{id: uuid.New()}
 	u := acceptUseCases(repo, inst, fakeChecker{active: true})
 
-	res, err := u.Accept(context.Background(), "tenant-1", p.ID, "user_42", "admin")
+	res, err := u.Accept(context.Background(), "organization-1", p.ID, "user_42", "admin")
 	if err != nil {
 		t.Fatalf("Accept idempotent: %v", err)
 	}
@@ -228,7 +228,7 @@ func TestAcceptSelfHealsWhenMemoryIDMissing(t *testing.T) {
 	inst := &spyInstaller{id: uuid.New()}
 	u := acceptUseCases(repo, inst, fakeChecker{active: true})
 
-	if _, err := u.Accept(context.Background(), "tenant-1", p.ID, "user_42", "admin"); err != nil {
+	if _, err := u.Accept(context.Background(), "organization-1", p.ID, "user_42", "admin"); err != nil {
 		t.Fatalf("self-heal accept: %v", err)
 	}
 	if inst.calls != 1 || repo.attachCall != 1 {
@@ -245,7 +245,7 @@ func TestAcceptRefusedWhenEvalFails(t *testing.T) {
 	inst := &spyInstaller{id: uuid.New()}
 	u := acceptUseCases(repo, inst, fakeChecker{active: false}) // capability not real
 
-	_, err := u.Accept(context.Background(), "tenant-1", p.ID, "user_42", "admin")
+	_, err := u.Accept(context.Background(), "organization-1", p.ID, "user_42", "admin")
 	if !domainerr.IsValidation(err) {
 		t.Fatalf("expected validation error, got %v", err)
 	}
@@ -262,7 +262,7 @@ func TestAcceptFailsClosedWithoutInstallerOrAuthz(t *testing.T) {
 	u1 := NewUseCases(noInstaller)
 	u1.SetCapabilityChecker(fakeChecker{active: true})
 	u1.SetAuthorizer(permissiveAuthz{})
-	if _, err := u1.Accept(context.Background(), "tenant-1", p.ID, "user_42", "admin"); !domainerr.IsValidation(err) {
+	if _, err := u1.Accept(context.Background(), "organization-1", p.ID, "user_42", "admin"); !domainerr.IsValidation(err) {
 		t.Fatalf("expected fail-closed without installer, got %v", err)
 	}
 	if noInstaller.decideCall != 0 {
@@ -274,7 +274,7 @@ func TestAcceptFailsClosedWithoutInstallerOrAuthz(t *testing.T) {
 	u2 := NewUseCases(noAuthz)
 	u2.SetCapabilityChecker(fakeChecker{active: true})
 	u2.SetMemoryInstaller(&spyInstaller{id: uuid.New()})
-	if _, err := u2.Accept(context.Background(), "tenant-1", p.ID, "user_42", "admin"); !domainerr.IsValidation(err) {
+	if _, err := u2.Accept(context.Background(), "organization-1", p.ID, "user_42", "admin"); !domainerr.IsValidation(err) {
 		t.Fatalf("expected fail-closed without authorizer, got %v", err)
 	}
 }
@@ -288,7 +288,7 @@ func TestAcceptDeniedByAuthorizer(t *testing.T) {
 	u.SetMemoryInstaller(inst)
 	u.SetAuthorizer(permissiveAuthz{err: domainerr.Forbidden("not the supervisor")})
 
-	if _, err := u.Accept(context.Background(), "tenant-1", p.ID, "member", "member"); err == nil {
+	if _, err := u.Accept(context.Background(), "organization-1", p.ID, "member", "member"); err == nil {
 		t.Fatal("expected authorization to deny an unprivileged actor")
 	}
 	if inst.calls != 0 || repo.decideCall != 0 {
@@ -302,7 +302,7 @@ func TestAcceptTreatsMemoryConflictAsInstalled(t *testing.T) {
 	inst := &spyInstaller{err: domainerr.Conflict("an active memory with the same content already exists")}
 	u := acceptUseCases(repo, inst, fakeChecker{active: true})
 
-	res, err := u.Accept(context.Background(), "tenant-1", p.ID, "user_42", "admin")
+	res, err := u.Accept(context.Background(), "organization-1", p.ID, "user_42", "admin")
 	if err != nil {
 		t.Fatalf("conflict must be treated as installed, got %v", err)
 	}
@@ -327,7 +327,7 @@ func TestDismissPendingAndGuards(t *testing.T) {
 
 	p := goodProposal()
 	repo := &decideRepo{proposal: p}
-	out, err := dismissUC(repo).Dismiss(context.Background(), "tenant-1", p.ID, "user_42", "admin")
+	out, err := dismissUC(repo).Dismiss(context.Background(), "organization-1", p.ID, "user_42", "admin")
 	if err != nil {
 		t.Fatalf("Dismiss: %v", err)
 	}
@@ -337,7 +337,7 @@ func TestDismissPendingAndGuards(t *testing.T) {
 
 	// Accepted cannot be dismissed.
 	accepted := &decideRepo{proposal: func() Proposal { q := goodProposal(); q.Status = StatusAccepted; return q }()}
-	if _, err := dismissUC(accepted).Dismiss(context.Background(), "tenant-1", accepted.proposal.ID, "u", "admin"); !domainerr.IsValidation(err) {
+	if _, err := dismissUC(accepted).Dismiss(context.Background(), "organization-1", accepted.proposal.ID, "u", "admin"); !domainerr.IsValidation(err) {
 		t.Fatalf("dismissing an accepted proposal must fail, got %v", err)
 	}
 	if accepted.decideCall != 0 {
@@ -346,7 +346,7 @@ func TestDismissPendingAndGuards(t *testing.T) {
 
 	// Dismiss is idempotent.
 	dismissed := &decideRepo{proposal: func() Proposal { q := goodProposal(); q.Status = StatusDismissed; return q }()}
-	if _, err := dismissUC(dismissed).Dismiss(context.Background(), "tenant-1", dismissed.proposal.ID, "u", "admin"); err != nil {
+	if _, err := dismissUC(dismissed).Dismiss(context.Background(), "organization-1", dismissed.proposal.ID, "u", "admin"); err != nil {
 		t.Fatalf("re-dismiss should be idempotent, got %v", err)
 	}
 	if dismissed.decideCall != 0 {
@@ -355,7 +355,7 @@ func TestDismissPendingAndGuards(t *testing.T) {
 
 	// Dismiss fails closed without an authorizer.
 	noAuthz := &decideRepo{proposal: goodProposal()}
-	if _, err := NewUseCases(noAuthz).Dismiss(context.Background(), "tenant-1", noAuthz.proposal.ID, "u", "admin"); !domainerr.IsValidation(err) {
+	if _, err := NewUseCases(noAuthz).Dismiss(context.Background(), "organization-1", noAuthz.proposal.ID, "u", "admin"); !domainerr.IsValidation(err) {
 		t.Fatalf("expected fail-closed dismiss without authorizer, got %v", err)
 	}
 }

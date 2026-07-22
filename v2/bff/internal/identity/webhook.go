@@ -18,7 +18,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	identitydomain "github.com/devpablocristo/bff-v2/internal/identity/usecases/domain"
-	tenantdomain "github.com/devpablocristo/bff-v2/internal/tenancy/usecases/domain"
+	productdomain "github.com/devpablocristo/bff-v2/internal/products/usecases/domain"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
 	ginmw "github.com/devpablocristo/platform/http/gin/go"
 )
@@ -40,24 +40,24 @@ type WebhookIdentityPort interface {
 	MarkDeletedByProviderUserID(ctx context.Context, provider, providerUserID string) error
 }
 
-type WebhookTenancyPort interface {
-	EnsureProviderDefaultTenant(ctx context.Context, input tenantdomain.EnsureOrgInput, userID string) (tenantdomain.Tenant, error)
-	OrgByProvider(ctx context.Context, provider, providerOrgID string) (tenantdomain.Org, error)
+type WebhookOrganizationAccessPort interface {
+	EnsureProviderDefaultProduct(ctx context.Context, input productdomain.EnsureOrgInput, userID string) (productdomain.Product, error)
+	OrgByProvider(ctx context.Context, provider, providerOrgID string) (productdomain.Org, error)
 	DeactivateUserMemberships(ctx context.Context, userID string) error
 	DeactivateOrgUserMemberships(ctx context.Context, orgID, userID string) error
 }
 
 type WebhookHandler struct {
 	identity WebhookIdentityPort
-	tenancy  WebhookTenancyPort
+	products WebhookOrganizationAccessPort
 	secret   string
 	now      func() time.Time
 }
 
-func NewWebhookHandler(identity WebhookIdentityPort, tenancy WebhookTenancyPort, secret string) *WebhookHandler {
+func NewWebhookHandler(identity WebhookIdentityPort, products WebhookOrganizationAccessPort, secret string) *WebhookHandler {
 	return &WebhookHandler{
 		identity: identity,
-		tenancy:  tenancy,
+		products: products,
 		secret:   strings.TrimSpace(secret),
 		now: func() time.Time {
 			return time.Now().UTC()
@@ -159,7 +159,7 @@ func (h *WebhookHandler) onUserDeleted(ctx context.Context, raw json.RawMessage)
 	if user.ID == "" {
 		return nil
 	}
-	return h.tenancy.DeactivateUserMemberships(ctx, user.ID)
+	return h.products.DeactivateUserMemberships(ctx, user.ID)
 }
 
 func (h *WebhookHandler) onOrganizationUpsert(ctx context.Context, raw json.RawMessage) error {
@@ -172,12 +172,12 @@ func (h *WebhookHandler) onOrganizationUpsert(ctx context.Context, raw json.RawM
 		return nil
 	}
 	now := h.now()
-	_, err := h.tenancy.EnsureProviderDefaultTenant(ctx, tenantdomain.EnsureOrgInput{
+	_, err := h.products.EnsureProviderDefaultProduct(ctx, productdomain.EnsureOrgInput{
 		Provider:      identitydomain.ProviderClerk,
 		ProviderOrgID: providerOrgID,
 		Name:          firstNonEmpty(data.Name, data.Slug, providerOrgID),
 		Slug:          data.Slug,
-		Status:        tenantdomain.StatusActive,
+		Status:        productdomain.StatusActive,
 		SyncedAt:      &now,
 	}, "")
 	return err
@@ -193,7 +193,7 @@ func (h *WebhookHandler) onOrganizationMembershipDeleted(ctx context.Context, ra
 	if providerOrgID == "" || providerUserID == "" {
 		return nil
 	}
-	org, err := h.tenancy.OrgByProvider(ctx, identitydomain.ProviderClerk, providerOrgID)
+	org, err := h.products.OrgByProvider(ctx, identitydomain.ProviderClerk, providerOrgID)
 	if err != nil {
 		if domainerr.IsNotFound(err) {
 			return nil
@@ -207,7 +207,7 @@ func (h *WebhookHandler) onOrganizationMembershipDeleted(ctx context.Context, ra
 		}
 		return err
 	}
-	return h.tenancy.DeactivateOrgUserMemberships(ctx, org.ID, user.ID)
+	return h.products.DeactivateOrgUserMemberships(ctx, org.ID, user.ID)
 }
 
 type clerkEventEnvelope struct {

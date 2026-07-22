@@ -58,16 +58,16 @@ func scanBinding(row scanner) (Binding, error) {
 	return out, nil
 }
 
-func (r *Repository) Create(ctx context.Context, tenant string, in CreateInput) (KnowledgeBase, error) {
-	return scanBase(r.db.QueryRow(ctx, `INSERT INTO companion_knowledge_bases(tenant_id,name,description,classification)
-		VALUES($1,$2,$3,$4) RETURNING `+baseColumns, tenant, in.Name, in.Description, in.Classification))
+func (r *Repository) Create(ctx context.Context, organization string, in CreateInput) (KnowledgeBase, error) {
+	return scanBase(r.db.QueryRow(ctx, `INSERT INTO companion_knowledge_bases(org_id,name,description,classification)
+		VALUES($1,$2,$3,$4) RETURNING `+baseColumns, organization, in.Name, in.Description, in.Classification))
 }
 
-func (r *Repository) Get(ctx context.Context, tenant string, id uuid.UUID) (KnowledgeBase, error) {
-	return scanBase(r.db.QueryRow(ctx, `SELECT `+baseColumns+` FROM companion_knowledge_bases WHERE tenant_id=$1 AND id=$2`, tenant, id))
+func (r *Repository) Get(ctx context.Context, organization string, id uuid.UUID) (KnowledgeBase, error) {
+	return scanBase(r.db.QueryRow(ctx, `SELECT `+baseColumns+` FROM companion_knowledge_bases WHERE org_id=$1 AND id=$2`, organization, id))
 }
 
-func (r *Repository) List(ctx context.Context, tenant, state string) ([]KnowledgeBase, error) {
+func (r *Repository) List(ctx context.Context, organization, state string) ([]KnowledgeBase, error) {
 	state = strings.TrimSpace(strings.ToLower(state))
 	if state == "" {
 		state = "active"
@@ -76,7 +76,7 @@ func (r *Repository) List(ctx context.Context, tenant, state string) ([]Knowledg
 		return nil, domainerr.Validation("state must be active or archived")
 	}
 	rows, err := r.db.Query(ctx, `SELECT `+baseColumns+` FROM companion_knowledge_bases
-		WHERE tenant_id=$1 AND lifecycle_state=$2 ORDER BY updated_at DESC,id`, tenant, state)
+		WHERE org_id=$1 AND lifecycle_state=$2 ORDER BY updated_at DESC,id`, organization, state)
 	if err != nil {
 		return nil, err
 	}
@@ -92,17 +92,17 @@ func (r *Repository) List(ctx context.Context, tenant, state string) ([]Knowledg
 	return out, rows.Err()
 }
 
-func (r *Repository) Update(ctx context.Context, tenant string, id uuid.UUID, in UpdateInput) (KnowledgeBase, error) {
+func (r *Repository) Update(ctx context.Context, organization string, id uuid.UUID, in UpdateInput) (KnowledgeBase, error) {
 	item, err := scanBase(r.db.QueryRow(ctx, `UPDATE companion_knowledge_bases SET name=$3,description=$4,
-		version=version+1,updated_at=now() WHERE tenant_id=$1 AND id=$2 AND lifecycle_state='active' AND version=$5
-		RETURNING `+baseColumns, tenant, id, in.Name, in.Description, in.ExpectedVersion))
+		version=version+1,updated_at=now() WHERE org_id=$1 AND id=$2 AND lifecycle_state='active' AND version=$5
+		RETURNING `+baseColumns, organization, id, in.Name, in.Description, in.ExpectedVersion))
 	if domainerr.IsNotFound(err) {
 		return KnowledgeBase{}, domainerr.Conflict("knowledge base version conflict or resource is not active")
 	}
 	return item, err
 }
 
-func (r *Repository) Lifecycle(ctx context.Context, tenant string, id uuid.UUID, action string, expectedVersion int64) (KnowledgeBase, error) {
+func (r *Repository) Lifecycle(ctx context.Context, organization string, id uuid.UUID, action string, expectedVersion int64) (KnowledgeBase, error) {
 	from, to := "active", "archived"
 	if action == "activate" {
 		from, to = "archived", "active"
@@ -111,34 +111,34 @@ func (r *Repository) Lifecycle(ctx context.Context, tenant string, id uuid.UUID,
 	}
 	item, err := scanBase(r.db.QueryRow(ctx, `UPDATE companion_knowledge_bases
 		SET lifecycle_state=$4,version=version+1,updated_at=now(),archived_at=CASE WHEN $4='archived' THEN now() ELSE NULL END
-		WHERE tenant_id=$1 AND id=$2 AND version=$3 AND lifecycle_state=$5 RETURNING `+baseColumns,
-		tenant, id, expectedVersion, to, from))
+		WHERE org_id=$1 AND id=$2 AND version=$3 AND lifecycle_state=$5 RETURNING `+baseColumns,
+		organization, id, expectedVersion, to, from))
 	if domainerr.IsNotFound(err) {
 		return KnowledgeBase{}, domainerr.Conflict("knowledge base version or lifecycle conflict")
 	}
 	return item, err
 }
 
-func (r *Repository) RegisterDocument(ctx context.Context, tenant string, baseID uuid.UUID, in RegisterDocumentInput) (Document, error) {
+func (r *Repository) RegisterDocument(ctx context.Context, organization string, baseID uuid.UUID, in RegisterDocumentInput) (Document, error) {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
 		return Document{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	var state, classification string
-	if err := tx.QueryRow(ctx, `SELECT lifecycle_state,classification FROM companion_knowledge_bases WHERE tenant_id=$1 AND id=$2 FOR UPDATE`, tenant, baseID).Scan(&state, &classification); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT lifecycle_state,classification FROM companion_knowledge_bases WHERE org_id=$1 AND id=$2 FOR UPDATE`, organization, baseID).Scan(&state, &classification); err != nil {
 		return Document{}, mapError(err, "knowledge base")
 	}
 	if state != "active" {
 		return Document{}, domainerr.Conflict("knowledge base is not active")
 	}
-	if err := validateDocumentScope(ctx, tx, tenant, baseID, classification, in.ArtifactScope); err != nil {
+	if err := validateDocumentScope(ctx, tx, organization, baseID, classification, in.ArtifactScope); err != nil {
 		return Document{}, err
 	}
 	id := uuid.New()
 	doc, err := scanDocument(tx.QueryRow(ctx, `
 		INSERT INTO companion_knowledge_documents(
-			id,tenant_id,knowledge_base_id,title,artifact_virployee_id,artifact_product_surface,
+			id,org_id,knowledge_base_id,title,artifact_virployee_id,artifact_product_surface,
 			artifact_subject_id,artifact_repository_generation,artifact_document_id,source_version,source_sha256
 		)
 		SELECT $1,$2,$3,COALESCE(NULLIF(btrim($4),''),a.name),a.virployee_id,a.product_surface,
@@ -146,26 +146,26 @@ func (r *Repository) RegisterDocument(ctx context.Context, tenant string, baseID
 		FROM companion_artifacts a
 		JOIN LATERAL (
 			SELECT source_version FROM companion_artifact_chunks c
-			WHERE c.tenant_id=a.tenant_id AND c.virployee_id=a.virployee_id
+			WHERE c.org_id=a.org_id AND c.virployee_id=a.virployee_id
 			  AND c.product_surface=a.product_surface AND c.subject_id=a.subject_id
 			  AND c.repository_generation=a.repository_generation AND c.document_id=a.document_id
 			  AND c.source_sha256=a.sha256
 			ORDER BY c.updated_at DESC LIMIT 1
 		) c ON true
-		WHERE a.tenant_id=$2 AND a.virployee_id=$5 AND a.product_surface=$6
+		WHERE a.org_id=$2 AND a.virployee_id=$5 AND a.product_surface=$6
 		  AND a.subject_id=$7 AND a.repository_generation=$8 AND a.document_id=$9
 		  AND a.status='indexed'
 		RETURNING `+documentColumns,
-		id, tenant, baseID, strings.TrimSpace(in.Title), in.ArtifactScope.VirployeeID,
+		id, organization, baseID, strings.TrimSpace(in.Title), in.ArtifactScope.VirployeeID,
 		in.ArtifactScope.ProductSurface, in.ArtifactScope.SubjectID, in.ArtifactScope.RepositoryGeneration,
 		in.ArtifactScope.DocumentID))
 	if domainerr.IsNotFound(err) {
-		return Document{}, domainerr.Validation("artifact document must exist, be indexed, and have verified chunks in this tenant")
+		return Document{}, domainerr.Validation("artifact document must exist, be indexed, and have verified chunks in this organization")
 	}
 	if err != nil {
 		return Document{}, err
 	}
-	if _, err := tx.Exec(ctx, `UPDATE companion_knowledge_bases SET version=version+1,updated_at=now() WHERE tenant_id=$1 AND id=$2`, tenant, baseID); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE companion_knowledge_bases SET version=version+1,updated_at=now() WHERE org_id=$1 AND id=$2`, organization, baseID); err != nil {
 		return Document{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -174,31 +174,31 @@ func (r *Repository) RegisterDocument(ctx context.Context, tenant string, baseID
 	return doc, nil
 }
 
-// ValidateIngestionScope rejects cross-tenant and classification-incompatible
+// ValidateIngestionScope rejects cross-organization and classification-incompatible
 // targets before any remote bytes are fetched or local bytes are indexed.
-func (r *Repository) ValidateIngestionScope(ctx context.Context, tenant string, baseID uuid.UUID, scope ArtifactScope) error {
+func (r *Repository) ValidateIngestionScope(ctx context.Context, organization string, baseID uuid.UUID, scope ArtifactScope) error {
 	if scope.ProductSurface != KnowledgeProductSurface {
 		return domainerr.Validation("knowledge ingestion product surface is server-owned")
 	}
 	var state, classification string
 	if err := r.db.QueryRow(ctx, `SELECT lifecycle_state,classification FROM companion_knowledge_bases
-		WHERE tenant_id=$1 AND id=$2`, tenant, baseID).Scan(&state, &classification); err != nil {
+		WHERE org_id=$1 AND id=$2`, organization, baseID).Scan(&state, &classification); err != nil {
 		return mapError(err, "knowledge base")
 	}
 	if state != "active" {
 		return domainerr.Conflict("knowledge base is not active")
 	}
-	return validateDocumentScope(ctx, r.db, tenant, baseID, classification, scope)
+	return validateDocumentScope(ctx, r.db, organization, baseID, classification, scope)
 }
 
-func validateDocumentScope(ctx context.Context, query rowQuerier, tenant string, baseID uuid.UUID, classification string, scope ArtifactScope) error {
+func validateDocumentScope(ctx context.Context, query rowQuerier, organization string, baseID uuid.UUID, classification string, scope ArtifactScope) error {
 	var virployeeExists bool
 	if err := query.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM virployees
-		WHERE tenant_id=$1 AND id=$2 AND archived_at IS NULL AND trashed_at IS NULL)`, tenant, scope.VirployeeID).Scan(&virployeeExists); err != nil {
+		WHERE org_id=$1 AND id=$2 AND archived_at IS NULL AND trashed_at IS NULL)`, organization, scope.VirployeeID).Scan(&virployeeExists); err != nil {
 		return err
 	}
 	if !virployeeExists {
-		return domainerr.Validation("artifact scope references a missing or cross-tenant Virployee")
+		return domainerr.Validation("artifact scope references a missing or cross-organization Virployee")
 	}
 	switch classification {
 	case ClassificationProfessional:
@@ -211,11 +211,11 @@ func validateDocumentScope(ctx context.Context, query rowQuerier, tenant string,
 			return domainerr.Validation("private knowledge documents require a valid work subject UUID")
 		}
 		var accessible bool
-		if err := query.QueryRow(ctx, subjectAccessibleToVirployeeSQL, tenant, scope.VirployeeID, subjectID).Scan(&accessible); err != nil {
+		if err := query.QueryRow(ctx, subjectAccessibleToVirployeeSQL, organization, scope.VirployeeID, subjectID).Scan(&accessible); err != nil {
 			return err
 		}
 		if !accessible {
-			return domainerr.Validation("private knowledge document references a missing, cross-tenant, or inaccessible work subject")
+			return domainerr.Validation("private knowledge document references a missing, cross-organization, or inaccessible work subject")
 		}
 		var incompatible bool
 		var bindingCount int
@@ -223,7 +223,7 @@ func validateDocumentScope(ctx context.Context, query rowQuerier, tenant string,
 				scope_type NOT IN ('subject','case') OR subject_id<>$3 OR virployee_id<>$4
 			),false)
 			FROM companion_knowledge_bindings
-			WHERE tenant_id=$1 AND knowledge_base_id=$2`, tenant, baseID, subjectID.String(), scope.VirployeeID).Scan(&bindingCount, &incompatible); err != nil {
+			WHERE org_id=$1 AND knowledge_base_id=$2`, organization, baseID, subjectID.String(), scope.VirployeeID).Scan(&bindingCount, &incompatible); err != nil {
 			return err
 		}
 		if incompatible || bindingCount > 1 {
@@ -235,7 +235,7 @@ func validateDocumentScope(ctx context.Context, query rowQuerier, tenant string,
 	return nil
 }
 
-func (r *Repository) ListDocuments(ctx context.Context, tenant string, baseID uuid.UUID, state string) ([]Document, error) {
+func (r *Repository) ListDocuments(ctx context.Context, organization string, baseID uuid.UUID, state string) ([]Document, error) {
 	state = strings.TrimSpace(strings.ToLower(state))
 	if state == "" {
 		state = "active"
@@ -244,7 +244,7 @@ func (r *Repository) ListDocuments(ctx context.Context, tenant string, baseID uu
 		return nil, domainerr.Validation("state must be active or archived")
 	}
 	rows, err := r.db.Query(ctx, `SELECT `+documentColumns+` FROM companion_knowledge_documents
-		WHERE tenant_id=$1 AND knowledge_base_id=$2 AND lifecycle_state=$3 ORDER BY updated_at DESC,id`, tenant, baseID, state)
+		WHERE org_id=$1 AND knowledge_base_id=$2 AND lifecycle_state=$3 ORDER BY updated_at DESC,id`, organization, baseID, state)
 	if err != nil {
 		return nil, err
 	}
@@ -260,20 +260,20 @@ func (r *Repository) ListDocuments(ctx context.Context, tenant string, baseID uu
 	return out, rows.Err()
 }
 
-func (r *Repository) ArchiveDocument(ctx context.Context, tenant string, baseID, documentID uuid.UUID, expectedVersion int64) (Document, error) {
+func (r *Repository) ArchiveDocument(ctx context.Context, organization string, baseID, documentID uuid.UUID, expectedVersion int64) (Document, error) {
 	doc, err := scanDocument(r.db.QueryRow(ctx, `UPDATE companion_knowledge_documents
 		SET lifecycle_state='archived',version=version+1,updated_at=now(),archived_at=now()
-		WHERE tenant_id=$1 AND knowledge_base_id=$2 AND id=$3 AND version=$4 AND lifecycle_state='active'
-		RETURNING `+documentColumns, tenant, baseID, documentID, expectedVersion))
+		WHERE org_id=$1 AND knowledge_base_id=$2 AND id=$3 AND version=$4 AND lifecycle_state='active'
+		RETURNING `+documentColumns, organization, baseID, documentID, expectedVersion))
 	if domainerr.IsNotFound(err) {
 		return Document{}, domainerr.Conflict("knowledge document version or lifecycle conflict")
 	}
 	return doc, err
 }
 
-func (r *Repository) ListBindings(ctx context.Context, tenant string, baseID uuid.UUID) ([]Binding, error) {
+func (r *Repository) ListBindings(ctx context.Context, organization string, baseID uuid.UUID) ([]Binding, error) {
 	rows, err := r.db.Query(ctx, `SELECT `+bindingColumns+` FROM companion_knowledge_bindings
-		WHERE tenant_id=$1 AND knowledge_base_id=$2 ORDER BY scope_type,subject_id,id`, tenant, baseID)
+		WHERE org_id=$1 AND knowledge_base_id=$2 ORDER BY scope_type,subject_id,id`, organization, baseID)
 	if err != nil {
 		return nil, err
 	}
@@ -289,7 +289,7 @@ func (r *Repository) ListBindings(ctx context.Context, tenant string, baseID uui
 	return out, rows.Err()
 }
 
-func (r *Repository) ReplaceBindings(ctx context.Context, tenant string, baseID uuid.UUID, expectedVersion int64, bindings []Binding) ([]Binding, error) {
+func (r *Repository) ReplaceBindings(ctx context.Context, organization string, baseID uuid.UUID, expectedVersion int64, bindings []Binding) ([]Binding, error) {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
 		return nil, err
@@ -297,7 +297,7 @@ func (r *Repository) ReplaceBindings(ctx context.Context, tenant string, baseID 
 	defer func() { _ = tx.Rollback(ctx) }()
 	var state, classification string
 	var version int64
-	if err := tx.QueryRow(ctx, `SELECT lifecycle_state,classification,version FROM companion_knowledge_bases WHERE tenant_id=$1 AND id=$2 FOR UPDATE`, tenant, baseID).Scan(&state, &classification, &version); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT lifecycle_state,classification,version FROM companion_knowledge_bases WHERE org_id=$1 AND id=$2 FOR UPDATE`, organization, baseID).Scan(&state, &classification, &version); err != nil {
 		return nil, mapError(err, "knowledge base")
 	}
 	if state != "active" || version != expectedVersion {
@@ -308,7 +308,7 @@ func (r *Repository) ReplaceBindings(ctx context.Context, tenant string, baseID 
 	}
 	privateSubject := ""
 	for _, binding := range bindings {
-		if err := validateBindingClassification(ctx, tx, tenant, baseID, classification, binding); err != nil {
+		if err := validateBindingClassification(ctx, tx, organization, baseID, classification, binding); err != nil {
 			return nil, err
 		}
 		if classification == ClassificationPrivate {
@@ -319,25 +319,25 @@ func (r *Repository) ReplaceBindings(ctx context.Context, tenant string, baseID 
 			}
 		}
 	}
-	if _, err := tx.Exec(ctx, `DELETE FROM companion_knowledge_bindings WHERE tenant_id=$1 AND knowledge_base_id=$2`, tenant, baseID); err != nil {
+	if _, err := tx.Exec(ctx, `DELETE FROM companion_knowledge_bindings WHERE org_id=$1 AND knowledge_base_id=$2`, organization, baseID); err != nil {
 		return nil, err
 	}
 	out := make([]Binding, 0, len(bindings))
 	for _, binding := range bindings {
-		if err := validateBindingReference(ctx, tx, tenant, binding); err != nil {
+		if err := validateBindingReference(ctx, tx, organization, binding); err != nil {
 			return nil, err
 		}
 		binding.KnowledgeBaseID = baseID
 		created, err := scanBinding(tx.QueryRow(ctx, `INSERT INTO companion_knowledge_bindings(
-			id,tenant_id,knowledge_base_id,scope_type,job_role_id,virployee_id,subject_id,case_id
+			id,org_id,knowledge_base_id,scope_type,job_role_id,virployee_id,subject_id,case_id
 		) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING `+bindingColumns,
-			binding.ID, tenant, baseID, binding.ScopeType, binding.JobRoleID, binding.VirployeeID, binding.SubjectID, binding.CaseID))
+			binding.ID, organization, baseID, binding.ScopeType, binding.JobRoleID, binding.VirployeeID, binding.SubjectID, binding.CaseID))
 		if err != nil {
 			return nil, err
 		}
 		out = append(out, created)
 	}
-	if _, err := tx.Exec(ctx, `UPDATE companion_knowledge_bases SET version=version+1,updated_at=now() WHERE tenant_id=$1 AND id=$2`, tenant, baseID); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE companion_knowledge_bases SET version=version+1,updated_at=now() WHERE org_id=$1 AND id=$2`, organization, baseID); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -346,7 +346,7 @@ func (r *Repository) ReplaceBindings(ctx context.Context, tenant string, baseID 
 	return out, nil
 }
 
-func validateBindingClassification(ctx context.Context, tx pgx.Tx, tenant string, baseID uuid.UUID, classification string, binding Binding) error {
+func validateBindingClassification(ctx context.Context, tx pgx.Tx, organization string, baseID uuid.UUID, classification string, binding Binding) error {
 	if err := validateBindingForClassification(classification, binding); err != nil {
 		return err
 	}
@@ -355,9 +355,9 @@ func validateBindingClassification(ctx context.Context, tx pgx.Tx, tenant string
 		var incompatible bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS(
 			SELECT 1 FROM companion_knowledge_documents
-			WHERE tenant_id=$1 AND knowledge_base_id=$2 AND lifecycle_state='active'
+			WHERE org_id=$1 AND knowledge_base_id=$2 AND lifecycle_state='active'
 			  AND artifact_subject_id<>$3
-		)`, tenant, baseID, ProfessionalArtifactSubject).Scan(&incompatible); err != nil {
+		)`, organization, baseID, ProfessionalArtifactSubject).Scan(&incompatible); err != nil {
 			return err
 		}
 		if incompatible {
@@ -367,9 +367,9 @@ func validateBindingClassification(ctx context.Context, tx pgx.Tx, tenant string
 		var incompatible bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS(
 			SELECT 1 FROM companion_knowledge_documents
-			WHERE tenant_id=$1 AND knowledge_base_id=$2 AND lifecycle_state='active'
+			WHERE org_id=$1 AND knowledge_base_id=$2 AND lifecycle_state='active'
 			  AND artifact_subject_id<>$3
-		)`, tenant, baseID, binding.SubjectID).Scan(&incompatible); err != nil {
+		)`, organization, baseID, binding.SubjectID).Scan(&incompatible); err != nil {
 			return err
 		}
 		if incompatible {
@@ -382,36 +382,36 @@ func validateBindingClassification(ctx context.Context, tx pgx.Tx, tenant string
 const subjectAccessibleToVirployeeSQL = `SELECT EXISTS(
 	SELECT 1
 	FROM companion_work_subjects s
-	JOIN virployees v ON v.tenant_id=s.tenant_id AND v.id=$2
-	WHERE s.tenant_id=$1 AND s.id=$3 AND s.archived_at IS NULL
+	JOIN virployees v ON v.org_id=s.org_id AND v.id=$2
+	WHERE s.org_id=$1 AND s.id=$3 AND s.archived_at IS NULL
 	  AND v.archived_at IS NULL AND v.trashed_at IS NULL
 	  AND (
 		EXISTS(SELECT 1 FROM companion_continuity_assignments a
-			WHERE a.tenant_id=s.tenant_id AND a.subject_id=s.id AND a.virployee_id=v.id AND a.status='active')
+			WHERE a.org_id=s.org_id AND a.subject_id=s.id AND a.virployee_id=v.id AND a.status='active')
 		OR EXISTS(SELECT 1 FROM companion_virployee_relationships r
-			WHERE r.tenant_id=s.tenant_id AND r.subject_id=s.id AND r.virployee_id=v.id AND r.relationship_type='serves')
+			WHERE r.org_id=s.org_id AND r.subject_id=s.id AND r.virployee_id=v.id AND r.relationship_type='serves')
 	  )
 )`
 
 const caseAccessibleToVirployeeSQL = `SELECT EXISTS(
 	SELECT 1
 	FROM companion_assist_cases c
-	JOIN companion_work_subjects s ON s.tenant_id=c.tenant_id AND s.id::text=c.subject_id
-	JOIN virployees v ON v.tenant_id=c.tenant_id AND v.id=$4
-	WHERE c.tenant_id=$1 AND c.id=$2 AND c.subject_id=$3
+	JOIN companion_work_subjects s ON s.org_id=c.org_id AND s.id::text=c.subject_id
+	JOIN virployees v ON v.org_id=c.org_id AND v.id=$4
+	WHERE c.org_id=$1 AND c.id=$2 AND c.subject_id=$3
 	  AND s.archived_at IS NULL AND v.archived_at IS NULL AND v.trashed_at IS NULL
 	  AND c.owner_virployee_id=v.id
 )`
 
-func validateBindingReference(ctx context.Context, query rowQuerier, tenant string, binding Binding) error {
+func validateBindingReference(ctx context.Context, query rowQuerier, organization string, binding Binding) error {
 	var valid bool
 	switch binding.ScopeType {
 	case ScopeProfessional:
-		if err := query.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM job_roles WHERE tenant_id=$1 AND id=$2 AND archived_at IS NULL AND trashed_at IS NULL)`, tenant, binding.JobRoleID).Scan(&valid); err != nil {
+		if err := query.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM job_roles WHERE org_id=$1 AND id=$2 AND archived_at IS NULL AND trashed_at IS NULL)`, organization, binding.JobRoleID).Scan(&valid); err != nil {
 			return err
 		}
 	case ScopeVirployee:
-		if err := query.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM virployees WHERE tenant_id=$1 AND id=$2 AND archived_at IS NULL AND trashed_at IS NULL)`, tenant, binding.VirployeeID).Scan(&valid); err != nil {
+		if err := query.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM virployees WHERE org_id=$1 AND id=$2 AND archived_at IS NULL AND trashed_at IS NULL)`, organization, binding.VirployeeID).Scan(&valid); err != nil {
 			return err
 		}
 	case ScopeSubject:
@@ -419,7 +419,7 @@ func validateBindingReference(ctx context.Context, query rowQuerier, tenant stri
 		if err != nil || subjectID == uuid.Nil {
 			return domainerr.Validation("knowledge subject binding requires a valid work subject UUID")
 		}
-		if err := query.QueryRow(ctx, subjectAccessibleToVirployeeSQL, tenant, binding.VirployeeID, subjectID).Scan(&valid); err != nil {
+		if err := query.QueryRow(ctx, subjectAccessibleToVirployeeSQL, organization, binding.VirployeeID, subjectID).Scan(&valid); err != nil {
 			return err
 		}
 	case ScopeCase:
@@ -428,20 +428,20 @@ func validateBindingReference(ctx context.Context, query rowQuerier, tenant stri
 			return domainerr.Validation("knowledge case binding requires a valid work subject UUID")
 		}
 		if err := query.QueryRow(ctx, caseAccessibleToVirployeeSQL,
-			tenant, binding.CaseID, binding.SubjectID, binding.VirployeeID).Scan(&valid); err != nil {
+			organization, binding.CaseID, binding.SubjectID, binding.VirployeeID).Scan(&valid); err != nil {
 			return err
 		}
 	}
 	if !valid {
-		return domainerr.Validation("knowledge binding references a missing or cross-tenant resource")
+		return domainerr.Validation("knowledge binding references a missing or cross-organization resource")
 	}
 	return nil
 }
 
-func (r *Repository) ListForVirployee(ctx context.Context, tenant string, virployeeID uuid.UUID) ([]VirployeeKnowledgeBase, error) {
+func (r *Repository) ListForVirployee(ctx context.Context, organization string, virployeeID uuid.UUID) ([]VirployeeKnowledgeBase, error) {
 	var exists bool
 	if err := r.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM virployees
-		WHERE tenant_id=$1 AND id=$2 AND archived_at IS NULL AND trashed_at IS NULL)`, tenant, virployeeID).Scan(&exists); err != nil {
+		WHERE org_id=$1 AND id=$2 AND archived_at IS NULL AND trashed_at IS NULL)`, organization, virployeeID).Scan(&exists); err != nil {
 		return nil, err
 	}
 	if !exists {
@@ -453,12 +453,12 @@ func (r *Repository) ListForVirployee(ctx context.Context, tenant string, virplo
 		       b.id,b.knowledge_base_id,b.scope_type,b.job_role_id,b.virployee_id,b.subject_id,b.case_id,
 		       b.version,b.created_at,b.updated_at
 		FROM companion_knowledge_bases kb
-		JOIN companion_knowledge_bindings b ON b.tenant_id=kb.tenant_id AND b.knowledge_base_id=kb.id
-		JOIN virployees v ON v.tenant_id=kb.tenant_id AND v.id=$2
-		WHERE kb.tenant_id=$1 AND kb.lifecycle_state='active'
+		JOIN companion_knowledge_bindings b ON b.org_id=kb.org_id AND b.knowledge_base_id=kb.id
+		JOIN virployees v ON v.org_id=kb.org_id AND v.id=$2
+		WHERE kb.org_id=$1 AND kb.lifecycle_state='active'
 		  AND ((b.scope_type='professional' AND b.job_role_id=v.job_role_id) OR b.virployee_id=$2)
 		ORDER BY kb.name,kb.id,b.scope_type,b.id
-	`, tenant, virployeeID)
+	`, organization, virployeeID)
 	if err != nil {
 		return nil, err
 	}
@@ -487,7 +487,7 @@ func (r *Repository) ListForVirployee(ctx context.Context, tenant string, virplo
 	return out, rows.Err()
 }
 
-func (r *Repository) SetForVirployee(ctx context.Context, tenant string, virployeeID, baseID uuid.UUID, expectedVersion int64, enabled bool) error {
+func (r *Repository) SetForVirployee(ctx context.Context, organization string, virployeeID, baseID uuid.UUID, expectedVersion int64, enabled bool) error {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
 		return err
@@ -495,7 +495,7 @@ func (r *Repository) SetForVirployee(ctx context.Context, tenant string, virploy
 	defer func() { _ = tx.Rollback(ctx) }()
 	var virployeeExists bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM virployees
-		WHERE tenant_id=$1 AND id=$2 AND archived_at IS NULL AND trashed_at IS NULL)`, tenant, virployeeID).Scan(&virployeeExists); err != nil {
+		WHERE org_id=$1 AND id=$2 AND archived_at IS NULL AND trashed_at IS NULL)`, organization, virployeeID).Scan(&virployeeExists); err != nil {
 		return err
 	}
 	if !virployeeExists {
@@ -504,7 +504,7 @@ func (r *Repository) SetForVirployee(ctx context.Context, tenant string, virploy
 	var state, classification string
 	var version int64
 	if err := tx.QueryRow(ctx, `SELECT lifecycle_state,classification,version FROM companion_knowledge_bases
-		WHERE tenant_id=$1 AND id=$2 FOR UPDATE`, tenant, baseID).Scan(&state, &classification, &version); err != nil {
+		WHERE org_id=$1 AND id=$2 FOR UPDATE`, organization, baseID).Scan(&state, &classification, &version); err != nil {
 		return mapError(err, "knowledge base")
 	}
 	if state != "active" || version != expectedVersion {
@@ -516,22 +516,22 @@ func (r *Repository) SetForVirployee(ctx context.Context, tenant string, virploy
 	var tag pgconn.CommandTag
 	if enabled {
 		tag, err = tx.Exec(ctx, `INSERT INTO companion_knowledge_bindings(
-			id,tenant_id,knowledge_base_id,scope_type,virployee_id)
+			id,org_id,knowledge_base_id,scope_type,virployee_id)
 			SELECT $1,$2,$3,'virployee',$4
 			WHERE NOT EXISTS(SELECT 1 FROM companion_knowledge_bindings
-				WHERE tenant_id=$2 AND knowledge_base_id=$3 AND scope_type='virployee' AND virployee_id=$4)`,
-			uuid.New(), tenant, baseID, virployeeID)
+				WHERE org_id=$2 AND knowledge_base_id=$3 AND scope_type='virployee' AND virployee_id=$4)`,
+			uuid.New(), organization, baseID, virployeeID)
 	} else {
 		tag, err = tx.Exec(ctx, `DELETE FROM companion_knowledge_bindings
-			WHERE tenant_id=$1 AND knowledge_base_id=$2 AND scope_type='virployee' AND virployee_id=$3`,
-			tenant, baseID, virployeeID)
+			WHERE org_id=$1 AND knowledge_base_id=$2 AND scope_type='virployee' AND virployee_id=$3`,
+			organization, baseID, virployeeID)
 	}
 	if err != nil {
 		return err
 	}
 	if tag.RowsAffected() > 0 {
 		if _, err := tx.Exec(ctx, `UPDATE companion_knowledge_bases SET version=version+1,updated_at=now()
-			WHERE tenant_id=$1 AND id=$2`, tenant, baseID); err != nil {
+			WHERE org_id=$1 AND id=$2`, organization, baseID); err != nil {
 			return err
 		}
 	}
@@ -545,10 +545,10 @@ func (r *Repository) ResolvedDocuments(ctx context.Context, scope RetrievalScope
 	rows, err := r.db.Query(ctx, `
 		SELECT DISTINCT `+resolvedDocumentColumns+`
 		FROM companion_knowledge_documents d
-		JOIN companion_knowledge_bases kb ON kb.tenant_id=d.tenant_id AND kb.id=d.knowledge_base_id
-		JOIN companion_knowledge_bindings b ON b.tenant_id=kb.tenant_id AND b.knowledge_base_id=kb.id
-		JOIN virployees v ON v.tenant_id=kb.tenant_id AND v.id=$2
-		WHERE kb.tenant_id=$1 AND kb.lifecycle_state='active' AND d.lifecycle_state='active'
+		JOIN companion_knowledge_bases kb ON kb.org_id=d.org_id AND kb.id=d.knowledge_base_id
+		JOIN companion_knowledge_bindings b ON b.org_id=kb.org_id AND b.knowledge_base_id=kb.id
+		JOIN virployees v ON v.org_id=kb.org_id AND v.id=$2
+		WHERE kb.org_id=$1 AND kb.lifecycle_state='active' AND d.lifecycle_state='active'
 		  AND (
 			(kb.classification='professional' AND d.artifact_subject_id='professional' AND (
 			  (b.scope_type='professional' AND b.job_role_id=v.job_role_id) OR
@@ -556,14 +556,14 @@ func (r *Repository) ResolvedDocuments(ctx context.Context, scope RetrievalScope
 			)) OR
 			(kb.classification='private' AND (
 			  SELECT count(*) FROM companion_knowledge_bindings private_scope
-			  WHERE private_scope.tenant_id=kb.tenant_id AND private_scope.knowledge_base_id=kb.id
+			  WHERE private_scope.org_id=kb.org_id AND private_scope.knowledge_base_id=kb.id
 			)=1 AND d.artifact_subject_id=b.subject_id AND (
 			  (b.scope_type='subject' AND b.virployee_id=$2 AND $3<>'' AND b.subject_id=$3) OR
 			  (b.scope_type='case' AND b.virployee_id=$2 AND $3<>'' AND b.subject_id=$3 AND b.case_id=$4)
 			))
 		  )
 		ORDER BY d.updated_at DESC,d.id
-	`, scope.TenantID, scope.VirployeeID, strings.TrimSpace(scope.SubjectID), nullableUUID(scope.CaseID))
+	`, scope.OrgID, scope.VirployeeID, strings.TrimSpace(scope.SubjectID), nullableUUID(scope.CaseID))
 	if err != nil {
 		return nil, err
 	}

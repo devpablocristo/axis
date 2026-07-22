@@ -61,7 +61,7 @@ func (r *MemoryRepository) Enqueue(_ context.Context, input EnqueueInput) (Job, 
 	now := r.now()
 	job := Job{
 		ID:             input.ID,
-		TenantID:       input.TenantID,
+		OrgID:          input.OrgID,
 		ProductSurface: input.ProductSurface,
 		Kind:           input.Kind,
 		ShardKey:       input.ShardKey,
@@ -211,11 +211,11 @@ func (r *MemoryRepository) Fail(_ context.Context, input FailInput) (Job, error)
 	return job, nil
 }
 
-func (r *MemoryRepository) Cancel(_ context.Context, tenantID string, jobID uuid.UUID, reasonCode string) error {
+func (r *MemoryRepository) Cancel(_ context.Context, orgID string, jobID uuid.UUID, reasonCode string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	job, ok := r.jobs[jobID]
-	if !ok || job.TenantID != strings.TrimSpace(tenantID) || (job.Status != StatusQueued && job.Status != StatusRunning) {
+	if !ok || job.OrgID != strings.TrimSpace(orgID) || (job.Status != StatusQueued && job.Status != StatusRunning) {
 		return ErrJobNotFound
 	}
 	now := r.now()
@@ -233,28 +233,28 @@ func (r *MemoryRepository) Cancel(_ context.Context, tenantID string, jobID uuid
 	return nil
 }
 
-func (r *MemoryRepository) Get(_ context.Context, tenantID string, jobID uuid.UUID) (Job, error) {
+func (r *MemoryRepository) Get(_ context.Context, orgID string, jobID uuid.UUID) (Job, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	job, ok := r.jobs[jobID]
-	if !ok || job.TenantID != strings.TrimSpace(tenantID) {
+	if !ok || job.OrgID != strings.TrimSpace(orgID) {
 		return Job{}, ErrJobNotFound
 	}
 	return job, nil
 }
 
-func (r *MemoryRepository) List(_ context.Context, tenantID, productSurface, status string, limit int) ([]Job, error) {
+func (r *MemoryRepository) List(_ context.Context, orgID, productSurface, status string, limit int) ([]Job, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	tenantID = strings.TrimSpace(tenantID)
+	orgID = strings.TrimSpace(orgID)
 	productSurface = strings.TrimSpace(strings.ToLower(productSurface))
 	status = strings.TrimSpace(status)
 	result := make([]Job, 0)
 	for _, job := range r.jobs {
-		if job.TenantID != tenantID || (productSurface != "" && job.ProductSurface != productSurface) || (status != "" && string(job.Status) != status) {
+		if job.OrgID != orgID || (productSurface != "" && job.ProductSurface != productSurface) || (status != "" && string(job.Status) != status) {
 			continue
 		}
 		result = append(result, job)
@@ -300,11 +300,11 @@ func (r *MemoryRepository) RecoverExpiredLeases(_ context.Context, limit int) (R
 	return result, nil
 }
 
-func (r *MemoryRepository) ReplayDeadLetter(_ context.Context, tenantID string, jobID uuid.UUID, runAfter time.Time) (Job, error) {
+func (r *MemoryRepository) ReplayDeadLetter(_ context.Context, orgID string, jobID uuid.UUID, runAfter time.Time) (Job, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	job, ok := r.jobs[jobID]
-	if !ok || job.TenantID != strings.TrimSpace(tenantID) || job.Status != StatusDeadLetter {
+	if !ok || job.OrgID != strings.TrimSpace(orgID) || job.Status != StatusDeadLetter {
 		return Job{}, ErrJobNotFound
 	}
 	for id, active := range r.jobs {
@@ -330,11 +330,11 @@ func (r *MemoryRepository) ReplayDeadLetter(_ context.Context, tenantID string, 
 }
 
 func sameDedupeScope(job Job, input EnqueueInput) bool {
-	return job.TenantID == input.TenantID && job.ProductSurface == input.ProductSurface && job.Kind == input.Kind && job.DedupeKey == input.DedupeKey
+	return job.OrgID == input.OrgID && job.ProductSurface == input.ProductSurface && job.Kind == input.Kind && job.DedupeKey == input.DedupeKey
 }
 
 func sameJobDedupeScope(left, right Job) bool {
-	return left.TenantID == right.TenantID && left.ProductSurface == right.ProductSurface && left.Kind == right.Kind && left.DedupeKey == right.DedupeKey
+	return left.OrgID == right.OrgID && left.ProductSurface == right.ProductSurface && left.Kind == right.Kind && left.DedupeKey == right.DedupeKey
 }
 
 func cloneJSON(value json.RawMessage) json.RawMessage {

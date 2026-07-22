@@ -23,8 +23,8 @@ func TestRepositoryConcurrentLimitAndIdempotency(t *testing.T) {
 	}
 	defer pool.Close()
 	repository := NewRepository(pool, true)
-	tenant := "quota-test-" + uuid.NewString()
-	key := Key{TenantID: tenant, ProductSurface: "medmory", Area: AreaInbound}
+	organization := "quota-test-" + uuid.NewString()
+	key := Key{OrgID: organization, ProductSurface: "producta", Area: AreaInbound}
 	if _, err := repository.UpsertPolicy(ctx, Policy{Key: key, WindowSeconds: 60, RequestLimit: 1, UnitLimit: 10, Active: true}); err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestRepositoryConcurrentLimitAndIdempotency(t *testing.T) {
 		t.Fatalf("allowed consumption must replay without another charge: %+v err=%v", decision, err)
 	}
 
-	bytesKey := Key{TenantID: tenant, ProductSurface: "medmory", Area: AreaBytes}
+	bytesKey := Key{OrgID: organization, ProductSurface: "producta", Area: AreaBytes}
 	if _, err := repository.UpsertPolicy(ctx, Policy{Key: bytesKey, WindowSeconds: 60, RequestLimit: 10, UnitLimit: 1, Active: true}); err != nil {
 		t.Fatal(err)
 	}
@@ -76,26 +76,26 @@ func TestRepositoryConcurrentLimitAndIdempotency(t *testing.T) {
 	var windowCount int
 	if err := pool.QueryRow(ctx, `
 		SELECT count(*) FROM quota_windows
-		WHERE tenant_id = $1 AND product_surface = $2 AND area = $3
-	`, tenant, "medmory", AreaBytes).Scan(&windowCount); err != nil {
+		WHERE org_id = $1 AND product_surface = $2 AND area = $3
+	`, organization, "producta", AreaBytes).Scan(&windowCount); err != nil {
 		t.Fatal(err)
 	}
 	if windowCount != 0 {
 		t.Fatalf("denied first consumption must not create a quota window, got %d", windowCount)
 	}
 
-	protectedKey := Key{TenantID: tenant, ProductSurface: "protected-product", Area: AreaInbound}
+	protectedKey := Key{OrgID: organization, ProductSurface: "protected-product", Area: AreaInbound}
 	if _, err := repository.UpsertPolicy(ctx, Policy{Key: protectedKey, WindowSeconds: 60, RequestLimit: 10, UnitLimit: 10, Active: true}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO capabilities (
-			id, tenant_id, capability_key, name, description, required_autonomy,
+			id, org_id, capability_key, name, description, required_autonomy,
 			risk_class, side_effect_class, requires_nexus_approval, evidence_required,
 			rollback_capability_key, promotion_state, manifest, created_at, updated_at
 		) VALUES ($1::uuid, $2, 'quota.policy.protected', 'Protected', '', 'A1',
 			'low', 'read', false, true, '', 'active', $3::jsonb, now(), now())
-	`, uuid.NewString(), tenant, `{"product_surface":"protected-product","quota_areas":["inbound"]}`); err != nil {
+	`, uuid.NewString(), organization, `{"product_surface":"protected-product","quota_areas":["inbound"]}`); err != nil {
 		t.Fatal(err)
 	}
 	_, err = repository.UpsertPolicy(ctx, Policy{Key: protectedKey, WindowSeconds: 60, RequestLimit: 10, UnitLimit: 10, Active: false})
@@ -103,10 +103,10 @@ func TestRepositoryConcurrentLimitAndIdempotency(t *testing.T) {
 		t.Fatalf("active capability quota policy must not be disabled, got %v", err)
 	}
 
-	if _, err := pool.Exec(ctx, `UPDATE quota_usage_ledger SET units = units WHERE tenant_id = $1`, tenant); err == nil {
+	if _, err := pool.Exec(ctx, `UPDATE quota_usage_ledger SET units = units WHERE org_id = $1`, organization); err == nil {
 		t.Fatal("usage ledger update must be rejected")
 	}
-	if _, err := pool.Exec(ctx, `DELETE FROM quota_usage_ledger WHERE tenant_id = $1`, tenant); err == nil {
+	if _, err := pool.Exec(ctx, `DELETE FROM quota_usage_ledger WHERE org_id = $1`, organization); err == nil {
 		t.Fatal("usage ledger delete must be rejected")
 	}
 }

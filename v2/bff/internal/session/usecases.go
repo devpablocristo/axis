@@ -7,8 +7,8 @@ import (
 	"time"
 
 	userdomain "github.com/devpablocristo/bff-v2/internal/identity/usecases/domain"
+	productdomain "github.com/devpablocristo/bff-v2/internal/products/usecases/domain"
 	sessiondomain "github.com/devpablocristo/bff-v2/internal/session/usecases/domain"
-	tenantdomain "github.com/devpablocristo/bff-v2/internal/tenancy/usecases/domain"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
 )
 
@@ -22,11 +22,11 @@ type IdentityPort interface {
 	Ensure(ctx context.Context, input userdomain.EnsureInput) (userdomain.User, error)
 }
 
-type TenancyPort interface {
-	EnsureDefaultTenant(ctx context.Context, orgID, orgName, userID string) (tenantdomain.Tenant, error)
-	EnsureProviderDefaultTenant(ctx context.Context, input tenantdomain.EnsureOrgInput, userID string) (tenantdomain.Tenant, error)
-	EnsureProviderDefaultTenantWithRole(ctx context.Context, input tenantdomain.EnsureOrgInput, userID, role string) (tenantdomain.Tenant, error)
-	ListForPrincipal(ctx context.Context, userID string) ([]tenantdomain.Tenant, error)
+type OrganizationAccessPort interface {
+	EnsureDefaultProduct(ctx context.Context, orgID, orgName, userID string) (productdomain.Product, error)
+	EnsureProviderDefaultProduct(ctx context.Context, input productdomain.EnsureOrgInput, userID string) (productdomain.Product, error)
+	EnsureProviderDefaultProductWithRole(ctx context.Context, input productdomain.EnsureOrgInput, userID, role string) (productdomain.Product, error)
+	ListForPrincipal(ctx context.Context, userID string) ([]productdomain.Product, error)
 }
 
 type OrgProviderPort interface {
@@ -39,14 +39,14 @@ type TokenVerifierPort interface {
 
 type UseCases struct {
 	identity      IdentityPort
-	tenancy       TenancyPort
+	products      OrganizationAccessPort
 	defaults      Defaults
 	tokenVerifier TokenVerifierPort
 	orgProvider   OrgProviderPort
 }
 
-func NewUseCases(identity IdentityPort, tenancy TenancyPort, defaults Defaults, tokenVerifier TokenVerifierPort, orgProvider OrgProviderPort) *UseCases {
-	return &UseCases{identity: identity, tenancy: tenancy, defaults: defaults, tokenVerifier: tokenVerifier, orgProvider: orgProvider}
+func NewUseCases(identity IdentityPort, products OrganizationAccessPort, defaults Defaults, tokenVerifier TokenVerifierPort, orgProvider OrgProviderPort) *UseCases {
+	return &UseCases{identity: identity, products: products, defaults: defaults, tokenVerifier: tokenVerifier, orgProvider: orgProvider}
 }
 
 func (u *UseCases) Resolve(ctx context.Context, input sessiondomain.ResolveInput) (sessiondomain.Session, error) {
@@ -73,20 +73,20 @@ func (u *UseCases) Resolve(ctx context.Context, input sessiondomain.ResolveInput
 	if err != nil {
 		return sessiondomain.Session{}, err
 	}
-	tenant, err := u.tenancy.EnsureDefaultTenant(ctx, normalized.OrgID, normalized.OrgID, user.ID)
+	product, err := u.products.EnsureDefaultProduct(ctx, normalized.OrgID, normalized.OrgID, user.ID)
 	if err != nil {
 		return sessiondomain.Session{}, err
 	}
-	tenants, err := u.tenancy.ListForPrincipal(ctx, user.ID)
+	products, err := u.products.ListForPrincipal(ctx, user.ID)
 	if err != nil {
 		return sessiondomain.Session{}, err
 	}
 	return sessiondomain.Session{
 		PrincipalID: user.ID,
-		OrgID:       tenant.OrgID,
+		OrgID:       product.OrgID,
 		AuthMethod:  "dev",
 		User:        user,
-		Tenants:     tenants,
+		Products:    products,
 	}, nil
 }
 
@@ -119,29 +119,29 @@ func (u *UseCases) resolveClerk(ctx context.Context, token string) (sessiondomai
 	}
 	orgID := ""
 	for _, membership := range memberships {
-		tenant, err := u.tenancy.EnsureProviderDefaultTenantWithRole(ctx, tenantdomain.EnsureOrgInput{
+		product, err := u.products.EnsureProviderDefaultProductWithRole(ctx, productdomain.EnsureOrgInput{
 			Provider:      membership.Org.Provider,
 			ProviderOrgID: membership.Org.ProviderOrgID,
 			Name:          membership.Org.Name,
 			Slug:          membership.Org.Slug,
 			Status:        membership.Org.Status,
 			SyncedAt:      membership.Org.SyncedAt,
-		}, user.ID, providerTenantRole(membership.Role))
+		}, user.ID, providerProductRole(membership.Role))
 		if err != nil {
 			return sessiondomain.Session{}, err
 		}
 		if orgID == "" {
-			orgID = tenant.OrgID
+			orgID = product.OrgID
 		}
 	}
 	if orgID == "" && strings.TrimSpace(u.defaults.OrgID) != "" {
-		tenant, err := u.tenancy.EnsureDefaultTenant(ctx, u.defaults.OrgID, u.defaults.OrgID, user.ID)
+		product, err := u.products.EnsureDefaultProduct(ctx, u.defaults.OrgID, u.defaults.OrgID, user.ID)
 		if err != nil {
 			return sessiondomain.Session{}, err
 		}
-		orgID = tenant.OrgID
+		orgID = product.OrgID
 	}
-	tenants, err := u.tenancy.ListForPrincipal(ctx, user.ID)
+	products, err := u.products.ListForPrincipal(ctx, user.ID)
 	if err != nil {
 		return sessiondomain.Session{}, err
 	}
@@ -150,7 +150,7 @@ func (u *UseCases) resolveClerk(ctx context.Context, token string) (sessiondomai
 		OrgID:       orgID,
 		AuthMethod:  "clerk",
 		User:        user,
-		Tenants:     tenants,
+		Products:    products,
 	}, nil
 }
 
@@ -244,7 +244,7 @@ func membershipFromClaims(providerOrgID string, claims map[string]any, now time.
 			Status:        userdomain.StatusActive,
 			SyncedAt:      &now,
 		},
-		Role: providerTenantRole(firstClaim(claims, "org_role", "orgRole")),
+		Role: providerProductRole(firstClaim(claims, "org_role", "orgRole")),
 	}, true
 }
 
@@ -264,15 +264,15 @@ func activeOrgFirst(memberships []userdomain.ProviderOrgMembership, activeProvid
 	return out
 }
 
-func providerTenantRole(raw string) string {
+func providerProductRole(raw string) string {
 	switch strings.TrimSpace(strings.ToLower(raw)) {
 	case "owner", "org:owner":
-		return tenantdomain.RoleOwner
+		return productdomain.RoleOwner
 	case "admin", "org:admin":
-		return tenantdomain.RoleAdmin
+		return productdomain.RoleAdmin
 	case "member", "org:member":
-		return tenantdomain.RoleMember
+		return productdomain.RoleMember
 	default:
-		return tenantdomain.RoleMember
+		return productdomain.RoleMember
 	}
 }

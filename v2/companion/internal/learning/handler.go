@@ -15,11 +15,11 @@ import (
 )
 
 type UseCasesPort interface {
-	List(ctx context.Context, tenantID, statusFilter string, virployeeID *uuid.UUID) ([]Proposal, error)
-	Get(ctx context.Context, tenantID string, id uuid.UUID) (Proposal, error)
-	Scan(ctx context.Context, tenantID string, minExecutions int) (ScanResult, error)
-	Accept(ctx context.Context, tenantID string, id uuid.UUID, actor, role string) (AcceptResult, error)
-	Dismiss(ctx context.Context, tenantID string, id uuid.UUID, actor, role string) (Proposal, error)
+	List(ctx context.Context, orgID, statusFilter string, virployeeID *uuid.UUID) ([]Proposal, error)
+	Get(ctx context.Context, orgID string, id uuid.UUID) (Proposal, error)
+	Scan(ctx context.Context, orgID string, minExecutions int) (ScanResult, error)
+	Accept(ctx context.Context, orgID string, id uuid.UUID, actor, role string) (AcceptResult, error)
+	Dismiss(ctx context.Context, orgID string, id uuid.UUID, actor, role string) (Proposal, error)
 }
 
 type Handler struct {
@@ -48,7 +48,7 @@ func (h *Handler) Accept(c *gin.Context) {
 		ginmw.Respond(c, domainerr.Validation("proposal_id must be a valid uuid"))
 		return
 	}
-	out, err := h.ucs.Accept(c.Request.Context(), tenantID(c), id, actorID(c), role(c))
+	out, err := h.ucs.Accept(c.Request.Context(), orgID(c), id, actorID(c), role(c))
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -63,7 +63,7 @@ func (h *Handler) Dismiss(c *gin.Context) {
 		ginmw.Respond(c, domainerr.Validation("proposal_id must be a valid uuid"))
 		return
 	}
-	out, err := h.ucs.Dismiss(c.Request.Context(), tenantID(c), id, actorID(c), role(c))
+	out, err := h.ucs.Dismiss(c.Request.Context(), orgID(c), id, actorID(c), role(c))
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -71,7 +71,7 @@ func (h *Handler) Dismiss(c *gin.Context) {
 	c.JSON(http.StatusOK, out)
 }
 
-// Scan triggers one analyzer pass for the tenant. min_executions is optional
+// Scan triggers one analyzer pass for the organization. min_executions is optional
 // and can only RAISE the configured threshold (the usecase clamps to the
 // configured floor); 0 or absent uses the default. The body guard mirrors the
 // sibling handlers: BFF-proxied requests arrive chunked (ContentLength -1)
@@ -86,7 +86,7 @@ func (h *Handler) Scan(c *gin.Context) {
 			return
 		}
 	}
-	out, err := h.ucs.Scan(c.Request.Context(), tenantID(c), req.MinExecutions)
+	out, err := h.ucs.Scan(c.Request.Context(), orgID(c), req.MinExecutions)
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -104,7 +104,7 @@ func (h *Handler) List(c *gin.Context) {
 		}
 		virployeeID = &parsed
 	}
-	out, err := h.ucs.List(c.Request.Context(), tenantID(c), c.Query("status"), virployeeID)
+	out, err := h.ucs.List(c.Request.Context(), orgID(c), c.Query("status"), virployeeID)
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -118,7 +118,7 @@ func (h *Handler) Get(c *gin.Context) {
 		ginmw.Respond(c, domainerr.Validation("proposal_id must be a valid uuid"))
 		return
 	}
-	out, err := h.ucs.Get(c.Request.Context(), tenantID(c), id)
+	out, err := h.ucs.Get(c.Request.Context(), orgID(c), id)
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -126,10 +126,10 @@ func (h *Handler) Get(c *gin.Context) {
 	c.JSON(http.StatusOK, out)
 }
 
-func tenantID(c *gin.Context) string {
+func orgID(c *gin.Context) string {
 	// The /v1 internal-auth middleware already rejects requests without a
-	// trusted X-Tenant-ID, so no fallback here.
-	return strings.TrimSpace(c.GetHeader("X-Tenant-ID"))
+	// trusted X-Org-ID, so no fallback here.
+	return strings.TrimSpace(c.GetHeader("X-Org-ID"))
 }
 
 func actorID(c *gin.Context) string {
@@ -139,8 +139,8 @@ func actorID(c *gin.Context) string {
 	return DefaultActorID
 }
 
-// role is the caller's tenant membership role, set by the BFF from the resolved
-// membership (X-Axis-Tenant-Role). The accept/dismiss authorization uses it.
+// role is the caller's organization membership role, set by the BFF from the resolved
+// membership (X-Axis-Org-Role). The accept/dismiss authorization uses it.
 func role(c *gin.Context) string {
-	return strings.TrimSpace(c.GetHeader("X-Axis-Tenant-Role"))
+	return strings.TrimSpace(c.GetHeader("X-Axis-Org-Role"))
 }

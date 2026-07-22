@@ -25,10 +25,10 @@ import {
 } from './api'
 import { formatDateTime24 } from './formatters'
 
-type Props = { tenantId: string; principalId: string; productSurface: string }
+type Props = { orgId: string; principalId: string; productSurface: string }
 type Risk = 'low' | 'medium' | 'high' | 'critical'
 
-export function GovernancePage({ tenantId, principalId, productSurface }: Props) {
+export function GovernancePage({ orgId, principalId, productSurface }: Props) {
   const [definitions, setDefinitions] = useState<FunctionalRoleDefinition[]>([])
   const [grants, setGrants] = useState<FunctionalRoleGrant[]>([])
   const [policies, setPolicies] = useState<GovernancePolicy[]>([])
@@ -46,12 +46,12 @@ export function GovernancePage({ tenantId, principalId, productSurface }: Props)
   const load = useCallback(async () => {
     setError('')
     try {
-      const basePolicies = await listGovernancePolicies(tenantId, principalId)
-      const detailed = await Promise.all(basePolicies.map((policy) => getGovernancePolicy(policy.id, tenantId, principalId)))
+      const basePolicies = await listGovernancePolicies(orgId, principalId)
+      const detailed = await Promise.all(basePolicies.map((policy) => getGovernancePolicy(policy.id, orgId, principalId)))
       const [nextPromotions, nextEvaluations, nextChanges] = await Promise.all([
-        listGovernancePolicyPromotions(tenantId, principalId),
-        listGovernancePolicyEvaluations(tenantId, principalId),
-        listGovernancePolicyChanges(tenantId, principalId),
+        listGovernancePolicyPromotions(orgId, principalId),
+        listGovernancePolicyEvaluations(orgId, principalId),
+        listGovernancePolicyChanges(orgId, principalId),
       ])
       setPolicies(detailed)
       setPromotions(nextPromotions)
@@ -60,7 +60,7 @@ export function GovernancePage({ tenantId, principalId, productSurface }: Props)
       setSelectedPolicyId((current) => current && detailed.some((item) => item.id === current) ? current : detailed[0]?.id ?? '')
       try {
         const [nextDefinitions, nextGrants] = await Promise.all([
-          listFunctionalRoleDefinitions(tenantId, principalId), listFunctionalRoleGrants(tenantId, principalId),
+          listFunctionalRoleDefinitions(orgId, principalId), listFunctionalRoleGrants(orgId, principalId),
         ])
         setDefinitions(nextDefinitions)
         setGrants(nextGrants)
@@ -71,7 +71,7 @@ export function GovernancePage({ tenantId, principalId, productSurface }: Props)
     } catch (cause) {
       setError(message(cause, 'Could not load governance authority'))
     }
-  }, [principalId, tenantId])
+  }, [principalId, orgId])
 
   useEffect(() => { void load() }, [load])
   useEffect(() => { setVersionDraft((current) => ({ ...current, product_surface: productSurface })) }, [productSurface])
@@ -101,7 +101,7 @@ export function GovernancePage({ tenantId, principalId, productSurface }: Props)
             <form className="governance-form" onSubmit={(event) => {
               event.preventDefault()
               void run('grant', async () => {
-                await createFunctionalRoleGrant({ ...grantDraft, valid_from: new Date().toISOString(), valid_until: new Date(grantDraft.valid_until).toISOString() }, tenantId, principalId)
+                await createFunctionalRoleGrant({ ...grantDraft, valid_from: new Date().toISOString(), valid_until: new Date(grantDraft.valid_until).toISOString() }, orgId, principalId)
                 setGrantDraft((current) => ({ ...current, user_id: '' }))
                 await load()
               })
@@ -117,14 +117,14 @@ export function GovernancePage({ tenantId, principalId, productSurface }: Props)
               <button className="btn-primary" disabled={busy !== '' || !grantDraft.user_id.trim()}>{busy === 'grant' ? 'Granting…' : 'Grant role'}</button>
             </form>
           )}
-          <div className="governance-ledger-list">{grants.map((grant) => <div key={grant.id} className={grant.revoked_at ? 'is-muted' : ''}><div><strong>{grant.role_key}</strong><span>{grant.user_id}</span></div><small>{grant.product_surface || 'all products'} · {grant.action_type_pattern} · risk ≤ {grant.max_risk_class} · until {formatDateTime24(grant.valid_until)}</small>{!grant.revoked_at ? <button className="btn-secondary" disabled={busy !== ''} onClick={() => void run(`revoke-${grant.id}`, async () => { await revokeFunctionalRoleGrant(grant.id, grant.revision, tenantId, principalId); await load() })}>Revoke</button> : <span className="status-badge">Revoked</span>}</div>)}</div>
+          <div className="governance-ledger-list">{grants.map((grant) => <div key={grant.id} className={grant.revoked_at ? 'is-muted' : ''}><div><strong>{grant.role_key}</strong><span>{grant.user_id}</span></div><small>{grant.product_surface || 'all products'} · {grant.action_type_pattern} · risk ≤ {grant.max_risk_class} · until {formatDateTime24(grant.valid_until)}</small>{!grant.revoked_at ? <button className="btn-secondary" disabled={busy !== ''} onClick={() => void run(`revoke-${grant.id}`, async () => { await revokeFunctionalRoleGrant(grant.id, grant.revision, orgId, principalId); await load() })}>Revoke</button> : <span className="status-badge">Revoked</span>}</div>)}</div>
         </article>
 
         <article className="card governance-panel governance-policy-builder">
           <div className="card-header"><div><span className="governance-kicker">Rules</span><h2>Versioned CEL policies</h2></div><small>Draft → shadow → active → retired</small></div>
           <form className="governance-artifact-form" onSubmit={(event) => {
             event.preventDefault()
-            void run('policy', async () => { const created = await createGovernancePolicy(policyDraft, tenantId, principalId); setPolicyDraft({ policy_key: '', name: '', description: '' }); await load(); setSelectedPolicyId(created.id) })
+            void run('policy', async () => { const created = await createGovernancePolicy(policyDraft, orgId, principalId); setPolicyDraft({ policy_key: '', name: '', description: '' }); await load(); setSelectedPolicyId(created.id) })
           }}>
             <label className="form-group">Policy key<input required value={policyDraft.policy_key} onChange={(event) => setPolicyDraft({ ...policyDraft, policy_key: event.currentTarget.value })} /></label>
             <label className="form-group">Name<input required value={policyDraft.name} onChange={(event) => setPolicyDraft({ ...policyDraft, name: event.currentTarget.value })} /></label>
@@ -134,7 +134,7 @@ export function GovernancePage({ tenantId, principalId, productSurface }: Props)
           <label className="form-group">Policy<select value={selectedPolicyId} onChange={(event) => setSelectedPolicyId(event.currentTarget.value)}><option value="">Select…</option>{policies.map((policy) => <option key={policy.id} value={policy.id}>{policy.name} · {policy.policy_key}</option>)}</select></label>
           {selectedPolicy ? <form className="governance-version-form" onSubmit={(event) => {
             event.preventDefault()
-            void run('version', async () => { await createGovernancePolicyVersion(selectedPolicy.id, versionDraft, tenantId, principalId); await load() })
+            void run('version', async () => { await createGovernancePolicyVersion(selectedPolicy.id, versionDraft, orgId, principalId); await load() })
           }}>
             <label className="form-group">Product<input value={versionDraft.product_surface} onChange={(event) => setVersionDraft({ ...versionDraft, product_surface: event.currentTarget.value })} /></label>
             <label className="form-group">Action pattern<input value={versionDraft.action_type_pattern} onChange={(event) => setVersionDraft({ ...versionDraft, action_type_pattern: event.currentTarget.value })} /></label>
@@ -154,9 +154,9 @@ export function GovernancePage({ tenantId, principalId, productSurface }: Props)
         <div className="governance-version-list">{policies.flatMap((policy) => (policy.versions ?? []).map((version) => ({ policy, version }))).map(({ policy, version }) => {
           const simulation = simulations[version.id]
           const target: 'shadow' | 'active' = version.state === 'draft' ? 'shadow' : 'active'
-          return <article key={version.id}><div><span className={`policy-state policy-state--${version.state}`}>{version.state}</span><strong>{policy.policy_key} · v{version.version}</strong><code>{version.effect}</code></div><p>{version.expression}</p><small>{version.action_type_pattern} · priority {version.priority} · {version.content_hash.slice(0, 12)}</small><div className="governance-actions"><button className="btn-secondary" disabled={busy !== ''} onClick={() => void run(`simulate-${version.id}`, async () => { const report = await simulateGovernancePolicyVersion(version.id, tenantId, principalId); setSimulations((current) => ({ ...current, [version.id]: report })) })}>Simulate</button>{simulation ? <><span>{simulation.would_match}/{simulation.total_evaluated} matches</span>{version.state !== 'active' ? <button className="btn-primary" disabled={busy !== ''} onClick={() => void run(`promote-${version.id}`, async () => { await requestGovernancePolicyPromotion(version.id, simulation.id, target, tenantId, principalId); await load() })}>{version.state === 'retired' ? 'Request rollback' : `Request ${target}`}</button> : null}</> : null}</div></article>
+          return <article key={version.id}><div><span className={`policy-state policy-state--${version.state}`}>{version.state}</span><strong>{policy.policy_key} · v{version.version}</strong><code>{version.effect}</code></div><p>{version.expression}</p><small>{version.action_type_pattern} · priority {version.priority} · {version.content_hash.slice(0, 12)}</small><div className="governance-actions"><button className="btn-secondary" disabled={busy !== ''} onClick={() => void run(`simulate-${version.id}`, async () => { const report = await simulateGovernancePolicyVersion(version.id, orgId, principalId); setSimulations((current) => ({ ...current, [version.id]: report })) })}>Simulate</button>{simulation ? <><span>{simulation.would_match}/{simulation.total_evaluated} matches</span>{version.state !== 'active' ? <button className="btn-primary" disabled={busy !== ''} onClick={() => void run(`promote-${version.id}`, async () => { await requestGovernancePolicyPromotion(version.id, simulation.id, target, orgId, principalId); await load() })}>{version.state === 'retired' ? 'Request rollback' : `Request ${target}`}</button> : null}</> : null}</div></article>
         })}</div>
-        <div className="governance-promotion-list"><h3>Promotion decisions</h3>{promotions.filter((item) => item.status === 'pending').map((promotion) => <div key={promotion.id}><span><strong>{versionById.get(promotion.policy_version_id)?.state ?? 'version'} → {promotion.target_state}</strong><small>Requested by {promotion.requested_by}</small></span><button className="btn-secondary" disabled={busy !== ''} onClick={() => void run(`reject-${promotion.id}`, async () => { await decideGovernancePolicyPromotion(promotion.id, 'reject', tenantId, principalId); await load() })}>Reject</button><button className="btn-primary" disabled={busy !== ''} onClick={() => void run(`approve-${promotion.id}`, async () => { await decideGovernancePolicyPromotion(promotion.id, 'approve', tenantId, principalId); await load() })}>Approve</button></div>)}{promotions.every((item) => item.status !== 'pending') ? <p className="axis-muted">No promotion is waiting for an independent decision.</p> : null}</div>
+        <div className="governance-promotion-list"><h3>Promotion decisions</h3>{promotions.filter((item) => item.status === 'pending').map((promotion) => <div key={promotion.id}><span><strong>{versionById.get(promotion.policy_version_id)?.state ?? 'version'} → {promotion.target_state}</strong><small>Requested by {promotion.requested_by}</small></span><button className="btn-secondary" disabled={busy !== ''} onClick={() => void run(`reject-${promotion.id}`, async () => { await decideGovernancePolicyPromotion(promotion.id, 'reject', orgId, principalId); await load() })}>Reject</button><button className="btn-primary" disabled={busy !== ''} onClick={() => void run(`approve-${promotion.id}`, async () => { await decideGovernancePolicyPromotion(promotion.id, 'approve', orgId, principalId); await load() })}>Approve</button></div>)}{promotions.every((item) => item.status !== 'pending') ? <p className="axis-muted">No promotion is waiting for an independent decision.</p> : null}</div>
       </section>
 
       <div className="governance-audit-grid">

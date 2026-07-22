@@ -16,10 +16,7 @@ CREATE TABLE IF NOT EXISTS axis_products (
 INSERT INTO axis_products (id, product_surface, name, status, created_at, updated_at)
 VALUES
     ('00000000-0000-4000-8000-000000000001', 'axis', 'Axis', 'active', now(), now()),
-    ('00000000-0000-4000-8000-000000000002', 'companion', 'Companion', 'active', now(), now()),
-    ('00000000-0000-4000-8000-000000000003', 'medmory', 'Medmory', 'active', now(), now()),
-    ('00000000-0000-4000-8000-000000000004', 'ponti', 'Ponti', 'active', now(), now()),
-    ('00000000-0000-4000-8000-000000000005', 'pymes', 'Pymes', 'active', now(), now())
+    ('00000000-0000-4000-8000-000000000002', 'companion', 'Companion', 'active', now(), now())
 ON CONFLICT (product_surface) DO NOTHING;
 
 INSERT INTO axis_products (id, product_surface, name, status, created_at, updated_at)

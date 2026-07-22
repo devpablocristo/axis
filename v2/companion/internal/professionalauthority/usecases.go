@@ -31,7 +31,7 @@ type RepositoryPort interface {
 }
 
 type DelegationAuthorizationCheck struct {
-	TenantID       string
+	OrgID          string
 	ActorID        string
 	ActorRole      string
 	Permission     string
@@ -71,23 +71,23 @@ func (u *UseCases) SetNow(now func() time.Time) {
 	}
 }
 
-func (u *UseCases) GetScopePolicy(ctx context.Context, tenantID string, virployeeID uuid.UUID) (ScopePolicy, error) {
-	tenantID, err := normalizeTenantID(tenantID)
+func (u *UseCases) GetScopePolicy(ctx context.Context, orgID string, virployeeID uuid.UUID) (ScopePolicy, error) {
+	orgID, err := normalizeOrgID(orgID)
 	if err != nil {
 		return ScopePolicy{}, err
 	}
-	if err := u.repo.EnsureVirployee(ctx, tenantID, virployeeID); err != nil {
+	if err := u.repo.EnsureVirployee(ctx, orgID, virployeeID); err != nil {
 		return ScopePolicy{}, err
 	}
-	policy, err := u.repo.GetScopePolicy(ctx, tenantID, virployeeID)
+	policy, err := u.repo.GetScopePolicy(ctx, orgID, virployeeID)
 	if domainerr.IsNotFound(err) {
-		return ScopePolicy{TenantID: tenantID, VirployeeID: virployeeID, OutOfScope: OutOfScopeAbstain}, nil
+		return ScopePolicy{OrgID: orgID, VirployeeID: virployeeID, OutOfScope: OutOfScopeAbstain}, nil
 	}
 	return policy, err
 }
 
-func (u *UseCases) PutScopePolicy(ctx context.Context, tenantID string, virployeeID uuid.UUID, input PutScopePolicyInput, actor Actor) (ScopePolicy, error) {
-	tenantID, err := normalizeTenantID(tenantID)
+func (u *UseCases) PutScopePolicy(ctx context.Context, orgID string, virployeeID uuid.UUID, input PutScopePolicyInput, actor Actor) (ScopePolicy, error) {
+	orgID, err := normalizeOrgID(orgID)
 	if err != nil {
 		return ScopePolicy{}, err
 	}
@@ -99,11 +99,11 @@ func (u *UseCases) PutScopePolicy(ctx context.Context, tenantID string, virploye
 	if err != nil {
 		return ScopePolicy{}, err
 	}
-	return u.repo.PutScopePolicy(ctx, tenantID, virployeeID, input, actor.ID, u.now())
+	return u.repo.PutScopePolicy(ctx, orgID, virployeeID, input, actor.ID, u.now())
 }
 
-func (u *UseCases) CreatePolicyPack(ctx context.Context, tenantID string, input CreatePolicyPackInput, actor Actor) (PolicyPack, error) {
-	tenantID, err := normalizeTenantID(tenantID)
+func (u *UseCases) CreatePolicyPack(ctx context.Context, orgID string, input CreatePolicyPackInput, actor Actor) (PolicyPack, error) {
+	orgID, err := normalizeOrgID(orgID)
 	if err != nil {
 		return PolicyPack{}, err
 	}
@@ -115,42 +115,42 @@ func (u *UseCases) CreatePolicyPack(ctx context.Context, tenantID string, input 
 	if err != nil {
 		return PolicyPack{}, err
 	}
-	return u.repo.CreatePolicyPack(ctx, tenantID, input, jobRoleID, actor.ID, u.now())
+	return u.repo.CreatePolicyPack(ctx, orgID, input, jobRoleID, actor.ID, u.now())
 }
 
-func (u *UseCases) ListPolicyPacks(ctx context.Context, tenantID string) ([]PolicyPack, error) {
-	tenantID, err := normalizeTenantID(tenantID)
+func (u *UseCases) ListPolicyPacks(ctx context.Context, orgID string) ([]PolicyPack, error) {
+	orgID, err := normalizeOrgID(orgID)
 	if err != nil {
 		return nil, err
 	}
-	return u.repo.ListPolicyPacks(ctx, tenantID)
+	return u.repo.ListPolicyPacks(ctx, orgID)
 }
 
-func (u *UseCases) GetPolicyPack(ctx context.Context, tenantID string, id uuid.UUID) (PolicyPack, error) {
-	tenantID, err := normalizeTenantID(tenantID)
+func (u *UseCases) GetPolicyPack(ctx context.Context, orgID string, id uuid.UUID) (PolicyPack, error) {
+	orgID, err := normalizeOrgID(orgID)
 	if err != nil {
 		return PolicyPack{}, err
 	}
-	return u.repo.GetPolicyPack(ctx, tenantID, id)
+	return u.repo.GetPolicyPack(ctx, orgID, id)
 }
 
-func (u *UseCases) GetPolicyBinding(ctx context.Context, tenantID string, virployeeID uuid.UUID) (PolicyBinding, error) {
-	tenantID, err := normalizeTenantID(tenantID)
+func (u *UseCases) GetPolicyBinding(ctx context.Context, orgID string, virployeeID uuid.UUID) (PolicyBinding, error) {
+	orgID, err := normalizeOrgID(orgID)
 	if err != nil {
 		return PolicyBinding{}, err
 	}
-	if err := u.repo.EnsureVirployee(ctx, tenantID, virployeeID); err != nil {
+	if err := u.repo.EnsureVirployee(ctx, orgID, virployeeID); err != nil {
 		return PolicyBinding{}, err
 	}
-	binding, err := u.repo.GetPolicyBinding(ctx, tenantID, virployeeID)
+	binding, err := u.repo.GetPolicyBinding(ctx, orgID, virployeeID)
 	if domainerr.IsNotFound(err) {
-		return PolicyBinding{TenantID: tenantID, VirployeeID: virployeeID, PolicyPackIDs: []uuid.UUID{}}, nil
+		return PolicyBinding{OrgID: orgID, VirployeeID: virployeeID, PolicyPackIDs: []uuid.UUID{}}, nil
 	}
 	return binding, err
 }
 
-func (u *UseCases) PutPolicyBinding(ctx context.Context, tenantID string, virployeeID uuid.UUID, input PutPolicyBindingInput, actor Actor) (PolicyBinding, error) {
-	tenantID, err := normalizeTenantID(tenantID)
+func (u *UseCases) PutPolicyBinding(ctx context.Context, orgID string, virployeeID uuid.UUID, input PutPolicyBindingInput, actor Actor) (PolicyBinding, error) {
+	orgID, err := normalizeOrgID(orgID)
 	if err != nil {
 		return PolicyBinding{}, err
 	}
@@ -162,11 +162,11 @@ func (u *UseCases) PutPolicyBinding(ctx context.Context, tenantID string, virplo
 	if err != nil {
 		return PolicyBinding{}, err
 	}
-	return u.repo.PutPolicyBinding(ctx, tenantID, virployeeID, ids, expectedRevision, actor.ID, u.now())
+	return u.repo.PutPolicyBinding(ctx, orgID, virployeeID, ids, expectedRevision, actor.ID, u.now())
 }
 
-func (u *UseCases) CreateDelegation(ctx context.Context, tenantID string, virployeeID uuid.UUID, input CreateDelegationInput, actor Actor) (Delegation, error) {
-	tenantID, err := normalizeTenantID(tenantID)
+func (u *UseCases) CreateDelegation(ctx context.Context, orgID string, virployeeID uuid.UUID, input CreateDelegationInput, actor Actor) (Delegation, error) {
+	orgID, err := normalizeOrgID(orgID)
 	if err != nil {
 		return Delegation{}, err
 	}
@@ -174,22 +174,22 @@ func (u *UseCases) CreateDelegation(ctx context.Context, tenantID string, virplo
 	if err != nil {
 		return Delegation{}, err
 	}
-	actor, err = u.authorizeDelegation(ctx, tenantID, actor, "delegations.write", input)
+	actor, err = u.authorizeDelegation(ctx, orgID, actor, "delegations.write", input)
 	if err != nil {
 		return Delegation{}, err
 	}
-	return u.repo.CreateDelegation(ctx, tenantID, virployeeID, input, actor.ID, u.now())
+	return u.repo.CreateDelegation(ctx, orgID, virployeeID, input, actor.ID, u.now())
 }
 
-func (u *UseCases) ListDelegations(ctx context.Context, tenantID string, virployeeID uuid.UUID, actors ...Actor) ([]Delegation, error) {
-	tenantID, err := normalizeTenantID(tenantID)
+func (u *UseCases) ListDelegations(ctx context.Context, orgID string, virployeeID uuid.UUID, actors ...Actor) ([]Delegation, error) {
+	orgID, err := normalizeOrgID(orgID)
 	if err != nil {
 		return nil, err
 	}
-	if err := u.repo.EnsureVirployee(ctx, tenantID, virployeeID); err != nil {
+	if err := u.repo.EnsureVirployee(ctx, orgID, virployeeID); err != nil {
 		return nil, err
 	}
-	items, err := u.repo.ListDelegations(ctx, tenantID, virployeeID)
+	items, err := u.repo.ListDelegations(ctx, orgID, virployeeID)
 	if err != nil || len(actors) == 0 {
 		return items, err
 	}
@@ -199,7 +199,7 @@ func (u *UseCases) ListDelegations(ctx context.Context, tenantID string, virploy
 	}
 	visible := make([]Delegation, 0, len(items))
 	for _, item := range items {
-		if _, err := u.authorizeDelegation(ctx, tenantID, actor, "delegations.read", delegationAsCreateInput(item)); err == nil {
+		if _, err := u.authorizeDelegation(ctx, orgID, actor, "delegations.read", delegationAsCreateInput(item)); err == nil {
 			visible = append(visible, item)
 		} else if !domainerr.IsForbidden(err) {
 			return nil, err
@@ -208,16 +208,16 @@ func (u *UseCases) ListDelegations(ctx context.Context, tenantID string, virploy
 	return visible, nil
 }
 
-func (u *UseCases) RevokeDelegation(ctx context.Context, tenantID string, virployeeID, delegationID uuid.UUID, input RevokeDelegationInput, actor Actor) (Delegation, error) {
-	tenantID, err := normalizeTenantID(tenantID)
+func (u *UseCases) RevokeDelegation(ctx context.Context, orgID string, virployeeID, delegationID uuid.UUID, input RevokeDelegationInput, actor Actor) (Delegation, error) {
+	orgID, err := normalizeOrgID(orgID)
 	if err != nil {
 		return Delegation{}, err
 	}
-	target, err := u.findDelegation(ctx, tenantID, virployeeID, delegationID)
+	target, err := u.findDelegation(ctx, orgID, virployeeID, delegationID)
 	if err != nil {
 		return Delegation{}, err
 	}
-	actor, err = u.authorizeDelegation(ctx, tenantID, actor, "delegations.revoke", delegationAsCreateInput(target))
+	actor, err = u.authorizeDelegation(ctx, orgID, actor, "delegations.revoke", delegationAsCreateInput(target))
 	if err != nil {
 		return Delegation{}, err
 	}
@@ -225,19 +225,19 @@ func (u *UseCases) RevokeDelegation(ctx context.Context, tenantID string, virplo
 	if err != nil {
 		return Delegation{}, err
 	}
-	return u.repo.RevokeDelegation(ctx, tenantID, virployeeID, delegationID, input, actor.ID, u.now())
+	return u.repo.RevokeDelegation(ctx, orgID, virployeeID, delegationID, input, actor.ID, u.now())
 }
 
-func (u *UseCases) ReviewDelegation(ctx context.Context, tenantID string, virployeeID, delegationID uuid.UUID, input ReviewDelegationInput, actor Actor) (Delegation, error) {
-	tenantID, err := normalizeTenantID(tenantID)
+func (u *UseCases) ReviewDelegation(ctx context.Context, orgID string, virployeeID, delegationID uuid.UUID, input ReviewDelegationInput, actor Actor) (Delegation, error) {
+	orgID, err := normalizeOrgID(orgID)
 	if err != nil {
 		return Delegation{}, err
 	}
-	target, err := u.findDelegation(ctx, tenantID, virployeeID, delegationID)
+	target, err := u.findDelegation(ctx, orgID, virployeeID, delegationID)
 	if err != nil {
 		return Delegation{}, err
 	}
-	actor, err = u.authorizeDelegation(ctx, tenantID, actor, "delegations.write", delegationAsCreateInput(target))
+	actor, err = u.authorizeDelegation(ctx, orgID, actor, "delegations.write", delegationAsCreateInput(target))
 	if err != nil {
 		return Delegation{}, err
 	}
@@ -245,10 +245,10 @@ func (u *UseCases) ReviewDelegation(ctx context.Context, tenantID string, virplo
 	if err != nil {
 		return Delegation{}, err
 	}
-	return u.repo.ReviewDelegation(ctx, tenantID, virployeeID, delegationID, input, actor.ID, u.now())
+	return u.repo.ReviewDelegation(ctx, orgID, virployeeID, delegationID, input, actor.ID, u.now())
 }
 
-func (u *UseCases) authorizeDelegation(ctx context.Context, tenantID string, actor Actor, permission string, input CreateDelegationInput) (Actor, error) {
+func (u *UseCases) authorizeDelegation(ctx context.Context, orgID string, actor Actor, permission string, input CreateDelegationInput) (Actor, error) {
 	actor.ID = strings.TrimSpace(actor.ID)
 	actor.Role = strings.ToLower(strings.TrimSpace(actor.Role))
 	if actor.ID == "" {
@@ -260,7 +260,7 @@ func (u *UseCases) authorizeDelegation(ctx context.Context, tenantID string, act
 	if u.authorizer == nil {
 		return Actor{}, domainerr.Forbidden("delegation authorization is unavailable")
 	}
-	check := DelegationAuthorizationCheck{TenantID: tenantID, ActorID: actor.ID, ActorRole: actor.Role, Permission: permission, RiskClass: input.MaxRiskClass}
+	check := DelegationAuthorizationCheck{OrgID: orgID, ActorID: actor.ID, ActorRole: actor.Role, Permission: permission, RiskClass: input.MaxRiskClass}
 	if check.RiskClass == "" {
 		check.RiskClass = "low"
 	}
@@ -291,8 +291,8 @@ func singleScope(values []string) string {
 	return ""
 }
 
-func (u *UseCases) findDelegation(ctx context.Context, tenantID string, virployeeID, delegationID uuid.UUID) (Delegation, error) {
-	items, err := u.repo.ListDelegations(ctx, tenantID, virployeeID)
+func (u *UseCases) findDelegation(ctx context.Context, orgID string, virployeeID, delegationID uuid.UUID) (Delegation, error) {
+	items, err := u.repo.ListDelegations(ctx, orgID, virployeeID)
 	if err != nil {
 		return Delegation{}, err
 	}
@@ -314,7 +314,7 @@ func delegationAsCreateInput(item Delegation) CreateDelegationInput {
 // includes a deterministic metadata-only snapshot hash, including denied
 // results, so traces can explain exactly which revisions were evaluated.
 func (u *UseCases) EvaluateAuthority(ctx context.Context, input executiongate.AuthorityCheckInput) (executiongate.AuthorityCheckResult, error) {
-	tenantID, err := normalizeTenantID(input.TenantID)
+	orgID, err := normalizeOrgID(input.OrgID)
 	if err != nil {
 		return executiongate.AuthorityCheckResult{}, err
 	}
@@ -322,7 +322,7 @@ func (u *UseCases) EvaluateAuthority(ctx context.Context, input executiongate.Au
 	if input.VirployeeID == uuid.Nil || capability == "" {
 		return executiongate.AuthorityCheckResult{}, domainerr.Validation("virployee_id and capability_key are required for authority evaluation")
 	}
-	resolved, err := u.repo.ResolveAuthority(ctx, tenantID, input.VirployeeID)
+	resolved, err := u.repo.ResolveAuthority(ctx, orgID, input.VirployeeID)
 	if err != nil {
 		return executiongate.AuthorityCheckResult{}, err
 	}
@@ -389,7 +389,7 @@ func (u *UseCases) EvaluateAuthority(ctx context.Context, input executiongate.Au
 		return executiongate.AuthorityCheckResult{}, err
 	}
 	snapshot := Snapshot{
-		TenantID: tenantID, VirployeeID: input.VirployeeID.String(), JobRoleID: resolved.JobRoleID.String(),
+		OrgID: orgID, VirployeeID: input.VirployeeID.String(), JobRoleID: resolved.JobRoleID.String(),
 		CapabilityKey: capability, ScopeRevision: resolved.Scope.Revision,
 		BindingRevision: resolved.BindingRevision, PolicyPacks: refs,
 		PrincipalType: principal.Type, PrincipalID: principal.ID,
@@ -418,7 +418,7 @@ func (u *UseCases) EvaluateAuthority(ctx context.Context, input executiongate.Au
 // non-empty allowlists must each match. The query itself is never returned or
 // persisted, only its hash participates in the decision snapshot.
 func (u *UseCases) EvaluateConversationScope(ctx context.Context, input executiongate.ConversationScopeInput) (executiongate.ConversationScopeResult, error) {
-	tenantID, err := normalizeTenantID(input.TenantID)
+	orgID, err := normalizeOrgID(input.OrgID)
 	if err != nil {
 		return executiongate.ConversationScopeResult{}, err
 	}
@@ -426,7 +426,7 @@ func (u *UseCases) EvaluateConversationScope(ctx context.Context, input executio
 	if input.VirployeeID == uuid.Nil || query == "" {
 		return executiongate.ConversationScopeResult{}, domainerr.Validation("virployee_id and query are required for conversation scope evaluation")
 	}
-	resolved, err := u.repo.ResolveAuthority(ctx, tenantID, input.VirployeeID)
+	resolved, err := u.repo.ResolveAuthority(ctx, orgID, input.VirployeeID)
 	if err != nil {
 		return executiongate.ConversationScopeResult{}, err
 	}
@@ -484,7 +484,7 @@ func (u *UseCases) EvaluateConversationScope(ctx context.Context, input executio
 		return executiongate.ConversationScopeResult{}, err
 	}
 	snapshot := Snapshot{
-		TenantID: tenantID, VirployeeID: input.VirployeeID.String(), JobRoleID: resolved.JobRoleID.String(),
+		OrgID: orgID, VirployeeID: input.VirployeeID.String(), JobRoleID: resolved.JobRoleID.String(),
 		CapabilityKey: "conversation.scope", ScopeRevision: resolved.Scope.Revision,
 		BindingRevision: resolved.BindingRevision, PolicyPacks: refs, InputHash: hashString(query),
 	}
@@ -498,12 +498,12 @@ func (u *UseCases) EvaluateConversationScope(ctx context.Context, input executio
 	}, nil
 }
 
-func normalizeTenantID(tenantID string) (string, error) {
-	tenantID = strings.TrimSpace(tenantID)
-	if tenantID == "" {
-		return "", domainerr.Validation("tenant_id is required")
+func normalizeOrgID(orgID string) (string, error) {
+	orgID = strings.TrimSpace(orgID)
+	if orgID == "" {
+		return "", domainerr.Validation("org_id is required")
 	}
-	return tenantID, nil
+	return orgID, nil
 }
 
 func matchesAny(patterns []string, capability string) bool {

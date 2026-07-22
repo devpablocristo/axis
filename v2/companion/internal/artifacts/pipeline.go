@@ -92,13 +92,13 @@ func (p *Pipeline) ingest(ctx context.Context, req IngestRequest, fetcher Artifa
 			return IngestResult{}, err
 		}
 		if record.StagedURI == "" {
-			record, _ = p.catalog.SetStatus(ctx, req.Scope.TenantID, record.ID, StatusStaging, "", "", "")
+			record, _ = p.catalog.SetStatus(ctx, req.Scope.OrgID, record.ID, StatusStaging, "", "", "")
 		}
 
 		parts, updated, err := p.ingestOne(ctx, req.Scope, record, fetcher)
 		if err != nil {
 			code := stableErrorCode(err)
-			failed, _ := p.catalog.SetStatus(ctx, req.Scope.TenantID, record.ID, StatusFailed, "", "", code)
+			failed, _ := p.catalog.SetStatus(ctx, req.Scope.OrgID, record.ID, StatusFailed, "", "", code)
 			result.Records = append(result.Records, failed)
 			if manifest.Required {
 				return IngestResult{}, fmt.Errorf("required artifact %s failed: %w", manifest.DocumentID, err)
@@ -119,20 +119,20 @@ func (p *Pipeline) ingest(ctx context.Context, req IngestRequest, fetcher Artifa
 		}
 		for i, record := range result.Records {
 			if record.Status == StatusExtracted {
-				result.Records[i], _ = p.catalog.SetStatus(ctx, req.Scope.TenantID, record.ID, StatusIndexing, record.StagedURI, record.ActualMIME, "")
+				result.Records[i], _ = p.catalog.SetStatus(ctx, req.Scope.OrgID, record.ID, StatusIndexing, record.StagedURI, record.ActualMIME, "")
 			}
 		}
 		if err := p.indexer.Index(ctx, req.Scope, result.Parts); err != nil {
 			for i, record := range result.Records {
 				if record.Status == StatusIndexing {
-					result.Records[i], _ = p.catalog.SetStatus(ctx, req.Scope.TenantID, record.ID, StatusFailed, record.StagedURI, record.ActualMIME, "artifact_indexing_failed")
+					result.Records[i], _ = p.catalog.SetStatus(ctx, req.Scope.OrgID, record.ID, StatusFailed, record.StagedURI, record.ActualMIME, "artifact_indexing_failed")
 				}
 			}
 			return IngestResult{}, fmt.Errorf("%w: %v", ErrIndexingFailed, err)
 		}
 		for i, record := range result.Records {
 			if record.Status == StatusIndexing {
-				result.Records[i], _ = p.catalog.SetStatus(ctx, req.Scope.TenantID, record.ID, StatusIndexed, record.StagedURI, record.ActualMIME, "")
+				result.Records[i], _ = p.catalog.SetStatus(ctx, req.Scope.OrgID, record.ID, StatusIndexed, record.StagedURI, record.ActualMIME, "")
 			}
 		}
 	}
@@ -181,9 +181,9 @@ func (p *Pipeline) ingestOne(ctx context.Context, scope Scope, record Record, fe
 		if err != nil {
 			return nil, record, fmt.Errorf("stage original: %w", err)
 		}
-		record, _ = p.catalog.SetStatus(ctx, scope.TenantID, record.ID, StatusStaged, stored.URI, actualMIME, "")
+		record, _ = p.catalog.SetStatus(ctx, scope.OrgID, record.ID, StatusStaged, stored.URI, actualMIME, "")
 	}
-	record, _ = p.catalog.SetStatus(ctx, scope.TenantID, record.ID, StatusExtracting, stored.URI, actualMIME, "")
+	record, _ = p.catalog.SetStatus(ctx, scope.OrgID, record.ID, StatusExtracting, stored.URI, actualMIME, "")
 
 	adapter := p.adapterFor(actualMIME, record.Manifest.Name)
 	if adapter == nil {
@@ -196,7 +196,7 @@ func (p *Pipeline) ingestOne(ctx context.Context, scope Scope, record Record, fe
 	if !usableParts(parts) {
 		return nil, record, ErrEmptyDerivative
 	}
-	record, err = p.catalog.SetStatus(ctx, scope.TenantID, record.ID, StatusExtracted, stored.URI, actualMIME, "")
+	record, err = p.catalog.SetStatus(ctx, scope.OrgID, record.ID, StatusExtracted, stored.URI, actualMIME, "")
 	return parts, record, err
 }
 
@@ -216,7 +216,7 @@ func (f localBlobFetcher) Fetch(_ context.Context, _ Manifest, dst io.Writer) (s
 }
 
 func validateRequest(req IngestRequest) error {
-	if strings.TrimSpace(req.Scope.TenantID) == "" || req.Scope.VirployeeID.String() == "" || strings.TrimSpace(req.Scope.SubjectID) == "" || strings.TrimSpace(req.Scope.RepositoryGeneration) == "" {
+	if strings.TrimSpace(req.Scope.OrgID) == "" || req.Scope.VirployeeID.String() == "" || strings.TrimSpace(req.Scope.SubjectID) == "" || strings.TrimSpace(req.Scope.RepositoryGeneration) == "" {
 		return errors.New("artifact scope is incomplete")
 	}
 	seen := map[string]struct{}{}

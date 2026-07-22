@@ -22,7 +22,7 @@ var (
 )
 
 type Key struct {
-	TenantID       string `json:"tenant_id"`
+	OrgID          string `json:"org_id"`
 	ProductSurface string `json:"product_surface"`
 	Area           string `json:"area"`
 }
@@ -98,10 +98,10 @@ func RetryAfter(err error) (int, bool) {
 }
 
 func normalizeKey(key Key) (Key, error) {
-	key.TenantID = strings.TrimSpace(key.TenantID)
+	key.OrgID = strings.TrimSpace(key.OrgID)
 	key.ProductSurface = strings.ToLower(strings.TrimSpace(key.ProductSurface))
 	key.Area = strings.ToLower(strings.TrimSpace(key.Area))
-	if key.TenantID == "" || key.ProductSurface == "" || key.Area == "" {
+	if key.OrgID == "" || key.ProductSurface == "" || key.Area == "" {
 		return Key{}, fmt.Errorf("quota key is incomplete")
 	}
 	return key, nil

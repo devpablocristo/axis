@@ -160,7 +160,7 @@ type ReplaceBindingsInput struct {
 }
 
 type RetrievalScope struct {
-	TenantID             string
+	OrgID                string
 	VirployeeID          uuid.UUID
 	SubjectID            string
 	CaseID               uuid.UUID

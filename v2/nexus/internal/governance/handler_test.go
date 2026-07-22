@@ -32,7 +32,7 @@ func TestHandlerCheckRequiresApprovalForHighRisk(t *testing.T) {
 		"binding_hash":"binding-123"
 	}`))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Tenant-ID", "tenant-1")
+	req.Header.Set("X-Org-ID", "organization-1")
 	router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
@@ -72,7 +72,7 @@ func TestHandlerCheckDeniesDisabledActionType(t *testing.T) {
 		"binding_hash":"binding-denied"
 	}`))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Tenant-ID", "tenant-1")
+	req.Header.Set("X-Org-ID", "organization-1")
 	router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
@@ -104,8 +104,8 @@ func TestHandlerDerivesMembershipAndDiscardsForgedFunctionalRoles(t *testing.T) 
 		"functional_scopes":["*"]
 	}`))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Tenant-ID", "tenant-1")
-	req.Header.Set("X-Axis-Tenant-Role", "member")
+	req.Header.Set("X-Org-ID", "organization-1")
+	req.Header.Set("X-Axis-Org-Role", "member")
 	req.Header.Set("X-Actor-ID", "user-1")
 	router.ServeHTTP(rec, req)
 

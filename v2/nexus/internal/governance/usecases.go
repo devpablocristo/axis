@@ -21,15 +21,15 @@ import (
 )
 
 type ActionTypeReaderPort interface {
-	GetByKey(ctx context.Context, tenantID string, key string) (actiondomain.ActionType, error)
+	GetByKey(ctx context.Context, orgID string, key string) (actiondomain.ActionType, error)
 }
 
 type CheckRecorderPort interface {
-	RecordCheck(ctx context.Context, tenantID string, input domain.NormalizedCheckInput, result domain.CheckResult) (domain.RecordedCheck, error)
+	RecordCheck(ctx context.Context, orgID string, input domain.NormalizedCheckInput, result domain.CheckResult) (domain.RecordedCheck, error)
 }
 
 type ExecutionResultRecorderPort interface {
-	RecordExecutionResult(ctx context.Context, tenantID, checkID string, input domain.ExecutionResultInput) (domain.ExecutionResult, error)
+	RecordExecutionResult(ctx context.Context, orgID, checkID string, input domain.ExecutionResultInput) (domain.ExecutionResult, error)
 }
 
 type RevalidationReaderPort interface {
@@ -45,7 +45,7 @@ type FunctionalRoleResolverPort interface {
 }
 
 type AuditEmitterPort interface {
-	Append(ctx context.Context, tenantID string, in auditdomain.AppendInput) (auditdomain.AuditEvent, error)
+	Append(ctx context.Context, orgID string, in auditdomain.AppendInput) (auditdomain.AuditEvent, error)
 }
 
 type UseCases struct {
@@ -82,12 +82,12 @@ func NewUseCases(actionTypes ActionTypeReaderPort, checks ...CheckRecorderPort) 
 	return &UseCases{actionTypes: actionTypes, checks: recorder, results: results, revalidation: revalidation}
 }
 
-func (u *UseCases) Check(ctx context.Context, tenantID string, input domain.CheckInput) (domain.CheckResult, error) {
+func (u *UseCases) Check(ctx context.Context, orgID string, input domain.CheckInput) (domain.CheckResult, error) {
 	normalized, err := domain.NormalizeCheckInput(input)
 	if err != nil {
 		return domain.CheckResult{}, err
 	}
-	actionType, err := u.actionTypes.GetByKey(ctx, tenantID, normalized.ActionType)
+	actionType, err := u.actionTypes.GetByKey(ctx, orgID, normalized.ActionType)
 	if err != nil {
 		if domainerr.IsNotFound(err) {
 			return domain.CheckResult{}, domainerr.Validation("unknown action_type")
@@ -102,7 +102,7 @@ func (u *UseCases) Check(ctx context.Context, tenantID string, input domain.Chec
 		result.RoleSnapshot = roleSnapshot(normalized)
 		result.BindingHash = normalized.BindingHash
 		if u.checks != nil {
-			recorded, err := u.checks.RecordCheck(ctx, tenantID, normalized, result)
+			recorded, err := u.checks.RecordCheck(ctx, orgID, normalized, result)
 			if err != nil {
 				return domain.CheckResult{}, err
 			}
@@ -110,12 +110,12 @@ func (u *UseCases) Check(ctx context.Context, tenantID string, input domain.Chec
 		}
 		return result, nil
 	}
-	if err := u.resolveFunctionalAuthority(ctx, tenantID, &normalized); err != nil {
+	if err := u.resolveFunctionalAuthority(ctx, orgID, &normalized); err != nil {
 		return domain.CheckResult{}, err
 	}
 	result := decisionForRisk(actionType.RiskClass)
 	if u.policies != nil {
-		policyResult, err := u.policies.Evaluate(ctx, tenantID, safePolicyInput(normalized, string(actionType.RiskClass)))
+		policyResult, err := u.policies.Evaluate(ctx, orgID, safePolicyInput(normalized, string(actionType.RiskClass)))
 		if err != nil {
 			return domain.CheckResult{}, err
 		}
@@ -124,7 +124,7 @@ func (u *UseCases) Check(ctx context.Context, tenantID string, input domain.Chec
 	result.RoleSnapshot = roleSnapshot(normalized)
 	result.BindingHash = normalized.BindingHash
 	if u.checks != nil {
-		recorded, err := u.checks.RecordCheck(ctx, tenantID, normalized, result)
+		recorded, err := u.checks.RecordCheck(ctx, orgID, normalized, result)
 		if err != nil {
 			return domain.CheckResult{}, err
 		}
@@ -135,7 +135,7 @@ func (u *UseCases) Check(ctx context.Context, tenantID string, input domain.Chec
 	return result, nil
 }
 
-func (u *UseCases) Revalidate(ctx context.Context, tenantID, checkID string, input domain.RevalidationInput) (domain.RevalidationResult, error) {
+func (u *UseCases) Revalidate(ctx context.Context, orgID, checkID string, input domain.RevalidationInput) (domain.RevalidationResult, error) {
 	if u.revalidation == nil || u.policies == nil {
 		return domain.RevalidationResult{}, domainerr.Conflict("governance revalidation is unavailable")
 	}
@@ -143,7 +143,7 @@ func (u *UseCases) Revalidate(ctx context.Context, tenantID, checkID string, inp
 	if input.BindingHash == "" {
 		return domain.RevalidationResult{}, domainerr.Validation("binding_hash is required")
 	}
-	record, err := u.revalidation.GetCheckForRevalidation(ctx, tenantID, strings.TrimSpace(checkID))
+	record, err := u.revalidation.GetCheckForRevalidation(ctx, orgID, strings.TrimSpace(checkID))
 	if err != nil {
 		return domain.RevalidationResult{}, err
 	}
@@ -155,7 +155,7 @@ func (u *UseCases) Revalidate(ctx context.Context, tenantID, checkID string, inp
 	if expected := strings.TrimSpace(input.PolicySnapshotHash); expected != "" && expected != record.PolicySnapshotHash {
 		return domain.RevalidationResult{Valid: false, Reason: "approval policy snapshot does not match the check", PolicySnapshotHash: record.PolicySnapshotHash}, nil
 	}
-	actionType, err := u.actionTypes.GetByKey(ctx, tenantID, record.Input.ActionType)
+	actionType, err := u.actionTypes.GetByKey(ctx, orgID, record.Input.ActionType)
 	if err != nil {
 		return domain.RevalidationResult{}, err
 	}
@@ -164,13 +164,13 @@ func (u *UseCases) Revalidate(ctx context.Context, tenantID, checkID string, inp
 	}
 	storedRoles := append([]string(nil), record.Input.FunctionalRoles...)
 	storedScopes := append([]string(nil), record.Input.FunctionalScopes...)
-	if err := u.resolveFunctionalAuthority(ctx, tenantID, &record.Input); err != nil {
+	if err := u.resolveFunctionalAuthority(ctx, orgID, &record.Input); err != nil {
 		return domain.RevalidationResult{}, err
 	}
 	if !slices.Equal(storedRoles, record.Input.FunctionalRoles) || !slices.Equal(storedScopes, record.Input.FunctionalScopes) {
 		return domain.RevalidationResult{Valid: false, Reason: "functional role authority changed", PolicySnapshotHash: record.PolicySnapshotHash}, nil
 	}
-	policyResult, err := u.policies.Evaluate(ctx, tenantID, safePolicyInput(record.Input, string(actionType.RiskClass)))
+	policyResult, err := u.policies.Evaluate(ctx, orgID, safePolicyInput(record.Input, string(actionType.RiskClass)))
 	if err != nil {
 		return domain.RevalidationResult{}, err
 	}
@@ -186,7 +186,7 @@ func (u *UseCases) Revalidate(ctx context.Context, tenantID, checkID string, inp
 	return domain.RevalidationResult{Valid: true, Reason: "binding and policy authority remain valid", PolicySnapshotHash: policyResult.PolicySnapshotHash}, nil
 }
 
-func (u *UseCases) ReportExecutionResult(ctx context.Context, tenantID, checkID string, input domain.ExecutionResultInput) (domain.ExecutionResult, error) {
+func (u *UseCases) ReportExecutionResult(ctx context.Context, orgID, checkID string, input domain.ExecutionResultInput) (domain.ExecutionResult, error) {
 	if u.results == nil {
 		return domain.ExecutionResult{}, domainerr.Conflict("governance result recorder is not configured")
 	}
@@ -203,23 +203,23 @@ func (u *UseCases) ReportExecutionResult(ctx context.Context, tenantID, checkID 
 	}
 	if err := u.attestations.Verify(attestation.Payload{
 		Version: normalized.AttestationVersion, ExecutorVersion: normalized.ExecutorVersion,
-		TenantID: tenantID, GovernanceCheckID: checkID, BindingHash: normalized.BindingHash,
+		OrgID: orgID, GovernanceCheckID: checkID, BindingHash: normalized.BindingHash,
 		IdempotencyKey: normalized.IdempotencyKey, Status: normalized.Status,
 		DurationMS: normalized.DurationMS, Result: attestedResult,
 	}, normalized.Attestation); err != nil {
 		return domain.ExecutionResult{}, domainerr.Conflict("executor attestation is invalid")
 	}
-	result, err := u.results.RecordExecutionResult(ctx, tenantID, checkID, normalized)
+	result, err := u.results.RecordExecutionResult(ctx, orgID, checkID, normalized)
 	if err != nil {
 		return domain.ExecutionResult{}, err
 	}
 	if result.Created {
-		u.emitAttestationVerified(ctx, tenantID, normalized, result)
+		u.emitAttestationVerified(ctx, orgID, normalized, result)
 	}
 	return result, nil
 }
 
-func (u *UseCases) emitAttestationVerified(ctx context.Context, tenantID string, input domain.ExecutionResultInput, result domain.ExecutionResult) {
+func (u *UseCases) emitAttestationVerified(ctx context.Context, orgID string, input domain.ExecutionResultInput, result domain.ExecutionResult) {
 	if u.audit == nil || result.RequesterID == "" {
 		return
 	}
@@ -229,7 +229,7 @@ func (u *UseCases) emitAttestationVerified(ctx context.Context, tenantID string,
 	}
 	attestationSum := sha256.Sum256([]byte(input.Attestation))
 	idempotencySum := sha256.Sum256([]byte(input.IdempotencyKey))
-	_, err := u.audit.Append(ctx, tenantID, auditdomain.AppendInput{
+	_, err := u.audit.Append(ctx, orgID, auditdomain.AppendInput{
 		VirployeeID: result.RequesterID, SubjectType: "governance_execution", SubjectID: result.ID,
 		EventType: auditdomain.EventAttestationVerified, ActorType: "service", ActorID: input.ExecutorVersion,
 		Summary: "executor attestation verified",
@@ -309,7 +309,7 @@ func roleSnapshot(input domain.NormalizedCheckInput) map[string]any {
 	return map[string]any{"membership_role": input.MembershipRole, "functional_roles": input.FunctionalRoles, "functional_scopes": input.FunctionalScopes}
 }
 
-func (u *UseCases) resolveFunctionalAuthority(ctx context.Context, tenantID string, input *domain.NormalizedCheckInput) error {
+func (u *UseCases) resolveFunctionalAuthority(ctx context.Context, orgID string, input *domain.NormalizedCheckInput) error {
 	if input.RequesterType != "human" {
 		input.FunctionalRoles = nil
 		input.FunctionalScopes = nil
@@ -318,7 +318,7 @@ func (u *UseCases) resolveFunctionalAuthority(ctx context.Context, tenantID stri
 	if u.functionalRoles == nil {
 		return nil
 	}
-	grants, err := u.functionalRoles.EffectiveGrants(ctx, tenantID, input.RequesterID)
+	grants, err := u.functionalRoles.EffectiveGrants(ctx, orgID, input.RequesterID)
 	if err != nil {
 		return fmt.Errorf("resolve functional role authority: %w", err)
 	}

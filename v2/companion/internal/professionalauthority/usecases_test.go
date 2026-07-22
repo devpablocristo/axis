@@ -16,8 +16,8 @@ func TestEvaluateAuthorityRequiresCurrentMatchingDelegation(t *testing.T) {
 	now := time.Date(2026, 7, 22, 15, 0, 0, 0, time.UTC)
 	virployeeID, jobRoleID, packID := uuid.New(), uuid.New(), uuid.New()
 	repo := &fakeRepository{resolved: map[string]ResolvedAuthority{
-		"tenant-a": {
-			TenantID: "tenant-a", VirployeeID: virployeeID, JobRoleID: jobRoleID,
+		"organization-a": {
+			OrgID: "organization-a", VirployeeID: virployeeID, JobRoleID: jobRoleID,
 			Scope: ScopePolicy{Revision: 3}, BindingRevision: 4,
 			PolicyPacks: []PolicyPack{{
 				ID: packID, Version: 2, Revision: 1,
@@ -34,7 +34,7 @@ func TestEvaluateAuthorityRequiresCurrentMatchingDelegation(t *testing.T) {
 	uc.SetNow(func() time.Time { return now })
 
 	input := executiongate.AuthorityCheckInput{
-		TenantID: "tenant-a", VirployeeID: virployeeID, JobRoleID: jobRoleID,
+		OrgID: "organization-a", VirployeeID: virployeeID, JobRoleID: jobRoleID,
 		CapabilityKey: "calendar.events.create", PrincipalType: "person", PrincipalID: "patient-a", At: now,
 	}
 	denied, err := uc.EvaluateAuthority(context.Background(), input)
@@ -50,9 +50,9 @@ func TestEvaluateAuthorityRequiresCurrentMatchingDelegation(t *testing.T) {
 		PrincipalType: "person", PrincipalID: "patient-a",
 		ValidFrom: now.Add(-time.Hour), ValidUntil: now.Add(time.Hour),
 	}
-	resolved := repo.resolved["tenant-a"]
+	resolved := repo.resolved["organization-a"]
 	resolved.Delegations = append(resolved.Delegations, valid)
-	repo.resolved["tenant-a"] = resolved
+	repo.resolved["organization-a"] = resolved
 	allowed, err := uc.EvaluateAuthority(context.Background(), input)
 	if err != nil {
 		t.Fatal(err)
@@ -65,7 +65,7 @@ func TestEvaluateAuthorityRequiresCurrentMatchingDelegation(t *testing.T) {
 	}
 
 	resolved.Scope.Revision++
-	repo.resolved["tenant-a"] = resolved
+	repo.resolved["organization-a"] = resolved
 	changed, err := uc.EvaluateAuthority(context.Background(), input)
 	if err != nil {
 		t.Fatal(err)
@@ -87,8 +87,8 @@ func TestEvaluateAuthoritySelectsDelegationForExactPrincipal(t *testing.T) {
 		CapabilityScopes: []string{"records.read"}, ValidFrom: now.Add(-time.Hour), ValidUntil: now.Add(time.Hour),
 	}
 	repo := &fakeRepository{resolved: map[string]ResolvedAuthority{
-		"tenant-a": {
-			TenantID: "tenant-a", VirployeeID: virployeeID, JobRoleID: jobRoleID,
+		"organization-a": {
+			OrgID: "organization-a", VirployeeID: virployeeID, JobRoleID: jobRoleID,
 			PolicyPacks: []PolicyPack{{ID: uuid.New(), Version: 1, Revision: 1,
 				Rules: PolicyRules{DelegationRequired: true, AllowedCapabilities: []string{"records.read"}}}},
 			Delegations: []Delegation{delegationA, delegationB},
@@ -100,7 +100,7 @@ func TestEvaluateAuthoritySelectsDelegationForExactPrincipal(t *testing.T) {
 	evaluate := func(principalID string) executiongate.AuthorityCheckResult {
 		t.Helper()
 		result, err := uc.EvaluateAuthority(context.Background(), executiongate.AuthorityCheckInput{
-			TenantID: "tenant-a", VirployeeID: virployeeID, JobRoleID: jobRoleID,
+			OrgID: "organization-a", VirployeeID: virployeeID, JobRoleID: jobRoleID,
 			CapabilityKey: "records.read", PrincipalType: "person", PrincipalID: principalID, At: now,
 		})
 		if err != nil {
@@ -120,7 +120,7 @@ func TestEvaluateAuthoritySelectsDelegationForExactPrincipal(t *testing.T) {
 	}
 
 	missing, err := uc.EvaluateAuthority(context.Background(), executiongate.AuthorityCheckInput{
-		TenantID: "tenant-a", VirployeeID: virployeeID, JobRoleID: jobRoleID,
+		OrgID: "organization-a", VirployeeID: virployeeID, JobRoleID: jobRoleID,
 		CapabilityKey: "records.read", At: now,
 	})
 	if err != nil {
@@ -138,10 +138,10 @@ func TestEvaluateAuthoritySelectsDelegationForExactPrincipal(t *testing.T) {
 func TestEvaluateAuthorityKeepsLegacyActionWhenDelegationNotRequired(t *testing.T) {
 	virployeeID, jobRoleID := uuid.New(), uuid.New()
 	uc := NewUseCases(&fakeRepository{resolved: map[string]ResolvedAuthority{
-		"tenant-a": {TenantID: "tenant-a", VirployeeID: virployeeID, JobRoleID: jobRoleID},
+		"organization-a": {OrgID: "organization-a", VirployeeID: virployeeID, JobRoleID: jobRoleID},
 	}})
 	result, err := uc.EvaluateAuthority(context.Background(), executiongate.AuthorityCheckInput{
-		TenantID: "tenant-a", VirployeeID: virployeeID, JobRoleID: jobRoleID, CapabilityKey: "calendar.events.read",
+		OrgID: "organization-a", VirployeeID: virployeeID, JobRoleID: jobRoleID, CapabilityKey: "calendar.events.read",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -158,13 +158,13 @@ func TestEvaluateAuthorityRequiresProductResourceAndRiskScopes(t *testing.T) {
 		CapabilityScopes: []string{"records.read"}, ProductScopes: []string{"clinical"},
 		ResourceScopes: []ResourceScope{{ResourceType: "case", ResourceID: "case-a"}}, MaxRiskClass: "medium",
 		Purpose: "review case records", ValidFrom: now.Add(-time.Hour), ValidUntil: now.Add(time.Hour)}
-	resolved := ResolvedAuthority{TenantID: "tenant-a", VirployeeID: virployeeID, JobRoleID: jobRoleID,
+	resolved := ResolvedAuthority{OrgID: "organization-a", VirployeeID: virployeeID, JobRoleID: jobRoleID,
 		PolicyPacks: []PolicyPack{{ID: uuid.New(), Version: 1, Revision: 1,
 			Rules: PolicyRules{DelegationRequired: true, AllowedCapabilities: []string{"records.read"}}}},
 		Delegations: []Delegation{delegation}}
-	uc := NewUseCases(&fakeRepository{resolved: map[string]ResolvedAuthority{"tenant-a": resolved}})
+	uc := NewUseCases(&fakeRepository{resolved: map[string]ResolvedAuthority{"organization-a": resolved}})
 	uc.SetNow(func() time.Time { return now })
-	base := executiongate.AuthorityCheckInput{TenantID: "tenant-a", VirployeeID: virployeeID, JobRoleID: jobRoleID,
+	base := executiongate.AuthorityCheckInput{OrgID: "organization-a", VirployeeID: virployeeID, JobRoleID: jobRoleID,
 		CapabilityKey: "records.read", PrincipalType: "person", PrincipalID: "patient-a", ProductSurface: "clinical",
 		ResourceType: "case", ResourceID: "case-a", RiskClass: "medium", At: now}
 	allowed, err := uc.EvaluateAuthority(context.Background(), base)
@@ -187,18 +187,18 @@ func TestEvaluateAuthorityRequiresProductResourceAndRiskScopes(t *testing.T) {
 	}
 }
 
-func TestEvaluateAuthorityEnforcesTenantAndPolicyCapability(t *testing.T) {
+func TestEvaluateAuthorityEnforcesOrgAndPolicyCapability(t *testing.T) {
 	virployeeID, jobRoleID := uuid.New(), uuid.New()
 	repo := &fakeRepository{resolved: map[string]ResolvedAuthority{
-		"tenant-a": {
-			TenantID: "tenant-a", VirployeeID: virployeeID, JobRoleID: jobRoleID,
+		"organization-a": {
+			OrgID: "organization-a", VirployeeID: virployeeID, JobRoleID: jobRoleID,
 			PolicyPacks: []PolicyPack{{ID: uuid.New(), Version: 1, Revision: 1,
 				Rules: PolicyRules{ProhibitedCapabilities: []string{"records.*"}}}},
 		},
 	}}
 	uc := NewUseCases(repo)
 	result, err := uc.EvaluateAuthority(context.Background(), executiongate.AuthorityCheckInput{
-		TenantID: "tenant-a", VirployeeID: virployeeID, JobRoleID: jobRoleID, CapabilityKey: "records.delete",
+		OrgID: "organization-a", VirployeeID: virployeeID, JobRoleID: jobRoleID, CapabilityKey: "records.delete",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -206,22 +206,22 @@ func TestEvaluateAuthorityEnforcesTenantAndPolicyCapability(t *testing.T) {
 	if result.Allowed {
 		t.Fatalf("prohibited capability must be denied: %+v", result)
 	}
-	if repo.lastTenant != "tenant-a" {
-		t.Fatalf("authority resolution lost tenant scope: %q", repo.lastTenant)
+	if repo.lastOrg != "organization-a" {
+		t.Fatalf("authority resolution lost organization scope: %q", repo.lastOrg)
 	}
 	_, err = uc.EvaluateAuthority(context.Background(), executiongate.AuthorityCheckInput{
-		TenantID: "tenant-b", VirployeeID: virployeeID, JobRoleID: jobRoleID, CapabilityKey: "records.delete",
+		OrgID: "organization-b", VirployeeID: virployeeID, JobRoleID: jobRoleID, CapabilityKey: "records.delete",
 	})
 	if !domainerr.IsNotFound(err) {
-		t.Fatalf("cross-tenant resolution must not reuse authority, got %v", err)
+		t.Fatalf("cross-organization resolution must not reuse authority, got %v", err)
 	}
 }
 
 func TestEvaluateConversationScopeAppliesProhibitionsAndOutOfScopeDecision(t *testing.T) {
 	virployeeID, jobRoleID := uuid.New(), uuid.New()
 	repo := &fakeRepository{resolved: map[string]ResolvedAuthority{
-		"tenant-a": {
-			TenantID: "tenant-a", VirployeeID: virployeeID, JobRoleID: jobRoleID,
+		"organization-a": {
+			OrgID: "organization-a", VirployeeID: virployeeID, JobRoleID: jobRoleID,
 			Scope: ScopePolicy{
 				AllowedTopics:    []string{"turnos"},
 				ProhibitedTopics: []string{"diagnostico"},
@@ -238,7 +238,7 @@ func TestEvaluateConversationScopeAppliesProhibitionsAndOutOfScopeDecision(t *te
 	uc := NewUseCases(repo)
 
 	allowed, err := uc.EvaluateConversationScope(context.Background(), executiongate.ConversationScopeInput{
-		TenantID: "tenant-a", VirployeeID: virployeeID, JobRoleID: jobRoleID,
+		OrgID: "organization-a", VirployeeID: virployeeID, JobRoleID: jobRoleID,
 		Query: "Necesito cambiar mis turnos para mañana",
 	})
 	if err != nil {
@@ -249,7 +249,7 @@ func TestEvaluateConversationScopeAppliesProhibitionsAndOutOfScopeDecision(t *te
 	}
 
 	prohibited, err := uc.EvaluateConversationScope(context.Background(), executiongate.ConversationScopeInput{
-		TenantID: "tenant-a", VirployeeID: virployeeID, JobRoleID: jobRoleID,
+		OrgID: "organization-a", VirployeeID: virployeeID, JobRoleID: jobRoleID,
 		Query: "Decime mi diagnostico ahora",
 	})
 	if err != nil {
@@ -260,7 +260,7 @@ func TestEvaluateConversationScopeAppliesProhibitionsAndOutOfScopeDecision(t *te
 	}
 
 	outside, err := uc.EvaluateConversationScope(context.Background(), executiongate.ConversationScopeInput{
-		TenantID: "tenant-a", VirployeeID: virployeeID, JobRoleID: jobRoleID,
+		OrgID: "organization-a", VirployeeID: virployeeID, JobRoleID: jobRoleID,
 		Query: "Contame el pronostico del tiempo",
 	})
 	if err != nil {
@@ -277,23 +277,23 @@ func TestEvaluateConversationScopeAppliesProhibitionsAndOutOfScopeDecision(t *te
 func TestEvaluateConversationScopeSnapshotHashesButDoesNotExposeQuery(t *testing.T) {
 	virployeeID, jobRoleID := uuid.New(), uuid.New()
 	resolved := ResolvedAuthority{
-		TenantID: "tenant-a", VirployeeID: virployeeID, JobRoleID: jobRoleID,
+		OrgID: "organization-a", VirployeeID: virployeeID, JobRoleID: jobRoleID,
 		Scope: ScopePolicy{AllowedTopics: []string{"agenda"}, OutOfScope: OutOfScopeAbstain, Revision: 1},
 	}
-	repo := &fakeRepository{resolved: map[string]ResolvedAuthority{"tenant-a": resolved}}
+	repo := &fakeRepository{resolved: map[string]ResolvedAuthority{"organization-a": resolved}}
 	uc := NewUseCases(repo)
 	query := "agenda confidencial paciente 123"
 
 	first, err := uc.EvaluateConversationScope(context.Background(), executiongate.ConversationScopeInput{
-		TenantID: "tenant-a", VirployeeID: virployeeID, JobRoleID: jobRoleID, Query: query,
+		OrgID: "organization-a", VirployeeID: virployeeID, JobRoleID: jobRoleID, Query: query,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	resolved.Scope.Revision = 2
-	repo.resolved["tenant-a"] = resolved
+	repo.resolved["organization-a"] = resolved
 	second, err := uc.EvaluateConversationScope(context.Background(), executiongate.ConversationScopeInput{
-		TenantID: "tenant-a", VirployeeID: virployeeID, JobRoleID: jobRoleID, Query: query,
+		OrgID: "organization-a", VirployeeID: virployeeID, JobRoleID: jobRoleID, Query: query,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -310,7 +310,7 @@ func TestEvaluateConversationScopeSnapshotHashesButDoesNotExposeQuery(t *testing
 func TestAuthorityMutationsRequireOwnerOrAdmin(t *testing.T) {
 	repo := &fakeRepository{}
 	uc := NewUseCases(repo)
-	_, err := uc.PutScopePolicy(context.Background(), "tenant-a", uuid.New(), PutScopePolicyInput{
+	_, err := uc.PutScopePolicy(context.Background(), "organization-a", uuid.New(), PutScopePolicyInput{
 		OutOfScope: OutOfScopeAbstain,
 	}, Actor{ID: "user-a", Role: "member"})
 	if !domainerr.IsForbidden(err) {
@@ -345,7 +345,7 @@ func TestDelegationAdminRevokeIsAuthorizedAgainstTargetScope(t *testing.T) {
 	uc.SetDelegationAuthorizer(authorizer)
 	uc.SetNow(func() time.Time { return now })
 
-	_, err := uc.RevokeDelegation(context.Background(), "tenant-a", virployeeID, delegationID,
+	_, err := uc.RevokeDelegation(context.Background(), "organization-a", virployeeID, delegationID,
 		RevokeDelegationInput{ExpectedRevision: 2, Reason: "authority ended"}, Actor{ID: "delegate-admin", Role: "member"})
 	if err != nil {
 		t.Fatal(err)
@@ -356,7 +356,7 @@ func TestDelegationAdminRevokeIsAuthorizedAgainstTargetScope(t *testing.T) {
 	}
 
 	authorizer.result = DelegationAuthorizationResult{Allowed: false, Reason: "outside grant scope"}
-	_, err = uc.RevokeDelegation(context.Background(), "tenant-a", virployeeID, delegationID,
+	_, err = uc.RevokeDelegation(context.Background(), "organization-a", virployeeID, delegationID,
 		RevokeDelegationInput{ExpectedRevision: 2, Reason: "retry"}, Actor{ID: "delegate-admin", Role: "member"})
 	if !domainerr.IsForbidden(err) || repo.revokeCalls != 1 {
 		t.Fatalf("out-of-scope revoke reached repository: err=%v calls=%d", err, repo.revokeCalls)
@@ -365,7 +365,7 @@ func TestDelegationAdminRevokeIsAuthorizedAgainstTargetScope(t *testing.T) {
 
 type fakeRepository struct {
 	resolved      map[string]ResolvedAuthority
-	lastTenant    string
+	lastOrg       string
 	putScopeCalls int
 	delegations   []Delegation
 	revokeCalls   int
@@ -375,9 +375,9 @@ func (r *fakeRepository) EnsureVirployee(context.Context, string, uuid.UUID) err
 func (r *fakeRepository) GetScopePolicy(context.Context, string, uuid.UUID) (ScopePolicy, error) {
 	return ScopePolicy{}, domainerr.NotFound("not found")
 }
-func (r *fakeRepository) PutScopePolicy(_ context.Context, tenant string, id uuid.UUID, in PutScopePolicyInput, _ string, now time.Time) (ScopePolicy, error) {
+func (r *fakeRepository) PutScopePolicy(_ context.Context, organization string, id uuid.UUID, in PutScopePolicyInput, _ string, now time.Time) (ScopePolicy, error) {
 	r.putScopeCalls++
-	return ScopePolicy{TenantID: tenant, VirployeeID: id, AllowedTopics: in.AllowedTopics, ProhibitedTopics: in.ProhibitedTopics, OutOfScope: in.OutOfScope, Revision: 1, CreatedAt: now, UpdatedAt: now}, nil
+	return ScopePolicy{OrgID: organization, VirployeeID: id, AllowedTopics: in.AllowedTopics, ProhibitedTopics: in.ProhibitedTopics, OutOfScope: in.OutOfScope, Revision: 1, CreatedAt: now, UpdatedAt: now}, nil
 }
 func (r *fakeRepository) CreatePolicyPack(context.Context, string, CreatePolicyPackInput, *uuid.UUID, string, time.Time) (PolicyPack, error) {
 	return PolicyPack{}, nil
@@ -418,9 +418,9 @@ func (f *fakeDelegationAuthorizer) CheckDelegationAuthorization(_ context.Contex
 func (r *fakeRepository) ReviewDelegation(context.Context, string, uuid.UUID, uuid.UUID, ReviewDelegationInput, string, time.Time) (Delegation, error) {
 	return Delegation{}, nil
 }
-func (r *fakeRepository) ResolveAuthority(_ context.Context, tenant string, _ uuid.UUID) (ResolvedAuthority, error) {
-	r.lastTenant = tenant
-	resolved, ok := r.resolved[tenant]
+func (r *fakeRepository) ResolveAuthority(_ context.Context, organization string, _ uuid.UUID) (ResolvedAuthority, error) {
+	r.lastOrg = organization
+	resolved, ok := r.resolved[organization]
 	if !ok {
 		return ResolvedAuthority{}, domainerr.NotFound("not found")
 	}

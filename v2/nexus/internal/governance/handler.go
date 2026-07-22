@@ -44,7 +44,7 @@ func (h *Handler) Revalidate(c *gin.Context) {
 	if err := ginmw.BindJSON(c, &req); err != nil {
 		return
 	}
-	out, err := h.ucs.Revalidate(c.Request.Context(), tenantID(c), checkID, req.ToDomain())
+	out, err := h.ucs.Revalidate(c.Request.Context(), orgID(c), checkID, req.ToDomain())
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -62,7 +62,7 @@ func (h *Handler) ReportExecutionResult(c *gin.Context) {
 	if err := ginmw.BindJSON(c, &req); err != nil {
 		return
 	}
-	out, err := h.ucs.ReportExecutionResult(c.Request.Context(), tenantID(c), checkID, req.ToDomain(c.GetHeader("Idempotency-Key")))
+	out, err := h.ucs.ReportExecutionResult(c.Request.Context(), orgID(c), checkID, req.ToDomain(c.GetHeader("Idempotency-Key")))
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -75,11 +75,11 @@ func (h *Handler) Check(c *gin.Context) {
 	if err := ginmw.BindJSON(c, &req); err != nil {
 		return
 	}
-	input := req.ToDomain(c.GetHeader("X-Axis-Tenant-Role"))
+	input := req.ToDomain(c.GetHeader("X-Axis-Org-Role"))
 	if strings.EqualFold(strings.TrimSpace(input.RequesterType), "human") {
 		input.RequesterID = strings.TrimSpace(c.GetHeader("X-Actor-ID"))
 	}
-	out, err := h.ucs.Check(c.Request.Context(), tenantID(c), input)
+	out, err := h.ucs.Check(c.Request.Context(), orgID(c), input)
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -87,6 +87,6 @@ func (h *Handler) Check(c *gin.Context) {
 	ginmw.WriteJSON(c, 200, dto.CheckFromDomain(out))
 }
 
-func tenantID(c *gin.Context) string {
-	return strings.TrimSpace(c.GetHeader("X-Tenant-ID"))
+func orgID(c *gin.Context) string {
+	return strings.TrimSpace(c.GetHeader("X-Org-ID"))
 }

@@ -21,8 +21,8 @@ func internalAuthMiddleware(secret string) gin.HandlerFunc {
 			c.Abort()
 			return
 		}
-		if strings.TrimSpace(c.GetHeader("X-Tenant-ID")) == "" || strings.TrimSpace(c.GetHeader("X-Actor-ID")) == "" {
-			ginmw.WriteError(c, http.StatusUnauthorized, "unauthorized", "trusted tenant and actor are required")
+		if strings.TrimSpace(c.GetHeader("X-Org-ID")) == "" || strings.TrimSpace(c.GetHeader("X-Actor-ID")) == "" {
+			ginmw.WriteError(c, http.StatusUnauthorized, "unauthorized", "trusted organization and actor are required")
 			c.Abort()
 			return
 		}

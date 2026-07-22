@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -24,7 +23,7 @@ import (
 )
 
 type Binding struct {
-	TenantID       string
+	ProductID      string
 	VirployeeID    string
 	ActorID        string
 	ProductSurface string
@@ -117,16 +116,7 @@ func (h *Handler) AssistRun(c *gin.Context) {
 		ginmw.WriteError(c, http.StatusForbidden, "forbidden", "product_surface does not match the api key")
 		return
 	}
-	requestedCapability := envelope.CapabilityKey
-	var deprecated bool
-	envelope.CapabilityKey, deprecated = normalizeCapabilityKey(envelope.CapabilityKey)
-	if deprecated {
-		c.Header("Deprecation", "true")
-		c.Header("Warning", `299 Axis "Deprecated capability alias; use `+envelope.CapabilityKey+`"`)
-		slog.WarnContext(c.Request.Context(), "assist_capability_alias_used",
-			"alias", strings.ToLower(strings.TrimSpace(requestedCapability)),
-			"capability_key", envelope.CapabilityKey, "product_surface", binding.ProductSurface)
-	}
+	envelope.CapabilityKey = strings.ToLower(strings.TrimSpace(envelope.CapabilityKey))
 	if isClinicalCapability(envelope.CapabilityKey) {
 		if subjectID, err := uuid.Parse(strings.TrimSpace(envelope.SubjectID)); err != nil || subjectID == uuid.Nil {
 			ginmw.WriteError(c, http.StatusBadRequest, "invalid_subject", "subject_id must be a UUID for clinical capabilities")
@@ -264,11 +254,7 @@ func (h *Handler) AssistCapabilities(c *gin.Context) {
 			},
 		},
 		"capabilities": []string{"clinical.records.search", "clinical.timeline.build"},
-		"capability_aliases": gin.H{
-			"medmory.search.query": "clinical.records.search", "medmory.timeline.read": "clinical.timeline.build",
-			"medmory.timeline.build": "clinical.timeline.build",
-		},
-		"limits": gin.H{"max_artifact_bytes": 250 << 20, "max_diagnosis_bytes": 500 << 20, "max_repository_bytes": 5 << 30},
+		"limits":       gin.H{"max_artifact_bytes": 250 << 20, "max_diagnosis_bytes": 500 << 20, "max_repository_bytes": 5 << 30},
 	})
 }
 
@@ -362,7 +348,7 @@ func (h *Handler) internalRequest(c *gin.Context, binding Binding, method, targe
 	}
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("X-Axis-Internal-Token", h.internalAuthSecret)
-	request.Header.Set("X-Tenant-ID", binding.TenantID)
+	request.Header.Set("X-Product-ID", binding.ProductID)
 	request.Header.Set("X-Actor-ID", binding.ActorID)
 	request.Header.Set("X-Product-Surface", binding.ProductSurface)
 	request.Header.Set("X-Axis-Forwarded-By", "bff-v2")
@@ -414,20 +400,6 @@ func productResult(run companionAssistResponse) assistRunResult {
 	}
 }
 
-var capabilityAliases = map[string]string{
-	"medmory.search.query": "clinical.records.search", "medmory.timeline.read": "clinical.timeline.build",
-	"medmory.timeline.build": "clinical.timeline.build",
-}
-
-func normalizeCapabilityKey(raw string) (string, bool) {
-	key := strings.ToLower(strings.TrimSpace(raw))
-	canonical, ok := capabilityAliases[key]
-	if ok {
-		return canonical, true
-	}
-	return key, false
-}
-
 func isClinicalCapability(key string) bool {
 	return key == "clinical.records.search" || key == "clinical.timeline.build"
 }
@@ -449,7 +421,7 @@ func (h *Handler) statusURL(runID string, original, resolved Binding) string {
 func (h *Handler) routeToken(runID, virployeeID string, binding Binding) string {
 	payload := base64.RawURLEncoding.EncodeToString([]byte(strings.TrimSpace(virployeeID)))
 	mac := hmac.New(sha256.New, []byte(h.internalAuthSecret))
-	_, _ = mac.Write([]byte(strings.Join([]string{binding.TenantID, binding.ProductSurface, runID, virployeeID}, "\x00")))
+	_, _ = mac.Write([]byte(strings.Join([]string{binding.ProductID, binding.ProductSurface, runID, virployeeID}, "\x00")))
 	return payload + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
@@ -536,7 +508,7 @@ func ParseBindings(raw string) map[string]Binding {
 		if key == "" {
 			continue
 		}
-		binding := Binding{TenantID: strings.TrimSpace(parts[0]), VirployeeID: strings.TrimSpace(parts[1]), ActorID: strings.TrimSpace(parts[2]), ProductSurface: strings.TrimSpace(parts[3])}
+		binding := Binding{ProductID: strings.TrimSpace(parts[0]), VirployeeID: strings.TrimSpace(parts[1]), ActorID: strings.TrimSpace(parts[2]), ProductSurface: strings.TrimSpace(parts[3])}
 		if len(parts) >= 5 {
 			binding.RoutingPoolID = strings.TrimSpace(parts[4])
 		}

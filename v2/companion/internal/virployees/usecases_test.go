@@ -27,7 +27,7 @@ func TestUseCasesCreateAndListActive(t *testing.T) {
 	jobRoleID := uuid.New()
 	profileTemplateID := uuid.New()
 
-	created, err := uc.Create(context.Background(), "tenant-1", domain.CreateInput{
+	created, err := uc.Create(context.Background(), "organization-1", domain.CreateInput{
 		Name:              " Sales Assistant ",
 		JobRoleID:         jobRoleID.String(),
 		ProfileTemplateID: profileTemplateID.String(),
@@ -41,7 +41,7 @@ func TestUseCasesCreateAndListActive(t *testing.T) {
 		t.Fatalf("unexpected create output: %+v", created)
 	}
 
-	active, err := uc.ListActive(context.Background(), "tenant-1")
+	active, err := uc.ListActive(context.Background(), "organization-1")
 	if err != nil {
 		t.Fatalf("ListActive: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestUseCasesCreateDefaultsAutonomyToA1AndValidatesJobRole(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	created, err := uc.Create(context.Background(), "tenant-1", domain.CreateInput{
+	created, err := uc.Create(context.Background(), "organization-1", domain.CreateInput{
 		Name:              "Ops",
 		JobRoleID:         jobRoleID.String(),
 		ProfileTemplateID: uuid.NewString(),
@@ -71,8 +71,8 @@ func TestUseCasesCreateDefaultsAutonomyToA1AndValidatesJobRole(t *testing.T) {
 	if created.Autonomy != domain.AutonomyA1 {
 		t.Fatalf("expected default autonomy A1, got %s", created.Autonomy)
 	}
-	if reader.lastTenant != "tenant-1" || reader.lastID != jobRoleID {
-		t.Fatalf("expected job role validation, got tenant=%q id=%s", reader.lastTenant, reader.lastID)
+	if reader.lastOrg != "organization-1" || reader.lastID != jobRoleID {
+		t.Fatalf("expected job role validation, got organization=%q id=%s", reader.lastOrg, reader.lastID)
 	}
 }
 
@@ -83,7 +83,7 @@ func TestUseCasesCreateRequiresProfileTemplateID(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = uc.Create(context.Background(), "tenant-1", domain.CreateInput{
+	_, err = uc.Create(context.Background(), "organization-1", domain.CreateInput{
 		Name:             "Ops",
 		JobRoleID:        uuid.NewString(),
 		SupervisorUserID: "dev-user",
@@ -101,7 +101,7 @@ func TestUseCasesCreateFailsWhenJobRoleIsNotActive(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = uc.Create(context.Background(), "tenant-1", domain.CreateInput{
+	_, err = uc.Create(context.Background(), "organization-1", domain.CreateInput{
 		Name:              "Ops",
 		JobRoleID:         jobRoleID.String(),
 		ProfileTemplateID: uuid.NewString(),
@@ -122,7 +122,7 @@ func TestUseCasesCreateValidatesProfileTemplate(t *testing.T) {
 	}
 	uc.SetProfileTemplateReader(reader)
 
-	created, err := uc.Create(context.Background(), "tenant-1", domain.CreateInput{
+	created, err := uc.Create(context.Background(), "organization-1", domain.CreateInput{
 		Name:              "Ops",
 		JobRoleID:         uuid.NewString(),
 		ProfileTemplateID: profileTemplateID.String(),
@@ -135,8 +135,8 @@ func TestUseCasesCreateValidatesProfileTemplate(t *testing.T) {
 	if created.ProfileTemplateID != profileTemplateID {
 		t.Fatalf("expected profile_template_id to be persisted, got %+v", created.ProfileTemplateID)
 	}
-	if reader.lastTenant != "tenant-1" || reader.lastID != profileTemplateID || reader.lastAutonomy != domain.AutonomyA2 {
-		t.Fatalf("expected profile template validation, got tenant=%q id=%s autonomy=%s", reader.lastTenant, reader.lastID, reader.lastAutonomy)
+	if reader.lastOrg != "organization-1" || reader.lastID != profileTemplateID || reader.lastAutonomy != domain.AutonomyA2 {
+		t.Fatalf("expected profile template validation, got organization=%q id=%s autonomy=%s", reader.lastOrg, reader.lastID, reader.lastAutonomy)
 	}
 }
 
@@ -148,7 +148,7 @@ func TestUseCasesCreateFailsWhenProfileTemplateRejectsAutonomy(t *testing.T) {
 	}
 	uc.SetProfileTemplateReader(&fakeProfileTemplateReader{err: domainerr.Validation("profile template max autonomy exceeded")})
 
-	_, err = uc.Create(context.Background(), "tenant-1", domain.CreateInput{
+	_, err = uc.Create(context.Background(), "organization-1", domain.CreateInput{
 		Name:              "Ops",
 		JobRoleID:         uuid.NewString(),
 		ProfileTemplateID: uuid.NewString(),
@@ -166,7 +166,7 @@ func TestUseCasesUpdateRequiresProfileTemplateID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := uc.Create(context.Background(), "tenant-1", domain.CreateInput{
+	created, err := uc.Create(context.Background(), "organization-1", domain.CreateInput{
 		Name:              "Ops",
 		JobRoleID:         uuid.NewString(),
 		ProfileTemplateID: uuid.NewString(),
@@ -176,7 +176,7 @@ func TestUseCasesUpdateRequiresProfileTemplateID(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = uc.Update(context.Background(), "tenant-1", created.ID, domain.UpdateInput{
+	_, err = uc.Update(context.Background(), "organization-1", created.ID, domain.UpdateInput{
 		Name:             "Ops",
 		JobRoleID:        uuid.NewString(),
 		SupervisorUserID: "dev-user",
@@ -196,7 +196,7 @@ func TestUseCasesUpdateChangesProfileTemplateReference(t *testing.T) {
 	uc.SetProfileTemplateReader(reader)
 	firstTemplateID := uuid.New()
 	secondTemplateID := uuid.New()
-	created, err := uc.Create(context.Background(), "tenant-1", domain.CreateInput{
+	created, err := uc.Create(context.Background(), "organization-1", domain.CreateInput{
 		Name:              "Ops",
 		JobRoleID:         uuid.NewString(),
 		ProfileTemplateID: firstTemplateID.String(),
@@ -206,7 +206,7 @@ func TestUseCasesUpdateChangesProfileTemplateReference(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	updated, err := uc.Update(context.Background(), "tenant-1", created.ID, domain.UpdateInput{
+	updated, err := uc.Update(context.Background(), "organization-1", created.ID, domain.UpdateInput{
 		Name:              "Ops updated",
 		JobRoleID:         uuid.NewString(),
 		ProfileTemplateID: secondTemplateID.String(),
@@ -229,40 +229,40 @@ func TestUseCasesLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := uc.Create(context.Background(), "tenant-1", domain.CreateInput{Name: "Ops", JobRoleID: uuid.NewString(), ProfileTemplateID: uuid.NewString(), SupervisorUserID: "dev-user"})
+	created, err := uc.Create(context.Background(), "organization-1", domain.CreateInput{Name: "Ops", JobRoleID: uuid.NewString(), ProfileTemplateID: uuid.NewString(), SupervisorUserID: "dev-user"})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if err := uc.Archive(context.Background(), "tenant-1", created.ID, "", ""); err != nil {
+	if err := uc.Archive(context.Background(), "organization-1", created.ID, "", ""); err != nil {
 		t.Fatalf("Archive: %v", err)
 	}
 	assertListLen(t, uc.ListActive, 0)
 	assertListLen(t, uc.ListArchived, 1)
 
-	if err := uc.Unarchive(context.Background(), "tenant-1", created.ID, "", ""); err != nil {
+	if err := uc.Unarchive(context.Background(), "organization-1", created.ID, "", ""); err != nil {
 		t.Fatalf("Unarchive: %v", err)
 	}
 	assertListLen(t, uc.ListActive, 1)
 
-	if err := uc.Trash(context.Background(), "tenant-1", created.ID, "", ""); err != nil {
+	if err := uc.Trash(context.Background(), "organization-1", created.ID, "", ""); err != nil {
 		t.Fatalf("Trash: %v", err)
 	}
 	assertListLen(t, uc.ListActive, 0)
 	assertListLen(t, uc.ListTrash, 1)
 
-	if err := uc.Restore(context.Background(), "tenant-1", created.ID, "", ""); err != nil {
+	if err := uc.Restore(context.Background(), "organization-1", created.ID, "", ""); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
 	assertListLen(t, uc.ListActive, 1)
 
-	if err := uc.Trash(context.Background(), "tenant-1", created.ID, "", ""); err != nil {
+	if err := uc.Trash(context.Background(), "organization-1", created.ID, "", ""); err != nil {
 		t.Fatalf("Trash again: %v", err)
 	}
-	if err := uc.Purge(context.Background(), "tenant-1", created.ID, "", ""); err != nil {
+	if err := uc.Purge(context.Background(), "organization-1", created.ID, "", ""); err != nil {
 		t.Fatalf("Purge: %v", err)
 	}
-	if _, err := uc.Get(context.Background(), "tenant-1", created.ID); !domainerr.IsNotFound(err) {
+	if _, err := uc.Get(context.Background(), "organization-1", created.ID); !domainerr.IsNotFound(err) {
 		t.Fatalf("expected not found after purge, got %v", err)
 	}
 }
@@ -273,14 +273,14 @@ func TestUseCasesUpdateArchivedOrTrashedFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := uc.Create(context.Background(), "tenant-1", domain.CreateInput{Name: "Ops", JobRoleID: uuid.NewString(), ProfileTemplateID: uuid.NewString(), SupervisorUserID: "dev-user"})
+	created, err := uc.Create(context.Background(), "organization-1", domain.CreateInput{Name: "Ops", JobRoleID: uuid.NewString(), ProfileTemplateID: uuid.NewString(), SupervisorUserID: "dev-user"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := uc.Archive(context.Background(), "tenant-1", created.ID, "", ""); err != nil {
+	if err := uc.Archive(context.Background(), "organization-1", created.ID, "", ""); err != nil {
 		t.Fatal(err)
 	}
-	_, err = uc.Update(context.Background(), "tenant-1", created.ID, domain.UpdateInput{Name: "New", JobRoleID: uuid.NewString(), ProfileTemplateID: uuid.NewString(), SupervisorUserID: "dev-user"})
+	_, err = uc.Update(context.Background(), "organization-1", created.ID, domain.UpdateInput{Name: "New", JobRoleID: uuid.NewString(), ProfileTemplateID: uuid.NewString(), SupervisorUserID: "dev-user"})
 	if !domainerr.IsConflict(err) {
 		t.Fatalf("expected conflict updating archived, got %v", err)
 	}
@@ -293,16 +293,16 @@ func TestUseCasesRuntimeContextReturnsResolvedReferences(t *testing.T) {
 	capabilityID := uuid.New()
 	jobRoles := &fakeJobRoleReader{
 		role: jobroledomain.JobRole{
-			ID:       jobRoleID,
-			TenantID: "tenant-1",
-			Name:     "Receptionist",
-			Mission:  "Welcome visitors",
+			ID:      jobRoleID,
+			OrgID:   "organization-1",
+			Name:    "Receptionist",
+			Mission: "Welcome visitors",
 		},
 	}
 	profiles := &fakeProfileTemplateReader{
 		profile: profiletemplatedomain.ProfileTemplate{
 			ID:           profileTemplateID,
-			TenantID:     "tenant-1",
+			OrgID:        "organization-1",
 			Name:         "Warm receptionist",
 			SystemPrompt: "Be warm and concise.",
 			MaxAutonomy:  domain.AutonomyA2,
@@ -312,7 +312,7 @@ func TestUseCasesRuntimeContextReturnsResolvedReferences(t *testing.T) {
 		rows: map[uuid.UUID]capabilitydomain.Capability{
 			capabilityID: {
 				ID:               capabilityID,
-				TenantID:         "tenant-1",
+				OrgID:            "organization-1",
 				CapabilityKey:    "calendar.events.create",
 				Name:             "Create calendar events",
 				RequiredAutonomy: domain.AutonomyA2,
@@ -326,7 +326,7 @@ func TestUseCasesRuntimeContextReturnsResolvedReferences(t *testing.T) {
 	uc.SetProfileTemplateReader(profiles)
 	uc.SetCapabilityValidator(capabilities)
 
-	created, err := uc.Create(context.Background(), "tenant-1", domain.CreateInput{
+	created, err := uc.Create(context.Background(), "organization-1", domain.CreateInput{
 		Name:              "Sofia",
 		JobRoleID:         jobRoleID.String(),
 		ProfileTemplateID: profileTemplateID.String(),
@@ -338,7 +338,7 @@ func TestUseCasesRuntimeContextReturnsResolvedReferences(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx, err := uc.RuntimeContext(context.Background(), "tenant-1", created.ID)
+	ctx, err := uc.RuntimeContext(context.Background(), "organization-1", created.ID)
 	if err != nil {
 		t.Fatalf("RuntimeContext: %v", err)
 	}
@@ -351,7 +351,7 @@ func TestUseCasesRuntimeContextReturnsResolvedReferences(t *testing.T) {
 	capability := capabilities.rows[capabilityID]
 	capability.PromotionState = capabilitydomain.PromotionDraft
 	capabilities.rows[capabilityID] = capability
-	if _, err := uc.RuntimeContext(context.Background(), "tenant-1", created.ID); !domainerr.IsValidation(err) {
+	if _, err := uc.RuntimeContext(context.Background(), "organization-1", created.ID); !domainerr.IsValidation(err) {
 		t.Fatalf("draft capability assigned before invalidation must fail closed, got %v", err)
 	}
 }
@@ -363,21 +363,21 @@ func TestUseCasesRuntimeContextFailsWhenProfileTemplateNoLongerAllowsAutonomy(t 
 	profiles := &fakeProfileTemplateReader{
 		profile: profiletemplatedomain.ProfileTemplate{
 			ID:           profileTemplateID,
-			TenantID:     "tenant-1",
+			OrgID:        "organization-1",
 			Name:         "Safe profile",
 			SystemPrompt: "Stay safe.",
 			MaxAutonomy:  domain.AutonomyA2,
 		},
 	}
 	uc, err := NewUseCases(repo, &fakeJobRoleReader{
-		role: jobroledomain.JobRole{ID: jobRoleID, TenantID: "tenant-1", Name: "Ops"},
+		role: jobroledomain.JobRole{ID: jobRoleID, OrgID: "organization-1", Name: "Ops"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	uc.SetProfileTemplateReader(profiles)
 
-	created, err := uc.Create(context.Background(), "tenant-1", domain.CreateInput{
+	created, err := uc.Create(context.Background(), "organization-1", domain.CreateInput{
 		Name:              "Ops",
 		JobRoleID:         jobRoleID.String(),
 		ProfileTemplateID: profileTemplateID.String(),
@@ -389,7 +389,7 @@ func TestUseCasesRuntimeContextFailsWhenProfileTemplateNoLongerAllowsAutonomy(t 
 	}
 
 	profiles.profile.MaxAutonomy = domain.AutonomyA1
-	if _, err := uc.RuntimeContext(context.Background(), "tenant-1", created.ID); !domainerr.IsValidation(err) {
+	if _, err := uc.RuntimeContext(context.Background(), "organization-1", created.ID); !domainerr.IsValidation(err) {
 		t.Fatalf("expected validation for profile autonomy mismatch, got %v", err)
 	}
 }
@@ -403,7 +403,7 @@ func TestUseCasesRuntimeContextFailsWhenCapabilityRequiresMoreAutonomy(t *testin
 		rows: map[uuid.UUID]capabilitydomain.Capability{
 			capabilityID: {
 				ID:               capabilityID,
-				TenantID:         "tenant-1",
+				OrgID:            "organization-1",
 				CapabilityKey:    "calendar.events.create",
 				Name:             "Create calendar events",
 				RequiredAutonomy: domain.AutonomyA3,
@@ -411,7 +411,7 @@ func TestUseCasesRuntimeContextFailsWhenCapabilityRequiresMoreAutonomy(t *testin
 		},
 	}
 	uc, err := NewUseCases(repo, &fakeJobRoleReader{
-		role: jobroledomain.JobRole{ID: jobRoleID, TenantID: "tenant-1", Name: "Ops"},
+		role: jobroledomain.JobRole{ID: jobRoleID, OrgID: "organization-1", Name: "Ops"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -419,7 +419,7 @@ func TestUseCasesRuntimeContextFailsWhenCapabilityRequiresMoreAutonomy(t *testin
 	uc.SetProfileTemplateReader(&fakeProfileTemplateReader{
 		profile: profiletemplatedomain.ProfileTemplate{
 			ID:           profileTemplateID,
-			TenantID:     "tenant-1",
+			OrgID:        "organization-1",
 			Name:         "Broad profile",
 			SystemPrompt: "Work safely.",
 			MaxAutonomy:  domain.AutonomyA3,
@@ -427,7 +427,7 @@ func TestUseCasesRuntimeContextFailsWhenCapabilityRequiresMoreAutonomy(t *testin
 	})
 	uc.SetCapabilityValidator(capabilities)
 
-	created, err := uc.Create(context.Background(), "tenant-1", domain.CreateInput{
+	created, err := uc.Create(context.Background(), "organization-1", domain.CreateInput{
 		Name:              "Ops",
 		JobRoleID:         jobRoleID.String(),
 		ProfileTemplateID: profileTemplateID.String(),
@@ -439,7 +439,7 @@ func TestUseCasesRuntimeContextFailsWhenCapabilityRequiresMoreAutonomy(t *testin
 		t.Fatal(err)
 	}
 
-	if _, err := uc.RuntimeContext(context.Background(), "tenant-1", created.ID); !domainerr.IsValidation(err) {
+	if _, err := uc.RuntimeContext(context.Background(), "organization-1", created.ID); !domainerr.IsValidation(err) {
 		t.Fatalf("expected validation for capability autonomy mismatch, got %v", err)
 	}
 }
@@ -450,7 +450,7 @@ func TestUseCasesDryRunAllowsMatchedCapability(t *testing.T) {
 	profileTemplateID := uuid.New()
 	capabilityID := uuid.New()
 	uc, err := NewUseCases(repo, &fakeJobRoleReader{
-		role: jobroledomain.JobRole{ID: jobRoleID, TenantID: "tenant-1", Name: "Receptionist"},
+		role: jobroledomain.JobRole{ID: jobRoleID, OrgID: "organization-1", Name: "Receptionist"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -458,7 +458,7 @@ func TestUseCasesDryRunAllowsMatchedCapability(t *testing.T) {
 	uc.SetProfileTemplateReader(&fakeProfileTemplateReader{
 		profile: profiletemplatedomain.ProfileTemplate{
 			ID:           profileTemplateID,
-			TenantID:     "tenant-1",
+			OrgID:        "organization-1",
 			Name:         "Receptionist profile",
 			SystemPrompt: "Be warm.",
 			MaxAutonomy:  domain.AutonomyA2,
@@ -468,7 +468,7 @@ func TestUseCasesDryRunAllowsMatchedCapability(t *testing.T) {
 		rows: map[uuid.UUID]capabilitydomain.Capability{
 			capabilityID: {
 				ID:               capabilityID,
-				TenantID:         "tenant-1",
+				OrgID:            "organization-1",
 				CapabilityKey:    "calendar.events.create",
 				Name:             "Create calendar events",
 				RequiredAutonomy: domain.AutonomyA2,
@@ -476,7 +476,7 @@ func TestUseCasesDryRunAllowsMatchedCapability(t *testing.T) {
 		},
 	})
 
-	created, err := uc.Create(context.Background(), "tenant-1", domain.CreateInput{
+	created, err := uc.Create(context.Background(), "organization-1", domain.CreateInput{
 		Name:              "Sofia",
 		JobRoleID:         jobRoleID.String(),
 		ProfileTemplateID: profileTemplateID.String(),
@@ -488,7 +488,7 @@ func TestUseCasesDryRunAllowsMatchedCapability(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := uc.DryRun(context.Background(), "tenant-1", created.ID, "Agendá una reunión para mañana")
+	result, err := uc.DryRun(context.Background(), "organization-1", created.ID, "Agendá una reunión para mañana")
 	if err != nil {
 		t.Fatalf("DryRun: %v", err)
 	}
@@ -517,7 +517,7 @@ func TestUseCasesDryRunIgnoresUnassignedCapability(t *testing.T) {
 	jobRoleID := uuid.New()
 	profileTemplateID := uuid.New()
 	uc, err := NewUseCases(repo, &fakeJobRoleReader{
-		role: jobroledomain.JobRole{ID: jobRoleID, TenantID: "tenant-1", Name: "Receptionist"},
+		role: jobroledomain.JobRole{ID: jobRoleID, OrgID: "organization-1", Name: "Receptionist"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -525,7 +525,7 @@ func TestUseCasesDryRunIgnoresUnassignedCapability(t *testing.T) {
 	uc.SetProfileTemplateReader(&fakeProfileTemplateReader{
 		profile: profiletemplatedomain.ProfileTemplate{
 			ID:           profileTemplateID,
-			TenantID:     "tenant-1",
+			OrgID:        "organization-1",
 			Name:         "Receptionist profile",
 			SystemPrompt: "Be warm.",
 			MaxAutonomy:  domain.AutonomyA2,
@@ -533,7 +533,7 @@ func TestUseCasesDryRunIgnoresUnassignedCapability(t *testing.T) {
 	})
 	uc.SetCapabilityValidator(&fakeCapabilityReader{rows: map[uuid.UUID]capabilitydomain.Capability{}})
 
-	created, err := uc.Create(context.Background(), "tenant-1", domain.CreateInput{
+	created, err := uc.Create(context.Background(), "organization-1", domain.CreateInput{
 		Name:              "Sofia",
 		JobRoleID:         jobRoleID.String(),
 		ProfileTemplateID: profileTemplateID.String(),
@@ -544,10 +544,10 @@ func TestUseCasesDryRunIgnoresUnassignedCapability(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Data-driven per tenant: with no capability assigned the create action is
+	// Data-driven per organization: with no capability assigned the create action is
 	// not recognizable, so the dry-run treats the input as conversational
 	// instead of inferring an unassigned capability.
-	result, err := uc.DryRun(context.Background(), "tenant-1", created.ID, "Agendá una reunión para mañana")
+	result, err := uc.DryRun(context.Background(), "organization-1", created.ID, "Agendá una reunión para mañana")
 	if err != nil {
 		t.Fatalf("DryRun: %v", err)
 	}
@@ -572,7 +572,7 @@ func TestUseCasesDryRunRejectsEmptyInput(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = uc.DryRun(context.Background(), "tenant-1", uuid.New(), " ")
+	_, err = uc.DryRun(context.Background(), "organization-1", uuid.New(), " ")
 	if !domainerr.IsValidation(err) {
 		t.Fatalf("expected validation for empty input, got %v", err)
 	}
@@ -581,7 +581,7 @@ func TestUseCasesDryRunRejectsEmptyInput(t *testing.T) {
 func TestUseCasesExecutionGateBlocksCreateBelowExecutionAutonomy(t *testing.T) {
 	uc, created := setupExecutionGateUseCase(t, domain.AutonomyA2)
 
-	result, err := uc.ExecutionGate(context.Background(), "tenant-1", created.ID, "Agendá una reunión mañana a las 15 con ana@example.com", nil)
+	result, err := uc.ExecutionGate(context.Background(), "organization-1", created.ID, "Agendá una reunión mañana a las 15 con ana@example.com", nil)
 	if err != nil {
 		t.Fatalf("ExecutionGate: %v", err)
 	}
@@ -596,7 +596,7 @@ func TestUseCasesExecutionGateBlocksCreateBelowExecutionAutonomy(t *testing.T) {
 func TestUseCasesExecutionGateFailsClosedWithoutGovernance(t *testing.T) {
 	uc, created := setupExecutionGateUseCase(t, domain.AutonomyA3)
 
-	result, err := uc.ExecutionGate(context.Background(), "tenant-1", created.ID, "Agendá una reunión mañana a las 15 con ana@example.com", nil)
+	result, err := uc.ExecutionGate(context.Background(), "organization-1", created.ID, "Agendá una reunión mañana a las 15 con ana@example.com", nil)
 	if err != nil {
 		t.Fatalf("ExecutionGate: %v", err)
 	}
@@ -622,14 +622,14 @@ func TestUseCasesExecutionGateChecksGovernanceWhenLocalGatePasses(t *testing.T) 
 	}
 	uc.SetGovernanceChecker(checker)
 
-	result, err := uc.ExecutionGate(context.Background(), "tenant-1", created.ID, "Agendá una reunión mañana a las 15 con ana@example.com", nil)
+	result, err := uc.ExecutionGate(context.Background(), "organization-1", created.ID, "Agendá una reunión mañana a las 15 con ana@example.com", nil)
 	if err != nil {
 		t.Fatalf("ExecutionGate: %v", err)
 	}
 	if result.Gate.Decision != "pass" {
 		t.Fatalf("expected governance allow to pass, got %+v", result.Gate)
 	}
-	if checker.last.TenantID != "tenant-1" || checker.last.ActionType != "calendar.events.create" || checker.last.RequesterID != created.ID.String() {
+	if checker.last.OrgID != "organization-1" || checker.last.ActionType != "calendar.events.create" || checker.last.RequesterID != created.ID.String() {
 		t.Fatalf("unexpected governance input: %+v", checker.last)
 	}
 	if checker.last.BindingHash == "" {
@@ -662,7 +662,7 @@ func TestUseCasesExecutionGateBlocksWhenGovernanceRequiresApproval(t *testing.T)
 		},
 	})
 
-	result, err := uc.ExecutionGate(context.Background(), "tenant-1", created.ID, "Agendá una reunión mañana a las 15 con ana@example.com", nil)
+	result, err := uc.ExecutionGate(context.Background(), "organization-1", created.ID, "Agendá una reunión mañana a las 15 con ana@example.com", nil)
 	if err != nil {
 		t.Fatalf("ExecutionGate: %v", err)
 	}
@@ -687,7 +687,7 @@ func TestUseCasesExecutionGateBlocksWhenGovernanceDenies(t *testing.T) {
 		},
 	})
 
-	result, err := uc.ExecutionGate(context.Background(), "tenant-1", created.ID, "Agendá una reunión mañana a las 15 con ana@example.com", nil)
+	result, err := uc.ExecutionGate(context.Background(), "organization-1", created.ID, "Agendá una reunión mañana a las 15 con ana@example.com", nil)
 	if err != nil {
 		t.Fatalf("ExecutionGate: %v", err)
 	}
@@ -708,7 +708,7 @@ func TestUseCasesExecutionGateBlocksWhenGovernanceUnavailable(t *testing.T) {
 	uc, created := setupExecutionGateUseCase(t, domain.AutonomyA3)
 	uc.SetGovernanceChecker(&fakeGovernanceChecker{err: errors.New("nexus unavailable")})
 
-	result, err := uc.ExecutionGate(context.Background(), "tenant-1", created.ID, "Agendá una reunión mañana a las 15 con ana@example.com", nil)
+	result, err := uc.ExecutionGate(context.Background(), "organization-1", created.ID, "Agendá una reunión mañana a las 15 con ana@example.com", nil)
 	if err != nil {
 		t.Fatalf("ExecutionGate: %v", err)
 	}
@@ -736,7 +736,7 @@ func TestUseCasesSimulateApprovedExecutionCreatesIdempotentTrace(t *testing.T) {
 			ApprovalStatus:       "pending",
 		},
 	})
-	if _, err := uc.ExecutionGate(context.Background(), "tenant-1", created.ID, "Agendá una reunión mañana a las 15 con ana@example.com", nil); err != nil {
+	if _, err := uc.ExecutionGate(context.Background(), "organization-1", created.ID, "Agendá una reunión mañana a las 15 con ana@example.com", nil); err != nil {
 		t.Fatalf("ExecutionGate: %v", err)
 	}
 	repo := uc.repo.(*fakeRepo)
@@ -748,7 +748,7 @@ func TestUseCasesSimulateApprovedExecutionCreatesIdempotentTrace(t *testing.T) {
 		Status:      "approved",
 	}})
 
-	trace, err := uc.SimulateApprovedExecution(context.Background(), "tenant-1", created.ID, approvalID)
+	trace, err := uc.SimulateApprovedExecution(context.Background(), "organization-1", created.ID, approvalID)
 	if err != nil {
 		t.Fatalf("SimulateApprovedExecution: %v", err)
 	}
@@ -762,7 +762,7 @@ func TestUseCasesSimulateApprovedExecutionCreatesIdempotentTrace(t *testing.T) {
 		t.Fatalf("expected approved binding trace, got %+v", trace)
 	}
 
-	replayed, err := uc.SimulateApprovedExecution(context.Background(), "tenant-1", created.ID, approvalID)
+	replayed, err := uc.SimulateApprovedExecution(context.Background(), "organization-1", created.ID, approvalID)
 	if err != nil {
 		t.Fatalf("replay SimulateApprovedExecution: %v", err)
 	}
@@ -783,7 +783,7 @@ func TestUseCasesSimulateApprovedExecutionRejectsPendingApproval(t *testing.T) {
 		Status:      "pending",
 	}})
 
-	_, err := uc.SimulateApprovedExecution(context.Background(), "tenant-1", created.ID, approvalID)
+	_, err := uc.SimulateApprovedExecution(context.Background(), "organization-1", created.ID, approvalID)
 	if !domainerr.IsConflict(err) {
 		t.Fatalf("expected conflict for pending approval, got %v", err)
 	}
@@ -798,7 +798,7 @@ func TestUseCasesSimulateApprovedExecutionRejectsBindingMismatch(t *testing.T) {
 		Status:      "approved",
 	}})
 
-	_, err := uc.SimulateApprovedExecution(context.Background(), "tenant-1", created.ID, approvalID)
+	_, err := uc.SimulateApprovedExecution(context.Background(), "organization-1", created.ID, approvalID)
 	if !domainerr.IsConflict(err) {
 		t.Fatalf("expected conflict for binding mismatch, got %v", err)
 	}
@@ -811,7 +811,7 @@ func TestUseCasesExecutionGateUsesConfirmedDraft(t *testing.T) {
 		Status:   "allowed",
 	}})
 
-	result, err := uc.ExecutionGate(context.Background(), "tenant-1", created.ID, "Agendá una reunión para mañana", &executiongate.ConfirmedDraft{
+	result, err := uc.ExecutionGate(context.Background(), "organization-1", created.ID, "Agendá una reunión para mañana", &executiongate.ConfirmedDraft{
 		Action: "calendar.events.create",
 		Kind:   "calendar_event",
 		Fields: []executiongate.ConfirmedDraftField{
@@ -834,7 +834,7 @@ func TestUseCasesExecutionGateUsesConfirmedDraft(t *testing.T) {
 func TestUseCasesExecutionGateBlocksIncompleteConfirmedDraft(t *testing.T) {
 	uc, created := setupExecutionGateUseCase(t, domain.AutonomyA3)
 
-	result, err := uc.ExecutionGate(context.Background(), "tenant-1", created.ID, "Agendá una reunión para mañana", &executiongate.ConfirmedDraft{
+	result, err := uc.ExecutionGate(context.Background(), "organization-1", created.ID, "Agendá una reunión para mañana", &executiongate.ConfirmedDraft{
 		Action: "calendar.events.create",
 		Kind:   "calendar_event",
 		Fields: []executiongate.ConfirmedDraftField{
@@ -852,7 +852,7 @@ func TestUseCasesExecutionGateBlocksIncompleteConfirmedDraft(t *testing.T) {
 func TestUseCasesExecutionGateRejectsConfirmedDraftActionMismatch(t *testing.T) {
 	uc, created := setupExecutionGateUseCase(t, domain.AutonomyA3)
 
-	_, err := uc.ExecutionGate(context.Background(), "tenant-1", created.ID, "Agendá una reunión para mañana", &executiongate.ConfirmedDraft{
+	_, err := uc.ExecutionGate(context.Background(), "organization-1", created.ID, "Agendá una reunión para mañana", &executiongate.ConfirmedDraft{
 		Action: "calendar.events.read",
 		Kind:   "calendar_event",
 	})
@@ -864,14 +864,14 @@ func TestUseCasesExecutionGateRejectsConfirmedDraftActionMismatch(t *testing.T) 
 func TestUseCasesListRunsReturnsLatestForVirployee(t *testing.T) {
 	uc, created := setupExecutionGateUseCase(t, domain.AutonomyA3)
 
-	if _, err := uc.DryRun(context.Background(), "tenant-1", created.ID, "Agendá una reunión para mañana"); err != nil {
+	if _, err := uc.DryRun(context.Background(), "organization-1", created.ID, "Agendá una reunión para mañana"); err != nil {
 		t.Fatalf("DryRun: %v", err)
 	}
-	if _, err := uc.ExecutionGate(context.Background(), "tenant-1", created.ID, "Agendá una reunión mañana a las 15 con ana@example.com", nil); err != nil {
+	if _, err := uc.ExecutionGate(context.Background(), "organization-1", created.ID, "Agendá una reunión mañana a las 15 con ana@example.com", nil); err != nil {
 		t.Fatalf("ExecutionGate: %v", err)
 	}
 
-	runs, err := uc.ListRuns(context.Background(), "tenant-1", created.ID, 20)
+	runs, err := uc.ListRuns(context.Background(), "organization-1", created.ID, 20)
 	if err != nil {
 		t.Fatalf("ListRuns: %v", err)
 	}
@@ -895,7 +895,7 @@ func setupApprovedExecutionGateTrace(t *testing.T) (*UseCases, domain.Virployee,
 			ApprovalStatus:       "pending",
 		},
 	})
-	if _, err := uc.ExecutionGate(context.Background(), "tenant-1", created.ID, "Agendá una reunión mañana a las 15 con ana@example.com", nil); err != nil {
+	if _, err := uc.ExecutionGate(context.Background(), "organization-1", created.ID, "Agendá una reunión mañana a las 15 con ana@example.com", nil); err != nil {
 		t.Fatalf("ExecutionGate: %v", err)
 	}
 	repo := uc.repo.(*fakeRepo)
@@ -909,7 +909,7 @@ func setupExecutionGateUseCase(t *testing.T, autonomy domain.AutonomyLevel) (*Us
 	profileTemplateID := uuid.New()
 	capabilityID := uuid.New()
 	uc, err := NewUseCases(repo, &fakeJobRoleReader{
-		role: jobroledomain.JobRole{ID: jobRoleID, TenantID: "tenant-1", Name: "Receptionist"},
+		role: jobroledomain.JobRole{ID: jobRoleID, OrgID: "organization-1", Name: "Receptionist"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -917,7 +917,7 @@ func setupExecutionGateUseCase(t *testing.T, autonomy domain.AutonomyLevel) (*Us
 	uc.SetProfileTemplateReader(&fakeProfileTemplateReader{
 		profile: profiletemplatedomain.ProfileTemplate{
 			ID:           profileTemplateID,
-			TenantID:     "tenant-1",
+			OrgID:        "organization-1",
 			Name:         "Receptionist profile",
 			SystemPrompt: "Be warm.",
 			MaxAutonomy:  autonomy,
@@ -927,14 +927,14 @@ func setupExecutionGateUseCase(t *testing.T, autonomy domain.AutonomyLevel) (*Us
 		rows: map[uuid.UUID]capabilitydomain.Capability{
 			capabilityID: {
 				ID:               capabilityID,
-				TenantID:         "tenant-1",
+				OrgID:            "organization-1",
 				CapabilityKey:    "calendar.events.create",
 				Name:             "Create calendar events",
 				RequiredAutonomy: domain.AutonomyA2,
 			},
 		},
 	})
-	created, err := uc.Create(context.Background(), "tenant-1", domain.CreateInput{
+	created, err := uc.Create(context.Background(), "organization-1", domain.CreateInput{
 		Name:              "Sofia",
 		JobRoleID:         jobRoleID.String(),
 		ProfileTemplateID: profileTemplateID.String(),
@@ -950,7 +950,7 @@ func setupExecutionGateUseCase(t *testing.T, autonomy domain.AutonomyLevel) (*Us
 
 func assertListLen(t *testing.T, fn func(context.Context, string) ([]domain.Virployee, error), want int) {
 	t.Helper()
-	got, err := fn(context.Background(), "tenant-1")
+	got, err := fn(context.Background(), "organization-1")
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -1109,7 +1109,7 @@ func (r *fakeRepo) State(_ context.Context, _ string, id uuid.UUID) (lifecycle.L
 	return lifecycleState(row.State()), nil
 }
 
-func (r *fakeRepo) CreateRunTrace(_ context.Context, tenantID string, input runtraces.CreateInput) (runtraces.Trace, error) {
+func (r *fakeRepo) CreateRunTrace(_ context.Context, orgID string, input runtraces.CreateInput) (runtraces.Trace, error) {
 	now := time.Now().UTC()
 	intent := input.Intent
 	if intent == nil {
@@ -1121,7 +1121,7 @@ func (r *fakeRepo) CreateRunTrace(_ context.Context, tenantID string, input runt
 	}
 	trace := runtraces.Trace{
 		ID:              uuid.New(),
-		TenantID:        tenantID,
+		OrgID:           orgID,
 		VirployeeID:     input.VirployeeID,
 		Operation:       input.Operation,
 		InputHash:       runtraces.HashString(input.Input),
@@ -1147,11 +1147,11 @@ func (r *fakeRepo) CreateRunTrace(_ context.Context, tenantID string, input runt
 	return trace, nil
 }
 
-func (r *fakeRepo) ListRunTraces(_ context.Context, tenantID string, virployeeID uuid.UUID, limit int) ([]runtraces.Trace, error) {
+func (r *fakeRepo) ListRunTraces(_ context.Context, orgID string, virployeeID uuid.UUID, limit int) ([]runtraces.Trace, error) {
 	out := []runtraces.Trace{}
 	for i := len(r.traces) - 1; i >= 0; i-- {
 		trace := r.traces[i]
-		if trace.TenantID != tenantID || trace.VirployeeID != virployeeID {
+		if trace.OrgID != orgID || trace.VirployeeID != virployeeID {
 			continue
 		}
 		out = append(out, trace)
@@ -1162,10 +1162,10 @@ func (r *fakeRepo) ListRunTraces(_ context.Context, tenantID string, virployeeID
 	return out, nil
 }
 
-func (r *fakeRepo) FindExecutionGateTraceByApproval(_ context.Context, tenantID string, virployeeID uuid.UUID, approvalID string) (runtraces.Trace, error) {
+func (r *fakeRepo) FindExecutionGateTraceByApproval(_ context.Context, orgID string, virployeeID uuid.UUID, approvalID string) (runtraces.Trace, error) {
 	for i := len(r.traces) - 1; i >= 0; i-- {
 		trace := r.traces[i]
-		if trace.TenantID == tenantID &&
+		if trace.OrgID == orgID &&
 			trace.VirployeeID == virployeeID &&
 			trace.Operation == runtraces.OperationExecutionGate &&
 			trace.NexusResult != nil &&
@@ -1176,10 +1176,10 @@ func (r *fakeRepo) FindExecutionGateTraceByApproval(_ context.Context, tenantID 
 	return runtraces.Trace{}, domainerr.NotFound("run trace not found")
 }
 
-func (r *fakeRepo) FindSimulatedExecutionTraceByApproval(_ context.Context, tenantID string, virployeeID uuid.UUID, approvalID string) (runtraces.Trace, error) {
+func (r *fakeRepo) FindSimulatedExecutionTraceByApproval(_ context.Context, orgID string, virployeeID uuid.UUID, approvalID string) (runtraces.Trace, error) {
 	for i := len(r.traces) - 1; i >= 0; i-- {
 		trace := r.traces[i]
-		if trace.TenantID == tenantID &&
+		if trace.OrgID == orgID &&
 			trace.VirployeeID == virployeeID &&
 			trace.Operation == runtraces.OperationSimulatedExecution &&
 			trace.ExecutionResult != nil &&
@@ -1202,14 +1202,14 @@ func lifecycleState(state domain.State) lifecycle.LifecycleState {
 }
 
 type fakeJobRoleReader struct {
-	lastTenant string
-	lastID     uuid.UUID
-	role       jobroledomain.JobRole
-	err        error
+	lastOrg string
+	lastID  uuid.UUID
+	role    jobroledomain.JobRole
+	err     error
 }
 
-func (r *fakeJobRoleReader) EnsureActive(_ context.Context, tenantID string, id uuid.UUID) error {
-	r.lastTenant = tenantID
+func (r *fakeJobRoleReader) EnsureActive(_ context.Context, orgID string, id uuid.UUID) error {
+	r.lastOrg = orgID
 	r.lastID = id
 	if r.err != nil {
 		return r.err
@@ -1217,30 +1217,30 @@ func (r *fakeJobRoleReader) EnsureActive(_ context.Context, tenantID string, id 
 	return nil
 }
 
-func (r *fakeJobRoleReader) Get(_ context.Context, tenantID string, id uuid.UUID) (jobroledomain.JobRole, error) {
+func (r *fakeJobRoleReader) Get(_ context.Context, orgID string, id uuid.UUID) (jobroledomain.JobRole, error) {
 	if r.err != nil {
 		return jobroledomain.JobRole{}, r.err
 	}
 	role := r.role
 	if role.ID == uuid.Nil {
-		role = jobroledomain.JobRole{ID: id, TenantID: tenantID, Name: "Job Role"}
+		role = jobroledomain.JobRole{ID: id, OrgID: orgID, Name: "Job Role"}
 	}
-	if role.ID != id || role.TenantID != tenantID || role.State() == jobroledomain.StateTrashed {
+	if role.ID != id || role.OrgID != orgID || role.State() == jobroledomain.StateTrashed {
 		return jobroledomain.JobRole{}, domainerr.NotFoundf("job_role", id.String())
 	}
 	return role, nil
 }
 
 type fakeProfileTemplateReader struct {
-	lastTenant   string
+	lastOrg      string
 	lastID       uuid.UUID
 	lastAutonomy domain.AutonomyLevel
 	profile      profiletemplatedomain.ProfileTemplate
 	err          error
 }
 
-func (v *fakeProfileTemplateReader) EnsureUsableByVirployee(_ context.Context, tenantID string, id uuid.UUID, autonomy domain.AutonomyLevel) error {
-	v.lastTenant = tenantID
+func (v *fakeProfileTemplateReader) EnsureUsableByVirployee(_ context.Context, orgID string, id uuid.UUID, autonomy domain.AutonomyLevel) error {
+	v.lastOrg = orgID
 	v.lastID = id
 	v.lastAutonomy = autonomy
 	if v.err != nil {
@@ -1249,7 +1249,7 @@ func (v *fakeProfileTemplateReader) EnsureUsableByVirployee(_ context.Context, t
 	return nil
 }
 
-func (v *fakeProfileTemplateReader) Get(_ context.Context, tenantID string, id uuid.UUID) (profiletemplatedomain.ProfileTemplate, error) {
+func (v *fakeProfileTemplateReader) Get(_ context.Context, orgID string, id uuid.UUID) (profiletemplatedomain.ProfileTemplate, error) {
 	if v.err != nil {
 		return profiletemplatedomain.ProfileTemplate{}, v.err
 	}
@@ -1257,13 +1257,13 @@ func (v *fakeProfileTemplateReader) Get(_ context.Context, tenantID string, id u
 	if profile.ID == uuid.Nil {
 		profile = profiletemplatedomain.ProfileTemplate{
 			ID:           id,
-			TenantID:     tenantID,
+			OrgID:        orgID,
 			Name:         "Profile",
 			SystemPrompt: "Prompt.",
 			MaxAutonomy:  domain.AutonomyA5,
 		}
 	}
-	if profile.ID != id || profile.TenantID != tenantID || profile.State() == profiletemplatedomain.StateTrashed {
+	if profile.ID != id || profile.OrgID != orgID || profile.State() == profiletemplatedomain.StateTrashed {
 		return profiletemplatedomain.ProfileTemplate{}, domainerr.NotFoundf("profile_template", id.String())
 	}
 	return profile, nil
@@ -1278,12 +1278,12 @@ func (r *fakeCapabilityReader) EnsureAssignable(context.Context, string, []uuid.
 	return nil
 }
 
-func (r *fakeCapabilityReader) Get(_ context.Context, tenantID string, id uuid.UUID) (capabilitydomain.Capability, error) {
+func (r *fakeCapabilityReader) Get(_ context.Context, orgID string, id uuid.UUID) (capabilitydomain.Capability, error) {
 	if r.err != nil {
 		return capabilitydomain.Capability{}, r.err
 	}
 	row, ok := r.rows[id]
-	if !ok || row.TenantID != tenantID || row.State() == capabilitydomain.StateTrashed {
+	if !ok || row.OrgID != orgID || row.State() == capabilitydomain.StateTrashed {
 		return capabilitydomain.Capability{}, domainerr.NotFoundf("capability", id.String())
 	}
 	if row.PromotionState == "" {

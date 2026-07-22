@@ -6,14 +6,14 @@ import (
 
 	"github.com/devpablocristo/bff-v2/internal/identity"
 	identitydomain "github.com/devpablocristo/bff-v2/internal/identity/usecases/domain"
-	tenantdomain "github.com/devpablocristo/bff-v2/internal/tenancy/usecases/domain"
+	productdomain "github.com/devpablocristo/bff-v2/internal/products/usecases/domain"
 	"github.com/devpablocristo/bff-v2/internal/users/usecases/domain"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
 	"github.com/google/uuid"
 )
 
 type RepositoryPort interface {
-	Get(ctx context.Context, tenantID uuid.UUID, userID string) (domain.User, error)
+	Get(ctx context.Context, orgID uuid.UUID, userID string) (domain.User, error)
 	List(ctx context.Context, input domain.NormalizedListInput) ([]domain.User, error)
 	UpsertMembership(ctx context.Context, input UpsertMembershipInput) (domain.User, error)
 	UpsertInvitation(ctx context.Context, input UpsertInvitationInput) (domain.User, error)
@@ -26,9 +26,8 @@ type RepositoryPort interface {
 	ActiveMembershipExists(ctx context.Context, input domain.NormalizedEnsureActiveInput) (bool, error)
 }
 
-type TenancyPort interface {
-	ResolveAccess(ctx context.Context, tenantID, principalID string) (tenantdomain.Tenant, tenantdomain.TenantMember, error)
-	OrgByID(ctx context.Context, id string) (tenantdomain.Org, error)
+type OrganizationAccessPort interface {
+	ResolveOrganizationAccess(ctx context.Context, orgID, principalID string) (productdomain.Org, productdomain.OrgMember, error)
 }
 
 type IdentityPort interface {
@@ -39,7 +38,7 @@ type IdentityPort interface {
 
 type UseCases struct {
 	repo        RepositoryPort
-	tenancy     TenancyPort
+	products    OrganizationAccessPort
 	identity    IdentityPort
 	idp         identity.IdentityProviderPort
 	orgProvider identity.OrgProviderPort
@@ -52,15 +51,14 @@ type Options struct {
 }
 
 type UpsertMembershipInput struct {
-	TenantID uuid.UUID
-	UserID   string
-	Email    string
-	Role     string
+	OrgID  uuid.UUID
+	UserID string
+	Email  string
+	Role   string
 }
 
 type UpsertInvitationInput struct {
-	TenantID             uuid.UUID
-	OrgID                string
+	OrgID                uuid.UUID
 	Provider             string
 	ProviderInvitationID string
 	Email                string
@@ -70,7 +68,7 @@ type UpsertInvitationInput struct {
 
 func NewUseCases(
 	repo RepositoryPort,
-	tenancy TenancyPort,
+	products OrganizationAccessPort,
 	identityUC IdentityPort,
 	idp identity.IdentityProviderPort,
 	orgProvider identity.OrgProviderPort,
@@ -79,7 +77,7 @@ func NewUseCases(
 ) *UseCases {
 	return &UseCases{
 		repo:        repo,
-		tenancy:     tenancy,
+		products:    products,
 		identity:    identityUC,
 		idp:         idp,
 		orgProvider: orgProvider,
@@ -93,7 +91,7 @@ func (u *UseCases) List(ctx context.Context, input domain.ListInput) ([]domain.U
 	if err != nil {
 		return nil, err
 	}
-	if _, _, err := u.tenancy.ResolveAccess(ctx, normalized.TenantID.String(), normalized.PrincipalID); err != nil {
+	if _, _, err := u.products.ResolveOrganizationAccess(ctx, normalized.OrgID.String(), normalized.PrincipalID); err != nil {
 		return nil, err
 	}
 	return u.repo.List(ctx, normalized)
@@ -104,16 +102,12 @@ func (u *UseCases) Create(ctx context.Context, input domain.CreateInput) (domain
 	if err != nil {
 		return domain.User{}, err
 	}
-	tenant, member, err := u.requireMutator(ctx, normalized.TenantID.String(), normalized.PrincipalID, normalized.Role)
+	org, member, err := u.requireMutator(ctx, normalized.OrgID.String(), normalized.PrincipalID, normalized.Role)
 	if err != nil {
 		return domain.User{}, err
 	}
 	if !domain.CanAssignRole(member.Role, normalized.Role) {
 		return domain.User{}, domainerr.Forbidden("principal cannot assign requested role")
-	}
-	org, err := u.tenancy.OrgByID(ctx, tenant.OrgID)
-	if err != nil {
-		return domain.User{}, err
 	}
 	providerUser, err := u.idp.FindUserByEmail(ctx, normalized.Email)
 	if err != nil {
@@ -130,7 +124,7 @@ func (u *UseCases) Create(ctx context.Context, input domain.CreateInput) (domain
 	if err != nil {
 		return domain.User{}, err
 	}
-	return u.upsertProviderTenantUser(ctx, normalized.TenantID, axisUser, providerUser, org, normalized.Role)
+	return u.upsertProviderProductUser(ctx, normalized.OrgID, axisUser, providerUser, org, normalized.Role)
 }
 
 func (u *UseCases) Update(ctx context.Context, input domain.UpdateInput) (domain.User, error) {
@@ -138,7 +132,7 @@ func (u *UseCases) Update(ctx context.Context, input domain.UpdateInput) (domain
 	if err != nil {
 		return domain.User{}, err
 	}
-	tenant, member, err := u.requireMutator(ctx, normalized.TenantID.String(), normalized.PrincipalID, normalized.Role)
+	org, member, err := u.requireMutator(ctx, normalized.OrgID.String(), normalized.PrincipalID, normalized.Role)
 	if err != nil {
 		return domain.User{}, err
 	}
@@ -146,10 +140,6 @@ func (u *UseCases) Update(ctx context.Context, input domain.UpdateInput) (domain
 		return domain.User{}, domainerr.Forbidden("principal cannot assign requested role")
 	}
 	if domain.KindFromID(normalized.UserID) == domain.KindUser {
-		org, err := u.tenancy.OrgByID(ctx, tenant.OrgID)
-		if err != nil {
-			return domain.User{}, err
-		}
 		axisUser, err := u.identity.Get(ctx, normalized.UserID)
 		if err != nil {
 			return domain.User{}, err
@@ -175,12 +165,12 @@ func (u *UseCases) Update(ctx context.Context, input domain.UpdateInput) (domain
 	return u.repo.Update(ctx, normalized)
 }
 
-func (u *UseCases) upsertProviderTenantUser(
+func (u *UseCases) upsertProviderProductUser(
 	ctx context.Context,
-	tenantID uuid.UUID,
+	orgID uuid.UUID,
 	axisUser identitydomain.User,
 	providerUser identitydomain.ProviderUser,
-	org tenantdomain.Org,
+	org productdomain.Org,
 	role string,
 ) (domain.User, error) {
 	if providerUser.Provider == identitydomain.ProviderClerk {
@@ -189,10 +179,10 @@ func (u *UseCases) upsertProviderTenantUser(
 		}
 	}
 	return u.repo.UpsertMembership(ctx, UpsertMembershipInput{
-		TenantID: tenantID,
-		UserID:   axisUser.ID,
-		Email:    axisUser.Email,
-		Role:     role,
+		OrgID:  orgID,
+		UserID: axisUser.ID,
+		Email:  axisUser.Email,
+		Role:   role,
 	})
 }
 
@@ -229,27 +219,23 @@ func (u *UseCases) Restore(ctx context.Context, input domain.LifecycleInput) err
 }
 
 func (u *UseCases) Purge(ctx context.Context, input domain.LifecycleInput) error {
-	normalized, tenant, err := u.normalizeLifecycleMutationWithTenant(ctx, input)
+	normalized, org, err := u.normalizeLifecycleMutationWithOrg(ctx, input)
 	if err != nil {
 		return err
 	}
 	if domain.KindFromID(normalized.UserID) == domain.KindUser {
-		user, err := u.repo.Get(ctx, normalized.TenantID, normalized.UserID)
+		user, err := u.repo.Get(ctx, normalized.OrgID, normalized.UserID)
 		if err != nil {
 			return err
 		}
 		if user.State != domain.StateTrashed {
-			return domainerr.NotFound("tenant user not found")
+			return domainerr.NotFound("organization user not found")
 		}
 		axisUser, err := u.identity.Get(ctx, normalized.UserID)
 		if err != nil {
 			return err
 		}
 		if axisUser.Provider == identitydomain.ProviderClerk {
-			org, err := u.tenancy.OrgByID(ctx, tenant.OrgID)
-			if err != nil {
-				return err
-			}
 			if err := u.orgProvider.DeleteOrgMembership(ctx, org.ProviderOrgID, axisUser.ProviderUserID); err != nil {
 				return err
 			}
@@ -259,10 +245,10 @@ func (u *UseCases) Purge(ctx context.Context, input domain.LifecycleInput) error
 	return u.repo.Purge(ctx, normalized)
 }
 
-func (u *UseCases) EnsureActive(ctx context.Context, tenantID, userID string) error {
+func (u *UseCases) EnsureActive(ctx context.Context, orgID, userID string) error {
 	normalized, err := domain.NormalizeEnsureActiveInput(domain.EnsureActiveInput{
-		TenantID: tenantID,
-		UserID:   userID,
+		OrgID:  orgID,
+		UserID: userID,
 	})
 	if err != nil {
 		return err
@@ -272,35 +258,35 @@ func (u *UseCases) EnsureActive(ctx context.Context, tenantID, userID string) er
 		return err
 	}
 	if !exists {
-		return domainerr.Validation("user_id must reference an active tenant user")
+		return domainerr.Validation("user_id must reference an active organization user")
 	}
 	return nil
 }
 
 func (u *UseCases) normalizeLifecycleMutation(ctx context.Context, input domain.LifecycleInput) (domain.NormalizedLifecycleInput, error) {
-	normalized, _, err := u.normalizeLifecycleMutationWithTenant(ctx, input)
+	normalized, _, err := u.normalizeLifecycleMutationWithOrg(ctx, input)
 	return normalized, err
 }
 
-func (u *UseCases) normalizeLifecycleMutationWithTenant(ctx context.Context, input domain.LifecycleInput) (domain.NormalizedLifecycleInput, tenantdomain.Tenant, error) {
+func (u *UseCases) normalizeLifecycleMutationWithOrg(ctx context.Context, input domain.LifecycleInput) (domain.NormalizedLifecycleInput, productdomain.Org, error) {
 	normalized, err := domain.NormalizeLifecycleInput(input)
 	if err != nil {
-		return domain.NormalizedLifecycleInput{}, tenantdomain.Tenant{}, err
+		return domain.NormalizedLifecycleInput{}, productdomain.Org{}, err
 	}
-	tenant, _, err := u.requireMutator(ctx, normalized.TenantID.String(), normalized.PrincipalID, "")
+	org, _, err := u.requireMutator(ctx, normalized.OrgID.String(), normalized.PrincipalID, "")
 	if err != nil {
-		return domain.NormalizedLifecycleInput{}, tenantdomain.Tenant{}, err
+		return domain.NormalizedLifecycleInput{}, productdomain.Org{}, err
 	}
-	return normalized, tenant, nil
+	return normalized, org, nil
 }
 
-func (u *UseCases) requireMutator(ctx context.Context, tenantID, principalID, _ string) (tenantdomain.Tenant, tenantdomain.TenantMember, error) {
-	tenant, member, err := u.tenancy.ResolveAccess(ctx, tenantID, principalID)
+func (u *UseCases) requireMutator(ctx context.Context, orgID, principalID, _ string) (productdomain.Org, productdomain.OrgMember, error) {
+	org, member, err := u.products.ResolveOrganizationAccess(ctx, orgID, principalID)
 	if err != nil {
-		return tenantdomain.Tenant{}, tenantdomain.TenantMember{}, err
+		return productdomain.Org{}, productdomain.OrgMember{}, err
 	}
 	if !domain.CanMutate(member.Role) {
-		return tenantdomain.Tenant{}, tenantdomain.TenantMember{}, domainerr.Forbidden("principal cannot mutate tenant users")
+		return productdomain.Org{}, productdomain.OrgMember{}, domainerr.Forbidden("principal cannot mutate organization users")
 	}
-	return tenant, member, nil
+	return org, member, nil
 }

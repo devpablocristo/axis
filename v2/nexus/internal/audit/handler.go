@@ -44,7 +44,7 @@ func (h *Handler) Append(c *gin.Context) {
 	if strings.TrimSpace(in.ActorID) == "" {
 		in.ActorID = actorID(c)
 	}
-	out, err := h.ucs.Append(c.Request.Context(), tenantID(c), in)
+	out, err := h.ucs.Append(c.Request.Context(), orgID(c), in)
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -53,7 +53,7 @@ func (h *Handler) Append(c *gin.Context) {
 }
 
 func (h *Handler) Replay(c *gin.Context) {
-	out, err := h.ucs.Replay(c.Request.Context(), tenantID(c), virployeeID(c))
+	out, err := h.ucs.Replay(c.Request.Context(), orgID(c), virployeeID(c))
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -62,7 +62,7 @@ func (h *Handler) Replay(c *gin.Context) {
 }
 
 func (h *Handler) Verify(c *gin.Context) {
-	out, err := h.ucs.Verify(c.Request.Context(), tenantID(c), virployeeID(c))
+	out, err := h.ucs.Verify(c.Request.Context(), orgID(c), virployeeID(c))
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -70,8 +70,8 @@ func (h *Handler) Verify(c *gin.Context) {
 	ginmw.WriteJSON(c, 200, out)
 }
 
-func tenantID(c *gin.Context) string {
-	return strings.TrimSpace(c.GetHeader("X-Tenant-ID"))
+func orgID(c *gin.Context) string {
+	return strings.TrimSpace(c.GetHeader("X-Org-ID"))
 }
 
 func actorID(c *gin.Context) string {

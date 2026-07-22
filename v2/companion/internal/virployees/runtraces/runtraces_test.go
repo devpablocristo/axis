@@ -41,7 +41,7 @@ func TestRedactValueRedactsNestedSensitiveKeys(t *testing.T) {
 
 func TestBindingHashIsDeterministic(t *testing.T) {
 	first, err := BindingHash(map[string]any{
-		"tenant_id":      "tenant-1",
+		"org_id":         "organization-1",
 		"capability_key": "calendar.events.create",
 		"input_hash":     "abc",
 	})
@@ -51,7 +51,7 @@ func TestBindingHashIsDeterministic(t *testing.T) {
 	second, err := BindingHash(map[string]any{
 		"input_hash":     "abc",
 		"capability_key": "calendar.events.create",
-		"tenant_id":      "tenant-1",
+		"org_id":         "organization-1",
 	})
 	if err != nil {
 		t.Fatal(err)

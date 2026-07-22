@@ -57,7 +57,7 @@ func (h *Handler) Create(c *gin.Context) {
 	if err := ginmw.BindJSON(c, &req); err != nil {
 		return
 	}
-	out, err := h.ucs.Create(c.Request.Context(), tenantID(c), req.ToDomain())
+	out, err := h.ucs.Create(c.Request.Context(), orgID(c), req.ToDomain())
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -70,11 +70,11 @@ func (h *Handler) List(c *gin.Context) {
 	var err error
 	switch strings.ToLower(strings.TrimSpace(c.Query("lifecycle"))) {
 	case "archived":
-		out, err = h.ucs.ListArchived(c.Request.Context(), tenantID(c))
+		out, err = h.ucs.ListArchived(c.Request.Context(), orgID(c))
 	case "trash", "trashed":
-		out, err = h.ucs.ListTrash(c.Request.Context(), tenantID(c))
+		out, err = h.ucs.ListTrash(c.Request.Context(), orgID(c))
 	default:
-		out, err = h.ucs.ListActive(c.Request.Context(), tenantID(c))
+		out, err = h.ucs.ListActive(c.Request.Context(), orgID(c))
 	}
 	if err != nil {
 		ginmw.Respond(c, err)
@@ -88,7 +88,7 @@ func (h *Handler) Get(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, err := h.ucs.Get(c.Request.Context(), tenantID(c), id)
+	out, err := h.ucs.Get(c.Request.Context(), orgID(c), id)
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -105,7 +105,7 @@ func (h *Handler) Update(c *gin.Context) {
 	if err := ginmw.BindJSON(c, &req); err != nil {
 		return
 	}
-	out, err := h.ucs.Update(c.Request.Context(), tenantID(c), id, req.ToDomain())
+	out, err := h.ucs.Update(c.Request.Context(), orgID(c), id, req.ToDomain())
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -145,7 +145,7 @@ func (h *Handler) lifecycleAction(
 	if !ok {
 		return
 	}
-	if err := fn(c.Request.Context(), tenantID(c), id, actorID(c), req.Reason); err != nil {
+	if err := fn(c.Request.Context(), orgID(c), id, actorID(c), req.Reason); err != nil {
 		ginmw.Respond(c, err)
 		return
 	}
@@ -167,8 +167,8 @@ func bindLifecycleRequest(c *gin.Context) (dto.LifecycleRequest, bool) {
 	return req, true
 }
 
-func tenantID(c *gin.Context) string {
-	return strings.TrimSpace(c.GetHeader("X-Tenant-ID"))
+func orgID(c *gin.Context) string {
+	return strings.TrimSpace(c.GetHeader("X-Org-ID"))
 }
 
 func actorID(c *gin.Context) string {

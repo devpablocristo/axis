@@ -116,7 +116,7 @@ func TestPayloadHashBindsMCPContext(t *testing.T) {
 	base := Action{SchemaVersion: SchemaVersion, Action: ActionCreate, Title: "Consulta", Date: "2026-08-10", Time: "10:00", Timezone: "UTC", DurationMinutes: 30, Attendees: []string{"a@example.com"}}
 	first, _ := base.PayloadHash()
 	base.MCPContext = &MCPContextBinding{
-		TenantID: "tenant-1", ActorID: "actor-1", VirployeeID: "virployee-1", SubjectID: "subject-1",
+		OrgID: "organization-1", ActorID: "actor-1", VirployeeID: "virployee-1", SubjectID: "subject-1",
 		AssignmentID: "assignment-1", AssignmentVersion: 1, CapabilityKey: ActionCreate,
 		CapabilityVersion: "1.0.0", ManifestHash: "manifest", PolicyVersion: 2,
 		AuthorityHash: "authority", ContextHash: "context", PayloadHash: "payload", IdempotencyHash: "idem",

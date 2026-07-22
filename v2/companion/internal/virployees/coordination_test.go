@@ -77,7 +77,7 @@ func TestValidDecisionEnforcesBoundedFanoutAndEscalationReason(t *testing.T) {
 func TestRecordLLMUsageKeepsEachOrchestrationStageIdempotent(t *testing.T) {
 	ledger := &fakeUsageLedger{}
 	usecases := &UseCases{usageLedger: ledger}
-	run := AssistRun{ID: uuid.New(), TenantID: "tenant-a", ProductSurface: "medmory"}
+	run := AssistRun{ID: uuid.New(), OrgID: "organization-a", ProductSurface: "producta"}
 	output := AnswerOutput{InputTokens: 10, OutputTokens: 5, ModelID: "test-model"}
 
 	usecases.recordLLMUsage(context.Background(), run, "selector", output)
@@ -104,9 +104,9 @@ func TestHandoffCreationIsScopedToTheCurrentOwnerSupervisor(t *testing.T) {
 		t.Fatal("an unrelated supervisor must not create a handoff")
 	}
 	if !canCreateHandoff(CoordinationActor{ID: "owner-a", Role: "owner"}, "supervisor-a") {
-		t.Fatal("tenant owner must be allowed to create a handoff")
+		t.Fatal("organization owner must be allowed to create a handoff")
 	}
-	if canCreateHandoff(CoordinationActor{ID: "service:medmory", Role: "service"}, "supervisor-a") {
+	if canCreateHandoff(CoordinationActor{ID: "service:producta", Role: "service"}, "supervisor-a") {
 		t.Fatal("service principals must never create handoffs")
 	}
 }

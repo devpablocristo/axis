@@ -11,7 +11,7 @@ import (
 
 type TimedOutAssist struct {
 	ID          uuid.UUID
-	TenantID    string
+	OrgID       string
 	VirployeeID uuid.UUID
 	InputHash   string
 	StartedAt   time.Time
@@ -58,7 +58,7 @@ func (r *Repository) ReconcileStaleAssistRuns(ctx context.Context, cutoff time.T
 				ELSE duration_ms
 			END
 		FROM stale WHERE a.id = stale.id
-		RETURNING a.id, a.tenant_id, a.virployee_id, a.input_hash, a.started_at,
+		RETURNING a.id, a.org_id, a.virployee_id, a.input_hash, a.started_at,
 			CASE WHEN a.status = 'received' THEN 'recovered' ELSE 'timed_out' END
 	`, cutoff.UTC(), limit, maxAttempts)
 	if err != nil {
@@ -68,7 +68,7 @@ func (r *Repository) ReconcileStaleAssistRuns(ctx context.Context, cutoff time.T
 	var out []TimedOutAssist
 	for rows.Next() {
 		var item TimedOutAssist
-		if err := rows.Scan(&item.ID, &item.TenantID, &item.VirployeeID, &item.InputHash, &item.StartedAt, &item.Outcome); err != nil {
+		if err := rows.Scan(&item.ID, &item.OrgID, &item.VirployeeID, &item.InputHash, &item.StartedAt, &item.Outcome); err != nil {
 			return nil, err
 		}
 		out = append(out, item)
@@ -92,7 +92,7 @@ func (r *Repository) claimExecutionWork(ctx context.Context, predicate string, c
 	defer func() { _ = tx.Rollback(ctx) }()
 	now := time.Now().UTC()
 	rows, err := tx.Query(ctx, `
-		SELECT e.id, e.tenant_id, e.virployee_id, e.prepared_action_id, e.idempotency_key,
+		SELECT e.id, e.org_id, e.virployee_id, e.prepared_action_id, e.idempotency_key,
 			e.status, e.resource_id, e.result, e.error, e.duration_ms, e.nexus_report_status,
 			e.started_at, e.completed_at, e.recovery_attempts, e.nexus_report_attempts,
 			p.governance_check_id, p.approval_id, p.capability_key, p.payload,
@@ -110,7 +110,7 @@ func (r *Repository) claimExecutionWork(ctx context.Context, predicate string, c
 	for rows.Next() {
 		var work ExecutionWork
 		var payload, result []byte
-		if err := rows.Scan(&work.Attempt.ID, &work.Attempt.TenantID, &work.Attempt.VirployeeID,
+		if err := rows.Scan(&work.Attempt.ID, &work.Attempt.OrgID, &work.Attempt.VirployeeID,
 			&work.Attempt.PreparedActionID, &work.Attempt.IdempotencyKey, &work.Attempt.Status,
 			&work.Attempt.ResourceID, &result, &work.Attempt.Error, &work.Attempt.DurationMS,
 			&work.Attempt.NexusReportStatus, &work.Attempt.StartedAt, &work.Attempt.CompletedAt,
@@ -120,7 +120,7 @@ func (r *Repository) claimExecutionWork(ctx context.Context, predicate string, c
 			rows.Close()
 			return nil, err
 		}
-		work.Action.ID, work.Action.TenantID, work.Action.VirployeeID = work.Attempt.PreparedActionID, work.Attempt.TenantID, work.Attempt.VirployeeID
+		work.Action.ID, work.Action.OrgID, work.Action.VirployeeID = work.Attempt.PreparedActionID, work.Attempt.OrgID, work.Attempt.VirployeeID
 		if err := json.Unmarshal(payload, &work.Action.Action); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("decode watcher prepared action: %w", err)
@@ -146,8 +146,8 @@ func (r *Repository) claimExecutionWork(ctx context.Context, predicate string, c
 	return out, nil
 }
 
-func (r *Repository) ReleaseExecutionRecovery(ctx context.Context, tenantID string, id uuid.UUID, watcherError string) error {
-	_, err := r.pool.Exec(ctx, `UPDATE companion_execution_attempts SET recovery_attempts=recovery_attempts+1, recovery_lease_owner='', recovery_lease_until=NULL, last_watcher_error=$3 WHERE tenant_id=$1 AND id=$2`, tenantID, id, watcherError)
+func (r *Repository) ReleaseExecutionRecovery(ctx context.Context, orgID string, id uuid.UUID, watcherError string) error {
+	_, err := r.pool.Exec(ctx, `UPDATE companion_execution_attempts SET recovery_attempts=recovery_attempts+1, recovery_lease_owner='', recovery_lease_until=NULL, last_watcher_error=$3 WHERE org_id=$1 AND id=$2`, orgID, id, watcherError)
 	return err
 }
 

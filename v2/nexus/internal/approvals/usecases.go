@@ -15,14 +15,14 @@ import (
 )
 
 type RepositoryPort interface {
-	List(ctx context.Context, tenantID string, status domain.Status, limit int, after *domain.ListCursor) ([]domain.Approval, error)
-	Get(ctx context.Context, tenantID string, id uuid.UUID) (domain.Approval, error)
-	Decide(ctx context.Context, tenantID string, id uuid.UUID, status domain.Status, actorID, actorRole, note string) (domain.Approval, error)
-	Review(ctx context.Context, tenantID string, id uuid.UUID, actorID, note string) (domain.Approval, error)
+	List(ctx context.Context, orgID string, status domain.Status, limit int, after *domain.ListCursor) ([]domain.Approval, error)
+	Get(ctx context.Context, orgID string, id uuid.UUID) (domain.Approval, error)
+	Decide(ctx context.Context, orgID string, id uuid.UUID, status domain.Status, actorID, actorRole, note string) (domain.Approval, error)
+	Review(ctx context.Context, orgID string, id uuid.UUID, actorID, note string) (domain.Approval, error)
 }
 
 type AuditEmitterPort interface {
-	Append(ctx context.Context, tenantID string, in auditdomain.AppendInput) (auditdomain.AuditEvent, error)
+	Append(ctx context.Context, orgID string, in auditdomain.AppendInput) (auditdomain.AuditEvent, error)
 }
 
 type AuthorizationPort interface {
@@ -42,7 +42,7 @@ func NewUseCases(repo RepositoryPort) *UseCases {
 func (u *UseCases) SetAuditEmitter(emitter AuditEmitterPort)   { u.audit = emitter }
 func (u *UseCases) SetAuthorizer(authorizer AuthorizationPort) { u.authorizer = authorizer }
 
-func (u *UseCases) List(ctx context.Context, tenantID string, input domain.ListInput) (domain.ListPage, error) {
+func (u *UseCases) List(ctx context.Context, orgID string, input domain.ListInput) (domain.ListPage, error) {
 	status, err := domain.NormalizeListStatus(input.StatusRaw)
 	if err != nil {
 		return domain.ListPage{}, err
@@ -52,7 +52,7 @@ func (u *UseCases) List(ctx context.Context, tenantID string, input domain.ListI
 		return domain.ListPage{}, err
 	}
 	limit := normalizeLimit(input.Limit)
-	items, err := u.repo.List(ctx, actiontypes.NormalizeTenantID(tenantID), status, limit+1, after)
+	items, err := u.repo.List(ctx, actiontypes.NormalizeOrgID(orgID), status, limit+1, after)
 	if err != nil {
 		return domain.ListPage{}, err
 	}
@@ -74,21 +74,21 @@ func (u *UseCases) List(ctx context.Context, tenantID string, input domain.ListI
 	}, nil
 }
 
-func (u *UseCases) Get(ctx context.Context, tenantID string, id uuid.UUID) (domain.Approval, error) {
-	return u.repo.Get(ctx, actiontypes.NormalizeTenantID(tenantID), id)
+func (u *UseCases) Get(ctx context.Context, orgID string, id uuid.UUID) (domain.Approval, error) {
+	return u.repo.Get(ctx, actiontypes.NormalizeOrgID(orgID), id)
 }
 
-func (u *UseCases) Approve(ctx context.Context, tenantID string, id uuid.UUID, actor domain.DecisionActor, input domain.DecisionInput) (domain.Approval, error) {
-	return u.decide(ctx, tenantID, id, actor, input, domain.StatusApproved)
+func (u *UseCases) Approve(ctx context.Context, orgID string, id uuid.UUID, actor domain.DecisionActor, input domain.DecisionInput) (domain.Approval, error) {
+	return u.decide(ctx, orgID, id, actor, input, domain.StatusApproved)
 }
 
-func (u *UseCases) Reject(ctx context.Context, tenantID string, id uuid.UUID, actor domain.DecisionActor, input domain.DecisionInput) (domain.Approval, error) {
-	return u.decide(ctx, tenantID, id, actor, input, domain.StatusRejected)
+func (u *UseCases) Reject(ctx context.Context, orgID string, id uuid.UUID, actor domain.DecisionActor, input domain.DecisionInput) (domain.Approval, error) {
+	return u.decide(ctx, orgID, id, actor, input, domain.StatusRejected)
 }
 
-func (u *UseCases) decide(ctx context.Context, tenantID string, id uuid.UUID, actor domain.DecisionActor, input domain.DecisionInput, status domain.Status) (domain.Approval, error) {
-	tenantID = actiontypes.NormalizeTenantID(tenantID)
-	approval, err := u.repo.Get(ctx, tenantID, id)
+func (u *UseCases) decide(ctx context.Context, orgID string, id uuid.UUID, actor domain.DecisionActor, input domain.DecisionInput, status domain.Status) (domain.Approval, error) {
+	orgID = actiontypes.NormalizeOrgID(orgID)
+	approval, err := u.repo.Get(ctx, orgID, id)
 	if err != nil {
 		return domain.Approval{}, err
 	}
@@ -100,7 +100,7 @@ func (u *UseCases) decide(ctx context.Context, tenantID string, id uuid.UUID, ac
 	if approval.ApprovalKind == "break_glass" && note == "" {
 		return domain.Approval{}, domainerr.Validation("break-glass decisions require a justification")
 	}
-	updated, err := u.repo.Decide(ctx, tenantID, id, status, actor.ID, actor.Role, note)
+	updated, err := u.repo.Decide(ctx, orgID, id, status, actor.ID, actor.Role, note)
 	if err != nil {
 		return domain.Approval{}, err
 	}
@@ -108,9 +108,9 @@ func (u *UseCases) decide(ctx context.Context, tenantID string, id uuid.UUID, ac
 	return updated, nil
 }
 
-func (u *UseCases) Review(ctx context.Context, tenantID string, id uuid.UUID, actor domain.DecisionActor, input domain.DecisionInput) (domain.Approval, error) {
-	tenantID = actiontypes.NormalizeTenantID(tenantID)
-	approval, err := u.repo.Get(ctx, tenantID, id)
+func (u *UseCases) Review(ctx context.Context, orgID string, id uuid.UUID, actor domain.DecisionActor, input domain.DecisionInput) (domain.Approval, error) {
+	orgID = actiontypes.NormalizeOrgID(orgID)
+	approval, err := u.repo.Get(ctx, orgID, id)
 	if err != nil {
 		return domain.Approval{}, err
 	}
@@ -128,7 +128,7 @@ func (u *UseCases) Review(ctx context.Context, tenantID string, id uuid.UUID, ac
 	if note == "" {
 		return domain.Approval{}, domainerr.Validation("post-action review requires a note")
 	}
-	updated, err := u.repo.Review(ctx, tenantID, id, actor.ID, note)
+	updated, err := u.repo.Review(ctx, orgID, id, actor.ID, note)
 	if err != nil {
 		return domain.Approval{}, err
 	}
@@ -152,7 +152,7 @@ func (u *UseCases) authorizeDecision(ctx context.Context, approval domain.Approv
 	}
 	if u.authorizer != nil {
 		result, err := u.authorizer.Check(ctx, authorization.CheckInput{
-			TenantID:       approval.TenantID,
+			OrgID:          approval.OrgID,
 			ActorID:        actor.ID,
 			ActorRole:      actor.Role,
 			Permission:     "approvals.decide",
@@ -186,7 +186,7 @@ func (u *UseCases) emitDecision(ctx context.Context, approval domain.Approval, a
 	if status == domain.StatusRejected {
 		decision = "reject"
 	}
-	_, err := u.audit.Append(ctx, approval.TenantID, auditdomain.AppendInput{
+	_, err := u.audit.Append(ctx, approval.OrgID, auditdomain.AppendInput{
 		VirployeeID: approval.RequesterID, SubjectType: "approval", SubjectID: approval.ID.String(),
 		EventType: auditdomain.EventGovernanceDecided, ActorType: "human", ActorID: actor.ID,
 		Summary: "governance approval decision recorded",
@@ -201,7 +201,7 @@ func (u *UseCases) emitReview(ctx context.Context, approval domain.Approval, act
 	if u.audit == nil {
 		return
 	}
-	_, err := u.audit.Append(ctx, approval.TenantID, auditdomain.AppendInput{
+	_, err := u.audit.Append(ctx, approval.OrgID, auditdomain.AppendInput{
 		VirployeeID: approval.RequesterID, SubjectType: "approval", SubjectID: approval.ID.String(),
 		EventType: auditdomain.EventBreakGlassReviewed, ActorType: "human", ActorID: actor.ID,
 		Summary: "break-glass approval reviewed",

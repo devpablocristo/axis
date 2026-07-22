@@ -15,13 +15,13 @@ Open `http://localhost:19173`.
 ## Navigation and state
 
 - Sidebar groups are ordered as Operate, Builder, Admin.
-- Org/Product selectors load the expected tenant.
+- Org/Product selectors load the expected organization.
 - Refresh session does not clear the selected page unexpectedly.
 - Empty states and errors use the same visual treatment across sections.
 
 ## CRUD surfaces
 
-- Virployees, Capabilities, Job Roles, Profile Templates, Users, Tenants, Orgs, and Products use one top action bar.
+- Virployees, Capabilities, Job Roles, Profile Templates, Users, Organizations, Orgs, and Products use one top action bar.
 - Buttons use consistent colors, spacing, casing, disabled states, and danger styling.
 - Selection checkboxes and primary name columns stay visible while horizontally scrolling.
 - Created timestamps are visible and sortable where list tables support sorting.

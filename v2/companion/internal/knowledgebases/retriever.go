@@ -57,13 +57,13 @@ func (r *Retriever) Retrieve(ctx context.Context, scope RetrievalScope, query st
 // after vector retrieval so sibling sources cannot cross an authorization
 // boundary.
 func (r *Retriever) Search(ctx context.Context, scope RetrievalScope, query string, offset, limit int) (SearchPage, error) {
-	scope.TenantID = strings.TrimSpace(scope.TenantID)
+	scope.OrgID = strings.TrimSpace(scope.OrgID)
 	scope.SubjectID = strings.TrimSpace(scope.SubjectID)
 	scope.ProductSurface = strings.TrimSpace(scope.ProductSurface)
 	scope.RepositoryGeneration = strings.TrimSpace(scope.RepositoryGeneration)
 	query = strings.TrimSpace(query)
-	if scope.TenantID == "" || scope.VirployeeID == uuid.Nil || query == "" {
-		return SearchPage{}, errors.New("knowledge retrieval tenant, virployee, and query are required")
+	if scope.OrgID == "" || scope.VirployeeID == uuid.Nil || query == "" {
+		return SearchPage{}, errors.New("knowledge retrieval organization, virployee, and query are required")
 	}
 	if offset < 0 {
 		return SearchPage{}, errors.New("knowledge retrieval offset cannot be negative")
@@ -104,7 +104,7 @@ func (r *Retriever) Search(ctx context.Context, scope RetrievalScope, query stri
 	for key, scopedDocuments := range grouped {
 		hits, err := r.artifacts.Retrieve(ctx, artifacts.RetrievalQuery{
 			Scope: artifacts.Scope{
-				TenantID: scope.TenantID, VirployeeID: key.VirployeeID, ProductSurface: key.ProductSurface,
+				OrgID: scope.OrgID, VirployeeID: key.VirployeeID, ProductSurface: key.ProductSurface,
 				SubjectID: key.SubjectID, RepositoryGeneration: key.RepositoryGeneration,
 			},
 			Text: query, Limit: retrievalLimit,

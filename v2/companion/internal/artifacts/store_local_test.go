@@ -22,7 +22,7 @@ func TestLocalStoreRoundTripUsesOpaquePrivatePath(t *testing.T) {
 	data := []byte("verified professional source")
 	blob := localTestBlob(t, data)
 	scope := Scope{
-		TenantID: "tenant-sensitive", VirployeeID: uuid.New(), ProductSurface: "knowledge_base",
+		OrgID: "organization-sensitive", VirployeeID: uuid.New(), ProductSurface: "knowledge_base",
 		SubjectID: "patient-sensitive", RepositoryGeneration: "generation-sensitive",
 	}
 	manifest := Manifest{
@@ -32,7 +32,7 @@ func TestLocalStoreRoundTripUsesOpaquePrivatePath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PutOriginal: %v", err)
 	}
-	for _, secret := range []string{scope.TenantID, scope.SubjectID, scope.RepositoryGeneration, manifest.DocumentID} {
+	for _, secret := range []string{scope.OrgID, scope.SubjectID, scope.RepositoryGeneration, manifest.DocumentID} {
 		if strings.Contains(stored.URI, secret) {
 			t.Fatalf("local URI leaked source identity %q: %s", secret, stored.URI)
 		}
@@ -66,7 +66,7 @@ func TestLocalStoreEnforcesCapacityAndRejectsEscapingURI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope := Scope{TenantID: "tenant", VirployeeID: uuid.New(), ProductSurface: "knowledge_base", SubjectID: "professional", RepositoryGeneration: "g1"}
+	scope := Scope{OrgID: "organization", VirployeeID: uuid.New(), ProductSurface: "knowledge_base", SubjectID: "professional", RepositoryGeneration: "g1"}
 	firstBlob := localTestBlob(t, first)
 	if _, err := store.PutOriginal(context.Background(), scope, Manifest{DocumentID: "one", MIMEType: "text/plain", SHA256: checksum(first), SizeBytes: int64(len(first))}, firstBlob); err != nil {
 		t.Fatal(err)

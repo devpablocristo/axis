@@ -17,7 +17,7 @@ func TestPrivateDocumentScopeHasNoLegacyWorkSubjectBypass(t *testing.T) {
 		RepositoryGeneration: "generation", DocumentID: "document",
 	}
 	missingAccess := &scriptedRowQuerier{rows: []scriptedRow{{values: []any{true}}, {values: []any{false}}}}
-	err := validateDocumentScope(context.Background(), missingAccess, "tenant-a", uuid.New(), ClassificationPrivate, scope)
+	err := validateDocumentScope(context.Background(), missingAccess, "organization-a", uuid.New(), ClassificationPrivate, scope)
 	if !domainerr.IsValidation(err) {
 		t.Fatalf("expected inaccessible work subject to be rejected, got %v", err)
 	}
@@ -30,7 +30,7 @@ func TestPrivateDocumentScopeHasNoLegacyWorkSubjectBypass(t *testing.T) {
 	invalidSubject := scope
 	invalidSubject.SubjectID = "legacy-free-form-subject"
 	invalid := &scriptedRowQuerier{rows: []scriptedRow{{values: []any{true}}}}
-	if err := validateDocumentScope(context.Background(), invalid, "tenant-a", uuid.New(), ClassificationPrivate, invalidSubject); !domainerr.IsValidation(err) {
+	if err := validateDocumentScope(context.Background(), invalid, "organization-a", uuid.New(), ClassificationPrivate, invalidSubject); !domainerr.IsValidation(err) {
 		t.Fatalf("expected non-work-subject identifier to be rejected, got %v", err)
 	}
 }
@@ -41,11 +41,11 @@ func TestPrivateDocumentScopeMatchesBoundVirployee(t *testing.T) {
 		RepositoryGeneration: "generation", DocumentID: "document",
 	}
 	valid := &scriptedRowQuerier{rows: []scriptedRow{{values: []any{true}}, {values: []any{true}}, {values: []any{0, false}}}}
-	if err := validateDocumentScope(context.Background(), valid, "tenant-a", uuid.New(), ClassificationPrivate, scope); err != nil {
+	if err := validateDocumentScope(context.Background(), valid, "organization-a", uuid.New(), ClassificationPrivate, scope); err != nil {
 		t.Fatalf("expected exact accessible scope, got %v", err)
 	}
 	incompatible := &scriptedRowQuerier{rows: []scriptedRow{{values: []any{true}}, {values: []any{true}}, {values: []any{1, true}}}}
-	if err := validateDocumentScope(context.Background(), incompatible, "tenant-a", uuid.New(), ClassificationPrivate, scope); !domainerr.IsConflict(err) {
+	if err := validateDocumentScope(context.Background(), incompatible, "organization-a", uuid.New(), ClassificationPrivate, scope); !domainerr.IsConflict(err) {
 		t.Fatalf("expected another Virployee binding to conflict, got %v", err)
 	}
 	if len(incompatible.queries) != 3 || !strings.Contains(incompatible.queries[2], "virployee_id<>$4") {
@@ -57,7 +57,7 @@ func TestSubjectAndCaseBindingsRequireExactAccessibleResources(t *testing.T) {
 	virployeeID := uuid.New()
 	subjectID := uuid.NewString()
 	subjectQuery := &scriptedRowQuerier{rows: []scriptedRow{{values: []any{false}}}}
-	err := validateBindingReference(context.Background(), subjectQuery, "tenant-a", Binding{
+	err := validateBindingReference(context.Background(), subjectQuery, "organization-a", Binding{
 		ScopeType: ScopeSubject, VirployeeID: &virployeeID, SubjectID: subjectID,
 	})
 	if !domainerr.IsValidation(err) || len(subjectQuery.queries) != 1 ||
@@ -68,7 +68,7 @@ func TestSubjectAndCaseBindingsRequireExactAccessibleResources(t *testing.T) {
 
 	caseID := uuid.New()
 	caseQuery := &scriptedRowQuerier{rows: []scriptedRow{{values: []any{true}}}}
-	if err := validateBindingReference(context.Background(), caseQuery, "tenant-a", Binding{
+	if err := validateBindingReference(context.Background(), caseQuery, "organization-a", Binding{
 		ScopeType: ScopeCase, VirployeeID: &virployeeID, SubjectID: subjectID, CaseID: &caseID,
 	}); err != nil {
 		t.Fatalf("expected accessible exact case, got %v", err)

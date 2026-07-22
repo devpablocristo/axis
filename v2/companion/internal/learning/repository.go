@@ -21,11 +21,11 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 	return &Repository{pool: pool}
 }
 
-const proposalColumns = `id::text, tenant_id, virployee_id::text, capability_key, title, content, content_hash,
+const proposalColumns = `id::text, org_id, virployee_id::text, capability_key, title, content, content_hash,
 	evidence, source_trace_ids, status, proposed_by, succeeded_watermark,
 	decided_by, decided_at, COALESCE(memory_id::text, ''), created_at, updated_at`
 
-func (r *Repository) Create(ctx context.Context, tenantID string, input NormalizedCreateInput) (Proposal, error) {
+func (r *Repository) Create(ctx context.Context, orgID string, input NormalizedCreateInput) (Proposal, error) {
 	evidence, err := json.Marshal(input.Evidence)
 	if err != nil {
 		return Proposal{}, err
@@ -37,22 +37,22 @@ func (r *Repository) Create(ctx context.Context, tenantID string, input Normaliz
 	now := time.Now().UTC()
 	row := r.pool.QueryRow(ctx, `
 		INSERT INTO companion_learning_proposals (
-			id, tenant_id, virployee_id, capability_key, title, content, content_hash,
+			id, org_id, virployee_id, capability_key, title, content, content_hash,
 			evidence, source_trace_ids, status, proposed_by, succeeded_watermark, created_at, updated_at
 		)
 		VALUES ($1::uuid, $2, $3::uuid, $4, $5, $6, $7, $8, $9, 'pending', $10, $11, $12, $12)
 		RETURNING `+proposalColumns+`
-	`, uuid.New().String(), tenantID, input.VirployeeID.String(), input.CapabilityKey, input.Title,
+	`, uuid.New().String(), orgID, input.VirployeeID.String(), input.CapabilityKey, input.Title,
 		input.Content, input.ContentHash, evidence, sources, input.ProposedBy, input.SucceededWatermark, now)
 	return scanProposal(row)
 }
 
-func (r *Repository) List(ctx context.Context, tenantID, status string, virployeeID *uuid.UUID) ([]Proposal, error) {
+func (r *Repository) List(ctx context.Context, orgID, status string, virployeeID *uuid.UUID) ([]Proposal, error) {
 	query := `
 		SELECT ` + proposalColumns + `
 		FROM companion_learning_proposals
-		WHERE tenant_id = $1 AND status = $2`
-	args := []any{tenantID, status}
+		WHERE org_id = $1 AND status = $2`
+	args := []any{orgID, status}
 	if virployeeID != nil {
 		query += ` AND virployee_id = $3::uuid`
 		args = append(args, virployeeID.String())
@@ -76,12 +76,12 @@ func (r *Repository) List(ctx context.Context, tenantID, status string, virploye
 	return out, rows.Err()
 }
 
-func (r *Repository) Get(ctx context.Context, tenantID string, id uuid.UUID) (Proposal, error) {
+func (r *Repository) Get(ctx context.Context, orgID string, id uuid.UUID) (Proposal, error) {
 	row := r.pool.QueryRow(ctx, `
 		SELECT `+proposalColumns+`
 		FROM companion_learning_proposals
-		WHERE tenant_id = $1 AND id = $2::uuid
-	`, tenantID, id.String())
+		WHERE org_id = $1 AND id = $2::uuid
+	`, orgID, id.String())
 	return scanProposal(row)
 }
 
@@ -94,7 +94,7 @@ func scanProposal(row scanner) (Proposal, error) {
 	var evidence, sources []byte
 	var out Proposal
 	err := row.Scan(
-		&idText, &out.TenantID, &virployeeText, &out.CapabilityKey, &out.Title, &out.Content,
+		&idText, &out.OrgID, &virployeeText, &out.CapabilityKey, &out.Title, &out.Content,
 		&out.ContentHash, &evidence, &sources, &out.Status, &out.ProposedBy, &out.SucceededWatermark,
 		&out.DecidedBy, &out.DecidedAt, &memoryIDText, &out.CreatedAt, &out.UpdatedAt,
 	)
@@ -137,7 +137,7 @@ func scanProposal(row scanner) (Proposal, error) {
 // WHERE status='pending' guard makes the transition atomic and idempotent-safe:
 // a proposal already decided (by a racing request) matches no row and surfaces
 // as Conflict, so the usecase never double-installs.
-func (r *Repository) Decide(ctx context.Context, tenantID string, id uuid.UUID, status, decidedBy string, memoryID *uuid.UUID) (Proposal, error) {
+func (r *Repository) Decide(ctx context.Context, orgID string, id uuid.UUID, status, decidedBy string, memoryID *uuid.UUID) (Proposal, error) {
 	var memoryArg any
 	if memoryID != nil {
 		memoryArg = memoryID.String()
@@ -145,9 +145,9 @@ func (r *Repository) Decide(ctx context.Context, tenantID string, id uuid.UUID, 
 	row := r.pool.QueryRow(ctx, `
 		UPDATE companion_learning_proposals
 		SET status = $3, decided_by = $4, decided_at = $5, memory_id = $6::uuid, updated_at = $5
-		WHERE tenant_id = $1 AND id = $2::uuid AND status = 'pending'
+		WHERE org_id = $1 AND id = $2::uuid AND status = 'pending'
 		RETURNING `+proposalColumns+`
-	`, tenantID, id.String(), status, decidedBy, time.Now().UTC(), memoryArg)
+	`, orgID, id.String(), status, decidedBy, time.Now().UTC(), memoryArg)
 	proposal, err := scanProposal(row)
 	if domainerr.IsNotFound(err) {
 		return Proposal{}, domainerr.Conflict("proposal is no longer pending")
@@ -159,13 +159,13 @@ func (r *Repository) Decide(ctx context.Context, tenantID string, id uuid.UUID, 
 // It runs after the pending→accepted claim (which happens before the install),
 // so it is guarded on status='accepted'. A no-match means the proposal is not
 // accepted (raced) and is treated as a NotFound by the caller.
-func (r *Repository) AttachMemory(ctx context.Context, tenantID string, id, memoryID uuid.UUID) (Proposal, error) {
+func (r *Repository) AttachMemory(ctx context.Context, orgID string, id, memoryID uuid.UUID) (Proposal, error) {
 	row := r.pool.QueryRow(ctx, `
 		UPDATE companion_learning_proposals
 		SET memory_id = $3::uuid, updated_at = $4
-		WHERE tenant_id = $1 AND id = $2::uuid AND status = 'accepted'
+		WHERE org_id = $1 AND id = $2::uuid AND status = 'accepted'
 		RETURNING `+proposalColumns+`
-	`, tenantID, id.String(), memoryID.String(), time.Now().UTC())
+	`, orgID, id.String(), memoryID.String(), time.Now().UTC())
 	return scanProposal(row)
 }
 

@@ -32,7 +32,7 @@ const (
 
 type Job struct {
 	ID             uuid.UUID       `json:"id"`
-	TenantID       string          `json:"tenant_id"`
+	OrgID          string          `json:"org_id"`
 	ProductSurface string          `json:"product_surface"`
 	Kind           string          `json:"kind"`
 	ShardKey       string          `json:"shard_key"`
@@ -58,7 +58,7 @@ type Job struct {
 
 type EnqueueInput struct {
 	ID             uuid.UUID
-	TenantID       string
+	OrgID          string
 	ProductSurface string
 	Kind           string
 	ShardKey       string
@@ -101,11 +101,11 @@ type Repository interface {
 	Heartbeat(ctx context.Context, jobID uuid.UUID, workerID string, lease time.Duration) error
 	Complete(ctx context.Context, jobID uuid.UUID, workerID string, evidence json.RawMessage) error
 	Fail(ctx context.Context, in FailInput) (Job, error)
-	Cancel(ctx context.Context, tenantID string, jobID uuid.UUID, reasonCode string) error
-	Get(ctx context.Context, tenantID string, jobID uuid.UUID) (Job, error)
-	List(ctx context.Context, tenantID, productSurface, status string, limit int) ([]Job, error)
+	Cancel(ctx context.Context, orgID string, jobID uuid.UUID, reasonCode string) error
+	Get(ctx context.Context, orgID string, jobID uuid.UUID) (Job, error)
+	List(ctx context.Context, orgID, productSurface, status string, limit int) ([]Job, error)
 	RecoverExpiredLeases(ctx context.Context, limit int) (RecoveryResult, error)
-	ReplayDeadLetter(ctx context.Context, tenantID string, jobID uuid.UUID, runAfter time.Time) (Job, error)
+	ReplayDeadLetter(ctx context.Context, orgID string, jobID uuid.UUID, runAfter time.Time) (Job, error)
 }
 
 var ErrJobNotFound = errors.New("job not found")
@@ -156,13 +156,13 @@ func NormalizeErrorCode(value string) string {
 }
 
 func NormalizeEnqueueInput(in EnqueueInput) (EnqueueInput, error) {
-	in.TenantID = strings.TrimSpace(in.TenantID)
+	in.OrgID = strings.TrimSpace(in.OrgID)
 	in.ProductSurface = strings.TrimSpace(strings.ToLower(in.ProductSurface))
 	in.Kind = strings.TrimSpace(in.Kind)
 	in.ShardKey = strings.TrimSpace(in.ShardKey)
 	in.DedupeKey = strings.TrimSpace(in.DedupeKey)
-	if in.TenantID == "" {
-		return EnqueueInput{}, fmt.Errorf("tenant_id is required")
+	if in.OrgID == "" {
+		return EnqueueInput{}, fmt.Errorf("org_id is required")
 	}
 	if in.ProductSurface == "" {
 		in.ProductSurface = DefaultProductSurface
@@ -174,7 +174,7 @@ func NormalizeEnqueueInput(in EnqueueInput) (EnqueueInput, error) {
 		return EnqueueInput{}, fmt.Errorf("dedupe_key is required")
 	}
 	if in.ShardKey == "" {
-		in.ShardKey = in.TenantID
+		in.ShardKey = in.OrgID
 	}
 	if len(in.Payload) == 0 {
 		in.Payload = json.RawMessage(`{}`)

@@ -3,7 +3,8 @@ set -euo pipefail
 
 : "${AXIS_COMPANION_URL:?set AXIS_COMPANION_URL, including /v1}"
 : "${AXIS_INTERNAL_AUTH_SECRET:?set AXIS_INTERNAL_AUTH_SECRET}"
-: "${AXIS_TENANT_ID:?set AXIS_TENANT_ID}"
+: "${AXIS_ORG_ID:?set AXIS_ORG_ID}"
+: "${AXIS_PRODUCT_SURFACE:?set AXIS_PRODUCT_SURFACE to the consumer-owned product key}"
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 companion_dir="$(cd "${script_dir}/.." && pwd)"
@@ -17,9 +18,9 @@ api() {
   local args=(
     -fsS -X "${method}"
     -H "X-Axis-Internal-Token: ${AXIS_INTERNAL_AUTH_SECRET}"
-    -H "X-Tenant-ID: ${AXIS_TENANT_ID}"
-    -H "X-Actor-ID: onboarding:medmory-clinical"
-    -H "X-Axis-Tenant-Role: admin"
+    -H "X-Org-ID: ${AXIS_ORG_ID}"
+    -H "X-Actor-ID: onboarding:clinical-capabilities"
+    -H "X-Axis-Org-Role: admin"
     -H "Content-Type: application/json"
   )
   if [[ -n "${body}" ]]; then
@@ -29,11 +30,11 @@ api() {
 }
 
 for area in inbound embeddings llm; do
-  api PUT "/quota-policies/medmory/${area}" \
+  api PUT "/quota-policies/${AXIS_PRODUCT_SURFACE}/${area}" \
     '{"window_seconds":3600,"request_limit":10000,"unit_limit":10000000,"active":true}' >/dev/null
 done
 
-(cd "${companion_dir}" && go run ./cmd/clinical-capability-manifests) >"${tmp_dir}/definitions.json"
+(cd "${companion_dir}" && go run ./cmd/clinical-capability-manifests -product-surface "${AXIS_PRODUCT_SURFACE}") >"${tmp_dir}/definitions.json"
 api GET /capabilities >"${tmp_dir}/capabilities.json"
 
 while IFS= read -r definition; do
@@ -52,12 +53,12 @@ while IFS= read -r definition; do
 done < <(jq -c '.[]' "${tmp_dir}/definitions.json")
 
 policy="$(api GET /runtime/mcp-policy)"
-policy_body="$(jq -c '
+policy_body="$(jq -c --arg product "${AXIS_PRODUCT_SURFACE}" '
   .enabled=true |
   .kill_switch=false |
   .max_risk_class=(if (.max_risk_class=="low") then "medium" else .max_risk_class end) |
   .allowed_capabilities=((.allowed_capabilities + ["clinical.records.search","clinical.timeline.build"]) | unique) |
-  .product_rules=(.product_rules + {medmory:{disabled:false,allowed_capabilities:["clinical.records.search","clinical.timeline.build"],denied_capabilities:[]}}) |
+  .product_rules=(.product_rules + {($product):{disabled:false,allowed_capabilities:["clinical.records.search","clinical.timeline.build"],denied_capabilities:[]}}) |
   {enabled,kill_switch,allowed_capabilities,denied_capabilities,capability_kill_switches,max_risk_class,
    max_calls_per_minute,max_concurrency,product_rules,job_role_rules,expected_version:.version}
 ' <<<"${policy}")"
@@ -88,4 +89,4 @@ while IFS= read -r virployee; do
   api PUT "/virployees/${virployee_id}" "${update_body}" >/dev/null
 done < <(jq -c '.data[]' "${tmp_dir}/virployees.json")
 
-echo "Medmory clinical capabilities are conformant, active, policy-enabled, and assigned for tenant ${AXIS_TENANT_ID}."
+echo "Clinical capabilities for ${AXIS_PRODUCT_SURFACE} are conformant, active, policy-enabled, and assigned for organization ${AXIS_ORG_ID}."

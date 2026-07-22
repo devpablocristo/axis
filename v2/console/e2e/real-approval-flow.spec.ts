@@ -74,11 +74,11 @@ test('real UI approval flow can approve and return to an approved run history', 
 
 async function seedApprovalFlowFixture(request: APIRequestContext) {
   const session = await devSession(request)
-  const tenantID = session.tenantID
+  const orgID = session.orgID
   const principalID = session.principalID
   const runID = new Date().toISOString().replace(/\D/g, '').slice(0, 14)
 
-  const readActionID = await ensureActionType(request, tenantID, principalID, {
+  const readActionID = await ensureActionType(request, orgID, principalID, {
     action_type_key: 'calendar.events.read',
     name: 'Read calendar events',
     description: 'Real UI approval flow action type',
@@ -86,7 +86,7 @@ async function seedApprovalFlowFixture(request: APIRequestContext) {
     risk_class: 'low',
     enabled: true,
   })
-  const createActionID = await ensureActionType(request, tenantID, principalID, {
+  const createActionID = await ensureActionType(request, orgID, principalID, {
     action_type_key: 'calendar.events.create',
     name: 'Create calendar events',
     description: 'Real UI approval flow action type',
@@ -97,36 +97,36 @@ async function seedApprovalFlowFixture(request: APIRequestContext) {
   void readActionID
   void createActionID
 
-  const readCapabilityID = await ensureCapability(request, tenantID, principalID, {
+  const readCapabilityID = await ensureCapability(request, orgID, principalID, {
     capability_key: 'calendar.events.read',
     name: 'Read calendar events',
     description: 'Real UI approval flow capability',
     required_autonomy: 'A1',
   })
-  const createCapabilityID = await ensureCapability(request, tenantID, principalID, {
+  const createCapabilityID = await ensureCapability(request, orgID, principalID, {
     capability_key: 'calendar.events.create',
     name: 'Create calendar events',
     description: 'Real UI approval flow capability',
     required_autonomy: 'A2',
   })
 
-  const jobRole = await api(request, 'POST', '/api/job-roles', tenantID, principalID, {
+  const jobRole = await api(request, 'POST', '/api/job-roles', orgID, principalID, {
     name: `Real Approval Role ${runID}`,
     mission: 'Exercise the real approval UI flow',
   })
-  const profile = await api(request, 'POST', '/api/profile-templates', tenantID, principalID, {
+  const profile = await api(request, 'POST', '/api/profile-templates', orgID, principalID, {
     name: `Real Approval Profile ${runID}`,
     description: 'Real approval UI flow profile',
     system_prompt: 'You are a real e2e assistant for calendar actions.',
     max_autonomy: 'A3',
   })
-  const employer = await api(request, 'POST', '/api/work-subjects', tenantID, principalID, {
+  const employer = await api(request, 'POST', '/api/work-subjects', orgID, principalID, {
     kind: 'organization',
     display_name: `Real Approval Employer ${runID}`,
     external_ref: `real-approval-employer-${runID}`,
   })
   const virployeeName = `Real Approval Virployee ${runID}`
-  const virployee = await api(request, 'POST', '/api/virployees', tenantID, principalID, {
+  const virployee = await api(request, 'POST', '/api/virployees', orgID, principalID, {
     name: virployeeName,
     job_role_id: jobRole.id,
     profile_template_id: profile.id,
@@ -136,7 +136,7 @@ async function seedApprovalFlowFixture(request: APIRequestContext) {
     autonomy: 'A3',
     employer_subject_id: employer.id,
   })
-  await api(request, 'PUT', `/api/virployees/${virployee.id}/scope-policy`, tenantID, principalID, {
+  await api(request, 'PUT', `/api/virployees/${virployee.id}/scope-policy`, orgID, principalID, {
     allowed_topics: ['calendar'],
     prohibited_topics: [],
     out_of_scope: 'abstain',
@@ -145,7 +145,7 @@ async function seedApprovalFlowFixture(request: APIRequestContext) {
 
   return {
     runID,
-    tenantID,
+    orgID,
     orgID: session.orgID,
     productSurface: session.productSurface,
     principalID,
@@ -155,7 +155,6 @@ async function seedApprovalFlowFixture(request: APIRequestContext) {
 }
 
 async function devSession(request: APIRequestContext): Promise<{
-  tenantID: string
   orgID: string
   productSurface: string
   principalID: string
@@ -171,28 +170,28 @@ async function devSession(request: APIRequestContext): Promise<{
     throw new Error(`GET /api/session: ${await response.text()}`)
   }
   const payload = await response.json()
-  const tenant = payload.tenants?.find((item: { org_id?: string }) => item.org_id === payload.org_id) ?? payload.tenants?.[0]
-  if (!tenant?.id || !(payload.principal_id || payload.actor_id)) {
+  const organization = payload.organizations?.find((item: { id?: string }) => item.id === payload.org_id) ?? payload.organizations?.[0]
+  const product = organization?.products?.[0]
+  if (!organization?.id || !(payload.principal_id || payload.actor_id)) {
     throw new Error(`Could not resolve dev session: ${JSON.stringify(payload)}`)
   }
   return {
-    tenantID: tenant.id,
-    orgID: tenant.org_id,
-    productSurface: tenant.product_surface,
+    orgID: organization.id,
+    productSurface: product?.product_surface ?? 'axis',
     principalID: payload.principal_id || payload.actor_id,
   }
 }
 
 async function ensureActionType(
   request: APIRequestContext,
-  tenantID: string,
+  orgID: string,
   principalID: string,
   input: Record<string, unknown> & { action_type_key: string },
 ): Promise<string> {
-  const list = await api(request, 'GET', '/api/action-types', tenantID, principalID)
+  const list = await api(request, 'GET', '/api/action-types', orgID, principalID)
   const existing = list.data?.find((item: { action_type_key?: string }) => item.action_type_key === input.action_type_key)
   if (existing?.id) {
-    const updated = await api(request, 'PUT', `/api/action-types/${existing.id}`, tenantID, principalID, {
+    const updated = await api(request, 'PUT', `/api/action-types/${existing.id}`, orgID, principalID, {
       name: input.name,
       description: input.description,
       category: input.category,
@@ -201,20 +200,20 @@ async function ensureActionType(
     })
     return String(updated.id)
   }
-  const created = await api(request, 'POST', '/api/action-types', tenantID, principalID, input)
+  const created = await api(request, 'POST', '/api/action-types', orgID, principalID, input)
   return String(created.id)
 }
 
 async function ensureCapability(
   request: APIRequestContext,
-  tenantID: string,
+  orgID: string,
   principalID: string,
   input: Record<string, unknown> & { capability_key: string },
 ): Promise<string> {
-  const list = await api(request, 'GET', '/api/capabilities', tenantID, principalID)
+  const list = await api(request, 'GET', '/api/capabilities', orgID, principalID)
   const existing = list.data?.find((item: { capability_key?: string }) => item.capability_key === input.capability_key)
   if (existing?.id) return String(existing.id)
-  const created = await api(request, 'POST', '/api/capabilities', tenantID, principalID, input)
+  const created = await api(request, 'POST', '/api/capabilities', orgID, principalID, input)
   return String(created.id)
 }
 
@@ -222,14 +221,15 @@ async function api(
   request: APIRequestContext,
   method: 'GET' | 'POST' | 'PUT',
   path: string,
-  tenantID: string,
+  orgID: string,
   principalID: string,
   body?: Record<string, unknown>,
 ) {
   const response = await request.fetch(`${bffURL}${path}`, {
     method,
     headers: {
-      'X-Tenant-ID': tenantID,
+      'X-Org-ID': orgID,
+      'X-Product-Surface': 'axis',
       'X-Actor-ID': principalID,
     },
     data: body,

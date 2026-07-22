@@ -21,7 +21,7 @@ import {
 } from './api'
 
 type WorkforcePageProps = {
-  tenantId: string
+  orgId: string
   principalId: string
   organizationName: string
 }
@@ -31,7 +31,7 @@ type ReassignmentDraft = {
   reason: string
 }
 
-export function WorkforcePage({ tenantId, principalId, organizationName }: WorkforcePageProps) {
+export function WorkforcePage({ orgId, principalId, organizationName }: WorkforcePageProps) {
   const [subjects, setSubjects] = useState<WorkSubject[]>([])
   const [pools, setPools] = useState<RoutingPool[]>([])
   const [jobRoles, setJobRoles] = useState<JobRole[]>([])
@@ -52,15 +52,15 @@ export function WorkforcePage({ tenantId, principalId, organizationName }: Workf
   const [reassignmentDrafts, setReassignmentDrafts] = useState<Record<string, ReassignmentDraft>>({})
 
   const loadBase = useCallback(async () => {
-    if (!tenantId || !principalId) return
+    if (!orgId || !principalId) return
     setLoading(true)
     setError('')
     try {
       const [nextSubjects, nextPools, nextRoles, nextVirployees] = await Promise.all([
-        listWorkSubjects(tenantId, principalId),
-        listRoutingPools(tenantId, principalId),
-        listJobRoles('active', tenantId, principalId),
-        listVirployees('active', tenantId, principalId),
+        listWorkSubjects(orgId, principalId),
+        listRoutingPools(orgId, principalId),
+        listJobRoles('active', orgId, principalId),
+        listVirployees('active', orgId, principalId),
       ])
       setSubjects(nextSubjects)
       setPools(nextPools)
@@ -72,7 +72,7 @@ export function WorkforcePage({ tenantId, principalId, organizationName }: Workf
     } finally {
       setLoading(false)
     }
-  }, [principalId, tenantId])
+  }, [principalId, orgId])
 
   const loadPool = useCallback(async () => {
     if (!selectedPoolId) {
@@ -83,8 +83,8 @@ export function WorkforcePage({ tenantId, principalId, organizationName }: Workf
     }
     try {
       const [nextMembers, nextAssignments] = await Promise.all([
-        listRoutingPoolMembers(selectedPoolId, tenantId, principalId),
-        listContinuityAssignments(selectedPoolId, tenantId, principalId),
+        listRoutingPoolMembers(selectedPoolId, orgId, principalId),
+        listContinuityAssignments(selectedPoolId, orgId, principalId),
       ])
       setMembers(nextMembers)
       setAssignments(nextAssignments)
@@ -97,7 +97,7 @@ export function WorkforcePage({ tenantId, principalId, organizationName }: Workf
     } catch (cause) {
       setError(errorMessage(cause))
     }
-  }, [principalId, selectedPoolId, tenantId])
+  }, [principalId, selectedPoolId, orgId])
 
   useEffect(() => { void loadBase() }, [loadBase])
   useEffect(() => { void loadPool() }, [loadPool])
@@ -139,7 +139,7 @@ export function WorkforcePage({ tenantId, principalId, organizationName }: Workf
     <section className="page-section workforce-page">
       <div className="card workforce-summary">
         <div className="card-header"><h2>Stable workforce assignments</h2></div>
-        <p>Owner organization: <strong>{organizationName || 'Current tenant organization'}</strong></p>
+        <p>Owner organization: <strong>{organizationName || 'Current organization organization'}</strong></p>
         <p className="axis-muted">Each subject keeps one Virployee in a pool; one Virployee can serve several isolated subjects up to its capacity.</p>
       </div>
       {error ? <p role="alert" className="iam-control__inline-error">{error}</p> : null}
@@ -151,7 +151,7 @@ export function WorkforcePage({ tenantId, principalId, organizationName }: Workf
             <form className="workforce-form" onSubmit={(event) => {
               event.preventDefault()
               void runMutation(async () => {
-                await createWorkSubject(subjectDraft, tenantId, principalId)
+                await createWorkSubject(subjectDraft, orgId, principalId)
                 setSubjectDraft({ kind: 'patient', display_name: '', external_ref: '' })
                 await loadBase()
               })
@@ -181,7 +181,7 @@ export function WorkforcePage({ tenantId, principalId, organizationName }: Workf
             <form className="workforce-form" onSubmit={(event) => {
               event.preventDefault()
               void runMutation(async () => {
-                const created = await createRoutingPool(poolDraft, tenantId, principalId)
+                const created = await createRoutingPool(poolDraft, orgId, principalId)
                 setPoolDraft({ name: '', job_role_id: '' })
                 await loadBase()
                 setSelectedPoolId(created.id)
@@ -210,7 +210,7 @@ export function WorkforcePage({ tenantId, principalId, organizationName }: Workf
               event.preventDefault()
               if (!selectedPoolId) return
               void runMutation(async () => {
-                await putRoutingPoolMember(selectedPoolId, memberDraft.virployee_id, { max_active_subjects: memberDraft.max_active_subjects, enabled: true }, tenantId, principalId)
+                await putRoutingPoolMember(selectedPoolId, memberDraft.virployee_id, { max_active_subjects: memberDraft.max_active_subjects, enabled: true }, orgId, principalId)
                 setMemberDraft({ virployee_id: '', max_active_subjects: 20 })
                 await loadPool()
               })
@@ -234,7 +234,7 @@ export function WorkforcePage({ tenantId, principalId, organizationName }: Workf
                     await putRoutingPoolMember(selectedPoolId, member.virployee_id, {
                       max_active_subjects: member.max_active_subjects,
                       enabled: member.enabled,
-                    }, tenantId, principalId)
+                    }, orgId, principalId)
                     setNotice(`${virployeeById.get(member.virployee_id) ?? 'Member'} capacity updated.`)
                     await loadPool()
                   })
@@ -272,7 +272,7 @@ export function WorkforcePage({ tenantId, principalId, organizationName }: Workf
               event.preventDefault()
               if (!selectedPoolId || !routingSubjectId) return
               void runMutation(async () => {
-                const result = await resolveVirployeeRouting(selectedPoolId, routingSubjectId, tenantId, principalId)
+                const result = await resolveVirployeeRouting(selectedPoolId, routingSubjectId, orgId, principalId)
                 setNotice(result.status === 'assigned' && result.assignment
                   ? `${subjectById.get(routingSubjectId) ?? 'Subject'} is assigned to ${virployeeById.get(result.assignment.virployee_id) ?? result.assignment.virployee_id}.`
                   : `Routing result: ${result.status}.`)
@@ -304,7 +304,7 @@ export function WorkforcePage({ tenantId, principalId, organizationName }: Workf
                           virployee_id: draft.virployee_id,
                           expected_version: assignment.version,
                           reason: draft.reason.trim(),
-                        }, tenantId, principalId)
+                        }, orgId, principalId)
                         setNotice(`${subjectById.get(updated.subject_id) ?? 'Subject'} reassigned to ${virployeeById.get(updated.virployee_id) ?? updated.virployee_id}.`)
                         await loadPool()
                       })

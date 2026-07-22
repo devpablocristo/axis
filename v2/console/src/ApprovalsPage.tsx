@@ -10,7 +10,7 @@ import {
 } from './api'
 
 type ApprovalsPageProps = {
-  tenantId: string
+  orgId: string
   principalId: string
   focusApprovalId?: string
   onReturnToVirployee?: () => void
@@ -33,14 +33,14 @@ const APPROVAL_PAGE_LIMITS: Record<ApprovalStatus, number> = {
 	expired: 10,
 }
 
-export function ApprovalsPage({ tenantId, principalId, focusApprovalId = '', onReturnToVirployee }: ApprovalsPageProps) {
+export function ApprovalsPage({ orgId, principalId, focusApprovalId = '', onReturnToVirployee }: ApprovalsPageProps) {
   const [approvalsByStatus, setApprovalsByStatus] = useState<ApprovalsByStatus>(() => emptyApprovalColumns())
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [busyID, setBusyID] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
   const focusedCardRef = useRef<HTMLElement | null>(null)
-  const isActive = Boolean(tenantId && principalId)
+  const isActive = Boolean(orgId && principalId)
   const normalizedSearchQuery = searchQuery.trim().toLowerCase()
   const totalCount = useMemo(
     () => APPROVAL_STATUSES.reduce((count, status) => count + approvalsByStatus[status].items.length, 0),
@@ -68,7 +68,7 @@ export function ApprovalsPage({ tenantId, principalId, focusApprovalId = '', onR
       return
     }
     void load()
-  }, [isActive, tenantId, principalId])
+  }, [isActive, orgId, principalId])
 
   useEffect(() => {
     if (!focusApprovalId || !focusedApproval || loading) return
@@ -81,7 +81,7 @@ export function ApprovalsPage({ tenantId, principalId, focusApprovalId = '', onR
     try {
       const entries = await Promise.all(
         APPROVAL_STATUSES.map(async (status): Promise<[ApprovalStatus, ApprovalColumnState]> => {
-          const page = await listApprovalsPage(tenantId, principalId, status, { limit: APPROVAL_PAGE_LIMITS[status] })
+          const page = await listApprovalsPage(orgId, principalId, status, { limit: APPROVAL_PAGE_LIMITS[status] })
           return [status, {
             items: sortApprovals(page.items),
             hasMore: page.hasMore,
@@ -109,7 +109,7 @@ export function ApprovalsPage({ tenantId, principalId, focusApprovalId = '', onR
     }))
     setError('')
     try {
-      const page = await listApprovalsPage(tenantId, principalId, status, {
+      const page = await listApprovalsPage(orgId, principalId, status, {
         limit: APPROVAL_PAGE_LIMITS[status],
         cursor: column.nextCursor,
       })
@@ -136,7 +136,7 @@ export function ApprovalsPage({ tenantId, principalId, focusApprovalId = '', onR
     const loaded = APPROVAL_STATUSES.some((status) => columns[status].items.some((approval) => approval.id === focusApprovalId))
     if (loaded) return columns
     try {
-      const approval = await getApproval(focusApprovalId, tenantId, principalId)
+      const approval = await getApproval(focusApprovalId, orgId, principalId)
       return insertApproval(columns, approval)
     } catch {
       return columns
@@ -153,11 +153,11 @@ export function ApprovalsPage({ tenantId, principalId, focusApprovalId = '', onR
     setError('')
     try {
       if (decision === 'approve') {
-        await approveApproval(approval.id, tenantId, principalId, note)
+        await approveApproval(approval.id, orgId, principalId, note)
       } else if (decision === 'reject') {
-        await rejectApproval(approval.id, tenantId, principalId, note)
+        await rejectApproval(approval.id, orgId, principalId, note)
 	  } else {
-		await reviewApproval(approval.id, tenantId, principalId, note ?? '')
+		await reviewApproval(approval.id, orgId, principalId, note ?? '')
       }
       await load()
     } catch (decisionError) {
@@ -170,7 +170,7 @@ export function ApprovalsPage({ tenantId, principalId, focusApprovalId = '', onR
   if (!isActive) {
     return (
       <section className="page-section">
-        <div className="empty-state">Select an active tenant to manage Approvals.</div>
+        <div className="empty-state">Select an active organization to manage Approvals.</div>
       </section>
     )
   }

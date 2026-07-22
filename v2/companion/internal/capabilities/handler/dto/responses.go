@@ -8,7 +8,7 @@ import (
 
 type CapabilityResponse struct {
 	ID                    string                   `json:"id"`
-	TenantID              string                   `json:"tenant_id"`
+	OrgID                 string                   `json:"org_id"`
 	CapabilityKey         string                   `json:"capability_key"`
 	Name                  string                   `json:"name"`
 	Description           string                   `json:"description"`
@@ -40,7 +40,7 @@ type ListCapabilitiesResponse struct {
 func CapabilityFromDomain(capability domain.Capability) CapabilityResponse {
 	return CapabilityResponse{
 		ID:                    capability.ID.String(),
-		TenantID:              capability.TenantID,
+		OrgID:                 capability.OrgID,
 		CapabilityKey:         capability.CapabilityKey,
 		Name:                  capability.Name,
 		Description:           capability.Description,

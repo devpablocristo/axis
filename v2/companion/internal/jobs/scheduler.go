@@ -10,7 +10,7 @@ import (
 )
 
 type RecurringConfig struct {
-	TenantID       string
+	OrgID          string
 	ProductSurface string
 	Kind           string
 	ShardKey       string
@@ -33,7 +33,7 @@ func RunRecurringScheduler(ctx context.Context, repository Repository, config Re
 			prefix = strings.TrimSpace(config.Kind)
 		}
 		_, _, err := repository.Enqueue(ctx, EnqueueInput{
-			TenantID: config.TenantID, ProductSurface: config.ProductSurface,
+			OrgID: config.OrgID, ProductSurface: config.ProductSurface,
 			Kind: config.Kind, ShardKey: config.ShardKey,
 			DedupeKey: fmt.Sprintf("%s:%d", prefix, bucket.Unix()),
 			Payload:   json.RawMessage(`{}`), RunAfter: bucket,

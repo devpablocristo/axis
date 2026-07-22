@@ -8,7 +8,7 @@ import (
 
 type ActionTypeResponse struct {
 	ID            string    `json:"id"`
-	TenantID      string    `json:"tenant_id"`
+	OrgID         string    `json:"org_id"`
 	ActionTypeKey string    `json:"action_type_key"`
 	Name          string    `json:"name"`
 	Description   string    `json:"description"`
@@ -26,7 +26,7 @@ type ListActionTypesResponse struct {
 func ActionTypeFromDomain(item domain.ActionType) ActionTypeResponse {
 	return ActionTypeResponse{
 		ID:            item.ID.String(),
-		TenantID:      item.TenantID,
+		OrgID:         item.OrgID,
 		ActionTypeKey: item.ActionTypeKey,
 		Name:          item.Name,
 		Description:   item.Description,

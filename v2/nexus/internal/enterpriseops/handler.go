@@ -49,7 +49,7 @@ func (h *Handler) Routes(r gin.IRouter) {
 	r.POST("/internal/operations/findings", h.ingestFinding)
 }
 func opContext(c *gin.Context) (string, string, string, string) {
-	return strings.TrimSpace(c.GetHeader("X-Tenant-ID")), strings.TrimSpace(c.GetHeader("X-Actor-ID")), strings.ToLower(strings.TrimSpace(c.GetHeader("X-Axis-Tenant-Role"))), strings.ToLower(strings.TrimSpace(c.GetHeader("X-Product-Surface")))
+	return strings.TrimSpace(c.GetHeader("X-Org-ID")), strings.TrimSpace(c.GetHeader("X-Actor-ID")), strings.ToLower(strings.TrimSpace(c.GetHeader("X-Axis-Org-Role"))), strings.ToLower(strings.TrimSpace(c.GetHeader("X-Product-Surface")))
 }
 func pagination(c *gin.Context) (int, int) {
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))

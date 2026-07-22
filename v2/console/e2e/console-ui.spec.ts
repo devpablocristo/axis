@@ -1,6 +1,6 @@
 import { expect, test, type Page, type Route } from '@playwright/test'
 
-const tenantID = 'tenant-axis-e2e'
+const productID = 'product-axis-e2e'
 const principalID = 'dev-user'
 
 const now = '2026-07-09T13:45:00Z'
@@ -11,19 +11,21 @@ const session = {
   org_id: 'dev-org',
   auth_method: 'dev',
   user: { id: principalID, email: 'dev@example.local', status: 'active' },
-  tenants: [{
-    id: tenantID,
-    org_id: 'dev-org',
-    org_name: 'dev-org',
-    product_surface: 'axis',
-    product_name: 'Axis',
-    status: 'active',
-    state: 'active',
-    created_at: now,
-    updated_at: now,
-    archived_at: null,
-    trashed_at: null,
-    purge_after: null,
+  organizations: [{
+    id: 'dev-org',
+    name: 'dev-org',
+    products: [{
+      id: productID,
+      product_surface: 'axis',
+      name: 'Axis',
+      status: 'active',
+      state: 'active',
+      created_at: now,
+      updated_at: now,
+      archived_at: null,
+      trashed_at: null,
+      purge_after: null,
+    }],
   }],
 }
 
@@ -155,8 +157,8 @@ const orgs = [{
   provider_org_id: 'dev-org',
   status: 'active',
   state: 'active',
-  tenant_count: 1,
-  has_tenants: true,
+  product_count: 1,
+  has_products: true,
   created_at: now,
   updated_at: now,
   archived_at: null,
@@ -254,9 +256,9 @@ test('all main sections render with coherent action buttons', async ({ page }) =
   }
 
   await nav.getByRole('button', { name: 'Admin' }).click()
-  const tenancyTabs = page.locator('.tenancy-section__tabs')
-  for (const tab of ['Users', 'Tenants', 'Orgs', 'Products']) {
-    await tenancyTabs.getByRole('tab', { name: tab }).click()
+  const adminTabs = page.locator('.organization-admin-section__tabs')
+  for (const tab of ['Users', 'Orgs', 'Products']) {
+    await adminTabs.getByRole('tab', { name: tab }).click()
     await assertVisualSystem(page)
   }
 })
@@ -285,9 +287,9 @@ test('crud lists use one toolbar and do not render row action columns', async ({
   }
 
   await nav.getByRole('button', { name: 'Admin' }).click()
-  const tenancyTabs = page.locator('.tenancy-section__tabs')
-  for (const tab of ['Users', 'Tenants', 'Orgs', 'Products']) {
-    await tenancyTabs.getByRole('tab', { name: tab }).click()
+  const adminTabs = page.locator('.organization-admin-section__tabs')
+  for (const tab of ['Users', 'Orgs', 'Products']) {
+    await adminTabs.getByRole('tab', { name: tab }).click()
     await expect(page.locator('th.col-actions')).toHaveCount(0)
     await expect(page.locator('.iam-control__bulk-buttons')).toHaveCount(1)
   }
@@ -304,9 +306,9 @@ test('builder and admin toolbars align primary actions with filters and keep lif
   }
 
   await nav.getByRole('button', { name: 'Admin' }).click()
-  const tenancyTabs = page.locator('.tenancy-section__tabs')
-  for (const tab of ['Users', 'Tenants', 'Orgs', 'Products']) {
-    await tenancyTabs.getByRole('tab', { name: tab }).click()
+  const adminTabs = page.locator('.organization-admin-section__tabs')
+  for (const tab of ['Users', 'Orgs', 'Products']) {
+    await adminTabs.getByRole('tab', { name: tab }).click()
     await expectConsistentToolbarHierarchy(page, `Admin/${tab}`)
   }
 })
@@ -322,9 +324,9 @@ test('crud lists keep selection and primary columns fixed and expose created tim
   }
 
   await nav.getByRole('button', { name: 'Admin' }).click()
-  const tenancyTabs = page.locator('.tenancy-section__tabs')
-  for (const tab of ['Users', 'Tenants', 'Orgs', 'Products']) {
-    await tenancyTabs.getByRole('tab', { name: tab }).click()
+  const adminTabs = page.locator('.organization-admin-section__tabs')
+  for (const tab of ['Users', 'Orgs', 'Products']) {
+    await adminTabs.getByRole('tab', { name: tab }).click()
     await expect(page.getByRole('columnheader', { name: 'Created' })).toBeVisible()
     await expectStickySelectionAndPrimary(page)
   }
@@ -348,9 +350,9 @@ test('crud tables stay usable across desktop, tablet, and mobile viewports', asy
     }
 
     await nav.getByRole('button', { name: 'Admin' }).click()
-    const tenancyTabs = page.locator('.tenancy-section__tabs')
-    for (const tab of ['Users', 'Tenants', 'Orgs', 'Products']) {
-      await tenancyTabs.getByRole('tab', { name: tab }).click()
+    const adminTabs = page.locator('.organization-admin-section__tabs')
+    for (const tab of ['Users', 'Orgs', 'Products']) {
+      await adminTabs.getByRole('tab', { name: tab }).click()
       await expectResponsiveCrudTable(page, `${viewport.name} ${tab}`)
     }
   }
@@ -601,9 +603,9 @@ async function installApiFixtures(page: Page) {
     if (path === '/api/capabilities') return json(route, { data: capabilities })
     if (path === '/api/profile-templates') return json(route, { data: profileTemplates })
     if (path === '/api/users') return json(route, { data: users })
-    if (path === '/api/tenants') return json(route, { data: session.tenants })
+    if (path === '/api/organizations') return json(route, { data: session.organizations })
     if (path === '/api/orgs') return json(route, { data: orgs })
-    if (path === '/api/products') return json(route, { data: products })
+    if (path === '/api/organizations/dev-org/products') return json(route, { data: products })
     if (path === '/api/role-definitions') return json(route, [
       { key: 'policy_admin', description: 'Manage policies', permissions: ['policies.read', 'policies.write'] },
       { key: 'auditor', description: 'Read governance history', permissions: ['audit.read', 'policies.read'] },
@@ -934,7 +936,7 @@ async function assertButtonSystem(page: Page) {
     'main .virployee-panel-footer button:visible',
     'main .approvals-control .page-header button:visible',
     'main .approvals-board__actions button:visible',
-    'main .tenancy-section__tabs button:visible',
+    'main .organization-admin-section__tabs button:visible',
   ].join(', ')
   const report = await page.locator(actionButtonSelector).evaluateAll((buttons) => {
     return buttons

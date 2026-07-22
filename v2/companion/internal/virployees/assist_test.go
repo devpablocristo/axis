@@ -26,12 +26,12 @@ type fakeAssistRepo struct {
 	current       AssistRun
 }
 
-func (r *fakeAssistRepo) BeginAssistRun(_ context.Context, tenant string, vid uuid.UUID, metadata AssistMetadata, idem, inputHash, _ string, input json.RawMessage) (AssistRun, bool, error) {
+func (r *fakeAssistRepo) BeginAssistRun(_ context.Context, organization string, vid uuid.UUID, metadata AssistMetadata, idem, inputHash, _ string, input json.RawMessage) (AssistRun, bool, error) {
 	r.beginCalls++
 	if !r.reserved {
 		return r.existing, false, nil
 	}
-	r.current = AssistRun{ID: uuid.New(), TenantID: tenant, VirployeeID: vid, CaseID: metadata.CaseID, AssignmentID: metadata.AssignmentID,
+	r.current = AssistRun{ID: uuid.New(), OrgID: organization, VirployeeID: vid, CaseID: metadata.CaseID, AssignmentID: metadata.AssignmentID,
 		AssignmentVersion: metadata.AssignmentVersion, AssistType: metadata.AssistType, ProductSurface: metadata.ProductSurface,
 		SubjectID: metadata.SubjectID, RepositoryGeneration: metadata.RepositoryGeneration,
 		CapabilityKey: metadata.CapabilityKey, CapabilityManifestHash: metadata.CapabilityManifestHash, GroundingMode: metadata.GroundingMode,
@@ -258,7 +258,7 @@ func TestAssistProcessesAndPersistsAnswer(t *testing.T) {
 	uc.assistRepo = repo
 	uc.answerer = ans
 
-	run, err := uc.Assist(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"documents":[]}`), "idem-1", AssistMetadata{})
+	run, err := uc.Assist(context.Background(), "organization-1", created.ID, json.RawMessage(`{"documents":[]}`), "idem-1", AssistMetadata{})
 	if err != nil {
 		t.Fatalf("Assist: %v", err)
 	}
@@ -285,7 +285,7 @@ func TestAssistBindsAndRevalidatesStableAssignment(t *testing.T) {
 	uc.SetContinuityAssignmentValidator(validator)
 	subjectID, assignmentID := uuid.New(), uuid.New()
 
-	run, err := uc.Assist(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"question":"hello"}`), "stable-assignment", AssistMetadata{
+	run, err := uc.Assist(context.Background(), "organization-1", created.ID, json.RawMessage(`{"question":"hello"}`), "stable-assignment", AssistMetadata{
 		SubjectID: subjectID.String(), AssignmentID: assignmentID,
 	})
 	if err != nil {
@@ -309,7 +309,7 @@ func TestAssistCannotOmitAssignmentWhenRoutingIsAuthoritative(t *testing.T) {
 	uc.assistRepo, uc.answerer = repo, &fakeAnswerer{}
 	uc.SetContinuityAssignmentValidator(validator)
 
-	_, err := uc.Assist(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"question":"hello"}`), "routing-bypass", AssistMetadata{
+	_, err := uc.Assist(context.Background(), "organization-1", created.ID, json.RawMessage(`{"question":"hello"}`), "routing-bypass", AssistMetadata{
 		SubjectID: uuid.NewString(),
 	})
 	if !domainerr.IsConflict(err) {
@@ -331,7 +331,7 @@ func TestAssistStopsBeforeContextWhenAssignmentChanged(t *testing.T) {
 	uc.assistRepo, uc.answerer = repo, answerer
 	uc.SetContinuityAssignmentValidator(validator)
 
-	_, err := uc.Assist(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"question":"hello"}`), "changed-assignment", AssistMetadata{
+	_, err := uc.Assist(context.Background(), "organization-1", created.ID, json.RawMessage(`{"question":"hello"}`), "changed-assignment", AssistMetadata{
 		SubjectID: uuid.NewString(), AssignmentID: uuid.New(),
 	})
 	if !domainerr.IsConflict(err) || answerer.called {
@@ -351,7 +351,7 @@ func TestAssistSourcesOnlyAbstainsWithoutEvidenceBeforeRuntime(t *testing.T) {
 	answerer := &fakeAnswerer{out: AnswerOutput{Answered: true}}
 	uc.assistRepo, uc.answerer = repo, answerer
 
-	run, err := uc.Assist(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"question":"unknown"}`), "sources-none", AssistMetadata{})
+	run, err := uc.Assist(context.Background(), "organization-1", created.ID, json.RawMessage(`{"question":"unknown"}`), "sources-none", AssistMetadata{})
 	if err != nil {
 		t.Fatalf("Assist: %v", err)
 	}
@@ -371,7 +371,7 @@ func TestAssistScopePolicyStopsBeforeKnowledgeAndRuntime(t *testing.T) {
 	uc.assistRepo, uc.answerer, uc.knowledge = repo, answerer, retriever
 	uc.SetAuthorityEvaluator(authority)
 
-	run, err := uc.Assist(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"question":"tema prohibido"}`), "scope-abstain", AssistMetadata{})
+	run, err := uc.Assist(context.Background(), "organization-1", created.ID, json.RawMessage(`{"question":"tema prohibido"}`), "scope-abstain", AssistMetadata{})
 	if err != nil {
 		t.Fatalf("Assist: %v", err)
 	}
@@ -396,7 +396,7 @@ func TestAssistScopePolicyEscalatesWithoutCallingRuntime(t *testing.T) {
 	uc.assistRepo, uc.answerer = repo, answerer
 	uc.SetAuthorityEvaluator(authority)
 
-	run, err := uc.Assist(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"question":"fuera del area"}`), "scope-escalate", AssistMetadata{})
+	run, err := uc.Assist(context.Background(), "organization-1", created.ID, json.RawMessage(`{"question":"fuera del area"}`), "scope-escalate", AssistMetadata{})
 	if err != nil {
 		t.Fatalf("Assist: %v", err)
 	}
@@ -412,7 +412,7 @@ func TestAssistScopeEvaluationFailureFailsClosed(t *testing.T) {
 	uc.assistRepo, uc.answerer = repo, answerer
 	uc.SetAuthorityEvaluator(&fakeConversationAuthority{err: errors.New("database unavailable")})
 
-	run, err := uc.Assist(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"question":"agenda"}`), "scope-error", AssistMetadata{})
+	run, err := uc.Assist(context.Background(), "organization-1", created.ID, json.RawMessage(`{"question":"agenda"}`), "scope-error", AssistMetadata{})
 	if err != nil {
 		t.Fatalf("Assist: %v", err)
 	}
@@ -439,7 +439,7 @@ func TestAssistSourcesOnlyCanonicalizesValidCitation(t *testing.T) {
 	}}
 	uc.assistRepo, uc.answerer = &fakeAssistRepo{reserved: true}, answerer
 
-	run, err := uc.Assist(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"question":"fact?"}`), "sources-cited", AssistMetadata{})
+	run, err := uc.Assist(context.Background(), "organization-1", created.ID, json.RawMessage(`{"question":"fact?"}`), "sources-cited", AssistMetadata{})
 	if err != nil {
 		t.Fatalf("Assist: %v", err)
 	}
@@ -460,7 +460,7 @@ func TestAssistStopsBeforeRuntimeWhenLLMQuotaIsExceeded(t *testing.T) {
 	uc.answerer = answerer
 	uc.SetQuotaPorts(quota, nil)
 
-	_, err := uc.Assist(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"documents":[]}`), "quota-run", AssistMetadata{ProductSurface: "medmory"})
+	_, err := uc.Assist(context.Background(), "organization-1", created.ID, json.RawMessage(`{"documents":[]}`), "quota-run", AssistMetadata{ProductSurface: "producta"})
 	if retryAfter, ok := quotas.RetryAfter(err); !ok || retryAfter != 17 {
 		t.Fatalf("expected quota error with Retry-After 17, got %v", err)
 	}
@@ -484,7 +484,7 @@ func TestAssistRecordsRuntimeUsageWithoutPromptContent(t *testing.T) {
 	uc.answerer = answerer
 	uc.SetQuotaPorts(&fakeQuota{}, ledger)
 
-	if _, err := uc.Assist(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"secret_note":"never persist this"}`), "usage-run", AssistMetadata{ProductSurface: "medmory"}); err != nil {
+	if _, err := uc.Assist(context.Background(), "organization-1", created.ID, json.RawMessage(`{"secret_note":"never persist this"}`), "usage-run", AssistMetadata{ProductSurface: "producta"}); err != nil {
 		t.Fatalf("Assist: %v", err)
 	}
 	if len(ledger.records) != 1 {
@@ -511,8 +511,8 @@ func TestAssistFetchesDocumentsAndPassesContentToModel(t *testing.T) {
 	uc.answerer = ans
 	uc.docFetcher = fetcher
 
-	input := json.RawMessage(`{"schema_version":"medmory.diagnosis_input.v1","documents":[{"key":"labs.txt","read_url":"https://x/labs","content_type":"text/plain"}]}`)
-	if _, err := uc.Assist(context.Background(), "tenant-1", created.ID, input, "idem-docs", AssistMetadata{}); err != nil {
+	input := json.RawMessage(`{"schema_version":"producta.diagnosis_input.v1","documents":[{"key":"labs.txt","read_url":"https://x/labs","content_type":"text/plain"}]}`)
+	if _, err := uc.Assist(context.Background(), "organization-1", created.ID, input, "idem-docs", AssistMetadata{}); err != nil {
 		t.Fatalf("Assist: %v", err)
 	}
 	if fetcher.calls != 1 {
@@ -542,8 +542,8 @@ func TestAssistUsesArtifactPipelineAndNeverForwardsSignedURLToRuntime(t *testing
 	uc.artifactIngestor = ingestor
 
 	input := json.RawMessage(`{"documents":[{"document_id":"doc-1","key":"labs.pdf","read_url":"https://signed.example/labs?secret=yes","content_type":"application/pdf","sha256":"abc","size_bytes":120}]}`)
-	metadata := AssistMetadata{AssistType: "clinical_diagnosis", ProductSurface: "medmory", SubjectID: "patient-a", RepositoryGeneration: "generation-a"}
-	if _, err := uc.Assist(context.Background(), "tenant-1", created.ID, input, "idem-artifacts", metadata); err != nil {
+	metadata := AssistMetadata{AssistType: "clinical_diagnosis", ProductSurface: "producta", SubjectID: "patient-a", RepositoryGeneration: "generation-a"}
+	if _, err := uc.Assist(context.Background(), "organization-1", created.ID, input, "idem-artifacts", metadata); err != nil {
 		t.Fatalf("Assist: %v", err)
 	}
 	if legacyFetcher.calls != 0 {
@@ -565,7 +565,7 @@ func TestAssistMarksDegradedWhenModelDidNotAnswer(t *testing.T) {
 	uc.assistRepo = &fakeAssistRepo{reserved: true}
 	uc.answerer = &fakeAnswerer{out: AnswerOutput{OutputText: "Recibido (modo echo).", Answered: false}}
 
-	run, err := uc.Assist(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"x":1}`), "idem-2", AssistMetadata{})
+	run, err := uc.Assist(context.Background(), "organization-1", created.ID, json.RawMessage(`{"x":1}`), "idem-2", AssistMetadata{})
 	if err != nil {
 		t.Fatalf("Assist: %v", err)
 	}
@@ -583,7 +583,7 @@ func TestAssistReplayReturnsExistingRunWithoutCallingModel(t *testing.T) {
 	uc.assistRepo = repo
 	uc.answerer = ans
 
-	run, err := uc.Assist(context.Background(), "tenant-1", created.ID, input, "idem-dup", AssistMetadata{})
+	run, err := uc.Assist(context.Background(), "organization-1", created.ID, input, "idem-dup", AssistMetadata{})
 	if err != nil {
 		t.Fatalf("Assist: %v", err)
 	}
@@ -604,7 +604,7 @@ func TestSubmitAssistAsyncPersistsAndQueuesIdentifiersWithoutCallingModel(t *tes
 	uc.assistQueue = queue
 	uc.answerer = answerer
 
-	run, err := uc.SubmitAssistAsync(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"document_id":"doc-1"}`), "manifest-generation-1", AssistMetadata{})
+	run, err := uc.SubmitAssistAsync(context.Background(), "organization-1", created.ID, json.RawMessage(`{"document_id":"doc-1"}`), "manifest-generation-1", AssistMetadata{})
 	if err != nil {
 		t.Fatalf("SubmitAssistAsync: %v", err)
 	}
@@ -624,7 +624,7 @@ func TestRequeueReceivedAssistRunsClosesPersistEnqueueGap(t *testing.T) {
 	uc.assistQueue = queue
 	uc.answerer = &fakeAnswerer{}
 
-	run, _, err := uc.SubmitAssist(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"x":1}`), "generation-a", AssistMetadata{})
+	run, _, err := uc.SubmitAssist(context.Background(), "organization-1", created.ID, json.RawMessage(`{"x":1}`), "generation-a", AssistMetadata{})
 	if err != nil {
 		t.Fatalf("SubmitAssist: %v", err)
 	}
@@ -643,12 +643,12 @@ func TestProcessAssistRunRecoversPreAnswerStateOnDurableJobRetry(t *testing.T) {
 	answerer := &fakeAnswerer{out: AnswerOutput{OutputJSON: json.RawMessage(`{"summary":"recovered"}`), Answered: true}}
 	uc.assistRepo = repo
 	uc.answerer = answerer
-	run, _, err := uc.SubmitAssist(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"documents":[]}`), "generation-a", AssistMetadata{})
+	run, _, err := uc.SubmitAssist(context.Background(), "organization-1", created.ID, json.RawMessage(`{"documents":[]}`), "generation-a", AssistMetadata{})
 	if err != nil {
 		t.Fatalf("SubmitAssist: %v", err)
 	}
 	repo.current.Status = "extracting" // previous worker died before the model call
-	completed, err := uc.ProcessAssistRun(context.Background(), "tenant-1", run.ID, true)
+	completed, err := uc.ProcessAssistRun(context.Background(), "organization-1", run.ID, true)
 	if err != nil {
 		t.Fatalf("ProcessAssistRun recovery: %v", err)
 	}
@@ -663,12 +663,12 @@ func TestProcessAssistRunNeverReplaysStaleAnsweringState(t *testing.T) {
 	answerer := &fakeAnswerer{out: AnswerOutput{Answered: true}}
 	uc.assistRepo = repo
 	uc.answerer = answerer
-	run, _, err := uc.SubmitAssist(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"documents":[]}`), "generation-a", AssistMetadata{})
+	run, _, err := uc.SubmitAssist(context.Background(), "organization-1", created.ID, json.RawMessage(`{"documents":[]}`), "generation-a", AssistMetadata{})
 	if err != nil {
 		t.Fatalf("SubmitAssist: %v", err)
 	}
 	repo.current.Status = "answering"
-	_, err = uc.ProcessAssistRun(context.Background(), "tenant-1", run.ID, true)
+	_, err = uc.ProcessAssistRun(context.Background(), "organization-1", run.ID, true)
 	if !domainerr.IsConflict(err) || answerer.called {
 		t.Fatalf("answering must not be replayed, err=%v called=%v", err, answerer.called)
 	}
@@ -679,7 +679,7 @@ func TestSubmitAssistRejectsIdempotencyKeyReusedWithDifferentInput(t *testing.T)
 	uc.assistRepo = &fakeAssistRepo{reserved: false, existing: AssistRun{ID: uuid.New(), Status: "done", InputHash: runtraces.HashString(`{"x":1}`)}}
 	uc.answerer = &fakeAnswerer{}
 
-	_, _, err := uc.SubmitAssist(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"x":2}`), "generation-a", AssistMetadata{})
+	_, _, err := uc.SubmitAssist(context.Background(), "organization-1", created.ID, json.RawMessage(`{"x":2}`), "generation-a", AssistMetadata{})
 	if !domainerr.IsConflict(err) {
 		t.Fatalf("expected idempotency conflict, got %v", err)
 	}
@@ -691,7 +691,7 @@ func TestAssistFailsClosedOnRuntimeError(t *testing.T) {
 	uc.assistRepo = repo
 	uc.answerer = &fakeAnswerer{err: errors.New("runtime down")}
 
-	_, err := uc.Assist(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"x":1}`), "idem-3", AssistMetadata{})
+	_, err := uc.Assist(context.Background(), "organization-1", created.ID, json.RawMessage(`{"x":1}`), "idem-3", AssistMetadata{})
 	if err == nil {
 		t.Fatal("expected an error when the runtime fails")
 	}
@@ -704,7 +704,7 @@ func TestAssistRequiresAnswerer(t *testing.T) {
 	uc, created := setupExecutionGateUseCase(t, domain.AutonomyA3)
 	uc.assistRepo = &fakeAssistRepo{reserved: true}
 	// answerer intentionally nil
-	_, err := uc.Assist(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"x":1}`), "k", AssistMetadata{})
+	_, err := uc.Assist(context.Background(), "organization-1", created.ID, json.RawMessage(`{"x":1}`), "k", AssistMetadata{})
 	if !domainerr.IsConflict(err) {
 		t.Fatalf("expected conflict when the answerer is not configured, got %v", err)
 	}

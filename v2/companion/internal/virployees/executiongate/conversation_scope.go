@@ -3,7 +3,7 @@ package executiongate
 import "github.com/google/uuid"
 
 type ConversationScopeInput struct {
-	TenantID    string
+	OrgID       string
 	VirployeeID uuid.UUID
 	JobRoleID   uuid.UUID
 	Query       string

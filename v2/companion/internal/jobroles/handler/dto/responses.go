@@ -8,7 +8,7 @@ import (
 
 type JobRoleResponse struct {
 	ID               string                     `json:"id"`
-	TenantID         string                     `json:"tenant_id"`
+	OrgID            string                     `json:"org_id"`
 	Name             string                     `json:"name"`
 	Slug             string                     `json:"slug"`
 	Mission          string                     `json:"mission"`
@@ -51,7 +51,7 @@ func JobRoleFromDomain(role domain.JobRole) JobRoleResponse {
 	}
 	return JobRoleResponse{
 		ID:               role.ID.String(),
-		TenantID:         role.TenantID,
+		OrgID:            role.OrgID,
 		Name:             role.Name,
 		Slug:             role.Slug,
 		Mission:          role.Mission,

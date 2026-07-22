@@ -20,13 +20,13 @@ type ConversationScopeEvaluatorPort interface {
 	EvaluateConversationScope(context.Context, executiongate.ConversationScopeInput) (executiongate.ConversationScopeResult, error)
 }
 
-func (u *UseCases) evaluateConversationScope(ctx context.Context, tenantID string, virployeeID, jobRoleID uuid.UUID, query string) (executiongate.ConversationScopeResult, bool) {
+func (u *UseCases) evaluateConversationScope(ctx context.Context, orgID string, virployeeID, jobRoleID uuid.UUID, query string) (executiongate.ConversationScopeResult, bool) {
 	evaluator, ok := u.authority.(ConversationScopeEvaluatorPort)
 	if !ok || evaluator == nil {
 		return executiongate.ConversationScopeResult{}, false
 	}
 	result, err := evaluator.EvaluateConversationScope(ctx, executiongate.ConversationScopeInput{
-		TenantID: tenantID, VirployeeID: virployeeID, JobRoleID: jobRoleID, Query: query,
+		OrgID: orgID, VirployeeID: virployeeID, JobRoleID: jobRoleID, Query: query,
 	})
 	if err != nil {
 		return executiongate.ConversationScopeResult{
@@ -46,7 +46,7 @@ type NexusPolicyPreparedActionRepositoryPort interface {
 
 func (u *UseCases) SetAuthorityEvaluator(evaluator AuthorityEvaluatorPort) { u.authority = evaluator }
 
-func (u *UseCases) evaluateAuthority(ctx context.Context, tenantID string, virployeeID, jobRoleID uuid.UUID, capability capabilitydomain.Capability, principal executiongate.PrincipalContext, mcp *preparedactions.MCPContextBinding) (executiongate.AuthorityCheckResult, error) {
+func (u *UseCases) evaluateAuthority(ctx context.Context, orgID string, virployeeID, jobRoleID uuid.UUID, capability capabilitydomain.Capability, principal executiongate.PrincipalContext, mcp *preparedactions.MCPContextBinding) (executiongate.AuthorityCheckResult, error) {
 	if u.authority == nil {
 		return executiongate.AuthorityCheckResult{}, domainerr.Conflict("professional authority evaluator is not configured")
 	}
@@ -58,14 +58,14 @@ func (u *UseCases) evaluateAuthority(ctx context.Context, tenantID string, virpl
 		}
 	}
 	return u.authority.EvaluateAuthority(ctx, executiongate.AuthorityCheckInput{
-		TenantID: tenantID, VirployeeID: virployeeID, JobRoleID: jobRoleID,
+		OrgID: orgID, VirployeeID: virployeeID, JobRoleID: jobRoleID,
 		CapabilityKey: capability.CapabilityKey, ProductSurface: capability.Manifest.ProductSurface,
 		ResourceType: resourceType, ResourceID: resourceID, RiskClass: capability.RiskClass,
 		PrincipalType: principal.Type, PrincipalID: principal.ID, At: time.Now().UTC(),
 	})
 }
 
-func (u *UseCases) verifyCurrentAuthority(ctx context.Context, tenantID string, virployeeID uuid.UUID, capability capabilitydomain.Capability, action preparedactions.Action, expectedHash string) (executiongate.AuthorityCheckResult, error) {
+func (u *UseCases) verifyCurrentAuthority(ctx context.Context, orgID string, virployeeID uuid.UUID, capability capabilitydomain.Capability, action preparedactions.Action, expectedHash string) (executiongate.AuthorityCheckResult, error) {
 	if u.authority == nil {
 		if strings.TrimSpace(expectedHash) != "" {
 			return executiongate.AuthorityCheckResult{}, domainerr.Conflict("professional authority evaluator is unavailable")
@@ -75,7 +75,7 @@ func (u *UseCases) verifyCurrentAuthority(ctx context.Context, tenantID string, 
 	if strings.TrimSpace(expectedHash) == "" {
 		return executiongate.AuthorityCheckResult{}, domainerr.Conflict("approval has no professional authority binding")
 	}
-	virployee, err := u.repo.Get(ctx, tenantID, virployeeID)
+	virployee, err := u.repo.Get(ctx, orgID, virployeeID)
 	if err != nil {
 		return executiongate.AuthorityCheckResult{}, err
 	}
@@ -83,7 +83,7 @@ func (u *UseCases) verifyCurrentAuthority(ctx context.Context, tenantID string, 
 	if err != nil {
 		return executiongate.AuthorityCheckResult{}, domainerr.Conflict("prepared action principal context is invalid")
 	}
-	result, err := u.evaluateAuthority(ctx, tenantID, virployeeID, virployee.JobRoleID, capability, principal, action.MCPContext)
+	result, err := u.evaluateAuthority(ctx, orgID, virployeeID, virployee.JobRoleID, capability, principal, action.MCPContext)
 	if err != nil {
 		return executiongate.AuthorityCheckResult{}, domainerr.Conflict("professional authority could not be revalidated")
 	}

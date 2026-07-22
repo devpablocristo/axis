@@ -14,12 +14,36 @@ const (
 	StateActive   = "active"
 	StateArchived = "archived"
 	StateTrashed  = "trashed"
+
+	RoleOwner  = "owner"
+	RoleAdmin  = "admin"
+	RoleMember = "member"
+
+	DefaultProductSurface = "axis"
 )
+
+type Org struct {
+	ID            string
+	Provider      string
+	ProviderOrgID string
+	Name          string
+	Slug          string
+	Status        string
+	SyncedAt      *time.Time
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+
+	ArchivedAt *time.Time
+	TrashedAt  *time.Time
+	PurgeAfter *time.Time
+}
 
 type Product struct {
 	ID             uuid.UUID
+	OrgID          string
+	OrgName        string
 	ProductSurface string
-	Name           string
+	ProductName    string
 	Status         string
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
@@ -29,20 +53,46 @@ type Product struct {
 	PurgeAfter *time.Time
 }
 
-type ListInput struct {
-	Lifecycle string
+type OrgMember struct {
+	OrgID     uuid.UUID
+	UserID    string
+	Role      string
+	Status    string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+
+	ArchivedAt *time.Time
+	TrashedAt  *time.Time
+	PurgeAfter *time.Time
 }
 
-type CreateInput struct {
-	Name           string
+type EnsureOrgInput struct {
+	OrgID         string
+	Provider      string
+	ProviderOrgID string
+	Name          string
+	Slug          string
+	Status        string
+	SyncedAt      *time.Time
+}
+
+type CreateProductInput struct {
+	OrgID          string
+	OrgName        string
 	ProductSurface string
 	PrincipalID    string
+	OwnerUserID    string
 }
 
-type UpdateInput struct {
+type UpdateProductInput struct {
 	ProductID   string
-	Name        string
+	OrgName     string
 	PrincipalID string
+}
+
+type ListInput struct {
+	PrincipalID string
+	Lifecycle   string
 }
 
 type LifecycleInput struct {
@@ -50,20 +100,29 @@ type LifecycleInput struct {
 	PrincipalID string
 }
 
-type NormalizedListInput struct {
-	Lifecycle string
+type AddMemberInput struct {
+	ProductID string
+	UserID    string
+	Role      string
 }
 
-type NormalizedCreateInput struct {
-	Name           string
+type NormalizedCreateProductInput struct {
+	OrgID          string
+	OrgName        string
 	ProductSurface string
 	PrincipalID    string
+	OwnerUserID    string
 }
 
-type NormalizedUpdateInput struct {
+type NormalizedUpdateProductInput struct {
 	ProductID   uuid.UUID
-	Name        string
+	OrgName     string
 	PrincipalID string
+}
+
+type NormalizedListInput struct {
+	PrincipalID string
+	Lifecycle   string
 }
 
 type NormalizedLifecycleInput struct {
@@ -71,50 +130,100 @@ type NormalizedLifecycleInput struct {
 	PrincipalID string
 }
 
-func NormalizeListInput(in ListInput) NormalizedListInput {
-	return NormalizedListInput{Lifecycle: NormalizeState(in.Lifecycle)}
+type NormalizedAddMemberInput struct {
+	ProductID uuid.UUID
+	UserID    string
+	Role      string
 }
 
-func NormalizeCreateInput(in CreateInput) (NormalizedCreateInput, error) {
-	name := strings.TrimSpace(in.Name)
-	if name == "" {
-		return NormalizedCreateInput{}, domainerr.Validation("name is required")
+func NormalizeEnsureOrgInput(in EnsureOrgInput) (EnsureOrgInput, error) {
+	orgID := strings.TrimSpace(in.OrgID)
+	if orgID != "" {
+		parsed, err := uuid.Parse(orgID)
+		if err != nil || parsed == uuid.Nil {
+			return EnsureOrgInput{}, domainerr.Validation("axis_org_id must be a valid UUID")
+		}
+		orgID = parsed.String()
+	}
+	provider := strings.TrimSpace(strings.ToLower(in.Provider))
+	if provider == "" {
+		provider = "dev"
+	}
+	providerOrgID := strings.TrimSpace(in.ProviderOrgID)
+	if providerOrgID == "" && orgID == "" {
+		return EnsureOrgInput{}, domainerr.Validation("provider_org_id is required")
+	}
+	out := EnsureOrgInput{
+		OrgID:         orgID,
+		Provider:      provider,
+		ProviderOrgID: providerOrgID,
+		Name:          strings.TrimSpace(in.Name),
+		Slug:          NormalizeProductSurface(in.Slug),
+		Status:        normalizeStatus(in.Status),
+		SyncedAt:      in.SyncedAt,
+	}
+	if out.Name == "" {
+		out.Name = firstNonEmpty(out.ProviderOrgID, out.OrgID)
+	}
+	if out.Slug == "" {
+		out.Slug = NormalizeProductSurface(out.Name)
+	}
+	return out, nil
+}
+
+func NormalizeCreateProductInput(in CreateProductInput) (NormalizedCreateProductInput, error) {
+	orgID := strings.TrimSpace(in.OrgID)
+	orgName := strings.TrimSpace(in.OrgName)
+	if orgID != "" {
+		parsedOrgID, err := uuid.Parse(orgID)
+		if err != nil || parsedOrgID == uuid.Nil {
+			return NormalizedCreateProductInput{}, domainerr.Validation("org_id must be a valid UUID")
+		}
+		orgID = parsedOrgID.String()
+	} else if orgName == "" {
+		return NormalizedCreateProductInput{}, domainerr.Validation("org_name is required")
 	}
 	productSurface := NormalizeProductSurface(in.ProductSurface)
 	if productSurface == "" {
-		productSurface = NormalizeProductSurface(name)
+		return NormalizedCreateProductInput{}, domainerr.Validation("product_surface is required")
 	}
-	if productSurface == "" {
-		return NormalizedCreateInput{}, domainerr.Validation("product_surface is required")
-	}
-	principalID := strings.TrimSpace(in.PrincipalID)
-	if principalID == "" {
-		return NormalizedCreateInput{}, domainerr.Validation("principal_id is required")
-	}
-	return NormalizedCreateInput{
-		Name:           name,
+	return NormalizedCreateProductInput{
+		OrgID:          orgID,
+		OrgName:        orgName,
 		ProductSurface: productSurface,
-		PrincipalID:    principalID,
+		PrincipalID:    strings.TrimSpace(in.PrincipalID),
+		OwnerUserID:    strings.TrimSpace(in.OwnerUserID),
 	}, nil
 }
 
-func NormalizeUpdateInput(in UpdateInput) (NormalizedUpdateInput, error) {
+func NormalizeUpdateProductInput(in UpdateProductInput) (NormalizedUpdateProductInput, error) {
 	productID, err := ParseProductID(in.ProductID)
 	if err != nil {
-		return NormalizedUpdateInput{}, err
+		return NormalizedUpdateProductInput{}, err
 	}
-	name := strings.TrimSpace(in.Name)
-	if name == "" {
-		return NormalizedUpdateInput{}, domainerr.Validation("name is required")
+	orgName := strings.TrimSpace(in.OrgName)
+	if orgName == "" {
+		return NormalizedUpdateProductInput{}, domainerr.Validation("org_name is required")
 	}
 	principalID := strings.TrimSpace(in.PrincipalID)
 	if principalID == "" {
-		return NormalizedUpdateInput{}, domainerr.Validation("principal_id is required")
+		return NormalizedUpdateProductInput{}, domainerr.Validation("principal_id is required")
 	}
-	return NormalizedUpdateInput{
+	return NormalizedUpdateProductInput{
 		ProductID:   productID,
-		Name:        name,
+		OrgName:     orgName,
 		PrincipalID: principalID,
+	}, nil
+}
+
+func NormalizeListInput(in ListInput) (NormalizedListInput, error) {
+	principalID := strings.TrimSpace(in.PrincipalID)
+	if principalID == "" {
+		return NormalizedListInput{}, domainerr.Validation("principal_id is required")
+	}
+	return NormalizedListInput{
+		PrincipalID: principalID,
+		Lifecycle:   NormalizeState(in.Lifecycle),
 	}, nil
 }
 
@@ -133,12 +242,57 @@ func NormalizeLifecycleInput(in LifecycleInput) (NormalizedLifecycleInput, error
 	}, nil
 }
 
+func NormalizeAddMemberInput(in AddMemberInput) (NormalizedAddMemberInput, error) {
+	productID, err := ParseProductID(in.ProductID)
+	if err != nil {
+		return NormalizedAddMemberInput{}, err
+	}
+	userID := strings.TrimSpace(in.UserID)
+	if userID == "" {
+		return NormalizedAddMemberInput{}, domainerr.Validation("user_id is required")
+	}
+	parsedUserID, err := uuid.Parse(userID)
+	if err != nil || parsedUserID == uuid.Nil {
+		return NormalizedAddMemberInput{}, domainerr.Validation("user_id must be a valid UUID")
+	}
+	return NormalizedAddMemberInput{
+		ProductID: productID,
+		UserID:    parsedUserID.String(),
+		Role:      NormalizeRole(in.Role),
+	}, nil
+}
+
 func ParseProductID(raw string) (uuid.UUID, error) {
-	id, err := uuid.Parse(strings.TrimSpace(raw))
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return uuid.Nil, domainerr.Validation("product_id is required")
+	}
+	id, err := uuid.Parse(raw)
 	if err != nil || id == uuid.Nil {
 		return uuid.Nil, domainerr.Validation("product_id must be a valid UUID")
 	}
 	return id, nil
+}
+
+func ParseOrgID(raw string) (uuid.UUID, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return uuid.Nil, domainerr.Validation("org_id is required")
+	}
+	id, err := uuid.Parse(raw)
+	if err != nil || id == uuid.Nil {
+		return uuid.Nil, domainerr.Validation("org_id must be a valid UUID")
+	}
+	return id, nil
+}
+
+func NormalizeRole(raw string) string {
+	switch strings.TrimSpace(strings.ToLower(raw)) {
+	case RoleOwner, RoleAdmin, RoleMember:
+		return strings.TrimSpace(strings.ToLower(raw))
+	default:
+		return RoleMember
+	}
 }
 
 func NormalizeState(raw string) string {
@@ -174,16 +328,52 @@ func NormalizeProductSurface(raw string) string {
 	return strings.Trim(string(out), "-")
 }
 
-func (p Product) IsUsable() bool {
-	return p.Status == StatusActive && p.ArchivedAt == nil && p.TrashedAt == nil
+func (t Product) IsUsable() bool {
+	return t.Status == StatusActive && t.ArchivedAt == nil && t.TrashedAt == nil
 }
 
-func (p Product) State() string {
-	if p.TrashedAt != nil {
+func (o Org) IsUsable() bool {
+	return o.Status == StatusActive && o.ArchivedAt == nil && o.TrashedAt == nil
+}
+
+func (t Product) State() string {
+	if t.TrashedAt != nil {
 		return StateTrashed
 	}
-	if p.ArchivedAt != nil {
+	if t.ArchivedAt != nil {
 		return StateArchived
 	}
 	return StateActive
+}
+
+func (m OrgMember) IsUsable() bool {
+	return m.Status == StatusActive && m.ArchivedAt == nil && m.TrashedAt == nil
+}
+
+func CanMutateProduct(role string) bool {
+	switch NormalizeRole(role) {
+	case RoleOwner, RoleAdmin:
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeStatus(raw string) string {
+	switch strings.TrimSpace(strings.ToLower(raw)) {
+	case StatusActive, "":
+		return StatusActive
+	default:
+		return strings.TrimSpace(strings.ToLower(raw))
+	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }

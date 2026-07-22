@@ -42,8 +42,8 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		return nil, err
 	}
 
-	provider := buildProvider(ctx, config)
-	plannerHandler := planner.NewHandler(planner.New(provider, config.LLMModel, planner.Pricing{
+	provider, effectiveModel := buildProvider(ctx, config)
+	plannerHandler := planner.NewHandler(planner.New(provider, effectiveModel, planner.Pricing{
 		InputMicroUSDPerMillionTokens:  config.LLMInputCostMicroUSDPerMillionTokens,
 		OutputMicroUSDPerMillionTokens: config.LLMOutputCostMicroUSDPerMillionTokens,
 	}))
@@ -55,7 +55,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	router.Use(ginmw.NewBodySizeLimit(config.MaxBodyBytes))
 	router.Use(ginmw.NewCORS(ginmw.CORSConfig{
 		Origins:      config.CORSOrigins,
-		AllowHeaders: []string{"Content-Type", "X-Actor-ID", "X-Tenant-ID"},
+		AllowHeaders: []string{"Content-Type", "X-Actor-ID", "X-Org-ID"},
 	}))
 	ginmw.RegisterHealthEndpoints(router, func(context.Context) error { return nil })
 

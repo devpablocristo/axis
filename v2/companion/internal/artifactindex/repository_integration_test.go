@@ -11,7 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func TestRepositoryTenantScopedHybridSearch(t *testing.T) {
+func TestRepositoryOrgScopedHybridSearch(t *testing.T) {
 	databaseURL := os.Getenv("COMPANION_V2_ARTIFACT_INDEX_TEST_DATABASE_URL")
 	if databaseURL == "" {
 		t.Skip("COMPANION_V2_ARTIFACT_INDEX_TEST_DATABASE_URL is not set")
@@ -24,9 +24,9 @@ func TestRepositoryTenantScopedHybridSearch(t *testing.T) {
 	defer pool.Close()
 	repository := NewRepository(pool)
 	virployeeID := uuid.New()
-	scopeA := artifacts.Scope{TenantID: "index-tenant-a", VirployeeID: virployeeID, ProductSurface: "medmory", SubjectID: "patient", RepositoryGeneration: "g1"}
+	scopeA := artifacts.Scope{OrgID: "index-organization-a", VirployeeID: virployeeID, ProductSurface: "producta", SubjectID: "patient", RepositoryGeneration: "g1"}
 	scopeB := scopeA
-	scopeB.TenantID = "index-tenant-b"
+	scopeB.OrgID = "index-organization-b"
 	vector := make([]float32, Dimensions)
 	vector[0] = 1
 	chunk := artifacts.Chunk{ID: "chunk-a", Text: "glucose fasting 126 mg dL", DocumentID: "doc-a", SHA256: "sha-a", SourceVersion: "sha-a", ExtractorVersion: "extract-v1", ChunkerVersion: "chunk-v1"}
@@ -35,7 +35,7 @@ func TestRepositoryTenantScopedHybridSearch(t *testing.T) {
 		t.Fatal(err)
 	}
 	other := chunk
-	other.ID, other.DocumentID, other.Text = "chunk-b", "doc-b", "secret other tenant"
+	other.ID, other.DocumentID, other.Text = "chunk-b", "doc-b", "secret other organization"
 	embedding.ChunkID = other.ID
 	if err := repository.Upsert(ctx, scopeB, []artifacts.Chunk{other}, []artifacts.Embedding{embedding}); err != nil {
 		t.Fatal(err)
@@ -45,9 +45,9 @@ func TestRepositoryTenantScopedHybridSearch(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(hits) != 1 || hits[0].Chunk.DocumentID != "doc-a" {
-		t.Fatalf("cross-tenant or missing result: %#v", hits)
+		t.Fatalf("cross-organization or missing result: %#v", hits)
 	}
-	_, _ = pool.Exec(ctx, "DELETE FROM companion_artifact_chunks WHERE tenant_id IN ('index-tenant-a','index-tenant-b')")
+	_, _ = pool.Exec(ctx, "DELETE FROM companion_artifact_chunks WHERE org_id IN ('index-organization-a','index-organization-b')")
 }
 
 func TestServiceRuntimePostgresEndToEnd(t *testing.T) {
@@ -67,7 +67,7 @@ func TestServiceRuntimePostgresEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope := artifacts.Scope{TenantID: "index-e2e", VirployeeID: uuid.New(), ProductSurface: "medmory", SubjectID: "patient-e2e", RepositoryGeneration: "g-e2e"}
+	scope := artifacts.Scope{OrgID: "index-e2e", VirployeeID: uuid.New(), ProductSurface: "producta", SubjectID: "patient-e2e", RepositoryGeneration: "g-e2e"}
 	if err := service.Index(ctx, scope, []artifacts.ContentPart{{
 		Kind: artifacts.PartText, Text: "El resultado de glucemia en ayunas fue 126 mg/dL.",
 		DocumentID: "lab-e2e", SHA256: "sha-e2e", MIMEType: "text/plain", Locator: &artifacts.Locator{Page: 1},

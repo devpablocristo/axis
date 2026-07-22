@@ -26,7 +26,7 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 	return &Repository{pool: pool}
 }
 
-func (r *Repository) Create(ctx context.Context, tenantID string, input domain.NormalizedCreateInput) (domain.JobRole, error) {
+func (r *Repository) Create(ctx context.Context, orgID string, input domain.NormalizedCreateInput) (domain.JobRole, error) {
 	id := uuid.New()
 	now := time.Now().UTC()
 	responsibilities, successCriteria, err := marshalDefinitions(input.Responsibilities, input.SuccessCriteria)
@@ -35,35 +35,35 @@ func (r *Repository) Create(ctx context.Context, tenantID string, input domain.N
 	}
 	row := r.pool.QueryRow(ctx, `
 		INSERT INTO job_roles (
-			id, tenant_id, name, slug, mission, responsibilities_json, success_criteria_json, created_at, updated_at
+			id, org_id, name, slug, mission, responsibilities_json, success_criteria_json, created_at, updated_at
 		)
 		VALUES ($1::uuid, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8, $8)
-		RETURNING id::text, tenant_id, name, slug, mission, responsibilities_json, success_criteria_json,
+		RETURNING id::text, org_id, name, slug, mission, responsibilities_json, success_criteria_json,
 			created_at, updated_at, archived_at, trashed_at, purge_after
-	`, id.String(), tenantID, input.Name, input.Slug, input.Mission, responsibilities, successCriteria, now)
+	`, id.String(), orgID, input.Name, input.Slug, input.Mission, responsibilities, successCriteria, now)
 	return scanJobRole(row)
 }
 
-func (r *Repository) List(ctx context.Context, tenantID string, state domain.State) ([]domain.JobRole, error) {
+func (r *Repository) List(ctx context.Context, orgID string, state domain.State) ([]domain.JobRole, error) {
 	var where string
 	switch state {
 	case domain.StateActive, "":
-		where = "tenant_id = $1 AND archived_at IS NULL AND trashed_at IS NULL"
+		where = "org_id = $1 AND archived_at IS NULL AND trashed_at IS NULL"
 	case domain.StateArchived:
-		where = "tenant_id = $1 AND archived_at IS NOT NULL AND trashed_at IS NULL"
+		where = "org_id = $1 AND archived_at IS NOT NULL AND trashed_at IS NULL"
 	case domain.StateTrashed:
-		where = "tenant_id = $1 AND trashed_at IS NOT NULL"
+		where = "org_id = $1 AND trashed_at IS NOT NULL"
 	default:
 		return nil, domainerr.Validation("invalid lifecycle state")
 	}
 
 	rows, err := r.pool.Query(ctx, `
-		SELECT id::text, tenant_id, name, slug, mission, responsibilities_json, success_criteria_json,
+		SELECT id::text, org_id, name, slug, mission, responsibilities_json, success_criteria_json,
 			created_at, updated_at, archived_at, trashed_at, purge_after
 		FROM job_roles
 		WHERE `+where+`
 		ORDER BY name ASC, id ASC
-	`, tenantID)
+	`, orgID)
 	if err != nil {
 		return nil, err
 	}
@@ -83,17 +83,17 @@ func (r *Repository) List(ctx context.Context, tenantID string, state domain.Sta
 	return out, nil
 }
 
-func (r *Repository) Get(ctx context.Context, tenantID string, id uuid.UUID) (domain.JobRole, error) {
+func (r *Repository) Get(ctx context.Context, orgID string, id uuid.UUID) (domain.JobRole, error) {
 	row := r.pool.QueryRow(ctx, `
-		SELECT id::text, tenant_id, name, slug, mission, responsibilities_json, success_criteria_json,
+		SELECT id::text, org_id, name, slug, mission, responsibilities_json, success_criteria_json,
 			created_at, updated_at, archived_at, trashed_at, purge_after
 		FROM job_roles
-		WHERE tenant_id = $1 AND id = $2::uuid AND trashed_at IS NULL
-	`, tenantID, id.String())
+		WHERE org_id = $1 AND id = $2::uuid AND trashed_at IS NULL
+	`, orgID, id.String())
 	return scanJobRole(row)
 }
 
-func (r *Repository) Update(ctx context.Context, tenantID string, id uuid.UUID, input domain.NormalizedUpdateInput) (domain.JobRole, error) {
+func (r *Repository) Update(ctx context.Context, orgID string, id uuid.UUID, input domain.NormalizedUpdateInput) (domain.JobRole, error) {
 	responsibilities, successCriteria, err := marshalDefinitions(input.Responsibilities, input.SuccessCriteria)
 	if err != nil {
 		return domain.JobRole{}, err
@@ -106,13 +106,13 @@ func (r *Repository) Update(ctx context.Context, tenantID string, id uuid.UUID, 
 			responsibilities_json = $6::jsonb,
 			success_criteria_json = $7::jsonb,
 			updated_at = $8
-		WHERE tenant_id = $1
+		WHERE org_id = $1
 			AND id = $2::uuid
 			AND archived_at IS NULL
 			AND trashed_at IS NULL
-		RETURNING id::text, tenant_id, name, slug, mission, responsibilities_json, success_criteria_json,
+		RETURNING id::text, org_id, name, slug, mission, responsibilities_json, success_criteria_json,
 			created_at, updated_at, archived_at, trashed_at, purge_after
-	`, tenantID, id.String(), input.Name, input.Slug, input.Mission, responsibilities, successCriteria, time.Now().UTC())
+	`, orgID, id.String(), input.Name, input.Slug, input.Mission, responsibilities, successCriteria, time.Now().UTC())
 	item, err := scanJobRole(row)
 	if err == nil {
 		return item, nil
@@ -123,7 +123,7 @@ func (r *Repository) Update(ctx context.Context, tenantID string, id uuid.UUID, 
 	if !domainerr.IsNotFound(err) {
 		return domain.JobRole{}, err
 	}
-	state, stateErr := r.State(ctx, tenantID, id)
+	state, stateErr := r.State(ctx, orgID, id)
 	if stateErr != nil {
 		return domain.JobRole{}, stateErr
 	}
@@ -133,77 +133,77 @@ func (r *Repository) Update(ctx context.Context, tenantID string, id uuid.UUID, 
 	return domain.JobRole{}, err
 }
 
-func (r *Repository) Archive(ctx context.Context, tenantID string, resourceID uuid.UUID, at time.Time) error {
+func (r *Repository) Archive(ctx context.Context, orgID string, resourceID uuid.UUID, at time.Time) error {
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE job_roles
 		SET archived_at = $3, updated_at = $3
-		WHERE tenant_id = $1
+		WHERE org_id = $1
 			AND id = $2::uuid
 			AND archived_at IS NULL
 			AND trashed_at IS NULL
-	`, tenantID, resourceID.String(), at.UTC())
-	return r.lifecycleResult(ctx, tenantID, resourceID, tag, err)
+	`, orgID, resourceID.String(), at.UTC())
+	return r.lifecycleResult(ctx, orgID, resourceID, tag, err)
 }
 
-func (r *Repository) Unarchive(ctx context.Context, tenantID string, resourceID uuid.UUID) error {
+func (r *Repository) Unarchive(ctx context.Context, orgID string, resourceID uuid.UUID) error {
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE job_roles
 		SET archived_at = NULL, updated_at = $3
-		WHERE tenant_id = $1
+		WHERE org_id = $1
 			AND id = $2::uuid
 			AND archived_at IS NOT NULL
 			AND trashed_at IS NULL
-	`, tenantID, resourceID.String(), time.Now().UTC())
-	return r.lifecycleResult(ctx, tenantID, resourceID, tag, err)
+	`, orgID, resourceID.String(), time.Now().UTC())
+	return r.lifecycleResult(ctx, orgID, resourceID, tag, err)
 }
 
-func (r *Repository) Purge(ctx context.Context, tenantID string, resourceID uuid.UUID) error {
+func (r *Repository) Purge(ctx context.Context, orgID string, resourceID uuid.UUID) error {
 	tag, err := r.pool.Exec(ctx, `
 		DELETE FROM job_roles
-		WHERE tenant_id = $1 AND id = $2::uuid
+		WHERE org_id = $1 AND id = $2::uuid
 			AND trashed_at IS NOT NULL
-	`, tenantID, resourceID.String())
-	return r.lifecycleResult(ctx, tenantID, resourceID, tag, err)
+	`, orgID, resourceID.String())
+	return r.lifecycleResult(ctx, orgID, resourceID, tag, err)
 }
 
-func (r *Repository) IsArchived(ctx context.Context, tenantID string, resourceID uuid.UUID) (bool, error) {
-	state, err := r.State(ctx, tenantID, resourceID)
+func (r *Repository) IsArchived(ctx context.Context, orgID string, resourceID uuid.UUID) (bool, error) {
+	state, err := r.State(ctx, orgID, resourceID)
 	if err != nil {
 		return false, err
 	}
 	return state == lifecycle.StateArchived, nil
 }
 
-func (r *Repository) Trash(ctx context.Context, tenantID string, resourceID uuid.UUID, at time.Time, purgeAfter *time.Time) error {
+func (r *Repository) Trash(ctx context.Context, orgID string, resourceID uuid.UUID, at time.Time, purgeAfter *time.Time) error {
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE job_roles
 		SET archived_at = NULL, trashed_at = $3, purge_after = $4, updated_at = $3
-		WHERE tenant_id = $1
+		WHERE org_id = $1
 			AND id = $2::uuid
 			AND trashed_at IS NULL
-	`, tenantID, resourceID.String(), at.UTC(), nullableTime(purgeAfter))
-	return r.lifecycleResult(ctx, tenantID, resourceID, tag, err)
+	`, orgID, resourceID.String(), at.UTC(), nullableTime(purgeAfter))
+	return r.lifecycleResult(ctx, orgID, resourceID, tag, err)
 }
 
-func (r *Repository) Restore(ctx context.Context, tenantID string, resourceID uuid.UUID) error {
+func (r *Repository) Restore(ctx context.Context, orgID string, resourceID uuid.UUID) error {
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE job_roles
 		SET trashed_at = NULL, purge_after = NULL, updated_at = $3
-		WHERE tenant_id = $1
+		WHERE org_id = $1
 			AND id = $2::uuid
 			AND trashed_at IS NOT NULL
-	`, tenantID, resourceID.String(), time.Now().UTC())
-	return r.lifecycleResult(ctx, tenantID, resourceID, tag, err)
+	`, orgID, resourceID.String(), time.Now().UTC())
+	return r.lifecycleResult(ctx, orgID, resourceID, tag, err)
 }
 
-func (r *Repository) State(ctx context.Context, tenantID string, resourceID uuid.UUID) (lifecycle.LifecycleState, error) {
+func (r *Repository) State(ctx context.Context, orgID string, resourceID uuid.UUID) (lifecycle.LifecycleState, error) {
 	var archivedAt sql.NullTime
 	var trashedAt sql.NullTime
 	err := r.pool.QueryRow(ctx, `
 		SELECT archived_at, trashed_at
 		FROM job_roles
-		WHERE tenant_id = $1 AND id = $2::uuid
-	`, tenantID, resourceID.String()).Scan(&archivedAt, &trashedAt)
+		WHERE org_id = $1 AND id = $2::uuid
+	`, orgID, resourceID.String()).Scan(&archivedAt, &trashedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", domainerr.NotFoundf("job_role", resourceID.String())
 	}
@@ -220,14 +220,14 @@ func (r *Repository) State(ctx context.Context, tenantID string, resourceID uuid
 	}
 }
 
-func (r *Repository) lifecycleResult(ctx context.Context, tenantID string, id uuid.UUID, tag pgconn.CommandTag, err error) error {
+func (r *Repository) lifecycleResult(ctx context.Context, orgID string, id uuid.UUID, tag pgconn.CommandTag, err error) error {
 	if err != nil {
 		return err
 	}
 	if tag.RowsAffected() > 0 {
 		return nil
 	}
-	if _, stateErr := r.State(ctx, tenantID, id); stateErr != nil {
+	if _, stateErr := r.State(ctx, orgID, id); stateErr != nil {
 		return stateErr
 	}
 	return domainerr.Conflict("invalid lifecycle transition")
@@ -244,7 +244,7 @@ func scanJobRole(row scanner) (domain.JobRole, error) {
 	var model models.JobRole
 	err := row.Scan(
 		&idText,
-		&model.TenantID,
+		&model.OrgID,
 		&model.Name,
 		&model.Slug,
 		&model.Mission,

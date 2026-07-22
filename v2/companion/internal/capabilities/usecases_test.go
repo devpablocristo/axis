@@ -18,7 +18,7 @@ func TestEnsureAssignableUsesRequiredAutonomy(t *testing.T) {
 		rows: map[uuid.UUID]domain.Capability{
 			id: {
 				ID:               id,
-				TenantID:         "tenant-1",
+				OrgID:            "organization-1",
 				CapabilityKey:    "messages.replies.draft",
 				Name:             "Draft replies",
 				RequiredAutonomy: virployeedomain.AutonomyA2,
@@ -31,13 +31,13 @@ func TestEnsureAssignableUsesRequiredAutonomy(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := uc.EnsureAssignable(context.Background(), "tenant-1", []uuid.UUID{id}, virployeedomain.AutonomyA1); !domainerr.IsValidation(err) {
+	if err := uc.EnsureAssignable(context.Background(), "organization-1", []uuid.UUID{id}, virployeedomain.AutonomyA1); !domainerr.IsValidation(err) {
 		t.Fatalf("expected A1 to fail for A2 capability, got %v", err)
 	}
-	if err := uc.EnsureAssignable(context.Background(), "tenant-1", []uuid.UUID{id}, virployeedomain.AutonomyA2); err != nil {
+	if err := uc.EnsureAssignable(context.Background(), "organization-1", []uuid.UUID{id}, virployeedomain.AutonomyA2); err != nil {
 		t.Fatalf("expected A2 to pass for A2 capability, got %v", err)
 	}
-	if err := uc.EnsureAssignable(context.Background(), "tenant-1", []uuid.UUID{id}, virployeedomain.AutonomyA3); err != nil {
+	if err := uc.EnsureAssignable(context.Background(), "organization-1", []uuid.UUID{id}, virployeedomain.AutonomyA3); err != nil {
 		t.Fatalf("expected A3 to pass for A2 capability, got %v", err)
 	}
 }
@@ -46,12 +46,12 @@ type fakeCapabilityRepo struct {
 	rows map[uuid.UUID]domain.Capability
 }
 
-func (r *fakeCapabilityRepo) Create(_ context.Context, tenantID string, input domain.NormalizedCreateInput) (domain.Capability, error) {
+func (r *fakeCapabilityRepo) Create(_ context.Context, orgID string, input domain.NormalizedCreateInput) (domain.Capability, error) {
 	id := uuid.New()
 	now := time.Now().UTC()
 	row := domain.Capability{
 		ID:               id,
-		TenantID:         tenantID,
+		OrgID:            orgID,
 		CapabilityKey:    input.CapabilityKey,
 		Name:             input.Name,
 		Description:      input.Description,
@@ -64,9 +64,9 @@ func (r *fakeCapabilityRepo) Create(_ context.Context, tenantID string, input do
 	return row, nil
 }
 
-func (r *fakeCapabilityRepo) UpdateManifest(_ context.Context, tenantID string, id uuid.UUID, manifest domain.Manifest, manifestHash string) (domain.Capability, error) {
+func (r *fakeCapabilityRepo) UpdateManifest(_ context.Context, orgID string, id uuid.UUID, manifest domain.Manifest, manifestHash string) (domain.Capability, error) {
 	row, ok := r.rows[id]
-	if !ok || row.TenantID != tenantID || row.State() != domain.StateActive {
+	if !ok || row.OrgID != orgID || row.State() != domain.StateActive {
 		return domain.Capability{}, domainerr.NotFoundf("capability", id.String())
 	}
 	row.Manifest = manifest
@@ -80,9 +80,9 @@ func (r *fakeCapabilityRepo) UpdateManifest(_ context.Context, tenantID string, 
 	return row, nil
 }
 
-func (r *fakeCapabilityRepo) SaveConformance(_ context.Context, tenantID string, id uuid.UUID, expected domain.Capability, report domain.ConformanceReport) (domain.Capability, error) {
+func (r *fakeCapabilityRepo) SaveConformance(_ context.Context, orgID string, id uuid.UUID, expected domain.Capability, report domain.ConformanceReport) (domain.Capability, error) {
 	row, ok := r.rows[id]
-	if !ok || row.TenantID != tenantID || row.ManifestHash != expected.ManifestHash || row.RiskClass != expected.RiskClass {
+	if !ok || row.OrgID != orgID || row.ManifestHash != expected.ManifestHash || row.RiskClass != expected.RiskClass {
 		return domain.Capability{}, domainerr.NotFoundf("capability", id.String())
 	}
 	row.ConformanceReport = report
@@ -99,9 +99,9 @@ func (r *fakeCapabilityRepo) SaveConformance(_ context.Context, tenantID string,
 	return row, nil
 }
 
-func (r *fakeCapabilityRepo) Activate(_ context.Context, tenantID string, id uuid.UUID, manifestHash string) (domain.Capability, error) {
+func (r *fakeCapabilityRepo) Activate(_ context.Context, orgID string, id uuid.UUID, manifestHash string) (domain.Capability, error) {
 	row, ok := r.rows[id]
-	if !ok || row.TenantID != tenantID || row.PromotionState != domain.PromotionConformant || row.ManifestHash != manifestHash || row.ConformedHash != manifestHash {
+	if !ok || row.OrgID != orgID || row.PromotionState != domain.PromotionConformant || row.ManifestHash != manifestHash || row.ConformedHash != manifestHash {
 		return domain.Capability{}, domainerr.Conflict("capability is not conformant")
 	}
 	row.PromotionState = domain.PromotionActive
@@ -121,17 +121,17 @@ func (r *fakeCapabilityRepo) List(_ context.Context, _ string, state domain.Stat
 	return out, nil
 }
 
-func (r *fakeCapabilityRepo) Get(_ context.Context, tenantID string, id uuid.UUID) (domain.Capability, error) {
+func (r *fakeCapabilityRepo) Get(_ context.Context, orgID string, id uuid.UUID) (domain.Capability, error) {
 	row, ok := r.rows[id]
-	if !ok || row.TenantID != tenantID || row.State() == domain.StateTrashed {
+	if !ok || row.OrgID != orgID || row.State() == domain.StateTrashed {
 		return domain.Capability{}, domainerr.NotFoundf("capability", id.String())
 	}
 	return row, nil
 }
 
-func (r *fakeCapabilityRepo) Update(_ context.Context, tenantID string, id uuid.UUID, input domain.NormalizedUpdateInput) (domain.Capability, error) {
+func (r *fakeCapabilityRepo) Update(_ context.Context, orgID string, id uuid.UUID, input domain.NormalizedUpdateInput) (domain.Capability, error) {
 	row, ok := r.rows[id]
-	if !ok || row.TenantID != tenantID {
+	if !ok || row.OrgID != orgID {
 		return domain.Capability{}, domainerr.NotFoundf("capability", id.String())
 	}
 	if row.State() != domain.StateActive {

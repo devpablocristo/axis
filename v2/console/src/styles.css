@@ -1345,7 +1345,7 @@ h4 {
 .btn-danger,
 .btn-success,
 .btn-sm,
-.tenancy-section__tabs button,
+.organization-admin-section__tabs button,
 .auth-panel button,
 .confirm-delete-actions button,
 .axis-crud-host .actions-row button,
@@ -1446,7 +1446,7 @@ button:disabled,
 .axis-crud-host .actions-row .btn-primary,
 .axis-crud-host .crud-row-actions .btn-primary,
 .iam-control__create-inline .btn-primary,
-.tenancy-section__tabs .btn-primary {
+.organization-admin-section__tabs .btn-primary {
   border-color: var(--axis-primary);
   background: var(--axis-primary);
   color: #ffffff;
@@ -1460,7 +1460,7 @@ button:disabled,
 .axis-crud-host .actions-row .btn-primary:hover:not(:disabled),
 .axis-crud-host .crud-row-actions .btn-primary:hover:not(:disabled),
 .iam-control__create-inline .btn-primary:hover:not(:disabled),
-.tenancy-section__tabs .btn-primary:hover:not(:disabled) {
+.organization-admin-section__tabs .btn-primary:hover:not(:disabled) {
   border-color: var(--axis-primary-strong);
   background: var(--axis-primary-strong);
 }
@@ -1469,7 +1469,7 @@ button:disabled,
 .axis-crud-host .actions-row .btn-primary:disabled,
 .axis-crud-host .crud-row-actions .btn-primary:disabled,
 .iam-control__create-inline .btn-primary:disabled,
-.tenancy-section__tabs .btn-primary:disabled {
+.organization-admin-section__tabs .btn-primary:disabled {
   border-color: var(--axis-primary);
   background: var(--axis-surface);
   color: var(--axis-primary);
@@ -1653,26 +1653,26 @@ button:disabled,
   line-height: 1.2;
 }
 
-.tenancy-section {
+.organization-admin-section {
   display: grid;
   gap: var(--axis-space-175);
 }
 
-.tenancy-section__tabs {
+.organization-admin-section__tabs {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
 
-.tenancy-section__tabs button.btn-primary,
-.tenancy-section__tabs button.btn-primary.active {
+.organization-admin-section__tabs button.btn-primary,
+.organization-admin-section__tabs button.btn-primary.active {
   border-color: var(--axis-primary);
   background: var(--axis-primary);
   color: #ffffff;
 }
 
-.tenancy-section__tabs button.btn-primary:hover:not(:disabled),
-.tenancy-section__tabs button.btn-primary.active:hover:not(:disabled) {
+.organization-admin-section__tabs button.btn-primary:hover:not(:disabled),
+.organization-admin-section__tabs button.btn-primary.active:hover:not(:disabled) {
   border-color: var(--axis-primary-strong);
   background: var(--axis-primary-strong);
 }
@@ -2097,16 +2097,16 @@ p.iam-control__inline-note {
   grid-column: 1 / -1;
 }
 
-.tenants-control .crud-form {
+.organizations-control .crud-form {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: end;
 }
 
-.tenants-control .crud-form-grid {
+.organizations-control .crud-form-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.tenants-control .crud-form > .actions-row {
+.organizations-control .crud-form > .actions-row {
   align-self: end;
   padding-bottom: 0;
 }
@@ -3575,7 +3575,7 @@ tbody tr:focus-within {
     white-space: normal;
   }
 
-  .tenants-control .crud-form {
+  .organizations-control .crud-form {
     grid-template-columns: 1fr;
   }
 

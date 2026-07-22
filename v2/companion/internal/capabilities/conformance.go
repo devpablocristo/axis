@@ -86,7 +86,7 @@ func validateConformance(ctx context.Context, capability domain.Capability, chec
 		quotaAreasOK = quotaAreasOK && oneOf(area, quotas.AreaInbound, quotas.AreaLLM, quotas.AreaEmbeddings, quotas.AreaBytes, quotas.AreaExecutors)
 	}
 	if quotaAreasOK && checker != nil {
-		configured, err := checker.HasActivePolicies(ctx, capability.TenantID, manifest.ProductSurface, manifest.QuotaAreas)
+		configured, err := checker.HasActivePolicies(ctx, capability.OrgID, manifest.ProductSurface, manifest.QuotaAreas)
 		if err != nil {
 			return report, fmt.Errorf("check quota policies: %w", err)
 		}
@@ -94,7 +94,7 @@ func validateConformance(ctx context.Context, capability domain.Capability, chec
 	} else if checker == nil {
 		quotaAreasOK = false
 	}
-	add("quotas", quotaAreasOK, "all declared quota areas need active tenant/product policies; inbound is mandatory and writes also require executors")
+	add("quotas", quotaAreasOK, "all declared quota areas need active organization/product policies; inbound is mandatory and writes also require executors")
 
 	report.Conformant = capability.ManifestHash != ""
 	for _, check := range report.Checks {

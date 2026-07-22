@@ -26,7 +26,7 @@ func (f *fakeOperationalRepository) ReleaseExecutionRecovery(context.Context, st
 func TestOperationalWatcherFinalizesStaleAssistAndAudits(t *testing.T) {
 	runID, virployeeID := uuid.New(), uuid.New()
 	repo := &fakeOperationalRepository{fakeExecRepo: &fakeExecRepo{}, assists: []TimedOutAssist{{
-		ID: runID, TenantID: "tenant-1", VirployeeID: virployeeID, InputHash: "sha256:input", Outcome: "timed_out",
+		ID: runID, OrgID: "organization-1", VirployeeID: virployeeID, InputHash: "sha256:input", Outcome: "timed_out",
 	}}}
 	emitter := &fakeAuditEmitter{}
 	uc := &UseCases{executionRepo: repo, auditEmitter: emitter, executors: map[string]ActionExecutorPort{}}
@@ -48,7 +48,7 @@ func TestOperationalWatcherFinalizesStaleAssistAndAudits(t *testing.T) {
 func TestOperationalWatcherRecoversPreAnswerAssistAndAudits(t *testing.T) {
 	runID, virployeeID := uuid.New(), uuid.New()
 	repo := &fakeOperationalRepository{fakeExecRepo: &fakeExecRepo{}, assists: []TimedOutAssist{{
-		ID: runID, TenantID: "tenant-1", VirployeeID: virployeeID, InputHash: "sha256:input", Outcome: "recovered",
+		ID: runID, OrgID: "organization-1", VirployeeID: virployeeID, InputHash: "sha256:input", Outcome: "recovered",
 	}}}
 	emitter := &fakeAuditEmitter{}
 	uc := &UseCases{executionRepo: repo, auditEmitter: emitter, executors: map[string]ActionExecutorPort{}}

@@ -7,7 +7,7 @@ import (
 )
 
 // AuditEvent is one sealed entry in a virployee's tamper-evident ledger. Events
-// are chained per virployee (ChainScope = "<tenant_id>/<virployee_id>"): each
+// are chained per virployee (ChainScope = "<org_id>/<virployee_id>"): each
 // event's PreviousHash points at the prior event's EventHash, so reordering,
 // deleting or editing any event breaks the chain and verification detects it.
 //
@@ -16,7 +16,7 @@ import (
 // content hash (e.g. data.output_hash).
 type AuditEvent struct {
 	ID             uuid.UUID
-	TenantID       string
+	OrgID          string
 	ChainScope     string
 	VirployeeID    string
 	SubjectType    string
@@ -45,13 +45,13 @@ const (
 	EventAttestationVerified = "executor_attestation_verified"
 )
 
-// ChainScopeFor builds the per-virployee chain scope. Tenant is always included
-// so two tenants can never share a chain.
-func ChainScopeFor(tenantID, virployeeID string) string {
-	return tenantID + "/" + virployeeID
+// ChainScopeFor builds the per-virployee chain scope. Organization is always included
+// so two organizations can never share a chain.
+func ChainScopeFor(orgID, virployeeID string) string {
+	return orgID + "/" + virployeeID
 }
 
-// AppendInput is the caller-supplied part of an event. Tenant and (optionally)
+// AppendInput is the caller-supplied part of an event. Organization and (optionally)
 // the actor come from the trusted request headers, not the body.
 type AppendInput struct {
 	IdempotencyKey string

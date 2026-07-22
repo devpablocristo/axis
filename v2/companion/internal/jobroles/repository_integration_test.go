@@ -21,11 +21,11 @@ func TestRepositoryPersistsProfessionalDefinition(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	tenantID := "job-role-definition-test-" + uuid.NewString()
-	defer func() { _, _ = pool.Exec(context.Background(), `DELETE FROM job_roles WHERE tenant_id=$1`, tenantID) }()
+	orgID := "job-role-definition-test-" + uuid.NewString()
+	defer func() { _, _ = pool.Exec(context.Background(), `DELETE FROM job_roles WHERE org_id=$1`, orgID) }()
 
 	repo := NewRepository(pool)
-	created, err := repo.Create(ctx, tenantID, domain.NormalizedCreateInput{
+	created, err := repo.Create(ctx, orgID, domain.NormalizedCreateInput{
 		Name:    "Clinical doctor",
 		Slug:    "clinical-doctor",
 		Mission: "Care for patients",
@@ -39,7 +39,7 @@ func TestRepositoryPersistsProfessionalDefinition(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	loaded, err := repo.Get(ctx, tenantID, created.ID)
+	loaded, err := repo.Get(ctx, orgID, created.ID)
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -48,7 +48,7 @@ func TestRepositoryPersistsProfessionalDefinition(t *testing.T) {
 		t.Fatalf("professional definition did not round-trip: %+v", loaded)
 	}
 
-	updated, err := repo.Update(ctx, tenantID, created.ID, domain.NormalizedUpdateInput{
+	updated, err := repo.Update(ctx, orgID, created.ID, domain.NormalizedUpdateInput{
 		Name: "Clinical doctor", Slug: "clinical-doctor", Mission: "Care safely",
 		Responsibilities: []domain.Responsibility{}, SuccessCriteria: []domain.SuccessCriterion{},
 	})

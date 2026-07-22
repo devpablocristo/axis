@@ -158,7 +158,7 @@ func TestEvaluateCalendarDeleteIntent(t *testing.T) {
 }
 
 func TestEvaluateIgnoresUnassignedCapabilities(t *testing.T) {
-	// Data-driven per tenant: with no capabilities assigned the catalog is
+	// Data-driven per organization: with no capabilities assigned the catalog is
 	// empty, so an action request is not recognized at all. The deterministic
 	// matcher can never infer an intent for an unassigned capability.
 	result := Evaluate("Agendá una reunión para mañana", runtimecontext.Context{

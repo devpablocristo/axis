@@ -19,7 +19,7 @@ share a Virployee, but never share private memory, documents or case context.
 
 ## Work subjects and employer relationships
 
-`work_subjects` are tenant-owned identities with an optional product-owned
+`work_subjects` are organization-owned identities with an optional product-owned
 `external_ref`. Supported kinds are `person`, `organization`, `team` and
 `patient`. Archive retains the identity and history while excluding it from new
 capacity calculations.
@@ -31,9 +31,9 @@ A Virployee has explicit relationships to subjects:
 - `reports_to`: an operational reporting relationship.
 
 Replacing relationships is atomic and requires exactly one primary
-`works_for`. The tenant remains the storage and authorization boundary; the
+`works_for`. The organization remains the storage and authorization boundary; the
 primary employer describes whom the Virployee works for and does not replace
-tenant ownership.
+organization ownership.
 
 ## Pools and capacity
 
@@ -57,7 +57,7 @@ Virployees in the same profession to have different capacity.
 The continuity key is:
 
 ```text
-tenant + routing_pool + work_subject -> virployee
+organization + routing_pool + work_subject -> virployee
 ```
 
 `POST /v1/virployee-routing/resolve` behaves as follows:
@@ -74,14 +74,14 @@ tenant + routing_pool + work_subject -> virployee
 
 Callers may also supply a canonical `capability_key`. In that case both an
 existing assignee and every new candidate must have that active, conformant
-capability assigned and sufficient autonomy. Legacy Medmory aliases are
-normalized to `clinical.records.search` or `clinical.timeline.build` before the
-query. A capability mismatch returns `reassignment_required` for an existing
+capability assigned and sufficient autonomy. Axis accepts only canonical
+capability keys; product-owned aliases must be translated by the consumer
+before the query. A capability mismatch returns `reassignment_required` for an existing
 assignment or `unavailable` for a new one; it never rotates the subject
 silently.
 
-Resolution serializes by tenant and pool and the database enforces one row per
-`tenant + pool + subject`. Concurrent resolves therefore converge on a single
+Resolution serializes by organization and pool and the database enforces one row per
+`organization + pool + subject`. Concurrent resolves therefore converge on a single
 assignment.
 
 Reassignment is an explicit owner/admin operation. It requires the current
@@ -94,7 +94,7 @@ assignment must no longer execute.
 ## Assist contract
 
 Assist receives `subject_id`, an optional `case_id`, and the resolved continuity
-`assignment_id`. Companion verifies that tenant, pool, subject, assignment and
+`assignment_id`. Companion verifies that organization, pool, subject, assignment and
 responsible Virployee agree before work is accepted and snapshots the current
 assignment version. It revalidates that version before processing durable work.
 A case can narrow context further, but cannot widen the subject boundary.
@@ -106,7 +106,7 @@ work context.
 ## API
 
 Companion exposes the following under `/v1`; BFF forwards the same paths below
-`/api` after resolving tenant and actor context:
+`/api` after resolving organization and actor context:
 
 ```text
 GET|POST            /work-subjects
@@ -127,7 +127,7 @@ GET                   /virployee-routing/assignments
 POST                  /virployee-routing/assignments/:assignment_id/reassign
 ```
 
-All database lookups include `tenant_id`; cross-tenant identifiers are rejected
+All database lookups include `org_id`; cross-organization identifiers are rejected
 as missing or invalid rather than resolved globally.
 
 ## Acceptance invariants

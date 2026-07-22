@@ -17,7 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func TestRealClerkUsersAndTenantsE2E(t *testing.T) {
+func TestRealClerkUsersAndProductsE2E(t *testing.T) {
 	if os.Getenv("BFF_V2_REAL_CLERK_E2E") != "1" {
 		t.Skip("set BFF_V2_REAL_CLERK_E2E=1 to run against real Clerk")
 	}
@@ -49,9 +49,9 @@ func TestRealClerkUsersAndTenantsE2E(t *testing.T) {
 
 	principalID := uuid.NewString()
 	orgID := uuid.NewString()
-	axisTenantID := uuid.NewString()
+	axisProductID := uuid.NewString()
 	orgName := firstEnvDefault("BFF_V2_REAL_CLERK_ORG_NAME", "Real Clerk Org")
-	seedRealClerkTenantFixture(t, deps.DB.Pool(), principalID, orgID, axisTenantID, providerOrgID, orgName)
+	seedRealClerkProductFixture(t, deps.DB.Pool(), principalID, orgID, axisProductID, providerOrgID, orgName)
 
 	email := fmt.Sprintf("axis-real-e2e-%d@example.com", time.Now().UnixNano())
 	var providerUserID string
@@ -61,7 +61,7 @@ func TestRealClerkUsersAndTenantsE2E(t *testing.T) {
 		}
 	})
 
-	created := doBFFRequest(t, deps.Router, http.MethodPost, "/api/users", axisTenantID, principalID, map[string]any{
+	created := doBFFRequest(t, deps.Router, http.MethodPost, "/api/users", orgID, principalID, map[string]any{
 		"email": email,
 		"role":  "member",
 	})
@@ -78,14 +78,14 @@ func TestRealClerkUsersAndTenantsE2E(t *testing.T) {
 		t.Fatalf("created user missing provider_user_id")
 	}
 
-	users := doBFFRequest(t, deps.Router, http.MethodGet, "/api/users", axisTenantID, principalID, nil)
+	users := doBFFRequest(t, deps.Router, http.MethodGet, "/api/users", orgID, principalID, nil)
 	assertStatus(t, users, http.StatusOK)
 	if findByEmail(listData(t, users.Payload), email) == nil {
-		t.Fatalf("expected real Clerk user in tenant list, payload=%v", users.Payload)
+		t.Fatalf("expected real Clerk user in product list, payload=%v", users.Payload)
 	}
 
 	updatedEmail := fmt.Sprintf("axis-real-e2e-updated-%d@example.com", time.Now().UnixNano())
-	updated := doBFFRequest(t, deps.Router, http.MethodPut, "/api/users/"+stringField(created.Payload, "id"), axisTenantID, principalID, map[string]any{
+	updated := doBFFRequest(t, deps.Router, http.MethodPut, "/api/users/"+stringField(created.Payload, "id"), axisProductID, principalID, map[string]any{
 		"email": updatedEmail,
 		"role":  "admin",
 	})
@@ -100,27 +100,27 @@ func TestRealClerkUsersAndTenantsE2E(t *testing.T) {
 		t.Fatalf("expected Clerk user %s to have updated email %s", providerUserID, updatedEmail)
 	}
 
-	trashed := doBFFRequest(t, deps.Router, http.MethodPost, "/api/users/"+stringField(created.Payload, "id")+"/trash", axisTenantID, principalID, nil)
+	trashed := doBFFRequest(t, deps.Router, http.MethodPost, "/api/users/"+stringField(created.Payload, "id")+"/trash", axisProductID, principalID, nil)
 	assertStatus(t, trashed, http.StatusNoContent)
-	trashUsers := doBFFRequest(t, deps.Router, http.MethodGet, "/api/users?lifecycle=trash", axisTenantID, principalID, nil)
+	trashUsers := doBFFRequest(t, deps.Router, http.MethodGet, "/api/users?lifecycle=trash", orgID, principalID, nil)
 	assertStatus(t, trashUsers, http.StatusOK)
 	if findByEmail(listData(t, trashUsers.Payload), updatedEmail) == nil {
 		t.Fatalf("expected updated user in trash list, payload=%v", trashUsers.Payload)
 	}
 
-	purged := doBFFRequest(t, deps.Router, http.MethodDelete, "/api/users/"+stringField(created.Payload, "id")+"/purge", axisTenantID, principalID, nil)
+	purged := doBFFRequest(t, deps.Router, http.MethodDelete, "/api/users/"+stringField(created.Payload, "id")+"/purge", axisProductID, principalID, nil)
 	assertStatus(t, purged, http.StatusNoContent)
 	if realClerkUserExists(t, secretKey, providerUserID) {
 		t.Fatalf("expected Clerk user %s to be deleted by purge", providerUserID)
 	}
 	providerUserID = ""
 
-	ponti := doBFFRequest(t, deps.Router, http.MethodPost, "/api/tenants", "", principalID, map[string]any{
+	productb := doBFFRequest(t, deps.Router, http.MethodPost, "/api/organizations/"+orgID+"/products", "", principalID, map[string]any{
 		"org_id":          orgID,
-		"product_surface": "ponti",
+		"product_surface": "companion",
 	})
-	assertStatus(t, ponti, http.StatusCreated)
-	assertOrgName(t, ponti.Payload, orgName, orgID)
+	assertStatus(t, productb, http.StatusCreated)
+	assertOrgName(t, productb.Payload, orgName, orgID)
 }
 
 func firstEnv(keys ...string) string {
@@ -139,7 +139,7 @@ func firstEnvDefault(key, fallback string) string {
 	return fallback
 }
 
-func seedRealClerkTenantFixture(t *testing.T, pool *pgxpool.Pool, principalID, orgID, axisTenantID, providerOrgID, orgName string) {
+func seedRealClerkProductFixture(t *testing.T, pool *pgxpool.Pool, principalID, orgID, axisProductID, providerOrgID, orgName string) {
 	t.Helper()
 	now := time.Now().UTC()
 	ctx := context.Background()
@@ -162,16 +162,16 @@ func seedRealClerkTenantFixture(t *testing.T, pool *pgxpool.Pool, principalID, o
 		t.Fatalf("seed clerk org: %v", err)
 	}
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO axis_tenants (id, org_id, product_surface, status, created_at, updated_at)
-		VALUES ($1::uuid, $2::uuid, 'axis', 'active', $3, $3)
-	`, axisTenantID, orgID, now); err != nil {
-		t.Fatalf("seed axis tenant: %v", err)
+		INSERT INTO axis_products (id, org_id, product_surface, name, status, created_at, updated_at)
+		VALUES ($1::uuid, $2::uuid, 'axis', 'Axis', 'active', $3, $3)
+	`, axisProductID, orgID, now); err != nil {
+		t.Fatalf("seed axis product: %v", err)
 	}
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO axis_tenant_members (tenant_id, user_id, role, status, created_at, updated_at)
+		INSERT INTO axis_org_members (org_id, user_id, role, status, created_at, updated_at)
 		VALUES ($1::uuid, $2::uuid, 'owner', 'active', $3, $3)
-	`, axisTenantID, principalID, now); err != nil {
-		t.Fatalf("seed principal tenant membership: %v", err)
+	`, orgID, principalID, now); err != nil {
+		t.Fatalf("seed principal organization membership: %v", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		t.Fatalf("commit real e2e seed tx: %v", err)

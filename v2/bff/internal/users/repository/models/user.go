@@ -7,13 +7,13 @@ import (
 	"github.com/google/uuid"
 )
 
-type TenantUser struct {
-	ID       string
-	Kind     string
-	Email    string
-	Role     string
-	TenantID uuid.UUID
-	State    string
+type ProductUser struct {
+	ID    string
+	Kind  string
+	Email string
+	Role  string
+	OrgID uuid.UUID
+	State string
 
 	CreatedAt time.Time
 	UpdatedAt time.Time
@@ -23,13 +23,13 @@ type TenantUser struct {
 	PurgeAfter *time.Time
 }
 
-func (u TenantUser) ToDomain() domain.User {
+func (u ProductUser) ToDomain() domain.User {
 	return domain.User{
 		ID:         u.ID,
 		Kind:       u.Kind,
 		Email:      u.Email,
 		Role:       u.Role,
-		TenantID:   u.TenantID,
+		OrgID:      u.OrgID,
 		State:      stateOrLifecycle(u.State, u.ArchivedAt, u.TrashedAt),
 		CreatedAt:  u.CreatedAt,
 		UpdatedAt:  u.UpdatedAt,

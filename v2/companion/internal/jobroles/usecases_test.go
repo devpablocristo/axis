@@ -18,7 +18,7 @@ func TestUseCasesCreateAndListActive(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	created, err := uc.Create(context.Background(), "tenant-1", domain.CreateInput{
+	created, err := uc.Create(context.Background(), "organization-1", domain.CreateInput{
 		Name:             " Sales Assistant ",
 		Responsibilities: []domain.Responsibility{{Title: " Qualify leads ", ExpectedOutcome: " Qualified pipeline ", Priority: 1}},
 		SuccessCriteria:  []domain.SuccessCriterion{{Title: " Response time ", TargetValue: "under 5 minutes", Priority: 1}},
@@ -26,14 +26,14 @@ func TestUseCasesCreateAndListActive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if created.TenantID != "tenant-1" || created.Name != "Sales Assistant" || created.Slug != "sales-assistant" {
+	if created.OrgID != "organization-1" || created.Name != "Sales Assistant" || created.Slug != "sales-assistant" {
 		t.Fatalf("unexpected create output: %+v", created)
 	}
 	if len(created.Responsibilities) != 1 || created.Responsibilities[0].Title != "Qualify leads" || len(created.SuccessCriteria) != 1 {
 		t.Fatalf("professional definition was not persisted: %+v", created)
 	}
 
-	active, err := uc.ListActive(context.Background(), "tenant-1")
+	active, err := uc.ListActive(context.Background(), "organization-1")
 	if err != nil {
 		t.Fatalf("ListActive: %v", err)
 	}
@@ -48,40 +48,40 @@ func TestUseCasesLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := uc.Create(context.Background(), "tenant-1", domain.CreateInput{Name: "Ops"})
+	created, err := uc.Create(context.Background(), "organization-1", domain.CreateInput{Name: "Ops"})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if err := uc.Archive(context.Background(), "tenant-1", created.ID, "", ""); err != nil {
+	if err := uc.Archive(context.Background(), "organization-1", created.ID, "", ""); err != nil {
 		t.Fatalf("Archive: %v", err)
 	}
 	assertListLen(t, uc.ListActive, 0)
 	assertListLen(t, uc.ListArchived, 1)
 
-	if err := uc.Unarchive(context.Background(), "tenant-1", created.ID, "", ""); err != nil {
+	if err := uc.Unarchive(context.Background(), "organization-1", created.ID, "", ""); err != nil {
 		t.Fatalf("Unarchive: %v", err)
 	}
 	assertListLen(t, uc.ListActive, 1)
 
-	if err := uc.Trash(context.Background(), "tenant-1", created.ID, "", ""); err != nil {
+	if err := uc.Trash(context.Background(), "organization-1", created.ID, "", ""); err != nil {
 		t.Fatalf("Trash: %v", err)
 	}
 	assertListLen(t, uc.ListActive, 0)
 	assertListLen(t, uc.ListTrash, 1)
 
-	if err := uc.Restore(context.Background(), "tenant-1", created.ID, "", ""); err != nil {
+	if err := uc.Restore(context.Background(), "organization-1", created.ID, "", ""); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
 	assertListLen(t, uc.ListActive, 1)
 
-	if err := uc.Trash(context.Background(), "tenant-1", created.ID, "", ""); err != nil {
+	if err := uc.Trash(context.Background(), "organization-1", created.ID, "", ""); err != nil {
 		t.Fatalf("Trash again: %v", err)
 	}
-	if err := uc.Purge(context.Background(), "tenant-1", created.ID, "", ""); err != nil {
+	if err := uc.Purge(context.Background(), "organization-1", created.ID, "", ""); err != nil {
 		t.Fatalf("Purge: %v", err)
 	}
-	if _, err := uc.Get(context.Background(), "tenant-1", created.ID); !domainerr.IsNotFound(err) {
+	if _, err := uc.Get(context.Background(), "organization-1", created.ID); !domainerr.IsNotFound(err) {
 		t.Fatalf("expected not found after purge, got %v", err)
 	}
 }
@@ -92,24 +92,24 @@ func TestUseCasesEnsureActive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := uc.Create(context.Background(), "tenant-1", domain.CreateInput{Name: "Ops"})
+	created, err := uc.Create(context.Background(), "organization-1", domain.CreateInput{Name: "Ops"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := uc.EnsureActive(context.Background(), "tenant-1", created.ID); err != nil {
+	if err := uc.EnsureActive(context.Background(), "organization-1", created.ID); err != nil {
 		t.Fatalf("EnsureActive: %v", err)
 	}
-	if err := uc.Archive(context.Background(), "tenant-1", created.ID, "", ""); err != nil {
+	if err := uc.Archive(context.Background(), "organization-1", created.ID, "", ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := uc.EnsureActive(context.Background(), "tenant-1", created.ID); !domainerr.IsConflict(err) {
+	if err := uc.EnsureActive(context.Background(), "organization-1", created.ID); !domainerr.IsConflict(err) {
 		t.Fatalf("expected conflict for archived job role, got %v", err)
 	}
 }
 
 func assertListLen(t *testing.T, fn func(context.Context, string) ([]domain.JobRole, error), want int) {
 	t.Helper()
-	got, err := fn(context.Background(), "tenant-1")
+	got, err := fn(context.Background(), "organization-1")
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -126,16 +126,16 @@ func newFakeRepo() *fakeRepo {
 	return &fakeRepo{rows: make(map[uuid.UUID]domain.JobRole)}
 }
 
-func (r *fakeRepo) Create(_ context.Context, tenantID string, input domain.NormalizedCreateInput) (domain.JobRole, error) {
+func (r *fakeRepo) Create(_ context.Context, orgID string, input domain.NormalizedCreateInput) (domain.JobRole, error) {
 	now := time.Now().UTC()
 	for _, row := range r.rows {
-		if row.TenantID == tenantID && row.Slug == input.Slug {
+		if row.OrgID == orgID && row.Slug == input.Slug {
 			return domain.JobRole{}, domainerr.Conflict("job role slug already exists")
 		}
 	}
 	row := domain.JobRole{
 		ID:               uuid.New(),
-		TenantID:         tenantID,
+		OrgID:            orgID,
 		Name:             input.Name,
 		Slug:             input.Slug,
 		Mission:          input.Mission,
@@ -148,34 +148,34 @@ func (r *fakeRepo) Create(_ context.Context, tenantID string, input domain.Norma
 	return row, nil
 }
 
-func (r *fakeRepo) List(_ context.Context, tenantID string, state domain.State) ([]domain.JobRole, error) {
+func (r *fakeRepo) List(_ context.Context, orgID string, state domain.State) ([]domain.JobRole, error) {
 	out := []domain.JobRole{}
 	for _, row := range r.rows {
-		if row.TenantID == tenantID && row.State() == state {
+		if row.OrgID == orgID && row.State() == state {
 			out = append(out, row)
 		}
 	}
 	return out, nil
 }
 
-func (r *fakeRepo) Get(_ context.Context, tenantID string, id uuid.UUID) (domain.JobRole, error) {
+func (r *fakeRepo) Get(_ context.Context, orgID string, id uuid.UUID) (domain.JobRole, error) {
 	row, ok := r.rows[id]
-	if !ok || row.TenantID != tenantID || row.State() == domain.StateTrashed {
+	if !ok || row.OrgID != orgID || row.State() == domain.StateTrashed {
 		return domain.JobRole{}, domainerr.NotFoundf("job role", id.String())
 	}
 	return row, nil
 }
 
-func (r *fakeRepo) Update(_ context.Context, tenantID string, id uuid.UUID, input domain.NormalizedUpdateInput) (domain.JobRole, error) {
+func (r *fakeRepo) Update(_ context.Context, orgID string, id uuid.UUID, input domain.NormalizedUpdateInput) (domain.JobRole, error) {
 	row, ok := r.rows[id]
-	if !ok || row.TenantID != tenantID {
+	if !ok || row.OrgID != orgID {
 		return domain.JobRole{}, domainerr.NotFoundf("job role", id.String())
 	}
 	if row.State() != domain.StateActive {
 		return domain.JobRole{}, domainerr.Conflict("job role is not active")
 	}
 	for existingID, existing := range r.rows {
-		if existingID != id && existing.TenantID == tenantID && existing.Slug == input.Slug {
+		if existingID != id && existing.OrgID == orgID && existing.Slug == input.Slug {
 			return domain.JobRole{}, domainerr.Conflict("job role slug already exists")
 		}
 	}
@@ -189,9 +189,9 @@ func (r *fakeRepo) Update(_ context.Context, tenantID string, id uuid.UUID, inpu
 	return row, nil
 }
 
-func (r *fakeRepo) Archive(_ context.Context, tenantID string, id uuid.UUID, at time.Time) error {
+func (r *fakeRepo) Archive(_ context.Context, orgID string, id uuid.UUID, at time.Time) error {
 	row, ok := r.rows[id]
-	if !ok || row.TenantID != tenantID || row.State() != domain.StateActive {
+	if !ok || row.OrgID != orgID || row.State() != domain.StateActive {
 		return domainerr.NotFoundf("job role", id.String())
 	}
 	row.ArchivedAt = &at
@@ -200,9 +200,9 @@ func (r *fakeRepo) Archive(_ context.Context, tenantID string, id uuid.UUID, at 
 	return nil
 }
 
-func (r *fakeRepo) Unarchive(_ context.Context, tenantID string, id uuid.UUID) error {
+func (r *fakeRepo) Unarchive(_ context.Context, orgID string, id uuid.UUID) error {
 	row, ok := r.rows[id]
-	if !ok || row.TenantID != tenantID || row.State() != domain.StateArchived {
+	if !ok || row.OrgID != orgID || row.State() != domain.StateArchived {
 		return domainerr.NotFoundf("job role", id.String())
 	}
 	row.ArchivedAt = nil
@@ -211,9 +211,9 @@ func (r *fakeRepo) Unarchive(_ context.Context, tenantID string, id uuid.UUID) e
 	return nil
 }
 
-func (r *fakeRepo) Trash(_ context.Context, tenantID string, id uuid.UUID, at time.Time, purgeAfter *time.Time) error {
+func (r *fakeRepo) Trash(_ context.Context, orgID string, id uuid.UUID, at time.Time, purgeAfter *time.Time) error {
 	row, ok := r.rows[id]
-	if !ok || row.TenantID != tenantID || row.State() == domain.StateTrashed {
+	if !ok || row.OrgID != orgID || row.State() == domain.StateTrashed {
 		return domainerr.NotFoundf("job role", id.String())
 	}
 	row.ArchivedAt = nil
@@ -224,9 +224,9 @@ func (r *fakeRepo) Trash(_ context.Context, tenantID string, id uuid.UUID, at ti
 	return nil
 }
 
-func (r *fakeRepo) Restore(_ context.Context, tenantID string, id uuid.UUID) error {
+func (r *fakeRepo) Restore(_ context.Context, orgID string, id uuid.UUID) error {
 	row, ok := r.rows[id]
-	if !ok || row.TenantID != tenantID || row.State() != domain.StateTrashed {
+	if !ok || row.OrgID != orgID || row.State() != domain.StateTrashed {
 		return domainerr.NotFoundf("job role", id.String())
 	}
 	row.TrashedAt = nil
@@ -236,26 +236,26 @@ func (r *fakeRepo) Restore(_ context.Context, tenantID string, id uuid.UUID) err
 	return nil
 }
 
-func (r *fakeRepo) Purge(_ context.Context, tenantID string, id uuid.UUID) error {
+func (r *fakeRepo) Purge(_ context.Context, orgID string, id uuid.UUID) error {
 	row, ok := r.rows[id]
-	if !ok || row.TenantID != tenantID {
+	if !ok || row.OrgID != orgID {
 		return domainerr.NotFoundf("job role", id.String())
 	}
 	delete(r.rows, id)
 	return nil
 }
 
-func (r *fakeRepo) IsArchived(_ context.Context, tenantID string, id uuid.UUID) (bool, error) {
+func (r *fakeRepo) IsArchived(_ context.Context, orgID string, id uuid.UUID) (bool, error) {
 	row, ok := r.rows[id]
-	if !ok || row.TenantID != tenantID {
+	if !ok || row.OrgID != orgID {
 		return false, domainerr.NotFoundf("job role", id.String())
 	}
 	return row.State() == domain.StateArchived, nil
 }
 
-func (r *fakeRepo) State(_ context.Context, tenantID string, id uuid.UUID) (lifecycle.LifecycleState, error) {
+func (r *fakeRepo) State(_ context.Context, orgID string, id uuid.UUID) (lifecycle.LifecycleState, error) {
 	row, ok := r.rows[id]
-	if !ok || row.TenantID != tenantID {
+	if !ok || row.OrgID != orgID {
 		return "", domainerr.NotFoundf("job role", id.String())
 	}
 	return lifecycleState(row.State()), nil

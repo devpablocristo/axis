@@ -37,7 +37,7 @@ var roleDefinitions = []RoleDefinition{
 
 type Grant struct {
 	ID                uuid.UUID  `json:"id"`
-	TenantID          string     `json:"tenant_id"`
+	OrgID             string     `json:"org_id"`
 	UserID            string     `json:"user_id"`
 	RoleKey           string     `json:"role_key"`
 	ProductSurface    string     `json:"product_surface,omitempty"`
@@ -74,7 +74,7 @@ type RevokeInput struct {
 }
 
 type CheckInput struct {
-	TenantID       string `json:"-"`
+	OrgID          string `json:"-"`
 	ActorID        string `json:"actor_id"`
 	ActorRole      string `json:"actor_role"`
 	Permission     string `json:"permission"`

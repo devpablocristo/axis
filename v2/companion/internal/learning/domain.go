@@ -2,7 +2,7 @@
 // executions are distilled into procedure PROPOSALS that wait in an inbox for
 // human review. A proposal only becomes memory through an explicit human
 // Accept (never automatically) — the same analyzer→proposer→human-accept
-// pattern v1 proved for governance policies, re-keyed per tenant.
+// pattern v1 proved for governance policies, re-keyed per organization.
 package learning
 
 import (
@@ -27,7 +27,7 @@ const (
 // Proposal is a distilled procedure candidate awaiting human review.
 type Proposal struct {
 	ID             uuid.UUID      `json:"id"`
-	TenantID       string         `json:"tenant_id"`
+	OrgID          string         `json:"org_id"`
 	VirployeeID    uuid.UUID      `json:"virployee_id"`
 	CapabilityKey  string         `json:"capability_key"`
 	Title          string         `json:"title"`

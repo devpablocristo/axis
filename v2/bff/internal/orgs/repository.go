@@ -48,7 +48,7 @@ func (r *Repository) Ensure(ctx context.Context, input domain.EnsureInput) (doma
 		RETURNING id, provider, provider_org_id, name, slug, status, synced_at, created_at, updated_at, archived_at, trashed_at, purge_after
 		)
 		SELECT u.id, u.provider, u.provider_org_id, u.name, u.slug, u.status, u.synced_at,
-			(SELECT COUNT(*)::int FROM axis_tenants t WHERE t.org_id = u.id),
+			(SELECT COUNT(*)::int FROM axis_org_products t WHERE t.org_id = u.id),
 			u.created_at, u.updated_at, u.archived_at, u.trashed_at, u.purge_after
 		FROM upsert u
 	`, id, input.Provider, input.ProviderOrgID, input.Name, input.Slug, input.Status, syncedAt, now)
@@ -58,7 +58,7 @@ func (r *Repository) Ensure(ctx context.Context, input domain.EnsureInput) (doma
 func (r *Repository) Get(ctx context.Context, id string) (domain.Org, error) {
 	row := r.pool.QueryRow(ctx, `
 		SELECT o.id, o.provider, o.provider_org_id, o.name, o.slug, o.status, o.synced_at,
-			(SELECT COUNT(*)::int FROM axis_tenants t WHERE t.org_id = o.id),
+			(SELECT COUNT(*)::int FROM axis_org_products t WHERE t.org_id = o.id),
 			o.created_at, o.updated_at, o.archived_at, o.trashed_at, o.purge_after
 		FROM axis_orgs o
 		WHERE o.id = $1::uuid
@@ -80,7 +80,7 @@ func (r *Repository) List(ctx context.Context, input domain.NormalizedListInput)
 	}
 	rows, err := r.pool.Query(ctx, `
 		SELECT o.id, o.provider, o.provider_org_id, o.name, o.slug, o.status, o.synced_at,
-			(SELECT COUNT(*)::int FROM axis_tenants t WHERE t.org_id = o.id),
+			(SELECT COUNT(*)::int FROM axis_org_products t WHERE t.org_id = o.id),
 			o.created_at, o.updated_at, o.archived_at, o.trashed_at, o.purge_after
 		FROM axis_orgs o
 		WHERE `+where+`
@@ -158,12 +158,12 @@ func (r *Repository) Purge(ctx context.Context, input domain.NormalizedLifecycle
 	return r.lifecycleResult(ctx, input.OrgID, tag, err)
 }
 
-func (r *Repository) HasTenants(ctx context.Context, orgID string) (bool, error) {
+func (r *Repository) HasProducts(ctx context.Context, orgID string) (bool, error) {
 	var exists bool
 	err := r.pool.QueryRow(ctx, `
 		SELECT EXISTS (
 			SELECT 1
-			FROM axis_tenants
+			FROM axis_org_products
 			WHERE org_id = $1::uuid
 		)
 	`, orgID).Scan(&exists)
@@ -184,7 +184,7 @@ func scanOrg(row scanner) (domain.Org, error) {
 		&model.Slug,
 		&model.Status,
 		&model.SyncedAt,
-		&model.TenantCount,
+		&model.ProductCount,
 		&model.CreatedAt,
 		&model.UpdatedAt,
 		&model.ArchivedAt,

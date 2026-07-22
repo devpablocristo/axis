@@ -26,7 +26,7 @@ const (
 
 type Trace struct {
 	ID                uuid.UUID
-	TenantID          string
+	OrgID             string
 	VirployeeID       uuid.UUID
 	Operation         Operation
 	InputHash         string

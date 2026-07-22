@@ -30,7 +30,7 @@ func TestMCPGovernanceInputSendsOnlyMetadataToNexus(t *testing.T) {
 		PayloadHash: "payload", IdempotencyHash: "idempotency", AssignmentID: uuid.NewString(), AssignmentVersion: 2,
 		SubjectID: uuid.NewString(), CaseID: uuid.NewString(),
 	}
-	input := governanceInput("tenant", result, "binding", binding)
+	input := governanceInput("organization", result, "binding", binding)
 	if input.Reason != "MCP capability invocation" || input.TargetResource != binding.CaseID || input.ResourceType != "case" {
 		t.Fatalf("MCP metadata envelope was not applied: %+v", input)
 	}

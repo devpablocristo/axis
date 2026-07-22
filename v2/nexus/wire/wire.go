@@ -156,7 +156,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		if err != nil {
 			return nil, jobs.Retryable("governance_reconciliation_failed", err)
 		}
-		return json.Marshal(map[string]int{"tenants": len(runs)})
+		return json.Marshal(map[string]int{"organizations": len(runs)})
 	})
 	jobsWorker.Register("enterprise.export", operationsService.ProcessExport)
 
@@ -170,8 +170,8 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 			"Authorization",
 			"Content-Type",
 			"X-Actor-ID",
-			"X-Tenant-ID",
-			"X-Axis-Tenant-Role",
+			"X-Org-ID",
+			"X-Axis-Org-Role",
 			"X-Product-Surface",
 			"Idempotency-Key",
 		},
@@ -210,7 +210,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	go func() {
 		defer deps.watcherWG.Done()
 		jobs.RunRecurringScheduler(backgroundCtx, jobsRepository, jobs.RecurringConfig{
-			TenantID: "system", ProductSurface: "nexus", Kind: "approval.expire",
+			OrgID: "system", ProductSurface: "nexus", Kind: "approval.expire",
 			Interval: config.WatcherInterval, Timeout: config.JobTimeout,
 			MaxAttempts: config.WatcherMaxAttempts,
 		})
@@ -218,7 +218,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	go func() {
 		defer deps.watcherWG.Done()
 		jobs.RunRecurringScheduler(backgroundCtx, jobsRepository, jobs.RecurringConfig{
-			TenantID: "system", ProductSurface: "nexus", Kind: "ops.governance_reconcile",
+			OrgID: "system", ProductSurface: "nexus", Kind: "ops.governance_reconcile",
 			Interval: 15 * time.Minute, Timeout: config.JobTimeout,
 			MaxAttempts: config.WatcherMaxAttempts,
 		})

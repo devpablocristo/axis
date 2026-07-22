@@ -95,7 +95,7 @@ const (
 
 type Message struct {
 	ID            uuid.UUID
-	TenantID      string
+	OrgID         string
 	AggregateType string
 	AggregateID   uuid.UUID
 	Kind          string
@@ -206,7 +206,7 @@ func safeMetadataID(value string) bool {
 
 type EnqueueInput struct {
 	ID            uuid.UUID
-	TenantID      string
+	OrgID         string
 	AggregateType string
 	AggregateID   uuid.UUID
 	Kind          string

@@ -11,7 +11,7 @@ import (
 )
 
 type UseCasesPort interface {
-	List(ctx context.Context, tenantID string) ([]CapabilityStats, error)
+	List(ctx context.Context, orgID string) ([]CapabilityStats, error)
 }
 
 type Handler struct {
@@ -27,7 +27,7 @@ func (h *Handler) Routes(router gin.IRouter) {
 }
 
 func (h *Handler) List(c *gin.Context) {
-	out, err := h.ucs.List(c.Request.Context(), tenantID(c))
+	out, err := h.ucs.List(c.Request.Context(), orgID(c))
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -35,8 +35,8 @@ func (h *Handler) List(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": out})
 }
 
-func tenantID(c *gin.Context) string {
+func orgID(c *gin.Context) string {
 	// The /v1 internal-auth middleware already rejects requests without a
-	// trusted X-Tenant-ID, so no fallback here.
-	return strings.TrimSpace(c.GetHeader("X-Tenant-ID"))
+	// trusted X-Org-ID, so no fallback here.
+	return strings.TrimSpace(c.GetHeader("X-Org-ID"))
 }

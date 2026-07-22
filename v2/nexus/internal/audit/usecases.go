@@ -29,10 +29,10 @@ func NewUseCases(repo RepositoryPort) *UseCases {
 	return &UseCases{repo: repo}
 }
 
-func (u *UseCases) Append(ctx context.Context, tenantID string, in auditdomain.AppendInput) (auditdomain.AuditEvent, error) {
-	tenantID = strings.TrimSpace(tenantID)
-	if tenantID == "" {
-		return auditdomain.AuditEvent{}, domainerr.Validation("tenant is required")
+func (u *UseCases) Append(ctx context.Context, orgID string, in auditdomain.AppendInput) (auditdomain.AuditEvent, error) {
+	orgID = strings.TrimSpace(orgID)
+	if orgID == "" {
+		return auditdomain.AuditEvent{}, domainerr.Validation("organization is required")
 	}
 	virployeeID := strings.TrimSpace(in.VirployeeID)
 	if virployeeID == "" {
@@ -47,8 +47,8 @@ func (u *UseCases) Append(ctx context.Context, tenantID string, in auditdomain.A
 		actorType = "service"
 	}
 	event := auditdomain.AuditEvent{
-		TenantID:    tenantID,
-		ChainScope:  auditdomain.ChainScopeFor(tenantID, virployeeID),
+		OrgID:       orgID,
+		ChainScope:  auditdomain.ChainScopeFor(orgID, virployeeID),
 		VirployeeID: virployeeID,
 		SubjectType: strings.TrimSpace(in.SubjectType),
 		SubjectID:   strings.TrimSpace(in.SubjectID),
@@ -98,8 +98,8 @@ type IntegrityOutput struct {
 	Error         string `json:"error,omitempty"`
 }
 
-func (u *UseCases) Replay(ctx context.Context, tenantID, virployeeID string) (ReplayOutput, error) {
-	scope, err := scopeFor(tenantID, virployeeID)
+func (u *UseCases) Replay(ctx context.Context, orgID, virployeeID string) (ReplayOutput, error) {
+	scope, err := scopeFor(orgID, virployeeID)
 	if err != nil {
 		return ReplayOutput{}, err
 	}
@@ -133,8 +133,8 @@ func (u *UseCases) Replay(ctx context.Context, tenantID, virployeeID string) (Re
 	return out, nil
 }
 
-func (u *UseCases) Verify(ctx context.Context, tenantID, virployeeID string) (IntegrityOutput, error) {
-	scope, err := scopeFor(tenantID, virployeeID)
+func (u *UseCases) Verify(ctx context.Context, orgID, virployeeID string) (IntegrityOutput, error) {
+	scope, err := scopeFor(orgID, virployeeID)
 	if err != nil {
 		return IntegrityOutput{}, err
 	}
@@ -151,23 +151,23 @@ func (u *UseCases) Verify(ctx context.Context, tenantID, virployeeID string) (In
 
 // ReplaySubject returns every independently verified virployee chain linked by
 // one subject (for example, an entrypoint run plus specialist consultations).
-func (u *UseCases) ReplaySubject(ctx context.Context, tenantID, subjectID string) ([]ReplayOutput, error) {
-	tenantID = strings.TrimSpace(tenantID)
+func (u *UseCases) ReplaySubject(ctx context.Context, orgID, subjectID string) ([]ReplayOutput, error) {
+	orgID = strings.TrimSpace(orgID)
 	subjectID = strings.TrimSpace(subjectID)
-	if tenantID == "" || subjectID == "" {
-		return nil, domainerr.Validation("tenant and subject are required")
+	if orgID == "" || subjectID == "" {
+		return nil, domainerr.Validation("organization and subject are required")
 	}
 	lister, ok := u.repo.(subjectChainRepository)
 	if !ok {
 		return []ReplayOutput{}, nil
 	}
-	virployeeIDs, err := lister.ListVirployeeIDsBySubject(ctx, tenantID, subjectID)
+	virployeeIDs, err := lister.ListVirployeeIDsBySubject(ctx, orgID, subjectID)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]ReplayOutput, 0, len(virployeeIDs))
 	for _, virployeeID := range virployeeIDs {
-		replay, replayErr := u.Replay(ctx, tenantID, virployeeID)
+		replay, replayErr := u.Replay(ctx, orgID, virployeeID)
 		if replayErr != nil {
 			return nil, replayErr
 		}
@@ -184,16 +184,16 @@ func (u *UseCases) verifySignatures(events []auditdomain.AuditEvent, out Integri
 	return out
 }
 
-func scopeFor(tenantID, virployeeID string) (string, error) {
-	tenantID = strings.TrimSpace(tenantID)
+func scopeFor(orgID, virployeeID string) (string, error) {
+	orgID = strings.TrimSpace(orgID)
 	virployeeID = strings.TrimSpace(virployeeID)
-	if tenantID == "" {
-		return "", domainerr.Validation("tenant is required")
+	if orgID == "" {
+		return "", domainerr.Validation("organization is required")
 	}
 	if virployeeID == "" {
 		return "", domainerr.Validation("virployee_id is required")
 	}
-	return auditdomain.ChainScopeFor(tenantID, virployeeID), nil
+	return auditdomain.ChainScopeFor(orgID, virployeeID), nil
 }
 
 // verifyEvents recomputes every hash and validates the chain. Ported from v1

@@ -8,7 +8,7 @@ import (
 
 // Candidate is a (virployee, capability) pair whose successful executions
 // reached the scan threshold. Extrapolated from v1's learning analyzer: group
-// outcomes, apply a threshold, propose — but always scoped to ONE tenant
+// outcomes, apply a threshold, propose — but always scoped to ONE organization
 // (never v1's cross-org scan) and with a configurable threshold.
 type Candidate struct {
 	VirployeeID   string

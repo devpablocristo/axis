@@ -28,7 +28,7 @@ const (
 
 type Capability struct {
 	ID               uuid.UUID
-	TenantID         string
+	OrgID            string
 	CapabilityKey    string
 	Name             string
 	Description      string

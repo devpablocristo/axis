@@ -51,8 +51,8 @@ func (f *fakeAnswerer) Answer(context.Context, virployees.AnswerInput) (virploye
 
 func testInvocation() mcpgovernance.InvocationContext {
 	return mcpgovernance.InvocationContext{
-		TenantID: "tenant-a", VirployeeID: uuid.New(), SubjectID: uuid.New(),
-		ProductSurface: "medmory", RepositoryGeneration: "generation-1",
+		OrgID: "organization-a", VirployeeID: uuid.New(), SubjectID: uuid.New(),
+		ProductSurface: "producta", RepositoryGeneration: "generation-1",
 	}
 }
 
@@ -105,7 +105,7 @@ func TestSearchPreservesScoreAndBindsCursorToScope(t *testing.T) {
 	if _, err := executor.Execute(context.Background(), invocation, testCapability(RecordsSearchKey, SearchOutputSchema()), map[string]any{"query": "labs", "cursor": cursor}); err == nil {
 		t.Fatal("cursor was reusable for another subject")
 	}
-	if retriever.scopes[0].TenantID != "tenant-a" || retriever.scopes[0].RepositoryGeneration != "generation-1" {
+	if retriever.scopes[0].OrgID != "organization-a" || retriever.scopes[0].RepositoryGeneration != "generation-1" {
 		t.Fatalf("retrieval scope was not exact: %+v", retriever.scopes[0])
 	}
 }

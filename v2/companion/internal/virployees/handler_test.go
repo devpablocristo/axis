@@ -43,7 +43,7 @@ func TestHandlerCreateReturnsAutonomy(t *testing.T) {
 	body := `{"name":"Ops","job_role_id":"` + jobRoleID.String() + `","profile_template_id":"` + profileTemplateID.String() + `","supervisor_user_id":"dev-user","autonomy":"A2","employer_subject_id":"` + uuid.NewString() + `"}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/virployees", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Tenant-ID", "tenant-1")
+	req.Header.Set("X-Org-ID", "organization-1")
 
 	router.ServeHTTP(rec, req)
 
@@ -82,7 +82,7 @@ func TestHandlerCreateRequiresPrimaryEmployer(t *testing.T) {
 	body := `{"name":"Ops","job_role_id":"` + uuid.NewString() + `","profile_template_id":"` + uuid.NewString() + `","supervisor_user_id":"dev-user"}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/virployees", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Tenant-ID", "tenant-1")
+	req.Header.Set("X-Org-ID", "organization-1")
 	router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected missing employer to be rejected, got %d body=%s", rec.Code, rec.Body.String())
@@ -132,15 +132,15 @@ func TestHandlerRuntimeContext(t *testing.T) {
 	id := uuid.New()
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/v1/virployees/"+id.String()+"/runtime-context", nil)
-	req.Header.Set("X-Tenant-ID", "tenant-1")
+	req.Header.Set("X-Org-ID", "organization-1")
 
 	router.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	if fake.lastTenant != "tenant-1" {
-		t.Fatalf("expected tenant-1, got %q", fake.lastTenant)
+	if fake.lastOrg != "organization-1" {
+		t.Fatalf("expected organization-1, got %q", fake.lastOrg)
 	}
 	var payload struct {
 		Virployee struct {
@@ -195,15 +195,15 @@ func TestHandlerDryRun(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/virployees/"+id.String()+"/dry-run", strings.NewReader(`{"input":"Agendá una reunión para mañana"}`))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Tenant-ID", "tenant-1")
+	req.Header.Set("X-Org-ID", "organization-1")
 
 	router.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	if fake.lastTenant != "tenant-1" {
-		t.Fatalf("expected tenant-1, got %q", fake.lastTenant)
+	if fake.lastOrg != "organization-1" {
+		t.Fatalf("expected organization-1, got %q", fake.lastOrg)
 	}
 	var payload struct {
 		Input             string `json:"input"`
@@ -284,7 +284,7 @@ func TestHandlerExecutionGate(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/virployees/"+id.String()+"/execution-gate", strings.NewReader(`{"input":"Agendá una reunión para mañana","assist_run_id":"`+assistRunID.String()+`","principal_type":"person","principal_id":"patient-a","confirmed_draft":{"action":"calendar.events.create","kind":"calendar_event","fields":[{"key":"title","value":"Reunión"},{"key":"date","value":"2026-07-12"},{"key":"time","value":"15:00"},{"key":"timezone","value":"America/Argentina/Buenos_Aires"},{"key":"duration_minutes","value":"60"},{"key":"attendees","value":"ana@example.com"}]}}`))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Tenant-ID", "tenant-1")
+	req.Header.Set("X-Org-ID", "organization-1")
 
 	router.ServeHTTP(rec, req)
 
@@ -343,15 +343,15 @@ func TestHandlerSimulateApprovedExecution(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/virployees/"+id.String()+"/simulated-executions", strings.NewReader(`{"approval_id":"`+approvalID.String()+`"}`))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Tenant-ID", "tenant-1")
+	req.Header.Set("X-Org-ID", "organization-1")
 
 	router.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	if fake.lastTenant != "tenant-1" {
-		t.Fatalf("expected tenant-1, got %q", fake.lastTenant)
+	if fake.lastOrg != "organization-1" {
+		t.Fatalf("expected organization-1, got %q", fake.lastOrg)
 	}
 	var payload struct {
 		Operation       string `json:"operation"`
@@ -375,15 +375,15 @@ func TestHandlerListRuns(t *testing.T) {
 	id := uuid.New()
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/v1/virployees/"+id.String()+"/runs?limit=10", nil)
-	req.Header.Set("X-Tenant-ID", "tenant-1")
+	req.Header.Set("X-Org-ID", "organization-1")
 
 	router.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	if fake.lastTenant != "tenant-1" {
-		t.Fatalf("expected tenant-1, got %q", fake.lastTenant)
+	if fake.lastOrg != "organization-1" {
+		t.Fatalf("expected organization-1, got %q", fake.lastOrg)
 	}
 	var payload struct {
 		Data []struct {
@@ -470,7 +470,7 @@ func TestHandlerSubmitAssistRunReturns202AndPollingReturnsRun(t *testing.T) {
 	post := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/virployees/"+virployeeID.String()+"/assist-runs", strings.NewReader(`{"input":{"documents":[]}}`))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Tenant-ID", "tenant-1")
+	req.Header.Set("X-Org-ID", "organization-1")
 	req.Header.Set("Idempotency-Key", "generation-a")
 	router.ServeHTTP(post, req)
 	if post.Code != http.StatusAccepted {
@@ -486,7 +486,7 @@ func TestHandlerSubmitAssistRunReturns202AndPollingReturnsRun(t *testing.T) {
 
 	poll := httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodGet, "/v1/virployees/"+virployeeID.String()+"/assist-runs/"+submitted.ID, nil)
-	req.Header.Set("X-Tenant-ID", "tenant-1")
+	req.Header.Set("X-Org-ID", "organization-1")
 	router.ServeHTTP(poll, req)
 	if poll.Code != http.StatusOK || !strings.Contains(poll.Body.String(), `"status":"done"`) {
 		t.Fatalf("expected completed poll response, got %d body=%s", poll.Code, poll.Body.String())
@@ -504,13 +504,13 @@ func testRouter(ucs UseCasesPort) *gin.Engine {
 type handlerFakeUseCases struct {
 	lastAction    string
 	lastActor     string
-	lastTenant    string
+	lastOrg       string
 	lastPrincipal executiongate.PrincipalContext
 	lastAssistRun uuid.UUID
 }
 
-func (f *handlerFakeUseCases) Create(_ context.Context, tenantID string, input domain.CreateInput) (domain.Virployee, error) {
-	f.lastTenant = tenantID
+func (f *handlerFakeUseCases) Create(_ context.Context, orgID string, input domain.CreateInput) (domain.Virployee, error) {
+	f.lastOrg = orgID
 	normalized, err := domain.NormalizeCreateInput(input)
 	if err != nil {
 		return domain.Virployee{}, err
@@ -534,8 +534,8 @@ func (f *handlerFakeUseCases) Get(_ context.Context, _ string, id uuid.UUID) (do
 	return domain.Virployee{ID: id, Name: "Ops", JobRoleID: uuid.New(), ProfileTemplateID: uuid.New(), SupervisorUserID: "dev-user", Autonomy: domain.AutonomyA1}, nil
 }
 
-func (f *handlerFakeUseCases) RuntimeContext(_ context.Context, tenantID string, id uuid.UUID) (runtimecontext.Context, error) {
-	f.lastTenant = tenantID
+func (f *handlerFakeUseCases) RuntimeContext(_ context.Context, orgID string, id uuid.UUID) (runtimecontext.Context, error) {
+	f.lastOrg = orgID
 	jobRoleID := uuid.New()
 	profileTemplateID := uuid.New()
 	capabilityID := uuid.New()
@@ -573,8 +573,8 @@ func (f *handlerFakeUseCases) RuntimeContext(_ context.Context, tenantID string,
 	}, nil
 }
 
-func (f *handlerFakeUseCases) DryRun(_ context.Context, tenantID string, id uuid.UUID, input string) (dryrun.Result, error) {
-	ctx, err := f.RuntimeContext(context.Background(), tenantID, id)
+func (f *handlerFakeUseCases) DryRun(_ context.Context, orgID string, id uuid.UUID, input string) (dryrun.Result, error) {
+	ctx, err := f.RuntimeContext(context.Background(), orgID, id)
 	if err != nil {
 		return dryrun.Result{}, err
 	}
@@ -582,18 +582,18 @@ func (f *handlerFakeUseCases) DryRun(_ context.Context, tenantID string, id uuid
 	return result, nil
 }
 
-func (f *handlerFakeUseCases) ExecutionGate(ctx context.Context, tenantID string, id uuid.UUID, input string, confirmedDraft *executiongate.ConfirmedDraft, principalContexts ...executiongate.PrincipalContext) (executiongate.Result, error) {
+func (f *handlerFakeUseCases) ExecutionGate(ctx context.Context, orgID string, id uuid.UUID, input string, confirmedDraft *executiongate.ConfirmedDraft, principalContexts ...executiongate.PrincipalContext) (executiongate.Result, error) {
 	principal := executiongate.PrincipalContext{}
 	if len(principalContexts) > 0 {
 		principal = principalContexts[0]
 	}
-	return f.ExecutionGateWithAssistRun(ctx, tenantID, id, input, confirmedDraft, principal, uuid.Nil)
+	return f.ExecutionGateWithAssistRun(ctx, orgID, id, input, confirmedDraft, principal, uuid.Nil)
 }
 
-func (f *handlerFakeUseCases) ExecutionGateWithAssistRun(ctx context.Context, tenantID string, id uuid.UUID, input string, confirmedDraft *executiongate.ConfirmedDraft, principal executiongate.PrincipalContext, assistRunID uuid.UUID) (executiongate.Result, error) {
+func (f *handlerFakeUseCases) ExecutionGateWithAssistRun(ctx context.Context, orgID string, id uuid.UUID, input string, confirmedDraft *executiongate.ConfirmedDraft, principal executiongate.PrincipalContext, assistRunID uuid.UUID) (executiongate.Result, error) {
 	f.lastPrincipal = principal
 	f.lastAssistRun = assistRunID
-	result, err := f.DryRun(ctx, tenantID, id, input)
+	result, err := f.DryRun(ctx, orgID, id, input)
 	if err != nil {
 		return executiongate.Result{}, err
 	}
@@ -606,11 +606,11 @@ func (f *handlerFakeUseCases) ExecutionGateWithAssistRun(ctx context.Context, te
 	return executiongate.Evaluate(result), nil
 }
 
-func (f *handlerFakeUseCases) SimulateApprovedExecution(_ context.Context, tenantID string, id uuid.UUID, approvalID uuid.UUID) (runtraces.Trace, error) {
-	f.lastTenant = tenantID
+func (f *handlerFakeUseCases) SimulateApprovedExecution(_ context.Context, orgID string, id uuid.UUID, approvalID uuid.UUID) (runtraces.Trace, error) {
+	f.lastOrg = orgID
 	return runtraces.Trace{
 		ID:             uuid.New(),
-		TenantID:       tenantID,
+		OrgID:          orgID,
 		VirployeeID:    id,
 		Operation:      runtraces.OperationSimulatedExecution,
 		InputHash:      runtraces.HashString("Agendá una reunión"),
@@ -633,35 +633,35 @@ func (f *handlerFakeUseCases) SimulateApprovedExecution(_ context.Context, tenan
 	}, nil
 }
 
-func (f *handlerFakeUseCases) ExecuteApprovedAction(_ context.Context, tenantID string, id uuid.UUID, approvalID uuid.UUID) (runtraces.Trace, error) {
-	f.lastTenant = tenantID
+func (f *handlerFakeUseCases) ExecuteApprovedAction(_ context.Context, orgID string, id uuid.UUID, approvalID uuid.UUID) (runtraces.Trace, error) {
+	f.lastOrg = orgID
 	return runtraces.Trace{
-		ID: uuid.New(), TenantID: tenantID, VirployeeID: id, Operation: runtraces.OperationExecution,
+		ID: uuid.New(), OrgID: orgID, VirployeeID: id, Operation: runtraces.OperationExecution,
 		ExecutionResult: &runtraces.ExecutionResult{Status: "succeeded", Mode: "local", ApprovalID: approvalID.String(), ResourceID: uuid.NewString(), NexusReportStatus: "reported"},
 	}, nil
 }
 
-func (f *handlerFakeUseCases) Assist(_ context.Context, tenantID string, id uuid.UUID, _ json.RawMessage, _ string, _ AssistMetadata) (AssistRun, error) {
-	f.lastTenant = tenantID
+func (f *handlerFakeUseCases) Assist(_ context.Context, orgID string, id uuid.UUID, _ json.RawMessage, _ string, _ AssistMetadata) (AssistRun, error) {
+	f.lastOrg = orgID
 	return AssistRun{ID: uuid.New(), VirployeeID: id, Status: "done", Answered: true, Output: json.RawMessage(`{"summary":"ok"}`)}, nil
 }
 
-func (f *handlerFakeUseCases) SubmitAssistAsync(_ context.Context, tenantID string, id uuid.UUID, _ json.RawMessage, _ string, _ AssistMetadata) (AssistRun, error) {
-	f.lastTenant = tenantID
-	return AssistRun{ID: uuid.New(), TenantID: tenantID, VirployeeID: id, Status: "received"}, nil
+func (f *handlerFakeUseCases) SubmitAssistAsync(_ context.Context, orgID string, id uuid.UUID, _ json.RawMessage, _ string, _ AssistMetadata) (AssistRun, error) {
+	f.lastOrg = orgID
+	return AssistRun{ID: uuid.New(), OrgID: orgID, VirployeeID: id, Status: "received"}, nil
 }
 
-func (f *handlerFakeUseCases) GetAssistRun(_ context.Context, tenantID string, virployeeID, runID uuid.UUID) (AssistRun, error) {
-	f.lastTenant = tenantID
-	return AssistRun{ID: runID, TenantID: tenantID, VirployeeID: virployeeID, Status: "done", Answered: true, Output: json.RawMessage(`{"summary":"ok"}`)}, nil
+func (f *handlerFakeUseCases) GetAssistRun(_ context.Context, orgID string, virployeeID, runID uuid.UUID) (AssistRun, error) {
+	f.lastOrg = orgID
+	return AssistRun{ID: runID, OrgID: orgID, VirployeeID: virployeeID, Status: "done", Answered: true, Output: json.RawMessage(`{"summary":"ok"}`)}, nil
 }
 
-func (f *handlerFakeUseCases) ListRuns(_ context.Context, tenantID string, id uuid.UUID, _ int) ([]runtraces.Trace, error) {
-	f.lastTenant = tenantID
+func (f *handlerFakeUseCases) ListRuns(_ context.Context, orgID string, id uuid.UUID, _ int) ([]runtraces.Trace, error) {
+	f.lastOrg = orgID
 	return []runtraces.Trace{
 		{
 			ID:             uuid.New(),
-			TenantID:       tenantID,
+			OrgID:          orgID,
 			VirployeeID:    id,
 			Operation:      runtraces.OperationExecutionGate,
 			InputHash:      runtraces.HashString("Agendá una reunión"),
@@ -685,37 +685,37 @@ func (f *handlerFakeUseCases) Update(_ context.Context, _ string, id uuid.UUID, 
 	return domain.Virployee{ID: id, Name: normalized.Name, JobRoleID: normalized.JobRoleID, ProfileTemplateID: normalized.ProfileTemplateID, SupervisorUserID: normalized.SupervisorUserID, Autonomy: normalized.Autonomy}, nil
 }
 
-func (f *handlerFakeUseCases) Archive(_ context.Context, tenantID string, _ uuid.UUID, actor, _ string) error {
+func (f *handlerFakeUseCases) Archive(_ context.Context, orgID string, _ uuid.UUID, actor, _ string) error {
 	f.lastAction = "archive"
 	f.lastActor = actor
-	f.lastTenant = tenantID
+	f.lastOrg = orgID
 	return nil
 }
 
-func (f *handlerFakeUseCases) Unarchive(_ context.Context, tenantID string, _ uuid.UUID, actor, _ string) error {
+func (f *handlerFakeUseCases) Unarchive(_ context.Context, orgID string, _ uuid.UUID, actor, _ string) error {
 	f.lastAction = "unarchive"
 	f.lastActor = actor
-	f.lastTenant = tenantID
+	f.lastOrg = orgID
 	return nil
 }
 
-func (f *handlerFakeUseCases) Trash(_ context.Context, tenantID string, _ uuid.UUID, actor, _ string) error {
+func (f *handlerFakeUseCases) Trash(_ context.Context, orgID string, _ uuid.UUID, actor, _ string) error {
 	f.lastAction = "trash"
 	f.lastActor = actor
-	f.lastTenant = tenantID
+	f.lastOrg = orgID
 	return nil
 }
 
-func (f *handlerFakeUseCases) Restore(_ context.Context, tenantID string, _ uuid.UUID, actor, _ string) error {
+func (f *handlerFakeUseCases) Restore(_ context.Context, orgID string, _ uuid.UUID, actor, _ string) error {
 	f.lastAction = "restore"
 	f.lastActor = actor
-	f.lastTenant = tenantID
+	f.lastOrg = orgID
 	return nil
 }
 
-func (f *handlerFakeUseCases) Purge(_ context.Context, tenantID string, _ uuid.UUID, actor, _ string) error {
+func (f *handlerFakeUseCases) Purge(_ context.Context, orgID string, _ uuid.UUID, actor, _ string) error {
 	f.lastAction = "purge"
 	f.lastActor = actor
-	f.lastTenant = tenantID
+	f.lastOrg = orgID
 	return nil
 }

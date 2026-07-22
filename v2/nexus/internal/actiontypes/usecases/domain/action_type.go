@@ -12,15 +12,15 @@ import (
 type RiskClass string
 
 const (
-	RiskClassLow    RiskClass = "low"
-	RiskClassMedium RiskClass = "medium"
-	RiskClassHigh   RiskClass = "high"
+	RiskClassLow      RiskClass = "low"
+	RiskClassMedium   RiskClass = "medium"
+	RiskClassHigh     RiskClass = "high"
 	RiskClassCritical RiskClass = "critical"
 )
 
 type ActionType struct {
 	ID            uuid.UUID
-	TenantID      string
+	OrgID         string
 	ActionTypeKey string
 	Name          string
 	Description   string

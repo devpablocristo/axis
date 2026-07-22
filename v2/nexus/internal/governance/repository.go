@@ -27,7 +27,7 @@ func NewRepository(pool *pgxpool.Pool, approvalTTL ...time.Duration) *Repository
 	return &Repository{pool: pool, approvalTTL: ttl}
 }
 
-func (r *Repository) RecordCheck(ctx context.Context, tenantID string, input domain.NormalizedCheckInput, result domain.CheckResult) (domain.RecordedCheck, error) {
+func (r *Repository) RecordCheck(ctx context.Context, orgID string, input domain.NormalizedCheckInput, result domain.CheckResult) (domain.RecordedCheck, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return domain.RecordedCheck{}, err
@@ -42,7 +42,7 @@ func (r *Repository) RecordCheck(ctx context.Context, tenantID string, input dom
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO governance_checks (
 			id,
-			tenant_id,
+			org_id,
 			requester_id,
 			action_type,
 			target_system,
@@ -69,7 +69,7 @@ func (r *Repository) RecordCheck(ctx context.Context, tenantID string, input dom
 			created_at
 		)
 		VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
-	`, checkID.String(), tenantID, input.RequesterID, input.ActionType, input.TargetSystem, input.TargetResource,
+	`, checkID.String(), orgID, input.RequesterID, input.ActionType, input.TargetSystem, input.TargetResource,
 		string(result.Decision), result.RiskLevel, string(result.Status), result.DecisionReason, result.BindingHash,
 		input.AuthorityBindingHash, input.ScopeRevision, input.PolicyRevisionHash, input.DelegationID,
 		input.DelegationRevision, result.PolicySnapshotHash, policyMatches, result.PolicyInputHash, input.ProductSurface,
@@ -88,7 +88,7 @@ func (r *Repository) RecordCheck(ctx context.Context, tenantID string, input dom
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO approvals (
 				id,
-				tenant_id,
+				org_id,
 				governance_check_id,
 				requester_id,
 				product_surface,
@@ -115,7 +115,7 @@ func (r *Repository) RecordCheck(ctx context.Context, tenantID string, input dom
 				updated_at
 			)
 			VALUES ($1::uuid, $2, $3::uuid, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, 'pending', $20, $21, $22, $23, $24, $24)
-		`, approvalID.String(), tenantID, checkID.String(), input.RequesterID,
+		`, approvalID.String(), orgID, checkID.String(), input.RequesterID,
 			input.ProductSurface, input.SupervisorUserID, input.ActionType, input.TargetSystem, input.TargetResource, input.ResourceType,
 			result.RiskLevel, input.Reason, result.BindingHash,
 			input.AuthorityBindingHash, input.ScopeRevision, input.PolicyRevisionHash, input.DelegationID,
@@ -132,14 +132,14 @@ func (r *Repository) RecordCheck(ctx context.Context, tenantID string, input dom
 	return recorded, nil
 }
 
-func (r *Repository) GetCheckForRevalidation(ctx context.Context, tenantID, checkID string) (domain.RevalidationRecord, error) {
+func (r *Repository) GetCheckForRevalidation(ctx context.Context, orgID, checkID string) (domain.RevalidationRecord, error) {
 	var record domain.RevalidationRecord
 	var decision string
 	var functionalRoles, functionalScopes []byte
 	err := r.pool.QueryRow(ctx, `SELECT requester_type,requester_id,product_surface,action_type,target_system,target_resource,resource_type,
 		membership_role,functional_roles,functional_scopes,binding_hash,authority_binding_hash,scope_revision,policy_revision_hash,
 		delegation_id,delegation_revision,decision,risk_level,policy_snapshot_hash
-		FROM governance_checks WHERE tenant_id=$1 AND id=$2::uuid`, tenantID, checkID).Scan(
+		FROM governance_checks WHERE org_id=$1 AND id=$2::uuid`, orgID, checkID).Scan(
 		&record.Input.RequesterType, &record.Input.RequesterID, &record.Input.ProductSurface, &record.Input.ActionType, &record.Input.TargetSystem,
 		&record.Input.TargetResource, &record.Input.ResourceType, &record.Input.MembershipRole, &functionalRoles, &functionalScopes,
 		&record.Input.BindingHash, &record.Input.AuthorityBindingHash, &record.Input.ScopeRevision, &record.Input.PolicyRevisionHash,

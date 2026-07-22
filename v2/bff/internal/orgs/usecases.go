@@ -7,7 +7,7 @@ import (
 	"github.com/devpablocristo/bff-v2/internal/identity"
 	identitydomain "github.com/devpablocristo/bff-v2/internal/identity/usecases/domain"
 	"github.com/devpablocristo/bff-v2/internal/orgs/usecases/domain"
-	tenantdomain "github.com/devpablocristo/bff-v2/internal/tenancy/usecases/domain"
+	productdomain "github.com/devpablocristo/bff-v2/internal/products/usecases/domain"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
 )
 
@@ -20,22 +20,22 @@ type RepositoryPort interface {
 	Trash(ctx context.Context, input domain.NormalizedLifecycleInput) error
 	Restore(ctx context.Context, input domain.NormalizedLifecycleInput) error
 	Purge(ctx context.Context, input domain.NormalizedLifecycleInput) error
-	HasTenants(ctx context.Context, orgID string) (bool, error)
+	HasProducts(ctx context.Context, orgID string) (bool, error)
 }
 
-type TenancyPort interface {
-	ListForPrincipal(ctx context.Context, userID string) ([]tenantdomain.Tenant, error)
-	ResolveAccess(ctx context.Context, tenantID, principalID string) (tenantdomain.Tenant, tenantdomain.TenantMember, error)
+type OrganizationAccessPort interface {
+	ListForPrincipal(ctx context.Context, userID string) ([]productdomain.Product, error)
+	ResolveAccess(ctx context.Context, productID, principalID string) (productdomain.Product, productdomain.OrgMember, error)
 }
 
 type UseCases struct {
 	repo        RepositoryPort
-	tenancy     TenancyPort
+	products    OrganizationAccessPort
 	orgProvider identity.OrgProviderPort
 }
 
-func NewUseCases(repo RepositoryPort, tenancy TenancyPort, orgProvider identity.OrgProviderPort) *UseCases {
-	return &UseCases{repo: repo, tenancy: tenancy, orgProvider: orgProvider}
+func NewUseCases(repo RepositoryPort, products OrganizationAccessPort, orgProvider identity.OrgProviderPort) *UseCases {
+	return &UseCases{repo: repo, products: products, orgProvider: orgProvider}
 }
 
 func (u *UseCases) List(ctx context.Context, input domain.ListInput) ([]domain.Org, error) {
@@ -43,7 +43,7 @@ func (u *UseCases) List(ctx context.Context, input domain.ListInput) ([]domain.O
 	if err != nil {
 		return nil, err
 	}
-	tenants, err := u.tenancy.ListForPrincipal(ctx, normalized.PrincipalID)
+	products, err := u.products.ListForPrincipal(ctx, normalized.PrincipalID)
 	if err != nil {
 		return nil, err
 	}
@@ -51,10 +51,10 @@ func (u *UseCases) List(ctx context.Context, input domain.ListInput) ([]domain.O
 	if err != nil {
 		return nil, err
 	}
-	if hasOwnerAccess(ctx, u.tenancy, normalized.PrincipalID, tenants) {
+	if hasOwnerAccess(ctx, u.products, normalized.PrincipalID, products) {
 		return items, nil
 	}
-	return filterOrgsForTenants(items, tenants), nil
+	return filterOrgsForProducts(items, products), nil
 }
 
 func (u *UseCases) Create(ctx context.Context, input domain.CreateInput) (domain.Org, error) {
@@ -105,7 +105,7 @@ func (u *UseCases) Archive(ctx context.Context, input domain.LifecycleInput) err
 	if err != nil {
 		return err
 	}
-	if err := u.ensureOrgHasNoTenants(ctx, org.ID); err != nil {
+	if err := u.ensureOrgHasNoProducts(ctx, org.ID); err != nil {
 		return err
 	}
 	return u.repo.Archive(ctx, normalized)
@@ -127,7 +127,7 @@ func (u *UseCases) Trash(ctx context.Context, input domain.LifecycleInput) error
 	if err != nil {
 		return err
 	}
-	if err := u.ensureOrgHasNoTenants(ctx, org.ID); err != nil {
+	if err := u.ensureOrgHasNoProducts(ctx, org.ID); err != nil {
 		return err
 	}
 	return u.repo.Trash(ctx, normalized)
@@ -152,7 +152,7 @@ func (u *UseCases) Purge(ctx context.Context, input domain.LifecycleInput) error
 	if org.State() != domain.StateTrashed {
 		return domainerr.Conflict("org must be trashed before purge")
 	}
-	if err := u.ensureOrgHasNoTenants(ctx, org.ID); err != nil {
+	if err := u.ensureOrgHasNoProducts(ctx, org.ID); err != nil {
 		return err
 	}
 	if strings.TrimSpace(org.ProviderOrgID) == "" {
@@ -183,62 +183,62 @@ func (u *UseCases) normalizeLifecycleMutation(ctx context.Context, input domain.
 }
 
 func (u *UseCases) requireOwner(ctx context.Context, principalID string) error {
-	if u.tenancy == nil {
-		return domainerr.Unavailable("tenancy is not configured")
+	if u.products == nil {
+		return domainerr.Unavailable("products is not configured")
 	}
-	tenants, err := u.tenancy.ListForPrincipal(ctx, principalID)
+	products, err := u.products.ListForPrincipal(ctx, principalID)
 	if err != nil {
 		return err
 	}
-	if hasOwnerAccess(ctx, u.tenancy, principalID, tenants) {
+	if hasOwnerAccess(ctx, u.products, principalID, products) {
 		return nil
 	}
 	return domainerr.Forbidden("principal must be owner")
 }
 
 func (u *UseCases) requireOrgMutator(ctx context.Context, principalID, orgID string) error {
-	if u.tenancy == nil {
-		return domainerr.Unavailable("tenancy is not configured")
+	if u.products == nil {
+		return domainerr.Unavailable("products is not configured")
 	}
-	tenants, err := u.tenancy.ListForPrincipal(ctx, principalID)
+	products, err := u.products.ListForPrincipal(ctx, principalID)
 	if err != nil {
 		return err
 	}
-	if hasOwnerAccess(ctx, u.tenancy, principalID, tenants) {
+	if hasOwnerAccess(ctx, u.products, principalID, products) {
 		return nil
 	}
-	for _, tenant := range tenants {
-		if tenant.OrgID != orgID {
+	for _, product := range products {
+		if product.OrgID != orgID {
 			continue
 		}
-		_, member, err := u.tenancy.ResolveAccess(ctx, tenant.ID.String(), principalID)
+		_, member, err := u.products.ResolveAccess(ctx, product.ID.String(), principalID)
 		if err != nil {
 			return err
 		}
-		if tenantdomain.CanMutateTenant(member.Role) {
+		if productdomain.CanMutateProduct(member.Role) {
 			return nil
 		}
 	}
 	return domainerr.Forbidden("principal cannot mutate orgs")
 }
 
-func hasOwnerAccess(ctx context.Context, tenancy TenancyPort, principalID string, tenants []tenantdomain.Tenant) bool {
-	for _, tenant := range tenants {
-		_, member, err := tenancy.ResolveAccess(ctx, tenant.ID.String(), principalID)
+func hasOwnerAccess(ctx context.Context, productAccess OrganizationAccessPort, principalID string, products []productdomain.Product) bool {
+	for _, product := range products {
+		_, member, err := productAccess.ResolveAccess(ctx, product.ID.String(), principalID)
 		if err != nil {
 			continue
 		}
-		if tenantdomain.NormalizeRole(member.Role) == tenantdomain.RoleOwner {
+		if productdomain.NormalizeRole(member.Role) == productdomain.RoleOwner {
 			return true
 		}
 	}
 	return false
 }
 
-func filterOrgsForTenants(items []domain.Org, tenants []tenantdomain.Tenant) []domain.Org {
-	allowed := make(map[string]struct{}, len(tenants))
-	for _, tenant := range tenants {
-		allowed[tenant.OrgID] = struct{}{}
+func filterOrgsForProducts(items []domain.Org, products []productdomain.Product) []domain.Org {
+	allowed := make(map[string]struct{}, len(products))
+	for _, product := range products {
+		allowed[product.OrgID] = struct{}{}
 	}
 	out := make([]domain.Org, 0, len(items))
 	for _, item := range items {
@@ -249,13 +249,13 @@ func filterOrgsForTenants(items []domain.Org, tenants []tenantdomain.Tenant) []d
 	return out
 }
 
-func (u *UseCases) ensureOrgHasNoTenants(ctx context.Context, orgID string) error {
-	inUse, err := u.repo.HasTenants(ctx, orgID)
+func (u *UseCases) ensureOrgHasNoProducts(ctx context.Context, orgID string) error {
+	inUse, err := u.repo.HasProducts(ctx, orgID)
 	if err != nil {
 		return err
 	}
 	if inUse {
-		return domainerr.Conflict("org is used by existing tenants")
+		return domainerr.Conflict("org is used by existing products")
 	}
 	return nil
 }

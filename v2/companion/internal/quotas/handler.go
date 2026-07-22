@@ -39,7 +39,7 @@ func (h *Handler) Upsert(c *gin.Context) {
 		active = *request.Active
 	}
 	policy, err := h.repository.UpsertPolicy(c.Request.Context(), Policy{
-		Key:           Key{TenantID: tenantID(c), ProductSurface: c.Param("product_surface"), Area: c.Param("area")},
+		Key:           Key{OrgID: orgID(c), ProductSurface: c.Param("product_surface"), Area: c.Param("area")},
 		WindowSeconds: request.WindowSeconds, RequestLimit: request.RequestLimit, UnitLimit: request.UnitLimit, Active: active,
 	})
 	if err != nil {
@@ -54,7 +54,7 @@ func (h *Handler) Upsert(c *gin.Context) {
 }
 
 func (h *Handler) List(c *gin.Context) {
-	policies, err := h.repository.ListPolicies(c.Request.Context(), tenantID(c), c.Param("product_surface"))
+	policies, err := h.repository.ListPolicies(c.Request.Context(), orgID(c), c.Param("product_surface"))
 	if err != nil {
 		ginmw.WriteError(c, http.StatusInternalServerError, "quota_unavailable", "quota policies unavailable")
 		return
@@ -62,4 +62,4 @@ func (h *Handler) List(c *gin.Context) {
 	ginmw.WriteJSON(c, http.StatusOK, gin.H{"data": policies})
 }
 
-func tenantID(c *gin.Context) string { return strings.TrimSpace(c.GetHeader("X-Tenant-ID")) }
+func orgID(c *gin.Context) string { return strings.TrimSpace(c.GetHeader("X-Org-ID")) }

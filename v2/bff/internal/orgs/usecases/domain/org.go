@@ -23,7 +23,7 @@ type Org struct {
 	Slug          string
 	Status        string
 	SyncedAt      *time.Time
-	TenantCount   int
+	ProductCount  int
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
 
@@ -197,8 +197,8 @@ func (o Org) State() string {
 	return StateActive
 }
 
-func (o Org) HasTenants() bool {
-	return o.TenantCount > 0
+func (o Org) HasProducts() bool {
+	return o.ProductCount > 0
 }
 
 func firstNonEmpty(values ...string) string {

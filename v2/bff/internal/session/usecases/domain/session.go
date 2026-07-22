@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	userdomain "github.com/devpablocristo/bff-v2/internal/identity/usecases/domain"
-	tenantdomain "github.com/devpablocristo/bff-v2/internal/tenancy/usecases/domain"
+	productdomain "github.com/devpablocristo/bff-v2/internal/products/usecases/domain"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
 )
 
@@ -20,7 +20,7 @@ type Session struct {
 	OrgID       string
 	AuthMethod  string
 	User        userdomain.User
-	Tenants     []tenantdomain.Tenant
+	Products    []productdomain.Product
 }
 
 func NormalizeResolveInput(in ResolveInput) (ResolveInput, error) {

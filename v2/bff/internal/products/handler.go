@@ -13,9 +13,11 @@ import (
 )
 
 type UseCasesPort interface {
+	Create(context.Context, domain.CreateProductInput) (domain.Product, error)
+	Update(context.Context, domain.UpdateProductInput) (domain.Product, error)
+	AddMember(context.Context, domain.AddMemberInput) (domain.OrgMember, error)
 	List(context.Context, domain.ListInput) ([]domain.Product, error)
-	Create(context.Context, domain.CreateInput) (domain.Product, error)
-	Update(context.Context, domain.UpdateInput) (domain.Product, error)
+	ListForPrincipal(context.Context, string) ([]domain.Product, error)
 	Archive(context.Context, domain.LifecycleInput) error
 	Unarchive(context.Context, domain.LifecycleInput) error
 	Trash(context.Context, domain.LifecycleInput) error
@@ -47,12 +49,95 @@ func (h *Handler) Routes(router gin.IRouter) {
 		group.POST("/:product_id/trash", h.Trash)
 		group.POST("/:product_id/restore", h.Restore)
 		group.DELETE("/:product_id/purge", h.Purge)
+		group.POST("/:product_id/members", h.AddMember)
 	}
+}
+
+// OrganizationProductRoutes exposes the organization -> products model. The
+// legacy product handlers remain unregistered and are kept only while internal
+// service scopes migrate away from their historical naming.
+func (h *Handler) OrganizationProductRoutes(router gin.IRouter) {
+	group := router.Group("/organizations/:org_id/products")
+	{
+		group.GET("", h.ListOrganizationProducts)
+		group.POST("", h.CreateOrganizationProduct)
+		group.PUT("/:product_id", h.UpdateOrganizationProduct)
+		group.POST("/:product_id/archive", h.ArchiveOrganizationProduct)
+		group.POST("/:product_id/unarchive", h.UnarchiveOrganizationProduct)
+		group.POST("/:product_id/trash", h.TrashOrganizationProduct)
+		group.POST("/:product_id/restore", h.RestoreOrganizationProduct)
+		group.DELETE("/:product_id/purge", h.PurgeOrganizationProduct)
+	}
+}
+
+func (h *Handler) ListOrganizationProducts(c *gin.Context) {
+	out, err := h.ucs.List(c.Request.Context(), domain.ListInput{
+		PrincipalID: h.principalID(c), Lifecycle: c.Query("lifecycle"),
+	})
+	if err != nil {
+		ginmw.Respond(c, err)
+		return
+	}
+	filtered := make([]domain.Product, 0, len(out))
+	for _, product := range out {
+		if product.OrgID == c.Param("org_id") {
+			filtered = append(filtered, product)
+		}
+	}
+	ginmw.WriteJSON(c, http.StatusOK, dto.OrganizationProductsFromDomain(filtered))
+}
+
+func (h *Handler) CreateOrganizationProduct(c *gin.Context) {
+	var req dto.CreateProductRequest
+	if err := ginmw.BindJSON(c, &req); err != nil {
+		return
+	}
+	req.OrgID = c.Param("org_id")
+	input := req.ToDomain(h.principalID(c))
+	out, err := h.ucs.Create(c.Request.Context(), input)
+	if err != nil {
+		ginmw.Respond(c, err)
+		return
+	}
+	ginmw.WriteCreated(c, dto.OrganizationProductFromDomain(out))
+}
+
+func (h *Handler) UpdateOrganizationProduct(c *gin.Context) {
+	c.Params = append(c.Params, gin.Param{Key: "product_id", Value: c.Param("product_id")})
+	h.Update(c)
+}
+
+func (h *Handler) ArchiveOrganizationProduct(c *gin.Context) {
+	h.organizationProductLifecycle(c, h.ucs.Archive)
+}
+func (h *Handler) UnarchiveOrganizationProduct(c *gin.Context) {
+	h.organizationProductLifecycle(c, h.ucs.Unarchive)
+}
+func (h *Handler) TrashOrganizationProduct(c *gin.Context) {
+	h.organizationProductLifecycle(c, h.ucs.Trash)
+}
+func (h *Handler) RestoreOrganizationProduct(c *gin.Context) {
+	h.organizationProductLifecycle(c, h.ucs.Restore)
+}
+func (h *Handler) PurgeOrganizationProduct(c *gin.Context) {
+	h.organizationProductLifecycle(c, h.ucs.Purge)
+}
+
+func (h *Handler) organizationProductLifecycle(c *gin.Context, fn func(context.Context, domain.LifecycleInput) error) {
+	err := fn(c.Request.Context(), domain.LifecycleInput{
+		ProductID: c.Param("product_id"), PrincipalID: h.principalID(c),
+	})
+	if err != nil {
+		ginmw.Respond(c, err)
+		return
+	}
+	ginmw.WriteNoContent(c)
 }
 
 func (h *Handler) List(c *gin.Context) {
 	out, err := h.ucs.List(c.Request.Context(), domain.ListInput{
-		Lifecycle: c.Query("lifecycle"),
+		PrincipalID: h.principalID(c),
+		Lifecycle:   c.Query("lifecycle"),
 	})
 	if err != nil {
 		ginmw.Respond(c, err)
@@ -66,7 +151,8 @@ func (h *Handler) Create(c *gin.Context) {
 	if err := ginmw.BindJSON(c, &req); err != nil {
 		return
 	}
-	out, err := h.ucs.Create(c.Request.Context(), req.ToDomain(h.principalID(c)))
+	input := req.ToDomain(h.principalID(c))
+	out, err := h.ucs.Create(c.Request.Context(), input)
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -85,6 +171,19 @@ func (h *Handler) Update(c *gin.Context) {
 		return
 	}
 	ginmw.WriteJSON(c, http.StatusOK, dto.ProductFromDomain(out))
+}
+
+func (h *Handler) AddMember(c *gin.Context) {
+	var req dto.AddOrgMemberRequest
+	if err := ginmw.BindJSON(c, &req); err != nil {
+		return
+	}
+	out, err := h.ucs.AddMember(c.Request.Context(), req.ToDomain(c.Param("product_id")))
+	if err != nil {
+		ginmw.Respond(c, err)
+		return
+	}
+	ginmw.WriteCreated(c, dto.OrgMemberFromDomain(out))
 }
 
 func (h *Handler) Archive(c *gin.Context) {

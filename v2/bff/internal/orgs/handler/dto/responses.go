@@ -13,8 +13,8 @@ type OrgResponse struct {
 	ProviderOrgID string     `json:"provider_org_id"`
 	Status        string     `json:"status"`
 	State         string     `json:"state"`
-	TenantCount   int        `json:"tenant_count"`
-	HasTenants    bool       `json:"has_tenants"`
+	ProductCount  int        `json:"product_count"`
+	HasProducts   bool       `json:"has_products"`
 	CreatedAt     time.Time  `json:"created_at"`
 	UpdatedAt     time.Time  `json:"updated_at"`
 	ArchivedAt    *time.Time `json:"archived_at"`
@@ -34,8 +34,8 @@ func OrgFromDomain(org domain.Org) OrgResponse {
 		ProviderOrgID: org.ProviderOrgID,
 		Status:        org.Status,
 		State:         org.State(),
-		TenantCount:   org.TenantCount,
-		HasTenants:    org.HasTenants(),
+		ProductCount:  org.ProductCount,
+		HasProducts:   org.HasProducts(),
 		CreatedAt:     org.CreatedAt,
 		UpdatedAt:     org.UpdatedAt,
 		ArchivedAt:    org.ArchivedAt,

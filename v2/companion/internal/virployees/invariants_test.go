@@ -75,7 +75,7 @@ func TestInvariantExecutionGatePassesOnlyOnGovernanceAllow(t *testing.T) {
 			uc, created := setupExecutionGateUseCase(t, domain.AutonomyA3)
 			tc.configure(uc)
 
-			result, err := uc.ExecutionGate(context.Background(), "tenant-1", created.ID, executableInput, nil)
+			result, err := uc.ExecutionGate(context.Background(), "organization-1", created.ID, executableInput, nil)
 			if err != nil {
 				t.Fatalf("ExecutionGate: %v", err)
 			}
@@ -145,12 +145,12 @@ func TestInvariantActionBindingCarriesAllFields(t *testing.T) {
 		},
 	}
 
-	binding := actionBinding("tenant-1", result, nil)
+	binding := actionBinding("organization-1", result, nil)
 	if binding == nil {
 		t.Fatal("expected a binding for a matched intent")
 	}
 	requiredKeys := []string{
-		"schema_version", "tenant_id", "virployee_id", "operation",
+		"schema_version", "org_id", "virployee_id", "operation",
 		"capability_key", "action", "target_system", "target_resource",
 		"input_hash", "memory_context_hash", "proposed_by",
 	}
@@ -190,7 +190,7 @@ func TestInvariantActionBindingCarriesAllFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FromDraft: %v", err)
 	}
-	withPrepared := actionBinding("tenant-1", result, &prepared)
+	withPrepared := actionBinding("organization-1", result, &prepared)
 	for _, key := range []string{"prepared_action_schema", "prepared_action_hash"} {
 		if _, ok := withPrepared[key]; !ok {
 			t.Fatalf("binding with prepared action is missing %q: %+v", key, withPrepared)
@@ -198,7 +198,7 @@ func TestInvariantActionBindingCarriesAllFields(t *testing.T) {
 	}
 
 	// No matched intent means no binding at all (nothing to pin).
-	unmatched := actionBinding("tenant-1", dryrun.Result{Intent: dryrun.Intent{Matched: false}}, nil)
+	unmatched := actionBinding("organization-1", dryrun.Result{Intent: dryrun.Intent{Matched: false}}, nil)
 	if unmatched != nil {
 		t.Fatalf("expected nil binding for unmatched intent, got %+v", unmatched)
 	}
@@ -219,7 +219,7 @@ func TestInvariantExecuteApprovedActionRebindsBeforeExecuting(t *testing.T) {
 			t.Fatal(err)
 		}
 		capabilityID := uuid.New()
-		created, err := uc.Create(context.Background(), "tenant-1", domain.CreateInput{
+		created, err := uc.Create(context.Background(), "organization-1", domain.CreateInput{
 			Name:              "Sofia",
 			JobRoleID:         uuid.NewString(),
 			ProfileTemplateID: uuid.NewString(),
@@ -232,7 +232,7 @@ func TestInvariantExecuteApprovedActionRebindsBeforeExecuting(t *testing.T) {
 		}
 		uc.SetCapabilityValidator(&fakeCapabilityReader{rows: map[uuid.UUID]capabilitydomain.Capability{
 			capabilityID: {
-				ID: capabilityID, TenantID: "tenant-1", CapabilityKey: preparedactions.ActionCreate,
+				ID: capabilityID, OrgID: "organization-1", CapabilityKey: preparedactions.ActionCreate,
 				RequiredAutonomy: domain.AutonomyA3, PromotionState: capabilitydomain.PromotionActive,
 			},
 		}})
@@ -257,7 +257,7 @@ func TestInvariantExecuteApprovedActionRebindsBeforeExecuting(t *testing.T) {
 		}
 		return PreparedActionRecord{
 			ID:                uuid.New(),
-			TenantID:          "tenant-1",
+			OrgID:             "organization-1",
 			GovernanceCheckID: checkID,
 			CapabilityKey:     preparedactions.ActionCreate,
 			PayloadHash:       payloadHash,
@@ -271,7 +271,7 @@ func TestInvariantExecuteApprovedActionRebindsBeforeExecuting(t *testing.T) {
 		prepared.BindingHash = "tampered-binding"
 		uc, executor, id, approvalID := newCase(prepared)
 
-		_, err := uc.ExecuteApprovedAction(context.Background(), "tenant-1", id, approvalID)
+		_, err := uc.ExecuteApprovedAction(context.Background(), "organization-1", id, approvalID)
 		if !domainerr.IsConflict(err) {
 			t.Fatalf("expected conflict on binding mismatch, got %v", err)
 		}
@@ -285,7 +285,7 @@ func TestInvariantExecuteApprovedActionRebindsBeforeExecuting(t *testing.T) {
 		prepared.GovernanceCheckID = uuid.New() // different from the approval's check id
 		uc, executor, id, approvalID := newCase(prepared)
 
-		_, err := uc.ExecuteApprovedAction(context.Background(), "tenant-1", id, approvalID)
+		_, err := uc.ExecuteApprovedAction(context.Background(), "organization-1", id, approvalID)
 		if !domainerr.IsConflict(err) {
 			t.Fatalf("expected conflict on governance check id mismatch, got %v", err)
 		}
@@ -305,7 +305,7 @@ func TestInvariantExecuteApprovedActionRebindsBeforeExecuting(t *testing.T) {
 			ExecutionResult: &runtraces.ExecutionResult{Status: "succeeded"},
 		}
 
-		if _, err := uc.ExecuteApprovedAction(context.Background(), "tenant-1", id, approvalID); err != nil {
+		if _, err := uc.ExecuteApprovedAction(context.Background(), "organization-1", id, approvalID); err != nil {
 			t.Fatalf("ExecuteApprovedAction with matching binding: %v", err)
 		}
 		if !executor.called {
@@ -324,7 +324,7 @@ func TestInvariantExecuteApprovedActionRebindsBeforeExecuting(t *testing.T) {
 		revalidator := &fakeGovernanceRevalidator{result: executiongate.GovernanceRevalidationResult{Valid: false, Reason: "active policy snapshot changed"}}
 		uc.SetGovernanceRevalidator(revalidator)
 
-		if _, err := uc.ExecuteApprovedAction(context.Background(), "tenant-1", id, approvalID); !domainerr.IsConflict(err) {
+		if _, err := uc.ExecuteApprovedAction(context.Background(), "organization-1", id, approvalID); !domainerr.IsConflict(err) {
 			t.Fatalf("expected stale policy conflict, got %v", err)
 		}
 		if executor.called {
@@ -343,13 +343,13 @@ func TestInvariantExecuteApprovedActionRebindsBeforeExecuting(t *testing.T) {
 		// execution-gate trace it reads as the source.
 		repo.existingExecTrace = nil
 		repo.traces = append(repo.traces, runtraces.Trace{
-			TenantID:    "tenant-1",
+			OrgID:       "organization-1",
 			VirployeeID: id,
 			Operation:   runtraces.OperationExecutionGate,
 			NexusResult: &runtraces.NexusResult{ApprovalID: approvalID.String()},
 		})
 
-		trace, err := uc.ExecuteApprovedAction(context.Background(), "tenant-1", id, approvalID)
+		trace, err := uc.ExecuteApprovedAction(context.Background(), "organization-1", id, approvalID)
 		if err != nil {
 			t.Fatalf("ExecuteApprovedAction: %v", err)
 		}
@@ -385,7 +385,7 @@ func TestInvariantExecuteApprovedActionRebindsBeforeExecuting(t *testing.T) {
 			Status:            "pending",
 		}})
 
-		_, err := uc.ExecuteApprovedAction(context.Background(), "tenant-1", id, approvalID)
+		_, err := uc.ExecuteApprovedAction(context.Background(), "organization-1", id, approvalID)
 		if !domainerr.IsConflict(err) {
 			t.Fatalf("expected conflict for a non-approved approval, got %v", err)
 		}
@@ -438,7 +438,7 @@ func TestInvariantPreparedActionPersistedOnlyOnRequireApproval(t *testing.T) {
 				PolicySnapshotHash: policySnapshotHash,
 			}})
 
-			if _, err := uc.ExecutionGate(context.Background(), "tenant-1", created.ID, "Agendá una reunión para mañana", readyDraft); err != nil {
+			if _, err := uc.ExecutionGate(context.Background(), "organization-1", created.ID, "Agendá una reunión para mañana", readyDraft); err != nil {
 				t.Fatalf("ExecutionGate(%s): %v", tc.decision, err)
 			}
 			if execRepo.savePreparedCalls != tc.wantSaves {
@@ -460,7 +460,7 @@ func TestInvariantDryRunFailsClosedToDeterministicWhenRuntimeErrors(t *testing.T
 	uc, created := setupExecutionGateUseCase(t, domain.AutonomyA3)
 	uc.SetRuntimePlanner(erroringPlanner{})
 
-	result, err := uc.DryRun(context.Background(), "tenant-1", created.ID, "Agendá una reunión mañana")
+	result, err := uc.DryRun(context.Background(), "organization-1", created.ID, "Agendá una reunión mañana")
 	if err != nil {
 		t.Fatalf("dry-run must not error when the runtime fails, got %v", err)
 	}
@@ -478,7 +478,7 @@ func TestDryRunReturnsQuotaDenialBeforeCallingRuntime(t *testing.T) {
 	uc.SetRuntimePlanner(planner)
 	uc.SetQuotaPorts(&fakeQuota{denyArea: "llm"}, nil)
 
-	_, err := uc.DryRun(context.Background(), "tenant-1", created.ID, "Agendá una reunión mañana")
+	_, err := uc.DryRun(context.Background(), "organization-1", created.ID, "Agendá una reunión mañana")
 	if _, ok := quotas.RetryAfter(err); !ok {
 		t.Fatalf("expected quota denial, got %v", err)
 	}

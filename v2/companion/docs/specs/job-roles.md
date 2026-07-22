@@ -17,7 +17,7 @@ Public representation:
 ```json
 {
   "id": "uuid",
-  "tenant_id": "tenant-id",
+  "org_id": "org-id",
   "name": "Sales Assistant",
   "slug": "sales-assistant",
   "mission": "Support commercial follow-up.",
@@ -51,7 +51,7 @@ Rules:
 - `name` is required.
 - `slug` is server-normalized from request `slug`; if empty, it is derived from
   `name`.
-- `(tenant_id, slug)` is unique.
+- `(org_id, slug)` is unique.
 - `mission` explains the durable purpose of the profession.
 - `responsibilities` is an ordered definition list. Every item requires a
   `title`; `description` and `expected_outcome` are optional and `priority` is a
@@ -118,7 +118,7 @@ A routing pool points to one Job Role and contains Virployees with that same
 Job Role. Stable subject assignment belongs to the routing model, not to Job
 Role. See [Workforce continuity and routing](workforce-routing.md).
 
-## Tenancy
+## Organization scope
 
-Companion reads `X-Tenant-ID`; missing values fall back to `default` for local
+Companion reads `X-Org-ID`; missing values fall back to `default` for local
 development. BFF v2 validates membership before forwarding requests.

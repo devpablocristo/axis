@@ -22,12 +22,12 @@ func (u *UseCases) consumeQuota(ctx context.Context, key quotas.Key, idempotency
 	return err
 }
 
-func quotaKey(tenantID, productSurface, area string) quotas.Key {
+func quotaKey(orgID, productSurface, area string) quotas.Key {
 	productSurface = strings.TrimSpace(productSurface)
 	if productSurface == "" {
 		productSurface = "axis"
 	}
-	return quotas.Key{TenantID: normalizeTenantID(tenantID), ProductSurface: productSurface, Area: area}
+	return quotas.Key{OrgID: normalizeOrgID(orgID), ProductSurface: productSurface, Area: area}
 }
 
 func estimatedAnswerTokens(input json.RawMessage, parts []artifacts.ContentPart) int64 {
@@ -45,7 +45,7 @@ func (u *UseCases) recordLLMUsage(ctx context.Context, run AssistRun, stage stri
 		return
 	}
 	_ = u.usageLedger.RecordUsage(ctx, quotas.Usage{
-		Key:            quotaKey(run.TenantID, run.ProductSurface, quotas.AreaLLM),
+		Key:            quotaKey(run.OrgID, run.ProductSurface, quotas.AreaLLM),
 		IdempotencyKey: run.ID.String() + ":actual:" + stage, SubjectType: "assist_run", SubjectID: run.ID.String(),
 		Units: output.InputTokens + output.OutputTokens, Model: output.ModelID,
 		EstimatedCostMicroUSD: output.EstimatedCostMicroUSD,
@@ -64,12 +64,12 @@ func estimatedDryRunTokens(input string, runtimeCtx runtimecontext.Context) int6
 	return (bytes+3)/4 + 2048
 }
 
-func (u *UseCases) recordProposalUsage(ctx context.Context, tenantID string, virployeeID uuid.UUID, idempotencyKey string, proposal dryrun.Proposal) {
+func (u *UseCases) recordProposalUsage(ctx context.Context, orgID string, virployeeID uuid.UUID, idempotencyKey string, proposal dryrun.Proposal) {
 	if u.usageLedger == nil {
 		return
 	}
 	_ = u.usageLedger.RecordUsage(ctx, quotas.Usage{
-		Key: quotaKey(tenantID, "axis", quotas.AreaLLM), IdempotencyKey: idempotencyKey + ":actual",
+		Key: quotaKey(orgID, "axis", quotas.AreaLLM), IdempotencyKey: idempotencyKey + ":actual",
 		SubjectType: "virployee", SubjectID: virployeeID.String(), Units: proposal.InputTokens + proposal.OutputTokens,
 		Model: proposal.Intent.ModelID, EstimatedCostMicroUSD: proposal.EstimatedCostMicroUSD,
 		Metadata: map[string]any{"input_tokens": proposal.InputTokens, "output_tokens": proposal.OutputTokens, "estimated": true},

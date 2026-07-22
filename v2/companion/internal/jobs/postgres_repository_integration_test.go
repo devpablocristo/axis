@@ -23,17 +23,17 @@ func TestPostgresRepositoryConcurrentClaimRecoveryAndReplay(t *testing.T) {
 	}
 	defer pool.Close()
 	repository := NewPostgresRepository(pool)
-	tenantID := "jobs-test-" + uuid.NewString()
+	orgID := "jobs-test-" + uuid.NewString()
 	kind := "test.concurrent." + uuid.NewString()
 	var created []uuid.UUID
 	t.Cleanup(func() {
 		for _, id := range created {
-			_, _ = pool.Exec(context.Background(), `DELETE FROM companion_jobs WHERE tenant_id=$1 AND id=$2`, tenantID, id)
+			_, _ = pool.Exec(context.Background(), `DELETE FROM companion_jobs WHERE org_id=$1 AND id=$2`, orgID, id)
 		}
 	})
 
 	job, inserted, err := repository.Enqueue(ctx, EnqueueInput{
-		TenantID: tenantID, ProductSurface: "tests", Kind: kind,
+		OrgID: orgID, ProductSurface: "tests", Kind: kind,
 		DedupeKey: "logical-1", MaxAttempts: 2,
 	})
 	if err != nil || !inserted {
@@ -75,14 +75,14 @@ func TestPostgresRepositoryConcurrentClaimRecoveryAndReplay(t *testing.T) {
 		t.Fatal(err)
 	}
 	deduplicated, inserted, err := repository.Enqueue(ctx, EnqueueInput{
-		TenantID: tenantID, ProductSurface: "tests", Kind: kind, DedupeKey: "logical-1",
+		OrgID: orgID, ProductSurface: "tests", Kind: kind, DedupeKey: "logical-1",
 	})
 	if err != nil || inserted || deduplicated.ID != job.ID || deduplicated.Status != StatusSucceeded {
 		t.Fatalf("durable dedupe=%+v inserted=%v err=%v", deduplicated, inserted, err)
 	}
 
 	deadJob, _, err := repository.Enqueue(ctx, EnqueueInput{
-		TenantID: tenantID, ProductSurface: "tests", Kind: kind,
+		OrgID: orgID, ProductSurface: "tests", Kind: kind,
 		DedupeKey: "logical-2", MaxAttempts: 1,
 	})
 	if err != nil {
@@ -95,14 +95,14 @@ func TestPostgresRepositoryConcurrentClaimRecoveryAndReplay(t *testing.T) {
 	if err != nil || len(claimed) != 1 || claimed[0].ID != deadJob.ID {
 		t.Fatalf("dead-letter claim=%+v err=%v", claimed, err)
 	}
-	if _, err := pool.Exec(ctx, `UPDATE companion_jobs SET lease_until=now()-interval '1 second' WHERE tenant_id=$1 AND id=$2`, tenantID, deadJob.ID); err != nil {
+	if _, err := pool.Exec(ctx, `UPDATE companion_jobs SET lease_until=now()-interval '1 second' WHERE org_id=$1 AND id=$2`, orgID, deadJob.ID); err != nil {
 		t.Fatal(err)
 	}
 	recovery, err := repository.RecoverExpiredLeases(ctx, 10)
 	if err != nil || recovery.DeadLetter != 1 {
 		t.Fatalf("recovery=%+v err=%v", recovery, err)
 	}
-	replayed, err := repository.ReplayDeadLetter(ctx, tenantID, deadJob.ID, time.Now().UTC())
+	replayed, err := repository.ReplayDeadLetter(ctx, orgID, deadJob.ID, time.Now().UTC())
 	if err != nil || replayed.Status != StatusQueued || replayed.Attempts != 0 {
 		t.Fatalf("replayed=%+v err=%v", replayed, err)
 	}
@@ -120,18 +120,18 @@ func TestPostgresRepositoryWorkerControlAndCircuitBreaker(t *testing.T) {
 	}
 	defer pool.Close()
 	repository := NewPostgresRepository(pool)
-	tenantID := "jobs-test-" + uuid.NewString()
+	orgID := "jobs-test-" + uuid.NewString()
 	product, kind := "tests", "test.circuit."+uuid.NewString()
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM companion_jobs WHERE tenant_id=$1`, tenantID)
-		_, _ = pool.Exec(context.Background(), `DELETE FROM companion_worker_controls WHERE tenant_id=$1`, tenantID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM companion_jobs WHERE org_id=$1`, orgID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM companion_worker_controls WHERE org_id=$1`, orgID)
 	})
 
-	if _, err = pool.Exec(ctx, `INSERT INTO companion_worker_controls(tenant_id,product_surface,kind,state,changed_by,reason_code)VALUES($1,$2,$3,'paused','test','manual_pause')`, tenantID, product, kind); err != nil {
+	if _, err = pool.Exec(ctx, `INSERT INTO companion_worker_controls(org_id,product_surface,kind,state,changed_by,reason_code)VALUES($1,$2,$3,'paused','test','manual_pause')`, orgID, product, kind); err != nil {
 		t.Fatal(err)
 	}
 	for index := 0; index < 2; index++ {
-		if _, _, err = repository.Enqueue(ctx, EnqueueInput{TenantID: tenantID, ProductSurface: product, Kind: kind, DedupeKey: uuid.NewString(), MaxAttempts: 10}); err != nil {
+		if _, _, err = repository.Enqueue(ctx, EnqueueInput{OrgID: orgID, ProductSurface: product, Kind: kind, DedupeKey: uuid.NewString(), MaxAttempts: 10}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -139,7 +139,7 @@ func TestPostgresRepositoryWorkerControlAndCircuitBreaker(t *testing.T) {
 	if err != nil || len(claimed) != 0 {
 		t.Fatalf("paused control claimed=%d err=%v", len(claimed), err)
 	}
-	if _, err = pool.Exec(ctx, `UPDATE companion_worker_controls SET state='closed' WHERE tenant_id=$1 AND product_surface=$2 AND kind=$3`, tenantID, product, kind); err != nil {
+	if _, err = pool.Exec(ctx, `UPDATE companion_worker_controls SET state='closed' WHERE org_id=$1 AND product_surface=$2 AND kind=$3`, orgID, product, kind); err != nil {
 		t.Fatal(err)
 	}
 	for attempt := 0; attempt < 5; attempt++ {
@@ -150,11 +150,11 @@ func TestPostgresRepositoryWorkerControlAndCircuitBreaker(t *testing.T) {
 		if _, err = repository.Fail(ctx, FailInput{JobID: claimed[0].ID, WorkerID: "failing-worker", ErrorCode: "dependency_unavailable", Retryable: true, Backoff: time.Millisecond}); err != nil {
 			t.Fatal(err)
 		}
-		_, _ = pool.Exec(ctx, `UPDATE companion_jobs SET run_after=now() WHERE tenant_id=$1 AND status='queued'`, tenantID)
+		_, _ = pool.Exec(ctx, `UPDATE companion_jobs SET run_after=now() WHERE org_id=$1 AND status='queued'`, orgID)
 	}
 	var state string
 	var failures int
-	if err = pool.QueryRow(ctx, `SELECT state,failure_count FROM companion_worker_controls WHERE tenant_id=$1 AND product_surface=$2 AND kind=$3`, tenantID, product, kind).Scan(&state, &failures); err != nil {
+	if err = pool.QueryRow(ctx, `SELECT state,failure_count FROM companion_worker_controls WHERE org_id=$1 AND product_surface=$2 AND kind=$3`, orgID, product, kind).Scan(&state, &failures); err != nil {
 		t.Fatal(err)
 	}
 	if state != "open" || failures != 5 {
@@ -164,7 +164,7 @@ func TestPostgresRepositoryWorkerControlAndCircuitBreaker(t *testing.T) {
 	if err != nil || len(claimed) != 0 {
 		t.Fatalf("open circuit claimed=%d err=%v", len(claimed), err)
 	}
-	if _, err = pool.Exec(ctx, `UPDATE companion_worker_controls SET opened_until=now()-interval '1 second' WHERE tenant_id=$1 AND product_surface=$2 AND kind=$3`, tenantID, product, kind); err != nil {
+	if _, err = pool.Exec(ctx, `UPDATE companion_worker_controls SET opened_until=now()-interval '1 second' WHERE org_id=$1 AND product_surface=$2 AND kind=$3`, orgID, product, kind); err != nil {
 		t.Fatal(err)
 	}
 	claimed, err = repository.Claim(ctx, ClaimOptions{WorkerID: "probe-worker", Kinds: []string{kind}, BatchSize: 10})
@@ -174,7 +174,7 @@ func TestPostgresRepositoryWorkerControlAndCircuitBreaker(t *testing.T) {
 	if err = repository.Complete(ctx, claimed[0].ID, "probe-worker", nil); err != nil {
 		t.Fatal(err)
 	}
-	if err = pool.QueryRow(ctx, `SELECT state,failure_count FROM companion_worker_controls WHERE tenant_id=$1 AND product_surface=$2 AND kind=$3`, tenantID, product, kind).Scan(&state, &failures); err != nil {
+	if err = pool.QueryRow(ctx, `SELECT state,failure_count FROM companion_worker_controls WHERE org_id=$1 AND product_surface=$2 AND kind=$3`, orgID, product, kind).Scan(&state, &failures); err != nil {
 		t.Fatal(err)
 	}
 	if state != "closed" || failures != 0 {

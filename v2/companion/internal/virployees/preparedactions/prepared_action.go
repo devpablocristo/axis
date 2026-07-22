@@ -37,7 +37,7 @@ type Action struct {
 	PrincipalID   string `json:"principal_id,omitempty"`
 	// AssistContext is populated only when the execution gate was explicitly
 	// tied to a completed Assist run. The server derives every field from the
-	// tenant-scoped run; callers cannot provide a context hash. Because this is
+	// organization-scoped run; callers cannot provide a context hash. Because this is
 	// part of the prepared-action payload, Nexus approves the exact Assist,
 	// subject/case/assignment, source set, and conversation-policy snapshot.
 	AssistContext *AssistContextBinding `json:"assist_context,omitempty"`
@@ -45,7 +45,7 @@ type Action struct {
 	// the Assist conversation. It protects legacy execution-gate calls too and
 	// is re-evaluated before an executor can perform side effects.
 	ProfessionalScope *ProfessionalScopeBinding `json:"professional_scope,omitempty"`
-	// MCPContext binds an action initiated through MCP to the exact tenant,
+	// MCPContext binds an action initiated through MCP to the exact organization,
 	// subject/case assignment, capability manifest, policy revision and caller
 	// idempotency key. Only hashes and stable identifiers are stored here.
 	MCPContext *MCPContextBinding `json:"mcp_context,omitempty"`
@@ -78,7 +78,7 @@ type ProfessionalScopeBinding struct {
 }
 
 type MCPContextBinding struct {
-	TenantID          string `json:"tenant_id"`
+	OrgID             string `json:"org_id"`
 	ActorID           string `json:"actor_id"`
 	VirployeeID       string `json:"virployee_id"`
 	SubjectID         string `json:"subject_id"`

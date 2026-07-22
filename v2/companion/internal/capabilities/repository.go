@@ -23,7 +23,7 @@ type Repository struct {
 	pool *pgxpool.Pool
 }
 
-const capabilitySelectColumns = `id::text, tenant_id, capability_key, name, description, required_autonomy,
+const capabilitySelectColumns = `id::text, org_id, capability_key, name, description, required_autonomy,
 	risk_class, side_effect_class, requires_nexus_approval, evidence_required, rollback_capability_key,
 	promotion_state, manifest, manifest_hash, conformed_hash, conformance_report, conformed_at, activated_at,
 	created_at, updated_at, archived_at, trashed_at, purge_after`
@@ -32,32 +32,32 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 	return &Repository{pool: pool}
 }
 
-func (r *Repository) Create(ctx context.Context, tenantID string, input domain.NormalizedCreateInput) (domain.Capability, error) {
+func (r *Repository) Create(ctx context.Context, orgID string, input domain.NormalizedCreateInput) (domain.Capability, error) {
 	id := uuid.New()
 	now := time.Now().UTC()
 	row := r.pool.QueryRow(ctx, `
 		INSERT INTO capabilities (
-			id, tenant_id, capability_key, name, description, required_autonomy,
+			id, org_id, capability_key, name, description, required_autonomy,
 			risk_class, side_effect_class, requires_nexus_approval, evidence_required, rollback_capability_key,
 			created_at, updated_at
 		)
 		VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12)
 		RETURNING `+capabilitySelectColumns+`
-	`, id.String(), tenantID, input.CapabilityKey, input.Name, input.Description, string(input.RequiredAutonomy),
+	`, id.String(), orgID, input.CapabilityKey, input.Name, input.Description, string(input.RequiredAutonomy),
 		input.Governance.RiskClass, input.Governance.SideEffectClass, input.Governance.RequiresNexusApproval,
 		input.Governance.EvidenceRequired, input.Governance.RollbackCapabilityKey, now)
 	return scanCapability(row)
 }
 
-func (r *Repository) List(ctx context.Context, tenantID string, state domain.State) ([]domain.Capability, error) {
+func (r *Repository) List(ctx context.Context, orgID string, state domain.State) ([]domain.Capability, error) {
 	var where string
 	switch state {
 	case domain.StateActive, "":
-		where = "tenant_id = $1 AND archived_at IS NULL AND trashed_at IS NULL"
+		where = "org_id = $1 AND archived_at IS NULL AND trashed_at IS NULL"
 	case domain.StateArchived:
-		where = "tenant_id = $1 AND archived_at IS NOT NULL AND trashed_at IS NULL"
+		where = "org_id = $1 AND archived_at IS NOT NULL AND trashed_at IS NULL"
 	case domain.StateTrashed:
-		where = "tenant_id = $1 AND trashed_at IS NOT NULL"
+		where = "org_id = $1 AND trashed_at IS NOT NULL"
 	default:
 		return nil, domainerr.Validation("invalid lifecycle state")
 	}
@@ -67,7 +67,7 @@ func (r *Repository) List(ctx context.Context, tenantID string, state domain.Sta
 		FROM capabilities
 		WHERE `+where+`
 		ORDER BY capability_key ASC, id ASC
-	`, tenantID)
+	`, orgID)
 	if err != nil {
 		return nil, err
 	}
@@ -87,16 +87,16 @@ func (r *Repository) List(ctx context.Context, tenantID string, state domain.Sta
 	return out, nil
 }
 
-func (r *Repository) Get(ctx context.Context, tenantID string, id uuid.UUID) (domain.Capability, error) {
+func (r *Repository) Get(ctx context.Context, orgID string, id uuid.UUID) (domain.Capability, error) {
 	row := r.pool.QueryRow(ctx, `
 		SELECT `+capabilitySelectColumns+`
 		FROM capabilities
-		WHERE tenant_id = $1 AND id = $2::uuid AND trashed_at IS NULL
-	`, tenantID, id.String())
+		WHERE org_id = $1 AND id = $2::uuid AND trashed_at IS NULL
+	`, orgID, id.String())
 	return scanCapability(row)
 }
 
-func (r *Repository) Update(ctx context.Context, tenantID string, id uuid.UUID, input domain.NormalizedUpdateInput) (domain.Capability, error) {
+func (r *Repository) Update(ctx context.Context, orgID string, id uuid.UUID, input domain.NormalizedUpdateInput) (domain.Capability, error) {
 	row := r.pool.QueryRow(ctx, `
 		UPDATE capabilities
 		SET name = $3,
@@ -136,12 +136,12 @@ func (r *Repository) Update(ctx context.Context, tenantID string, id uuid.UUID, 
 				evidence_required IS DISTINCT FROM $9 OR rollback_capability_key IS DISTINCT FROM $10
 				THEN NULL ELSE activated_at END,
 			updated_at = $11
-		WHERE tenant_id = $1
+		WHERE org_id = $1
 			AND id = $2::uuid
 			AND archived_at IS NULL
 			AND trashed_at IS NULL
 		RETURNING `+capabilitySelectColumns+`
-	`, tenantID, id.String(), input.Name, input.Description, string(input.RequiredAutonomy),
+	`, orgID, id.String(), input.Name, input.Description, string(input.RequiredAutonomy),
 		input.Governance.RiskClass, input.Governance.SideEffectClass, input.Governance.RequiresNexusApproval,
 		input.Governance.EvidenceRequired, input.Governance.RollbackCapabilityKey, time.Now().UTC())
 	item, err := scanCapability(row)
@@ -151,7 +151,7 @@ func (r *Repository) Update(ctx context.Context, tenantID string, id uuid.UUID, 
 	if !domainerr.IsNotFound(err) {
 		return domain.Capability{}, err
 	}
-	state, stateErr := r.State(ctx, tenantID, id)
+	state, stateErr := r.State(ctx, orgID, id)
 	if stateErr != nil {
 		return domain.Capability{}, stateErr
 	}
@@ -161,7 +161,7 @@ func (r *Repository) Update(ctx context.Context, tenantID string, id uuid.UUID, 
 	return domain.Capability{}, err
 }
 
-func (r *Repository) UpdateManifest(ctx context.Context, tenantID string, id uuid.UUID, manifest domain.Manifest, manifestHash string) (domain.Capability, error) {
+func (r *Repository) UpdateManifest(ctx context.Context, orgID string, id uuid.UUID, manifest domain.Manifest, manifestHash string) (domain.Capability, error) {
 	raw, err := json.Marshal(manifest)
 	if err != nil {
 		return domain.Capability{}, err
@@ -176,14 +176,14 @@ func (r *Repository) UpdateManifest(ctx context.Context, tenantID string, id uui
 			conformed_at = NULL,
 			activated_at = NULL,
 			updated_at = $5
-		WHERE tenant_id = $1 AND id = $2::uuid
+		WHERE org_id = $1 AND id = $2::uuid
 			AND archived_at IS NULL AND trashed_at IS NULL
 		RETURNING `+capabilitySelectColumns+`
-	`, tenantID, id.String(), raw, manifestHash, time.Now().UTC())
+	`, orgID, id.String(), raw, manifestHash, time.Now().UTC())
 	return scanCapability(row)
 }
 
-func (r *Repository) SaveConformance(ctx context.Context, tenantID string, id uuid.UUID, expected domain.Capability, report domain.ConformanceReport) (domain.Capability, error) {
+func (r *Repository) SaveConformance(ctx context.Context, orgID string, id uuid.UUID, expected domain.Capability, report domain.ConformanceReport) (domain.Capability, error) {
 	raw, err := json.Marshal(report)
 	if err != nil {
 		return domain.Capability{}, err
@@ -197,7 +197,7 @@ func (r *Repository) SaveConformance(ctx context.Context, tenantID string, id uu
 			conformed_at = CASE WHEN $4::boolean THEN $6::timestamptz ELSE NULL END,
 			activated_at = NULL,
 			updated_at = $6::timestamptz
-		WHERE tenant_id = $1 AND id = $2::uuid
+		WHERE org_id = $1 AND id = $2::uuid
 			AND manifest_hash = $3
 			AND required_autonomy = $7
 			AND risk_class = $8
@@ -207,18 +207,18 @@ func (r *Repository) SaveConformance(ctx context.Context, tenantID string, id uu
 			AND rollback_capability_key = $12
 			AND archived_at IS NULL AND trashed_at IS NULL
 		RETURNING `+capabilitySelectColumns+`
-	`, tenantID, id.String(), expected.ManifestHash, report.Conformant, raw, now,
+	`, orgID, id.String(), expected.ManifestHash, report.Conformant, raw, now,
 		string(expected.RequiredAutonomy), expected.RiskClass, expected.SideEffectClass,
 		expected.RequiresNexusApproval, expected.EvidenceRequired, expected.RollbackCapabilityKey)
 	return scanCapability(row)
 }
 
-func (r *Repository) Activate(ctx context.Context, tenantID string, id uuid.UUID, manifestHash string) (domain.Capability, error) {
+func (r *Repository) Activate(ctx context.Context, orgID string, id uuid.UUID, manifestHash string) (domain.Capability, error) {
 	now := time.Now().UTC()
 	row := r.pool.QueryRow(ctx, `
 		UPDATE capabilities
 		SET promotion_state = 'active', activated_at = $4, updated_at = $4
-		WHERE tenant_id = $1 AND id = $2::uuid
+		WHERE org_id = $1 AND id = $2::uuid
 			AND promotion_state = 'conformant'
 			AND manifest_hash = $3 AND conformed_hash = $3
 			AND NOT EXISTS (
@@ -226,88 +226,88 @@ func (r *Repository) Activate(ctx context.Context, tenantID string, id uuid.UUID
 				FROM jsonb_array_elements_text(COALESCE(manifest->'quota_areas', '[]'::jsonb)) AS required(area)
 				WHERE NOT EXISTS (
 					SELECT 1 FROM quota_policies qp
-					WHERE qp.tenant_id = capabilities.tenant_id
+					WHERE qp.org_id = capabilities.org_id
 					  AND qp.product_surface = manifest->>'product_surface'
 					  AND qp.area = required.area AND qp.active = true
 				)
 			)
 			AND archived_at IS NULL AND trashed_at IS NULL
 		RETURNING `+capabilitySelectColumns+`
-	`, tenantID, id.String(), manifestHash, now)
+	`, orgID, id.String(), manifestHash, now)
 	return scanCapability(row)
 }
 
-func (r *Repository) Archive(ctx context.Context, tenantID string, resourceID uuid.UUID, at time.Time) error {
+func (r *Repository) Archive(ctx context.Context, orgID string, resourceID uuid.UUID, at time.Time) error {
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE capabilities
 		SET archived_at = $3, updated_at = $3
-		WHERE tenant_id = $1
+		WHERE org_id = $1
 			AND id = $2::uuid
 			AND archived_at IS NULL
 			AND trashed_at IS NULL
-	`, tenantID, resourceID.String(), at.UTC())
-	return r.lifecycleResult(ctx, tenantID, resourceID, tag, err)
+	`, orgID, resourceID.String(), at.UTC())
+	return r.lifecycleResult(ctx, orgID, resourceID, tag, err)
 }
 
-func (r *Repository) Unarchive(ctx context.Context, tenantID string, resourceID uuid.UUID) error {
+func (r *Repository) Unarchive(ctx context.Context, orgID string, resourceID uuid.UUID) error {
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE capabilities
 		SET archived_at = NULL, updated_at = $3
-		WHERE tenant_id = $1
+		WHERE org_id = $1
 			AND id = $2::uuid
 			AND archived_at IS NOT NULL
 			AND trashed_at IS NULL
-	`, tenantID, resourceID.String(), time.Now().UTC())
-	return r.lifecycleResult(ctx, tenantID, resourceID, tag, err)
+	`, orgID, resourceID.String(), time.Now().UTC())
+	return r.lifecycleResult(ctx, orgID, resourceID, tag, err)
 }
 
-func (r *Repository) Purge(ctx context.Context, tenantID string, resourceID uuid.UUID) error {
+func (r *Repository) Purge(ctx context.Context, orgID string, resourceID uuid.UUID) error {
 	tag, err := r.pool.Exec(ctx, `
 		DELETE FROM capabilities
-		WHERE tenant_id = $1 AND id = $2::uuid
+		WHERE org_id = $1 AND id = $2::uuid
 			AND trashed_at IS NOT NULL
-	`, tenantID, resourceID.String())
-	return r.lifecycleResult(ctx, tenantID, resourceID, tag, err)
+	`, orgID, resourceID.String())
+	return r.lifecycleResult(ctx, orgID, resourceID, tag, err)
 }
 
-func (r *Repository) IsArchived(ctx context.Context, tenantID string, resourceID uuid.UUID) (bool, error) {
-	state, err := r.State(ctx, tenantID, resourceID)
+func (r *Repository) IsArchived(ctx context.Context, orgID string, resourceID uuid.UUID) (bool, error) {
+	state, err := r.State(ctx, orgID, resourceID)
 	if err != nil {
 		return false, err
 	}
 	return state == lifecycle.StateArchived, nil
 }
 
-func (r *Repository) Trash(ctx context.Context, tenantID string, resourceID uuid.UUID, at time.Time, purgeAfter *time.Time) error {
+func (r *Repository) Trash(ctx context.Context, orgID string, resourceID uuid.UUID, at time.Time, purgeAfter *time.Time) error {
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE capabilities
 		SET archived_at = NULL, trashed_at = $3, purge_after = $4, updated_at = $3
-		WHERE tenant_id = $1
+		WHERE org_id = $1
 			AND id = $2::uuid
 			AND trashed_at IS NULL
-	`, tenantID, resourceID.String(), at.UTC(), nullableTime(purgeAfter))
-	return r.lifecycleResult(ctx, tenantID, resourceID, tag, err)
+	`, orgID, resourceID.String(), at.UTC(), nullableTime(purgeAfter))
+	return r.lifecycleResult(ctx, orgID, resourceID, tag, err)
 }
 
-func (r *Repository) Restore(ctx context.Context, tenantID string, resourceID uuid.UUID) error {
+func (r *Repository) Restore(ctx context.Context, orgID string, resourceID uuid.UUID) error {
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE capabilities
 		SET trashed_at = NULL, purge_after = NULL, updated_at = $3
-		WHERE tenant_id = $1
+		WHERE org_id = $1
 			AND id = $2::uuid
 			AND trashed_at IS NOT NULL
-	`, tenantID, resourceID.String(), time.Now().UTC())
-	return r.lifecycleResult(ctx, tenantID, resourceID, tag, err)
+	`, orgID, resourceID.String(), time.Now().UTC())
+	return r.lifecycleResult(ctx, orgID, resourceID, tag, err)
 }
 
-func (r *Repository) State(ctx context.Context, tenantID string, resourceID uuid.UUID) (lifecycle.LifecycleState, error) {
+func (r *Repository) State(ctx context.Context, orgID string, resourceID uuid.UUID) (lifecycle.LifecycleState, error) {
 	var archivedAt sql.NullTime
 	var trashedAt sql.NullTime
 	err := r.pool.QueryRow(ctx, `
 		SELECT archived_at, trashed_at
 		FROM capabilities
-		WHERE tenant_id = $1 AND id = $2::uuid
-	`, tenantID, resourceID.String()).Scan(&archivedAt, &trashedAt)
+		WHERE org_id = $1 AND id = $2::uuid
+	`, orgID, resourceID.String()).Scan(&archivedAt, &trashedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", domainerr.NotFoundf("capability", resourceID.String())
 	}
@@ -324,30 +324,30 @@ func (r *Repository) State(ctx context.Context, tenantID string, resourceID uuid
 	}
 }
 
-func (r *Repository) HasActiveVirployeeAssignments(ctx context.Context, tenantID string, id uuid.UUID) (bool, error) {
+func (r *Repository) HasActiveVirployeeAssignments(ctx context.Context, orgID string, id uuid.UUID) (bool, error) {
 	var exists bool
 	err := r.pool.QueryRow(ctx, `
 		SELECT EXISTS (
 			SELECT 1
 			FROM virployee_capabilities vc
 			JOIN virployees v ON v.id = vc.virployee_id
-			WHERE v.tenant_id = $1
+			WHERE v.org_id = $1
 			  AND vc.capability_id = $2::uuid
 			  AND v.archived_at IS NULL
 			  AND v.trashed_at IS NULL
 		)
-	`, tenantID, id.String()).Scan(&exists)
+	`, orgID, id.String()).Scan(&exists)
 	return exists, err
 }
 
-func (r *Repository) lifecycleResult(ctx context.Context, tenantID string, id uuid.UUID, tag pgconn.CommandTag, err error) error {
+func (r *Repository) lifecycleResult(ctx context.Context, orgID string, id uuid.UUID, tag pgconn.CommandTag, err error) error {
 	if err != nil {
 		return err
 	}
 	if tag.RowsAffected() > 0 {
 		return nil
 	}
-	if _, stateErr := r.State(ctx, tenantID, id); stateErr != nil {
+	if _, stateErr := r.State(ctx, orgID, id); stateErr != nil {
 		return stateErr
 	}
 	return domainerr.Conflict("invalid lifecycle transition")
@@ -365,7 +365,7 @@ func scanCapability(row scanner) (domain.Capability, error) {
 	var model models.Capability
 	err := row.Scan(
 		&idText,
-		&model.TenantID,
+		&model.OrgID,
 		&model.CapabilityKey,
 		&model.Name,
 		&model.Description,

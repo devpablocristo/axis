@@ -19,7 +19,7 @@ func TestUseCasesCreateAndListActive(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	created, err := uc.Create(context.Background(), "tenant-1", domain.CreateInput{
+	created, err := uc.Create(context.Background(), "organization-1", domain.CreateInput{
 		Name:         " Default assistant ",
 		SystemPrompt: " Stay concise. ",
 		MaxAutonomy:  "A2",
@@ -27,11 +27,11 @@ func TestUseCasesCreateAndListActive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if created.TenantID != "tenant-1" || created.Name != "Default assistant" || created.SystemPrompt != "Stay concise." || created.MaxAutonomy != virployeedomain.AutonomyA2 {
+	if created.OrgID != "organization-1" || created.Name != "Default assistant" || created.SystemPrompt != "Stay concise." || created.MaxAutonomy != virployeedomain.AutonomyA2 {
 		t.Fatalf("unexpected create output: %+v", created)
 	}
 
-	active, err := uc.ListActive(context.Background(), "tenant-1")
+	active, err := uc.ListActive(context.Background(), "organization-1")
 	if err != nil {
 		t.Fatalf("ListActive: %v", err)
 	}
@@ -46,7 +46,7 @@ func TestUseCasesCreateValidatesRequiredFields(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = uc.Create(context.Background(), "tenant-1", domain.CreateInput{
+	_, err = uc.Create(context.Background(), "organization-1", domain.CreateInput{
 		Name:        "Default",
 		MaxAutonomy: "A2",
 	})
@@ -54,7 +54,7 @@ func TestUseCasesCreateValidatesRequiredFields(t *testing.T) {
 		t.Fatalf("expected validation for missing system_prompt, got %v", err)
 	}
 
-	_, err = uc.Create(context.Background(), "tenant-1", domain.CreateInput{
+	_, err = uc.Create(context.Background(), "organization-1", domain.CreateInput{
 		Name:         "Default",
 		SystemPrompt: "Prompt",
 		MaxAutonomy:  "A9",
@@ -70,7 +70,7 @@ func TestEnsureUsableByVirployeeUsesMaxAutonomy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	profile, err := uc.Create(context.Background(), "tenant-1", domain.CreateInput{
+	profile, err := uc.Create(context.Background(), "organization-1", domain.CreateInput{
 		Name:         "Safe assistant",
 		SystemPrompt: "Do safe work.",
 		MaxAutonomy:  "A2",
@@ -79,14 +79,14 @@ func TestEnsureUsableByVirployeeUsesMaxAutonomy(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := uc.EnsureUsableByVirployee(context.Background(), "tenant-1", profile.ID, virployeedomain.AutonomyA2); err != nil {
+	if err := uc.EnsureUsableByVirployee(context.Background(), "organization-1", profile.ID, virployeedomain.AutonomyA2); err != nil {
 		t.Fatalf("expected A2 profile template to accept A2 virployee, got %v", err)
 	}
-	if err := uc.EnsureUsableByVirployee(context.Background(), "tenant-1", profile.ID, virployeedomain.AutonomyA3); !domainerr.IsValidation(err) {
+	if err := uc.EnsureUsableByVirployee(context.Background(), "organization-1", profile.ID, virployeedomain.AutonomyA3); !domainerr.IsValidation(err) {
 		t.Fatalf("expected A2 profile template to reject A3 virployee, got %v", err)
 	}
-	if err := uc.EnsureUsableByVirployee(context.Background(), "other-tenant", profile.ID, virployeedomain.AutonomyA2); !domainerr.IsValidation(err) {
-		t.Fatalf("expected other tenant to fail, got %v", err)
+	if err := uc.EnsureUsableByVirployee(context.Background(), "other-organization", profile.ID, virployeedomain.AutonomyA2); !domainerr.IsValidation(err) {
+		t.Fatalf("expected other organization to fail, got %v", err)
 	}
 }
 
@@ -96,7 +96,7 @@ func TestLifecycleBlocksAssignedProfiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	profile, err := uc.Create(context.Background(), "tenant-1", domain.CreateInput{
+	profile, err := uc.Create(context.Background(), "organization-1", domain.CreateInput{
 		Name:         "Assigned",
 		SystemPrompt: "Prompt",
 		MaxAutonomy:  "A1",
@@ -106,13 +106,13 @@ func TestLifecycleBlocksAssignedProfiles(t *testing.T) {
 	}
 	repo.assigned[profile.ID] = true
 
-	if err := uc.Archive(context.Background(), "tenant-1", profile.ID, "", ""); !domainerr.IsConflict(err) {
+	if err := uc.Archive(context.Background(), "organization-1", profile.ID, "", ""); !domainerr.IsConflict(err) {
 		t.Fatalf("expected conflict archiving assigned profile, got %v", err)
 	}
-	if err := uc.Trash(context.Background(), "tenant-1", profile.ID, "", ""); !domainerr.IsConflict(err) {
+	if err := uc.Trash(context.Background(), "organization-1", profile.ID, "", ""); !domainerr.IsConflict(err) {
 		t.Fatalf("expected conflict trashing assigned profile, got %v", err)
 	}
-	if err := uc.Purge(context.Background(), "tenant-1", profile.ID, "", ""); !domainerr.IsConflict(err) {
+	if err := uc.Purge(context.Background(), "organization-1", profile.ID, "", ""); !domainerr.IsConflict(err) {
 		t.Fatalf("expected conflict purging assigned profile, got %v", err)
 	}
 }
@@ -129,11 +129,11 @@ func newFakeProfileRepo() *fakeProfileRepo {
 	}
 }
 
-func (r *fakeProfileRepo) Create(_ context.Context, tenantID string, input domain.NormalizedCreateInput) (domain.ProfileTemplate, error) {
+func (r *fakeProfileRepo) Create(_ context.Context, orgID string, input domain.NormalizedCreateInput) (domain.ProfileTemplate, error) {
 	now := time.Now().UTC()
 	row := domain.ProfileTemplate{
 		ID:           uuid.New(),
-		TenantID:     tenantID,
+		OrgID:        orgID,
 		Name:         input.Name,
 		Description:  input.Description,
 		SystemPrompt: input.SystemPrompt,
@@ -145,27 +145,27 @@ func (r *fakeProfileRepo) Create(_ context.Context, tenantID string, input domai
 	return row, nil
 }
 
-func (r *fakeProfileRepo) List(_ context.Context, tenantID string, state domain.State) ([]domain.ProfileTemplate, error) {
+func (r *fakeProfileRepo) List(_ context.Context, orgID string, state domain.State) ([]domain.ProfileTemplate, error) {
 	out := []domain.ProfileTemplate{}
 	for _, row := range r.rows {
-		if row.TenantID == tenantID && row.State() == state {
+		if row.OrgID == orgID && row.State() == state {
 			out = append(out, row)
 		}
 	}
 	return out, nil
 }
 
-func (r *fakeProfileRepo) Get(_ context.Context, tenantID string, id uuid.UUID) (domain.ProfileTemplate, error) {
+func (r *fakeProfileRepo) Get(_ context.Context, orgID string, id uuid.UUID) (domain.ProfileTemplate, error) {
 	row, ok := r.rows[id]
-	if !ok || row.TenantID != tenantID || row.State() == domain.StateTrashed {
+	if !ok || row.OrgID != orgID || row.State() == domain.StateTrashed {
 		return domain.ProfileTemplate{}, domainerr.NotFoundf("profile", id.String())
 	}
 	return row, nil
 }
 
-func (r *fakeProfileRepo) Update(_ context.Context, tenantID string, id uuid.UUID, input domain.NormalizedUpdateInput) (domain.ProfileTemplate, error) {
+func (r *fakeProfileRepo) Update(_ context.Context, orgID string, id uuid.UUID, input domain.NormalizedUpdateInput) (domain.ProfileTemplate, error) {
 	row, ok := r.rows[id]
-	if !ok || row.TenantID != tenantID {
+	if !ok || row.OrgID != orgID {
 		return domain.ProfileTemplate{}, domainerr.NotFoundf("profile", id.String())
 	}
 	if row.State() != domain.StateActive {
@@ -184,9 +184,9 @@ func (r *fakeProfileRepo) HasActiveVirployeeAssignments(_ context.Context, _ str
 	return r.assigned[id], nil
 }
 
-func (r *fakeProfileRepo) Archive(_ context.Context, tenantID string, id uuid.UUID, at time.Time) error {
+func (r *fakeProfileRepo) Archive(_ context.Context, orgID string, id uuid.UUID, at time.Time) error {
 	row, ok := r.rows[id]
-	if !ok || row.TenantID != tenantID || row.State() != domain.StateActive {
+	if !ok || row.OrgID != orgID || row.State() != domain.StateActive {
 		return domainerr.NotFoundf("profile", id.String())
 	}
 	row.ArchivedAt = &at
@@ -195,9 +195,9 @@ func (r *fakeProfileRepo) Archive(_ context.Context, tenantID string, id uuid.UU
 	return nil
 }
 
-func (r *fakeProfileRepo) Unarchive(_ context.Context, tenantID string, id uuid.UUID) error {
+func (r *fakeProfileRepo) Unarchive(_ context.Context, orgID string, id uuid.UUID) error {
 	row, ok := r.rows[id]
-	if !ok || row.TenantID != tenantID || row.State() != domain.StateArchived {
+	if !ok || row.OrgID != orgID || row.State() != domain.StateArchived {
 		return domainerr.NotFoundf("profile", id.String())
 	}
 	row.ArchivedAt = nil
@@ -206,9 +206,9 @@ func (r *fakeProfileRepo) Unarchive(_ context.Context, tenantID string, id uuid.
 	return nil
 }
 
-func (r *fakeProfileRepo) Trash(_ context.Context, tenantID string, id uuid.UUID, at time.Time, purgeAfter *time.Time) error {
+func (r *fakeProfileRepo) Trash(_ context.Context, orgID string, id uuid.UUID, at time.Time, purgeAfter *time.Time) error {
 	row, ok := r.rows[id]
-	if !ok || row.TenantID != tenantID || row.State() == domain.StateTrashed {
+	if !ok || row.OrgID != orgID || row.State() == domain.StateTrashed {
 		return domainerr.NotFoundf("profile", id.String())
 	}
 	row.ArchivedAt = nil
@@ -219,9 +219,9 @@ func (r *fakeProfileRepo) Trash(_ context.Context, tenantID string, id uuid.UUID
 	return nil
 }
 
-func (r *fakeProfileRepo) Restore(_ context.Context, tenantID string, id uuid.UUID) error {
+func (r *fakeProfileRepo) Restore(_ context.Context, orgID string, id uuid.UUID) error {
 	row, ok := r.rows[id]
-	if !ok || row.TenantID != tenantID || row.State() != domain.StateTrashed {
+	if !ok || row.OrgID != orgID || row.State() != domain.StateTrashed {
 		return domainerr.NotFoundf("profile", id.String())
 	}
 	row.TrashedAt = nil
@@ -231,26 +231,26 @@ func (r *fakeProfileRepo) Restore(_ context.Context, tenantID string, id uuid.UU
 	return nil
 }
 
-func (r *fakeProfileRepo) Purge(_ context.Context, tenantID string, id uuid.UUID) error {
+func (r *fakeProfileRepo) Purge(_ context.Context, orgID string, id uuid.UUID) error {
 	row, ok := r.rows[id]
-	if !ok || row.TenantID != tenantID {
+	if !ok || row.OrgID != orgID {
 		return domainerr.NotFoundf("profile", id.String())
 	}
 	delete(r.rows, id)
 	return nil
 }
 
-func (r *fakeProfileRepo) IsArchived(_ context.Context, tenantID string, id uuid.UUID) (bool, error) {
+func (r *fakeProfileRepo) IsArchived(_ context.Context, orgID string, id uuid.UUID) (bool, error) {
 	row, ok := r.rows[id]
-	if !ok || row.TenantID != tenantID {
+	if !ok || row.OrgID != orgID {
 		return false, domainerr.NotFoundf("profile", id.String())
 	}
 	return row.State() == domain.StateArchived, nil
 }
 
-func (r *fakeProfileRepo) State(_ context.Context, tenantID string, id uuid.UUID) (lifecycle.LifecycleState, error) {
+func (r *fakeProfileRepo) State(_ context.Context, orgID string, id uuid.UUID) (lifecycle.LifecycleState, error) {
 	row, ok := r.rows[id]
-	if !ok || row.TenantID != tenantID {
+	if !ok || row.OrgID != orgID {
 		return "", domainerr.NotFoundf("profile", id.String())
 	}
 	switch row.State() {

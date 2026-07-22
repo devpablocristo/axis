@@ -30,7 +30,7 @@ func (h *Handler) Routes(r gin.IRouter) {
 	g.POST("/outbox/:message_id/replay", h.replayOutbox)
 }
 func rc(c *gin.Context) (string, string, string, string) {
-	return strings.TrimSpace(c.GetHeader("X-Tenant-ID")), strings.ToLower(strings.TrimSpace(c.GetHeader("X-Product-Surface"))), strings.TrimSpace(c.GetHeader("X-Actor-ID")), strings.TrimSpace(c.GetHeader("X-Axis-Tenant-Role"))
+	return strings.TrimSpace(c.GetHeader("X-Org-ID")), strings.ToLower(strings.TrimSpace(c.GetHeader("X-Product-Surface"))), strings.TrimSpace(c.GetHeader("X-Actor-ID")), strings.TrimSpace(c.GetHeader("X-Axis-Org-Role"))
 }
 func page(c *gin.Context) (int, int) {
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))

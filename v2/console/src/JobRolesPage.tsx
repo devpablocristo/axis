@@ -27,7 +27,7 @@ type CrudLifecycleView = 'active' | 'archived' | 'trash'
 type BulkAction = 'archive' | 'trash' | 'restore' | 'purge'
 
 type JobRolesPageProps = {
-  tenantId: string
+  orgId: string
   principalId: string
 }
 
@@ -35,7 +35,7 @@ const CrudPage = PlatformCrudPage as unknown as <T extends { id: string }>(
   props: CrudPageProps<T>,
 ) => ReactElement
 
-export function JobRolesPage({ tenantId, principalId }: JobRolesPageProps) {
+export function JobRolesPage({ orgId, principalId }: JobRolesPageProps) {
   const [lifecycleView, setLifecycleView] = useState<CrudLifecycleView>('active')
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [selectedRowsById, setSelectedRowsById] = useState<Record<string, JobRole>>({})
@@ -47,20 +47,20 @@ export function JobRolesPage({ tenantId, principalId }: JobRolesPageProps) {
   const [bulkBusy, setBulkBusy] = useState(false)
   const [reloadVersion, setReloadVersion] = useState(0)
   const [actionError, setActionError] = useState('')
-  const isActive = Boolean(tenantId && principalId)
+  const isActive = Boolean(orgId && principalId)
   const formFields = useMemo(() => jobRoleFormFields(), [])
   const selectedRow = selectedIds.length === 1 ? selectedRowsById[selectedIds[0]] ?? null : null
 
   const dataSource: NonNullable<CrudPageProps<JobRole>['dataSource']> = useMemo(() => ({
-    list: () => isActive ? listJobRoles(lifecycleView, tenantId, principalId) : Promise.resolve([]),
-  }), [isActive, lifecycleView, principalId, tenantId])
+    list: () => isActive ? listJobRoles(lifecycleView, orgId, principalId) : Promise.resolve([]),
+  }), [isActive, lifecycleView, principalId, orgId])
 
   useEffect(() => {
     setSelectedIds([])
     setSelectedRowsById({})
     closeForm()
     setActionError('')
-  }, [lifecycleView, tenantId])
+  }, [lifecycleView, orgId])
 
   const toggleSelected = (row: JobRole, checked: boolean) => {
     setSelectedRowsById((current) => {
@@ -117,9 +117,9 @@ export function JobRolesPage({ tenantId, principalId }: JobRolesPageProps) {
     setActionError('')
     try {
       if (formMode === 'create') {
-        await createJobRole(jobRolePayload(formValues, responsibilities, successCriteria), tenantId, principalId)
+        await createJobRole(jobRolePayload(formValues, responsibilities, successCriteria), orgId, principalId)
       } else if (selectedRow) {
-        await updateJobRole(selectedRow.id, jobRolePayload(formValues, responsibilities, successCriteria), tenantId, principalId)
+        await updateJobRole(selectedRow.id, jobRolePayload(formValues, responsibilities, successCriteria), orgId, principalId)
       }
       closeForm()
       clearSelected()
@@ -138,17 +138,17 @@ export function JobRolesPage({ tenantId, principalId }: JobRolesPageProps) {
     try {
       for (const id of selectedIds) {
         if (action === 'archive') {
-          await archiveJobRole(id, tenantId, principalId)
+          await archiveJobRole(id, orgId, principalId)
         } else if (action === 'trash') {
-          await trashJobRole(id, tenantId, principalId)
+          await trashJobRole(id, orgId, principalId)
         } else if (action === 'restore') {
           if (lifecycleView === 'archived') {
-            await unarchiveJobRole(id, tenantId, principalId)
+            await unarchiveJobRole(id, orgId, principalId)
           } else {
-            await restoreJobRole(id, tenantId, principalId)
+            await restoreJobRole(id, orgId, principalId)
           }
         } else {
-          await purgeJobRole(id, tenantId, principalId)
+          await purgeJobRole(id, orgId, principalId)
         }
       }
       clearSelected()
@@ -163,7 +163,7 @@ export function JobRolesPage({ tenantId, principalId }: JobRolesPageProps) {
   if (!isActive) {
     return (
       <section className="page-section">
-        <div className="empty-state">Select an active tenant to manage Job Roles.</div>
+        <div className="empty-state">Select an active organization to manage Job Roles.</div>
       </section>
     )
   }
@@ -171,7 +171,7 @@ export function JobRolesPage({ tenantId, principalId }: JobRolesPageProps) {
   return (
     <section className="page-section iam-control axis-crud-host">
       <CrudPage<JobRole>
-        key={`job-roles-${tenantId}-${lifecycleView}-${reloadVersion}`}
+        key={`job-roles-${orgId}-${lifecycleView}-${reloadVersion}`}
         dataSource={dataSource}
         stringsBase={defaultCrudStrings}
         strings={{

@@ -26,7 +26,7 @@ type Actor struct {
 }
 
 type ScopePolicy struct {
-	TenantID         string
+	OrgID            string
 	VirployeeID      uuid.UUID
 	AllowedTopics    []string
 	ProhibitedTopics []string
@@ -54,7 +54,7 @@ type PolicyRules struct {
 
 type PolicyPack struct {
 	ID        uuid.UUID
-	TenantID  string
+	OrgID     string
 	PolicyKey string
 	Name      string
 	Version   int
@@ -75,7 +75,7 @@ type CreatePolicyPackInput struct {
 }
 
 type PolicyBinding struct {
-	TenantID      string
+	OrgID         string
 	VirployeeID   uuid.UUID
 	PolicyPackIDs []uuid.UUID
 	Revision      int64
@@ -90,7 +90,7 @@ type PutPolicyBindingInput struct {
 
 type Delegation struct {
 	ID               uuid.UUID
-	TenantID         string
+	OrgID            string
 	VirployeeID      uuid.UUID
 	PrincipalType    string
 	PrincipalID      string
@@ -145,7 +145,7 @@ type RevokeDelegationInput struct {
 }
 
 type ResolvedAuthority struct {
-	TenantID        string
+	OrgID           string
 	VirployeeID     uuid.UUID
 	JobRoleID       uuid.UUID
 	Scope           ScopePolicy
@@ -155,7 +155,7 @@ type ResolvedAuthority struct {
 }
 
 type Snapshot struct {
-	TenantID                 string            `json:"tenant_id"`
+	OrgID                    string            `json:"org_id"`
 	VirployeeID              string            `json:"virployee_id"`
 	JobRoleID                string            `json:"job_role_id"`
 	CapabilityKey            string            `json:"capability_key"`

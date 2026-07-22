@@ -24,10 +24,10 @@ func (r *Repository) UpsertManifest(ctx context.Context, scope Scope, manifest M
 	id := uuid.New()
 	row := r.pool.QueryRow(ctx, `
 		INSERT INTO companion_artifacts (
-			id, tenant_id, virployee_id, product_surface, subject_id, repository_generation,
+			id, org_id, virployee_id, product_surface, subject_id, repository_generation,
 			document_id, name, source_ref, sha256, mime_type, size_bytes, required, status
 		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'received')
-		ON CONFLICT (tenant_id, virployee_id, product_surface, subject_id, repository_generation, document_id)
+		ON CONFLICT (org_id, virployee_id, product_surface, subject_id, repository_generation, document_id)
 		DO UPDATE SET
 			name = EXCLUDED.name,
 			source_ref = EXCLUDED.source_ref,
@@ -39,7 +39,7 @@ func (r *Repository) UpsertManifest(ctx context.Context, scope Scope, manifest M
 		WHERE companion_artifacts.sha256 = EXCLUDED.sha256
 		  AND companion_artifacts.size_bytes = EXCLUDED.size_bytes
 		RETURNING `+recordColumns+`
-	`, id, scope.TenantID, scope.VirployeeID, scope.ProductSurface, scope.SubjectID, scope.RepositoryGeneration,
+	`, id, scope.OrgID, scope.VirployeeID, scope.ProductSurface, scope.SubjectID, scope.RepositoryGeneration,
 		manifest.DocumentID, manifest.Name, manifest.SourceRef, manifest.SHA256, manifest.MIMEType, manifest.SizeBytes, manifest.Required)
 	record, err := scanRecord(row)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -52,7 +52,7 @@ func (r *Repository) UpsertManifest(ctx context.Context, scope Scope, manifest M
 	return record, nil
 }
 
-func (r *Repository) SetStatus(ctx context.Context, tenantID string, id uuid.UUID, status Status, stagedURI, actualMIME, errorCode string) (Record, error) {
+func (r *Repository) SetStatus(ctx context.Context, orgID string, id uuid.UUID, status Status, stagedURI, actualMIME, errorCode string) (Record, error) {
 	var expiresAt *time.Time
 	if stagedURI != "" {
 		value := r.now().UTC().Add(StagingTTL)
@@ -66,17 +66,17 @@ func (r *Repository) SetStatus(ctx context.Context, tenantID string, id uuid.UUI
 		    error_code=$6,
 		    expires_at=COALESCE($7, expires_at),
 		    updated_at=now()
-		WHERE tenant_id=$1 AND id=$2
+		WHERE org_id=$1 AND id=$2
 		RETURNING `+recordColumns,
-		tenantID, id, status, stagedURI, actualMIME, errorCode, expiresAt)
+		orgID, id, status, stagedURI, actualMIME, errorCode, expiresAt)
 	return scanRecord(row)
 }
 
 func (r *Repository) ListGeneration(ctx context.Context, scope Scope) ([]Record, error) {
 	rows, err := r.pool.Query(ctx, `SELECT `+recordColumns+`
 		FROM companion_artifacts
-		WHERE tenant_id=$1 AND virployee_id=$2 AND product_surface=$3 AND subject_id=$4 AND repository_generation=$5
-		ORDER BY document_id`, scope.TenantID, scope.VirployeeID, scope.ProductSurface, scope.SubjectID, scope.RepositoryGeneration)
+		WHERE org_id=$1 AND virployee_id=$2 AND product_surface=$3 AND subject_id=$4 AND repository_generation=$5
+		ORDER BY document_id`, scope.OrgID, scope.VirployeeID, scope.ProductSurface, scope.SubjectID, scope.RepositoryGeneration)
 	if err != nil {
 		return nil, err
 	}
@@ -92,7 +92,7 @@ func (r *Repository) ListGeneration(ctx context.Context, scope Scope) ([]Record,
 	return out, rows.Err()
 }
 
-const recordColumns = `id, tenant_id, virployee_id, product_surface, subject_id, repository_generation,
+const recordColumns = `id, org_id, virployee_id, product_surface, subject_id, repository_generation,
 	document_id, name, source_ref, sha256, mime_type, size_bytes, required, status,
 	staged_uri, actual_mime, error_code, expires_at, created_at, updated_at`
 
@@ -102,7 +102,7 @@ func scanRecord(row recordScanner) (Record, error) {
 	var record Record
 	var expiresAt *time.Time
 	err := row.Scan(
-		&record.ID, &record.Scope.TenantID, &record.Scope.VirployeeID, &record.Scope.ProductSurface,
+		&record.ID, &record.Scope.OrgID, &record.Scope.VirployeeID, &record.Scope.ProductSurface,
 		&record.Scope.SubjectID, &record.Scope.RepositoryGeneration, &record.Manifest.DocumentID,
 		&record.Manifest.Name, &record.Manifest.SourceRef, &record.Manifest.SHA256, &record.Manifest.MIMEType,
 		&record.Manifest.SizeBytes, &record.Manifest.Required, &record.Status, &record.StagedURI,

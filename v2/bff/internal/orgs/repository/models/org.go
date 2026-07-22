@@ -14,7 +14,7 @@ type Org struct {
 	Slug          string
 	Status        string
 	SyncedAt      *time.Time
-	TenantCount   int
+	ProductCount  int
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
 
@@ -32,7 +32,7 @@ func (o Org) ToDomain() domain.Org {
 		Slug:          o.Slug,
 		Status:        o.Status,
 		SyncedAt:      o.SyncedAt,
-		TenantCount:   o.TenantCount,
+		ProductCount:  o.ProductCount,
 		CreatedAt:     o.CreatedAt,
 		UpdatedAt:     o.UpdatedAt,
 		ArchivedAt:    o.ArchivedAt,

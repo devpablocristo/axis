@@ -10,7 +10,7 @@ import (
 
 type Capability struct {
 	ID                    uuid.UUID
-	TenantID              string
+	OrgID                 string
 	CapabilityKey         string
 	Name                  string
 	Description           string
@@ -37,7 +37,7 @@ type Capability struct {
 func (m Capability) ToDomain() domain.Capability {
 	return domain.Capability{
 		ID:                    m.ID,
-		TenantID:              m.TenantID,
+		OrgID:                 m.OrgID,
 		CapabilityKey:         m.CapabilityKey,
 		Name:                  m.Name,
 		Description:           m.Description,

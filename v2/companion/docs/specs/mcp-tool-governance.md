@@ -8,12 +8,12 @@ scope.
 Capabilities are the only tool catalog. A capability is advertised only when
 it is active, its promoted manifest is conformant, it is assigned to the active
 Virployee, its autonomy and professional authority allow it for the selected
-work subject/case, the effective tenant/product/Job Role MCP policy permits it,
-and a local governed executor is registered. Every request uses tenant and actor
+work subject/case, the effective organization/product/Job Role MCP policy permits it,
+and a local governed executor is registered. Every request uses organization and actor
 identity supplied by trusted middleware and resolves an active continuity
 assignment; caller arguments cannot override either identity.
 
-The tenant policy is disabled by default. Denylists and global or per-capability
+The organization policy is disabled by default. Denylists and global or per-capability
 kill switches take precedence over allowlists. Owners and admins manage the
 versioned policy through `GET/PUT /v1/runtime/mcp-policy` and inspect its change
 history and metadata-only invocation audit through the corresponding audit APIs.
@@ -21,7 +21,7 @@ history and metadata-only invocation audit through the corresponding audit APIs.
 `ToolInvocationGate` is shared by the MCP facade and the internal execution
 path. Inputs and outputs are validated against the promoted manifest schemas.
 Reads require a registered executor. Writes require a stable idempotency key and
-pass through Execution Gate and Nexus; approval binds tenant, actor, Virployee,
+pass through Execution Gate and Nexus; approval binds organization, actor, Virployee,
 subject/case, continuity assignment revision, delegation/authority snapshot,
 capability manifest and its product surface, MCP policy revision, active Nexus
 policy snapshot, payload hash, and idempotency hash. Nexus receives only safe

@@ -103,7 +103,7 @@ func (h *Handler) SubmitAssistRun(c *gin.Context) {
 		ginmw.Respond(c, err)
 		return
 	}
-	run, err := h.ucs.SubmitAssistAsync(c.Request.Context(), tenantID(c), id, req.InputJSON, idem, metadata)
+	run, err := h.ucs.SubmitAssistAsync(c.Request.Context(), orgID(c), id, req.InputJSON, idem, metadata)
 	if err != nil {
 		if respondQuotaError(c, err) {
 			return
@@ -127,7 +127,7 @@ func (h *Handler) GetAssistRun(c *gin.Context) {
 	if !ok {
 		return
 	}
-	run, err := h.ucs.GetAssistRun(c.Request.Context(), tenantID(c), virployeeID, runID)
+	run, err := h.ucs.GetAssistRun(c.Request.Context(), orgID(c), virployeeID, runID)
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -149,7 +149,7 @@ func (h *Handler) ExecuteApprovedAction(c *gin.Context) {
 		ginmw.Respond(c, ginmw.ErrBadInput)
 		return
 	}
-	out, err := h.ucs.ExecuteApprovedAction(c.Request.Context(), tenantID(c), id, approvalID)
+	out, err := h.ucs.ExecuteApprovedAction(c.Request.Context(), orgID(c), id, approvalID)
 	if err != nil {
 		if respondQuotaError(c, err) {
 			return
@@ -178,7 +178,7 @@ func (h *Handler) Assist(c *gin.Context) {
 		ginmw.Respond(c, err)
 		return
 	}
-	run, err := h.ucs.Assist(c.Request.Context(), tenantID(c), id, req.InputJSON, idem, metadata)
+	run, err := h.ucs.Assist(c.Request.Context(), orgID(c), id, req.InputJSON, idem, metadata)
 	if err != nil {
 		if respondQuotaError(c, err) {
 			return
@@ -280,7 +280,7 @@ func (h *Handler) ListRuns(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, err := h.ucs.ListRuns(c.Request.Context(), tenantID(c), id, limit)
+	out, err := h.ucs.ListRuns(c.Request.Context(), orgID(c), id, limit)
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -302,7 +302,7 @@ func (h *Handler) SimulateApprovedExecution(c *gin.Context) {
 		ginmw.Respond(c, ginmw.ErrBadInput)
 		return
 	}
-	out, err := h.ucs.SimulateApprovedExecution(c.Request.Context(), tenantID(c), id, approvalID)
+	out, err := h.ucs.SimulateApprovedExecution(c.Request.Context(), orgID(c), id, approvalID)
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -319,7 +319,7 @@ func (h *Handler) Create(c *gin.Context) {
 	if err := ginmw.BindJSON(c, &req); err != nil {
 		return
 	}
-	out, err := h.ucs.Create(c.Request.Context(), tenantID(c), req.ToDomain())
+	out, err := h.ucs.Create(c.Request.Context(), orgID(c), req.ToDomain())
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -328,7 +328,7 @@ func (h *Handler) Create(c *gin.Context) {
 }
 
 func (h *Handler) ListActive(c *gin.Context) {
-	out, err := h.ucs.ListActive(c.Request.Context(), tenantID(c))
+	out, err := h.ucs.ListActive(c.Request.Context(), orgID(c))
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -337,7 +337,7 @@ func (h *Handler) ListActive(c *gin.Context) {
 }
 
 func (h *Handler) ListArchived(c *gin.Context) {
-	out, err := h.ucs.ListArchived(c.Request.Context(), tenantID(c))
+	out, err := h.ucs.ListArchived(c.Request.Context(), orgID(c))
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -346,7 +346,7 @@ func (h *Handler) ListArchived(c *gin.Context) {
 }
 
 func (h *Handler) ListTrash(c *gin.Context) {
-	out, err := h.ucs.ListTrash(c.Request.Context(), tenantID(c))
+	out, err := h.ucs.ListTrash(c.Request.Context(), orgID(c))
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -359,7 +359,7 @@ func (h *Handler) Get(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, err := h.ucs.Get(c.Request.Context(), tenantID(c), id)
+	out, err := h.ucs.Get(c.Request.Context(), orgID(c), id)
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -372,7 +372,7 @@ func (h *Handler) RuntimeContext(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, err := h.ucs.RuntimeContext(c.Request.Context(), tenantID(c), id)
+	out, err := h.ucs.RuntimeContext(c.Request.Context(), orgID(c), id)
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -389,7 +389,7 @@ func (h *Handler) DryRun(c *gin.Context) {
 	if err := ginmw.BindJSON(c, &req); err != nil {
 		return
 	}
-	out, err := h.ucs.DryRun(c.Request.Context(), tenantID(c), id, req.Input)
+	out, err := h.ucs.DryRun(c.Request.Context(), orgID(c), id, req.Input)
 	if err != nil {
 		if respondQuotaError(c, err) {
 			return
@@ -418,7 +418,7 @@ func (h *Handler) ExecutionGate(c *gin.Context) {
 		}
 		assistRunID = parsed
 	}
-	out, err := h.ucs.ExecutionGateWithAssistRun(c.Request.Context(), tenantID(c), id, req.Input, req.ConfirmedDraftToDomain(), req.PrincipalToDomain(), assistRunID)
+	out, err := h.ucs.ExecutionGateWithAssistRun(c.Request.Context(), orgID(c), id, req.Input, req.ConfirmedDraftToDomain(), req.PrincipalToDomain(), assistRunID)
 	if err != nil {
 		if respondQuotaError(c, err) {
 			return
@@ -438,7 +438,7 @@ func (h *Handler) Update(c *gin.Context) {
 	if err := ginmw.BindJSON(c, &req); err != nil {
 		return
 	}
-	out, err := h.ucs.Update(c.Request.Context(), tenantID(c), id, req.ToDomain())
+	out, err := h.ucs.Update(c.Request.Context(), orgID(c), id, req.ToDomain())
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -475,7 +475,7 @@ func (h *Handler) lifecycleAction(c *gin.Context, fn func(context.Context, strin
 	if !ok {
 		return
 	}
-	if err := fn(c.Request.Context(), tenantID(c), id, actorID(c), req.Reason); err != nil {
+	if err := fn(c.Request.Context(), orgID(c), id, actorID(c), req.Reason); err != nil {
 		ginmw.Respond(c, err)
 		return
 	}
@@ -497,12 +497,12 @@ func bindLifecycleRequest(c *gin.Context) (dto.LifecycleRequest, bool) {
 	return req, true
 }
 
-func tenantID(c *gin.Context) string {
-	tenant := strings.TrimSpace(c.GetHeader("X-Tenant-ID"))
-	if tenant == "" {
-		return DefaultTenantID
+func orgID(c *gin.Context) string {
+	organization := strings.TrimSpace(c.GetHeader("X-Org-ID"))
+	if organization == "" {
+		return DefaultOrgID
 	}
-	return tenant
+	return organization
 }
 
 func actorID(c *gin.Context) string {

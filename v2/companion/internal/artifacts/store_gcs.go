@@ -54,7 +54,7 @@ func NewGCSStore(config GCSStoreConfig, tokens oauth2.TokenSource, client *http.
 func (s *GCSStore) PutOriginal(ctx context.Context, scope Scope, manifest Manifest, blob Blob) (StoredArtifact, error) {
 	objectName := path.Join(
 		s.config.Prefix,
-		cleanSegment(scope.TenantID),
+		cleanSegment(scope.OrgID),
 		cleanSegment(scope.ProductSurface),
 		cleanSegment(scope.VirployeeID.String()),
 		"subjects", opaqueSegment(scope.SubjectID),

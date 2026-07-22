@@ -61,11 +61,11 @@ func (s *HTTPNotificationSender) SendNotification(ctx context.Context, destinati
 }
 
 type notificationDelivery struct {
-	id        string
-	tenant    string
-	reference string
-	payload   json.RawMessage
-	attempts  int
+	id           string
+	organization string
+	reference    string
+	payload      json.RawMessage
+	attempts     int
 }
 
 func (s *Service) ConfigureNotificationDelivery(resolver NotificationDestinationResolver, sender NotificationSender) {
@@ -87,7 +87,7 @@ func (s *Service) DeliverNotifications(ctx context.Context, limit int) (int, err
 	defer func() { _ = tx.Rollback(ctx) }()
 	rows, err := tx.Query(ctx, `WITH picked AS(
 		SELECT outbox.id FROM operational_notification_outbox AS outbox
-		JOIN operational_notification_policy AS policy ON policy.tenant_id=outbox.tenant_id AND policy.enabled=true
+		JOIN operational_notification_policy AS policy ON policy.org_id=outbox.org_id AND policy.enabled=true
 		WHERE outbox.attempts<10 AND (
 			(outbox.status='pending' AND outbox.available_at<=now()) OR
 			(outbox.status='processing' AND outbox.lease_until<now())
@@ -95,15 +95,15 @@ func (s *Service) DeliverNotifications(ctx context.Context, limit int) (int, err
 	) UPDATE operational_notification_outbox AS outbox
 	SET status='processing',attempts=attempts+1,lease_until=now()+interval '1 minute',updated_at=now()
 	FROM picked,operational_notification_policy AS policy
-	WHERE outbox.id=picked.id AND policy.tenant_id=outbox.tenant_id
-	RETURNING outbox.id::text,outbox.tenant_id,policy.webhook_secret_ref,outbox.payload_json,outbox.attempts`, limit)
+	WHERE outbox.id=picked.id AND policy.org_id=outbox.org_id
+	RETURNING outbox.id::text,outbox.org_id,policy.webhook_secret_ref,outbox.payload_json,outbox.attempts`, limit)
 	if err != nil {
 		return 0, err
 	}
 	deliveries := []notificationDelivery{}
 	for rows.Next() {
 		var item notificationDelivery
-		if err = rows.Scan(&item.id, &item.tenant, &item.reference, &item.payload, &item.attempts); err != nil {
+		if err = rows.Scan(&item.id, &item.organization, &item.reference, &item.payload, &item.attempts); err != nil {
 			rows.Close()
 			return 0, err
 		}

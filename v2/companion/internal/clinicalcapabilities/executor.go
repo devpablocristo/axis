@@ -68,7 +68,7 @@ func (e *Executor) Execute(ctx context.Context, invocation mcpgovernance.Invocat
 
 func (e *Executor) retrievalScope(invocation mcpgovernance.InvocationContext) knowledgebases.RetrievalScope {
 	return knowledgebases.RetrievalScope{
-		TenantID: invocation.TenantID, VirployeeID: invocation.VirployeeID,
+		OrgID: invocation.OrgID, VirployeeID: invocation.VirployeeID,
 		SubjectID: invocation.SubjectID.String(), CaseID: invocation.CaseID,
 		ProductSurface: invocation.ProductSurface, RepositoryGeneration: invocation.RepositoryGeneration,
 	}
@@ -85,7 +85,7 @@ func (e *Executor) search(ctx context.Context, invocation mcpgovernance.Invocati
 		return nil, err
 	}
 	bindingHash, _ := mcpgovernance.Hash(map[string]any{
-		"schema_version": "clinical.search.cursor-binding.v1", "tenant_id": invocation.TenantID,
+		"schema_version": "clinical.search.cursor-binding.v1", "org_id": invocation.OrgID,
 		"virployee_id": invocation.VirployeeID.String(), "subject_id": invocation.SubjectID.String(),
 		"case_id": optionalUUID(invocation.CaseID), "product_surface": invocation.ProductSurface,
 		"repository_generation": invocation.RepositoryGeneration, "query": query,
@@ -214,7 +214,7 @@ func (e *Executor) timeline(ctx context.Context, invocation mcpgovernance.Invoca
 	if e.runtime == nil || e.answerer == nil {
 		return nil, domainerr.Conflict("timeline runtime is not configured")
 	}
-	rc, err := e.runtime.RuntimeContext(ctx, invocation.TenantID, invocation.VirployeeID)
+	rc, err := e.runtime.RuntimeContext(ctx, invocation.OrgID, invocation.VirployeeID)
 	if err != nil {
 		return nil, err
 	}

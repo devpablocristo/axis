@@ -20,17 +20,17 @@ const vertexScope = "https://www.googleapis.com/auth/cloud-platform"
 // the project is unset or ADC is unavailable it falls back to Echo, so dev and
 // CI run without GCP access. Other providers go through kernels/ai's factory
 // (which itself falls back to Echo without an API key).
-func buildProvider(ctx context.Context, config cfg.Config) ai.Provider {
+func buildProvider(ctx context.Context, config cfg.Config) (ai.Provider, string) {
 	switch config.LLMProvider {
 	case "vertex", "vertexai", "vertex_ai":
 		if config.VertexProject == "" {
 			slog.WarnContext(ctx, "runtime_vertex_no_project_fallback_echo")
-			return ai.NewEcho()
+			return ai.NewEcho(), "echo"
 		}
 		source, err := google.DefaultTokenSource(ctx, vertexScope)
 		if err != nil {
 			slog.WarnContext(ctx, "runtime_vertex_no_adc_fallback_echo", "error", err.Error())
-			return ai.NewEcho()
+			return ai.NewEcho(), "echo"
 		}
 		tokenSource := func(context.Context) (string, error) {
 			token, err := source.Token()
@@ -43,9 +43,13 @@ func buildProvider(ctx context.Context, config cfg.Config) ai.Provider {
 		if model == "" {
 			model = "gemini-2.5-flash-lite"
 		}
-		return ai.NewVertexAI(config.VertexProject, config.VertexLocation, tokenSource, ai.WithVertexModel(model))
+		return ai.NewVertexAI(config.VertexProject, config.VertexLocation, tokenSource, ai.WithVertexModel(model)), model
 	default:
-		return ai.NewProvider(config.LLMProvider, config.LLMAPIKey, config.LLMModel)
+		provider := ai.NewProvider(config.LLMProvider, config.LLMAPIKey, config.LLMModel)
+		if config.LLMAPIKey == "" {
+			return provider, "echo"
+		}
+		return provider, config.LLMModel
 	}
 }
 

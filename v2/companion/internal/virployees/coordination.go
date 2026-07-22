@@ -22,7 +22,7 @@ func (u *UseCases) processOrchestratedAssist(ctx context.Context, run AssistRun,
 	if u.coordinationRepo == nil || run.CaseID == uuid.Nil {
 		return AssistRun{}, false, nil
 	}
-	policy, err := u.coordinationRepo.FindOrchestrationPolicy(ctx, run.TenantID, run.ProductSurface, run.AssistType, run.VirployeeID)
+	policy, err := u.coordinationRepo.FindOrchestrationPolicy(ctx, run.OrgID, run.ProductSurface, run.AssistType, run.VirployeeID)
 	if err != nil {
 		if domainerr.IsNotFound(err) {
 			return AssistRun{}, false, nil
@@ -32,7 +32,7 @@ func (u *UseCases) processOrchestratedAssist(ctx context.Context, run AssistRun,
 	if policy.Mode == OrchestrationModeDisabled {
 		return AssistRun{}, false, nil
 	}
-	routes, err := u.coordinationRepo.ListSpecialistRoutes(ctx, run.TenantID, run.ProductSurface, run.AssistType, run.VirployeeID, true)
+	routes, err := u.coordinationRepo.ListSpecialistRoutes(ctx, run.OrgID, run.ProductSurface, run.AssistType, run.VirployeeID, true)
 	if err != nil {
 		return AssistRun{}, true, err
 	}
@@ -41,15 +41,15 @@ func (u *UseCases) processOrchestratedAssist(ctx context.Context, run AssistRun,
 		// bounded fan-out on the returned proposal.
 		sort.Slice(routes, func(i, j int) bool { return routes[i].SpecialtyCode < routes[j].SpecialtyCode })
 	}
-	runtimeContext, err := u.RuntimeContext(ctx, run.TenantID, run.ResponsibleVirployeeID)
+	runtimeContext, err := u.RuntimeContext(ctx, run.OrgID, run.ResponsibleVirployeeID)
 	if err != nil {
 		return AssistRun{}, true, err
 	}
 	estimatedTokens := estimatedAnswerTokens(answerInput, initialParts)
-	if err := u.consumeQuota(ctx, quotaKey(run.TenantID, run.ProductSurface, quotas.AreaLLM), run.ID.String()+":selector", "assist_run", run.ID.String(), estimatedTokens); err != nil {
+	if err := u.consumeQuota(ctx, quotaKey(run.OrgID, run.ProductSurface, quotas.AreaLLM), run.ID.String()+":selector", "assist_run", run.ID.String(), estimatedTokens); err != nil {
 		return run, true, err
 	}
-	if _, err := u.assistRepo.SetAssistRunStatus(ctx, run.TenantID, run.ID, AssistStatusPlanning); err != nil {
+	if _, err := u.assistRepo.SetAssistRunStatus(ctx, run.OrgID, run.ID, AssistStatusPlanning); err != nil {
 		return AssistRun{}, true, err
 	}
 	decisionSchema := orchestrationDecisionSchema(policy.OutputSchema, routes)
@@ -62,10 +62,10 @@ func (u *UseCases) processOrchestratedAssist(ctx context.Context, run AssistRun,
 	durationMS := time.Since(started).Milliseconds()
 	if err != nil {
 		if policy.Mode == OrchestrationModeShadow {
-			_, _ = u.assistRepo.SetAssistRunStatus(ctx, run.TenantID, run.ID, "answering")
+			_, _ = u.assistRepo.SetAssistRunStatus(ctx, run.OrgID, run.ID, "answering")
 			return AssistRun{}, false, nil
 		}
-		failed, _ := u.assistRepo.CompleteAssistRun(ctx, run.TenantID, run.ID, "failed", nil, "", false, false, "", "", "orchestration_plan_invalid", durationMS)
+		failed, _ := u.assistRepo.CompleteAssistRun(ctx, run.OrgID, run.ID, "failed", nil, "", false, false, "", "", "orchestration_plan_invalid", durationMS)
 		u.emitCoordinationAudit(ctx, run, run.ResponsibleVirployeeID, "orchestration_failed", "specialist orchestration planning failed", map[string]any{"error_code": "orchestration_plan_invalid"})
 		return failed, true, domainerr.Unavailable("specialist orchestration planning failed")
 	}
@@ -77,19 +77,19 @@ func (u *UseCases) processOrchestratedAssist(ctx context.Context, run AssistRun,
 			"decision": decision.Decision, "plan_hash": planHash, "policy_id": policy.ID.String(), "policy_version": policy.Version,
 			"requested_count": len(decision.Consultations),
 		})
-		_, _ = u.assistRepo.SetAssistRunStatus(ctx, run.TenantID, run.ID, "answering")
+		_, _ = u.assistRepo.SetAssistRunStatus(ctx, run.OrgID, run.ID, "answering")
 		return AssistRun{}, false, nil
 	}
 
 	consultations, err := u.validateConsultationProposal(ctx, run, policy, routes, decision)
 	if err != nil {
-		failed, _ := u.assistRepo.CompleteAssistRun(ctx, run.TenantID, run.ID, "failed", nil, "", false, false, out.ModelID, out.PromptVersion, "orchestration_policy_rejected", durationMS)
+		failed, _ := u.assistRepo.CompleteAssistRun(ctx, run.OrgID, run.ID, "failed", nil, "", false, false, out.ModelID, out.PromptVersion, "orchestration_policy_rejected", durationMS)
 		u.emitCoordinationAudit(ctx, run, run.ResponsibleVirployeeID, "orchestration_failed", "specialist orchestration policy rejected the proposal", map[string]any{"error_code": "orchestration_policy_rejected", "plan_hash": planHash})
 		return failed, true, err
 	}
 	if decision.Decision == "consult" {
 		reservationUnits := estimatedTokens * int64(len(consultations)+1)
-		if err := u.consumeQuota(ctx, quotaKey(run.TenantID, run.ProductSurface, quotas.AreaLLM), run.ID.String()+":fanout", "assist_run", run.ID.String(), reservationUnits); err != nil {
+		if err := u.consumeQuota(ctx, quotaKey(run.OrgID, run.ProductSurface, quotas.AreaLLM), run.ID.String()+":fanout", "assist_run", run.ID.String(), reservationUnits); err != nil {
 			return run, true, err
 		}
 	}
@@ -107,12 +107,12 @@ func (u *UseCases) processOrchestratedAssist(ctx context.Context, run AssistRun,
 		if err != nil {
 			return AssistRun{}, true, err
 		}
-		_ = u.coordinationRepo.SetPlanStatus(ctx, run.TenantID, plan.ID, "completed")
-		u.emitAssistAudit(ctx, run.TenantID, run.ResponsibleVirployeeID, done, run.InputHash)
+		_ = u.coordinationRepo.SetPlanStatus(ctx, run.OrgID, plan.ID, "completed")
+		u.emitAssistAudit(ctx, run.OrgID, run.ResponsibleVirployeeID, done, run.InputHash)
 		return done, true, nil
 	case "needs_human":
 		reason, urgency := escalationValues(decision.Escalation)
-		if _, err := u.coordinationRepo.CreateHumanReview(ctx, run.TenantID, run.CaseID, run.ID, reason, urgency); err != nil {
+		if _, err := u.coordinationRepo.CreateHumanReview(ctx, run.OrgID, run.CaseID, run.ID, reason, urgency); err != nil {
 			return AssistRun{}, true, err
 		}
 		output := needsHumanOutput(reason, urgency)
@@ -131,7 +131,7 @@ func (u *UseCases) processOrchestratedAssist(ctx context.Context, run AssistRun,
 				return AssistRun{}, true, err
 			}
 		}
-		current, err := u.assistRepo.GetAssistRunByID(ctx, run.TenantID, run.ID)
+		current, err := u.assistRepo.GetAssistRunByID(ctx, run.OrgID, run.ID)
 		return current, true, err
 	default:
 		return AssistRun{}, true, domainerr.Validation("unsupported orchestration decision")
@@ -192,7 +192,7 @@ func (u *UseCases) validateConsultationProposal(ctx context.Context, run AssistR
 		if route.TargetVirployeeID == run.ResponsibleVirployeeID || route.TargetVirployeeID == run.VirployeeID {
 			return nil, domainerr.Forbidden("orchestration cycle is not allowed")
 		}
-		runtimeContext, err := u.RuntimeContext(ctx, run.TenantID, route.TargetVirployeeID)
+		runtimeContext, err := u.RuntimeContext(ctx, run.OrgID, route.TargetVirployeeID)
 		if err != nil {
 			return nil, err
 		}
@@ -223,11 +223,11 @@ func (u *UseCases) validateConsultationProposal(ctx context.Context, run AssistR
 	return out, nil
 }
 
-func (u *UseCases) ProcessSpecialistConsultation(ctx context.Context, tenantID string, id uuid.UUID, attempt int) (SpecialistConsultation, error) {
+func (u *UseCases) ProcessSpecialistConsultation(ctx context.Context, orgID string, id uuid.UUID, attempt int) (SpecialistConsultation, error) {
 	if u.coordinationRepo == nil {
 		return SpecialistConsultation{}, domainerr.Conflict("coordination repository is not configured")
 	}
-	item, claimed, err := u.coordinationRepo.ClaimConsultation(ctx, normalizeTenantID(tenantID), id)
+	item, claimed, err := u.coordinationRepo.ClaimConsultation(ctx, normalizeOrgID(orgID), id)
 	if err != nil {
 		return SpecialistConsultation{}, err
 	}
@@ -237,20 +237,20 @@ func (u *UseCases) ProcessSpecialistConsultation(ctx context.Context, tenantID s
 		}
 		return item, nil
 	}
-	plan, err := u.coordinationRepo.GetOrchestrationPlan(ctx, item.TenantID, item.PlanID)
+	plan, err := u.coordinationRepo.GetOrchestrationPlan(ctx, item.OrgID, item.PlanID)
 	if err != nil {
 		return item, err
 	}
 	if !plan.DeadlineAt.After(time.Now().UTC()) {
-		item, _ = u.coordinationRepo.CompleteConsultation(ctx, item.TenantID, item.ID, "timed_out", nil, "", "", "", "consultation_timeout", 0)
+		item, _ = u.coordinationRepo.CompleteConsultation(ctx, item.OrgID, item.ID, "timed_out", nil, "", "", "", "consultation_timeout", 0)
 		_ = u.enqueueReconcile(ctx, plan, item.ID.String())
 		return item, nil
 	}
-	run, err := u.assistRepo.GetAssistRunByID(ctx, item.TenantID, item.RootRunID)
+	run, err := u.assistRepo.GetAssistRunByID(ctx, item.OrgID, item.RootRunID)
 	if err != nil {
 		return item, err
 	}
-	runtimeContext, err := u.RuntimeContext(ctx, item.TenantID, item.TargetVirployeeID)
+	runtimeContext, err := u.RuntimeContext(ctx, item.OrgID, item.TargetVirployeeID)
 	if err != nil {
 		return u.failConsultation(ctx, item, plan, attempt, "specialist_context_unavailable", err)
 	}
@@ -267,7 +267,7 @@ func (u *UseCases) ProcessSpecialistConsultation(ctx context.Context, tenantID s
 	}
 	u.recordLLMUsage(ctx, run, "consult:"+item.ID.String(), out)
 	raw, _ := json.Marshal(opinion)
-	item, err = u.coordinationRepo.CompleteConsultation(ctx, item.TenantID, item.ID, "completed", raw, runtraces.HashString(string(raw)), out.ModelID, out.PromptVersion, "", duration)
+	item, err = u.coordinationRepo.CompleteConsultation(ctx, item.OrgID, item.ID, "completed", raw, runtraces.HashString(string(raw)), out.ModelID, out.PromptVersion, "", duration)
 	if err != nil {
 		return item, err
 	}
@@ -277,29 +277,29 @@ func (u *UseCases) ProcessSpecialistConsultation(ctx context.Context, tenantID s
 
 func (u *UseCases) failInterruptedConsultation(ctx context.Context, item SpecialistConsultation) (SpecialistConsultation, error) {
 	const errorCode = "specialist_interrupted_after_lease_loss"
-	plan, err := u.coordinationRepo.GetOrchestrationPlan(ctx, item.TenantID, item.PlanID)
+	plan, err := u.coordinationRepo.GetOrchestrationPlan(ctx, item.OrgID, item.PlanID)
 	if err != nil {
 		return item, err
 	}
-	failed, err := u.coordinationRepo.CompleteConsultation(ctx, item.TenantID, item.ID, "failed", nil, "", "", "", errorCode, 0)
+	failed, err := u.coordinationRepo.CompleteConsultation(ctx, item.OrgID, item.ID, "failed", nil, "", "", "", errorCode, 0)
 	if err != nil {
 		return item, err
 	}
-	run, _ := u.assistRepo.GetAssistRunByID(ctx, item.TenantID, item.RootRunID)
+	run, _ := u.assistRepo.GetAssistRunByID(ctx, item.OrgID, item.RootRunID)
 	u.emitCoordinationAudit(ctx, run, item.TargetVirployeeID, "specialist_consult_failed", "specialist consultation failed after lease loss", map[string]any{"consultation_id": item.ID.String(), "plan_id": item.PlanID.String(), "specialty_code": item.SpecialtyCode, "requirement": item.Requirement, "error_code": errorCode})
 	return failed, u.enqueueReconcile(ctx, plan, item.ID.String())
 }
 
 func (u *UseCases) failConsultation(ctx context.Context, item SpecialistConsultation, plan OrchestrationPlan, attempt int, code string, cause error) (SpecialistConsultation, error) {
 	if attempt < 3 {
-		_ = u.coordinationRepo.ReleaseConsultation(ctx, item.TenantID, item.ID, code)
+		_ = u.coordinationRepo.ReleaseConsultation(ctx, item.OrgID, item.ID, code)
 		return item, cause
 	}
-	failed, err := u.coordinationRepo.CompleteConsultation(ctx, item.TenantID, item.ID, "failed", nil, "", "", "", code, 0)
+	failed, err := u.coordinationRepo.CompleteConsultation(ctx, item.OrgID, item.ID, "failed", nil, "", "", "", code, 0)
 	if err != nil {
 		return item, err
 	}
-	run, _ := u.assistRepo.GetAssistRunByID(ctx, item.TenantID, item.RootRunID)
+	run, _ := u.assistRepo.GetAssistRunByID(ctx, item.OrgID, item.RootRunID)
 	u.emitCoordinationAudit(ctx, run, item.TargetVirployeeID, "specialist_consult_failed", "specialist consultation failed", map[string]any{"consultation_id": item.ID.String(), "plan_id": item.PlanID.String(), "specialty_code": item.SpecialtyCode, "requirement": item.Requirement, "error_code": code})
 	return failed, u.enqueueReconcile(ctx, plan, item.ID.String())
 }
@@ -319,8 +319,8 @@ func (u *UseCases) answerOpinionWithRepair(ctx context.Context, input AnswerInpu
 	return AnswerOutput{}, SpecialistOpinion{}, errInvalidStructuredAnswer
 }
 
-func (u *UseCases) ReconcileOrchestration(ctx context.Context, tenantID string, planID uuid.UUID) (OrchestrationPlan, error) {
-	plan, err := u.coordinationRepo.GetOrchestrationPlan(ctx, normalizeTenantID(tenantID), planID)
+func (u *UseCases) ReconcileOrchestration(ctx context.Context, orgID string, planID uuid.UUID) (OrchestrationPlan, error) {
+	plan, err := u.coordinationRepo.GetOrchestrationPlan(ctx, normalizeOrgID(orgID), planID)
 	if err != nil {
 		return OrchestrationPlan{}, err
 	}
@@ -328,11 +328,11 @@ func (u *UseCases) ReconcileOrchestration(ctx context.Context, tenantID string, 
 		return plan, nil
 	}
 	if !plan.DeadlineAt.After(time.Now().UTC()) {
-		if err := u.coordinationRepo.TimeoutConsultations(ctx, plan.TenantID, plan.ID); err != nil {
+		if err := u.coordinationRepo.TimeoutConsultations(ctx, plan.OrgID, plan.ID); err != nil {
 			return plan, err
 		}
 	}
-	items, err := u.coordinationRepo.ListConsultations(ctx, plan.TenantID, plan.ID)
+	items, err := u.coordinationRepo.ListConsultations(ctx, plan.OrgID, plan.ID)
 	if err != nil {
 		return plan, err
 	}
@@ -341,11 +341,11 @@ func (u *UseCases) ReconcileOrchestration(ctx context.Context, tenantID string, 
 			return plan, nil
 		}
 	}
-	plan, err = u.coordinationRepo.RefreshPlanCounts(ctx, plan.TenantID, plan.ID)
+	plan, err = u.coordinationRepo.RefreshPlanCounts(ctx, plan.OrgID, plan.ID)
 	if err != nil {
 		return plan, err
 	}
-	run, err := u.assistRepo.GetAssistRunByID(ctx, plan.TenantID, plan.RootRunID)
+	run, err := u.assistRepo.GetAssistRunByID(ctx, plan.OrgID, plan.RootRunID)
 	if err != nil {
 		return plan, err
 	}
@@ -354,7 +354,7 @@ func (u *UseCases) ReconcileOrchestration(ctx context.Context, tenantID string, 
 			var opinion SpecialistOpinion
 			if json.Unmarshal(item.Output, &opinion) == nil && opinion.HumanReview != nil && opinion.HumanReview.Urgency == "urgent" {
 				reason, urgency := escalationValues(opinion.HumanReview)
-				_, err = u.coordinationRepo.CreateHumanReview(ctx, plan.TenantID, plan.CaseID, plan.RootRunID, reason, urgency)
+				_, err = u.coordinationRepo.CreateHumanReview(ctx, plan.OrgID, plan.CaseID, plan.RootRunID, reason, urgency)
 				if err != nil {
 					return plan, err
 				}
@@ -362,7 +362,7 @@ func (u *UseCases) ReconcileOrchestration(ctx context.Context, tenantID string, 
 				if err != nil {
 					return plan, err
 				}
-				_ = u.coordinationRepo.SetPlanStatus(ctx, plan.TenantID, plan.ID, "needs_human")
+				_ = u.coordinationRepo.SetPlanStatus(ctx, plan.OrgID, plan.ID, "needs_human")
 				u.emitCoordinationAudit(ctx, run, run.ResponsibleVirployeeID, "human_review_requested", "specialist requested urgent human review", map[string]any{"plan_id": plan.ID.String(), "consultation_id": item.ID.String(), "reason_code": reason, "urgency": urgency})
 				plan.Status = "needs_human"
 				return plan, nil
@@ -374,16 +374,16 @@ func (u *UseCases) ReconcileOrchestration(ctx context.Context, tenantID string, 
 				return plan, completeErr
 			}
 			_ = failed
-			_ = u.coordinationRepo.SetPlanStatus(ctx, plan.TenantID, plan.ID, "failed")
+			_ = u.coordinationRepo.SetPlanStatus(ctx, plan.OrgID, plan.ID, "failed")
 			u.emitCoordinationAudit(ctx, run, run.ResponsibleVirployeeID, "orchestration_failed", "required specialist consultation unavailable", map[string]any{"plan_id": plan.ID.String(), "consultation_id": item.ID.String(), "specialty_code": item.SpecialtyCode, "error_code": "specialist_required_unavailable"})
 			plan.Status = "failed"
 			return plan, nil
 		}
 	}
-	if _, err = u.assistRepo.SetAssistRunStatus(ctx, plan.TenantID, plan.RootRunID, AssistStatusSynthesizing); err != nil {
+	if _, err = u.assistRepo.SetAssistRunStatus(ctx, plan.OrgID, plan.RootRunID, AssistStatusSynthesizing); err != nil {
 		return plan, err
 	}
-	_ = u.coordinationRepo.SetPlanStatus(ctx, plan.TenantID, plan.ID, "ready")
+	_ = u.coordinationRepo.SetPlanStatus(ctx, plan.OrgID, plan.ID, "ready")
 	plan.Status = "ready"
 	if u.coordinationQueue == nil {
 		return plan, domainerr.Conflict("coordination queue is not configured")
@@ -391,16 +391,16 @@ func (u *UseCases) ReconcileOrchestration(ctx context.Context, tenantID string, 
 	return plan, u.coordinationQueue.EnqueueSynthesis(ctx, plan)
 }
 
-func (u *UseCases) SynthesizeOrchestration(ctx context.Context, tenantID string, planID uuid.UUID, attempt int) (AssistRun, error) {
-	plan, claimed, err := u.coordinationRepo.ClaimSynthesis(ctx, normalizeTenantID(tenantID), planID)
+func (u *UseCases) SynthesizeOrchestration(ctx context.Context, orgID string, planID uuid.UUID, attempt int) (AssistRun, error) {
+	plan, claimed, err := u.coordinationRepo.ClaimSynthesis(ctx, normalizeOrgID(orgID), planID)
 	if err != nil {
 		return AssistRun{}, err
 	}
 	if !claimed && plan.Status == "completed" {
-		return u.assistRepo.GetAssistRunByID(ctx, plan.TenantID, plan.RootRunID)
+		return u.assistRepo.GetAssistRunByID(ctx, plan.OrgID, plan.RootRunID)
 	}
 	if !claimed && (plan.Status == "failed" || plan.Status == "needs_human") {
-		return u.assistRepo.GetAssistRunByID(ctx, plan.TenantID, plan.RootRunID)
+		return u.assistRepo.GetAssistRunByID(ctx, plan.OrgID, plan.RootRunID)
 	}
 	if !claimed && plan.Status == "synthesizing" && attempt > 1 {
 		return u.finalizeInterruptedSynthesis(ctx, plan)
@@ -408,20 +408,20 @@ func (u *UseCases) SynthesizeOrchestration(ctx context.Context, tenantID string,
 	if !claimed {
 		return AssistRun{}, domainerr.Conflict("orchestration plan is not ready for synthesis")
 	}
-	run, err := u.assistRepo.GetAssistRunByID(ctx, plan.TenantID, plan.RootRunID)
+	run, err := u.assistRepo.GetAssistRunByID(ctx, plan.OrgID, plan.RootRunID)
 	if err != nil {
 		return AssistRun{}, err
 	}
-	assistCase, err := u.coordinationRepo.GetAssistCase(ctx, plan.TenantID, plan.CaseID)
+	assistCase, err := u.coordinationRepo.GetAssistCase(ctx, plan.OrgID, plan.CaseID)
 	if err != nil {
 		return AssistRun{}, err
 	}
 	run.ResponsibleVirployeeID = assistCase.OwnerVirployeeID
-	runtimeContext, err := u.RuntimeContext(ctx, plan.TenantID, run.ResponsibleVirployeeID)
+	runtimeContext, err := u.RuntimeContext(ctx, plan.OrgID, run.ResponsibleVirployeeID)
 	if err != nil {
 		return AssistRun{}, err
 	}
-	items, err := u.coordinationRepo.ListConsultations(ctx, plan.TenantID, plan.ID)
+	items, err := u.coordinationRepo.ListConsultations(ctx, plan.OrgID, plan.ID)
 	if err != nil {
 		return AssistRun{}, err
 	}
@@ -443,25 +443,25 @@ func (u *UseCases) SynthesizeOrchestration(ctx context.Context, tenantID string,
 	out, err := u.answerFinalWithRepair(ctx, AnswerInput{SystemPrompt: runtimeContext.ProfileTemplate.SystemPrompt + orchestrationSynthesisInstruction(), JobRole: runtimeContext.JobRole.Name, InputJSON: input, ResponseSchema: plan.OutputSchema, ContentParts: parts})
 	duration := time.Since(started).Milliseconds()
 	if err != nil {
-		_ = u.coordinationRepo.SetPlanStatus(ctx, plan.TenantID, plan.ID, "ready")
+		_ = u.coordinationRepo.SetPlanStatus(ctx, plan.OrgID, plan.ID, "ready")
 		return AssistRun{}, err
 	}
 	u.recordLLMUsage(ctx, run, "synthesis:"+plan.ID.String(), out)
 	done, err := u.completeForOwner(ctx, run, "done", out.OutputJSON, out.OutputText, true, false, out.ModelID, out.PromptVersion, "", duration)
 	if err != nil {
-		_ = u.coordinationRepo.SetPlanStatus(ctx, plan.TenantID, plan.ID, "ready")
+		_ = u.coordinationRepo.SetPlanStatus(ctx, plan.OrgID, plan.ID, "ready")
 		return AssistRun{}, err
 	}
-	if err := u.coordinationRepo.SetPlanStatus(ctx, plan.TenantID, plan.ID, "completed"); err != nil {
+	if err := u.coordinationRepo.SetPlanStatus(ctx, plan.OrgID, plan.ID, "completed"); err != nil {
 		return done, err
 	}
 	u.emitCoordinationAudit(ctx, done, run.ResponsibleVirployeeID, "synthesis_completed", "specialist orchestration synthesis completed", map[string]any{"plan_id": plan.ID.String(), "plan_hash": plan.PlanHash, "output_hash": runtraces.HashString(string(out.OutputJSON)), "consultation_count": len(items), "limitation_count": len(limitations), "model": out.ModelID, "prompt_version": out.PromptVersion})
-	u.emitAssistAudit(ctx, done.TenantID, run.ResponsibleVirployeeID, done, done.InputHash)
+	u.emitAssistAudit(ctx, done.OrgID, run.ResponsibleVirployeeID, done, done.InputHash)
 	return done, nil
 }
 
 func (u *UseCases) finalizeInterruptedSynthesis(ctx context.Context, plan OrchestrationPlan) (AssistRun, error) {
-	run, err := u.assistRepo.GetAssistRunByID(ctx, plan.TenantID, plan.RootRunID)
+	run, err := u.assistRepo.GetAssistRunByID(ctx, plan.OrgID, plan.RootRunID)
 	if err != nil {
 		return AssistRun{}, err
 	}
@@ -470,7 +470,7 @@ func (u *UseCases) finalizeInterruptedSynthesis(ctx context.Context, plan Orches
 		if planStatus == "done" {
 			planStatus = "completed"
 		}
-		if err := u.coordinationRepo.SetPlanStatus(ctx, plan.TenantID, plan.ID, planStatus); err != nil {
+		if err := u.coordinationRepo.SetPlanStatus(ctx, plan.OrgID, plan.ID, planStatus); err != nil {
 			return run, err
 		}
 		return run, nil
@@ -479,7 +479,7 @@ func (u *UseCases) finalizeInterruptedSynthesis(ctx context.Context, plan Orches
 	if err != nil {
 		return AssistRun{}, err
 	}
-	if err := u.coordinationRepo.SetPlanStatus(ctx, plan.TenantID, plan.ID, "failed"); err != nil {
+	if err := u.coordinationRepo.SetPlanStatus(ctx, plan.OrgID, plan.ID, "failed"); err != nil {
 		return failed, err
 	}
 	u.emitCoordinationAudit(ctx, failed, run.ResponsibleVirployeeID, "orchestration_failed", "specialist synthesis interrupted after lease loss", map[string]any{"plan_id": plan.ID.String(), "error_code": "synthesis_interrupted_after_lease_loss"})
@@ -507,7 +507,7 @@ func (u *UseCases) loadCorpus(ctx context.Context, run AssistRun, query string) 
 	if u.corpusReader == nil {
 		return nil, nil
 	}
-	return u.corpusReader.Load(ctx, artifacts.Scope{TenantID: run.TenantID, VirployeeID: run.VirployeeID, ProductSurface: run.ProductSurface, SubjectID: run.SubjectID, RepositoryGeneration: run.RepositoryGeneration}, query, 12)
+	return u.corpusReader.Load(ctx, artifacts.Scope{OrgID: run.OrgID, VirployeeID: run.VirployeeID, ProductSurface: run.ProductSurface, SubjectID: run.SubjectID, RepositoryGeneration: run.RepositoryGeneration}, query, 12)
 }
 func (u *UseCases) enqueueReconcile(ctx context.Context, plan OrchestrationPlan, trigger string) error {
 	if u.coordinationQueue == nil {
@@ -522,20 +522,20 @@ type ownedAssistCompleter interface {
 
 func (u *UseCases) completeForOwner(ctx context.Context, run AssistRun, status string, output json.RawMessage, outputText string, answered, degraded bool, model, promptVersion, runErr string, durationMS int64) (AssistRun, error) {
 	if repo, ok := u.assistRepo.(ownedAssistCompleter); ok {
-		return repo.CompleteAssistRunForOwner(ctx, run.TenantID, run.ID, run.OwnershipVersion, status, output, outputText, answered, degraded, model, promptVersion, runErr, durationMS)
+		return repo.CompleteAssistRunForOwner(ctx, run.OrgID, run.ID, run.OwnershipVersion, status, output, outputText, answered, degraded, model, promptVersion, runErr, durationMS)
 	}
-	return u.assistRepo.CompleteAssistRun(ctx, run.TenantID, run.ID, status, output, outputText, answered, degraded, model, promptVersion, runErr, durationMS)
+	return u.assistRepo.CompleteAssistRun(ctx, run.OrgID, run.ID, status, output, outputText, answered, degraded, model, promptVersion, runErr, durationMS)
 }
 
 func (u *UseCases) LoadOrchestrationSummary(ctx context.Context, run AssistRun) (*OrchestrationSummary, error) {
 	if u.coordinationRepo == nil || run.OrchestrationPlanID == uuid.Nil {
 		return nil, nil
 	}
-	plan, err := u.coordinationRepo.GetOrchestrationPlan(ctx, run.TenantID, run.OrchestrationPlanID)
+	plan, err := u.coordinationRepo.GetOrchestrationPlan(ctx, run.OrgID, run.OrchestrationPlanID)
 	if err != nil {
 		return nil, err
 	}
-	items, err := u.coordinationRepo.ListConsultations(ctx, run.TenantID, plan.ID)
+	items, err := u.coordinationRepo.ListConsultations(ctx, run.OrgID, plan.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -579,7 +579,7 @@ func (u *UseCases) RequeueCoordinationWork(ctx context.Context, limit int) (Coor
 			result.Syntheses++
 			continue
 		}
-		items, err := u.coordinationRepo.ListConsultations(ctx, plan.TenantID, plan.ID)
+		items, err := u.coordinationRepo.ListConsultations(ctx, plan.OrgID, plan.ID)
 		if err != nil {
 			return result, err
 		}
@@ -619,8 +619,8 @@ func (u *UseCases) emitCoordinationAudit(ctx context.Context, run AssistRun, cha
 	}
 	data["root_run_id"] = run.ID.String()
 	data["case_id"] = run.CaseID.String()
-	if err := u.auditEmitter.AppendAuditEvent(ctx, AuditEventInput{TenantID: run.TenantID, VirployeeID: chainVirployee.String(), ActorType: "virployee", ActorID: chainVirployee.String(), SubjectType: "assist_run", SubjectID: run.ID.String(), EventType: eventType, Summary: summary, Data: data}); err != nil {
-		slog.ErrorContext(ctx, "coordination audit emit failed", "error", err, "tenant_id", run.TenantID, "root_run_id", run.ID.String(), "event_type", eventType)
+	if err := u.auditEmitter.AppendAuditEvent(ctx, AuditEventInput{OrgID: run.OrgID, VirployeeID: chainVirployee.String(), ActorType: "virployee", ActorID: chainVirployee.String(), SubjectType: "assist_run", SubjectID: run.ID.String(), EventType: eventType, Summary: summary, Data: data}); err != nil {
+		slog.ErrorContext(ctx, "coordination audit emit failed", "error", err, "org_id", run.OrgID, "root_run_id", run.ID.String(), "event_type", eventType)
 	}
 }
 

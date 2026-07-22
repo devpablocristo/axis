@@ -42,7 +42,7 @@ var autonomyDefinitions = []AutonomyDefinition{
 	{
 		Level:       AutonomyA3,
 		Name:        "Limited execution",
-		Description: "Can execute low-risk writes that are reversible, idempotent and scoped to the tenant.",
+		Description: "Can execute low-risk writes that are reversible, idempotent and scoped to the organization.",
 	},
 	{
 		Level:       AutonomyA4,

@@ -24,7 +24,7 @@ func TestRetrieverDropsUnregisteredSiblingDocuments(t *testing.T) {
 	virployeeID, baseID, documentID := uuid.New(), uuid.New(), uuid.New()
 	document := Document{
 		ID: documentID, KnowledgeBaseID: baseID, Title: "Clinical guide", SourceSHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", SourceVersion: "v1",
-		ArtifactScope: ArtifactScope{VirployeeID: virployeeID, ProductSurface: "medmory", SubjectID: "patient-a", RepositoryGeneration: "g1", DocumentID: "source-allowed"},
+		ArtifactScope: ArtifactScope{VirployeeID: virployeeID, ProductSurface: "producta", SubjectID: "patient-a", RepositoryGeneration: "g1", DocumentID: "source-allowed"},
 	}
 	r, err := NewRetriever(documentResolverStub{documents: []Document{document}}, artifactRetrieverStub{hits: []artifacts.RetrievalHit{
 		{Chunk: artifacts.Chunk{ID: "bad", Text: "private sibling", DocumentID: "source-other", SHA256: document.SourceSHA256, SourceVersion: "v1"}, Score: 0.99},
@@ -33,7 +33,7 @@ func TestRetrieverDropsUnregisteredSiblingDocuments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	evidence, err := r.Retrieve(context.Background(), RetrievalScope{TenantID: "tenant-a", VirployeeID: virployeeID, SubjectID: "patient-a"}, "question", 5)
+	evidence, err := r.Retrieve(context.Background(), RetrievalScope{OrgID: "organization-a", VirployeeID: virployeeID, SubjectID: "patient-a"}, "question", 5)
 	if err != nil {
 		t.Fatalf("Retrieve: %v", err)
 	}
