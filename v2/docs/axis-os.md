@@ -72,6 +72,10 @@ channel for governance calls to Nexus. Health endpoints remain public.
   run (degraded when no model answered). This is not the action path — anything
   with external effects still routes through the Execution Gate and Nexus.
 - Companion tenancy storage is deferred; BFF validates tenancy before forwarding.
+- A product (machine, not a Clerk user) can call the BFF inbound edge
+  `POST /v1/assist-runs` with an API key that maps to a tenant + virployee; the
+  request is proxied to the virployee's assist endpoint. This edge is separate
+  from the human-session `/api` surface.
 - Virployees remain the first workforce primitive.
 - Virployee-owned lexical memory supports controlled CRUD, recall, lifecycle,
   audit hashes, and safe references in runtime traces.
