@@ -38,6 +38,7 @@ type Config struct {
 	ArtifactCMEKKey              string
 	MalwareScannerAddress        string
 	ArtifactFetchAllowedHosts    []string
+	ArtifactExtractorBaseURL     string
 	GoogleCalendarSecretRef      string
 	ExecutorAttestationSecretRef string
 
@@ -88,6 +89,7 @@ func Load() Config {
 		ArtifactCMEKKey:              strings.TrimSpace(envconfig.Get("COMPANION_V2_ARTIFACT_CMEK_KEY", "")),
 		MalwareScannerAddress:        strings.TrimSpace(envconfig.Get("COMPANION_V2_MALWARE_SCANNER_ADDRESS", "")),
 		ArtifactFetchAllowedHosts:    splitCSV(envconfig.Get("COMPANION_V2_ARTIFACT_FETCH_ALLOWED_HOSTS", "")),
+		ArtifactExtractorBaseURL:     strings.TrimRight(strings.TrimSpace(envconfig.Get("COMPANION_V2_ARTIFACT_EXTRACTOR_BASE_URL", "")), "/"),
 		GoogleCalendarSecretRef:      strings.TrimSpace(envconfig.Get("COMPANION_V2_GOOGLE_CALENDAR_SECRET_REF", "")),
 		ExecutorAttestationSecretRef: strings.TrimSpace(envconfig.Get("COMPANION_V2_EXECUTOR_ATTESTATION_SECRET_REF", "")),
 		LearningMinExecutions:        envconfig.Int("COMPANION_V2_LEARNING_MIN_EXECUTIONS", 3),

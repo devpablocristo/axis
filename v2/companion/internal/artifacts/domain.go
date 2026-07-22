@@ -17,14 +17,15 @@ const (
 )
 
 var (
-	ErrArtifactTooLarge  = errors.New("artifact exceeds size limit")
-	ErrDiagnosisTooLarge = errors.New("diagnosis exceeds size limit")
-	ErrChecksumMismatch  = errors.New("artifact checksum mismatch")
-	ErrSizeMismatch      = errors.New("artifact size mismatch")
-	ErrMIMEMismatch      = errors.New("artifact MIME does not match content")
-	ErrUnsupportedFormat = errors.New("artifact format is not supported")
-	ErrEmptyDerivative   = errors.New("artifact adapter returned no usable content")
-	ErrIndexingFailed    = errors.New("artifact indexing failed")
+	ErrArtifactTooLarge      = errors.New("artifact exceeds size limit")
+	ErrDiagnosisTooLarge     = errors.New("diagnosis exceeds size limit")
+	ErrChecksumMismatch      = errors.New("artifact checksum mismatch")
+	ErrSizeMismatch          = errors.New("artifact size mismatch")
+	ErrMIMEMismatch          = errors.New("artifact MIME does not match content")
+	ErrUnsupportedFormat     = errors.New("artifact format is not supported")
+	ErrEmptyDerivative       = errors.New("artifact adapter returned no usable content")
+	ErrIndexingFailed        = errors.New("artifact indexing failed")
+	ErrExtractionUnavailable = errors.New("isolated artifact extraction is unavailable")
 )
 
 type Scope struct {
@@ -141,6 +142,8 @@ type ExtractRequest struct {
 	Scope    Scope
 	Manifest Manifest
 	Stored   StoredArtifact
+	Blob     Blob
+	Profile  string
 }
 
 type Chunk struct {

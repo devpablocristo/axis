@@ -250,12 +250,30 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 			db.Close()
 			return nil, err
 		}
+		var extractor artifacts.ExtractionPort
+		if config.ArtifactExtractorBaseURL != "" {
+			extractor, err = artifacts.NewHTTPExtractionClient(
+				config.ArtifactExtractorBaseURL,
+				&http.Client{Timeout: 10 * time.Minute, Transport: otelhttp.NewTransport(http.DefaultTransport)},
+				config.InternalAuthSecret,
+			)
+			if err != nil {
+				db.Close()
+				return nil, err
+			}
+		}
 		artifactPipeline := artifacts.NewPipeline(
 			artifacts.NewRepository(db.Pool()),
 			fetcher,
 			scanner,
 			store,
-			artifacts.TextFormatAdapter{}, artifacts.PDFFormatAdapter{}, artifacts.NativeMediaAdapter{},
+			artifacts.OfficeFormatAdapter{Extractor: extractor},
+			artifacts.DICOMFormatAdapter{Extractor: extractor},
+			artifacts.PDFFormatAdapter{Extractor: extractor},
+			artifacts.ImageFormatAdapter{Extractor: extractor},
+			artifacts.AudioFormatAdapter{Extractor: extractor},
+			artifacts.VideoFormatAdapter{Extractor: extractor},
+			artifacts.TextFormatAdapter{},
 		)
 		indexService, err := artifactindex.NewService(
 			artifactindex.NewChunker(), artifactindex.NewRuntimeEmbedder(runtimePlanner), artifactindex.NewRepository(db.Pool()),

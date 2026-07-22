@@ -51,14 +51,14 @@ func (TextFormatAdapter) Adapt(_ context.Context, input AdaptInput) ([]ContentPa
 	}}, nil
 }
 
-type PDFFormatAdapter struct{}
+type PDFFormatAdapter struct{ Extractor ExtractionPort }
 
 func (PDFFormatAdapter) Name() string { return "pdf" }
 func (PDFFormatAdapter) Supports(mimeType, filename string) bool {
 	return normalizeMIME(mimeType) == "application/pdf" || strings.EqualFold(filepath.Ext(filename), ".pdf")
 }
 
-func (PDFFormatAdapter) Adapt(_ context.Context, input AdaptInput) ([]ContentPart, error) {
+func (adapter PDFFormatAdapter) Adapt(ctx context.Context, input AdaptInput) ([]ContentPart, error) {
 	r, err := input.Blob.Open()
 	if err != nil {
 		return nil, err
@@ -79,11 +79,13 @@ func (PDFFormatAdapter) Adapt(_ context.Context, input AdaptInput) ([]ContentPar
 		readerAt = bytes.NewReader(data)
 	}
 	reader, err := pdf.NewReader(readerAt, input.Blob.Size())
+	hasText := false
 	if err == nil {
 		plain, plainErr := reader.GetPlainText()
 		if plainErr == nil {
 			extracted, readErr := io.ReadAll(plain)
 			if readErr == nil && strings.TrimSpace(string(extracted)) != "" {
+				hasText = true
 				parts = append([]ContentPart{{
 					Kind: PartText, Text: string(extracted), MIMEType: "text/plain", Name: input.Manifest.Name,
 					SHA256: input.Manifest.SHA256, DocumentID: input.Manifest.DocumentID,
@@ -93,6 +95,14 @@ func (PDFFormatAdapter) Adapt(_ context.Context, input AdaptInput) ([]ContentPar
 	}
 	if input.Stored.URI == "" {
 		return nil, fmt.Errorf("PDF native part requires staged URI")
+	}
+	if !hasText && adapter.Extractor != nil {
+		derived, extractErr := adapter.Extractor.Extract(ctx, ExtractRequest{
+			Scope: input.Scope, Manifest: input.Manifest, Stored: input.Stored, Blob: input.Blob, Profile: "ocr_pdf",
+		})
+		if extractErr == nil && usableParts(derived) {
+			parts = append(derived, parts...)
+		}
 	}
 	return parts, nil
 }

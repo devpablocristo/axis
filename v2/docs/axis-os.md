@@ -153,6 +153,16 @@ derived chunks. The original remains authoritative; text, OCR, captions,
 transcripts, tables and keyframes are versioned derivatives and never replace
 it.
 
+Conversions that need native binaries cross `ExtractionPort` into the isolated
+artifact-worker container; the Companion process never shells out. The worker
+has bounded multipart input/output and per-request temporary storage, and owns
+the LibreOffice, Poppler/Tesseract, ImageMagick, FFmpeg and DCMTK adapters.
+Office and DICOM fail closed when the worker is unavailable. PDF and
+Vertex-native image/audio/video retain the verified staged original and may add
+OCR, normalized media, keyframes or transcripts without replacing it. Every
+returned derivative is rebound to the original document ID and SHA-256 before
+it can reach indexing or Runtime.
+
 `artifactindex` is a separate Companion bounded context, not an extension of
 Virployee memory. It chunks only verified derivatives and stores 768-dimensional
 `gemini-embedding-001` vectors in pgvector together with FTS text and source

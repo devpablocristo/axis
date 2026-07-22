@@ -144,7 +144,7 @@ func TestAssistCapabilitiesAreMachineAuthenticatedAndConservative(t *testing.T) 
 	req.Header.Set("X-API-Key", "secret-key")
 	rec := httptest.NewRecorder()
 	newTestEngine("http://unused").ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "application/pdf") || !strings.Contains(rec.Body.String(), "pending") {
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "application/pdf") || !strings.Contains(rec.Body.String(), "application/dicom") || strings.Contains(rec.Body.String(), "pending") {
 		t.Fatalf("unexpected capabilities: code=%d body=%s", rec.Code, rec.Body.String())
 	}
 }

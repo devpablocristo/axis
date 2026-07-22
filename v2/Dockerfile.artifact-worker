@@ -1,0 +1,22 @@
+FROM golang:1.26.5-bookworm AS build
+
+WORKDIR /src
+COPY artifact-worker/go.mod ./
+RUN go mod download
+COPY artifact-worker/ ./
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -o /out/artifact-worker ./cmd/api
+
+FROM debian:bookworm-slim
+
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    ca-certificates dcmtk ffmpeg imagemagick libreoffice-nogui poppler-utils tesseract-ocr wget \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --system appuser \
+    && useradd --system --gid appuser --no-create-home appuser
+
+WORKDIR /app
+COPY --from=build /out/artifact-worker /app/artifact-worker
+USER appuser
+
+EXPOSE 8080
+ENTRYPOINT ["/app/artifact-worker"]

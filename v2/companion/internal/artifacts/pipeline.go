@@ -228,10 +228,18 @@ func mimeCompatible(declared, actual string) bool {
 	if declared == actual {
 		return true
 	}
+	if actual == "application/zip" && isOfficeContainerMIME(declared) {
+		return true
+	}
 	// Browsers and net/http commonly classify JSON, XML, CSV and Markdown as
 	// text/plain. They are mutually compatible text encodings, but never
 	// compatible with an image/media declaration.
 	return isTextualMIME(declared) && isTextualMIME(actual)
+}
+
+func isOfficeContainerMIME(value string) bool {
+	value = normalizeMIME(value)
+	return strings.Contains(value, "officedocument") || strings.Contains(value, "opendocument")
 }
 
 func isTextualMIME(value string) bool {
@@ -268,6 +276,8 @@ func stableErrorCode(err error) string {
 		return "empty_derivative"
 	case errors.Is(err, ErrIndexingFailed):
 		return "artifact_indexing_failed"
+	case errors.Is(err, ErrExtractionUnavailable):
+		return "artifact_extraction_unavailable"
 	default:
 		return "artifact_processing_failed"
 	}

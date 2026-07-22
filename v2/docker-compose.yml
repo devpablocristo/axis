@@ -58,6 +58,32 @@ services:
     ports:
       - "${JAEGER_UI_PORT:-19686}:16686"
 
+  artifact-worker-v2:
+    build:
+      context: .
+      dockerfile: Dockerfile.artifact-worker
+    restart: unless-stopped
+    environment:
+      PORT: "8080"
+      AXIS_V2_INTERNAL_AUTH_SECRET: ${AXIS_V2_INTERNAL_AUTH_SECRET:-axis-v2-local-internal}
+      ARTIFACT_WORKER_CONCURRENCY: ${ARTIFACT_WORKER_CONCURRENCY:-2}
+      ARTIFACT_WORKER_WHISPER_MODEL: ${ARTIFACT_WORKER_WHISPER_MODEL:-}
+      ARTIFACT_WORKER_WHISPER_BIN: ${ARTIFACT_WORKER_WHISPER_BIN:-whisper-cli}
+    read_only: true
+    tmpfs:
+      - /tmp:size=768m,mode=1777
+    mem_limit: 1g
+    pids_limit: 256
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/readyz >/dev/null 2>&1 || exit 1"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
   companion-v2:
     build:
       context: .
@@ -84,6 +110,7 @@ services:
       COMPANION_V2_ARTIFACT_CMEK_KEY: ${COMPANION_V2_ARTIFACT_CMEK_KEY:-}
       COMPANION_V2_MALWARE_SCANNER_ADDRESS: ${COMPANION_V2_MALWARE_SCANNER_ADDRESS:-}
       COMPANION_V2_ARTIFACT_FETCH_ALLOWED_HOSTS: ${COMPANION_V2_ARTIFACT_FETCH_ALLOWED_HOSTS:-}
+      COMPANION_V2_ARTIFACT_EXTRACTOR_BASE_URL: ${COMPANION_V2_ARTIFACT_EXTRACTOR_BASE_URL:-http://artifact-worker-v2:8080}
       COMPANION_V2_EXECUTION_MODE: ${COMPANION_V2_EXECUTION_MODE:-local}
       # F6 real Google Calendar executor. Enable by setting EXECUTION_MODE to
       # include "google_calendar" plus a calendar id; credentials come from ADC
@@ -108,6 +135,8 @@ services:
       - "${COMPANION_V2_PORT:-19086}:8080"
     depends_on:
       companion-v2-postgres:
+        condition: service_healthy
+      artifact-worker-v2:
         condition: service_healthy
     networks:
       - default

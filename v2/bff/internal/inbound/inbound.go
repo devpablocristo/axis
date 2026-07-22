@@ -161,11 +161,19 @@ func (h *Handler) AssistCapabilities(c *gin.Context) {
 		"schema_version": "axis.assist_capabilities.v1",
 		"states":         []string{"received", "staging", "extracting", "indexing", "answering", "completed", "failed"},
 		"formats": gin.H{
-			"native":  []string{"text/*", "application/json", "application/xml"},
-			"extract": []string{"application/pdf"},
-			"pending": []string{"image/*", "audio/*", "video/*", "application/dicom", "application/msword", "application/vnd.openxmlformats-officedocument.*", "application/vnd.oasis.opendocument.*"},
+			"native": []string{
+				"text/*", "application/json", "application/xml", "application/pdf",
+				"image/png", "image/jpeg", "image/webp", "image/heic", "image/heif",
+				"audio/wav", "audio/mpeg", "audio/mp4", "audio/ogg", "audio/flac",
+				"video/mp4", "video/quicktime", "video/webm",
+			},
+			"extractor": []string{
+				"image/tiff", "image/gif", "image/bmp", "video/x-matroska", "application/dicom",
+				"application/msword", "application/rtf", "application/vnd.ms-excel", "application/vnd.ms-powerpoint",
+				"application/vnd.openxmlformats-officedocument.*", "application/vnd.oasis.opendocument.*",
+			},
 		},
-		"limits": gin.H{"max_artifact_bytes": 2 << 20, "max_diagnosis_bytes": 500 << 20, "max_repository_bytes": 5 << 30},
+		"limits": gin.H{"max_artifact_bytes": 250 << 20, "max_diagnosis_bytes": 500 << 20, "max_repository_bytes": 5 << 30},
 	})
 }
 
