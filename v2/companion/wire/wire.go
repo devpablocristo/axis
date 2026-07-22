@@ -24,6 +24,7 @@ import (
 	"github.com/devpablocristo/companion-v2/internal/nexusclient"
 	"github.com/devpablocristo/companion-v2/internal/outbox"
 	"github.com/devpablocristo/companion-v2/internal/profiletemplates"
+	"github.com/devpablocristo/companion-v2/internal/quotas"
 	"github.com/devpablocristo/companion-v2/internal/runtimeclient"
 	"github.com/devpablocristo/companion-v2/internal/virployees"
 	postgres "github.com/devpablocristo/platform/databases/postgres/go"
@@ -96,6 +97,8 @@ func (a runtimeAnswererAdapter) Answer(ctx context.Context, in virployees.Answer
 		Answered:      res.Answered,
 		ModelID:       res.ModelID,
 		PromptVersion: res.PromptVersion,
+		InputTokens:   res.Usage.InputTokens, OutputTokens: res.Usage.OutputTokens,
+		EstimatedCostMicroUSD: res.Usage.EstimatedCostMicroUSD,
 	}, nil
 }
 
@@ -170,6 +173,8 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		return nil, err
 	}
 	capabilitiesHandler := capabilities.NewHandler(capabilitiesUsecases)
+	quotaRepository := quotas.NewRepository(db.Pool(), config.Environment == "production")
+	quotaHandler := quotas.NewHandler(quotaRepository)
 
 	profileTemplatesRepo := profiletemplates.NewRepository(db.Pool())
 	profileTemplatesUsecases, err := profiletemplates.NewUseCases(profileTemplatesRepo)
@@ -201,6 +206,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	}
 	virployeesUsecases.SetCapabilityValidator(capabilitiesUsecases)
 	virployeesUsecases.SetProfileTemplateReader(profileTemplatesUsecases)
+	virployeesUsecases.SetQuotaPorts(quotaRepository, quotaRepository)
 	var nexusClient *nexusclient.Client
 	if config.NexusBaseURL != "" {
 		nexusClient = nexusclient.New(config.NexusBaseURL, &http.Client{Timeout: 5 * time.Second, Transport: otelhttp.NewTransport(http.DefaultTransport)}, config.InternalAuthSecret)
@@ -275,8 +281,10 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 			artifacts.VideoFormatAdapter{Extractor: extractor},
 			artifacts.TextFormatAdapter{},
 		)
+		artifactEmbedder := artifactindex.NewRuntimeEmbedder(runtimePlanner)
+		artifactEmbedder.SetQuotaPorts(quotaRepository, quotaRepository)
 		indexService, err := artifactindex.NewService(
-			artifactindex.NewChunker(), artifactindex.NewRuntimeEmbedder(runtimePlanner), artifactindex.NewRepository(db.Pool()),
+			artifactindex.NewChunker(), artifactEmbedder, artifactindex.NewRepository(db.Pool()),
 		)
 		if err != nil {
 			db.Close()
@@ -313,6 +321,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		virployeesUsecases.RegisterExecutor("calendar.events.delete", googleExecutor)
 	}
 	memoriesUsecases := memories.NewUseCases(memories.NewRepository(db.Pool()))
+	memoriesUsecases.SetQuotaPorts(quotaRepository, quotaRepository)
 	if runtimePlanner != nil {
 		memoriesUsecases.SetEmbedder(memoryEmbeddingAdapter{client: runtimePlanner})
 	}
@@ -347,6 +356,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	api.Use(internalAuthMiddleware(config.InternalAuthSecret))
 	jobRolesHandler.Routes(api)
 	capabilitiesHandler.Routes(api)
+	quotaHandler.Routes(api)
 	profileTemplatesHandler.Routes(api)
 	virployeesHandler.Routes(api)
 	memoriesHandler.Routes(api)

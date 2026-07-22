@@ -108,6 +108,9 @@ func (u *UseCases) ExecuteApprovedAction(ctx context.Context, tenantID string, i
 		return runtraces.Trace{}, domainerr.Conflict("executor is not configured for prepared action")
 	}
 	idempotencyKey := runtraces.HashString(fmt.Sprintf("%s:%s:%s:%s", tenantID, approvalID, prepared.BindingHash, prepared.Action.Action))
+	if err := u.consumeQuota(ctx, quotaKey(tenantID, "axis", "executors"), idempotencyKey, "prepared_action", prepared.ID.String(), 1); err != nil {
+		return runtraces.Trace{}, err
+	}
 	attempt, created, err := u.executionRepo.BeginExecution(ctx, tenantID, id, prepared.ID, idempotencyKey)
 	if err != nil {
 		return runtraces.Trace{}, err

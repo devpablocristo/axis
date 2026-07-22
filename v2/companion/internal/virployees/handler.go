@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
+	"github.com/devpablocristo/companion-v2/internal/quotas"
 	"github.com/devpablocristo/companion-v2/internal/virployees/dryrun"
 	"github.com/devpablocristo/companion-v2/internal/virployees/executiongate"
 	"github.com/devpablocristo/companion-v2/internal/virployees/handler/dto"
@@ -101,6 +102,9 @@ func (h *Handler) SubmitAssistRun(c *gin.Context) {
 	}
 	run, err := h.ucs.SubmitAssistAsync(c.Request.Context(), tenantID(c), id, req.InputJSON, idem, metadata)
 	if err != nil {
+		if respondQuotaError(c, err) {
+			return
+		}
 		ginmw.Respond(c, err)
 		return
 	}
@@ -144,6 +148,9 @@ func (h *Handler) ExecuteApprovedAction(c *gin.Context) {
 	}
 	out, err := h.ucs.ExecuteApprovedAction(c.Request.Context(), tenantID(c), id, approvalID)
 	if err != nil {
+		if respondQuotaError(c, err) {
+			return
+		}
 		ginmw.Respond(c, err)
 		return
 	}
@@ -169,10 +176,23 @@ func (h *Handler) Assist(c *gin.Context) {
 	}
 	run, err := h.ucs.Assist(c.Request.Context(), tenantID(c), id, req.InputJSON, idem, metadata)
 	if err != nil {
+		if respondQuotaError(c, err) {
+			return
+		}
 		ginmw.Respond(c, err)
 		return
 	}
 	ginmw.WriteJSON(c, http.StatusOK, assistRunToDTO(run))
+}
+
+func respondQuotaError(c *gin.Context, err error) bool {
+	retryAfter, ok := quotas.RetryAfter(err)
+	if !ok {
+		return false
+	}
+	c.Header("Retry-After", strconv.Itoa(retryAfter))
+	ginmw.WriteError(c, http.StatusTooManyRequests, "quota_exceeded", "product quota exceeded")
+	return true
 }
 
 func assistRunToDTO(run AssistRun) dto.AssistRunResponse {

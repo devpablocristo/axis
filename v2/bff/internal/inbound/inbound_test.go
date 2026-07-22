@@ -105,6 +105,23 @@ func TestAssistRunReturns202AndStatusURLWhileDurableWorkContinues(t *testing.T) 
 	}
 }
 
+func TestAssistRunPreservesQuotaResponseAndRetryAfter(t *testing.T) {
+	companion := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Retry-After", "17")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":{"code":"quota_exceeded"}}`))
+	}))
+	defer companion.Close()
+	req := httptest.NewRequest(http.MethodPost, "/v1/assist-runs", strings.NewReader(`{"product_surface":"medmory","input":{"documents":[]}}`))
+	req.Header.Set("X-API-Key", "secret-key")
+	req.Header.Set("Idempotency-Key", "quota-test")
+	rec := httptest.NewRecorder()
+	newTestEngine(companion.URL).ServeHTTP(rec, req)
+	if rec.Code != http.StatusTooManyRequests || rec.Header().Get("Retry-After") != "17" || !strings.Contains(rec.Body.String(), "quota_exceeded") {
+		t.Fatalf("quota response was not preserved: code=%d retry=%q body=%s", rec.Code, rec.Header().Get("Retry-After"), rec.Body.String())
+	}
+}
+
 func TestAssistRunPreferWaitObservesCompletion(t *testing.T) {
 	gets := 0
 	companion := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

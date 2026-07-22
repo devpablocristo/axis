@@ -23,12 +23,12 @@ sig = "9ebad54c846281cf"
 [[bindings]]
 doc = "v2/companion/docs/specs/memories.md"
 target = "v2/companion/internal/memories/usecases.go"
-sig = "1dd4d3fc56f8d9ca"
+sig = "281a5e860afbf4e7"
 
 [[bindings]]
 doc = "v2/companion/docs/specs/memories.md"
 target = "v2/companion/internal/runtimeclient/client.go"
-sig = "eb934e04127c2f8b"
+sig = "8542677efd93bb85"
 
 [[bindings]]
 doc = "v2/companion/docs/specs/memories.md"
@@ -43,7 +43,7 @@ sig = "00dd0bdc0dc071de"
 [[bindings]]
 doc = "v2/companion/docs/specs/memories.md"
 target = "v2/companion/internal/virployees/usecases.go"
-sig = "f29e61f423d6421f"
+sig = "559876057a2214d1"
 
 [[bindings]]
 doc = "v2/companion/docs/specs/memories.md"
@@ -58,12 +58,12 @@ sig = "ad13f5a6ee3a9034"
 [[bindings]]
 doc = "v2/companion/docs/specs/memories.md"
 target = "v2/runtime/internal/planner/dto.go"
-sig = "a709185bdf684fcc"
+sig = "c7f6f8fe948abb14"
 
 [[bindings]]
 doc = "v2/companion/docs/specs/memories.md"
 target = "v2/runtime/internal/planner/planner.go"
-sig = "4af71270c7f8e769"
+sig = "a7e21ed18243eccc"
 
 [[bindings]]
 doc = "v2/docs/axis-os.md"
@@ -72,8 +72,13 @@ sig = "7812d67659fe193c"
 
 [[bindings]]
 doc = "v2/docs/axis-os.md"
+target = "v2/companion/internal/quotas/repository.go"
+sig = "fd480563b86c0423"
+
+[[bindings]]
+doc = "v2/docs/axis-os.md"
 target = "v2/companion/wire/wire.go"
-sig = "deacae2b53cfa2c0"
+sig = "be1b221d22db1a37"
 
 [[bindings]]
 doc = "v2/docs/axis-os.md"
@@ -83,4 +88,4 @@ sig = "00652a09b6bb8139"
 [[bindings]]
 doc = "v2/docs/axis-os.md"
 target = "v2/runtime/wire/wire.go"
-sig = "c604f08993a660f0"
+sig = "6260e730f93aabd4"

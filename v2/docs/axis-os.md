@@ -174,6 +174,16 @@ Runtime owns the Vertex embedding adapter and exposes it only on the internal
 authenticated surface. Document and query task types stay distinct and input
 truncation is disabled so incomplete clinical evidence fails visibly.
 
+Resource governance is owned by the `quotas` bounded context. `QuotaPort` and
+`UsageLedgerPort` are backed by PostgreSQL fixed windows keyed by tenant,
+product surface and area. An idempotency key makes retries free of duplicate
+charges; one atomic statement enforces request and unit ceilings across all
+replicas. Inbound assists, artifact bytes, LLM work, embeddings and external
+executors reserve capacity before work begins. Denials return `429` with
+`Retry-After`; production has no implicit unlimited policy. The append-only
+usage ledger stores quantities, model/cost metadata and operational subject
+identifiers, never prompts, artifact content, vectors, signed URLs or secrets.
+
 Executor credentials and attestation keys are resolved through opaque
 `secret_ref` values by service-local Secret Manager adapters. Secret bytes are
 held only long enough to construct a credential or signer and are never stored

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/devpablocristo/companion-v2/internal/artifacts"
+	"github.com/devpablocristo/companion-v2/internal/quotas"
 	"github.com/devpablocristo/companion-v2/internal/virployees/runtraces"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
 	"github.com/google/uuid"
@@ -56,12 +57,15 @@ func (u *UseCases) SubmitAssist(ctx context.Context, tenantID string, id uuid.UU
 	if strings.TrimSpace(string(inputJSON)) == "" || !json.Valid(inputJSON) {
 		return AssistRun{}, false, domainerr.Validation("input_json must be valid JSON")
 	}
+	if strings.TrimSpace(idempotencyKey) == "" {
+		idempotencyKey = runtraces.HashString(tenantID + ":" + id.String() + ":" + string(inputJSON))
+	}
+	if err := u.consumeQuota(ctx, quotaKey(tenantID, metadata.ProductSurface, quotas.AreaInbound), idempotencyKey, "virployee", id.String(), 1); err != nil {
+		return AssistRun{}, false, err
+	}
 	// Fail before accepting work when the virployee/profile is not executable.
 	if _, err := u.RuntimeContext(ctx, tenantID, id); err != nil {
 		return AssistRun{}, false, err
-	}
-	if strings.TrimSpace(idempotencyKey) == "" {
-		idempotencyKey = runtraces.HashString(tenantID + ":" + id.String() + ":" + string(inputJSON))
 	}
 	inputHash := runtraces.HashString(string(inputJSON))
 	run, reserved, err := u.assistRepo.BeginAssistRun(ctx, tenantID, id, metadata, idempotencyKey, inputHash, runtraces.InputPreview(string(inputJSON)), inputJSON)
@@ -141,6 +145,9 @@ func (u *UseCases) ProcessAssistRun(ctx context.Context, tenantID string, runID 
 
 	contentParts, ingested, ingestErr := u.ingestArtifacts(ctx, run)
 	if ingestErr != nil {
+		if _, quotaExceeded := quotas.RetryAfter(ingestErr); quotaExceeded {
+			return run, ingestErr
+		}
 		failed, _ := u.assistRepo.CompleteAssistRun(ctx, tenantID, run.ID, "failed", nil, "", false, false, "", "", artifacts.StableErrorCode(ingestErr), 0)
 		u.emitAssistAudit(ctx, tenantID, run.VirployeeID, failed, run.InputHash)
 		return failed, domainerr.Unavailable("required artifact processing failed")
@@ -154,6 +161,9 @@ func (u *UseCases) ProcessAssistRun(ctx context.Context, tenantID string, runID 
 		answerInputJSON = enriched
 	} else {
 		answerInputJSON = u.resolveDocuments(ctx, run.InputJSON)
+	}
+	if err := u.consumeQuota(ctx, quotaKey(tenantID, run.ProductSurface, quotas.AreaLLM), run.ID.String(), "assist_run", run.ID.String(), estimatedAnswerTokens(answerInputJSON, contentParts)); err != nil {
+		return run, err
 	}
 	run, err = u.assistRepo.SetAssistRunStatus(ctx, tenantID, run.ID, "answering")
 	if err != nil {
@@ -173,6 +183,7 @@ func (u *UseCases) ProcessAssistRun(ctx context.Context, tenantID string, runID 
 		u.emitAssistAudit(ctx, tenantID, run.VirployeeID, failed, run.InputHash)
 		return failed, domainerr.Unavailable("assist runtime failed")
 	}
+	u.recordLLMUsage(ctx, run, out)
 
 	done, err := u.assistRepo.CompleteAssistRun(ctx, tenantID, run.ID, "done", out.OutputJSON, out.OutputText, out.Answered, !out.Answered, out.ModelID, out.PromptVersion, "", durationMS)
 	if err != nil {
@@ -196,6 +207,7 @@ func (u *UseCases) ingestArtifacts(ctx context.Context, run AssistRun) ([]artifa
 		return nil, false, domainerr.Validation("artifact assist metadata is incomplete")
 	}
 	manifests := make([]artifacts.Manifest, 0, len(parsed.Documents))
+	var totalBytes int64
 	for _, doc := range parsed.Documents {
 		required := true
 		if doc.Required != nil {
@@ -205,6 +217,10 @@ func (u *UseCases) ingestArtifacts(ctx context.Context, run AssistRun) ([]artifa
 			DocumentID: doc.DocumentID, Name: doc.Key, SourceRef: doc.Key, ReadURL: doc.ReadURL,
 			SHA256: doc.SHA256, MIMEType: doc.ContentType, SizeBytes: doc.SizeBytes, Required: required,
 		})
+		totalBytes += doc.SizeBytes
+	}
+	if err := u.consumeQuota(ctx, quotaKey(run.TenantID, run.ProductSurface, quotas.AreaBytes), run.ID.String(), "assist_run", run.ID.String(), totalBytes); err != nil {
+		return nil, true, err
 	}
 	result, err := u.artifactIngestor.Ingest(ctx, artifacts.IngestRequest{
 		Scope: artifacts.Scope{

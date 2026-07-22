@@ -66,7 +66,7 @@ func (e *fakeEmbedder) Embed(_ context.Context, _ artifacts.Scope, chunks []arti
 	}
 	return out, nil
 }
-func (e *fakeEmbedder) EmbedQuery(context.Context, string) ([]float32, string, error) {
+func (e *fakeEmbedder) EmbedQuery(context.Context, artifacts.Scope, string) ([]float32, string, error) {
 	e.queryTask = true
 	return make([]float32, Dimensions), "gemini-embedding-001", nil
 }

@@ -6,8 +6,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"log/slog"
+	"strconv"
 	"strings"
 
+	"github.com/devpablocristo/companion-v2/internal/quotas"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
 	"github.com/google/uuid"
 )
@@ -21,6 +23,8 @@ type UseCases struct {
 	repo     *Repository
 	curator  MemoryCuratorPort
 	embedder EmbeddingPort
+	quota    quotas.QuotaPort
+	ledger   quotas.UsageLedgerPort
 }
 
 func NewUseCases(repo *Repository) *UseCases {
@@ -34,6 +38,9 @@ func (u *UseCases) SetCurator(curator MemoryCuratorPort) {
 }
 
 func (u *UseCases) SetEmbedder(embedder EmbeddingPort) { u.embedder = embedder }
+func (u *UseCases) SetQuotaPorts(quota quotas.QuotaPort, ledger quotas.UsageLedgerPort) {
+	u.quota, u.ledger = quota, ledger
+}
 func (u *UseCases) authorize(ctx context.Context, tenant string, virployee uuid.UUID, actor, role string) error {
 	return u.repo.Authorized(ctx, strings.TrimSpace(tenant), virployee, strings.TrimSpace(actor), strings.ToLower(strings.TrimSpace(role)))
 }
@@ -126,6 +133,12 @@ func (u *UseCases) recall(ctx context.Context, tenant string, virployee uuid.UUI
 	if u.embedder == nil {
 		return u.repo.Recall(ctx, strings.TrimSpace(tenant), virployee, query, limit, nil, "")
 	}
+	idempotencyKey := uuid.NewString()
+	units := estimateTokens(query)
+	if err := u.consumeEmbeddingQuota(ctx, tenant, idempotencyKey, "memory_recall", virployee.String(), units); err != nil {
+		slog.WarnContext(ctx, "memory_query_quota_exceeded_fallback_fts")
+		return u.repo.Recall(ctx, strings.TrimSpace(tenant), virployee, query, limit, nil, "")
+	}
 	vector, model, err := u.embedder.EmbedQuery(ctx, query)
 	if err != nil {
 		// Recall degrades to tenant-scoped FTS; unsafe/unapproved memories remain
@@ -133,6 +146,7 @@ func (u *UseCases) recall(ctx context.Context, tenant string, virployee uuid.UUI
 		slog.WarnContext(ctx, "memory_query_embedding_failed_fallback_fts")
 		return u.repo.Recall(ctx, strings.TrimSpace(tenant), virployee, query, limit, nil, "")
 	}
+	u.recordEmbeddingUsage(ctx, tenant, idempotencyKey, "memory_recall", virployee.String(), units, model)
 	return u.repo.Recall(ctx, strings.TrimSpace(tenant), virployee, query, limit, vector, model)
 }
 
@@ -164,15 +178,52 @@ func (u *UseCases) IndexMemory(ctx context.Context, tenant string, id uuid.UUID,
 	if err != nil {
 		return Memory{}, err
 	}
-	vector, model, err := u.embedder.EmbedDocument(ctx, memory.Title+"\n"+memory.Content)
+	content := memory.Title + "\n" + memory.Content
+	idempotencyKey := memory.ID.String() + ":" + strconv.Itoa(version)
+	units := estimateTokens(content)
+	if err := u.consumeEmbeddingQuota(ctx, tenant, idempotencyKey, "memory", memory.ID.String(), units); err != nil {
+		return Memory{}, err
+	}
+	vector, model, err := u.embedder.EmbedDocument(ctx, content)
 	if err != nil {
 		return Memory{}, err
 	}
+	u.recordEmbeddingUsage(ctx, tenant, idempotencyKey, "memory", memory.ID.String(), units, model)
 	if err := u.repo.StoreEmbedding(ctx, strings.TrimSpace(tenant), memory, vector, model); err != nil {
 		return Memory{}, err
 	}
 	memory.EmbeddingModel, memory.EmbeddingVersion = model, EmbeddingVersion
 	return memory, nil
+}
+
+func (u *UseCases) consumeEmbeddingQuota(ctx context.Context, tenant, idempotencyKey, subjectType, subjectID string, units int64) error {
+	if u.quota == nil {
+		return nil
+	}
+	_, err := u.quota.Consume(ctx, quotas.ConsumeRequest{
+		Key:            quotas.Key{TenantID: strings.TrimSpace(tenant), ProductSurface: "axis", Area: quotas.AreaEmbeddings},
+		IdempotencyKey: idempotencyKey, SubjectType: subjectType, SubjectID: subjectID, Units: units,
+	})
+	return err
+}
+
+func (u *UseCases) recordEmbeddingUsage(ctx context.Context, tenant, idempotencyKey, subjectType, subjectID string, units int64, model string) {
+	if u.ledger == nil {
+		return
+	}
+	_ = u.ledger.RecordUsage(ctx, quotas.Usage{
+		Key:            quotas.Key{TenantID: strings.TrimSpace(tenant), ProductSurface: "axis", Area: quotas.AreaEmbeddings},
+		IdempotencyKey: idempotencyKey + ":actual", SubjectType: subjectType, SubjectID: subjectID,
+		Units: units, Model: model, Metadata: map[string]any{"estimated": true},
+	})
+}
+
+func estimateTokens(value string) int64 {
+	length := int64(len(strings.TrimSpace(value)))
+	if length == 0 {
+		return 0
+	}
+	return (length + 3) / 4
 }
 
 func (u *UseCases) DecayDue(ctx context.Context, limit int) (int64, error) {

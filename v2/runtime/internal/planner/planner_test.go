@@ -256,7 +256,9 @@ var diagnosisSchema = map[string]any{"type": "object", "properties": map[string]
 
 func TestAnswerStructuredReturnsJSONWhenModelAnswers(t *testing.T) {
 	prov := &answerProvider{resp: ai.ChatResponse{Text: `{"summary":"paciente estable","conditions":[]}`}}
-	out, err := New(prov, "gemini-test").Answer(context.Background(), AnswerRequest{
+	out, err := New(prov, "gemini-test", Pricing{
+		InputMicroUSDPerMillionTokens: 1_000_000, OutputMicroUSDPerMillionTokens: 2_000_000,
+	}).Answer(context.Background(), AnswerRequest{
 		SystemPrompt:   "Sos un médico clínico.",
 		InputJSON:      json.RawMessage(`{"labs":"glucosa 126"}`),
 		ResponseSchema: diagnosisSchema,
@@ -269,6 +271,11 @@ func TestAnswerStructuredReturnsJSONWhenModelAnswers(t *testing.T) {
 	}
 	if len(out.OutputJSON) == 0 || out.PromptVersion != answerPromptVersion {
 		t.Fatalf("expected structured output + prompt version, got %+v", out)
+	}
+	if !out.Usage.Estimated || out.Usage.InputTokens < 1 || out.Usage.OutputTokens < 1 ||
+		out.Usage.TotalTokens != out.Usage.InputTokens+out.Usage.OutputTokens ||
+		out.Usage.EstimatedCostMicroUSD != out.Usage.InputTokens+2*out.Usage.OutputTokens {
+		t.Fatalf("expected internally consistent estimated usage, got %+v", out.Usage)
 	}
 	var parsed map[string]any
 	if err := json.Unmarshal(out.OutputJSON, &parsed); err != nil || parsed["summary"] != "paciente estable" {

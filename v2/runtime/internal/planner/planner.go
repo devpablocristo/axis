@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	ai "github.com/devpablocristo/platform/kernels/ai/go"
 )
@@ -27,10 +28,20 @@ const (
 type Planner struct {
 	provider ai.Provider
 	model    string
+	pricing  Pricing
 }
 
-func New(provider ai.Provider, model string) *Planner {
-	return &Planner{provider: provider, model: model}
+type Pricing struct {
+	InputMicroUSDPerMillionTokens  int64
+	OutputMicroUSDPerMillionTokens int64
+}
+
+func New(provider ai.Provider, model string, pricing ...Pricing) *Planner {
+	configured := Pricing{}
+	if len(pricing) > 0 {
+		configured = pricing[0]
+	}
+	return &Planner{provider: provider, model: model, pricing: configured}
 }
 
 func (p *Planner) Propose(ctx context.Context, req ProposeRequest) (ProposeResponse, error) {
@@ -59,7 +70,7 @@ func (p *Planner) Propose(ctx context.Context, req ProposeRequest) (ProposeRespo
 		return ProposeResponse{}, err
 	}
 
-	return ProposeResponse{Intent: interpret(resp, req.Capabilities), Model: p.model, PromptVersion: promptVersion}, nil
+	return ProposeResponse{Intent: interpret(resp, req.Capabilities), Model: p.model, PromptVersion: promptVersion, Usage: p.usage(buildSystemPrompt(req)+req.Input, resp.Text)}, nil
 }
 
 // Enrich rewrites the wording of a distilled procedure to be clearer, without
@@ -107,6 +118,7 @@ func (p *Planner) Enrich(ctx context.Context, req EnrichRequest) (EnrichResponse
 		Enriched:      true,
 		Model:         p.model,
 		PromptVersion: enrichPromptVersion,
+		Usage:         p.usage(buildEnrichSystemPrompt(req)+req.Title+req.Content, resp.Text),
 	}, nil
 }
 
@@ -151,6 +163,7 @@ func (p *Planner) Answer(ctx context.Context, req AnswerRequest) (AnswerResponse
 
 	text := stripCodeFences(resp.Text)
 	base.OutputText = text
+	base.Usage = p.usage(chatReq.SystemPrompt+userContent, resp.Text)
 	// A usable answer is a non-empty JSON object/array. Echo (no model) returns
 	// canned prose that does not parse, so it stays Answered=false (degraded) — the
 	// caller then marks the run degraded instead of treating prose as an answer.
@@ -159,6 +172,21 @@ func (p *Planner) Answer(ctx context.Context, req AnswerRequest) (AnswerResponse
 		base.Answered = true
 	}
 	return base, nil
+}
+
+func (p *Planner) usage(input, output string) Usage {
+	inputTokens := estimatedTokens(input)
+	outputTokens := estimatedTokens(output)
+	cost := (inputTokens*p.pricing.InputMicroUSDPerMillionTokens + outputTokens*p.pricing.OutputMicroUSDPerMillionTokens) / 1_000_000
+	return Usage{InputTokens: inputTokens, OutputTokens: outputTokens, TotalTokens: inputTokens + outputTokens, EstimatedCostMicroUSD: cost, Estimated: true}
+}
+
+func estimatedTokens(value string) int64 {
+	runes := int64(utf8.RuneCountInString(value))
+	if runes == 0 {
+		return 0
+	}
+	return (runes + 3) / 4
 }
 
 func materializeTextParts(parts []ContentPart) (string, bool) {

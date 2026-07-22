@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -91,6 +92,14 @@ func (h *Handler) AssistRun(c *gin.Context) {
 
 	run, err := h.submit(c, binding, envelope, idempotencyKey)
 	if err != nil {
+		var downstream *downstreamError
+		if errors.As(err, &downstream) && downstream.Status == http.StatusTooManyRequests {
+			if downstream.RetryAfter != "" {
+				c.Header("Retry-After", downstream.RetryAfter)
+			}
+			ginmw.WriteError(c, http.StatusTooManyRequests, "quota_exceeded", "product quota exceeded")
+			return
+		}
 		ginmw.WriteError(c, http.StatusBadGateway, "downstream_unavailable", "assist service unavailable")
 		return
 	}
@@ -232,10 +241,17 @@ func (h *Handler) do(request *http.Request) (companionAssistResponse, error) {
 		return companionAssistResponse{}, err
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return decoded, fmt.Errorf("companion assist status %d", response.StatusCode)
+		return decoded, &downstreamError{Status: response.StatusCode, RetryAfter: response.Header.Get("Retry-After")}
 	}
 	return decoded, nil
 }
+
+type downstreamError struct {
+	Status     int
+	RetryAfter string
+}
+
+func (e *downstreamError) Error() string { return fmt.Sprintf("companion assist status %d", e.Status) }
 
 func productResult(run companionAssistResponse) assistRunResult {
 	status := strings.ToLower(strings.TrimSpace(run.Status))

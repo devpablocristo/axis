@@ -11,6 +11,7 @@ import (
 	jobroledomain "github.com/devpablocristo/companion-v2/internal/jobroles/usecases/domain"
 	"github.com/devpablocristo/companion-v2/internal/memories"
 	profiletemplatedomain "github.com/devpablocristo/companion-v2/internal/profiletemplates/usecases/domain"
+	"github.com/devpablocristo/companion-v2/internal/quotas"
 	"github.com/devpablocristo/companion-v2/internal/virployees/dryrun"
 	"github.com/devpablocristo/companion-v2/internal/virployees/executiongate"
 	"github.com/devpablocristo/companion-v2/internal/virployees/preparedactions"
@@ -136,11 +137,14 @@ type AnswerInput struct {
 }
 
 type AnswerOutput struct {
-	OutputText    string
-	OutputJSON    json.RawMessage
-	Answered      bool
-	ModelID       string
-	PromptVersion string
+	OutputText            string
+	OutputJSON            json.RawMessage
+	Answered              bool
+	ModelID               string
+	PromptVersion         string
+	InputTokens           int64
+	OutputTokens          int64
+	EstimatedCostMicroUSD int64
 }
 
 // RuntimeAnswererPort asks the runtime to process input and answer (read/explain,
@@ -194,6 +198,8 @@ type UseCases struct {
 	docFetcher       DocumentFetcherPort
 	artifactIngestor ArtifactIngestorPort
 	auditEmitter     AuditEmitterPort
+	quota            quotas.QuotaPort
+	usageLedger      quotas.UsageLedgerPort
 	lifecycle        *lifecycle.Service
 }
 
@@ -272,6 +278,10 @@ func (u *UseCases) SetDocumentFetcher(fetcher DocumentFetcherPort) { u.docFetche
 func (u *UseCases) SetArtifactIngestor(ingestor ArtifactIngestorPort) { u.artifactIngestor = ingestor }
 
 func (u *UseCases) SetAuditEmitter(emitter AuditEmitterPort) { u.auditEmitter = emitter }
+
+func (u *UseCases) SetQuotaPorts(quota quotas.QuotaPort, ledger quotas.UsageLedgerPort) {
+	u.quota, u.usageLedger = quota, ledger
+}
 
 func (u *UseCases) RegisterExecutor(action string, executor ActionExecutorPort) {
 	action = strings.TrimSpace(action)

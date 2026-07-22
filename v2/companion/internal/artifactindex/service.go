@@ -10,7 +10,7 @@ import (
 
 type QueryEmbedder interface {
 	artifacts.EmbeddingPort
-	EmbedQuery(context.Context, string) ([]float32, string, error)
+	EmbedQuery(context.Context, artifacts.Scope, string) ([]float32, string, error)
 }
 
 type Store interface {
@@ -50,7 +50,7 @@ func (s *Service) Retrieve(ctx context.Context, query artifacts.RetrievalQuery) 
 	if strings.TrimSpace(query.Text) == "" {
 		return nil, errors.New("retrieval query text is required")
 	}
-	vector, model, err := s.embedder.EmbedQuery(ctx, query.Text)
+	vector, model, err := s.embedder.EmbedQuery(ctx, query.Scope, query.Text)
 	if err != nil {
 		return nil, err
 	}

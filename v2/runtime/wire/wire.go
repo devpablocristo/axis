@@ -43,7 +43,10 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	}
 
 	provider := buildProvider(ctx, config)
-	plannerHandler := planner.NewHandler(planner.New(provider, config.LLMModel))
+	plannerHandler := planner.NewHandler(planner.New(provider, config.LLMModel, planner.Pricing{
+		InputMicroUSDPerMillionTokens:  config.LLMInputCostMicroUSDPerMillionTokens,
+		OutputMicroUSDPerMillionTokens: config.LLMOutputCostMicroUSDPerMillionTokens,
+	}))
 	embeddingHandler := embeddings.NewHandler(buildEmbeddingProvider(ctx, config))
 
 	gin.SetMode(gin.ReleaseMode)

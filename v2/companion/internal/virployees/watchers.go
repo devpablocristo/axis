@@ -85,6 +85,10 @@ func (u *UseCases) recoverExecution(ctx context.Context, repo OperationalReposit
 		fail("executor_unconfigured")
 		return
 	}
+	if err := u.consumeQuota(ctx, quotaKey(attempt.TenantID, "axis", "executors"), attempt.IdempotencyKey, "execution_attempt", attempt.ID.String(), 1); err != nil {
+		fail("executor_quota_exceeded")
+		return
+	}
 	started := time.Now()
 	outcome, executeErr := executor.Execute(ctx, attempt.TenantID, attempt.VirployeeID, attempt, prepared.Action)
 	result := outcome.Result

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/devpablocristo/companion-v2/internal/artifacts"
+	"github.com/devpablocristo/companion-v2/internal/quotas"
 	"github.com/devpablocristo/companion-v2/internal/virployees/runtraces"
 	"github.com/devpablocristo/companion-v2/internal/virployees/usecases/domain"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
@@ -81,6 +82,27 @@ type fakeAnswerer struct {
 	err       error
 }
 
+type fakeQuota struct {
+	denyArea string
+	calls    []quotas.ConsumeRequest
+}
+
+func (q *fakeQuota) Consume(_ context.Context, request quotas.ConsumeRequest) (quotas.Decision, error) {
+	q.calls = append(q.calls, request)
+	if request.Area == q.denyArea {
+		decision := quotas.Decision{Allowed: false, PolicyFound: true, RetryAfterSeconds: 17}
+		return decision, &quotas.ExceededError{Key: request.Key, RetryAfter: 17}
+	}
+	return quotas.Decision{Allowed: true, PolicyFound: true}, nil
+}
+
+type fakeUsageLedger struct{ records []quotas.Usage }
+
+func (l *fakeUsageLedger) RecordUsage(_ context.Context, usage quotas.Usage) error {
+	l.records = append(l.records, usage)
+	return nil
+}
+
 func (a *fakeAnswerer) Answer(_ context.Context, in AnswerInput) (AnswerOutput, error) {
 	a.called = true
 	a.lastInput = in
@@ -140,6 +162,55 @@ func TestAssistProcessesAndPersistsAnswer(t *testing.T) {
 	}
 	if string(run.Output) != `{"summary":"ok"}` || repo.completeCalls != 1 {
 		t.Fatalf("expected the model output persisted once, got %+v (completes=%d)", run, repo.completeCalls)
+	}
+}
+
+func TestAssistStopsBeforeRuntimeWhenLLMQuotaIsExceeded(t *testing.T) {
+	uc, created := setupExecutionGateUseCase(t, domain.AutonomyA3)
+	repo := &fakeAssistRepo{reserved: true}
+	answerer := &fakeAnswerer{out: AnswerOutput{Answered: true}}
+	quota := &fakeQuota{denyArea: quotas.AreaLLM}
+	uc.assistRepo = repo
+	uc.answerer = answerer
+	uc.SetQuotaPorts(quota, nil)
+
+	_, err := uc.Assist(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"documents":[]}`), "quota-run", AssistMetadata{ProductSurface: "medmory"})
+	if retryAfter, ok := quotas.RetryAfter(err); !ok || retryAfter != 17 {
+		t.Fatalf("expected quota error with Retry-After 17, got %v", err)
+	}
+	if answerer.called {
+		t.Fatal("runtime must not be called after quota denial")
+	}
+	if len(quota.calls) != 2 || quota.calls[0].Area != quotas.AreaInbound || quota.calls[1].Area != quotas.AreaLLM {
+		t.Fatalf("unexpected quota sequence: %+v", quota.calls)
+	}
+}
+
+func TestAssistRecordsRuntimeUsageWithoutPromptContent(t *testing.T) {
+	uc, created := setupExecutionGateUseCase(t, domain.AutonomyA3)
+	repo := &fakeAssistRepo{reserved: true}
+	answerer := &fakeAnswerer{out: AnswerOutput{
+		OutputJSON: json.RawMessage(`{"summary":"ok"}`), Answered: true, ModelID: "gemini",
+		InputTokens: 11, OutputTokens: 7, EstimatedCostMicroUSD: 3,
+	}}
+	ledger := &fakeUsageLedger{}
+	uc.assistRepo = repo
+	uc.answerer = answerer
+	uc.SetQuotaPorts(&fakeQuota{}, ledger)
+
+	if _, err := uc.Assist(context.Background(), "tenant-1", created.ID, json.RawMessage(`{"secret_note":"never persist this"}`), "usage-run", AssistMetadata{ProductSurface: "medmory"}); err != nil {
+		t.Fatalf("Assist: %v", err)
+	}
+	if len(ledger.records) != 1 {
+		t.Fatalf("expected one actual usage record, got %d", len(ledger.records))
+	}
+	usage := ledger.records[0]
+	if usage.Area != quotas.AreaLLM || usage.Units != 18 || usage.Model != "gemini" || usage.EstimatedCostMicroUSD != 3 {
+		t.Fatalf("unexpected usage record: %+v", usage)
+	}
+	encoded, _ := json.Marshal(usage.Metadata)
+	if strings.Contains(string(encoded), "never persist this") {
+		t.Fatalf("usage metadata must not contain prompt content: %s", encoded)
 	}
 }
 

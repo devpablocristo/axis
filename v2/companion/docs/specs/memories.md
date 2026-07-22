@@ -43,6 +43,12 @@ falls back to lexical recall without weakening curation predicates. Recall
 returns five results by default and ten at most. Lists use an opaque cursor over
 `updated_at + id`, default 50 and maximum 100.
 
+Every memory indexing or vector-query call reserves the tenant's `axis / embeddings`
+quota before reaching Runtime. A denied indexing job remains retryable; denied
+or unavailable query embedding degrades to the same tenant-scoped lexical
+recall. Successful calls append only token estimates, model and operational
+identifiers to the usage ledger—never query text, memory content or vectors.
+
 Runtime Context and Dry Run expose safe memory references (ID, title, type,
 version, content hash, sensitivity and score). Run traces persist those
 references plus a deterministic `memory_context_hash`, never memory content.
@@ -50,6 +56,11 @@ Execution Gate binds that hash so governance seals the exact recalled context.
 The recalled, curator-approved content is included in the Runtime proposal
 context while run traces retain only references and the hash. The deterministic
 fallback parser does not change its decision from memory.
+
+Runtime responses include an estimated input/output token and cost envelope
+until provider-authoritative usage is available. Companion reserves the LLM
+budget before a run enters `answering`, records actual returned estimates after
+the call, and keeps all prompt and document content out of accounting metadata.
 
 ## Explicit non-goals
 

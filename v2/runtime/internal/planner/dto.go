@@ -35,6 +35,7 @@ type ProposeResponse struct {
 	Intent        ProposedIntent `json:"intent"`
 	Model         string         `json:"model,omitempty"`
 	PromptVersion string         `json:"prompt_version,omitempty"`
+	Usage         Usage          `json:"usage"`
 }
 
 type ProposedIntent struct {
@@ -84,6 +85,7 @@ type AnswerResponse struct {
 	Answered      bool            `json:"answered"`
 	Model         string          `json:"model,omitempty"`
 	PromptVersion string          `json:"prompt_version,omitempty"`
+	Usage         Usage           `json:"usage"`
 }
 
 // EnrichRequest is what Companion sends to improve the WORDING of a distilled
@@ -105,4 +107,16 @@ type EnrichResponse struct {
 	Enriched      bool   `json:"enriched"`
 	Model         string `json:"model,omitempty"`
 	PromptVersion string `json:"prompt_version,omitempty"`
+	Usage         Usage  `json:"usage"`
+}
+
+// Usage is deliberately marked estimated until each provider adapter exposes
+// authoritative billing metadata. Runtime still reports a consistent token and
+// cost envelope so Companion can enforce budgets before and account after calls.
+type Usage struct {
+	InputTokens           int64 `json:"input_tokens"`
+	OutputTokens          int64 `json:"output_tokens"`
+	TotalTokens           int64 `json:"total_tokens"`
+	EstimatedCostMicroUSD int64 `json:"estimated_cost_microusd"`
+	Estimated             bool  `json:"estimated"`
 }

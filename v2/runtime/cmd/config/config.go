@@ -17,13 +17,15 @@ type Config struct {
 	// with Application Default Credentials and requires VertexProject; without a
 	// project (or, for other providers, without an API key) it falls back to the
 	// Echo provider, so dev and CI start without a secret or external calls.
-	LLMProvider    string
-	LLMAPIKey      string
-	LLMModel       string
-	VertexProject  string
-	VertexLocation string
-	EmbeddingModel string
-	EmbeddingDim   int
+	LLMProvider                           string
+	LLMAPIKey                             string
+	LLMModel                              string
+	VertexProject                         string
+	VertexLocation                        string
+	EmbeddingModel                        string
+	EmbeddingDim                          int
+	LLMInputCostMicroUSDPerMillionTokens  int64
+	LLMOutputCostMicroUSDPerMillionTokens int64
 
 	ServiceVersion string
 	OTelExporter   string
@@ -33,22 +35,24 @@ type Config struct {
 
 func Load() Config {
 	return Config{
-		Environment:        envconfig.NormalizeEnv(envconfig.Get("RUNTIME_V2_ENV", "development")),
-		Port:               envconfig.Get("PORT", "19088"),
-		MaxBodyBytes:       int64(envconfig.Int("RUNTIME_V2_MAX_BODY_BYTES", 1<<20)),
-		CORSOrigins:        splitCSV(envconfig.Get("RUNTIME_V2_CORS_ORIGINS", "")),
-		InternalAuthSecret: strings.TrimSpace(envconfig.Get("RUNTIME_V2_INTERNAL_AUTH_SECRET", envconfig.Get("AXIS_V2_INTERNAL_AUTH_SECRET", ""))),
-		LLMProvider:        strings.ToLower(strings.TrimSpace(envconfig.Get("RUNTIME_V2_LLM_PROVIDER", "vertex"))),
-		LLMAPIKey:          strings.TrimSpace(envconfig.Get("RUNTIME_V2_LLM_API_KEY", "")),
-		LLMModel:           strings.TrimSpace(envconfig.Get("RUNTIME_V2_LLM_MODEL", "gemini-2.5-flash-lite")),
-		VertexProject:      strings.TrimSpace(envconfig.Get("RUNTIME_V2_VERTEX_PROJECT", "")),
-		VertexLocation:     strings.TrimSpace(envconfig.Get("RUNTIME_V2_VERTEX_LOCATION", "us-central1")),
-		EmbeddingModel:     strings.TrimSpace(envconfig.Get("RUNTIME_V2_EMBEDDING_MODEL", "gemini-embedding-001")),
-		EmbeddingDim:       envconfig.Int("RUNTIME_V2_EMBEDDING_DIMENSIONS", 768),
-		ServiceVersion:     envconfig.Get("RUNTIME_V2_SERVICE_VERSION", ""),
-		OTelExporter:       strings.ToLower(strings.TrimSpace(envconfig.Get("RUNTIME_V2_OTEL_EXPORTER", "none"))),
-		OTelEndpoint:       strings.TrimSpace(envconfig.Get("RUNTIME_V2_OTEL_OTLP_ENDPOINT", "")),
-		OTelInsecure:       envconfig.Bool("RUNTIME_V2_OTEL_OTLP_INSECURE", true),
+		Environment:                           envconfig.NormalizeEnv(envconfig.Get("RUNTIME_V2_ENV", "development")),
+		Port:                                  envconfig.Get("PORT", "19088"),
+		MaxBodyBytes:                          int64(envconfig.Int("RUNTIME_V2_MAX_BODY_BYTES", 1<<20)),
+		CORSOrigins:                           splitCSV(envconfig.Get("RUNTIME_V2_CORS_ORIGINS", "")),
+		InternalAuthSecret:                    strings.TrimSpace(envconfig.Get("RUNTIME_V2_INTERNAL_AUTH_SECRET", envconfig.Get("AXIS_V2_INTERNAL_AUTH_SECRET", ""))),
+		LLMProvider:                           strings.ToLower(strings.TrimSpace(envconfig.Get("RUNTIME_V2_LLM_PROVIDER", "vertex"))),
+		LLMAPIKey:                             strings.TrimSpace(envconfig.Get("RUNTIME_V2_LLM_API_KEY", "")),
+		LLMModel:                              strings.TrimSpace(envconfig.Get("RUNTIME_V2_LLM_MODEL", "gemini-2.5-flash-lite")),
+		VertexProject:                         strings.TrimSpace(envconfig.Get("RUNTIME_V2_VERTEX_PROJECT", "")),
+		VertexLocation:                        strings.TrimSpace(envconfig.Get("RUNTIME_V2_VERTEX_LOCATION", "us-central1")),
+		EmbeddingModel:                        strings.TrimSpace(envconfig.Get("RUNTIME_V2_EMBEDDING_MODEL", "gemini-embedding-001")),
+		EmbeddingDim:                          envconfig.Int("RUNTIME_V2_EMBEDDING_DIMENSIONS", 768),
+		LLMInputCostMicroUSDPerMillionTokens:  int64(envconfig.Int("RUNTIME_V2_LLM_INPUT_COST_MICROUSD_PER_MILLION_TOKENS", 0)),
+		LLMOutputCostMicroUSDPerMillionTokens: int64(envconfig.Int("RUNTIME_V2_LLM_OUTPUT_COST_MICROUSD_PER_MILLION_TOKENS", 0)),
+		ServiceVersion:                        envconfig.Get("RUNTIME_V2_SERVICE_VERSION", ""),
+		OTelExporter:                          strings.ToLower(strings.TrimSpace(envconfig.Get("RUNTIME_V2_OTEL_EXPORTER", "none"))),
+		OTelEndpoint:                          strings.TrimSpace(envconfig.Get("RUNTIME_V2_OTEL_OTLP_ENDPOINT", "")),
+		OTelInsecure:                          envconfig.Bool("RUNTIME_V2_OTEL_OTLP_INSECURE", true),
 	}
 }
 
