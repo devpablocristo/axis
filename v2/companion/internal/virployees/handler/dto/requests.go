@@ -15,7 +15,10 @@ type AssistRequest struct {
 	IdempotencyKey       string          `json:"idempotency_key,omitempty"`
 	AssistType           string          `json:"assist_type,omitempty"`
 	ProductSurface       string          `json:"product_surface,omitempty"`
+	CapabilityKey        string          `json:"capability_key,omitempty"`
 	SubjectID            string          `json:"subject_id,omitempty"`
+	CaseID               string          `json:"case_id,omitempty"`
+	AssignmentID         string          `json:"assignment_id,omitempty"`
 	RepositoryGeneration string          `json:"repository_generation,omitempty"`
 }
 
@@ -27,6 +30,8 @@ type CreateVirployeeRequest struct {
 	Description       string   `json:"description"`
 	SupervisorUserID  string   `json:"supervisor_user_id" binding:"required"`
 	Autonomy          string   `json:"autonomy"`
+	GroundingMode     string   `json:"grounding_mode,omitempty"`
+	EmployerSubjectID string   `json:"employer_subject_id" binding:"required"`
 }
 
 func (r CreateVirployeeRequest) ToDomain() domain.CreateInput {
@@ -38,6 +43,8 @@ func (r CreateVirployeeRequest) ToDomain() domain.CreateInput {
 		Description:       r.Description,
 		SupervisorUserID:  r.SupervisorUserID,
 		Autonomy:          r.Autonomy,
+		GroundingMode:     r.GroundingMode,
+		EmployerSubjectID: r.EmployerSubjectID,
 	}
 }
 
@@ -49,6 +56,7 @@ type UpdateVirployeeRequest struct {
 	Description       string   `json:"description"`
 	SupervisorUserID  string   `json:"supervisor_user_id" binding:"required"`
 	Autonomy          string   `json:"autonomy"`
+	GroundingMode     string   `json:"grounding_mode,omitempty"`
 }
 
 func (r UpdateVirployeeRequest) ToDomain() domain.UpdateInput {
@@ -60,6 +68,7 @@ func (r UpdateVirployeeRequest) ToDomain() domain.UpdateInput {
 		Description:       r.Description,
 		SupervisorUserID:  r.SupervisorUserID,
 		Autonomy:          r.Autonomy,
+		GroundingMode:     r.GroundingMode,
 	}
 }
 
@@ -73,6 +82,9 @@ type DryRunVirployeeRequest struct {
 
 type ExecutionGateVirployeeRequest struct {
 	Input          string                 `json:"input" binding:"required"`
+	AssistRunID    string                 `json:"assist_run_id,omitempty"`
+	PrincipalType  string                 `json:"principal_type,omitempty"`
+	PrincipalID    string                 `json:"principal_id,omitempty"`
 	ConfirmedDraft *ConfirmedDraftRequest `json:"confirmed_draft"`
 }
 
@@ -111,4 +123,8 @@ func (r ExecutionGateVirployeeRequest) ConfirmedDraftToDomain() *executiongate.C
 		Kind:   r.ConfirmedDraft.Kind,
 		Fields: fields,
 	}
+}
+
+func (r ExecutionGateVirployeeRequest) PrincipalToDomain() executiongate.PrincipalContext {
+	return executiongate.PrincipalContext{Type: r.PrincipalType, ID: r.PrincipalID}
 }

@@ -102,7 +102,7 @@ func (r *Repository) Search(ctx context.Context, query artifacts.RetrievalQuery,
 		return nil, errors.New("retrieval vector, model and text are required")
 	}
 	limit := query.Limit
-	if limit <= 0 || limit > 50 {
+	if limit <= 0 || limit > 201 {
 		limit = 12
 	}
 	rows, err := r.pool.Query(ctx, `

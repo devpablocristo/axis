@@ -10,8 +10,11 @@ import { formatDateTime24 } from './formatters'
 import { VirployeeMemoryPanel } from './VirployeeMemoryPanel'
 import {
   type Approval,
+  type AssistCase,
   type Capability,
+  type ContinuityAssignment,
   type JobRole,
+  type GroundingMode,
   type TenantUser,
   type VirployeeAutonomy,
   type VirployeeAutonomyLevel,
@@ -22,21 +25,48 @@ import {
   type VirployeeRunTrace,
   type VirployeeRuntimeContext,
   type ProfileTemplate,
+  type ProfessionalPolicyBinding,
+  type ProfessionalPolicyPack,
+  type KnowledgeBase,
+  type MCPTool,
+  type VirployeeKnowledgeBase,
+  type VirployeeDelegation,
+  type VirployeeScopePolicy,
+  type WorkRelationshipInput,
+  type WorkSubject,
   archiveVirployee,
   checkVirployeeExecutionGate,
+  createVirployeeDelegation,
   createVirployee,
   dryRunVirployee,
   getApproval,
   getVirployeeRuntimeContext,
+  getVirployeeRelationships,
+  getVirployeeProfessionalPolicyBinding,
+  getVirployeeScopePolicy,
   listCapabilities,
+  listAssistCases,
   listJobRoles,
   listProfileTemplates,
+  listProfessionalPolicyPacks,
+  listKnowledgeBases,
+  listMCPTools,
+  listVirployeeKnowledgeBases,
   listVirployeeRuns,
   listUsers,
   listVirployeeAutonomyLevels,
   listVirployees,
+  listVirployeeDelegations,
+  listVirployeeAssignments,
+  listWorkSubjects,
+  putVirployeeRelationships,
+  putVirployeeProfessionalPolicyBinding,
+  putVirployeeScopePolicy,
+  setVirployeeKnowledgeBase,
   purgeVirployee,
   restoreVirployee,
+  revokeVirployeeDelegation,
+  reviewVirployeeDelegation,
   executeApprovedVirployeeAction,
   trashVirployee,
   unarchiveVirployee,
@@ -71,6 +101,7 @@ type VirployeeEditValues = {
   supervisor_user_id: string
   description: string
   capability_ids: string[]
+  grounding_mode: GroundingMode
 }
 
 const VISIBLE_AUTONOMY_LEVELS: VirployeeAutonomy[] = ['A0', 'A1', 'A2', 'A3']
@@ -135,6 +166,7 @@ export function VirployeesPage({
   const [createValues, setCreateValues] = useState<VirployeeEditValues | null>(null)
   const [createSaving, setCreateSaving] = useState(false)
   const [createError, setCreateError] = useState('')
+	const [createEmployerSubjectID, setCreateEmployerSubjectID] = useState('')
   const [bulkBusy, setBulkBusy] = useState(false)
   const [reloadVersion, setReloadVersion] = useState(0)
   const [actionError, setActionError] = useState('')
@@ -153,6 +185,7 @@ export function VirployeesPage({
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState('')
   const previewRequestRef = useRef(0)
+	const previewContextRequestRef = useRef(0)
   const [dryRunRow, setDryRunRow] = useState<Virployee | null>(null)
   const [dryRunInput, setDryRunInput] = useState('')
   const [dryRunResult, setDryRunResult] = useState<VirployeeDryRun | null>(null)
@@ -176,6 +209,29 @@ export function VirployeesPage({
   const [editValues, setEditValues] = useState<VirployeeEditValues | null>(null)
   const [editSaving, setEditSaving] = useState(false)
   const [editError, setEditError] = useState('')
+	const [workSubjects, setWorkSubjects] = useState<WorkSubject[]>([])
+	const [editRelationships, setEditRelationships] = useState<WorkRelationshipInput[]>([])
+	const [editAssignments, setEditAssignments] = useState<ContinuityAssignment[]>([])
+	const [relationshipsLoading, setRelationshipsLoading] = useState(false)
+	const [relationshipsDirty, setRelationshipsDirty] = useState(false)
+	const [previewRelationships, setPreviewRelationships] = useState<WorkRelationshipInput[]>([])
+	const [previewAssignments, setPreviewAssignments] = useState<ContinuityAssignment[]>([])
+	const [previewCases, setPreviewCases] = useState<AssistCase[]>([])
+	const [policyPacks, setPolicyPacks] = useState<ProfessionalPolicyPack[]>([])
+	const [knowledgeCatalog, setKnowledgeCatalog] = useState<KnowledgeBase[]>([])
+	const [editKnowledgeBases, setEditKnowledgeBases] = useState<VirployeeKnowledgeBase[]>([])
+	const [previewKnowledgeBases, setPreviewKnowledgeBases] = useState<VirployeeKnowledgeBase[]>([])
+	const [previewMCPTools, setPreviewMCPTools] = useState<MCPTool[]>([])
+	const [previewMCPError, setPreviewMCPError] = useState('')
+	const [previewMCPLoading, setPreviewMCPLoading] = useState(false)
+	const [knowledgeBusy, setKnowledgeBusy] = useState(false)
+	const [editScopePolicy, setEditScopePolicy] = useState<VirployeeScopePolicy | null>(null)
+	const [editPolicyBinding, setEditPolicyBinding] = useState<ProfessionalPolicyBinding | null>(null)
+	const [editDelegations, setEditDelegations] = useState<VirployeeDelegation[]>([])
+	const [authorityDirty, setAuthorityDirty] = useState(false)
+	const [previewScopePolicy, setPreviewScopePolicy] = useState<VirployeeScopePolicy | null>(null)
+	const [previewPolicyBinding, setPreviewPolicyBinding] = useState<ProfessionalPolicyBinding | null>(null)
+	const [previewDelegations, setPreviewDelegations] = useState<VirployeeDelegation[]>([])
 	const [memoryRow, setMemoryRow] = useState<Virployee | null>(null)
   // Gate on tenant only: the browser's principalId is not authoritative (the BFF
   // overwrites X-Actor-ID from the resolved session), and gating on it made the
@@ -292,6 +348,18 @@ export function VirployeesPage({
   }, [isActive, principalId, reloadVersion, tenantId])
 
   useEffect(() => {
+	if (!isActive) {
+	  setKnowledgeCatalog([])
+	  return
+	}
+	let cancelled = false
+	listKnowledgeBases(tenantId, principalId, 'active')
+	  .then((items) => { if (!cancelled) setKnowledgeCatalog(items) })
+	  .catch(() => { if (!cancelled) setKnowledgeCatalog([]) })
+	return () => { cancelled = true }
+  }, [isActive, principalId, reloadVersion, tenantId])
+
+  useEffect(() => {
     if (!isActive) {
       setCapabilities([])
       setCapabilitiesError('')
@@ -379,6 +447,30 @@ export function VirployeesPage({
       cancelled = true
     }
   }, [isActive, principalId, tenantId])
+
+  useEffect(() => {
+    if (!isActive) {
+      setWorkSubjects([])
+      return
+    }
+    let cancelled = false
+    listWorkSubjects(tenantId, principalId)
+      .then((items) => { if (!cancelled) setWorkSubjects(items.filter((item) => item.state === 'active')) })
+      .catch(() => { if (!cancelled) setWorkSubjects([]) })
+    return () => { cancelled = true }
+  }, [isActive, principalId, reloadVersion, tenantId])
+
+  useEffect(() => {
+    if (!isActive) {
+      setPolicyPacks([])
+      return
+    }
+    let cancelled = false
+    listProfessionalPolicyPacks(tenantId, principalId)
+      .then((items) => { if (!cancelled) setPolicyPacks(items) })
+      .catch(() => { if (!cancelled) setPolicyPacks([]) })
+    return () => { cancelled = true }
+  }, [isActive, principalId, reloadVersion, tenantId])
 
   useEffect(() => {
     const root = rootRef.current
@@ -490,7 +582,9 @@ export function VirployeesPage({
     closePreview()
     closeDryRun()
     closeEdit()
-    setCreateValues(initialVirployeeCreateValues(jobRoleOptions, profileTemplateOptions, supervisorOptions))
+	setCreateValues(initialVirployeeCreateValues(jobRoleOptions, profileTemplateOptions, supervisorOptions))
+	const possibleEmployers = workSubjects.filter((subject) => subject.kind !== 'patient' && subject.kind !== 'case')
+	setCreateEmployerSubjectID(possibleEmployers.length === 1 ? possibleEmployers[0].id : '')
     setCreateSaving(false)
     setCreateError('')
     setActionError('')
@@ -501,7 +595,8 @@ export function VirployeesPage({
     setCreateValues(null)
     setCreateSaving(false)
     setCreateError('')
-    setCreateOpen(false)
+	setCreateOpen(false)
+	setCreateEmployerSubjectID('')
   }
 
   const updateCreateValue = (key: keyof VirployeeEditValues, value: string) => {
@@ -522,11 +617,11 @@ export function VirployeesPage({
   }
 
   const saveCreate = async () => {
-    if (!createValues || createSaving || !isValidEditValues(createValues)) return
+	if (!createValues || createSaving || !isValidEditValues(createValues) || !createEmployerSubjectID) return
     setCreateSaving(true)
     setCreateError('')
     try {
-      await createVirployee(editPayload(createValues), tenantId, principalId)
+	  await createVirployee({ ...editPayload(createValues), employer_subject_id: createEmployerSubjectID }, tenantId, principalId)
       closeCreate()
       setReloadVersion((current) => current + 1)
     } catch (error) {
@@ -543,8 +638,35 @@ export function VirployeesPage({
     closeDryRun()
     setEditRow(row)
     setEditValues(virployeeToEditValues(row))
+	setEditRelationships([])
+	setEditAssignments([])
+	setRelationshipsDirty(false)
+	setEditScopePolicy(null)
+	setEditPolicyBinding(null)
+	setEditDelegations([])
+	setEditKnowledgeBases([])
+	setAuthorityDirty(false)
+	setRelationshipsLoading(true)
     setEditError('')
     setActionError('')
+	Promise.all([
+	  getVirployeeRelationships(row.id, tenantId, principalId),
+	  listVirployeeAssignments(row.id, tenantId, principalId),
+	  getVirployeeScopePolicy(row.id, tenantId, principalId),
+	  getVirployeeProfessionalPolicyBinding(row.id, tenantId, principalId),
+	  listVirployeeDelegations(row.id, tenantId, principalId),
+	  listVirployeeKnowledgeBases(row.id, tenantId, principalId),
+	])
+	  .then(([relationships, assignments, scope, binding, delegations, knowledgeBases]) => {
+		setEditRelationships(relationships.map((item) => ({ subject_id: item.subject_id, type: item.type, is_primary: item.is_primary })))
+		setEditAssignments(assignments)
+		setEditScopePolicy(scope)
+		setEditPolicyBinding(binding)
+		setEditDelegations(delegations)
+		setEditKnowledgeBases(knowledgeBases)
+	  })
+	  .catch((error) => setEditError(error instanceof Error ? error.message : 'Could not load Virployee configuration'))
+	  .finally(() => setRelationshipsLoading(false))
   }
 
   const closeEdit = () => {
@@ -552,6 +674,32 @@ export function VirployeesPage({
     setEditValues(null)
     setEditError('')
     setEditSaving(false)
+	setEditRelationships([])
+	setEditAssignments([])
+	setRelationshipsDirty(false)
+	setRelationshipsLoading(false)
+	setEditScopePolicy(null)
+	setEditPolicyBinding(null)
+	setEditDelegations([])
+	setEditKnowledgeBases([])
+	setKnowledgeBusy(false)
+	setAuthorityDirty(false)
+  }
+
+  const toggleEditKnowledgeBase = async (base: KnowledgeBase, enabled: boolean) => {
+	if (!editRow || knowledgeBusy) return
+	setKnowledgeBusy(true)
+	setEditError('')
+	try {
+	  const effective = await setVirployeeKnowledgeBase(editRow.id, base, enabled, tenantId, principalId)
+	  const catalog = await listKnowledgeBases(tenantId, principalId, 'active')
+	  setEditKnowledgeBases(effective)
+	  setKnowledgeCatalog(catalog)
+	} catch (error) {
+	  setEditError(error instanceof Error ? error.message : 'Could not update Virployee knowledge')
+	} finally {
+	  setKnowledgeBusy(false)
+	}
   }
 
   const openPreview = (row: Virployee) => {
@@ -563,13 +711,37 @@ export function VirployeesPage({
     previewRequestRef.current = requestID
     setPreviewRow(row)
     setPreviewContext(null)
+	setPreviewRelationships([])
+	setPreviewAssignments([])
+	setPreviewCases([])
+	setPreviewScopePolicy(null)
+	setPreviewPolicyBinding(null)
+	setPreviewDelegations([])
+	setPreviewKnowledgeBases([])
+	setPreviewMCPTools([])
+	setPreviewMCPError('')
+	setPreviewMCPLoading(false)
     setPreviewError('')
     setPreviewLoading(true)
     setActionError('')
-    getVirployeeRuntimeContext(row.id, tenantId, principalId)
-      .then((context) => {
+	Promise.all([
+	  getVirployeeRuntimeContext(row.id, tenantId, principalId),
+	  getVirployeeRelationships(row.id, tenantId, principalId).catch(() => []),
+	  listVirployeeAssignments(row.id, tenantId, principalId).catch(() => []),
+	  getVirployeeScopePolicy(row.id, tenantId, principalId).catch(() => null),
+	  getVirployeeProfessionalPolicyBinding(row.id, tenantId, principalId).catch(() => null),
+	  listVirployeeKnowledgeBases(row.id, tenantId, principalId, {}).catch(() => []),
+	])
+	      .then(([context, relationships, assignments, scope, binding, knowledgeBases]) => {
         if (previewRequestRef.current !== requestID) return
         setPreviewContext(context)
+		setPreviewRelationships(relationships.map((item) => ({ subject_id: item.subject_id, type: item.type, is_primary: item.is_primary })))
+		setPreviewAssignments(assignments)
+		setPreviewCases([])
+		setPreviewScopePolicy(scope)
+		setPreviewPolicyBinding(binding)
+		setPreviewDelegations([])
+		setPreviewKnowledgeBases(knowledgeBases)
       })
       .catch((error) => {
         if (previewRequestRef.current !== requestID) return
@@ -580,10 +752,65 @@ export function VirployeesPage({
       })
   }
 
+	const resolvePreviewSubjectContext = (row: Virployee, subjectID: string, caseID: string) => {
+		const requestID = previewContextRequestRef.current + 1
+		previewContextRequestRef.current = requestID
+		setPreviewError('')
+		setPreviewMCPError('')
+		if (!subjectID) {
+			setPreviewCases([])
+			setPreviewDelegations([])
+			setPreviewMCPTools([])
+			setPreviewMCPLoading(false)
+			void listVirployeeKnowledgeBases(row.id, tenantId, principalId, {})
+				.then((items) => {
+					if (previewContextRequestRef.current === requestID) setPreviewKnowledgeBases(items)
+				})
+				.catch((error) => {
+					if (previewContextRequestRef.current === requestID) setPreviewError(error instanceof Error ? error.message : 'Could not resolve preview context')
+				})
+			return
+		}
+		const principals = caseID ? [subjectID, caseID] : [subjectID]
+		setPreviewMCPLoading(true)
+		void Promise.all([
+			listAssistCases(tenantId, principalId, { subjectId: subjectID, ownerVirployeeId: row.id }),
+			listVirployeeDelegations(row.id, tenantId, principalId, principals),
+			listVirployeeKnowledgeBases(row.id, tenantId, principalId, { subjectId: subjectID, caseId: caseID }),
+			listMCPTools(row.id, subjectID, caseID, tenantId, principalId),
+		]).then(([cases, delegations, knowledgeBases, mcpTools]) => {
+			if (previewContextRequestRef.current !== requestID) return
+			setPreviewCases(cases)
+			setPreviewDelegations(delegations)
+			setPreviewKnowledgeBases(knowledgeBases)
+			setPreviewMCPTools(mcpTools)
+		}).catch((error) => {
+			if (previewContextRequestRef.current === requestID) {
+				const message = error instanceof Error ? error.message : 'Could not resolve preview context'
+				setPreviewError(message)
+				setPreviewMCPError(message)
+				setPreviewMCPTools([])
+			}
+		}).finally(() => {
+			if (previewContextRequestRef.current === requestID) setPreviewMCPLoading(false)
+		})
+	}
+
   const closePreview = () => {
     previewRequestRef.current += 1
+	previewContextRequestRef.current += 1
     setPreviewRow(null)
     setPreviewContext(null)
+	setPreviewRelationships([])
+	setPreviewAssignments([])
+	setPreviewCases([])
+	setPreviewScopePolicy(null)
+	setPreviewPolicyBinding(null)
+	setPreviewDelegations([])
+	setPreviewKnowledgeBases([])
+	setPreviewMCPTools([])
+	setPreviewMCPError('')
+	setPreviewMCPLoading(false)
     setPreviewLoading(false)
     setPreviewError('')
   }
@@ -803,10 +1030,23 @@ export function VirployeesPage({
 
   const saveEdit = async () => {
     if (!editRow || !editValues || editSaving || !isValidEditValues(editValues)) return
+	if (relationshipsDirty && !isValidRelationships(editRelationships)) {
+	  setEditError('Work configuration needs exactly one primary works-for relationship.')
+	  return
+	}
     setEditSaving(true)
     setEditError('')
     try {
       await updateVirployee(editRow.id, editPayload(editValues), tenantId, principalId)
+	  if (relationshipsDirty) {
+		await putVirployeeRelationships(editRow.id, editRelationships, tenantId, principalId)
+	  }
+	  if (authorityDirty && editScopePolicy) {
+		await putVirployeeScopePolicy(editRow.id, editScopePolicy, tenantId, principalId)
+	  }
+	  if (authorityDirty && editPolicyBinding) {
+		await putVirployeeProfessionalPolicyBinding(editRow.id, editPolicyBinding, tenantId, principalId)
+	  }
       closeEdit()
       setReloadVersion((current) => current + 1)
     } catch (error) {
@@ -891,20 +1131,37 @@ export function VirployeesPage({
                 supervisorOptions={supervisorOptions}
                 capabilities={activeCapabilities}
                 capabilityByID={capabilityByID}
+					workSubjects={workSubjects}
+					employerSubjectID={createEmployerSubjectID}
+					onEmployerChange={setCreateEmployerSubjectID}
                 onValueChange={updateCreateValue}
                 onToggleCapability={toggleCreateCapability}
                 onClose={closeCreate}
                 onSave={() => void saveCreate()}
               />
             ) : null}
-            {previewRow ? (
-              <VirployeePreviewInline
+			{previewRow ? (
+			  <VirployeePreviewInline
+				key={previewRow.id}
                 row={previewRow}
                 context={previewContext}
                 loading={previewLoading}
                 error={previewError}
                 autonomyByLevel={autonomyByLevel}
                 supervisor={userByID.get((previewContext?.virployee.supervisor_user_id ?? previewRow.supervisor_user_id))}
+				workSubjects={workSubjects}
+				relationships={previewRelationships}
+				assignments={previewAssignments}
+				cases={previewCases}
+				scopePolicy={previewScopePolicy}
+				policyBinding={previewPolicyBinding}
+				policyPacks={policyPacks}
+				delegations={previewDelegations}
+				knowledgeBases={previewKnowledgeBases}
+				mcpTools={previewMCPTools}
+				mcpLoading={previewMCPLoading}
+				mcpError={previewMCPError}
+				onContextChange={(subjectID, caseID) => resolvePreviewSubjectContext(previewRow, subjectID, caseID)}
                 onClose={closePreview}
               />
             ) : null}
@@ -944,6 +1201,9 @@ export function VirployeesPage({
               <VirployeeEditInline
                 title="Edit virployee"
                 primaryLabel="Save"
+				virployeeId={editRow.id}
+				tenantId={tenantId}
+				principalId={principalId}
                 values={editValues}
                 saving={editSaving}
                 error={editError}
@@ -953,6 +1213,22 @@ export function VirployeesPage({
                 supervisorOptions={supervisorOptions}
                 capabilities={activeCapabilities}
                 capabilityByID={capabilityByID}
+				workSubjects={workSubjects}
+				relationships={editRelationships}
+				assignments={editAssignments}
+				relationshipsLoading={relationshipsLoading}
+				onRelationshipsChange={(items) => { setEditRelationships(items); setRelationshipsDirty(true) }}
+				scopePolicy={editScopePolicy}
+				policyBinding={editPolicyBinding}
+				policyPacks={policyPacks}
+				delegations={editDelegations}
+				knowledgeCatalog={knowledgeCatalog}
+				knowledgeBases={editKnowledgeBases}
+				knowledgeBusy={knowledgeBusy}
+				onKnowledgeBaseChange={(base, enabled) => void toggleEditKnowledgeBase(base, enabled)}
+				onDelegationsChange={setEditDelegations}
+				onScopePolicyChange={(scope) => { setEditScopePolicy(scope); setAuthorityDirty(true) }}
+				onPolicyBindingChange={(binding) => { setEditPolicyBinding(binding); setAuthorityDirty(true) }}
                 onValueChange={updateEditValue}
                 onToggleCapability={toggleEditCapability}
                 onClose={closeEdit}
@@ -972,6 +1248,9 @@ export function VirployeesPage({
 function VirployeeEditInline(props: {
   title: string
   primaryLabel: string
+  virployeeId?: string
+  tenantId?: string
+  principalId?: string
   values: VirployeeEditValues
   saving: boolean
   error: string
@@ -981,6 +1260,24 @@ function VirployeeEditInline(props: {
   supervisorOptions: Array<{ label: string; value: string }>
   capabilities: Capability[]
   capabilityByID: ReadonlyMap<string, Capability>
+  workSubjects: WorkSubject[]
+	  employerSubjectID?: string
+	  onEmployerChange?: (subjectID: string) => void
+  relationships?: WorkRelationshipInput[]
+  assignments?: ContinuityAssignment[]
+  relationshipsLoading?: boolean
+  onRelationshipsChange?: (items: WorkRelationshipInput[]) => void
+  scopePolicy?: VirployeeScopePolicy | null
+  policyBinding?: ProfessionalPolicyBinding | null
+  policyPacks?: ProfessionalPolicyPack[]
+  delegations?: VirployeeDelegation[]
+  knowledgeCatalog?: KnowledgeBase[]
+  knowledgeBases?: VirployeeKnowledgeBase[]
+  knowledgeBusy?: boolean
+  onScopePolicyChange?: (scope: VirployeeScopePolicy) => void
+  onPolicyBindingChange?: (binding: ProfessionalPolicyBinding) => void
+  onDelegationsChange?: (delegations: VirployeeDelegation[]) => void
+  onKnowledgeBaseChange?: (base: KnowledgeBase, enabled: boolean) => void
   onValueChange: (key: keyof VirployeeEditValues, value: string) => void
   onToggleCapability: (id: string) => void
   onClose: () => void
@@ -992,7 +1289,10 @@ function VirployeeEditInline(props: {
   const prerequisiteNotes = [
     props.jobRoleOptions.length === 0 ? 'Create an active Job Role before saving Virployees.' : '',
     props.profileTemplateOptions.length === 0 ? 'Create an active Profile Template before saving Virployees.' : '',
-    props.supervisorOptions.length === 0 ? 'Create an active User before assigning a supervisor.' : '',
+	props.supervisorOptions.length === 0 ? 'Create an active User before assigning a supervisor.' : '',
+	props.onEmployerChange && props.workSubjects.every((subject) => subject.kind === 'patient' || subject.kind === 'case')
+	  ? 'Create a person, organization, or team in Workforce before saving Virployees.'
+	  : '',
   ].filter(Boolean)
 
   return (
@@ -1008,7 +1308,7 @@ function VirployeeEditInline(props: {
           }}
         >
           <div className="virployee-form-actions virployee-form-actions--top">
-            <button type="submit" className="btn-primary" disabled={props.saving || !isValidEditValues(props.values)}>
+			<button type="submit" className="btn-primary" disabled={props.saving || !isValidEditValues(props.values) || (Boolean(props.onEmployerChange) && !props.employerSubjectID)}>
               {props.saving ? 'Saving...' : props.primaryLabel}
             </button>
             <button type="button" className="btn-secondary" disabled={props.saving} onClick={props.onClose}>
@@ -1063,6 +1363,13 @@ function VirployeeEditInline(props: {
                 ))}
               </select>
             </label>
+			<label className="form-group">
+			  Knowledge mode
+			  <select value={props.values.grounding_mode} onChange={(event) => props.onValueChange('grounding_mode', event.currentTarget.value)}>
+				<option value="sources_only">Sources only</option>
+				<option value="general">General</option>
+			  </select>
+			</label>
             <label className="form-group full-width">
               Supervisor
               <select
@@ -1084,6 +1391,63 @@ function VirployeeEditInline(props: {
               />
             </label>
           </div>
+          <section className="capability-selector" aria-label="Work configuration">
+            <h3>Work</h3>
+            {props.relationshipsLoading ? <p className="axis-muted">Loading relationships...</p> : null}
+			{props.relationships && props.onRelationshipsChange ? (
+              <WorkRelationshipsEditor
+				items={props.relationships}
+				subjects={props.workSubjects}
+				onChange={props.onRelationshipsChange}
+			  />
+			) : props.onEmployerChange ? (
+			  <label className="form-group">
+				Primary employer
+				<select value={props.employerSubjectID ?? ''} onChange={(event) => props.onEmployerChange?.(event.currentTarget.value)}>
+				  <option value="">Select who this Virployee works for...</option>
+				  {props.workSubjects.filter((subject) => subject.kind !== 'patient' && subject.kind !== 'case').map((subject) => (
+					<option key={subject.id} value={subject.id}>{subject.display_name} · {subject.kind}</option>
+				  ))}
+				</select>
+			  </label>
+			) : (
+              <p className="axis-muted">Create the Virployee first, then configure who it works for and serves.</p>
+            )}
+          </section>
+          <section className="capability-selector" aria-label="Assigned patients">
+			<h3>Assigned patients</h3>
+			{props.virployeeId ? (
+			  <AssignedSubjects assignments={props.assignments ?? []} subjects={props.workSubjects} />
+			) : <p className="axis-muted">Assignments become available after creating the Virployee.</p>}
+		  </section>
+          <section className="capability-selector" aria-label="Knowledge configuration">
+			<h3>Knowledge</h3>
+			{props.virployeeId && props.onKnowledgeBaseChange ? (
+			  <VirployeeKnowledgeEditor
+				virployeeId={props.virployeeId}
+				catalog={props.knowledgeCatalog ?? []}
+				effective={props.knowledgeBases ?? []}
+				busy={props.knowledgeBusy ?? false}
+				onChange={props.onKnowledgeBaseChange}
+			  />
+			) : <p className="axis-muted">Create the Virployee first, then assign its professional libraries.</p>}
+		  </section>
+          {props.scopePolicy && props.policyBinding && props.onScopePolicyChange && props.onPolicyBindingChange ? (
+            <VirployeeAuthorityEditor
+			  scope={props.scopePolicy}
+			  binding={props.policyBinding}
+			  packs={props.policyPacks ?? []}
+			  delegations={props.delegations ?? []}
+			  capabilities={props.capabilities}
+			  subjects={props.workSubjects}
+			  virployeeId={props.virployeeId ?? ''}
+			  tenantId={props.tenantId ?? ''}
+			  principalId={props.principalId ?? ''}
+			  onScopeChange={props.onScopePolicyChange}
+			  onBindingChange={props.onPolicyBindingChange}
+			  onDelegationsChange={props.onDelegationsChange ?? (() => undefined)}
+			/>
+          ) : null}
           <section className="capability-selector" aria-label="Capabilities">
             <label className="form-group">
               Capabilities
@@ -1131,7 +1495,7 @@ function VirployeeEditInline(props: {
             </div>
           </section>
           <footer className="virployee-edit-form__footer">
-            <button type="submit" className="btn-primary" disabled={props.saving || !isValidEditValues(props.values)}>
+            <button type="submit" className="btn-primary" disabled={props.saving || !isValidEditValues(props.values) || (Boolean(props.onEmployerChange) && !props.employerSubjectID)}>
               {props.saving ? 'Saving...' : props.primaryLabel}
             </button>
             <button type="button" className="btn-secondary" disabled={props.saving} onClick={props.onClose}>
@@ -1150,7 +1514,20 @@ function VirployeePreviewInline(props: {
   error: string
   autonomyByLevel: ReadonlyMap<VirployeeAutonomy, VirployeeAutonomyLevel>
   supervisor?: TenantUser
-  onClose: () => void
+  workSubjects: WorkSubject[]
+  relationships: WorkRelationshipInput[]
+  assignments: ContinuityAssignment[]
+  cases: AssistCase[]
+  scopePolicy: VirployeeScopePolicy | null
+  policyBinding: ProfessionalPolicyBinding | null
+  policyPacks: ProfessionalPolicyPack[]
+	  delegations: VirployeeDelegation[]
+	  knowledgeBases: VirployeeKnowledgeBase[]
+	  mcpTools: MCPTool[]
+	  mcpLoading: boolean
+	  mcpError: string
+	  onContextChange: (subjectID: string, caseID: string) => void
+	  onClose: () => void
 }) {
   const virployee = props.context?.virployee ?? props.row
   const description = stringValue(virployee.description)
@@ -1160,6 +1537,20 @@ function VirployeePreviewInline(props: {
   const profilePrompt = stringValue(props.context?.profile_template.system_prompt ?? '')
   const capabilities = props.context?.capabilities ?? []
   const supervisorValue = props.supervisor ? userLabel(props.supervisor) : 'Unknown Supervisor'
+	const subjectByID = new Map(props.workSubjects.map((subject) => [subject.id, subject.display_name]))
+	const packByID = new Map(props.policyPacks.map((pack) => [pack.id, pack]))
+	const [selectedSubjectID, setSelectedSubjectID] = useState('')
+	const [selectedCaseID, setSelectedCaseID] = useState('')
+	const selectedAssignments = props.assignments.filter((assignment) => assignment.subject_id === selectedSubjectID)
+	const selectedCases = props.cases.filter((item) => item.subject_id === selectedSubjectID)
+	const visibleRelationships = props.relationships.filter((item) => item.type !== 'serves' || item.subject_id === selectedSubjectID)
+	const visibleKnowledgeBases = props.knowledgeBases.filter((entry) => {
+	  if (entry.knowledge_base.classification === 'professional') return true
+	  if (selectedSubjectID === '') return false
+	  return entry.bindings.some((binding) => binding.subject_id === selectedSubjectID && (
+		binding.scope_type === 'subject' || (binding.scope_type === 'case' && binding.case_id === selectedCaseID)
+	  ))
+	})
 
   return (
     <div className="card crud-form-card virployee-preview-inline">
@@ -1174,10 +1565,40 @@ function VirployeePreviewInline(props: {
       <div className="virployee-preview">
         {props.loading ? <p className="iam-control__inline-note">Loading Runtime Context...</p> : null}
         {props.error ? <p role="alert" className="iam-control__inline-error">{props.error}</p> : null}
+		<section className="virployee-preview__section" aria-label="Resolved patient context">
+		  <h3>Resolved patient context</h3>
+		  <div className="virployee-preview__grid">
+			<label className="form-group">Patient
+				  <select value={selectedSubjectID} onChange={(event) => {
+					const subjectID = event.currentTarget.value
+					setSelectedSubjectID(subjectID)
+					setSelectedCaseID('')
+					props.onContextChange(subjectID, '')
+				  }}>
+				<option value="">Select a patient to inspect...</option>
+				{props.assignments.map((assignment) => (
+				  <option key={assignment.id} value={assignment.subject_id}>{subjectByID.get(assignment.subject_id) ?? assignment.subject_id}</option>
+				))}
+			  </select>
+			</label>
+			<label className="form-group">Case (optional)
+				  <select value={selectedCaseID} disabled={!selectedSubjectID} onChange={(event) => {
+					const caseID = event.currentTarget.value
+					setSelectedCaseID(caseID)
+					props.onContextChange(selectedSubjectID, caseID)
+				  }}>
+				<option value="">Patient-wide context</option>
+				{selectedCases.map((item) => <option key={item.id} value={item.id}>{item.assist_type} · {item.status}</option>)}
+			  </select>
+			</label>
+		  </div>
+		  {!selectedSubjectID ? <p className="axis-muted">Private libraries and cases stay hidden until one patient is selected; memory content is never exposed in preview.</p> : null}
+		</section>
         <section className="virployee-preview__section" aria-label="Virployee">
           <h3>{virployee.name}</h3>
           <div className="virployee-preview__grid">
             <PreviewField label="Autonomy" value={formatAutonomy(virployee.autonomy, props.autonomyByLevel)} />
+			<PreviewField label="Knowledge mode" value={(virployee as { grounding_mode?: string }).grounding_mode === 'sources_only' ? 'Sources only' : 'General'} />
             <PreviewField label="State" value={formatState(virployee.state)} />
             <PreviewField label="Supervisor" value={supervisorValue} />
             <PreviewField label="Description" value={description || '-'} />
@@ -1190,7 +1611,62 @@ function VirployeePreviewInline(props: {
             <PreviewField label="Name" value={jobRoleNameValue} />
             <PreviewField label="Mission" value={jobRoleMission || '-'} />
           </div>
+		  {(props.context?.job_role.responsibilities?.length ?? 0) > 0 ? (
+			<div className="virployee-preview__capabilities">
+			  {props.context?.job_role.responsibilities.map((item) => (
+				<div key={`${item.priority}-${item.title}`} className="virployee-preview__capability">
+				  <strong>{item.title}</strong><span>{item.expected_outcome || item.description}</span>
+				</div>
+			  ))}
+			</div>
+		  ) : null}
         </section>
+
+		<section className="virployee-preview__section" aria-label="Work">
+		  <h3>Work</h3>
+		  {visibleRelationships.length === 0 ? <p className="virployee-preview__empty">Not configured for this context</p> : (
+			<div className="virployee-preview__capabilities">
+			  {visibleRelationships.map((item, index) => (
+				<div key={`${item.type}-${item.subject_id}-${index}`} className="virployee-preview__capability">
+				  <strong>{item.type.replaceAll('_', ' ')}{item.is_primary ? ' · primary' : ''}</strong>
+				  <span>{subjectByID.get(item.subject_id) ?? item.subject_id}</span>
+				</div>
+			  ))}
+			</div>
+		  )}
+		</section>
+
+		<section className="virployee-preview__section" aria-label="Assigned patients">
+		  <h3>Assigned patients</h3>
+		  {selectedSubjectID ? <AssignedSubjects assignments={selectedAssignments} subjects={props.workSubjects} /> : <p className="virployee-preview__empty">Select a patient above.</p>}
+		</section>
+
+		<section className="virployee-preview__section" aria-label="Knowledge and rules">
+		  <h3>Knowledge and rules</h3>
+		  <div className="virployee-preview__grid">
+			<PreviewField label="Allowed topics" value={(props.scopePolicy?.allowed_topics ?? []).join(', ') || '-'} />
+			<PreviewField label="Prohibited topics" value={(props.scopePolicy?.prohibited_topics ?? []).join(', ') || '-'} />
+			<PreviewField label="Outside scope" value={props.scopePolicy?.out_of_scope ?? 'abstain'} />
+			<PreviewField label="Policy packs" value={(props.policyBinding?.policy_pack_ids ?? []).map((id) => packByID.get(id)?.name ?? id).join(', ') || '-'} />
+		  </div>
+		  {visibleKnowledgeBases.length === 0 ? <p className="virployee-preview__empty">No authorized libraries for this context</p> : (
+			<div className="virployee-preview__capabilities">{visibleKnowledgeBases.map((entry) => (
+			  <div key={entry.knowledge_base.id} className="virployee-preview__capability">
+				<strong>{entry.knowledge_base.name}</strong>
+				<span>{entry.knowledge_base.classification} · {entry.bindings.map((binding) => binding.scope_type).join(', ')}</span>
+			  </div>
+			))}</div>
+		  )}
+		</section>
+
+		<section className="virployee-preview__section" aria-label="Delegation">
+		  <h3>Delegation</h3>
+		  {props.delegations.length === 0 ? <p className="virployee-preview__empty">No delegations assigned</p> : (
+			<div className="virployee-preview__capabilities">{props.delegations.map((delegation) => (
+			  <div key={delegation.id} className="virployee-preview__capability"><strong>{delegation.principal_id}</strong><span>{delegation.status} · {(delegation.capability_scopes ?? []).join(', ')}</span></div>
+			))}</div>
+		  )}
+		</section>
 
         <section className="virployee-preview__section" aria-label="Profile Template">
           <h3>Profile Template</h3>
@@ -1222,6 +1698,22 @@ function VirployeePreviewInline(props: {
             </div>
           )}
         </section>
+
+		<section className="virployee-preview__section" aria-label="MCP tools">
+		  <h3>MCP tools for selected context</h3>
+		  {!selectedSubjectID ? <p className="virployee-preview__empty">Select a patient to resolve the effective tool set.</p> : null}
+		  {selectedSubjectID && props.mcpLoading ? <p className="iam-control__inline-note">Resolving assignment, policy and authority…</p> : null}
+		  {selectedSubjectID && props.mcpError ? <p role="alert" className="iam-control__inline-error">Blocked: {props.mcpError}</p> : null}
+		  {selectedSubjectID && !props.mcpLoading && !props.mcpError && props.mcpTools.length === 0 ? (
+			<p className="virployee-preview__empty">No tools are authorized. MCP may be disabled or all capabilities are blocked by effective policy.</p>
+		  ) : null}
+		  {props.mcpTools.length > 0 ? <div className="virployee-preview__capabilities">{props.mcpTools.map((tool) => (
+			<div key={tool.name} className="virployee-preview__capability">
+			  <strong>{tool.name}</strong>
+			  <span>{tool.annotations.readOnlyHint ? 'read' : 'write'} · risk {tool._meta['axis/riskClass']} · {tool._meta['axis/requiresApproval'] ? 'approval required' : 'direct execution allowed'}</span>
+			</div>
+		  ))}</div> : null}
+		</section>
       </div>
       <footer className="virployee-panel-footer">
         <button type="button" className="btn-secondary" onClick={props.onClose}>
@@ -1230,6 +1722,267 @@ function VirployeePreviewInline(props: {
       </footer>
     </div>
   )
+}
+
+function VirployeeKnowledgeEditor(props: {
+  virployeeId: string
+  catalog: KnowledgeBase[]
+  effective: VirployeeKnowledgeBase[]
+  busy: boolean
+  onChange: (base: KnowledgeBase, enabled: boolean) => void
+}) {
+  const effectiveByID = new Map(props.effective.map((entry) => [entry.knowledge_base.id, entry]))
+  const professional = props.catalog.filter((base) => base.classification === 'professional' && base.state === 'active')
+  const privateLibraries = props.effective.filter((entry) => entry.knowledge_base.classification === 'private')
+
+  return (
+	<div className="virployee-knowledge-editor">
+	  <p className="axis-muted">Job Role libraries are inherited. Direct changes here are applied immediately and version checked.</p>
+	  {professional.length === 0 ? <p className="axis-muted">No active professional libraries.</p> : professional.map((base) => {
+		const entry = effectiveByID.get(base.id)
+		const inherited = entry?.bindings.some((binding) => binding.scope_type === 'professional') ?? false
+		const direct = entry?.bindings.some((binding) => binding.scope_type === 'virployee' && binding.virployee_id === props.virployeeId) ?? false
+		return (
+		  <label key={base.id} className="work-relationship-primary">
+			<input
+			  type="checkbox"
+			  checked={Boolean(entry)}
+			  disabled={props.busy || inherited}
+			  onChange={(event) => props.onChange(entry?.knowledge_base ?? base, event.currentTarget.checked)}
+			/>
+			<span>{base.name}{inherited ? ' · inherited from Job Role' : direct ? ' · direct' : ''}</span>
+		  </label>
+		)
+	  })}
+	  {privateLibraries.length > 0 ? (
+		<div className="capability-selector__chips" aria-label="Patient and case libraries">
+		  {privateLibraries.map((entry) => (
+			<span key={entry.knowledge_base.id} className="capability-selector__empty-chip">
+			  {entry.knowledge_base.name} · {entry.bindings.map((binding) => binding.scope_type).join(', ')}
+			</span>
+		  ))}
+		</div>
+	  ) : null}
+	</div>
+  )
+}
+
+function AssignedSubjects(props: { assignments: ContinuityAssignment[]; subjects: WorkSubject[] }) {
+  const subjectByID = new Map(props.subjects.map((subject) => [subject.id, subject]))
+  if (props.assignments.length === 0) {
+	return <p className="axis-muted">No active patients assigned.</p>
+  }
+  return (
+	<div className="virployee-preview__capabilities">
+	  {props.assignments.map((assignment) => {
+		const subject = subjectByID.get(assignment.subject_id)
+		return (
+		  <div key={assignment.id} className="virployee-preview__capability">
+			<strong>{subject?.display_name ?? assignment.subject_id}</strong>
+			<span>{subject?.kind ?? 'subject'} · assignment v{assignment.version}</span>
+		  </div>
+		)
+	  })}
+	</div>
+  )
+}
+
+function WorkRelationshipsEditor(props: {
+  items: WorkRelationshipInput[]
+  subjects: WorkSubject[]
+  onChange: (items: WorkRelationshipInput[]) => void
+}) {
+  const add = () => props.onChange([...props.items, {
+    subject_id: props.subjects[0]?.id ?? '',
+    type: props.items.some((item) => item.type === 'works_for') ? 'serves' : 'works_for',
+    is_primary: !props.items.some((item) => item.type === 'works_for' && item.is_primary),
+  }])
+  return (
+    <div className="work-relationships-editor">
+      {props.items.map((item, index) => (
+        <div key={`${item.subject_id}-${item.type}-${index}`} className="work-relationship-row">
+          <label className="form-group">Relationship
+            <select value={item.type} onChange={(event) => {
+              const type = event.currentTarget.value as WorkRelationshipInput['type']
+              const next = [...props.items]
+              next[index] = { ...item, type, is_primary: type === 'works_for' ? item.is_primary : false }
+              props.onChange(next)
+            }}>
+              <option value="works_for">Works for</option>
+              <option value="serves">Serves</option>
+              <option value="reports_to">Reports to</option>
+            </select>
+          </label>
+          <label className="form-group">Subject
+            <select value={item.subject_id} onChange={(event) => {
+              const next = [...props.items]
+              next[index] = { ...item, subject_id: event.currentTarget.value }
+              props.onChange(next)
+            }}>
+              <option value="">Select...</option>
+              {props.subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.display_name} · {subject.kind}</option>)}
+            </select>
+          </label>
+          <label className="form-group work-relationship-primary">
+            <input
+              type="checkbox"
+              checked={item.is_primary}
+              disabled={item.type !== 'works_for'}
+              onChange={(event) => props.onChange(props.items.map((current, itemIndex) => ({
+                ...current,
+                is_primary: itemIndex === index ? event.currentTarget.checked : current.type === 'works_for' ? false : current.is_primary,
+              })))}
+            /> Primary employer
+          </label>
+          <button type="button" className="btn-secondary" onClick={() => props.onChange(props.items.filter((_current, itemIndex) => itemIndex !== index))}>Remove</button>
+        </div>
+      ))}
+      <button type="button" className="btn-secondary" disabled={props.subjects.length === 0} onClick={add}>Add relationship</button>
+      {props.subjects.length === 0 ? <p className="axis-muted">Create a subject in Workforce before configuring work.</p> : null}
+    </div>
+  )
+}
+
+function VirployeeAuthorityEditor(props: {
+  scope: VirployeeScopePolicy
+  binding: ProfessionalPolicyBinding
+  packs: ProfessionalPolicyPack[]
+  delegations: VirployeeDelegation[]
+  capabilities: Capability[]
+  subjects: WorkSubject[]
+  virployeeId: string
+  tenantId: string
+  principalId: string
+  onScopeChange: (scope: VirployeeScopePolicy) => void
+  onBindingChange: (binding: ProfessionalPolicyBinding) => void
+  onDelegationsChange: (delegations: VirployeeDelegation[]) => void
+}) {
+  const selected = new Set(props.binding.policy_pack_ids ?? [])
+  const [delegationDraft, setDelegationDraft] = useState({ subject_id: '', capability_key: '', purpose: '', valid_until: futureLocalDate(30) })
+  const [delegationBusy, setDelegationBusy] = useState(false)
+  const [delegationError, setDelegationError] = useState('')
+
+  const createDelegation = async () => {
+    const subject = props.subjects.find((item) => item.id === delegationDraft.subject_id)
+    const capability = props.capabilities.find((item) => item.capability_key === delegationDraft.capability_key)
+    if (!subject || !capability || !delegationDraft.purpose.trim() || !delegationDraft.valid_until) return
+    setDelegationBusy(true)
+    setDelegationError('')
+    try {
+      const created = await createVirployeeDelegation(props.virployeeId, {
+        principal_type: subject.kind === 'patient' ? 'person' : subject.kind,
+        principal_id: subject.id,
+        capability_scopes: [delegationDraft.capability_key],
+		product_scopes: [capability.manifest.product_surface || '*'],
+		resource_scopes: [{ resource_type: '*', resource_id: subject.id }],
+		max_risk_class: capability.risk_class,
+		purpose: delegationDraft.purpose.trim(),
+        valid_until: new Date(delegationDraft.valid_until).toISOString(),
+      }, props.tenantId, props.principalId)
+      props.onDelegationsChange([...props.delegations, created])
+      setDelegationDraft({ subject_id: '', capability_key: '', purpose: '', valid_until: futureLocalDate(30) })
+    } catch (cause) {
+      setDelegationError(cause instanceof Error ? cause.message : 'Could not create delegation')
+    } finally {
+      setDelegationBusy(false)
+    }
+  }
+
+  const reviewDelegation = async (delegation: VirployeeDelegation) => {
+	setDelegationBusy(true)
+	setDelegationError('')
+	try {
+	  const reviewed = await reviewVirployeeDelegation(props.virployeeId, delegation.id, delegation.revision, 'Authority reviewed in console', props.tenantId, props.principalId)
+	  props.onDelegationsChange(props.delegations.map((item) => item.id === reviewed.id ? reviewed : item))
+	} catch (cause) {
+	  setDelegationError(cause instanceof Error ? cause.message : 'Could not review delegation')
+	} finally {
+	  setDelegationBusy(false)
+	}
+  }
+
+  const revokeDelegation = async (delegation: VirployeeDelegation) => {
+    setDelegationBusy(true)
+    setDelegationError('')
+    try {
+      const revoked = await revokeVirployeeDelegation(props.virployeeId, delegation.id, delegation.revision, props.tenantId, props.principalId)
+      props.onDelegationsChange(props.delegations.map((item) => item.id === revoked.id ? revoked : item))
+    } catch (cause) {
+      setDelegationError(cause instanceof Error ? cause.message : 'Could not revoke delegation')
+    } finally {
+      setDelegationBusy(false)
+    }
+  }
+  return (
+    <section className="capability-selector virployee-authority-editor" aria-label="Professional rules and delegation">
+      <h3>Knowledge and rules</h3>
+      <div className="crud-form-grid">
+        <label className="form-group">Allowed topics
+          <textarea rows={4} value={(props.scope.allowed_topics ?? []).join('\n')} onChange={(event) => props.onScopeChange({ ...props.scope, allowed_topics: splitRules(event.currentTarget.value) })} />
+        </label>
+        <label className="form-group">Prohibited topics
+          <textarea rows={4} value={(props.scope.prohibited_topics ?? []).join('\n')} onChange={(event) => props.onScopeChange({ ...props.scope, prohibited_topics: splitRules(event.currentTarget.value) })} />
+        </label>
+        <label className="form-group">Outside scope
+          <select value={props.scope.out_of_scope} onChange={(event) => props.onScopeChange({ ...props.scope, out_of_scope: event.currentTarget.value as 'abstain' | 'escalate' })}>
+            <option value="abstain">Abstain</option><option value="escalate">Escalate</option>
+          </select>
+        </label>
+      </div>
+      <div className="policy-binding-grid" aria-label="Policy packs">
+        {props.packs.map((pack) => (
+          <label key={pack.id} className="policy-binding-option">
+            <input type="checkbox" checked={selected.has(pack.id)} onChange={(event) => props.onBindingChange({
+              ...props.binding,
+              policy_pack_ids: event.currentTarget.checked
+                ? [...(props.binding.policy_pack_ids ?? []), pack.id]
+                : (props.binding.policy_pack_ids ?? []).filter((id) => id !== pack.id),
+            })} />
+            <span><strong>{pack.name}</strong><small>{pack.policy_key} · v{pack.version}</small></span>
+          </label>
+        ))}
+        {props.packs.length === 0 ? <p className="axis-muted">No professional policy packs available.</p> : null}
+      </div>
+      <h3>Delegation</h3>
+	  <div className="delegation-create-row">
+		<label className="form-group">Principal
+		  <select value={delegationDraft.subject_id} onChange={(event) => setDelegationDraft({ ...delegationDraft, subject_id: event.currentTarget.value })}>
+			<option value="">Select...</option>{props.subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.display_name}</option>)}
+		  </select>
+		</label>
+		<label className="form-group">Capability
+		  <select value={delegationDraft.capability_key} onChange={(event) => setDelegationDraft({ ...delegationDraft, capability_key: event.currentTarget.value })}>
+			<option value="">Select...</option>{props.capabilities.map((capability) => <option key={capability.id} value={capability.capability_key}>{capability.name}</option>)}
+		  </select>
+		</label>
+		<label className="form-group">Valid until
+		  <input type="datetime-local" value={delegationDraft.valid_until} onChange={(event) => setDelegationDraft({ ...delegationDraft, valid_until: event.currentTarget.value })} />
+		</label>
+		<label className="form-group">Purpose
+		  <input value={delegationDraft.purpose} onChange={(event) => setDelegationDraft({ ...delegationDraft, purpose: event.currentTarget.value })} placeholder="Why this authority is needed" />
+		</label>
+		<button type="button" className="btn-secondary" disabled={delegationBusy || !delegationDraft.subject_id || !delegationDraft.capability_key || !delegationDraft.purpose.trim()} onClick={() => void createDelegation()}>Add delegation</button>
+	  </div>
+	  {delegationError ? <p role="alert" className="iam-control__inline-error">{delegationError}</p> : null}
+      {props.delegations.length === 0 ? <p className="axis-muted">No delegations configured.</p> : (
+        <div className="workforce-list">
+          {props.delegations.map((delegation) => (
+            <div key={delegation.id}><strong>{delegation.principal_type} · {delegation.principal_id}</strong><span>{delegation.status} · {(delegation.capability_scopes ?? []).join(', ')} · risk ≤ {delegation.max_risk_class}</span><small>{delegation.purpose} · {(delegation.product_scopes ?? []).join(', ')}</small>{delegation.status === 'active' ? <><button type="button" className="btn-secondary" disabled={delegationBusy} onClick={() => void reviewDelegation(delegation)}>Review</button><button type="button" className="btn-secondary" disabled={delegationBusy} onClick={() => void revokeDelegation(delegation)}>Revoke</button></> : null}</div>
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
+function splitRules(value: string): string[] {
+  return Array.from(new Set(value.split(/[,\n]/).map((item) => item.trim()).filter(Boolean)))
+}
+
+function futureLocalDate(days: number): string {
+  const value = new Date(Date.now() + days * 24 * 60 * 60 * 1000)
+  const offset = value.getTimezoneOffset() * 60_000
+  return new Date(value.getTime() - offset).toISOString().slice(0, 16)
 }
 
 function VirployeeDryRunInline(props: {
@@ -2220,6 +2973,7 @@ function virployeePayload(values: CrudFormValues, capabilityIds: string[] = []) 
     description: stringValue(values.description),
     supervisor_user_id: stringValue(values.supervisor_user_id),
     autonomy: autonomyValue(values.autonomy),
+	grounding_mode: 'sources_only' as GroundingMode,
   }
 }
 
@@ -2232,6 +2986,7 @@ function virployeeToEditValues(row: Virployee): VirployeeEditValues {
     supervisor_user_id: row.supervisor_user_id,
     description: row.description ?? '',
     capability_ids: row.capability_ids ?? [],
+	grounding_mode: row.grounding_mode ?? 'general',
   }
 }
 
@@ -2244,6 +2999,7 @@ function editPayload(values: VirployeeEditValues) {
     description: stringValue(values.description),
     supervisor_user_id: stringValue(values.supervisor_user_id),
     autonomy: values.autonomy,
+	grounding_mode: values.grounding_mode,
   }
 }
 
@@ -2260,6 +3016,7 @@ function initialVirployeeCreateValues(
     supervisor_user_id: supervisorOptions.length === 1 ? supervisorOptions[0].value : '',
     description: '',
     capability_ids: [],
+	grounding_mode: 'sources_only',
   }
 }
 
@@ -2270,6 +3027,12 @@ function isValidEditValues(values: VirployeeEditValues): boolean {
     stringValue(values.profile_template_id).length > 0 &&
     stringValue(values.supervisor_user_id).length > 0
   )
+}
+
+function isValidRelationships(items: WorkRelationshipInput[]): boolean {
+  if (items.some((item) => !item.subject_id)) return false
+  return items.filter((item) => item.type === 'works_for' && item.is_primary).length === 1
+    && items.every((item) => item.type === 'works_for' || !item.is_primary)
 }
 
 function capabilityOptionLabel(capability: Capability): string {

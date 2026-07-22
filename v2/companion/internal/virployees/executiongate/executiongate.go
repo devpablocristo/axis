@@ -3,9 +3,11 @@ package executiongate
 import (
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/devpablocristo/companion-v2/internal/virployees/dryrun"
 	virployeedomain "github.com/devpablocristo/companion-v2/internal/virployees/usecases/domain"
+	"github.com/google/uuid"
 )
 
 type Decision string
@@ -39,23 +41,31 @@ type Gate struct {
 }
 
 type Result struct {
-	Input  string
-	DryRun dryrun.Result
-	Gate   Gate
+	Input       string
+	DryRun      dryrun.Result
+	Gate        Gate
+	BindingHash string
+	Governance  *GovernanceCheckResult
 }
 
 type GovernanceCheckInput struct {
-	TenantID         string
-	RequesterType    string
-	RequesterID      string
-	SupervisorUserID string
-	ActionType       string
-	TargetSystem     string
-	TargetResource   string
-	Params           map[string]any
-	Reason           string
-	Context          string
-	BindingHash      string
+	TenantID             string
+	ProductSurface       string
+	RequesterType        string
+	RequesterID          string
+	SupervisorUserID     string
+	ActionType           string
+	TargetSystem         string
+	TargetResource       string
+	ResourceType         string
+	Reason               string
+	BindingHash          string
+	AuthorityBindingHash string
+	ScopeRevision        int64
+	PolicyRevisionHash   string
+	DelegationRequired   bool
+	DelegationID         string
+	DelegationRevision   int64
 }
 
 type GovernanceCheckResult struct {
@@ -68,14 +78,63 @@ type GovernanceCheckResult struct {
 	BindingHash          string
 	ApprovalID           string
 	ApprovalStatus       string
+	PolicySnapshotHash   string
 }
 
 type GovernanceApproval struct {
-	ID                string
-	GovernanceCheckID string
-	RequesterID       string
-	BindingHash       string
-	Status            string
+	ID                 string
+	GovernanceCheckID  string
+	RequesterID        string
+	BindingHash        string
+	Status             string
+	PolicySnapshotHash string
+}
+
+type GovernanceRevalidationInput struct {
+	TenantID             string
+	CheckID              string
+	BindingHash          string
+	PolicySnapshotHash   string
+	AuthorityBindingHash string
+	ScopeRevision        int64
+	PolicyRevisionHash   string
+	DelegationID         string
+	DelegationRevision   int64
+}
+
+type GovernanceRevalidationResult struct {
+	Valid              bool
+	Reason             string
+	PolicySnapshotHash string
+}
+
+// AuthorityCheckInput is deliberately limited to stable identifiers. Policy
+// text, principal display data and user content never cross the execution gate.
+type AuthorityCheckInput struct {
+	TenantID       string
+	VirployeeID    uuid.UUID
+	JobRoleID      uuid.UUID
+	CapabilityKey  string
+	ProductSurface string
+	ResourceType   string
+	ResourceID     string
+	RiskClass      string
+	PrincipalType  string
+	PrincipalID    string
+	At             time.Time
+}
+
+// AuthorityCheckResult is the metadata-only snapshot bound to governance. A
+// revision change produces a different SnapshotHash and invalidates approvals.
+type AuthorityCheckResult struct {
+	Allowed            bool
+	Reason             string
+	SnapshotHash       string
+	ScopeRevision      int64
+	PolicyRevisionHash string
+	DelegationRequired bool
+	DelegationID       string
+	DelegationRevision int64
 }
 
 type ConfirmedDraft struct {
@@ -138,6 +197,56 @@ func ApplyGovernanceUnavailable(result Result) Result {
 	})
 	result.Gate.Decision = DecisionBlocked
 	result.Gate.NextStep = nextStep(result.Gate.Decision, result.Gate.Checks)
+	return result
+}
+
+func ApplyAuthority(result Result, authority AuthorityCheckResult) Result {
+	status := CheckStatusPass
+	reason := strings.TrimSpace(authority.Reason)
+	if reason == "" {
+		reason = "professional authority permits this capability"
+	}
+	if !authority.Allowed {
+		status = CheckStatusBlocked
+		if reason == "" {
+			reason = "professional authority denied this capability"
+		}
+	}
+	result.Gate.Checks = append(result.Gate.Checks, Check{Key: "professional_authority", Status: status, Reason: reason})
+	if status == CheckStatusBlocked {
+		result.Gate.Decision = DecisionBlocked
+		result.Gate.NextStep = nextStep(result.Gate.Decision, result.Gate.Checks)
+	}
+	return result
+}
+
+func ApplyAuthorityUnavailable(result Result) Result {
+	result.Gate.Checks = append(result.Gate.Checks, Check{
+		Key: "professional_authority", Status: CheckStatusBlocked,
+		Reason: "professional authority evaluation is unavailable",
+	})
+	result.Gate.Decision = DecisionBlocked
+	result.Gate.NextStep = nextStep(result.Gate.Decision, result.Gate.Checks)
+	return result
+}
+
+// ApplyProfessionalScope adds the topic/scope policy decision to the action
+// gate. An out-of-scope or unavailable decision is always blocking; escalation
+// is a conversation outcome, never permission to execute a side effect.
+func ApplyProfessionalScope(result Result, scope ConversationScopeResult) Result {
+	status := CheckStatusPass
+	reason := strings.TrimSpace(scope.Reason)
+	if reason == "" {
+		reason = "action is within professional scope"
+	}
+	if !scope.Allowed {
+		status = CheckStatusBlocked
+	}
+	result.Gate.Checks = append(result.Gate.Checks, Check{Key: "professional_scope", Status: status, Reason: reason})
+	if status == CheckStatusBlocked {
+		result.Gate.Decision = DecisionBlocked
+		result.Gate.NextStep = nextStep(result.Gate.Decision, result.Gate.Checks)
+	}
 	return result
 }
 
@@ -231,6 +340,8 @@ func nextStep(decision Decision, checks []Check) string {
 			return "would require higher autonomy or human approval before execution"
 		case "governance_check":
 			return "would require governance clearance before execution"
+		case "professional_authority":
+			return "would stop until professional authority is valid"
 		}
 	}
 	return "would stop before execution"

@@ -13,6 +13,18 @@ func (f fakeAuditReader) Replay(context.Context, string, string) (audit.ReplayOu
 	return f.out, nil
 }
 
+type fakeSubjectAuditReader struct {
+	primary audit.ReplayOutput
+	chains  []audit.ReplayOutput
+}
+
+func (f fakeSubjectAuditReader) Replay(context.Context, string, string) (audit.ReplayOutput, error) {
+	return f.primary, nil
+}
+func (f fakeSubjectAuditReader) ReplaySubject(context.Context, string, string) ([]audit.ReplayOutput, error) {
+	return f.chains, nil
+}
+
 func sampleReplay() audit.ReplayOutput {
 	return audit.ReplayOutput{
 		Scope:       "tenant-1/vp-1",
@@ -87,5 +99,36 @@ func TestTamperedPackFailsVerification(t *testing.T) {
 	pack.Timeline[0].Summary = "altered after signing"
 	if err := VerifyPack("super-secret", pack); err == nil {
 		t.Fatal("a tampered pack must fail verification")
+	}
+}
+
+func TestFocusedPackLinksAndIndependentlyProvesSpecialistChains(t *testing.T) {
+	primary := sampleReplay()
+	specialist := audit.ReplayOutput{
+		Scope: "tenant-1/vp-specialist", VirployeeID: "vp-specialist", EventCount: 2,
+		Timeline: []audit.TimelineEntry{
+			{Event: "specialist_consult_completed", Actor: "vp-specialist", SubjectID: "run-2", At: "2026-07-21T12:00:30Z", Summary: "opinion", EventHash: "s1"},
+			{Event: "other", Actor: "vp-specialist", SubjectID: "other-run", At: "2026-07-21T12:02:00Z", Summary: "other", EventHash: "s2"},
+		},
+		Integrity: &audit.IntegrityOutput{Status: "ok", CheckedEvents: 2, FirstHash: "s1", LastHash: "s2", Signed: true},
+	}
+	reader := fakeSubjectAuditReader{primary: primary, chains: []audit.ReplayOutput{primary, specialist}}
+	uc := NewUseCases(reader, NewSigner("linked-secret", "k1"))
+	pack, err := uc.Generate(context.Background(), "tenant-1", "vp-1", "run-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pack.LinkedChains) != 1 || pack.LinkedChains[0].VirployeeID != "vp-specialist" || pack.LinkedChains[0].EventCount != 1 {
+		t.Fatalf("unexpected linked chains: %+v", pack.LinkedChains)
+	}
+	if pack.LinkedChains[0].Integrity.CheckedEvents != 2 || pack.EventCount != 2 || pack.Subject == nil || pack.Subject.ChainEventCount != 4 {
+		t.Fatalf("linked integrity/counts missing: %+v", pack)
+	}
+	if err := VerifyPack("linked-secret", pack); err != nil {
+		t.Fatalf("linked pack must reverify: %v", err)
+	}
+	pack.LinkedChains[0].Timeline[0].Summary = "tampered"
+	if err := VerifyPack("linked-secret", pack); err == nil {
+		t.Fatal("tampering a linked specialist chain must invalidate the pack signature")
 	}
 }

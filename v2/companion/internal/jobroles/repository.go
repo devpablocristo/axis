@@ -3,6 +3,7 @@ package jobroles
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -28,14 +29,18 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 func (r *Repository) Create(ctx context.Context, tenantID string, input domain.NormalizedCreateInput) (domain.JobRole, error) {
 	id := uuid.New()
 	now := time.Now().UTC()
+	responsibilities, successCriteria, err := marshalDefinitions(input.Responsibilities, input.SuccessCriteria)
+	if err != nil {
+		return domain.JobRole{}, err
+	}
 	row := r.pool.QueryRow(ctx, `
 		INSERT INTO job_roles (
-			id, tenant_id, name, slug, mission, created_at, updated_at
+			id, tenant_id, name, slug, mission, responsibilities_json, success_criteria_json, created_at, updated_at
 		)
-		VALUES ($1::uuid, $2, $3, $4, $5, $6, $6)
-		RETURNING id::text, tenant_id, name, slug, mission,
+		VALUES ($1::uuid, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8, $8)
+		RETURNING id::text, tenant_id, name, slug, mission, responsibilities_json, success_criteria_json,
 			created_at, updated_at, archived_at, trashed_at, purge_after
-	`, id.String(), tenantID, input.Name, input.Slug, input.Mission, now)
+	`, id.String(), tenantID, input.Name, input.Slug, input.Mission, responsibilities, successCriteria, now)
 	return scanJobRole(row)
 }
 
@@ -53,7 +58,7 @@ func (r *Repository) List(ctx context.Context, tenantID string, state domain.Sta
 	}
 
 	rows, err := r.pool.Query(ctx, `
-		SELECT id::text, tenant_id, name, slug, mission,
+		SELECT id::text, tenant_id, name, slug, mission, responsibilities_json, success_criteria_json,
 			created_at, updated_at, archived_at, trashed_at, purge_after
 		FROM job_roles
 		WHERE `+where+`
@@ -80,7 +85,7 @@ func (r *Repository) List(ctx context.Context, tenantID string, state domain.Sta
 
 func (r *Repository) Get(ctx context.Context, tenantID string, id uuid.UUID) (domain.JobRole, error) {
 	row := r.pool.QueryRow(ctx, `
-		SELECT id::text, tenant_id, name, slug, mission,
+		SELECT id::text, tenant_id, name, slug, mission, responsibilities_json, success_criteria_json,
 			created_at, updated_at, archived_at, trashed_at, purge_after
 		FROM job_roles
 		WHERE tenant_id = $1 AND id = $2::uuid AND trashed_at IS NULL
@@ -89,19 +94,25 @@ func (r *Repository) Get(ctx context.Context, tenantID string, id uuid.UUID) (do
 }
 
 func (r *Repository) Update(ctx context.Context, tenantID string, id uuid.UUID, input domain.NormalizedUpdateInput) (domain.JobRole, error) {
+	responsibilities, successCriteria, err := marshalDefinitions(input.Responsibilities, input.SuccessCriteria)
+	if err != nil {
+		return domain.JobRole{}, err
+	}
 	row := r.pool.QueryRow(ctx, `
 		UPDATE job_roles
 		SET name = $3,
 			slug = $4,
 			mission = $5,
-			updated_at = $6
+			responsibilities_json = $6::jsonb,
+			success_criteria_json = $7::jsonb,
+			updated_at = $8
 		WHERE tenant_id = $1
 			AND id = $2::uuid
 			AND archived_at IS NULL
 			AND trashed_at IS NULL
-		RETURNING id::text, tenant_id, name, slug, mission,
+		RETURNING id::text, tenant_id, name, slug, mission, responsibilities_json, success_criteria_json,
 			created_at, updated_at, archived_at, trashed_at, purge_after
-	`, tenantID, id.String(), input.Name, input.Slug, input.Mission, time.Now().UTC())
+	`, tenantID, id.String(), input.Name, input.Slug, input.Mission, responsibilities, successCriteria, time.Now().UTC())
 	item, err := scanJobRole(row)
 	if err == nil {
 		return item, nil
@@ -228,6 +239,8 @@ type scanner interface {
 
 func scanJobRole(row scanner) (domain.JobRole, error) {
 	var idText string
+	var responsibilitiesJSON []byte
+	var successCriteriaJSON []byte
 	var model models.JobRole
 	err := row.Scan(
 		&idText,
@@ -235,6 +248,8 @@ func scanJobRole(row scanner) (domain.JobRole, error) {
 		&model.Name,
 		&model.Slug,
 		&model.Mission,
+		&responsibilitiesJSON,
+		&successCriteriaJSON,
 		&model.CreatedAt,
 		&model.UpdatedAt,
 		&model.ArchivedAt,
@@ -252,7 +267,25 @@ func scanJobRole(row scanner) (domain.JobRole, error) {
 		return domain.JobRole{}, err
 	}
 	model.ID = id
+	if err := json.Unmarshal(responsibilitiesJSON, &model.Responsibilities); err != nil {
+		return domain.JobRole{}, err
+	}
+	if err := json.Unmarshal(successCriteriaJSON, &model.SuccessCriteria); err != nil {
+		return domain.JobRole{}, err
+	}
 	return model.ToDomain(), nil
+}
+
+func marshalDefinitions(responsibilities []domain.Responsibility, successCriteria []domain.SuccessCriterion) ([]byte, []byte, error) {
+	responsibilitiesJSON, err := json.Marshal(responsibilities)
+	if err != nil {
+		return nil, nil, err
+	}
+	successCriteriaJSON, err := json.Marshal(successCriteria)
+	if err != nil {
+		return nil, nil, err
+	}
+	return responsibilitiesJSON, successCriteriaJSON, nil
 }
 
 func nullableTime(value *time.Time) any {

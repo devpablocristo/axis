@@ -194,6 +194,46 @@ func TestPipelineIndexesVerifiedDerivativesAndReportsProgress(t *testing.T) {
 	}
 }
 
+func TestPipelineIngestUploadUsesVerifiedPipelineAndServerObservedProvenance(t *testing.T) {
+	data := []byte("Professional protocol version 7")
+	catalog := &fakeCatalog{}
+	scanner := &fakeScanner{}
+	store := &fakeStore{}
+	indexer := &fakeIndexer{}
+	// A local upload does not depend on the remote HTTP fetcher, but every
+	// security and indexing stage after acquisition remains identical.
+	pipeline := NewPipeline(catalog, nil, scanner, store, TextFormatAdapter{})
+	pipeline.SetIndexer(indexer)
+	scope := testScope()
+	result, err := pipeline.IngestUpload(context.Background(), UploadRequest{
+		Scope: scope,
+		Manifest: Manifest{
+			DocumentID: "upload-1", Name: "protocol.txt", SourceRef: "upload:upload-1",
+			MIMEType: "text/plain", Required: true,
+		},
+		Content: bytes.NewReader(data), ContentType: "text/plain; charset=utf-8",
+	})
+	if err != nil {
+		t.Fatalf("IngestUpload: %v", err)
+	}
+	if scanner.calls != 1 || store.puts != 1 || !indexer.called {
+		t.Fatalf("upload skipped a required stage: scanner=%d store=%d indexed=%v", scanner.calls, store.puts, indexer.called)
+	}
+	if len(result.Records) != 1 || result.Records[0].Status != StatusIndexed {
+		t.Fatalf("unexpected records: %+v", result.Records)
+	}
+	record := result.Records[0]
+	if record.Scope != scope || record.Manifest.SizeBytes != int64(len(data)) || record.Manifest.SHA256 != checksum(data) {
+		t.Fatalf("server-observed provenance was not preserved: %+v", record)
+	}
+	if record.Manifest.ReadURL == "" || record.Manifest.SourceRef != "upload:upload-1" {
+		t.Fatalf("unexpected transport/source metadata: %+v", record.Manifest)
+	}
+	if len(result.Parts) != 1 || result.Parts[0].Text != string(data) || result.Parts[0].SHA256 != checksum(data) {
+		t.Fatalf("unexpected upload derivative: %+v", result.Parts)
+	}
+}
+
 func TestPipelineFailsClosedWhenIndexingFails(t *testing.T) {
 	data := []byte("clinical")
 	indexer := &fakeIndexer{err: errors.New("provider unavailable")}
@@ -207,6 +247,26 @@ func TestPipelineFailsClosedWhenIndexingFails(t *testing.T) {
 	}}})
 	if !errors.Is(err, ErrIndexingFailed) || StableErrorCode(err) != "artifact_indexing_failed" {
 		t.Fatalf("expected stable indexing failure, got %v (%s)", err, StableErrorCode(err))
+	}
+}
+
+func TestPipelineRequiredIndexingFailsBeforeAcquisitionWhenIndexerIsMissing(t *testing.T) {
+	catalog := &fakeCatalog{}
+	scanner := &fakeScanner{}
+	store := &fakeStore{}
+	pipeline := NewPipeline(catalog, fakeFetcher{}, scanner, store, TextFormatAdapter{})
+	_, err := pipeline.Ingest(context.Background(), IngestRequest{
+		Scope: testScope(), RequireIndexing: true,
+		Artifacts: []Manifest{{
+			DocumentID: "doc-1", Name: "source.txt", ReadURL: "https://product/doc-1",
+			SHA256: checksum([]byte("source")), MIMEType: "text/plain", SizeBytes: 6, Required: true,
+		}},
+	})
+	if err == nil {
+		t.Fatal("required indexing must fail closed when the indexer is missing")
+	}
+	if len(catalog.records) != 0 || scanner.calls != 0 || store.puts != 0 {
+		t.Fatalf("bytes must not be acquired without required indexing: catalog=%d scanner=%d store=%d", len(catalog.records), scanner.calls, store.puts)
 	}
 }
 

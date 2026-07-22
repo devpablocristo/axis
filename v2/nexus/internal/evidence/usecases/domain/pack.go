@@ -7,15 +7,27 @@ import "time"
 // prove it is authentic and unaltered. The integrity block proves the underlying
 // audit chain itself was intact when the pack was generated.
 type EvidencePack struct {
-	Version     string          `json:"version"`
-	GeneratedAt time.Time       `json:"generated_at"`
+	Version      string          `json:"version"`
+	GeneratedAt  time.Time       `json:"generated_at"`
+	Scope        string          `json:"scope"`
+	Virployee    VirployeeRef    `json:"virployee"`
+	Subject      *SubjectRef     `json:"subject,omitempty"`
+	EventCount   int             `json:"event_count"`
+	Timeline     []TimelineEvent `json:"timeline"`
+	Integrity    Integrity       `json:"integrity"`
+	LinkedChains []LinkedChain   `json:"linked_chains,omitempty"`
+	Signature    Signature       `json:"signature"`
+}
+
+// LinkedChain proves a second virployee's contribution to the same subject.
+// Each chain retains its own integrity root; chains are never flattened into a
+// synthetic hash sequence.
+type LinkedChain struct {
 	Scope       string          `json:"scope"`
-	Virployee   VirployeeRef    `json:"virployee"`
-	Subject     *SubjectRef     `json:"subject,omitempty"`
+	VirployeeID string          `json:"virployee_id"`
 	EventCount  int             `json:"event_count"`
 	Timeline    []TimelineEvent `json:"timeline"`
 	Integrity   Integrity       `json:"integrity"`
-	Signature   Signature       `json:"signature"`
 }
 
 // VirployeeRef identifies the virtual employee whose ledger this pack covers.

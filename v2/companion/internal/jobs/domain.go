@@ -15,11 +15,12 @@ import (
 type Status string
 
 const (
-	StatusQueued     Status = "queued"
-	StatusRunning    Status = "running"
-	StatusSucceeded  Status = "succeeded"
-	StatusDeadLetter Status = "dead_letter"
-	StatusCancelled  Status = "cancelled"
+	StatusQueued          Status = "queued"
+	StatusRunning         Status = "running"
+	StatusCancelRequested Status = "cancel_requested"
+	StatusSucceeded       Status = "succeeded"
+	StatusDeadLetter      Status = "dead_letter"
+	StatusCancelled       Status = "cancelled"
 )
 
 const (
@@ -108,6 +109,7 @@ type Repository interface {
 }
 
 var ErrJobNotFound = errors.New("job not found")
+var ErrJobCancelled = errors.New("job cancellation requested")
 
 type HandlerError struct {
 	code      string

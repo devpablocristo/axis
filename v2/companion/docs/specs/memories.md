@@ -2,10 +2,24 @@
 
 ## Decision
 
-Companion owns one persistent memory model scoped exclusively by `tenant_id` and
-`virployee_id`. It replaces the v1 overlap between containers, facts and
-operational memory. There is no v1 migration and no tenant-, user-, task- or
-conversation-shared memory.
+Companion owns one persistent memory model under `tenant_id + virployee_id`,
+with an explicit nested work scope. It replaces the v1 overlap between
+containers, facts and operational memory. There is no v1 migration and no
+tenant-, user- or conversation-shared memory outside these boundaries.
+
+The valid scopes are:
+
+- `virployee`: non-personal procedures and durable operating knowledge shared
+  across the Virployee's work.
+- `subject`: preferences and history for exactly one patient/customer/work
+  subject.
+- `case`: temporary or case-specific facts for exactly one subject and Assist
+  case.
+
+`subject` requires `subject_id` and forbids `case_id`; `case` requires both;
+`virployee` accepts neither. Existing memory rows are retained as
+Virployee-global records. A case-scoped write must reference a case for the same
+tenant, subject and responsible/entrypoint Virployee.
 
 Memories have a title, lexical content, type (`fact`, `preference`, `procedure`
 or `note`), sensitivity (`normal` or `sensitive`), provenance, actor, content
@@ -35,13 +49,25 @@ hashes, versions and curation metadata, never content.
 
 ## Retrieval and runtime
 
-F5 recall is hybrid pgvector plus PostgreSQL full-text search, always constrained
-by tenant and Virployee before ranking. Embeddings use Runtime's
-`gemini-embedding-001` adapter at 768 dimensions and carry model plus content
-version so stale vectors never match current text. Failed or pending indexing
-falls back to lexical recall without weakening curation predicates. Recall
-returns five results by default and ten at most. Lists use an opaque cursor over
-`updated_at + id`, default 50 and maximum 100.
+F5 recall is hybrid pgvector plus PostgreSQL full-text search, always
+constrained by tenant, Virployee and requested work scope before ranking.
+Embeddings use Runtime's `gemini-embedding-001` adapter at 768 dimensions and
+carry model plus content version so stale vectors never match current text.
+Failed or pending indexing falls back to lexical recall without weakening
+curation predicates. Recall returns five results by default and ten at most.
+Lists use an opaque cursor over `updated_at + id`, default 50 and maximum 100.
+
+Listing selects one exact scope. Recall is deliberately hierarchical:
+
+```text
+virployee request -> virployee-global only
+subject request   -> virployee-global + exact subject
+case request      -> virployee-global + exact subject + exact case
+```
+
+No query scans a sibling subject or case. Conflict detection, active-content
+uniqueness, curation audit and safe Runtime references also carry the scope, so
+two patients assigned to one Virployee cannot collide or leak through recall.
 
 Every memory indexing or vector-query call reserves the tenant's `axis / embeddings`
 quota before reaching Runtime. A denied indexing job remains retryable; denied
@@ -53,9 +79,13 @@ Runtime Context and Dry Run expose safe memory references (ID, title, type,
 version, content hash, sensitivity and score). Run traces persist those
 references plus a deterministic `memory_context_hash`, never memory content.
 Execution Gate binds that hash so governance seals the exact recalled context.
-The recalled, curator-approved content is included in the Runtime proposal
-context while run traces retain only references and the hash. The deterministic
-fallback parser does not change its decision from memory.
+For `grounding_mode=general`, the recalled, curator-approved content is included
+in the Runtime proposal/Assist context while run traces retain only references
+and the hash. Assist chooses the case scope when it has `case_id`, otherwise the
+subject scope when it has `subject_id`. For `grounding_mode=sources_only`,
+personal memory is not evidence and is not sent to the answer model; only
+verified document fragments are eligible. The deterministic fallback parser
+does not change its decision from memory.
 
 Runtime responses include an estimated input/output token and cost envelope
 until provider-authoritative usage is available. Companion reserves the LLM
@@ -64,8 +94,9 @@ the call, and keeps all prompt and document content out of accounting metadata.
 
 ## Explicit non-goals
 
-Documentary evidence from Medmory is never promoted into memory automatically;
-it remains in `artifactindex`. Curation detects deterministic conflicts but does
-not ask an LLM to resolve them. PostgreSQL encryption at rest protects content;
-field encryption is deferred because it would prevent lexical and vector
-retrieval.
+Documentary evidence is never promoted into memory automatically. It remains in
+`artifactindex` and is exposed through governed Knowledge Bases; see
+[Grounded knowledge and professional authority](grounded-knowledge-and-authority.md).
+Curation detects deterministic conflicts but does not ask an LLM to resolve
+them. PostgreSQL encryption at rest protects content; field encryption is
+deferred because it would prevent lexical and vector retrieval.

@@ -24,7 +24,7 @@ func TestPostgresRepositoryConcurrentClaimRecoveryAndReplay(t *testing.T) {
 	defer pool.Close()
 	repository := NewPostgresRepository(pool)
 	tenantID := "jobs-test-" + uuid.NewString()
-	kind := "test.concurrent"
+	kind := "test.concurrent." + uuid.NewString()
 	var created []uuid.UUID
 	t.Cleanup(func() {
 		for _, id := range created {
@@ -105,5 +105,79 @@ func TestPostgresRepositoryConcurrentClaimRecoveryAndReplay(t *testing.T) {
 	replayed, err := repository.ReplayDeadLetter(ctx, tenantID, deadJob.ID, time.Now().UTC())
 	if err != nil || replayed.Status != StatusQueued || replayed.Attempts != 0 {
 		t.Fatalf("replayed=%+v err=%v", replayed, err)
+	}
+}
+
+func TestPostgresRepositoryWorkerControlAndCircuitBreaker(t *testing.T) {
+	databaseURL := os.Getenv("COMPANION_V2_JOBS_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("COMPANION_V2_JOBS_TEST_DATABASE_URL is not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	repository := NewPostgresRepository(pool)
+	tenantID := "jobs-test-" + uuid.NewString()
+	product, kind := "tests", "test.circuit."+uuid.NewString()
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM companion_jobs WHERE tenant_id=$1`, tenantID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM companion_worker_controls WHERE tenant_id=$1`, tenantID)
+	})
+
+	if _, err = pool.Exec(ctx, `INSERT INTO companion_worker_controls(tenant_id,product_surface,kind,state,changed_by,reason_code)VALUES($1,$2,$3,'paused','test','manual_pause')`, tenantID, product, kind); err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index < 2; index++ {
+		if _, _, err = repository.Enqueue(ctx, EnqueueInput{TenantID: tenantID, ProductSurface: product, Kind: kind, DedupeKey: uuid.NewString(), MaxAttempts: 10}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	claimed, err := repository.Claim(ctx, ClaimOptions{WorkerID: "paused-worker", Kinds: []string{kind}, BatchSize: 10})
+	if err != nil || len(claimed) != 0 {
+		t.Fatalf("paused control claimed=%d err=%v", len(claimed), err)
+	}
+	if _, err = pool.Exec(ctx, `UPDATE companion_worker_controls SET state='closed' WHERE tenant_id=$1 AND product_surface=$2 AND kind=$3`, tenantID, product, kind); err != nil {
+		t.Fatal(err)
+	}
+	for attempt := 0; attempt < 5; attempt++ {
+		claimed, err = repository.Claim(ctx, ClaimOptions{WorkerID: "failing-worker", Kinds: []string{kind}, BatchSize: 1})
+		if err != nil || len(claimed) != 1 {
+			t.Fatalf("failure claim %d claimed=%d err=%v", attempt, len(claimed), err)
+		}
+		if _, err = repository.Fail(ctx, FailInput{JobID: claimed[0].ID, WorkerID: "failing-worker", ErrorCode: "dependency_unavailable", Retryable: true, Backoff: time.Millisecond}); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = pool.Exec(ctx, `UPDATE companion_jobs SET run_after=now() WHERE tenant_id=$1 AND status='queued'`, tenantID)
+	}
+	var state string
+	var failures int
+	if err = pool.QueryRow(ctx, `SELECT state,failure_count FROM companion_worker_controls WHERE tenant_id=$1 AND product_surface=$2 AND kind=$3`, tenantID, product, kind).Scan(&state, &failures); err != nil {
+		t.Fatal(err)
+	}
+	if state != "open" || failures != 5 {
+		t.Fatalf("expected open circuit after five failures, state=%s failures=%d", state, failures)
+	}
+	claimed, err = repository.Claim(ctx, ClaimOptions{WorkerID: "blocked-worker", Kinds: []string{kind}, BatchSize: 10})
+	if err != nil || len(claimed) != 0 {
+		t.Fatalf("open circuit claimed=%d err=%v", len(claimed), err)
+	}
+	if _, err = pool.Exec(ctx, `UPDATE companion_worker_controls SET opened_until=now()-interval '1 second' WHERE tenant_id=$1 AND product_surface=$2 AND kind=$3`, tenantID, product, kind); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err = repository.Claim(ctx, ClaimOptions{WorkerID: "probe-worker", Kinds: []string{kind}, BatchSize: 10})
+	if err != nil || len(claimed) != 1 {
+		t.Fatalf("half-open probe claimed=%d err=%v", len(claimed), err)
+	}
+	if err = repository.Complete(ctx, claimed[0].ID, "probe-worker", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err = pool.QueryRow(ctx, `SELECT state,failure_count FROM companion_worker_controls WHERE tenant_id=$1 AND product_surface=$2 AND kind=$3`, tenantID, product, kind).Scan(&state, &failures); err != nil {
+		t.Fatal(err)
+	}
+	if state != "closed" || failures != 0 {
+		t.Fatalf("successful probe did not close circuit, state=%s failures=%d", state, failures)
 	}
 }

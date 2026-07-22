@@ -12,6 +12,7 @@ func TestNormalizeCreateInput(t *testing.T) {
 	supervisorID := "dev-user"
 	jobRoleID := uuid.New()
 	profileTemplateID := uuid.New()
+	employerID := uuid.New()
 	got, err := NormalizeCreateInput(CreateInput{
 		Name:              "  Sales Assistant ",
 		JobRoleID:         " " + jobRoleID.String() + " ",
@@ -19,12 +20,16 @@ func TestNormalizeCreateInput(t *testing.T) {
 		Description:       "  Helps  ",
 		SupervisorUserID:  " " + supervisorID + " ",
 		Autonomy:          " A2 ",
+		EmployerSubjectID: " " + employerID.String() + " ",
 	})
 	if err != nil {
 		t.Fatalf("NormalizeCreateInput: %v", err)
 	}
 	if got.Name != "Sales Assistant" || got.JobRoleID != jobRoleID || got.ProfileTemplateID != profileTemplateID || got.Description != "Helps" || got.SupervisorUserID != supervisorID || got.Autonomy != AutonomyA2 {
 		t.Fatalf("unexpected normalized input: %+v", got)
+	}
+	if got.EmployerSubjectID != employerID {
+		t.Fatalf("expected employer %s, got %s", employerID, got.EmployerSubjectID)
 	}
 }
 
@@ -40,6 +45,24 @@ func TestNormalizeCreateInputDefaultsAutonomy(t *testing.T) {
 	}
 	if got.Autonomy != AutonomyA1 {
 		t.Fatalf("expected default autonomy A1, got %s", got.Autonomy)
+	}
+	if got.GroundingMode != GroundingSourcesOnly {
+		t.Fatalf("expected new virployees to default to sources_only, got %q", got.GroundingMode)
+	}
+}
+
+func TestNormalizeUpdateInputPreservesGroundingWhenOmittedAndValidatesExplicitMode(t *testing.T) {
+	base := UpdateInput{Name: "Agent", JobRoleID: uuid.NewString(), ProfileTemplateID: uuid.NewString(), SupervisorUserID: "user-1"}
+	got, err := NormalizeUpdateInput(base)
+	if err != nil {
+		t.Fatalf("NormalizeUpdateInput: %v", err)
+	}
+	if got.GroundingMode != "" {
+		t.Fatalf("omitted update grounding mode must preserve storage value, got %q", got.GroundingMode)
+	}
+	base.GroundingMode = "unsupported"
+	if _, err := NormalizeUpdateInput(base); !domainerr.IsValidation(err) {
+		t.Fatalf("expected grounding validation, got %v", err)
 	}
 }
 
@@ -66,6 +89,9 @@ func TestNormalizeCreateInputRequiresNameJobRoleAndSupervisor(t *testing.T) {
 	}
 	if _, err := NormalizeCreateInput(CreateInput{Name: "name", JobRoleID: jobRoleID, ProfileTemplateID: profileTemplateID, SupervisorUserID: "dev-user", Autonomy: "A9"}); !domainerr.IsValidation(err) {
 		t.Fatalf("expected validation for invalid autonomy, got %v", err)
+	}
+	if _, err := NormalizeCreateInput(CreateInput{Name: "name", JobRoleID: jobRoleID, ProfileTemplateID: profileTemplateID, SupervisorUserID: "dev-user", EmployerSubjectID: "not-a-uuid"}); !domainerr.IsValidation(err) {
+		t.Fatalf("expected validation for invalid employer_subject_id, got %v", err)
 	}
 }
 

@@ -106,6 +106,401 @@ export type Approval = {
 	updated_at: string
 }
 
+export type AssistCase = {
+	id: string
+	tenant_id: string
+	product_surface: string
+	assist_type: string
+	subject_id: string
+	entrypoint_virployee_id: string
+	owner_virployee_id: string
+	status: 'open' | 'needs_human' | 'closed'
+	version: number
+	created_at: string
+	updated_at: string
+}
+
+export type WorkSubjectKind = 'person' | 'organization' | 'team' | 'patient' | 'case'
+
+export type WorkSubject = {
+	id: string
+	tenant_id: string
+	kind: WorkSubjectKind
+	display_name: string
+	external_ref: string
+	state: 'active' | 'archived'
+	created_at: string
+	updated_at: string
+}
+
+export type WorkSubjectInput = Pick<WorkSubject, 'kind' | 'display_name' | 'external_ref'>
+
+export type RoutingPool = {
+	id: string
+	tenant_id: string
+	job_role_id: string
+	name: string
+	state: 'active' | 'archived'
+	created_at: string
+	updated_at: string
+}
+
+export type RoutingPoolMember = {
+	pool_id: string
+	virployee_id: string
+	max_active_subjects: number
+	enabled: boolean
+	active_subjects: number
+	created_at: string
+	updated_at: string
+}
+
+export type ContinuityAssignment = {
+	id: string
+	tenant_id: string
+	pool_id: string
+	subject_id: string
+	virployee_id: string
+	status: 'active' | 'reassigned'
+	version: number
+	assigned_at: string
+	updated_at: string
+}
+
+export type MCPPolicyRule = {
+	disabled: boolean
+	allowed_capabilities: string[]
+	denied_capabilities: string[]
+}
+
+export type MCPPolicy = {
+	tenant_id: string
+	enabled: boolean
+	kill_switch: boolean
+	allowed_capabilities: string[]
+	denied_capabilities: string[]
+	capability_kill_switches: Record<string, boolean>
+	max_risk_class: 'low' | 'medium' | 'high' | 'critical'
+	max_calls_per_minute: number
+	max_concurrency: number
+	product_rules: Record<string, MCPPolicyRule>
+	job_role_rules: Record<string, MCPPolicyRule>
+	version: number
+	changed_by: string
+	created_at: string
+	updated_at: string
+}
+
+export type MCPTool = {
+	name: string
+	description?: string
+	inputSchema: Record<string, unknown>
+	outputSchema?: Record<string, unknown>
+	annotations: {
+		readOnlyHint: boolean
+		destructiveHint: boolean
+		idempotentHint: boolean
+		openWorldHint: boolean
+	}
+	_meta: {
+		'axis/capabilityVersion': string
+		'axis/manifestHash': string
+		'axis/riskClass': string
+		'axis/requiresApproval': boolean
+		'axis/rollbackMode': string
+	}
+}
+
+export type MCPInvocationAudit = {
+	id: string
+	context: {
+		tenant_id: string
+		actor_id: string
+		virployee_id: string
+		subject_id: string
+		case_id: string
+		assignment_id: string
+		assignment_version: number
+	}
+	method: string
+	capability_key: string
+	capability_version: string
+	policy_version: number
+	status: string
+	blocked_by: string
+	error_code: string
+	duration_ms: number
+	created_at: string
+}
+
+export type MCPPolicyAudit = {
+	id: string
+	actor_id: string
+	previous_version: number
+	new_version: number
+	created_at: string
+}
+
+export type RoutingResolution = {
+	status: 'assigned' | 'unavailable' | 'reassignment_required'
+	created: boolean
+	assignment?: ContinuityAssignment
+}
+
+export type WorkRelationshipType = 'works_for' | 'serves' | 'reports_to'
+
+export type WorkRelationship = {
+	id: string
+	virployee_id: string
+	subject_id: string
+	type: WorkRelationshipType
+	is_primary: boolean
+	created_at: string
+	updated_at: string
+}
+
+export type WorkRelationshipInput = Pick<WorkRelationship, 'subject_id' | 'type' | 'is_primary'>
+
+export type KnowledgeBase = {
+	id: string
+	name: string
+	description: string
+	classification: 'professional' | 'private'
+	state: 'active' | 'archived'
+	version: number
+	created_at: string
+	updated_at: string
+	archived_at?: string
+}
+
+export type KnowledgeArtifactScope = {
+	virployee_id: string
+	product_surface: string
+	subject_id: string
+	repository_generation: string
+	document_id: string
+}
+
+export type KnowledgeDocument = {
+	id: string
+	knowledge_base_id: string
+	title: string
+	artifact_scope: KnowledgeArtifactScope
+	source_version: string
+	source_sha256: string
+	state: 'active' | 'archived'
+	version: number
+	created_at: string
+	updated_at: string
+	archived_at?: string
+}
+
+export type KnowledgeIngestionTarget = {
+	virployee_id: string
+	subject_id: string
+	document_id: string
+}
+
+export type KnowledgeConnectorIngestion = {
+	title?: string
+	target: KnowledgeIngestionTarget
+	source: {
+		connector: string
+		external_id: string
+		name: string
+		read_url: string
+		sha256: string
+		mime_type: string
+		size_bytes: number
+	}
+}
+
+export type KnowledgeBindingScope = 'professional' | 'virployee' | 'subject' | 'case'
+
+export type KnowledgeBindingInput = {
+	scope_type: KnowledgeBindingScope
+	job_role_id?: string
+	virployee_id?: string
+	subject_id?: string
+	case_id?: string
+}
+
+export type KnowledgeBinding = KnowledgeBindingInput & {
+	id: string
+	knowledge_base_id: string
+	version: number
+	created_at: string
+	updated_at: string
+}
+
+export type VirployeeKnowledgeBase = {
+	knowledge_base: KnowledgeBase
+	bindings: KnowledgeBinding[]
+}
+
+export type VirployeeScopePolicy = {
+	virployee_id: string
+	allowed_topics: string[]
+	prohibited_topics: string[]
+	out_of_scope: 'abstain' | 'escalate'
+	revision: number
+	created_at: string
+	updated_at: string
+}
+
+export type ProfessionalPolicyRules = {
+	allowed_topics: string[]
+	prohibited_topics: string[]
+	out_of_scope: 'abstain' | 'escalate'
+	allowed_capabilities: string[]
+	prohibited_capabilities: string[]
+	delegation_required: boolean
+}
+
+export type ProfessionalPolicyPack = {
+	id: string
+	tenant_id: string
+	policy_key: string
+	name: string
+	version: number
+	job_role_id?: string
+	rules: ProfessionalPolicyRules
+	created_at: string
+	updated_at: string
+}
+
+export type ProfessionalPolicyBinding = {
+	virployee_id: string
+	policy_pack_ids: string[]
+	revision: number
+	updated_at?: string
+}
+
+export type VirployeeDelegation = {
+	id: string
+	virployee_id: string
+	principal_type: 'person' | 'organization' | 'team' | 'case' | 'project' | 'service'
+	principal_id: string
+	capability_scopes: string[]
+	product_scopes: string[]
+	resource_scopes: Array<{ resource_type: string; resource_id: string }>
+	max_risk_class: 'low' | 'medium' | 'high' | 'critical'
+	purpose: string
+	granted_by: string
+	valid_from: string
+	valid_until: string
+	status: 'active' | 'revoked' | 'expired'
+	revision: number
+	reviewed_at?: string | null
+	reviewed_by?: string
+	review_note?: string
+	created_at: string
+	updated_at: string
+}
+
+export type FunctionalRoleDefinition = { key: 'policy_admin' | 'approver' | 'auditor' | 'delegation_admin'; description: string; permissions: string[] }
+export type FunctionalRoleGrant = {
+	id: string; tenant_id: string; user_id: string; role_key: FunctionalRoleDefinition['key']; product_surface?: string
+	action_type_pattern: string; resource_type?: string; resource_id?: string; max_risk_class: 'low' | 'medium' | 'high' | 'critical'
+	valid_from: string; valid_until: string; revision: number; granted_by: string; revoked_at?: string; revoked_by?: string
+	revocation_reason?: string; created_at: string; updated_at: string
+}
+export type GovernancePolicyVersion = {
+	id: string; tenant_id: string; policy_id: string; version: number; state: 'draft' | 'shadow' | 'active' | 'retired'
+	product_surface?: string; action_type_pattern: string; target_system?: string; requester_type?: string; expression: string
+	effect: 'allow' | 'deny' | 'require_approval'; risk_override?: '' | 'low' | 'medium' | 'high' | 'critical'; priority: number
+	content_hash: string; created_by: string; created_at: string; retired_at?: string
+}
+export type GovernancePolicy = {
+	id: string; tenant_id: string; policy_key: string; name: string; description: string; created_by: string
+	created_at: string; updated_at: string; versions?: GovernancePolicyVersion[]
+}
+export type GovernancePolicySimulation = {
+	id: string; policy_version_id: string; requested_by: string; total_evaluated: number; would_match: number
+	would_allow: number; would_deny: number; would_require_approval: number; report_hash: string; created_at: string
+}
+export type GovernancePolicyPromotion = {
+	id: string; policy_version_id: string; simulation_id: string; target_state: 'shadow' | 'active'; status: 'pending' | 'approved' | 'rejected'
+	requested_by: string; decided_by?: string; decision_reason?: string; created_at: string; decided_at?: string
+}
+export type GovernancePolicyEvaluation = {
+	id: string; policy_version_id: string; mode: 'shadow' | 'enforced'; matched: boolean; effect: string; decision?: string
+	error_code?: string; input_hash: string; created_at: string
+}
+export type GovernancePolicyChange = {
+	id: string; policy_id: string; policy_version_id?: string; actor_id: string; action: string; summary: string
+	data: Record<string, unknown>; created_at: string
+}
+
+export type Handoff = {
+	id: string
+	tenant_id: string
+	case_id: string
+	source_run_id?: string
+	from_virployee_id: string
+	to_virployee_id: string
+	reason_code: string
+	note_hash?: string
+	status: 'pending' | 'accepted' | 'rejected' | 'cancelled' | 'expired'
+	requested_by: string
+	decided_by?: string
+	version: number
+	expires_at: string
+	created_at: string
+	updated_at: string
+}
+
+export type HumanReview = {
+	id: string
+	tenant_id: string
+	case_id: string
+	root_run_id: string
+	handoff_id?: string
+	reason_code: string
+	urgency: 'routine' | 'urgent'
+	status: 'pending' | 'claimed' | 'resolved'
+	reviewer_user_id?: string
+	outcome?: 'handled_externally' | 'handoff_requested' | 'dismissed'
+	note_hash?: string
+	created_at: string
+	updated_at: string
+}
+
+export type OrchestrationPolicy = {
+	id: string
+	tenant_id: string
+	product_surface: string
+	assist_type: string
+	entrypoint_virployee_id: string
+	mode: 'disabled' | 'shadow' | 'active'
+	selector_capability_id: string
+	synthesis_capability_id: string
+	output_schema: Record<string, unknown>
+	max_specialists: number
+	max_depth: number
+	consultation_timeout_seconds: number
+	orchestration_timeout_seconds: number
+	version: number
+	created_at: string
+	updated_at: string
+}
+
+export type SpecialistRoute = {
+	id: string
+	tenant_id: string
+	product_surface: string
+	assist_type: string
+	entrypoint_virployee_id: string
+	specialty_code: string
+	target_virployee_id: string
+	capability_id: string
+	requirement_mode: 'advisory_only' | 'selector_allowed' | 'required'
+	enabled: boolean
+	version: number
+	created_at: string
+	updated_at: string
+}
+
 export type TenantInput = {
 	org_id?: string
 	org_name?: string
@@ -118,6 +513,7 @@ export type TenantUpdateInput = {
 
 export type VirployeeState = 'active' | 'archived' | 'trashed'
 export type VirployeeAutonomy = 'A0' | 'A1' | 'A2' | 'A3' | 'A4' | 'A5'
+export type GroundingMode = 'general' | 'sources_only'
 
 export type VirployeeAutonomyLevel = {
   level: VirployeeAutonomy
@@ -135,6 +531,7 @@ export type Virployee = {
   description: string
   supervisor_user_id: string
   autonomy: VirployeeAutonomy
+  grounding_mode: GroundingMode
   state: VirployeeState
   created_at: string
   updated_at: string
@@ -151,6 +548,7 @@ export type VirployeeRuntimeContext = {
     autonomy: VirployeeAutonomy
     state: VirployeeState
     supervisor_user_id: string
+    grounding_mode: GroundingMode
   }
   job_role: {
     id: string
@@ -185,9 +583,10 @@ export type VirployeeRuntimeContext = {
   memory_context_hash: string
 }
 
-export type MemoryReference = { id:string; title:string; type:'fact'|'preference'|'procedure'|'note'; version:number; hash:string; sensitivity:'normal'|'sensitive'; score:number }
-export type VirployeeMemory = { id:string; virployee_id:string; title:string; type:MemoryReference['type']; content?:string; preview?:string; sensitivity:MemoryReference['sensitivity']; provenance:'human'|'system'; actor_id:string; source_reference?:string; content_hash:string; version:number; state:'active'|'archived'|'trash'; created_at:string; updated_at:string }
-export type MemoryInput = { title:string; type:MemoryReference['type']; content:string; sensitivity:MemoryReference['sensitivity'] }
+export type MemoryScope = { type:'virployee'|'subject'|'case'; subject_id?:string; case_id?:string }
+export type MemoryReference = { id:string; title:string; type:'fact'|'preference'|'procedure'|'note'; version:number; hash:string; sensitivity:'normal'|'sensitive'; score:number; scope_type:'virployee'|'subject'|'case'; subject_id?:string; case_id?:string }
+export type VirployeeMemory = { id:string; virployee_id:string; scope_type:'virployee'|'subject'|'case'; subject_id?:string; case_id?:string; title:string; type:MemoryReference['type']; content?:string; preview?:string; sensitivity:MemoryReference['sensitivity']; provenance:'human'|'system'; actor_id:string; source_reference?:string; content_hash:string; version:number; state:'active'|'archived'|'trash'; created_at:string; updated_at:string }
+export type MemoryInput = { title:string; type:MemoryReference['type']; content:string; sensitivity:MemoryReference['sensitivity']; scope:MemoryScope }
 export type MemoryPage = { items:VirployeeMemory[]; next_cursor?:string }
 export type MemoryRecall = { items:MemoryReference[]; memory_context_hash:string }
 
@@ -331,9 +730,25 @@ export type VirployeeInput = {
   description: string
   supervisor_user_id: string
   autonomy: VirployeeAutonomy | ''
+  grounding_mode?: GroundingMode
+  employer_subject_id?: string
 }
 
 export type JobRoleState = 'active' | 'archived' | 'trashed'
+
+export type JobRoleResponsibility = {
+	title: string
+	description: string
+	expected_outcome: string
+	priority: number
+}
+
+export type JobRoleSuccessCriterion = {
+	title: string
+	description: string
+	target_value: string
+	priority: number
+}
 
 export type JobRole = {
   id: string
@@ -341,6 +756,8 @@ export type JobRole = {
   name: string
   slug: string
   mission: string
+	responsibilities: JobRoleResponsibility[]
+	success_criteria: JobRoleSuccessCriterion[]
   state: JobRoleState
   created_at: string
   updated_at: string
@@ -352,6 +769,8 @@ export type JobRole = {
 export type JobRoleInput = {
   name: string
   mission: string
+	responsibilities: JobRoleResponsibility[]
+	success_criteria: JobRoleSuccessCriterion[]
 }
 
 export type CapabilityState = 'active' | 'archived' | 'trashed'
@@ -523,6 +942,7 @@ export type AxisFetchInit = {
   principalId?: string
   method?: string
   body?: unknown
+  rawBody?: BodyInit
   headers?: Record<string, string>
 }
 
@@ -536,7 +956,7 @@ export function setAxisAuthTokenGetter(getter: AxisAuthTokenGetter | null) {
 
 export async function axisFetch<T>(path: string, init: AxisFetchInit = {}): Promise<T> {
   const headers = new Headers(init.headers)
-  if (init.body !== undefined) {
+  if (init.body !== undefined && init.rawBody === undefined) {
     headers.set('Content-Type', 'application/json')
   }
   if (init.tenantId) {
@@ -553,7 +973,7 @@ export async function axisFetch<T>(path: string, init: AxisFetchInit = {}): Prom
   const response = await fetch(path, {
     method: init.method ?? 'GET',
     headers,
-    body: init.body === undefined ? undefined : JSON.stringify(init.body),
+    body: init.rawBody ?? (init.body === undefined ? undefined : JSON.stringify(init.body)),
   })
 
   if (!response.ok) {
@@ -565,8 +985,456 @@ export async function axisFetch<T>(path: string, init: AxisFetchInit = {}): Prom
   return response.json() as Promise<T>
 }
 
+export async function axisDownload(path: string, init: AxisFetchInit = {}): Promise<Blob> {
+  const headers = new Headers(init.headers)
+  if (init.tenantId) headers.set('X-Tenant-ID', init.tenantId)
+  if (init.principalId) headers.set('X-Actor-ID', init.principalId)
+  const token = await resolveAxisAuthToken()
+  if (token) headers.set('Authorization', `Bearer ${token}`)
+  const response = await fetch(path, { method: init.method ?? 'GET', headers })
+  if (!response.ok) throw new Error(await responseErrorMessage(response))
+  return response.blob()
+}
+
 export function getSession(): Promise<Session> {
   return axisFetch<Session>('/api/session')
+}
+
+export function listWorkSubjects(tenantId: string, principalId: string): Promise<WorkSubject[]> {
+	return axisFetch<{ data?: WorkSubject[] } | WorkSubject[]>('/api/work-subjects', { tenantId, principalId })
+		.then((payload) => Array.isArray(payload) ? payload : payload.data ?? [])
+}
+
+export function getMCPPolicy(tenantId: string, principalId: string): Promise<MCPPolicy> {
+	return axisFetch<MCPPolicy>('/api/runtime/mcp-policy', { tenantId, principalId })
+}
+
+export function putMCPPolicy(policy: MCPPolicy, tenantId: string, principalId: string): Promise<MCPPolicy> {
+	return axisFetch<MCPPolicy>('/api/runtime/mcp-policy', {
+		method: 'PUT', tenantId, principalId,
+		body: {
+			enabled: policy.enabled, kill_switch: policy.kill_switch,
+			allowed_capabilities: policy.allowed_capabilities, denied_capabilities: policy.denied_capabilities,
+			capability_kill_switches: policy.capability_kill_switches,
+			max_risk_class: policy.max_risk_class, max_calls_per_minute: policy.max_calls_per_minute,
+			max_concurrency: policy.max_concurrency, product_rules: policy.product_rules,
+			job_role_rules: policy.job_role_rules, expected_version: policy.version,
+		},
+	})
+}
+
+export function listMCPInvocations(tenantId: string, principalId: string, virployeeId = ''): Promise<MCPInvocationAudit[]> {
+	const params = new URLSearchParams({ limit: '100' })
+	if (virployeeId) params.set('virployee_id', virployeeId)
+	return axisFetch<MCPInvocationAudit[]>(`/api/runtime/mcp-invocations?${params.toString()}`, { tenantId, principalId })
+}
+
+export function listMCPPolicyAudit(tenantId: string, principalId: string): Promise<MCPPolicyAudit[]> {
+	return axisFetch<MCPPolicyAudit[]>('/api/runtime/mcp-policy/audit?limit=50', { tenantId, principalId })
+}
+
+export function listMCPTools(virployeeId: string, subjectId: string, caseId: string, tenantId: string, principalId: string): Promise<MCPTool[]> {
+	return axisFetch<{
+		jsonrpc: string
+		result?: { tools?: MCPTool[] }
+		error?: { message?: string }
+	}>('/api/mcp', {
+		method: 'POST', tenantId, principalId,
+		headers: {
+			'X-Axis-Virployee-ID': virployeeId,
+			'X-Axis-Subject-ID': subjectId,
+			...(caseId ? { 'X-Axis-Case-ID': caseId } : {}),
+		},
+		body: { jsonrpc: '2.0', id: 'console-tools-list', method: 'tools/list', params: {} },
+	}).then((payload) => {
+		if (payload.error) throw new Error(payload.error.message || 'Could not resolve MCP tools')
+		return payload.result?.tools ?? []
+	})
+}
+
+export function createWorkSubject(input: WorkSubjectInput, tenantId: string, principalId: string): Promise<WorkSubject> {
+	return axisFetch<WorkSubject>('/api/work-subjects', { method: 'POST', tenantId, principalId, body: input })
+}
+
+export function updateWorkSubject(id: string, input: WorkSubjectInput, tenantId: string, principalId: string): Promise<WorkSubject> {
+	return axisFetch<WorkSubject>(`/api/work-subjects/${encodeURIComponent(id)}`, { method: 'PUT', tenantId, principalId, body: input })
+}
+
+export function setWorkSubjectArchived(id: string, archived: boolean, tenantId: string, principalId: string): Promise<void> {
+	return axisFetch<void>(`/api/work-subjects/${encodeURIComponent(id)}/${archived ? 'archive' : 'unarchive'}`, {
+		method: 'POST', tenantId, principalId, body: { reason: 'console' },
+	})
+}
+
+export function listKnowledgeBases(tenantId: string, principalId: string, state = 'active'): Promise<KnowledgeBase[]> {
+	const params = new URLSearchParams({ state })
+	return axisFetch<{ data?: KnowledgeBase[] } | KnowledgeBase[]>(`/api/knowledge-bases?${params.toString()}`, { tenantId, principalId })
+		.then((payload) => Array.isArray(payload) ? payload : payload.data ?? [])
+}
+
+export function createKnowledgeBase(input: Pick<KnowledgeBase, 'name' | 'description' | 'classification'>, tenantId: string, principalId: string): Promise<KnowledgeBase> {
+	return axisFetch<KnowledgeBase>('/api/knowledge-bases', { method: 'POST', tenantId, principalId, body: input })
+}
+
+export function updateKnowledgeBase(id: string, input: Pick<KnowledgeBase, 'name' | 'description' | 'version'>, tenantId: string, principalId: string): Promise<KnowledgeBase> {
+	return axisFetch<KnowledgeBase>(`/api/knowledge-bases/${encodeURIComponent(id)}`, {
+		method: 'PUT', tenantId, principalId,
+		body: { name: input.name, description: input.description, expected_version: input.version },
+	})
+}
+
+export function setKnowledgeBaseArchived(base: KnowledgeBase, archived: boolean, tenantId: string, principalId: string): Promise<KnowledgeBase> {
+	return axisFetch<KnowledgeBase>(`/api/knowledge-bases/${encodeURIComponent(base.id)}/${archived ? 'archive' : 'activate'}`, {
+		method: 'POST', tenantId, principalId, body: { expected_version: base.version },
+	})
+}
+
+export function listKnowledgeDocuments(baseId: string, tenantId: string, principalId: string): Promise<KnowledgeDocument[]> {
+	return axisFetch<{ data?: KnowledgeDocument[] } | KnowledgeDocument[]>(`/api/knowledge-bases/${encodeURIComponent(baseId)}/documents?state=active`, { tenantId, principalId })
+		.then((payload) => Array.isArray(payload) ? payload : payload.data ?? [])
+}
+
+export function registerKnowledgeDocument(baseId: string, input: Pick<KnowledgeDocument, 'title' | 'artifact_scope'>, tenantId: string, principalId: string): Promise<KnowledgeDocument> {
+	return axisFetch<KnowledgeDocument>(`/api/knowledge-bases/${encodeURIComponent(baseId)}/documents`, {
+		method: 'POST', tenantId, principalId, body: input,
+	})
+}
+
+export function ingestKnowledgeConnector(baseId: string, input: KnowledgeConnectorIngestion, tenantId: string, principalId: string): Promise<KnowledgeDocument> {
+	return axisFetch<KnowledgeDocument>(`/api/knowledge-bases/${encodeURIComponent(baseId)}/ingestions/connector`, {
+		method: 'POST', tenantId, principalId, body: input,
+	})
+}
+
+export function uploadKnowledgeFile(
+	baseId: string,
+	input: { title?: string; target: KnowledgeIngestionTarget; file: File },
+	tenantId: string,
+	principalId: string,
+): Promise<KnowledgeDocument> {
+	const form = new FormData()
+	form.set('title', input.title ?? '')
+	form.set('virployee_id', input.target.virployee_id)
+	form.set('subject_id', input.target.subject_id)
+	form.set('document_id', input.target.document_id)
+	form.set('file', input.file, input.file.name)
+	return axisFetch<KnowledgeDocument>(`/api/knowledge-bases/${encodeURIComponent(baseId)}/ingestions/upload`, {
+		method: 'POST', tenantId, principalId, rawBody: form,
+	})
+}
+
+export function archiveKnowledgeDocument(baseId: string, document: KnowledgeDocument, tenantId: string, principalId: string): Promise<KnowledgeDocument> {
+	return axisFetch<KnowledgeDocument>(`/api/knowledge-bases/${encodeURIComponent(baseId)}/documents/${encodeURIComponent(document.id)}/archive`, {
+		method: 'POST', tenantId, principalId, body: { expected_version: document.version },
+	})
+}
+
+export function listKnowledgeBindings(baseId: string, tenantId: string, principalId: string): Promise<KnowledgeBinding[]> {
+	return axisFetch<{ data?: KnowledgeBinding[] } | KnowledgeBinding[]>(`/api/knowledge-bases/${encodeURIComponent(baseId)}/bindings`, { tenantId, principalId })
+		.then((payload) => Array.isArray(payload) ? payload : payload.data ?? [])
+}
+
+export function replaceKnowledgeBindings(base: KnowledgeBase, bindings: KnowledgeBindingInput[], tenantId: string, principalId: string): Promise<KnowledgeBinding[]> {
+	return axisFetch<{ data?: KnowledgeBinding[] }>(`/api/knowledge-bases/${encodeURIComponent(base.id)}/bindings`, {
+		method: 'PUT', tenantId, principalId, body: { expected_version: base.version, bindings },
+	}).then((payload) => payload.data ?? [])
+}
+
+export function listVirployeeKnowledgeBases(
+	virployeeId: string,
+	tenantId: string,
+	principalId: string,
+	preview?: { subjectId?: string; caseId?: string },
+): Promise<VirployeeKnowledgeBase[]> {
+	const params = new URLSearchParams()
+	if (preview) {
+		params.set('context_preview', '1')
+		if (preview.subjectId) params.set('subject_id', preview.subjectId)
+		if (preview.caseId) params.set('case_id', preview.caseId)
+	}
+	const query = params.size > 0 ? `?${params.toString()}` : ''
+	return axisFetch<{ data?: VirployeeKnowledgeBase[] }>(`/api/virployees/${encodeURIComponent(virployeeId)}/knowledge-bases${query}`, {
+		tenantId,
+		principalId,
+	}).then((payload) => payload.data ?? [])
+}
+
+export function setVirployeeKnowledgeBase(
+	virployeeId: string,
+	base: KnowledgeBase,
+	enabled: boolean,
+	tenantId: string,
+	principalId: string,
+): Promise<VirployeeKnowledgeBase[]> {
+	return axisFetch<{ data?: VirployeeKnowledgeBase[] }>(`/api/virployees/${encodeURIComponent(virployeeId)}/knowledge-bases`, {
+		method: 'PUT',
+		tenantId,
+		principalId,
+		body: { knowledge_base_id: base.id, expected_version: base.version, enabled },
+	}).then((payload) => payload.data ?? [])
+}
+
+export function listRoutingPools(tenantId: string, principalId: string): Promise<RoutingPool[]> {
+	return axisFetch<{ data?: RoutingPool[] } | RoutingPool[]>('/api/routing-pools', { tenantId, principalId })
+		.then((payload) => Array.isArray(payload) ? payload : payload.data ?? [])
+}
+
+export function createRoutingPool(input: Pick<RoutingPool, 'job_role_id' | 'name'>, tenantId: string, principalId: string): Promise<RoutingPool> {
+	return axisFetch<RoutingPool>('/api/routing-pools', { method: 'POST', tenantId, principalId, body: input })
+}
+
+export function updateRoutingPool(id: string, input: Pick<RoutingPool, 'job_role_id' | 'name'>, tenantId: string, principalId: string): Promise<RoutingPool> {
+	return axisFetch<RoutingPool>(`/api/routing-pools/${encodeURIComponent(id)}`, { method: 'PUT', tenantId, principalId, body: input })
+}
+
+export function listRoutingPoolMembers(poolId: string, tenantId: string, principalId: string): Promise<RoutingPoolMember[]> {
+	return axisFetch<{ data?: RoutingPoolMember[] } | RoutingPoolMember[]>(`/api/routing-pools/${encodeURIComponent(poolId)}/members`, { tenantId, principalId })
+		.then((payload) => Array.isArray(payload) ? payload : payload.data ?? [])
+}
+
+export function putRoutingPoolMember(poolId: string, virployeeId: string, input: Pick<RoutingPoolMember, 'max_active_subjects' | 'enabled'>, tenantId: string, principalId: string): Promise<RoutingPoolMember> {
+	return axisFetch<RoutingPoolMember>(`/api/routing-pools/${encodeURIComponent(poolId)}/members/${encodeURIComponent(virployeeId)}`, {
+		method: 'PUT', tenantId, principalId, body: input,
+	})
+}
+
+export function resolveVirployeeRouting(poolId: string, subjectId: string, tenantId: string, principalId: string): Promise<RoutingResolution> {
+	return axisFetch<RoutingResolution>('/api/virployee-routing/resolve', {
+		method: 'POST', tenantId, principalId, body: { pool_id: poolId, subject_id: subjectId },
+	})
+}
+
+export function listContinuityAssignments(poolId: string, tenantId: string, principalId: string): Promise<ContinuityAssignment[]> {
+	const params = new URLSearchParams({ pool_id: poolId })
+	return axisFetch<{ data?: ContinuityAssignment[] } | ContinuityAssignment[]>(`/api/virployee-routing/assignments?${params.toString()}`, { tenantId, principalId })
+		.then((payload) => Array.isArray(payload) ? payload : payload.data ?? [])
+}
+
+export function reassignContinuityAssignment(
+	assignmentId: string,
+	input: { virployee_id: string; expected_version: number; reason: string },
+	tenantId: string,
+	principalId: string,
+): Promise<ContinuityAssignment> {
+	return axisFetch<ContinuityAssignment>(`/api/virployee-routing/assignments/${encodeURIComponent(assignmentId)}/reassign`, {
+		method: 'POST', tenantId, principalId, body: input,
+	})
+}
+
+export function listVirployeeAssignments(virployeeId: string, tenantId: string, principalId: string): Promise<ContinuityAssignment[]> {
+	return axisFetch<{ data?: ContinuityAssignment[] } | ContinuityAssignment[]>(`/api/virployees/${encodeURIComponent(virployeeId)}/assignments`, { tenantId, principalId })
+		.then((payload) => Array.isArray(payload) ? payload : payload.data ?? [])
+}
+
+export function getVirployeeRelationships(virployeeId: string, tenantId: string, principalId: string): Promise<WorkRelationship[]> {
+	return axisFetch<{ data?: WorkRelationship[] }>(`/api/virployees/${encodeURIComponent(virployeeId)}/relationships`, { tenantId, principalId })
+		.then((payload) => payload.data ?? [])
+}
+
+export function putVirployeeRelationships(virployeeId: string, relationships: WorkRelationshipInput[], tenantId: string, principalId: string): Promise<WorkRelationship[]> {
+	return axisFetch<{ data?: WorkRelationship[] }>(`/api/virployees/${encodeURIComponent(virployeeId)}/relationships`, {
+		method: 'PUT', tenantId, principalId, body: { relationships },
+	}).then((payload) => payload.data ?? [])
+}
+
+export function getVirployeeScopePolicy(virployeeId: string, tenantId: string, principalId: string): Promise<VirployeeScopePolicy> {
+	return axisFetch<VirployeeScopePolicy>(`/api/virployees/${encodeURIComponent(virployeeId)}/scope-policy`, { tenantId, principalId })
+}
+
+export function putVirployeeScopePolicy(virployeeId: string, input: Pick<VirployeeScopePolicy, 'allowed_topics' | 'prohibited_topics' | 'out_of_scope' | 'revision'>, tenantId: string, principalId: string): Promise<VirployeeScopePolicy> {
+	return axisFetch<VirployeeScopePolicy>(`/api/virployees/${encodeURIComponent(virployeeId)}/scope-policy`, {
+		method: 'PUT', tenantId, principalId,
+		body: { allowed_topics: input.allowed_topics, prohibited_topics: input.prohibited_topics, out_of_scope: input.out_of_scope, expected_revision: input.revision },
+	})
+}
+
+export function listProfessionalPolicyPacks(tenantId: string, principalId: string): Promise<ProfessionalPolicyPack[]> {
+	return axisFetch<{ data?: ProfessionalPolicyPack[] } | ProfessionalPolicyPack[]>('/api/professional-policy-packs', { tenantId, principalId })
+		.then((payload) => Array.isArray(payload) ? payload : payload.data ?? [])
+}
+
+export function createProfessionalPolicyPack(input: Omit<ProfessionalPolicyPack, 'id' | 'tenant_id' | 'created_at' | 'updated_at'>, tenantId: string, principalId: string): Promise<ProfessionalPolicyPack> {
+	return axisFetch<ProfessionalPolicyPack>('/api/professional-policy-packs', { method: 'POST', tenantId, principalId, body: input })
+}
+
+export function getVirployeeProfessionalPolicyBinding(virployeeId: string, tenantId: string, principalId: string): Promise<ProfessionalPolicyBinding> {
+	return axisFetch<ProfessionalPolicyBinding>(`/api/virployees/${encodeURIComponent(virployeeId)}/professional-policy-packs`, { tenantId, principalId })
+}
+
+export function putVirployeeProfessionalPolicyBinding(virployeeId: string, binding: ProfessionalPolicyBinding, tenantId: string, principalId: string): Promise<ProfessionalPolicyBinding> {
+	return axisFetch<ProfessionalPolicyBinding>(`/api/virployees/${encodeURIComponent(virployeeId)}/professional-policy-packs`, {
+		method: 'PUT', tenantId, principalId, body: { policy_pack_ids: binding.policy_pack_ids, expected_revision: binding.revision },
+	})
+}
+
+export function listVirployeeDelegations(virployeeId: string, tenantId: string, principalId: string, principalIds: string[] = []): Promise<VirployeeDelegation[]> {
+	const params = new URLSearchParams()
+	for (const id of principalIds) if (id) params.append('principal_id', id)
+	const query = params.size > 0 ? `?${params.toString()}` : ''
+	return axisFetch<{ data?: VirployeeDelegation[] } | VirployeeDelegation[]>(`/api/virployees/${encodeURIComponent(virployeeId)}/delegations${query}`, { tenantId, principalId })
+		.then((payload) => Array.isArray(payload) ? payload : payload.data ?? [])
+}
+
+export function createVirployeeDelegation(virployeeId: string, input: Pick<VirployeeDelegation, 'principal_type' | 'principal_id' | 'capability_scopes' | 'product_scopes' | 'resource_scopes' | 'max_risk_class' | 'purpose' | 'valid_until'> & { valid_from?: string }, tenantId: string, principalId: string): Promise<VirployeeDelegation> {
+	return axisFetch<VirployeeDelegation>(`/api/virployees/${encodeURIComponent(virployeeId)}/delegations`, {
+		method: 'POST', tenantId, principalId, body: input,
+	})
+}
+
+export function reviewVirployeeDelegation(virployeeId: string, delegationId: string, expectedRevision: number, note: string, tenantId: string, principalId: string): Promise<VirployeeDelegation> {
+	return axisFetch<VirployeeDelegation>(`/api/virployees/${encodeURIComponent(virployeeId)}/delegations/${encodeURIComponent(delegationId)}/review`, {
+		method: 'POST', tenantId, principalId, body: { expected_revision: expectedRevision, note },
+	})
+}
+
+export function listFunctionalRoleDefinitions(tenantId: string, principalId: string): Promise<FunctionalRoleDefinition[]> {
+	return axisFetch<FunctionalRoleDefinition[]>('/api/role-definitions', { tenantId, principalId })
+}
+
+export function listFunctionalRoleGrants(tenantId: string, principalId: string): Promise<FunctionalRoleGrant[]> {
+	return axisFetch<FunctionalRoleGrant[]>('/api/role-grants', { tenantId, principalId })
+}
+
+export function createFunctionalRoleGrant(input: Omit<FunctionalRoleGrant, 'id' | 'tenant_id' | 'revision' | 'granted_by' | 'created_at' | 'updated_at' | 'revoked_at' | 'revoked_by' | 'revocation_reason'>, tenantId: string, principalId: string): Promise<FunctionalRoleGrant> {
+	return axisFetch<FunctionalRoleGrant>('/api/role-grants', { method: 'POST', tenantId, principalId, body: input })
+}
+
+export function revokeFunctionalRoleGrant(id: string, revision: number, tenantId: string, principalId: string): Promise<FunctionalRoleGrant> {
+	return axisFetch<FunctionalRoleGrant>(`/api/role-grants/${encodeURIComponent(id)}/revoke`, { method: 'POST', tenantId, principalId, body: { expected_revision: revision, reason: 'console' } })
+}
+
+export function listGovernancePolicies(tenantId: string, principalId: string): Promise<GovernancePolicy[]> {
+	return axisFetch<GovernancePolicy[]>('/api/governance-policies', { tenantId, principalId })
+}
+
+export function getGovernancePolicy(id: string, tenantId: string, principalId: string): Promise<GovernancePolicy> {
+	return axisFetch<GovernancePolicy>(`/api/governance-policies/${encodeURIComponent(id)}`, { tenantId, principalId })
+}
+
+export function createGovernancePolicy(input: Pick<GovernancePolicy, 'policy_key' | 'name' | 'description'>, tenantId: string, principalId: string): Promise<GovernancePolicy> {
+	return axisFetch<GovernancePolicy>('/api/governance-policies', { method: 'POST', tenantId, principalId, body: input })
+}
+
+export function createGovernancePolicyVersion(policyId: string, input: Pick<GovernancePolicyVersion, 'product_surface' | 'action_type_pattern' | 'target_system' | 'requester_type' | 'expression' | 'effect' | 'risk_override' | 'priority'>, tenantId: string, principalId: string): Promise<GovernancePolicyVersion> {
+	return axisFetch<GovernancePolicyVersion>(`/api/governance-policies/${encodeURIComponent(policyId)}/versions`, { method: 'POST', tenantId, principalId, body: input })
+}
+
+export function simulateGovernancePolicyVersion(id: string, tenantId: string, principalId: string): Promise<GovernancePolicySimulation> {
+	return axisFetch<GovernancePolicySimulation>(`/api/governance-policy-versions/${encodeURIComponent(id)}/simulate`, { method: 'POST', tenantId, principalId, body: {} })
+}
+
+export function requestGovernancePolicyPromotion(id: string, simulationId: string, targetState: 'shadow' | 'active', tenantId: string, principalId: string): Promise<GovernancePolicyPromotion> {
+	return axisFetch<GovernancePolicyPromotion>(`/api/governance-policy-versions/${encodeURIComponent(id)}/promotions`, { method: 'POST', tenantId, principalId, body: { simulation_id: simulationId, target_state: targetState } })
+}
+
+export function listGovernancePolicyPromotions(tenantId: string, principalId: string): Promise<GovernancePolicyPromotion[]> {
+	return axisFetch<GovernancePolicyPromotion[]>('/api/governance-policy-promotions?limit=200', { tenantId, principalId })
+}
+
+export function decideGovernancePolicyPromotion(id: string, decision: 'approve' | 'reject', tenantId: string, principalId: string): Promise<GovernancePolicyPromotion> {
+	return axisFetch<GovernancePolicyPromotion>(`/api/governance-policy-promotions/${encodeURIComponent(id)}/${decision}`, { method: 'POST', tenantId, principalId, body: { reason: 'console' } })
+}
+
+export function listGovernancePolicyEvaluations(tenantId: string, principalId: string): Promise<GovernancePolicyEvaluation[]> {
+	return axisFetch<GovernancePolicyEvaluation[]>('/api/governance-policy-evaluations?limit=200', { tenantId, principalId })
+}
+
+export function listGovernancePolicyChanges(tenantId: string, principalId: string): Promise<GovernancePolicyChange[]> {
+	return axisFetch<GovernancePolicyChange[]>('/api/governance-policy-changelog?limit=200', { tenantId, principalId })
+}
+
+export function revokeVirployeeDelegation(virployeeId: string, delegationId: string, expectedRevision: number, tenantId: string, principalId: string): Promise<VirployeeDelegation> {
+	return axisFetch<VirployeeDelegation>(`/api/virployees/${encodeURIComponent(virployeeId)}/delegations/${encodeURIComponent(delegationId)}/revoke`, {
+		method: 'POST', tenantId, principalId, body: { expected_revision: expectedRevision, reason: 'console' },
+	})
+}
+
+export function listAssistCases(
+	tenantId: string,
+	principalId: string,
+	filters: { subjectId?: string; ownerVirployeeId?: string; caseId?: string } = {},
+): Promise<AssistCase[]> {
+	const params = new URLSearchParams({ limit: '200' })
+	if (filters.subjectId) params.set('subject_id', filters.subjectId)
+	if (filters.ownerVirployeeId) params.set('owner_virployee_id', filters.ownerVirployeeId)
+	if (filters.caseId) params.set('case_id', filters.caseId)
+	return axisFetch<AssistCase[]>(`/api/assist-cases?${params.toString()}`, { tenantId, principalId })
+}
+
+export function listHandoffs(tenantId: string, principalId: string): Promise<Handoff[]> {
+	return axisFetch<Handoff[]>('/api/handoffs?limit=200', { tenantId, principalId })
+}
+
+export function createHandoff(
+	input: { case_id: string; source_run_id?: string; to_virployee_id: string; reason_code: string; note?: string },
+	tenantId: string,
+	principalId: string,
+): Promise<Handoff> {
+	return axisFetch<Handoff>('/api/handoffs', { method: 'POST', tenantId, principalId, body: input })
+}
+
+export function decideHandoff(
+	id: string,
+	decision: 'accept' | 'reject' | 'cancel',
+	version: number,
+	tenantId: string,
+	principalId: string,
+	note = '',
+): Promise<Handoff> {
+	return axisFetch<Handoff>(`/api/handoffs/${encodeURIComponent(id)}/${decision}`, {
+		method: 'POST', tenantId, principalId, body: { version, note },
+	})
+}
+
+export function listHumanReviews(tenantId: string, principalId: string): Promise<HumanReview[]> {
+	return axisFetch<HumanReview[]>('/api/human-reviews', { tenantId, principalId })
+}
+
+export function claimHumanReview(id: string, tenantId: string, principalId: string): Promise<HumanReview> {
+	return axisFetch<HumanReview>(`/api/human-reviews/${encodeURIComponent(id)}/claim`, {
+		method: 'POST', tenantId, principalId, body: {},
+	})
+}
+
+export function resolveHumanReview(
+	id: string,
+	outcome: 'handled_externally' | 'handoff_requested' | 'dismissed',
+	tenantId: string,
+	principalId: string,
+	note = '',
+	handoffId = '',
+): Promise<HumanReview> {
+	return axisFetch<HumanReview>(`/api/human-reviews/${encodeURIComponent(id)}/resolve`, {
+		method: 'POST', tenantId, principalId, body: { outcome, note, handoff_id: handoffId },
+	})
+}
+
+export function listOrchestrationPolicies(tenantId: string, principalId: string): Promise<OrchestrationPolicy[]> {
+	return axisFetch<OrchestrationPolicy[]>('/api/orchestration-policies', { tenantId, principalId })
+}
+
+export function upsertOrchestrationPolicy(
+	input: Omit<OrchestrationPolicy, 'id' | 'tenant_id' | 'version' | 'created_at' | 'updated_at' | 'max_depth'>,
+	tenantId: string,
+	principalId: string,
+): Promise<OrchestrationPolicy> {
+	return axisFetch<OrchestrationPolicy>('/api/orchestration-policies', {
+		method: 'PUT', tenantId, principalId, body: input,
+	})
+}
+
+export function listSpecialistRoutes(tenantId: string, principalId: string): Promise<SpecialistRoute[]> {
+	return axisFetch<SpecialistRoute[]>('/api/specialist-routes', { tenantId, principalId })
+}
+
+export function upsertSpecialistRoute(
+	input: Omit<SpecialistRoute, 'id' | 'tenant_id' | 'version' | 'created_at' | 'updated_at'>,
+	tenantId: string,
+	principalId: string,
+): Promise<SpecialistRoute> {
+	return axisFetch<SpecialistRoute>('/api/specialist-routes', {
+		method: 'PUT', tenantId, principalId, body: input,
+	})
 }
 
 export function listTenants(
@@ -846,13 +1714,16 @@ export function getVirployeeRuntimeContext(
   )
 }
 
-export function listVirployeeMemories(id:string, state:string, query:string, cursor:string, tenantId:string, principalId:string):Promise<MemoryPage> {
-  const params = new URLSearchParams({state, q:query, limit:'50'}); if(cursor) params.set('cursor',cursor)
+export function listVirployeeMemories(id:string, state:string, query:string, cursor:string, scope:MemoryScope, tenantId:string, principalId:string):Promise<MemoryPage> {
+  const params = new URLSearchParams({state, q:query, limit:'50', scope_type:scope.type})
+  if (cursor) params.set('cursor',cursor)
+  if (scope.subject_id) params.set('subject_id', scope.subject_id)
+  if (scope.case_id) params.set('case_id', scope.case_id)
   return axisFetch<MemoryPage>(`/api/virployees/${encodeURIComponent(id)}/memories?${params}`,{tenantId,principalId})
 }
 export function createVirployeeMemory(id:string,input:MemoryInput,tenantId:string,principalId:string):Promise<VirployeeMemory>{return axisFetch(`/api/virployees/${encodeURIComponent(id)}/memories`,{method:'POST',tenantId,principalId,body:input})}
 export function updateVirployeeMemory(virployeeId:string,id:string,input:MemoryInput,expectedVersion:number,tenantId:string,principalId:string):Promise<VirployeeMemory>{return axisFetch(`/api/virployees/${encodeURIComponent(virployeeId)}/memories/${encodeURIComponent(id)}`,{method:'PUT',tenantId,principalId,body:{...input,expected_version:expectedVersion}})}
-export function recallVirployeeMemories(id:string,query:string,tenantId:string,principalId:string):Promise<MemoryRecall>{return axisFetch(`/api/virployees/${encodeURIComponent(id)}/memories/recall`,{method:'POST',tenantId,principalId,body:{query}})}
+export function recallVirployeeMemories(id:string,query:string,scope:MemoryScope,tenantId:string,principalId:string):Promise<MemoryRecall>{return axisFetch(`/api/virployees/${encodeURIComponent(id)}/memories/recall`,{method:'POST',tenantId,principalId,body:{query,scope}})}
 export function lifecycleVirployeeMemory(virployeeId:string,id:string,action:'archive'|'unarchive'|'trash'|'restore'|'purge',tenantId:string,principalId:string):Promise<void>{return axisFetch(`/api/virployees/${encodeURIComponent(virployeeId)}/memories/${encodeURIComponent(id)}/${action}`,{method:action==='purge'?'DELETE':'POST',tenantId,principalId})}
 
 export function dryRunVirployee(

@@ -135,6 +135,35 @@ Example: a Virployee with `autonomy = A2` can receive a Capability with
 
 This is configuration validation only. It does not execute anything.
 
+## Clinical read capabilities
+
+Axis defines two tenant-scoped, product-neutral keys whose first manifest uses
+`product_surface=medmory`:
+
+- `clinical.records.search`: A0, read-only, medium risk, evidence required,
+  30-second timeout, one attempt, inbound/embeddings quotas.
+- `clinical.timeline.build`: A1, read-only, medium risk, evidence required,
+  120-second timeout, one attempt, inbound/LLM quotas.
+
+Their input and output schemas set `additionalProperties=false`. Search returns
+bounded excerpts, scores and canonical document/source/hash/locator references;
+its opaque cursor is bound to tenant, Virployee, subject, case, product,
+repository generation, query and manifest hash. Timeline is a projection, not
+a persisted clinical entity. It returns ordered events, coverage and canonical
+references, with `completed|partial|abstained` status.
+
+Assist accepts a nullable `capability_key` for backward compatibility. When it
+is present, only these registered read executors are valid: write, unknown or
+executor-less capabilities fail closed. The accepted run snapshots the
+canonical key and manifest hash; both participate in context/idempotency and
+are checked again before execution. Legacy Medmory aliases normalize before
+routing and hashing and never own manifests.
+
+`/v1/virployee-routing:resolve` includes the optional canonical capability key.
+Existing assignments become `reassignment_required` when their member no
+longer has an active/conformant assignment or enough autonomy; new candidates
+are filtered by the same predicates.
+
 ## Conformance and promotion
 
 The conformance gate is deterministic and fail-closed. It validates:
@@ -194,6 +223,7 @@ Capabilities for the current tenant.
 - IAM permissions.
 - Job Role recommended capabilities.
 - Global/product Capability catalog.
+- Persisted clinical timeline tables or Medmory-owned clinical engines.
 
 ## Decision Summary
 

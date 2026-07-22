@@ -54,12 +54,13 @@ func ChainScopeFor(tenantID, virployeeID string) string {
 // AppendInput is the caller-supplied part of an event. Tenant and (optionally)
 // the actor come from the trusted request headers, not the body.
 type AppendInput struct {
-	VirployeeID string
-	SubjectType string
-	SubjectID   string
-	EventType   string
-	ActorType   string
-	ActorID     string
-	Summary     string
-	Data        map[string]any
+	IdempotencyKey string
+	VirployeeID    string
+	SubjectType    string
+	SubjectID      string
+	EventType      string
+	ActorType      string
+	ActorID        string
+	Summary        string
+	Data           map[string]any
 }

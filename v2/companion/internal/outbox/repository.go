@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -30,8 +31,18 @@ func (r *Repository) EnqueueTx(ctx context.Context, tx pgx.Tx, input EnqueueInpu
 	if input.ID == uuid.Nil {
 		input.ID = uuid.New()
 	}
-	if input.TenantID == "" || input.AggregateID == uuid.Nil || input.AggregateType != "execution_attempt" || input.Kind != "execution_result" || input.DedupeKey == "" || !json.Valid(input.Payload) {
+	if input.TenantID == "" || input.AggregateID == uuid.Nil || !validMessageType(input.AggregateType, input.Kind) || input.DedupeKey == "" || !json.Valid(input.Payload) {
 		return Message{}, false, fmt.Errorf("invalid Nexus outbox message")
+	}
+	if input.Kind == KindAuditEvent {
+		if _, err := ParseNexusAuditEvent(input.Payload, input.AggregateID); err != nil {
+			return Message{}, false, fmt.Errorf("invalid Nexus outbox audit payload: %w", err)
+		}
+	}
+	if input.Kind == KindOperationalFinding {
+		if _, err := ParseOperationalFinding(input.Payload); err != nil {
+			return Message{}, false, fmt.Errorf("invalid operational finding payload: %w", err)
+		}
 	}
 	message, err := scanMessage(tx.QueryRow(ctx, `
         INSERT INTO companion_nexus_outbox
@@ -50,6 +61,9 @@ func (r *Repository) EnqueueTx(ctx context.Context, tx pgx.Tx, input EnqueueInpu
 	}
 	if err != nil {
 		return Message{}, false, fmt.Errorf("enqueue Nexus outbox message: %w", err)
+	}
+	if !inserted && (message.AggregateType != input.AggregateType || message.AggregateID != input.AggregateID || message.Kind != input.Kind || !sameJSON(message.Payload, input.Payload)) {
+		return Message{}, false, fmt.Errorf("nexus outbox dedupe key conflicts with a different message")
 	}
 	if inserted {
 		if err := recordEvent(ctx, tx, message.ID, "pending", json.RawMessage(`{}`)); err != nil {
@@ -142,27 +156,31 @@ func (r *Repository) MarkDelivered(ctx context.Context, id uuid.UUID, workerID s
 	defer func() { _ = tx.Rollback(ctx) }()
 	var aggregateID uuid.UUID
 	var tenantID string
+	var aggregateType string
+	var kind string
 	var attempts int
 	err = tx.QueryRow(ctx, `
         UPDATE companion_nexus_outbox
         SET status='delivered', lease_owner='', lease_until=NULL, last_error_code='',
             delivered_at=now(), updated_at=now()
         WHERE id=$1 AND lease_owner=$2 AND status='processing'
-		RETURNING aggregate_id, tenant_id, attempts
-	`, id, strings.TrimSpace(workerID)).Scan(&aggregateID, &tenantID, &attempts)
+		RETURNING aggregate_id, tenant_id, aggregate_type, kind, attempts
+	`, id, strings.TrimSpace(workerID)).Scan(&aggregateID, &tenantID, &aggregateType, &kind, &attempts)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrMessageNotFound
 	}
 	if err != nil {
 		return fmt.Errorf("mark outbox delivered: %w", err)
 	}
-	if _, err := tx.Exec(ctx, `
+	if aggregateType == AggregateTypeExecutionAttempt && kind == KindExecutionResult {
+		if _, err := tx.Exec(ctx, `
         UPDATE companion_execution_attempts
         SET nexus_report_status='reported', nexus_report_attempts=$2,
             report_lease_owner='', report_lease_until=NULL, last_watcher_error='', updated_at=now()
 		WHERE id=$1 AND tenant_id=$3
 	`, aggregateID, attempts, tenantID); err != nil {
-		return fmt.Errorf("project delivered outbox: %w", err)
+			return fmt.Errorf("project delivered outbox: %w", err)
+		}
 	}
 	if err := recordEvent(ctx, tx, id, "delivered", json.RawMessage(`{}`)); err != nil {
 		return err
@@ -201,13 +219,15 @@ func (r *Repository) MarkFailed(ctx context.Context, id uuid.UUID, workerID, err
 		projection = "dead"
 		event = "dead"
 	}
-	if _, err := tx.Exec(ctx, `
+	if message.AggregateType == AggregateTypeExecutionAttempt && message.Kind == KindExecutionResult {
+		if _, err := tx.Exec(ctx, `
         UPDATE companion_execution_attempts
         SET nexus_report_status=$2, nexus_report_attempts=$3, nexus_report_next_at=$4,
             report_lease_owner='', report_lease_until=NULL, last_watcher_error=$5, updated_at=now()
 		WHERE id=$1 AND tenant_id=$6
 	`, message.AggregateID, projection, message.Attempts, message.AvailableAt, errorCode, message.TenantID); err != nil {
-		return Message{}, fmt.Errorf("project failed outbox: %w", err)
+			return Message{}, fmt.Errorf("project failed outbox: %w", err)
+		}
 	}
 	metadata, _ := json.Marshal(map[string]any{"attempt": message.Attempts, "error_code": errorCode})
 	if err := recordEvent(ctx, tx, message.ID, event, metadata); err != nil {
@@ -244,24 +264,26 @@ func (r *Repository) RecoverExpiredLeases(ctx context.Context, limit int) (Recov
             last_error_code='lease_expired', updated_at=now()
         FROM picked
         WHERE message.id=picked.id
-		RETURNING message.id, message.tenant_id, message.aggregate_id, message.status, message.attempts, message.available_at
+		RETURNING message.id, message.tenant_id, message.aggregate_type, message.kind, message.aggregate_id, message.status, message.attempts, message.available_at
     `, limit)
 	if err != nil {
 		return RecoveryResult{}, fmt.Errorf("recover outbox leases: %w", err)
 	}
 	type recovered struct {
-		id          uuid.UUID
-		tenantID    string
-		aggregateID uuid.UUID
-		status      Status
-		attempts    int
-		availableAt time.Time
+		id            uuid.UUID
+		tenantID      string
+		aggregateType string
+		kind          string
+		aggregateID   uuid.UUID
+		status        Status
+		attempts      int
+		availableAt   time.Time
 	}
 	items := make([]recovered, 0)
 	var result RecoveryResult
 	for rows.Next() {
 		var item recovered
-		if err := rows.Scan(&item.id, &item.tenantID, &item.aggregateID, &item.status, &item.attempts, &item.availableAt); err != nil {
+		if err := rows.Scan(&item.id, &item.tenantID, &item.aggregateType, &item.kind, &item.aggregateID, &item.status, &item.attempts, &item.availableAt); err != nil {
 			return RecoveryResult{}, err
 		}
 		if item.status == StatusPending {
@@ -280,13 +302,15 @@ func (r *Repository) RecoverExpiredLeases(ctx context.Context, limit int) (Recov
 		if item.status == StatusDead {
 			projection, event = "dead", "dead"
 		}
-		if _, err := tx.Exec(ctx, `
+		if item.aggregateType == AggregateTypeExecutionAttempt && item.kind == KindExecutionResult {
+			if _, err := tx.Exec(ctx, `
             UPDATE companion_execution_attempts
             SET nexus_report_status=$2, nexus_report_attempts=$3, nexus_report_next_at=$4,
                 last_watcher_error='lease_expired', updated_at=now()
 			WHERE id=$1 AND tenant_id=$5
 		`, item.aggregateID, projection, item.attempts, item.availableAt, item.tenantID); err != nil {
-			return RecoveryResult{}, err
+				return RecoveryResult{}, err
+			}
 		}
 		if err := recordEvent(ctx, tx, item.id, event, json.RawMessage(`{"error_code":"lease_expired"}`)); err != nil {
 			return RecoveryResult{}, err
@@ -320,13 +344,15 @@ func (r *Repository) Replay(ctx context.Context, tenantID string, id uuid.UUID, 
 	if err != nil {
 		return Message{}, fmt.Errorf("replay outbox: %w", err)
 	}
-	if _, err := tx.Exec(ctx, `
+	if message.AggregateType == AggregateTypeExecutionAttempt && message.Kind == KindExecutionResult {
+		if _, err := tx.Exec(ctx, `
         UPDATE companion_execution_attempts
         SET nexus_report_status='pending', nexus_report_attempts=0, nexus_report_next_at=$2,
             last_watcher_error='', updated_at=now()
 		WHERE id=$1 AND tenant_id=$3
 	`, message.AggregateID, message.AvailableAt, message.TenantID); err != nil {
-		return Message{}, err
+			return Message{}, err
+		}
 	}
 	if err := recordEvent(ctx, tx, id, "replayed", json.RawMessage(`{}`)); err != nil {
 		return Message{}, err
@@ -400,6 +426,26 @@ func prefixedColumns(prefix string) string {
 		columns[index] = prefix + "." + strings.TrimSpace(column)
 	}
 	return strings.Join(columns, ", ")
+}
+
+func validMessageType(aggregateType, kind string) bool {
+	return (aggregateType == AggregateTypeExecutionAttempt && kind == KindExecutionResult) ||
+		(aggregateType == AggregateTypeProfessionalAuthority && kind == KindAuditEvent) ||
+		(aggregateType == AggregateTypeOperationalFinding && kind == KindOperationalFinding)
+}
+
+func containsString(items []string, value string) bool {
+	for _, item := range items {
+		if item == value {
+			return true
+		}
+	}
+	return false
+}
+
+func sameJSON(left, right json.RawMessage) bool {
+	var leftValue, rightValue any
+	return json.Unmarshal(left, &leftValue) == nil && json.Unmarshal(right, &rightValue) == nil && reflect.DeepEqual(leftValue, rightValue)
 }
 
 var _ RepositoryPort = (*Repository)(nil)

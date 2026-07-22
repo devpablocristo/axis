@@ -55,11 +55,35 @@ type ProposedIntent struct {
 // product's opaque payload; ResponseSchema, when set, forces a structured JSON
 // answer that must conform to it.
 type AnswerRequest struct {
-	SystemPrompt   string          `json:"system_prompt,omitempty"`
-	JobRole        string          `json:"job_role,omitempty"`
-	InputJSON      json.RawMessage `json:"input_json"`
-	ResponseSchema map[string]any  `json:"response_schema,omitempty"`
-	ContentParts   []ContentPart   `json:"content_parts,omitempty"`
+	SystemPrompt        string              `json:"system_prompt,omitempty"`
+	JobRole             string              `json:"job_role,omitempty"`
+	ProfessionalContext ProfessionalContext `json:"professional_context,omitempty"`
+	InputJSON           json.RawMessage     `json:"input_json"`
+	ResponseSchema      map[string]any      `json:"response_schema,omitempty"`
+	ContentParts        []ContentPart       `json:"content_parts,omitempty"`
+	GroundingMode       string              `json:"grounding_mode,omitempty"`
+}
+
+type ProfessionalContext struct {
+	JobRoleID        string                         `json:"job_role_id,omitempty"`
+	Name             string                         `json:"name,omitempty"`
+	Mission          string                         `json:"mission,omitempty"`
+	Responsibilities []ProfessionalResponsibility   `json:"responsibilities,omitempty"`
+	SuccessCriteria  []ProfessionalSuccessCriterion `json:"success_criteria,omitempty"`
+}
+
+type ProfessionalResponsibility struct {
+	Title           string `json:"title"`
+	Description     string `json:"description"`
+	ExpectedOutcome string `json:"expected_outcome"`
+	Priority        int    `json:"priority"`
+}
+
+type ProfessionalSuccessCriterion struct {
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	TargetValue string `json:"target_value"`
+	Priority    int    `json:"priority"`
 }
 
 type ContentPart struct {
@@ -83,9 +107,17 @@ type AnswerResponse struct {
 	OutputText    string          `json:"output_text,omitempty"`
 	OutputJSON    json.RawMessage `json:"output_json,omitempty"`
 	Answered      bool            `json:"answered"`
+	Status        string          `json:"status"`
+	Citations     []Citation      `json:"citations"`
 	Model         string          `json:"model,omitempty"`
 	PromptVersion string          `json:"prompt_version,omitempty"`
 	Usage         Usage           `json:"usage"`
+}
+
+type Citation struct {
+	DocumentID string          `json:"document_id"`
+	SHA256     string          `json:"sha256,omitempty"`
+	Locator    json.RawMessage `json:"locator,omitempty"`
 }
 
 // EnrichRequest is what Companion sends to improve the WORDING of a distilled

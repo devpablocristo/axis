@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/devpablocristo/companion-v2/internal/virployees/executiongate"
 	"github.com/devpablocristo/companion-v2/internal/virployees/preparedactions"
 	"github.com/devpablocristo/companion-v2/internal/virployees/runtraces"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
@@ -102,6 +103,52 @@ func (u *UseCases) ExecuteApprovedAction(ctx context.Context, tenantID string, i
 	}
 	if prepared.BindingHash != approval.BindingHash || prepared.GovernanceCheckID.String() != approval.GovernanceCheckID {
 		return runtraces.Trace{}, domainerr.Conflict("approval binding does not match prepared action")
+	}
+	if prepared.NexusPolicySnapshotHash != approval.PolicySnapshotHash {
+		return runtraces.Trace{}, domainerr.Conflict("approval policy snapshot does not match prepared action")
+	}
+	payloadHash, err := prepared.Action.PayloadHash()
+	if err != nil || payloadHash != prepared.PayloadHash {
+		return runtraces.Trace{}, domainerr.Conflict("prepared action payload does not match its approved hash")
+	}
+	currentVirployee, currentCapability, err := u.verifyCurrentExecutionEligibility(ctx, tenantID, id, prepared.CapabilityKey, prepared.Action)
+	if err != nil {
+		return runtraces.Trace{}, err
+	}
+	if err := u.verifyCurrentProfessionalActionScope(ctx, tenantID, id, currentVirployee.JobRoleID, prepared.CapabilityKey, prepared.Action); err != nil {
+		return runtraces.Trace{}, err
+	}
+	if err := u.verifyPreparedAssistContext(ctx, tenantID, id, prepared.Action.AssistContext); err != nil {
+		return runtraces.Trace{}, err
+	}
+	if prepared.Action.MCPContext != nil {
+		if u.mcpContext == nil {
+			return runtraces.Trace{}, domainerr.Conflict("MCP execution context validator is unavailable")
+		}
+		if err := u.mcpContext.ValidateMCPExecutionContext(ctx, *prepared.Action.MCPContext); err != nil {
+			return runtraces.Trace{}, err
+		}
+	}
+	currentAuthority, err := u.verifyCurrentAuthority(ctx, tenantID, id, currentCapability, prepared.Action, prepared.AuthorityBindingHash)
+	if err != nil {
+		return runtraces.Trace{}, err
+	}
+	if strings.TrimSpace(approval.PolicySnapshotHash) != "" {
+		if u.governanceRevalidator == nil {
+			return runtraces.Trace{}, domainerr.Conflict("governance revalidation is unavailable")
+		}
+		revalidation, err := u.governanceRevalidator.Revalidate(ctx, executiongate.GovernanceRevalidationInput{
+			TenantID: tenantID, CheckID: prepared.GovernanceCheckID.String(), BindingHash: prepared.BindingHash,
+			PolicySnapshotHash: approval.PolicySnapshotHash, AuthorityBindingHash: currentAuthority.SnapshotHash,
+			ScopeRevision: currentAuthority.ScopeRevision, PolicyRevisionHash: currentAuthority.PolicyRevisionHash,
+			DelegationID: currentAuthority.DelegationID, DelegationRevision: currentAuthority.DelegationRevision,
+		})
+		if err != nil {
+			return runtraces.Trace{}, domainerr.Conflict("governance authority could not be revalidated")
+		}
+		if !revalidation.Valid {
+			return runtraces.Trace{}, domainerr.Conflict("governance authority changed after approval")
+		}
 	}
 	executor := u.executors[prepared.Action.Action]
 	if executor == nil {

@@ -10,12 +10,12 @@ import (
 
 type conflictStub struct{ conflict bool }
 
-func (s conflictStub) HasActiveConflict(context.Context, string, uuid.UUID, uuid.UUID, string, string, string) (bool, error) {
+func (s conflictStub) HasActiveConflict(context.Context, string, uuid.UUID, uuid.UUID, Scope, string, string, string) (bool, error) {
 	return s.conflict, nil
 }
 
 func curatorInput(content string) CreateInput {
-	return CreateInput{Title: "Patient preference", Type: "preference", Content: content, Provenance: "human", ActorID: "user-1"}
+	return CreateInput{Title: "Patient preference", Type: "preference", Content: content, Provenance: "human", ActorID: "user-1", Scope: Scope{Type: ScopeSubject, SubjectID: "00000000-0000-4000-8000-000000000001"}}
 }
 
 func TestCuratorRejectsSecretBeforePersistence(t *testing.T) {

@@ -28,15 +28,29 @@ func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
 }
 
 func (r *PostgresRepository) Enqueue(ctx context.Context, input EnqueueInput) (Job, bool, error) {
-	input, err := NormalizeEnqueueInput(input)
-	if err != nil {
-		return Job{}, false, err
-	}
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return Job{}, false, fmt.Errorf("begin enqueue job: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	job, inserted, err := r.EnqueueTx(ctx, tx, input)
+	if err != nil {
+		return Job{}, false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Job{}, false, fmt.Errorf("commit enqueue job: %w", err)
+	}
+	return job, inserted, nil
+}
+
+// EnqueueTx persists a job inside the caller's transaction. It is used when a
+// domain record and the durable work needed to advance it must become visible
+// atomically. The caller owns commit/rollback.
+func (r *PostgresRepository) EnqueueTx(ctx context.Context, tx pgx.Tx, input EnqueueInput) (Job, bool, error) {
+	input, err := NormalizeEnqueueInput(input)
+	if err != nil {
+		return Job{}, false, err
+	}
 
 	row := tx.QueryRow(ctx, `
         INSERT INTO companion_jobs
@@ -52,9 +66,6 @@ func (r *PostgresRepository) Enqueue(ctx context.Context, input EnqueueInput) (J
 	if scanErr == nil {
 		if err := recordEvent(ctx, tx, job.ID, "queued", json.RawMessage(`{"source":"enqueue"}`)); err != nil {
 			return Job{}, false, err
-		}
-		if err := tx.Commit(ctx); err != nil {
-			return Job{}, false, fmt.Errorf("commit enqueue job: %w", err)
 		}
 		return job, true, nil
 	}
@@ -83,9 +94,6 @@ func (r *PostgresRepository) Enqueue(ctx context.Context, input EnqueueInput) (J
 			return Job{}, false, err
 		}
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return Job{}, false, fmt.Errorf("commit deduplicated job: %w", err)
-	}
 	return existing, false, nil
 }
 
@@ -96,19 +104,42 @@ func (r *PostgresRepository) Claim(ctx context.Context, options ClaimOptions) ([
 		return nil, fmt.Errorf("begin claim jobs: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `
+		UPDATE companion_worker_controls
+		SET state='half_open', revision=revision+1, changed_by='system:circuit_breaker',
+			reason_code='cooldown_elapsed', updated_at=now()
+		WHERE state='open' AND opened_until<=now()
+	`); err != nil {
+		return nil, fmt.Errorf("advance worker circuit breakers: %w", err)
+	}
 
 	rows, err := tx.Query(ctx, `
-        WITH picked AS (
-            SELECT id
-            FROM companion_jobs
-            WHERE status='queued'
-              AND attempts < max_attempts
-              AND run_after <= now()
-              AND (cardinality($2::text[]) = 0 OR kind = ANY($2::text[]))
-              AND ($3::int <= 0 OR mod(abs(hashtext(shard_key)), $3::int) = $4::int)
-            ORDER BY priority DESC, run_after, created_at
+        WITH candidates AS (
+            SELECT job.id, job.priority, job.run_after, job.created_at,
+                   COALESCE(control.state,'closed') AS control_state,
+                   row_number() OVER (
+                       PARTITION BY job.tenant_id,job.product_surface,job.kind
+                       ORDER BY job.priority DESC,job.run_after,job.created_at,job.id
+                   ) AS control_rank
+            FROM companion_jobs AS job
+            LEFT JOIN companion_worker_controls AS control
+              ON control.tenant_id=job.tenant_id
+             AND control.product_surface=job.product_surface
+             AND control.kind=job.kind
+            WHERE job.status='queued'
+              AND job.attempts < job.max_attempts
+              AND job.run_after <= now()
+              AND (cardinality($2::text[]) = 0 OR job.kind = ANY($2::text[]))
+              AND ($3::int <= 0 OR mod(abs(hashtext(job.shard_key)), $3::int) = $4::int)
+              AND COALESCE(control.state,'closed') NOT IN ('paused','open')
+        ), picked AS (
+            SELECT job.id
+            FROM companion_jobs AS job
+            JOIN candidates ON candidates.id=job.id
+            WHERE candidates.control_state<>'half_open' OR candidates.control_rank=1
+            ORDER BY candidates.priority DESC,candidates.run_after,candidates.created_at
             LIMIT $5
-            FOR UPDATE SKIP LOCKED
+            FOR UPDATE OF job SKIP LOCKED
         )
         UPDATE companion_jobs AS job
         SET status='running', attempts=attempts+1, lease_owner=$1,
@@ -148,6 +179,17 @@ func (r *PostgresRepository) Claim(ctx context.Context, options ClaimOptions) ([
 }
 
 func (r *PostgresRepository) Heartbeat(ctx context.Context, jobID uuid.UUID, workerID string, lease time.Duration) error {
+	cancelled, err := r.pool.Exec(ctx, `
+		UPDATE companion_jobs SET status='cancelled',lease_owner='',lease_until=NULL,
+			completed_at=now(),updated_at=now()
+		WHERE id=$1 AND lease_owner=$2 AND status='cancel_requested'
+	`, jobID, strings.TrimSpace(workerID))
+	if err != nil {
+		return fmt.Errorf("acknowledge job cancellation: %w", err)
+	}
+	if cancelled.RowsAffected() > 0 {
+		return ErrJobCancelled
+	}
 	tag, err := r.pool.Exec(ctx, `
         UPDATE companion_jobs
         SET heartbeat_at=now(), lease_until=now()+make_interval(secs => $3), updated_at=now()
@@ -169,20 +211,29 @@ func (r *PostgresRepository) Complete(ctx context.Context, jobID uuid.UUID, work
 		return fmt.Errorf("begin complete job: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	tag, err := tx.Exec(ctx, `
+	var finalStatus Status
+	var tenantID, productSurface, kind string
+	err = tx.QueryRow(ctx, `
         UPDATE companion_jobs
-        SET status='succeeded', lease_owner='', lease_until=NULL, evidence_json=$3,
+        SET status=CASE WHEN status='cancel_requested' THEN 'cancelled' ELSE 'succeeded' END,
+			lease_owner='', lease_until=NULL, evidence_json=CASE WHEN status='running' THEN $3 ELSE evidence_json END,
             completed_at=now(), updated_at=now()
-        WHERE id=$1 AND lease_owner=$2 AND status='running'
-    `, jobID, strings.TrimSpace(workerID), evidence)
+		WHERE id=$1 AND lease_owner=$2 AND status IN('running','cancel_requested')
+		RETURNING status,tenant_id,product_surface,kind
+	`, jobID, strings.TrimSpace(workerID), evidence).Scan(&finalStatus, &tenantID, &productSurface, &kind)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrJobNotFound
+		}
 		return fmt.Errorf("complete job: %w", err)
 	}
-	if tag.RowsAffected() == 0 {
-		return ErrJobNotFound
-	}
-	if err := recordEvent(ctx, tx, jobID, "succeeded", json.RawMessage(`{}`)); err != nil {
+	if err := recordEvent(ctx, tx, jobID, string(finalStatus), json.RawMessage(`{}`)); err != nil {
 		return err
+	}
+	if finalStatus == StatusSucceeded {
+		if err := closeCircuitAfterProbe(ctx, tx, "companion_worker_controls", tenantID, productSurface, kind); err != nil {
+			return err
+		}
 	}
 	return commitTx(ctx, tx, "complete job")
 }
@@ -198,13 +249,13 @@ func (r *PostgresRepository) Fail(ctx context.Context, input FailInput) (Job, er
 	defer func() { _ = tx.Rollback(ctx) }()
 	row := tx.QueryRow(ctx, `
         UPDATE companion_jobs
-        SET status=CASE WHEN $4 AND attempts < max_attempts THEN 'queued' ELSE 'dead_letter' END,
+        SET status=CASE WHEN status='cancel_requested' THEN 'cancelled' WHEN $4 AND attempts < max_attempts THEN 'queued' ELSE 'dead_letter' END,
             run_after=CASE WHEN $4 AND attempts < max_attempts
                            THEN now()+make_interval(secs => $5) ELSE run_after END,
             lease_owner='', lease_until=NULL, last_error_code=$3, evidence_json=$6,
-            completed_at=CASE WHEN $4 AND attempts < max_attempts THEN NULL ELSE now() END,
+            completed_at=CASE WHEN status<>'cancel_requested' AND $4 AND attempts < max_attempts THEN NULL ELSE now() END,
             updated_at=now()
-        WHERE id=$1 AND lease_owner=$2 AND status='running'
+		WHERE id=$1 AND lease_owner=$2 AND status IN('running','cancel_requested')
         RETURNING `+jobColumns,
 		input.JobID, strings.TrimSpace(input.WorkerID), input.ErrorCode, input.Retryable,
 		durationSeconds(input.Backoff), input.Evidence)
@@ -216,12 +267,20 @@ func (r *PostgresRepository) Fail(ctx context.Context, input FailInput) (Job, er
 		return Job{}, fmt.Errorf("fail job: %w", err)
 	}
 	event := "retry_scheduled"
-	if job.Status == StatusDeadLetter {
+	switch job.Status {
+	case StatusDeadLetter:
 		event = "dead_letter"
+	case StatusCancelled:
+		event = "cancelled"
 	}
 	metadata, _ := json.Marshal(map[string]string{"error_code": input.ErrorCode})
 	if err := recordEvent(ctx, tx, job.ID, event, metadata); err != nil {
 		return Job{}, err
+	}
+	if input.Retryable && job.Status != StatusCancelled {
+		if err := recordCircuitFailure(ctx, tx, "companion_worker_controls", "companion_job_definitions", job); err != nil {
+			return Job{}, err
+		}
 	}
 	if err := commitTx(ctx, tx, "fail job"); err != nil {
 		return Job{}, err
@@ -236,20 +295,25 @@ func (r *PostgresRepository) Cancel(ctx context.Context, tenantID string, jobID 
 		return fmt.Errorf("begin cancel job: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	tag, err := tx.Exec(ctx, `
+	var status Status
+	err = tx.QueryRow(ctx, `
         UPDATE companion_jobs
-        SET status='cancelled', lease_owner='', lease_until=NULL, last_error_code=$3,
-            completed_at=now(), updated_at=now()
+		SET status=CASE WHEN status='running' THEN 'cancel_requested' ELSE 'cancelled' END,
+			cancel_requested_at=now(), last_error_code=$3,
+			lease_owner=CASE WHEN status='running' THEN lease_owner ELSE '' END,
+			lease_until=CASE WHEN status='running' THEN lease_until ELSE NULL END,
+			completed_at=CASE WHEN status='running' THEN NULL ELSE now() END,updated_at=now()
         WHERE tenant_id=$1 AND id=$2 AND status IN ('queued','running')
-    `, strings.TrimSpace(tenantID), jobID, reasonCode)
+		RETURNING status
+	`, strings.TrimSpace(tenantID), jobID, reasonCode).Scan(&status)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrJobNotFound
+		}
 		return fmt.Errorf("cancel job: %w", err)
 	}
-	if tag.RowsAffected() == 0 {
-		return ErrJobNotFound
-	}
 	metadata, _ := json.Marshal(map[string]string{"reason_code": reasonCode})
-	if err := recordEvent(ctx, tx, jobID, "cancelled", metadata); err != nil {
+	if err := recordEvent(ctx, tx, jobID, string(status), metadata); err != nil {
 		return err
 	}
 	return commitTx(ctx, tx, "cancel job")
@@ -485,4 +549,45 @@ func prefixedJobColumns(prefix string) string {
 		columns[index] = prefix + "." + strings.TrimSpace(column)
 	}
 	return strings.Join(columns, ", ")
+}
+
+func closeCircuitAfterProbe(ctx context.Context, tx pgx.Tx, controlsTable, tenantID, productSurface, kind string) error {
+	query := fmt.Sprintf(`UPDATE %s SET state='closed',failure_count=0,failure_window_started_at=NULL,
+		opened_until=NULL,revision=revision+1,changed_by='system:circuit_breaker',reason_code='probe_succeeded',updated_at=now()
+		WHERE tenant_id=$1 AND product_surface=$2 AND kind=$3 AND state='half_open'`, controlsTable)
+	if _, err := tx.Exec(ctx, query, tenantID, productSurface, kind); err != nil {
+		return fmt.Errorf("close worker circuit after probe: %w", err)
+	}
+	return nil
+}
+
+func recordCircuitFailure(ctx context.Context, tx pgx.Tx, controlsTable, definitionsTable string, job Job) error {
+	query := fmt.Sprintf(`
+		INSERT INTO %s(tenant_id,product_surface,kind,state,failure_count,failure_window_started_at,
+			opened_until,changed_by,reason_code)
+		SELECT $1,$2,$3,'closed',1,now(),NULL,'system:circuit_breaker','dependency_failure'
+		WHERE NOT COALESCE((SELECT protected FROM %s WHERE product_surface=$2 AND kind=$3),false)
+		ON CONFLICT(tenant_id,product_surface,kind) DO UPDATE SET
+			failure_count=CASE WHEN %s.failure_window_started_at>=now()-interval '1 minute'
+				THEN %s.failure_count+1 ELSE 1 END,
+			failure_window_started_at=CASE WHEN %s.failure_window_started_at>=now()-interval '1 minute'
+				THEN %s.failure_window_started_at ELSE now() END,
+			state=CASE
+				WHEN %s.state='paused' THEN 'paused'
+				WHEN %s.state='half_open' OR
+					(CASE WHEN %s.failure_window_started_at>=now()-interval '1 minute' THEN %s.failure_count+1 ELSE 1 END)>=5
+				THEN 'open' ELSE %s.state END,
+			opened_until=CASE
+				WHEN %s.state='half_open' OR
+					(CASE WHEN %s.failure_window_started_at>=now()-interval '1 minute' THEN %s.failure_count+1 ELSE 1 END)>=5
+				THEN now()+interval '1 minute' ELSE %s.opened_until END,
+			revision=%s.revision+1,changed_by='system:circuit_breaker',reason_code='dependency_failure',updated_at=now()
+	`, controlsTable, definitionsTable,
+		controlsTable, controlsTable, controlsTable, controlsTable,
+		controlsTable, controlsTable, controlsTable, controlsTable, controlsTable,
+		controlsTable, controlsTable, controlsTable, controlsTable, controlsTable)
+	if _, err := tx.Exec(ctx, query, job.TenantID, job.ProductSurface, job.Kind); err != nil {
+		return fmt.Errorf("record worker circuit failure: %w", err)
+	}
+	return nil
 }

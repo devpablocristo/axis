@@ -40,6 +40,7 @@ func (h *Handler) Append(c *gin.Context) {
 		return
 	}
 	in := req.ToDomain()
+	in.IdempotencyKey = strings.TrimSpace(c.GetHeader("Idempotency-Key"))
 	if strings.TrimSpace(in.ActorID) == "" {
 		in.ActorID = actorID(c)
 	}

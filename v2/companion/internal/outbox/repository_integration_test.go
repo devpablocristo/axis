@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -12,6 +13,46 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+func TestValidMessageTypeRequiresExactAggregateKindPair(t *testing.T) {
+	tests := []struct {
+		aggregateType string
+		kind          string
+		want          bool
+	}{
+		{AggregateTypeExecutionAttempt, KindExecutionResult, true},
+		{AggregateTypeProfessionalAuthority, KindAuditEvent, true},
+		{AggregateTypeOperationalFinding, KindOperationalFinding, true},
+		{AggregateTypeExecutionAttempt, KindAuditEvent, false},
+		{AggregateTypeProfessionalAuthority, KindExecutionResult, false},
+		{AggregateTypeOperationalFinding, KindAuditEvent, false},
+		{"unknown", KindAuditEvent, false},
+	}
+	for _, test := range tests {
+		if got := validMessageType(test.aggregateType, test.kind); got != test.want {
+			t.Fatalf("validMessageType(%q, %q)=%v want %v", test.aggregateType, test.kind, got, test.want)
+		}
+	}
+}
+
+func TestParseOperationalFindingRejectsUnknownOrNonObjectMetadata(t *testing.T) {
+	base := `{"run_id":"` + uuid.NewString() + `","finding_type":"job.dead_letter","severity":"high","resource_type":"job","resource_id":"` + uuid.NewString() + `","fingerprint":"` + strings.Repeat("a", 64) + `","state_based":true,`
+	for name, suffix := range map[string]string{
+		"unknown field":       `"metadata":{},"raw_error":"credential leaked"}`,
+		"non-object metadata": `"metadata":["raw payload"]}`,
+		"missing metadata":    `"state_based":true}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := ParseOperationalFinding(json.RawMessage(base + suffix)); err == nil {
+				t.Fatal("invalid operational finding must be rejected")
+			}
+		})
+	}
+	valid := json.RawMessage(base + `"metadata":{"check":"lease"}}`)
+	if _, err := ParseOperationalFinding(valid); err != nil {
+		t.Fatalf("valid operational finding rejected: %v", err)
+	}
+}
 
 func TestPostgresOutboxTransactionalClaimDeadLetterReplayAndProjection(t *testing.T) {
 	databaseURL := os.Getenv("COMPANION_V2_OUTBOX_TEST_DATABASE_URL")

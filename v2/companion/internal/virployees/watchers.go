@@ -80,6 +80,12 @@ func (u *UseCases) recoverExecution(ctx context.Context, repo OperationalReposit
 		fail("approval_not_executable")
 		return
 	}
+	if prepared.Action.MCPContext != nil {
+		if u.mcpContext == nil || u.mcpContext.ValidateMCPExecutionContext(ctx, *prepared.Action.MCPContext) != nil {
+			fail("mcp_context_revalidation_failed")
+			return
+		}
+	}
 	executor := u.executors[prepared.Action.Action]
 	if executor == nil {
 		fail("executor_unconfigured")

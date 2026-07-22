@@ -272,7 +272,7 @@ func (u *UseCases) EnsureActive(ctx context.Context, tenantID, userID string) er
 		return err
 	}
 	if !exists {
-		return domainerr.Validation("supervisor_user_id must reference an active tenant user")
+		return domainerr.Validation("user_id must reference an active tenant user")
 	}
 	return nil
 }

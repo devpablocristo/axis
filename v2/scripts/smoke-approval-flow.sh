@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
+trap 'echo "approval flow failed at line $LINENO" >&2' ERR
 
 BFF_URL="${BFF_URL:-http://127.0.0.1:19080}"
 DEV_ACTOR_ID="${DEV_ACTOR_ID:-dev-user}"
@@ -39,13 +40,13 @@ api() {
   local body="${3:-}"
 
   if [[ -n "$body" ]]; then
-    curl -fsS -X "$method" "$BFF_URL$path" \
+    curl -sS --fail-with-body -X "$method" "$BFF_URL$path" \
       -H "Content-Type: application/json" \
       -H "X-Tenant-ID: $TENANT_ID" \
       -H "X-Actor-ID: $PRINCIPAL_ID" \
       -d "$body"
   else
-    curl -fsS -X "$method" "$BFF_URL$path" \
+    curl -sS --fail-with-body -X "$method" "$BFF_URL$path" \
       -H "X-Tenant-ID: $TENANT_ID" \
       -H "X-Actor-ID: $PRINCIPAL_ID"
   fi
@@ -188,6 +189,10 @@ create_job_role() {
   api POST "/api/job-roles" "$payload" | jq -r '.id'
 }
 
+create_employer() {
+  api POST "/api/work-subjects" "$(jq -n --arg ref "smoke-approval-$RUN_ID" '{kind:"organization",display_name:"Smoke Approval Employer",external_ref:$ref}')" | jq -r '.id'
+}
+
 create_profile_template() {
   local payload
   payload="$(
@@ -208,6 +213,7 @@ create_virployee() {
   local profile_template_id="$2"
   local read_capability_id="$3"
   local create_capability_id="$4"
+  local employer_id="$5"
   local payload
 
   payload="$(
@@ -218,6 +224,7 @@ create_virployee() {
       --arg supervisorUserID "$PRINCIPAL_ID" \
       --arg readCapabilityID "$read_capability_id" \
       --arg createCapabilityID "$create_capability_id" \
+	  --arg employerSubjectID "$employer_id" \
       '{
         name: $name,
         job_role_id: $jobRoleID,
@@ -225,7 +232,8 @@ create_virployee() {
         capability_ids: [$readCapabilityID, $createCapabilityID],
         description: "Smoke approval flow virployee",
         supervisor_user_id: $supervisorUserID,
-        autonomy: "A3"
+		autonomy: "A3",
+		employer_subject_id: $employerSubjectID
       }'
   )"
   api POST "/api/virployees" "$payload" | jq -r '.id'
@@ -261,6 +269,11 @@ run_gate() {
   api POST "/api/virployees/$virployee_id/execution-gate" "$payload"
 }
 
+configure_scope_policy() {
+  local virployee_id="$1"
+  api PUT "/api/virployees/$virployee_id/scope-policy" '{"allowed_topics":["calendar"],"prohibited_topics":[],"out_of_scope":"abstain","expected_revision":0}' >/dev/null
+}
+
 latest_runs() {
   local virployee_id="$1"
   api GET "/api/virployees/$virployee_id/runs?limit=20"
@@ -279,7 +292,9 @@ read_capability_id="$(ensure_capability "calendar.events.read" "Read calendar ev
 create_capability_id="$(ensure_capability "calendar.events.create" "Create calendar events" "A2" "high" "write" "true")"
 job_role_id="$(create_job_role)"
 profile_template_id="$(create_profile_template)"
-virployee_id="$(create_virployee "$job_role_id" "$profile_template_id" "$read_capability_id" "$create_capability_id")"
+employer_id="$(create_employer)"
+virployee_id="$(create_virployee "$job_role_id" "$profile_template_id" "$read_capability_id" "$create_capability_id" "$employer_id")"
+configure_scope_policy "$virployee_id"
 
 allow_gate="$(run_gate "$virployee_id" "Que reuniones tengo manana")"
 assert_jq "$allow_gate" '.execution_gate.decision == "pass"' "calendar read should pass"

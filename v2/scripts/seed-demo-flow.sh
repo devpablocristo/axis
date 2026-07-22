@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
+trap 'echo "seed demo failed at line $LINENO" >&2' ERR
 
 BFF_URL="${BFF_URL:-http://127.0.0.1:19080}"
 CONSOLE_URL="${CONSOLE_URL:-http://localhost:19173}"
@@ -49,13 +50,13 @@ api() {
   local body="${3:-}"
 
   if [[ -n "$body" ]]; then
-    curl -fsS -X "$method" "$BFF_URL$path" \
+    curl -sS --fail-with-body -X "$method" "$BFF_URL$path" \
       -H "Content-Type: application/json" \
       -H "X-Tenant-ID: $TENANT_ID" \
       -H "X-Actor-ID: $PRINCIPAL_ID" \
       -d "$body"
   else
-    curl -fsS -X "$method" "$BFF_URL$path" \
+    curl -sS --fail-with-body -X "$method" "$BFF_URL$path" \
       -H "X-Tenant-ID: $TENANT_ID" \
       -H "X-Actor-ID: $PRINCIPAL_ID"
   fi
@@ -275,6 +276,16 @@ ensure_job_role() {
   api POST "/api/job-roles" "$payload" | jq -r '.id'
 }
 
+ensure_employer() {
+  local employer_list employer_id
+  employer_list="$(api GET "/api/work-subjects")"
+  employer_id="$(jq -r '.data[]? | select(.external_ref == "demo-approval-employer") | .id' <<<"$employer_list" | head -n 1)"
+  if [[ -z "$employer_id" ]]; then
+    employer_id="$(api POST "/api/work-subjects" '{"kind":"organization","display_name":"Demo Approval Employer","external_ref":"demo-approval-employer"}' | jq -r '.id')"
+  fi
+  echo "$employer_id"
+}
+
 ensure_profile_template() {
   local list id payload
 
@@ -304,6 +315,7 @@ ensure_virployee() {
   local read_capability_id="$3"
   local create_capability_id="$4"
   local delete_capability_id="$5"
+  local employer_id="$6"
   local list id payload
 
   payload="$(
@@ -315,6 +327,7 @@ ensure_virployee() {
       --arg readCapabilityID "$read_capability_id" \
       --arg createCapabilityID "$create_capability_id" \
       --arg deleteCapabilityID "$delete_capability_id" \
+	  --arg employerSubjectID "$employer_id" \
       '{
         name: $name,
         job_role_id: $jobRoleID,
@@ -322,7 +335,8 @@ ensure_virployee() {
         capability_ids: [$readCapabilityID, $createCapabilityID, $deleteCapabilityID],
         description: "Demo approval flow virployee",
         supervisor_user_id: $supervisorUserID,
-        autonomy: "A3"
+		autonomy: "A3",
+		employer_subject_id: $employerSubjectID
       }'
   )"
 
@@ -344,6 +358,15 @@ run_dry_run() {
 
   payload="$(jq -n --arg input "$input" '{input: $input}')"
   api POST "/api/virployees/$virployee_id/dry-run" "$payload"
+}
+
+configure_scope_policy() {
+  local virployee_id="$1"
+  local current revision payload
+  current="$(api GET "/api/virployees/$virployee_id/scope-policy")"
+  revision="$(jq -r '.revision // 0' <<<"$current")"
+  payload="$(jq -n --argjson revision "$revision" '{allowed_topics:["calendar"],prohibited_topics:[],out_of_scope:"abstain",expected_revision:$revision}')"
+  api PUT "/api/virployees/$virployee_id/scope-policy" "$payload" >/dev/null
 }
 
 run_gate() {
@@ -404,7 +427,9 @@ delete_capability_id="$(ensure_capability "calendar.events.delete" "Delete calen
 create_capability_id="$(ensure_capability "calendar.events.create" "Create calendar events" "A2" "high" "write" "true" "true" "calendar.events.delete")"
 job_role_id="$(ensure_job_role)"
 profile_template_id="$(ensure_profile_template)"
-virployee_id="$(ensure_virployee "$job_role_id" "$profile_template_id" "$read_capability_id" "$create_capability_id" "$delete_capability_id")"
+employer_id="$(ensure_employer)"
+virployee_id="$(ensure_virployee "$job_role_id" "$profile_template_id" "$read_capability_id" "$create_capability_id" "$delete_capability_id" "$employer_id")"
+configure_scope_policy "$virployee_id"
 
 read_input="Que reuniones tengo manana"
 create_input="Agenda una reunion \"$DEMO_TITLE\" manana a las 15 con ana@example.com"

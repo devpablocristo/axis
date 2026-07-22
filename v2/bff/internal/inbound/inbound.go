@@ -3,11 +3,15 @@ package inbound
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -16,6 +20,7 @@ import (
 
 	ginmw "github.com/devpablocristo/platform/http/gin/go"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 type Binding struct {
@@ -23,6 +28,7 @@ type Binding struct {
 	VirployeeID    string
 	ActorID        string
 	ProductSurface string
+	RoutingPoolID  string
 }
 
 type Handler struct {
@@ -49,25 +55,52 @@ type assistRunEnvelope struct {
 	OwnerSystem          string          `json:"owner_system"`
 	ProductSurface       string          `json:"product_surface"`
 	AssistType           string          `json:"assist_type"`
+	CapabilityKey        string          `json:"capability_key,omitempty"`
 	SubjectType          string          `json:"subject_type"`
 	SubjectID            string          `json:"subject_id"`
+	CaseID               string          `json:"case_id,omitempty"`
+	AssignmentID         string          `json:"assignment_id,omitempty"`
 	RepositoryGeneration string          `json:"repository_generation"`
 	Input                json.RawMessage `json:"input"`
 }
 
 type assistRunResult struct {
-	ID           string          `json:"id"`
-	Status       string          `json:"status"`
-	StatusURL    string          `json:"status_url,omitempty"`
-	Output       json.RawMessage `json:"output,omitempty"`
-	ErrorMessage string          `json:"error_message,omitempty"`
+	ID                     string          `json:"id"`
+	CaseID                 string          `json:"case_id,omitempty"`
+	ResponsibleVirployeeID string          `json:"responsible_virployee_id,omitempty"`
+	CapabilityKey          string          `json:"capability_key,omitempty"`
+	CapabilityManifestHash string          `json:"capability_manifest_hash,omitempty"`
+	Status                 string          `json:"status"`
+	AnswerStatus           string          `json:"answer_status,omitempty"`
+	Citations              json.RawMessage `json:"citations,omitempty"`
+	StatusURL              string          `json:"status_url,omitempty"`
+	Output                 json.RawMessage `json:"output,omitempty"`
+	Orchestration          json.RawMessage `json:"orchestration,omitempty"`
+	ErrorMessage           string          `json:"error_message,omitempty"`
 }
 
 type companionAssistResponse struct {
-	ID     string          `json:"id"`
-	Status string          `json:"status"`
-	Output json.RawMessage `json:"output"`
-	Error  string          `json:"error_message"`
+	ID                     string          `json:"id"`
+	CaseID                 string          `json:"case_id"`
+	ResponsibleVirployeeID string          `json:"responsible_virployee_id"`
+	CapabilityKey          string          `json:"capability_key"`
+	CapabilityManifestHash string          `json:"capability_manifest_hash"`
+	Status                 string          `json:"status"`
+	AnswerStatus           string          `json:"answer_status"`
+	Citations              json.RawMessage `json:"citations"`
+	Output                 json.RawMessage `json:"output"`
+	Orchestration          json.RawMessage `json:"orchestration"`
+	Error                  string          `json:"error_message"`
+}
+
+type routingResolution struct {
+	Status     string             `json:"status"`
+	Assignment *routingAssignment `json:"assignment,omitempty"`
+}
+
+type routingAssignment struct {
+	ID          string `json:"id"`
+	VirployeeID string `json:"virployee_id"`
 }
 
 func (h *Handler) AssistRun(c *gin.Context) {
@@ -84,13 +117,37 @@ func (h *Handler) AssistRun(c *gin.Context) {
 		ginmw.WriteError(c, http.StatusForbidden, "forbidden", "product_surface does not match the api key")
 		return
 	}
+	requestedCapability := envelope.CapabilityKey
+	var deprecated bool
+	envelope.CapabilityKey, deprecated = normalizeCapabilityKey(envelope.CapabilityKey)
+	if deprecated {
+		c.Header("Deprecation", "true")
+		c.Header("Warning", `299 Axis "Deprecated capability alias; use `+envelope.CapabilityKey+`"`)
+		slog.WarnContext(c.Request.Context(), "assist_capability_alias_used",
+			"alias", strings.ToLower(strings.TrimSpace(requestedCapability)),
+			"capability_key", envelope.CapabilityKey, "product_surface", binding.ProductSurface)
+	}
+	if isClinicalCapability(envelope.CapabilityKey) {
+		if subjectID, err := uuid.Parse(strings.TrimSpace(envelope.SubjectID)); err != nil || subjectID == uuid.Nil {
+			ginmw.WriteError(c, http.StatusBadRequest, "invalid_subject", "subject_id must be a UUID for clinical capabilities")
+			return
+		}
+		if strings.TrimSpace(envelope.RepositoryGeneration) == "" {
+			ginmw.WriteError(c, http.StatusBadRequest, "repository_generation_required", "repository_generation is required for clinical capabilities")
+			return
+		}
+	}
+	if strings.TrimSpace(binding.RoutingPoolID) != "" && strings.TrimSpace(envelope.SubjectID) == "" {
+		ginmw.WriteError(c, http.StatusBadRequest, "subject_required", "subject_id is required for routed assists")
+		return
+	}
 	idempotencyKey := strings.TrimSpace(c.GetHeader("Idempotency-Key"))
 	if idempotencyKey == "" {
 		ginmw.WriteError(c, http.StatusBadRequest, "idempotency_required", "Idempotency-Key must identify a stable input manifest")
 		return
 	}
 
-	run, err := h.submit(c, binding, envelope, idempotencyKey)
+	run, resolvedBinding, err := h.submit(c, binding, envelope, idempotencyKey)
 	if err != nil {
 		var downstream *downstreamError
 		if errors.As(err, &downstream) && downstream.Status == http.StatusTooManyRequests {
@@ -98,6 +155,10 @@ func (h *Handler) AssistRun(c *gin.Context) {
 				c.Header("Retry-After", downstream.RetryAfter)
 			}
 			ginmw.WriteError(c, http.StatusTooManyRequests, "quota_exceeded", "product quota exceeded")
+			return
+		}
+		if errors.As(err, &downstream) && (downstream.Status == http.StatusConflict || downstream.Status == http.StatusServiceUnavailable) {
+			ginmw.WriteError(c, downstream.Status, "routing_unavailable", "no stable Virployee assignment is currently available")
 			return
 		}
 		ginmw.WriteError(c, http.StatusBadGateway, "downstream_unavailable", "assist service unavailable")
@@ -120,11 +181,11 @@ func (h *Handler) AssistRun(c *gin.Context) {
 			case <-c.Request.Context().Done():
 				return
 			case <-deadline.C:
-				result.StatusURL = statusURL(result.ID)
+				result.StatusURL = h.statusURL(result.ID, binding, resolvedBinding)
 				c.JSON(http.StatusAccepted, result)
 				return
 			case <-ticker.C:
-				polled, pollErr := h.get(c, binding, result.ID)
+				polled, pollErr := h.get(c, resolvedBinding, result.ID)
 				if pollErr != nil {
 					continue
 				}
@@ -136,7 +197,7 @@ func (h *Handler) AssistRun(c *gin.Context) {
 			}
 		}
 	}
-	result.StatusURL = statusURL(result.ID)
+	result.StatusURL = h.statusURL(result.ID, binding, resolvedBinding)
 	c.JSON(http.StatusAccepted, result)
 }
 
@@ -150,14 +211,23 @@ func (h *Handler) GetAssistRun(c *gin.Context) {
 		ginmw.WriteError(c, http.StatusBadRequest, "invalid_request", "run id is required")
 		return
 	}
-	run, err := h.get(c, binding, runID)
+	resolvedBinding := binding
+	if token := strings.TrimSpace(c.Query("route")); token != "" {
+		virployeeID, valid := h.verifyRouteToken(token, runID, binding)
+		if !valid {
+			ginmw.WriteError(c, http.StatusForbidden, "forbidden", "invalid assist route")
+			return
+		}
+		resolvedBinding.VirployeeID = virployeeID
+	}
+	run, err := h.get(c, resolvedBinding, runID)
 	if err != nil {
 		ginmw.WriteError(c, http.StatusBadGateway, "downstream_unavailable", "assist service unavailable")
 		return
 	}
 	result := productResult(run)
 	if !isTerminal(result.Status) {
-		result.StatusURL = statusURL(result.ID)
+		result.StatusURL = h.statusURL(result.ID, binding, resolvedBinding)
 	}
 	c.JSON(http.StatusOK, result)
 }
@@ -168,7 +238,18 @@ func (h *Handler) AssistCapabilities(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"schema_version": "axis.assist_capabilities.v1",
-		"states":         []string{"received", "staging", "extracting", "indexing", "answering", "completed", "failed"},
+		"states": []string{
+			"received", "staging", "extracting", "indexing", "planning", "consulting",
+			"synthesizing", "answering", "completed", "failed", "needs_human",
+		},
+		"orchestration": gin.H{
+			"schema_version":  "axis.orchestration_summary.v1",
+			"modes":           []string{"disabled", "shadow", "active"},
+			"max_specialists": 3,
+			"max_depth":       1,
+			"handoffs":        true,
+			"human_review":    true,
+		},
 		"formats": gin.H{
 			"native": []string{
 				"text/*", "application/json", "application/xml", "application/pdf",
@@ -182,25 +263,87 @@ func (h *Handler) AssistCapabilities(c *gin.Context) {
 				"application/vnd.openxmlformats-officedocument.*", "application/vnd.oasis.opendocument.*",
 			},
 		},
+		"capabilities": []string{"clinical.records.search", "clinical.timeline.build"},
+		"capability_aliases": gin.H{
+			"medmory.search.query": "clinical.records.search", "medmory.timeline.read": "clinical.timeline.build",
+			"medmory.timeline.build": "clinical.timeline.build",
+		},
 		"limits": gin.H{"max_artifact_bytes": 250 << 20, "max_diagnosis_bytes": 500 << 20, "max_repository_bytes": 5 << 30},
 	})
 }
 
-func (h *Handler) submit(c *gin.Context, binding Binding, envelope assistRunEnvelope, idempotencyKey string) (companionAssistResponse, error) {
+func (h *Handler) submit(c *gin.Context, binding Binding, envelope assistRunEnvelope, idempotencyKey string) (companionAssistResponse, Binding, error) {
+	resolvedBinding := binding
+	assignmentID := strings.TrimSpace(envelope.AssignmentID)
+	if strings.TrimSpace(binding.RoutingPoolID) != "" {
+		resolution, err := h.resolveRouting(c, binding, envelope.SubjectID, envelope.CapabilityKey)
+		if err != nil {
+			return companionAssistResponse{}, Binding{}, err
+		}
+		if resolution.Status == "unavailable" {
+			return companionAssistResponse{}, Binding{}, &downstreamError{Status: http.StatusServiceUnavailable}
+		}
+		if resolution.Status == "reassignment_required" {
+			return companionAssistResponse{}, Binding{}, &downstreamError{Status: http.StatusConflict}
+		}
+		if resolution.Status != "assigned" || resolution.Assignment == nil || strings.TrimSpace(resolution.Assignment.ID) == "" || strings.TrimSpace(resolution.Assignment.VirployeeID) == "" {
+			return companionAssistResponse{}, Binding{}, errors.New("routing response has no stable assignment")
+		}
+		if assignmentID != "" && assignmentID != resolution.Assignment.ID {
+			return companionAssistResponse{}, Binding{}, &downstreamError{Status: http.StatusConflict}
+		}
+		assignmentID = resolution.Assignment.ID
+		resolvedBinding.VirployeeID = resolution.Assignment.VirployeeID
+	}
 	body, err := json.Marshal(map[string]any{
 		"input_json": envelope.Input, "idempotency_key": idempotencyKey,
 		"assist_type": envelope.AssistType, "product_surface": binding.ProductSurface,
-		"subject_id": envelope.SubjectID, "repository_generation": envelope.RepositoryGeneration,
+		"capability_key": envelope.CapabilityKey,
+		"subject_id":     envelope.SubjectID, "repository_generation": envelope.RepositoryGeneration,
+		"case_id": envelope.CaseID, "assignment_id": assignmentID,
 	})
 	if err != nil {
-		return companionAssistResponse{}, err
+		return companionAssistResponse{}, Binding{}, err
 	}
-	target := h.companionBaseURL + "/v1/virployees/" + url.PathEscape(binding.VirployeeID) + "/assist-runs"
+	target := h.companionBaseURL + "/v1/virployees/" + url.PathEscape(resolvedBinding.VirployeeID) + "/assist-runs"
 	request, err := h.internalRequest(c, binding, http.MethodPost, target, body)
 	if err != nil {
-		return companionAssistResponse{}, err
+		return companionAssistResponse{}, Binding{}, err
 	}
-	return h.do(request)
+	run, err := h.do(request)
+	return run, resolvedBinding, err
+}
+
+func (h *Handler) resolveRouting(c *gin.Context, binding Binding, subjectID, capabilityKey string) (routingResolution, error) {
+	body, err := json.Marshal(map[string]string{
+		"pool_id": binding.RoutingPoolID, "subject_id": strings.TrimSpace(subjectID),
+		"capability_key": strings.TrimSpace(capabilityKey),
+	})
+	if err != nil {
+		return routingResolution{}, err
+	}
+	target := h.companionBaseURL + "/v1/virployee-routing:resolve"
+	request, err := h.internalRequest(c, binding, http.MethodPost, target, body)
+	if err != nil {
+		return routingResolution{}, err
+	}
+	response, err := h.client.Do(request)
+	if err != nil {
+		return routingResolution{}, err
+	}
+	defer func() { _ = response.Body.Close() }()
+	raw, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+	if err != nil {
+		return routingResolution{}, err
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return routingResolution{}, &downstreamError{Status: response.StatusCode, RetryAfter: response.Header.Get("Retry-After")}
+	}
+	var resolution routingResolution
+	if err := json.Unmarshal(raw, &resolution); err != nil {
+		return routingResolution{}, err
+	}
+	return resolution, nil
 }
 
 func (h *Handler) get(c *gin.Context, binding Binding, runID string) (companionAssistResponse, error) {
@@ -263,11 +406,66 @@ func productResult(run companionAssistResponse) assistRunResult {
 	case "":
 		status = "received"
 	}
-	return assistRunResult{ID: run.ID, Status: status, Output: run.Output, ErrorMessage: run.Error}
+	return assistRunResult{
+		ID: run.ID, CaseID: run.CaseID, ResponsibleVirployeeID: run.ResponsibleVirployeeID,
+		CapabilityKey: run.CapabilityKey, CapabilityManifestHash: run.CapabilityManifestHash,
+		Status: status, AnswerStatus: run.AnswerStatus, Citations: run.Citations,
+		Output: run.Output, Orchestration: run.Orchestration, ErrorMessage: run.Error,
+	}
 }
 
-func isTerminal(status string) bool { return status == "completed" || status == "failed" }
-func statusURL(id string) string    { return "/v1/assist-runs/" + url.PathEscape(id) }
+var capabilityAliases = map[string]string{
+	"medmory.search.query": "clinical.records.search", "medmory.timeline.read": "clinical.timeline.build",
+	"medmory.timeline.build": "clinical.timeline.build",
+}
+
+func normalizeCapabilityKey(raw string) (string, bool) {
+	key := strings.ToLower(strings.TrimSpace(raw))
+	canonical, ok := capabilityAliases[key]
+	if ok {
+		return canonical, true
+	}
+	return key, false
+}
+
+func isClinicalCapability(key string) bool {
+	return key == "clinical.records.search" || key == "clinical.timeline.build"
+}
+
+func isTerminal(status string) bool {
+	return status == "completed" || status == "failed" || status == "needs_human"
+}
+func statusURL(id string) string { return "/v1/assist-runs/" + url.PathEscape(id) }
+
+func (h *Handler) statusURL(runID string, original, resolved Binding) string {
+	base := statusURL(runID)
+	if strings.TrimSpace(resolved.VirployeeID) == "" || resolved.VirployeeID == original.VirployeeID {
+		return base
+	}
+	token := h.routeToken(runID, resolved.VirployeeID, original)
+	return base + "?route=" + url.QueryEscape(token)
+}
+
+func (h *Handler) routeToken(runID, virployeeID string, binding Binding) string {
+	payload := base64.RawURLEncoding.EncodeToString([]byte(strings.TrimSpace(virployeeID)))
+	mac := hmac.New(sha256.New, []byte(h.internalAuthSecret))
+	_, _ = mac.Write([]byte(strings.Join([]string{binding.TenantID, binding.ProductSurface, runID, virployeeID}, "\x00")))
+	return payload + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
+
+func (h *Handler) verifyRouteToken(token, runID string, binding Binding) (string, bool) {
+	payload, signature, ok := strings.Cut(strings.TrimSpace(token), ".")
+	if !ok || payload == "" || signature == "" {
+		return "", false
+	}
+	decoded, err := base64.RawURLEncoding.DecodeString(payload)
+	if err != nil || strings.TrimSpace(string(decoded)) == "" {
+		return "", false
+	}
+	virployeeID := strings.TrimSpace(string(decoded))
+	expected := h.routeToken(runID, virployeeID, binding)
+	return virployeeID, subtle.ConstantTimeCompare([]byte(expected), []byte(token)) == 1
+}
 
 func preferredWait(header string) time.Duration {
 	for _, part := range strings.Split(header, ",") {
@@ -338,7 +536,11 @@ func ParseBindings(raw string) map[string]Binding {
 		if key == "" {
 			continue
 		}
-		out[key] = Binding{TenantID: strings.TrimSpace(parts[0]), VirployeeID: strings.TrimSpace(parts[1]), ActorID: strings.TrimSpace(parts[2]), ProductSurface: strings.TrimSpace(parts[3])}
+		binding := Binding{TenantID: strings.TrimSpace(parts[0]), VirployeeID: strings.TrimSpace(parts[1]), ActorID: strings.TrimSpace(parts[2]), ProductSurface: strings.TrimSpace(parts[3])}
+		if len(parts) >= 5 {
+			binding.RoutingPoolID = strings.TrimSpace(parts[4])
+		}
+		out[key] = binding
 	}
 	return out
 }

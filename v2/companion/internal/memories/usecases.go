@@ -101,9 +101,13 @@ func (u *UseCases) Update(ctx context.Context, tenant string, virployee, id uuid
 		return Memory{}, err
 	}
 	in.ActorID = actor
+	current, err := u.repo.Get(ctx, tenant, virployee, id)
+	if err != nil {
+		return Memory{}, err
+	}
 	curated, err := u.curator.Curate(ctx, tenant, virployee, id, CreateInput{
 		Title: in.Title, Type: in.Type, Content: in.Content, Sensitivity: in.Sensitivity,
-		Provenance: "human", ActorID: actor,
+		Provenance: "human", ActorID: actor, Scope: current.Scope(),
 	})
 	if err != nil {
 		return Memory{}, err
@@ -112,10 +116,14 @@ func (u *UseCases) Update(ctx context.Context, tenant string, virployee, id uuid
 	return redact(m, false), err
 }
 func (u *UseCases) Recall(ctx context.Context, tenant string, virployee uuid.UUID, actor, role, query string, limit int) ([]Reference, error) {
+	return u.RecallScoped(ctx, tenant, virployee, actor, role, Scope{}, query, limit)
+}
+
+func (u *UseCases) RecallScoped(ctx context.Context, tenant string, virployee uuid.UUID, actor, role string, scope Scope, query string, limit int) ([]Reference, error) {
 	if err := u.authorize(ctx, tenant, virployee, actor, role); err != nil {
 		return nil, err
 	}
-	items, err := u.recall(ctx, tenant, virployee, query, limit)
+	items, err := u.recall(ctx, tenant, virployee, scope, query, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -126,28 +134,36 @@ func (u *UseCases) Recall(ctx context.Context, tenant string, virployee uuid.UUI
 	return refs, nil
 }
 func (u *UseCases) RecallInternal(ctx context.Context, tenant string, virployee uuid.UUID, query string, limit int) ([]Recalled, error) {
-	return u.recall(ctx, tenant, virployee, query, limit)
+	return u.recall(ctx, tenant, virployee, Scope{}, query, limit)
 }
 
-func (u *UseCases) recall(ctx context.Context, tenant string, virployee uuid.UUID, query string, limit int) ([]Recalled, error) {
+func (u *UseCases) RecallScopedInternal(ctx context.Context, tenant string, virployee uuid.UUID, scope Scope, query string, limit int) ([]Recalled, error) {
+	return u.recall(ctx, tenant, virployee, scope, query, limit)
+}
+
+func (u *UseCases) recall(ctx context.Context, tenant string, virployee uuid.UUID, scope Scope, query string, limit int) ([]Recalled, error) {
+	scope, err := NormalizeScope(scope)
+	if err != nil {
+		return nil, err
+	}
 	if u.embedder == nil {
-		return u.repo.Recall(ctx, strings.TrimSpace(tenant), virployee, query, limit, nil, "")
+		return u.repo.RecallScoped(ctx, strings.TrimSpace(tenant), virployee, scope, query, limit, nil, "")
 	}
 	idempotencyKey := uuid.NewString()
 	units := estimateTokens(query)
 	if err := u.consumeEmbeddingQuota(ctx, tenant, idempotencyKey, "memory_recall", virployee.String(), units); err != nil {
 		slog.WarnContext(ctx, "memory_query_quota_exceeded_fallback_fts")
-		return u.repo.Recall(ctx, strings.TrimSpace(tenant), virployee, query, limit, nil, "")
+		return u.repo.RecallScoped(ctx, strings.TrimSpace(tenant), virployee, scope, query, limit, nil, "")
 	}
 	vector, model, err := u.embedder.EmbedQuery(ctx, query)
 	if err != nil {
 		// Recall degrades to tenant-scoped FTS; unsafe/unapproved memories remain
 		// excluded by the repository in both paths.
 		slog.WarnContext(ctx, "memory_query_embedding_failed_fallback_fts")
-		return u.repo.Recall(ctx, strings.TrimSpace(tenant), virployee, query, limit, nil, "")
+		return u.repo.RecallScoped(ctx, strings.TrimSpace(tenant), virployee, scope, query, limit, nil, "")
 	}
 	u.recordEmbeddingUsage(ctx, tenant, idempotencyKey, "memory_recall", virployee.String(), units, model)
-	return u.repo.Recall(ctx, strings.TrimSpace(tenant), virployee, query, limit, vector, model)
+	return u.repo.RecallScoped(ctx, strings.TrimSpace(tenant), virployee, scope, query, limit, vector, model)
 }
 
 func (u *UseCases) Review(ctx context.Context, tenant string, virployee, id uuid.UUID, actor, role, decision, note string) (Memory, error) {

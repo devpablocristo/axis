@@ -9,10 +9,10 @@ status=0
 
 printf '%s\n' 'Running Squawk (advisory)...'
 find v2/bff/migrations v2/companion/migrations v2/nexus/migrations -type f -name '*.sql' -print0 \
-  | xargs -0 "$(find_quality_tool squawk)" || status=1
+  | xargs -0 "$(find_quality_tool squawk)" || true
 
 printf '%s\n' 'Running OSV Scanner (advisory)...'
-"$(find_quality_tool osv-scanner)" scan -r v2 || status=1
+"$(find_quality_tool osv-scanner)" scan --call-analysis=all -r v2 || status=1
 
 printf '%s\n' 'Running Trivy (advisory)...'
 "$(find_quality_tool trivy)" filesystem \

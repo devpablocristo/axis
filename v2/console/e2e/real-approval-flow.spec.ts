@@ -120,6 +120,11 @@ async function seedApprovalFlowFixture(request: APIRequestContext) {
     system_prompt: 'You are a real e2e assistant for calendar actions.',
     max_autonomy: 'A3',
   })
+  const employer = await api(request, 'POST', '/api/work-subjects', tenantID, principalID, {
+    kind: 'organization',
+    display_name: `Real Approval Employer ${runID}`,
+    external_ref: `real-approval-employer-${runID}`,
+  })
   const virployeeName = `Real Approval Virployee ${runID}`
   const virployee = await api(request, 'POST', '/api/virployees', tenantID, principalID, {
     name: virployeeName,
@@ -129,6 +134,13 @@ async function seedApprovalFlowFixture(request: APIRequestContext) {
     description: 'Real approval UI flow virployee',
     supervisor_user_id: principalID,
     autonomy: 'A3',
+    employer_subject_id: employer.id,
+  })
+  await api(request, 'PUT', `/api/virployees/${virployee.id}/scope-policy`, tenantID, principalID, {
+    allowed_topics: ['calendar'],
+    prohibited_topics: [],
+    out_of_scope: 'abstain',
+    expected_revision: 0,
   })
 
   return {

@@ -25,29 +25,47 @@ const (
 )
 
 type CheckInput struct {
-	RequesterType    string
-	RequesterID      string
-	SupervisorUserID string
-	ActionType       string
-	TargetSystem     string
-	TargetResource   string
-	Params           map[string]any
-	Reason           string
-	Context          string
-	BindingHash      string
+	RequesterType        string
+	RequesterID          string
+	ProductSurface       string
+	SupervisorUserID     string
+	ActionType           string
+	TargetSystem         string
+	TargetResource       string
+	ResourceType         string
+	MembershipRole       string
+	FunctionalRoles      []string
+	FunctionalScopes     []string
+	Reason               string
+	BindingHash          string
+	AuthorityBindingHash string
+	ScopeRevision        int64
+	PolicyRevisionHash   string
+	DelegationRequired   bool
+	DelegationID         string
+	DelegationRevision   int64
 }
 
 type NormalizedCheckInput struct {
-	RequesterType    string
-	RequesterID      string
-	SupervisorUserID string
-	ActionType       string
-	TargetSystem     string
-	TargetResource   string
-	Params           map[string]any
-	Reason           string
-	Context          string
-	BindingHash      string
+	RequesterType        string
+	RequesterID          string
+	ProductSurface       string
+	SupervisorUserID     string
+	ActionType           string
+	TargetSystem         string
+	TargetResource       string
+	ResourceType         string
+	MembershipRole       string
+	FunctionalRoles      []string
+	FunctionalScopes     []string
+	Reason               string
+	BindingHash          string
+	AuthorityBindingHash string
+	ScopeRevision        int64
+	PolicyRevisionHash   string
+	DelegationRequired   bool
+	DelegationID         string
+	DelegationRevision   int64
 }
 
 type CheckResult struct {
@@ -61,12 +79,39 @@ type CheckResult struct {
 	BindingHash          string
 	ApprovalID           string
 	ApprovalStatus       string
+	PolicySnapshotHash   string
+	PolicyInputHash      string
+	PolicyMatches        []map[string]any
+	RoleSnapshot         map[string]any
 }
 
 type RecordedCheck struct {
 	CheckID        string
 	ApprovalID     string
 	ApprovalStatus string
+}
+
+type RevalidationInput struct {
+	BindingHash          string
+	PolicySnapshotHash   string
+	AuthorityBindingHash string
+	ScopeRevision        int64
+	PolicyRevisionHash   string
+	DelegationID         string
+	DelegationRevision   int64
+}
+
+type RevalidationResult struct {
+	Valid              bool
+	Reason             string
+	PolicySnapshotHash string
+}
+
+type RevalidationRecord struct {
+	Input              NormalizedCheckInput
+	Decision           Decision
+	RiskLevel          string
+	PolicySnapshotHash string
 }
 
 type ExecutionResultInput struct {
@@ -180,20 +225,65 @@ func NormalizeCheckInput(in CheckInput) (NormalizedCheckInput, error) {
 	if actionType == "" {
 		return NormalizedCheckInput{}, domainerr.Validation("action_type is required")
 	}
-	params := in.Params
-	if params == nil {
-		params = make(map[string]any)
+	bindingHash := strings.TrimSpace(in.BindingHash)
+	authorityBindingHash := strings.TrimSpace(in.AuthorityBindingHash)
+	policyRevisionHash := strings.TrimSpace(in.PolicyRevisionHash)
+	delegationID := strings.TrimSpace(in.DelegationID)
+	if authorityBindingHash != "" {
+		if bindingHash == "" {
+			return NormalizedCheckInput{}, domainerr.Validation("binding_hash is required with professional authority")
+		}
+		if policyRevisionHash == "" {
+			return NormalizedCheckInput{}, domainerr.Validation("policy_revision_hash is required with professional authority")
+		}
+		if in.ScopeRevision < 0 || in.DelegationRevision < 0 {
+			return NormalizedCheckInput{}, domainerr.Validation("professional authority revisions cannot be negative")
+		}
+		if in.DelegationRequired && (delegationID == "" || in.DelegationRevision <= 0) {
+			return NormalizedCheckInput{}, domainerr.Validation("a current delegation binding is required")
+		}
+		if delegationID != "" && in.DelegationRevision <= 0 {
+			return NormalizedCheckInput{}, domainerr.Validation("delegation_revision is required with delegation_id")
+		}
+	} else if in.DelegationRequired || delegationID != "" || in.DelegationRevision != 0 {
+		return NormalizedCheckInput{}, domainerr.Validation("authority_binding_hash is required with delegation metadata")
 	}
 	return NormalizedCheckInput{
-		RequesterType:    requesterType,
-		RequesterID:      requesterID,
-		SupervisorUserID: strings.TrimSpace(in.SupervisorUserID),
-		ActionType:       actionType,
-		TargetSystem:     strings.TrimSpace(in.TargetSystem),
-		TargetResource:   strings.TrimSpace(in.TargetResource),
-		Params:           params,
-		Reason:           strings.TrimSpace(in.Reason),
-		Context:          strings.TrimSpace(in.Context),
-		BindingHash:      strings.TrimSpace(in.BindingHash),
+		RequesterType:        requesterType,
+		RequesterID:          requesterID,
+		ProductSurface:       strings.ToLower(strings.TrimSpace(in.ProductSurface)),
+		SupervisorUserID:     strings.TrimSpace(in.SupervisorUserID),
+		ActionType:           actionType,
+		TargetSystem:         strings.TrimSpace(in.TargetSystem),
+		TargetResource:       strings.TrimSpace(in.TargetResource),
+		ResourceType:         strings.ToLower(strings.TrimSpace(in.ResourceType)),
+		MembershipRole:       strings.ToLower(strings.TrimSpace(in.MembershipRole)),
+		FunctionalRoles:      normalizedStrings(in.FunctionalRoles),
+		FunctionalScopes:     normalizedStrings(in.FunctionalScopes),
+		Reason:               strings.TrimSpace(in.Reason),
+		BindingHash:          bindingHash,
+		AuthorityBindingHash: authorityBindingHash,
+		ScopeRevision:        in.ScopeRevision,
+		PolicyRevisionHash:   policyRevisionHash,
+		DelegationRequired:   in.DelegationRequired,
+		DelegationID:         delegationID,
+		DelegationRevision:   in.DelegationRevision,
 	}, nil
+}
+
+func normalizedStrings(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		value = strings.ToLower(strings.TrimSpace(value))
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }

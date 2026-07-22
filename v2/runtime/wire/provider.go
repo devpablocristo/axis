@@ -52,12 +52,12 @@ func buildProvider(ctx context.Context, config cfg.Config) ai.Provider {
 func buildEmbeddingProvider(ctx context.Context, config cfg.Config) embeddings.Provider {
 	if config.VertexProject == "" {
 		slog.WarnContext(ctx, "runtime_embedding_no_project")
-		return nil
+		return developmentEmbeddingFallback(ctx, config)
 	}
 	source, err := google.DefaultTokenSource(ctx, vertexScope)
 	if err != nil {
 		slog.WarnContext(ctx, "runtime_embedding_no_adc", "error", err.Error())
-		return nil
+		return developmentEmbeddingFallback(ctx, config)
 	}
 	provider, err := embeddings.NewVertex(embeddings.VertexConfig{
 		Project: config.VertexProject, Location: config.VertexLocation, Model: config.EmbeddingModel,
@@ -73,7 +73,20 @@ func buildEmbeddingProvider(ctx context.Context, config cfg.Config) embeddings.P
 	})
 	if err != nil {
 		slog.WarnContext(ctx, "runtime_embedding_invalid_config", "error", err.Error())
+		return developmentEmbeddingFallback(ctx, config)
+	}
+	return provider
+}
+
+func developmentEmbeddingFallback(ctx context.Context, config cfg.Config) embeddings.Provider {
+	if config.Environment == "production" || !config.DevelopmentEmbeddingsEnabled {
 		return nil
 	}
+	provider, err := embeddings.NewDeterministic(config.EmbeddingDim)
+	if err != nil {
+		slog.WarnContext(ctx, "runtime_development_embedding_invalid_config", "error", err.Error())
+		return nil
+	}
+	slog.WarnContext(ctx, "runtime_development_embedding_enabled", "model", provider.Model())
 	return provider
 }

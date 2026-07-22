@@ -15,18 +15,24 @@ import (
 	"github.com/devpablocristo/companion-v2/internal/artifacts"
 	"github.com/devpablocristo/companion-v2/internal/attestation"
 	"github.com/devpablocristo/companion-v2/internal/capabilities"
+	"github.com/devpablocristo/companion-v2/internal/clinicalcapabilities"
 	"github.com/devpablocristo/companion-v2/internal/executionstats"
 	"github.com/devpablocristo/companion-v2/internal/infra/migrations"
 	"github.com/devpablocristo/companion-v2/internal/jobroles"
 	"github.com/devpablocristo/companion-v2/internal/jobs"
+	"github.com/devpablocristo/companion-v2/internal/knowledgebases"
 	"github.com/devpablocristo/companion-v2/internal/learning"
+	"github.com/devpablocristo/companion-v2/internal/mcpgovernance"
 	"github.com/devpablocristo/companion-v2/internal/memories"
 	"github.com/devpablocristo/companion-v2/internal/nexusclient"
+	"github.com/devpablocristo/companion-v2/internal/operations"
 	"github.com/devpablocristo/companion-v2/internal/outbox"
+	"github.com/devpablocristo/companion-v2/internal/professionalauthority"
 	"github.com/devpablocristo/companion-v2/internal/profiletemplates"
 	"github.com/devpablocristo/companion-v2/internal/quotas"
 	"github.com/devpablocristo/companion-v2/internal/runtimeclient"
 	"github.com/devpablocristo/companion-v2/internal/virployees"
+	"github.com/devpablocristo/companion-v2/internal/workforcerouting"
 	postgres "github.com/devpablocristo/platform/databases/postgres/go"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
 	ginmw "github.com/devpablocristo/platform/http/gin/go"
@@ -49,6 +55,42 @@ type Dependencies struct {
 // runtimeAnswererAdapter adapts the runtime client's Answer to the virployees
 // RuntimeAnswererPort, keeping the virployees package free of runtimeclient.
 type runtimeAnswererAdapter struct{ client *runtimeclient.Client }
+
+type governedReadInvokerAdapter struct {
+	gate *mcpgovernance.ToolInvocationGate
+}
+
+func (a governedReadInvokerAdapter) SupportsGovernedRead(capabilityKey string) bool {
+	return a.gate != nil && a.gate.HasReadExecutor(capabilityKey)
+}
+
+func (a governedReadInvokerAdapter) InvokeGovernedRead(ctx context.Context, in virployees.GovernedReadInvocation) (map[string]any, error) {
+	if a.gate == nil {
+		return nil, domainerr.Conflict("ToolInvocationGate is not configured")
+	}
+	resolved, err := a.gate.ResolveContext(ctx, mcpgovernance.ContextRequest{
+		TenantID: in.TenantID, ActorID: in.ActorID, ActorRole: "service",
+		VirployeeID: in.VirployeeID, SubjectID: in.SubjectID, CaseID: in.CaseID,
+		ProductSurface: in.ProductSurface, RepositoryGeneration: in.RepositoryGeneration,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if resolved.AssignmentID != in.AssignmentID || resolved.AssignmentVersion != in.AssignmentVersion {
+		return nil, domainerr.Conflict("continuity assignment changed after Assist acceptance")
+	}
+	out, err := a.gate.CallTool(ctx, mcpgovernance.Invocation{
+		Context: resolved, ToolName: in.CapabilityKey, Arguments: in.Arguments,
+		IdempotencyKey: in.IdempotencyKey, ExpectedManifestHash: in.CapabilityManifestHash,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if out.Status != "succeeded" || out.Result == nil {
+		return nil, domainerr.Conflict("governed read did not complete")
+	}
+	return out.Result, nil
+}
 
 type memoryEmbeddingAdapter struct{ client *runtimeclient.Client }
 
@@ -81,20 +123,45 @@ func (a runtimeAnswererAdapter) Answer(ctx context.Context, in virployees.Answer
 			DocumentID: part.DocumentID, Locator: locator,
 		})
 	}
+	professional := runtimeclient.ProfessionalContext{
+		JobRoleID: in.ProfessionalContext.JobRoleID,
+		Name:      in.ProfessionalContext.Name,
+		Mission:   in.ProfessionalContext.Mission,
+	}
+	for _, responsibility := range in.ProfessionalContext.Responsibilities {
+		professional.Responsibilities = append(professional.Responsibilities, runtimeclient.ProfessionalResponsibility{
+			Title: responsibility.Title, Description: responsibility.Description,
+			ExpectedOutcome: responsibility.ExpectedOutcome, Priority: responsibility.Priority,
+		})
+	}
+	for _, criterion := range in.ProfessionalContext.SuccessCriteria {
+		professional.SuccessCriteria = append(professional.SuccessCriteria, runtimeclient.ProfessionalSuccessCriterion{
+			Title: criterion.Title, Description: criterion.Description,
+			TargetValue: criterion.TargetValue, Priority: criterion.Priority,
+		})
+	}
 	res, err := a.client.Answer(ctx, runtimeclient.AnswerRequest{
-		SystemPrompt:   in.SystemPrompt,
-		JobRole:        in.JobRole,
-		InputJSON:      in.InputJSON,
-		ResponseSchema: in.ResponseSchema,
-		ContentParts:   parts,
+		SystemPrompt:        in.SystemPrompt,
+		JobRole:             in.JobRole,
+		ProfessionalContext: professional,
+		InputJSON:           in.InputJSON,
+		ResponseSchema:      in.ResponseSchema,
+		ContentParts:        parts,
+		GroundingMode:       in.GroundingMode,
 	})
 	if err != nil {
 		return virployees.AnswerOutput{}, err
+	}
+	citations := make([]virployees.RuntimeCitation, 0, len(res.Citations))
+	for _, citation := range res.Citations {
+		citations = append(citations, virployees.RuntimeCitation{DocumentID: citation.DocumentID, SHA256: citation.SHA256, Locator: citation.Locator})
 	}
 	return virployees.AnswerOutput{
 		OutputText:    res.OutputText,
 		OutputJSON:    res.OutputJSON,
 		Answered:      res.Answered,
+		Status:        res.Status,
+		Citations:     citations,
 		ModelID:       res.ModelID,
 		PromptVersion: res.PromptVersion,
 		InputTokens:   res.Usage.InputTokens, OutputTokens: res.Usage.OutputTokens,
@@ -105,6 +172,17 @@ func (a runtimeAnswererAdapter) Answer(ctx context.Context, in virployees.Answer
 // auditEmitterAdapter maps the companion-owned audit event onto the Nexus audit
 // client, keeping the virployees package free of nexusclient.
 type auditEmitterAdapter struct{ client *nexusclient.Client }
+
+type operationsAuthorizationAdapter struct{ client *nexusclient.Client }
+
+func (a operationsAuthorizationAdapter) CheckOperationAuthorization(ctx context.Context, in operations.AuthorizationCheck) (operations.AuthorizationResult, error) {
+	out, err := a.client.CheckDelegationAuthorization(ctx, professionalauthority.DelegationAuthorizationCheck{
+		TenantID: in.TenantID, ActorID: in.ActorID, ActorRole: in.ActorRole,
+		Permission: in.Permission, ProductSurface: in.ProductSurface, ActionType: in.ActionType,
+		ResourceType: in.ResourceType, ResourceID: in.ResourceID, RiskClass: "low",
+	})
+	return operations.AuthorizationResult{Allowed: out.Allowed, Reason: out.Reason}, err
+}
 
 func (a auditEmitterAdapter) AppendAuditEvent(ctx context.Context, in virployees.AuditEventInput) error {
 	return a.client.AppendAuditEvent(ctx, in.TenantID, nexusclient.AuditEvent{
@@ -165,6 +243,11 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		return nil, err
 	}
 	jobRolesHandler := jobroles.NewHandler(jobRolesUsecases)
+	workforceUsecases := workforcerouting.NewUseCases(workforcerouting.NewRepository(db.Pool()))
+	workforceHandler := workforcerouting.NewHandler(workforceUsecases)
+	knowledgeRepository := knowledgebases.NewRepository(db.Pool())
+	knowledgeUsecases := knowledgebases.NewUseCases(knowledgeRepository)
+	knowledgeHandler := knowledgebases.NewHandler(knowledgeUsecases)
 
 	capabilitiesRepo := capabilities.NewRepository(db.Pool())
 	capabilitiesUsecases, err := capabilities.NewUseCases(capabilitiesRepo)
@@ -205,13 +288,26 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		db.Close()
 		return nil, err
 	}
+	virployeesUsecases.SetContinuityAssignmentValidator(workforceUsecases)
 	virployeesUsecases.SetCapabilityValidator(capabilitiesUsecases)
 	virployeesUsecases.SetProfileTemplateReader(profileTemplatesUsecases)
 	virployeesUsecases.SetQuotaPorts(quotaRepository, quotaRepository)
+	authorityUsecases := professionalauthority.NewUseCases(professionalauthority.NewRepository(db.Pool()))
+	virployeesUsecases.SetAuthorityEvaluator(authorityUsecases)
+	mcpRepository := mcpgovernance.NewRepository(db.Pool())
+	mcpUsecases := mcpgovernance.NewToolInvocationGate(
+		mcpRepository, capabilitiesUsecases, virployeesUsecases, authorityUsecases,
+		mcpWriteGateAdapter{virployees: virployeesUsecases},
+	)
+	virployeesUsecases.SetGovernedReadInvoker(governedReadInvokerAdapter{gate: mcpUsecases})
+	virployeesUsecases.SetMCPExecutionContextValidator(mcpUsecases)
+	mcpHandler := mcpgovernance.NewHandler(mcpUsecases)
 	var nexusClient *nexusclient.Client
 	if config.NexusBaseURL != "" {
 		nexusClient = nexusclient.New(config.NexusBaseURL, &http.Client{Timeout: 5 * time.Second, Transport: otelhttp.NewTransport(http.DefaultTransport)}, config.InternalAuthSecret)
+		authorityUsecases.SetDelegationAuthorizer(nexusClient)
 		virployeesUsecases.SetGovernanceChecker(nexusClient)
+		virployeesUsecases.SetGovernanceRevalidator(nexusClient)
 		virployeesUsecases.SetApprovalReader(nexusClient)
 		// Emit tamper-evident audit events (assist + governed executions) into the
 		// Nexus ledger. Best-effort: emission failures never fail the work.
@@ -224,6 +320,8 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		virployeesUsecases.SetRuntimeAnswerer(runtimeAnswererAdapter{client: runtimePlanner})
 		virployeesUsecases.SetDocumentFetcher(virployees.NewHTTPDocumentFetcher(&http.Client{Timeout: 15 * time.Second, Transport: otelhttp.NewTransport(http.DefaultTransport)}))
 	}
+	production := config.Environment == "production"
+	var artifactStore artifacts.ArtifactStorePort
 	if config.ArtifactStagingBucket != "" {
 		if runtimePlanner == nil {
 			db.Close()
@@ -234,28 +332,48 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 			db.Close()
 			return nil, fmt.Errorf("artifact staging credentials: %w", err)
 		}
-		store, err := artifacts.NewGCSStore(artifacts.GCSStoreConfig{
+		artifactStore, err = artifacts.NewGCSStore(artifacts.GCSStoreConfig{
 			Bucket: config.ArtifactStagingBucket, CMEKKey: config.ArtifactCMEKKey,
-			Prefix: config.ArtifactStagingPrefix, RequireCMEK: config.Environment == "production",
+			Prefix: config.ArtifactStagingPrefix, RequireCMEK: production,
 		}, tokens, &http.Client{Timeout: 10 * time.Minute, Transport: otelhttp.NewTransport(http.DefaultTransport)})
 		if err != nil {
 			db.Close()
 			return nil, err
 		}
+	} else if production {
+		db.Close()
+		return nil, fmt.Errorf("production artifact ingestion requires COMPANION_V2_ARTIFACT_STAGING_BUCKET with CMEK")
+	} else if config.ArtifactLocalStagingDir != "" {
+		artifactStore, err = artifacts.NewLocalStore(artifacts.LocalStoreConfig{
+			RootDir: config.ArtifactLocalStagingDir, MaxBytes: config.ArtifactLocalMaxBytes,
+		})
+		if err != nil {
+			db.Close()
+			return nil, fmt.Errorf("local artifact staging: %w", err)
+		}
+	}
+	if artifactStore != nil {
+		if runtimePlanner == nil {
+			db.Close()
+			return nil, fmt.Errorf("artifact ingestion requires COMPANION_V2_RUNTIME_BASE_URL")
+		}
 		var scanner artifacts.MalwareScannerPort = artifacts.DevelopmentScanner{}
 		if config.MalwareScannerAddress != "" {
 			scanner = artifacts.ClamAVScanner{Address: config.MalwareScannerAddress, Timeout: 2 * time.Minute}
-		} else if config.Environment == "production" {
+		} else if production {
 			db.Close()
 			return nil, fmt.Errorf("production artifact ingestion requires COMPANION_V2_MALWARE_SCANNER_ADDRESS")
 		}
-		fetcher, err := artifacts.NewHTTPFetcher(
-			&http.Client{Timeout: 5 * time.Minute, Transport: otelhttp.NewTransport(http.DefaultTransport)},
-			config.ArtifactFetchAllowedHosts,
-		)
-		if err != nil {
-			db.Close()
-			return nil, err
+		var fetcher artifacts.ArtifactFetcherPort
+		if len(config.ArtifactFetchAllowedHosts) > 0 {
+			fetcher, err = artifacts.NewHTTPFetcher(
+				&http.Client{Timeout: 5 * time.Minute, Transport: otelhttp.NewTransport(http.DefaultTransport)},
+				config.ArtifactFetchAllowedHosts,
+			)
+			if err != nil {
+				db.Close()
+				return nil, err
+			}
 		}
 		var extractor artifacts.ExtractionPort
 		if config.ArtifactExtractorBaseURL != "" {
@@ -269,11 +387,12 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 				return nil, err
 			}
 		}
+		artifactRepository := artifacts.NewRepository(db.Pool())
 		artifactPipeline := artifacts.NewPipeline(
-			artifacts.NewRepository(db.Pool()),
+			artifactRepository,
 			fetcher,
 			scanner,
-			store,
+			artifactStore,
 			artifacts.OfficeFormatAdapter{Extractor: extractor},
 			artifacts.DICOMFormatAdapter{Extractor: extractor},
 			artifacts.PDFFormatAdapter{Extractor: extractor},
@@ -292,7 +411,20 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 			return nil, err
 		}
 		artifactPipeline.SetIndexer(indexService)
+		knowledgeUsecases.SetArtifactIngestor(artifactPipeline)
 		virployeesUsecases.SetArtifactIngestor(artifactPipeline)
+		virployeesUsecases.SetArtifactCorpusReader(artifacts.NewCorpusReader(artifactRepository, indexService))
+		knowledgeRetriever, err := knowledgebases.NewRetriever(knowledgeRepository, indexService)
+		if err != nil {
+			db.Close()
+			return nil, err
+		}
+		virployeesUsecases.SetKnowledgeRetriever(knowledgeRetriever)
+		clinicalExecutor := clinicalcapabilities.NewExecutor(
+			knowledgeRetriever, virployeesUsecases, runtimeAnswererAdapter{client: runtimePlanner},
+		)
+		mcpUsecases.RegisterReadExecutor(clinicalcapabilities.RecordsSearchKey, clinicalExecutor)
+		mcpUsecases.RegisterReadExecutor(clinicalcapabilities.TimelineBuildKey, clinicalExecutor)
 	}
 	// Executors are wired per enabled mode (COMPANION_V2_EXECUTION_MODE is a set).
 	// The local simulator and a real external executor can coexist on different
@@ -328,6 +460,8 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	}
 	virployeesUsecases.SetMemoryReader(memoriesUsecases)
 	virployeesHandler := virployees.NewHandler(virployeesUsecases)
+	authorityHandler := professionalauthority.NewHandler(authorityUsecases)
+	coordinationHandler := virployees.NewCoordinationHandler(virployeesUsecases)
 	memoriesHandler := memories.NewHandler(memoriesUsecases)
 	executionStatsHandler := executionstats.NewHandler(executionstats.NewUseCases(executionstats.NewRepository(db.Pool())))
 	learningUsecases := learning.NewUseCases(learning.NewRepository(db.Pool()))
@@ -348,30 +482,40 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
 	router.Use(gin.Recovery())
-	router.Use(ginmw.NewBodySizeLimit(config.MaxBodyBytes))
+	router.Use(routeAwareBodySizeLimit(config.MaxBodyBytes, config.KnowledgeUploadMaxBodyBytes))
 	router.Use(ginmw.NewCORS(ginmw.CORSConfig{
 		Origins:      config.CORSOrigins,
-		AllowHeaders: []string{"X-Actor-ID", "X-Tenant-ID", "X-Axis-Tenant-Role"},
+		AllowHeaders: []string{"X-Actor-ID", "X-Tenant-ID", "X-Axis-Tenant-Role", "X-Axis-Virployee-ID", "X-Axis-Subject-ID", "X-Axis-Case-ID", "X-Axis-Product-Surface", "X-Axis-Repository-Generation", "X-Idempotency-Key", "Idempotency-Key"},
 	}))
 	ginmw.RegisterHealthEndpoints(router, db.Ping)
 	api := router.Group("/v1")
 	api.Use(internalAuthMiddleware(config.InternalAuthSecret))
+	mcp := router.Group("")
+	mcp.Use(internalAuthMiddleware(config.InternalAuthSecret))
+	mcpHandler.MCPRoutes(mcp)
+	mcpHandler.MCPRoutes(api)
 	jobRolesHandler.Routes(api)
+	workforceHandler.Routes(api)
+	knowledgeHandler.Routes(api)
 	capabilitiesHandler.Routes(api)
 	quotaHandler.Routes(api)
 	profileTemplatesHandler.Routes(api)
 	virployeesHandler.Routes(api)
+	authorityHandler.Routes(api)
+	coordinationHandler.Routes(api)
 	memoriesHandler.Routes(api)
 	executionStatsHandler.Routes(api)
 	learningHandler.Routes(api)
-
+	mcpHandler.AdminRoutes(api)
 	server := &http.Server{
 		Addr:    config.Addr(),
 		Handler: tracedServerHandler("companion-v2", observability.Middleware(logger, router)),
 	}
 	backgroundCtx, backgroundCancel := context.WithCancel(ctx)
 	jobsRepository := jobs.NewPostgresRepository(db.Pool())
+	nexusOutboxRepository := outbox.NewRepository(db.Pool())
 	virployeesUsecases.SetAssistQueue(assistQueueAdapter{repository: jobsRepository})
+	virployeesUsecases.SetCoordinationQueue(coordinationQueueAdapter{repository: jobsRepository})
 	jobsWorker := jobs.NewWorker(jobsRepository, jobs.WorkerConfig{
 		WorkerID: "companion-jobs-" + uuid.NewString(), Concurrency: config.JobWorkerConcurrency,
 		PollInterval: config.JobPollInterval, LeaseDuration: config.WatcherLease,
@@ -383,6 +527,13 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		BatchSize: config.WatcherBatchSize, MaxRecoveryAttempts: config.WatcherMaxRecoveries,
 		WorkerID: "companion-watchers-" + uuid.NewString(),
 	}
+	var operationsAuthorizer operations.AuthorizerPort
+	if nexusClient != nil {
+		operationsAuthorizer = operationsAuthorizationAdapter{client: nexusClient}
+	}
+	operationsRepository := operations.NewRepository(db.Pool())
+	operationsUsecases := operations.NewUseCases(operationsRepository, operationsAuthorizer)
+	operations.NewHandler(operationsUsecases).Routes(api)
 	jobsWorker.Register("operational.reconcile", func(jobCtx context.Context, _ jobs.Job) (json.RawMessage, error) {
 		if err := virployeesUsecases.RunOperationalWatchersOnce(jobCtx, watcherConfig); err != nil {
 			return nil, jobs.Retryable("operational_reconcile_failed", err)
@@ -391,8 +542,24 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		if err != nil {
 			return nil, jobs.Retryable("assist_reconcile_failed", err)
 		}
-		evidence, _ := json.Marshal(map[string]any{"reconciled": true, "assist_runs_requeued": requeued})
+		coordination, err := virployeesUsecases.RequeueCoordinationWork(jobCtx, watcherConfig.BatchSize)
+		if err != nil {
+			return nil, jobs.Retryable("coordination_reconcile_failed", err)
+		}
+		evidence, _ := json.Marshal(map[string]any{"reconciled": true, "assist_runs_requeued": requeued, "coordination": coordination})
 		return evidence, nil
+	})
+	jobsWorker.Register("ops.fleet_reconcile", func(jobCtx context.Context, job jobs.Job) (json.RawMessage, error) {
+		runs, err := operationsUsecases.RunScheduled(jobCtx, "companion")
+		if err != nil {
+			return nil, jobs.Retryable("fleet_reconcile_failed", err)
+		}
+		findings, repaired := 0, 0
+		for _, run := range runs {
+			findings += run.FindingsCount
+			repaired += run.RepairedCount
+		}
+		return json.Marshal(map[string]any{"tenants": len(runs), "findings": findings, "repaired": repaired, "source_job_id": job.ID.String()})
 	})
 	jobsWorker.Register(assistProcessJobKind, func(jobCtx context.Context, job jobs.Job) (json.RawMessage, error) {
 		var payload assistJobPayload
@@ -411,6 +578,68 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 			}
 			return evidence, jobs.Retryable("assist_processing_failed", processErr)
 		}
+		return evidence, nil
+	})
+	jobsWorker.Register(virployees.JobKindSpecialistConsult, func(jobCtx context.Context, job jobs.Job) (json.RawMessage, error) {
+		var payload struct {
+			ConsultationID string `json:"consultation_id"`
+		}
+		if err := json.Unmarshal(job.Payload, &payload); err != nil {
+			return nil, jobs.Permanent("invalid_specialist_consult_job", err)
+		}
+		id, err := uuid.Parse(payload.ConsultationID)
+		if err != nil {
+			return nil, jobs.Permanent("invalid_specialist_consult_job", err)
+		}
+		item, processErr := virployeesUsecases.ProcessSpecialistConsultation(jobCtx, job.TenantID, id, job.Attempts)
+		evidence, _ := json.Marshal(map[string]any{"consultation_id": id.String(), "status": item.Status, "output_hash": item.OutputHash})
+		if processErr != nil {
+			return evidence, jobs.Retryable("specialist_consult_failed", processErr)
+		}
+		return evidence, nil
+	})
+	jobsWorker.Register(virployees.JobKindOrchestrationReconcile, func(jobCtx context.Context, job jobs.Job) (json.RawMessage, error) {
+		var payload struct {
+			PlanID string `json:"plan_id"`
+		}
+		if err := json.Unmarshal(job.Payload, &payload); err != nil {
+			return nil, jobs.Permanent("invalid_orchestration_reconcile_job", err)
+		}
+		id, err := uuid.Parse(payload.PlanID)
+		if err != nil {
+			return nil, jobs.Permanent("invalid_orchestration_reconcile_job", err)
+		}
+		plan, reconcileErr := virployeesUsecases.ReconcileOrchestration(jobCtx, job.TenantID, id)
+		evidence, _ := json.Marshal(map[string]any{"plan_id": id.String(), "status": plan.Status, "completed": plan.CompletedCount, "failed": plan.FailedCount})
+		if reconcileErr != nil {
+			return evidence, jobs.Retryable("orchestration_reconcile_failed", reconcileErr)
+		}
+		return evidence, nil
+	})
+	jobsWorker.Register(virployees.JobKindOrchestrationSynthesis, func(jobCtx context.Context, job jobs.Job) (json.RawMessage, error) {
+		var payload struct {
+			PlanID string `json:"plan_id"`
+		}
+		if err := json.Unmarshal(job.Payload, &payload); err != nil {
+			return nil, jobs.Permanent("invalid_orchestration_synthesis_job", err)
+		}
+		id, err := uuid.Parse(payload.PlanID)
+		if err != nil {
+			return nil, jobs.Permanent("invalid_orchestration_synthesis_job", err)
+		}
+		run, synthesisErr := virployeesUsecases.SynthesizeOrchestration(jobCtx, job.TenantID, id, job.Attempts)
+		evidence, _ := json.Marshal(map[string]any{"plan_id": id.String(), "run_id": run.ID.String(), "status": run.Status})
+		if synthesisErr != nil {
+			return evidence, jobs.Retryable("orchestration_synthesis_failed", synthesisErr)
+		}
+		return evidence, nil
+	})
+	jobsWorker.Register("handoff.expire", func(jobCtx context.Context, _ jobs.Job) (json.RawMessage, error) {
+		count, err := virployeesUsecases.ExpireHandoffs(jobCtx, config.WatcherBatchSize)
+		if err != nil {
+			return nil, jobs.Retryable("handoff_expire_failed", err)
+		}
+		evidence, _ := json.Marshal(map[string]any{"expired": count})
 		return evidence, nil
 	})
 	jobsWorker.Register("memory.index", func(jobCtx context.Context, job jobs.Job) (json.RawMessage, error) {
@@ -446,19 +675,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	})
 	var nexusOutbox *outbox.Dispatcher
 	if nexusClient != nil {
-		nexusOutbox = outbox.NewDispatcher(outbox.NewRepository(db.Pool()), outbox.SenderFunc(func(deliveryCtx context.Context, message outbox.Message) error {
-			var payload outbox.NexusExecutionResult
-			if err := json.Unmarshal(message.Payload, &payload); err != nil {
-				return outbox.Permanent("invalid_outbox_payload", err)
-			}
-			if payload.GovernanceCheckID == "" || payload.IdempotencyKey == "" || payload.BindingHash == "" || payload.Status == "" {
-				return outbox.Permanent("invalid_outbox_payload", fmt.Errorf("required delivery metadata is missing"))
-			}
-			if err := nexusClient.ReportExecutionResult(deliveryCtx, message.TenantID, payload.GovernanceCheckID, payload.IdempotencyKey, payload.BindingHash, payload.Status, payload.DurationMS, payload.Result, payload.AttestationVersion, payload.ExecutorVersion, payload.Attestation); err != nil {
-				return outbox.Retryable("nexus_unavailable", err)
-			}
-			return nil
-		}), outbox.DispatcherConfig{
+		nexusOutbox = outbox.NewDispatcher(nexusOutboxRepository, newNexusOutboxSender(nexusClient), outbox.DispatcherConfig{
 			WorkerID:    "companion-nexus-outbox-" + uuid.NewString(),
 			Concurrency: config.JobWorkerConcurrency, PollInterval: config.JobPollInterval,
 			Lease: config.WatcherLease, Timeout: 10 * time.Second,
@@ -474,10 +691,26 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		tracerShutdown: tracerShutdown,
 		watcherCancel:  backgroundCancel,
 	}
-	deps.watcherWG.Add(3)
+	deps.watcherWG.Add(5)
 	go func() {
 		defer deps.watcherWG.Done()
 		jobsWorker.Run(backgroundCtx)
+	}()
+	go func() {
+		defer deps.watcherWG.Done()
+		jobs.RunRecurringScheduler(backgroundCtx, jobsRepository, jobs.RecurringConfig{
+			TenantID: "system", ProductSurface: "companion", Kind: "ops.fleet_reconcile",
+			DedupePrefix: "ops-fleet", Interval: 15 * time.Minute, Timeout: config.JobTimeout,
+			MaxAttempts: config.WatcherMaxRecoveries,
+		})
+	}()
+	go func() {
+		defer deps.watcherWG.Done()
+		jobs.RunRecurringScheduler(backgroundCtx, jobsRepository, jobs.RecurringConfig{
+			TenantID: "system", ProductSurface: "companion", Kind: "handoff.expire",
+			Interval: config.WatcherInterval, Timeout: config.JobTimeout,
+			MaxAttempts: config.WatcherMaxRecoveries,
+		})
 	}()
 	if nexusOutbox != nil {
 		deps.watcherWG.Add(1)

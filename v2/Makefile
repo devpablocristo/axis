@@ -17,8 +17,8 @@ down:
 
 seed-demo: ensure-product-network
 	@test -f .env || cp .env.example .env
-	$(DC) up -d --build bff-v2 console-v2
-	$(DC) run --rm -T --build seed-demo
+	BFF_V2_IDENTITY_PROVIDER=dev $(DC) up -d --build bff-v2 console-v2
+	BFF_V2_IDENTITY_PROVIDER=dev $(DC) run --rm -T --build seed-demo
 
 test-console-e2e: ensure-product-network
 	@test -f .env || cp .env.example .env
