@@ -99,6 +99,10 @@ func (u *UseCases) RegisterReadExecutor(capabilityKey string, executor ReadExecu
 	}
 }
 
+func (u *UseCases) HasReadExecutor(capabilityKey string) bool {
+	return u.readers[strings.ToLower(strings.TrimSpace(capabilityKey))] != nil
+}
+
 func (u *UseCases) GetPolicy(ctx context.Context, tenantID string) (Policy, error) {
 	return u.repo.GetPolicy(ctx, strings.TrimSpace(tenantID))
 }
@@ -234,6 +238,9 @@ func (u *UseCases) CallTool(ctx context.Context, invocation Invocation) (out Inv
 	if err != nil {
 		return InvocationResult{}, err
 	}
+	if expected := strings.TrimSpace(invocation.ExpectedManifestHash); expected != "" && tool.Meta.ManifestHash != expected {
+		return InvocationResult{}, domainerr.Conflict("capability manifest changed after Assist acceptance")
+	}
 	payloadHash, err := Hash(invocation.Arguments)
 	if err != nil {
 		return InvocationResult{}, domainerr.Validation("tool arguments are invalid")
@@ -330,6 +337,7 @@ func (u *UseCases) CallTool(ctx context.Context, invocation Invocation) (out Inv
 	currentContext, err := u.repo.ResolveContext(ctx, ContextRequest{
 		TenantID: invocation.Context.TenantID, ActorID: invocation.Context.ActorID, ActorRole: invocation.Context.ActorRole,
 		VirployeeID: invocation.Context.VirployeeID, SubjectID: invocation.Context.SubjectID, CaseID: invocation.Context.CaseID,
+		ProductSurface: invocation.Context.ProductSurface, RepositoryGeneration: invocation.Context.RepositoryGeneration,
 	})
 	if err != nil {
 		blockedBy = "context_revalidation"
@@ -389,6 +397,9 @@ func (u *UseCases) resolveTools(ctx context.Context, policy Policy, invocation I
 	tools := make([]Tool, 0, len(assigned))
 	for _, capability := range capabilities {
 		if _, ok := assigned[capability.ID]; !ok || capability.PromotionState != capabilitydomain.PromotionActive || capability.ManifestHash == "" || capability.ConformedHash != capability.ManifestHash {
+			continue
+		}
+		if invocation.ProductSurface != "" && capability.Manifest.ProductSurface != invocation.ProductSurface {
 			continue
 		}
 		if capability.SideEffectClass == "read" {
@@ -475,6 +486,7 @@ func toolContextHash(context InvocationContext, virployee virployeedomain.Virplo
 		"actor_id": context.ActorID, "virployee_id": context.VirployeeID.String(), "job_role_id": virployee.JobRoleID.String(),
 		"subject_id": context.SubjectID.String(), "case_id": optionalUUID(context.CaseID),
 		"assignment_id": context.AssignmentID.String(), "assignment_version": context.AssignmentVersion,
+		"product_surface": context.ProductSurface, "repository_generation": context.RepositoryGeneration,
 		"principal_type": context.PrincipalType, "principal_id": context.PrincipalID,
 		"capability_key": tool.Name, "capability_version": tool.Meta.CapabilityVersion,
 		"manifest_hash": tool.Meta.ManifestHash, "authority_hash": tool.AuthorityHash, "mcp_policy_version": policy.Version,
@@ -491,6 +503,7 @@ func listContextHash(context InvocationContext, virployee virployeedomain.Virplo
 		"virployee_id": context.VirployeeID.String(), "job_role_id": virployee.JobRoleID.String(),
 		"subject_id": context.SubjectID.String(), "case_id": optionalUUID(context.CaseID),
 		"assignment_id": context.AssignmentID.String(), "assignment_version": context.AssignmentVersion,
+		"product_surface": context.ProductSurface, "repository_generation": context.RepositoryGeneration,
 		"mcp_policy_version": policy.Version, "tools": items,
 	})
 }

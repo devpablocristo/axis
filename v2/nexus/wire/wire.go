@@ -16,6 +16,7 @@ import (
 	"github.com/devpablocristo/nexus-v2/internal/attestation"
 	"github.com/devpablocristo/nexus-v2/internal/audit"
 	"github.com/devpablocristo/nexus-v2/internal/authorization"
+	"github.com/devpablocristo/nexus-v2/internal/enterpriseops"
 	"github.com/devpablocristo/nexus-v2/internal/evidence"
 	"github.com/devpablocristo/nexus-v2/internal/governance"
 	"github.com/devpablocristo/nexus-v2/internal/governancepolicies"
@@ -138,6 +139,11 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		PollInterval: config.JobPollInterval, LeaseDuration: config.JobLease,
 		DefaultTimeout: config.JobTimeout, RecoveryBatch: config.WatcherBatchSize,
 	})
+	operationsService := enterpriseops.NewService(db.Pool(), jobsRepository, authorizationUseCases)
+	operationsService.ConfigureNotificationDelivery(
+		notificationDestinationResolver{environment: config.Environment},
+		enterpriseops.NewHTTPNotificationSender(&http.Client{Timeout: 10 * time.Second, Transport: otelhttp.NewTransport(http.DefaultTransport)}, config.Environment != "production"),
+	)
 	jobsWorker.Register("approval.expire", func(jobCtx context.Context, _ jobs.Job) (json.RawMessage, error) {
 		count, err := approvalWatcher.RunOnce(jobCtx, config.WatcherBatchSize)
 		if err != nil {
@@ -145,6 +151,14 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		}
 		return json.Marshal(map[string]int{"expired": count})
 	})
+	jobsWorker.Register("ops.governance_reconcile", func(jobCtx context.Context, _ jobs.Job) (json.RawMessage, error) {
+		runs, err := operationsService.RunScheduled(jobCtx, "nexus")
+		if err != nil {
+			return nil, jobs.Retryable("governance_reconciliation_failed", err)
+		}
+		return json.Marshal(map[string]int{"tenants": len(runs)})
+	})
+	jobsWorker.Register("enterprise.export", operationsService.ProcessExport)
 
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
@@ -158,6 +172,8 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 			"X-Actor-ID",
 			"X-Tenant-ID",
 			"X-Axis-Tenant-Role",
+			"X-Product-Surface",
+			"Idempotency-Key",
 		},
 	}))
 	ginmw.RegisterHealthEndpoints(router, db.Ping)
@@ -171,6 +187,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	approvalsHandler.Routes(api)
 	auditHandler.Routes(api)
 	evidenceHandler.Routes(api)
+	enterpriseops.NewHandler(operationsService).Routes(api)
 
 	server := &http.Server{
 		Addr:    config.Addr(),
@@ -185,7 +202,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		tracerShutdown: tracerShutdown,
 		watcherCancel:  backgroundCancel,
 	}
-	deps.watcherWG.Add(2)
+	deps.watcherWG.Add(4)
 	go func() {
 		defer deps.watcherWG.Done()
 		jobsWorker.Run(backgroundCtx)
@@ -197,6 +214,18 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 			Interval: config.WatcherInterval, Timeout: config.JobTimeout,
 			MaxAttempts: config.WatcherMaxAttempts,
 		})
+	}()
+	go func() {
+		defer deps.watcherWG.Done()
+		jobs.RunRecurringScheduler(backgroundCtx, jobsRepository, jobs.RecurringConfig{
+			TenantID: "system", ProductSurface: "nexus", Kind: "ops.governance_reconcile",
+			Interval: 15 * time.Minute, Timeout: config.JobTimeout,
+			MaxAttempts: config.WatcherMaxAttempts,
+		})
+	}()
+	go func() {
+		defer deps.watcherWG.Done()
+		operationsService.RunNotificationDispatcher(backgroundCtx, 5*time.Second, config.WatcherBatchSize)
 	}()
 	return deps, nil
 }

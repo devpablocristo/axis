@@ -181,6 +181,38 @@ func TestReadRejectsInvalidExecutorOutput(t *testing.T) {
 	}
 }
 
+func TestReadRejectsChangedExpectedManifestBeforeExecutor(t *testing.T) {
+	uc, repo, capability, _, request := testUseCases(t, "read")
+	uc.RegisterReadExecutor(capability.CapabilityKey, fakeReader{result: map[string]any{"items": []any{}}})
+	ctx, err := uc.ResolveContext(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = uc.CallTool(context.Background(), Invocation{
+		Context: ctx, ToolName: capability.CapabilityKey, Arguments: map[string]any{"query": "today"},
+		ExpectedManifestHash: "stale-manifest",
+	})
+	if !domainerr.IsConflict(err) || len(repo.audits) != 0 {
+		t.Fatalf("stale manifest must fail before executor/audit reservation: err=%v audits=%d", err, len(repo.audits))
+	}
+}
+
+func TestToolContextHashBindsProductAndRepositoryGeneration(t *testing.T) {
+	_, repo, capability, virployee, _ := testUseCases(t, "read")
+	tool := toolFromCapability(capability, "authority-hash")
+	base := repo.resolved
+	base.ProductSurface, base.RepositoryGeneration = "medmory", "generation-a"
+	first, err := toolContextHash(base, virployee, repo.policy, tool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base.RepositoryGeneration = "generation-b"
+	second, _ := toolContextHash(base, virployee, repo.policy, tool)
+	if first == second {
+		t.Fatal("repository_generation did not participate in the governed context hash")
+	}
+}
+
 func TestValidateJSONSchema(t *testing.T) {
 	schema := map[string]any{
 		"type": "object", "required": []any{"name"}, "additionalProperties": false,

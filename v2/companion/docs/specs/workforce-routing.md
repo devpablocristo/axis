@@ -72,6 +72,14 @@ tenant + routing_pool + work_subject -> virployee
 4. If every member is at capacity, return `status=unavailable` without creating
    an assignment.
 
+Callers may also supply a canonical `capability_key`. In that case both an
+existing assignee and every new candidate must have that active, conformant
+capability assigned and sufficient autonomy. Legacy Medmory aliases are
+normalized to `clinical.records.search` or `clinical.timeline.build` before the
+query. A capability mismatch returns `reassignment_required` for an existing
+assignment or `unavailable` for a new one; it never rotates the subject
+silently.
+
 Resolution serializes by tenant and pool and the database enforces one row per
 `tenant + pool + subject`. Concurrent resolves therefore converge on a single
 assignment.

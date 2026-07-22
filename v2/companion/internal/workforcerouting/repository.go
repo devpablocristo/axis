@@ -317,7 +317,7 @@ func (r *Repository) Resolve(ctx context.Context, tenantID string, in Normalized
 		return ResolveResult{}, domainerr.Conflict("work subject is archived")
 	}
 
-	existing, eligible, err := scanAssignmentEligibility(tx.QueryRow(ctx, assignmentEligibilitySQL, tenantID, in.PoolID, in.SubjectID))
+	existing, eligible, err := scanAssignmentEligibility(tx.QueryRow(ctx, assignmentEligibilitySQL, tenantID, in.PoolID, in.SubjectID, in.CapabilityKey))
 	if err == nil {
 		status := ResolveStatusAssigned
 		if !eligible {
@@ -344,6 +344,17 @@ func (r *Repository) Resolve(ctx context.Context, tenantID string, in Normalized
 		WHERE m.tenant_id=$1 AND m.pool_id=$2 AND m.enabled
 		  AND p.archived_at IS NULL AND v.archived_at IS NULL AND v.trashed_at IS NULL
 		  AND v.job_role_id=p.job_role_id
+		  AND ($3='' OR EXISTS (
+		      SELECT 1 FROM virployee_capabilities vc
+		      JOIN capabilities c ON c.tenant_id=vc.tenant_id AND c.id=vc.capability_id
+		      WHERE vc.tenant_id=m.tenant_id AND vc.virployee_id=m.virployee_id
+		        AND c.capability_key=$3 AND c.archived_at IS NULL AND c.trashed_at IS NULL
+		        AND c.promotion_state='active' AND c.manifest_hash<>'' AND c.conformed_hash=c.manifest_hash
+		        AND CASE v.autonomy WHEN 'A0' THEN 0 WHEN 'A1' THEN 1 WHEN 'A2' THEN 2
+		            WHEN 'A3' THEN 3 WHEN 'A4' THEN 4 WHEN 'A5' THEN 5 ELSE -1 END >=
+		            CASE c.required_autonomy WHEN 'A0' THEN 0 WHEN 'A1' THEN 1 WHEN 'A2' THEN 2
+		            WHEN 'A3' THEN 3 WHEN 'A4' THEN 4 WHEN 'A5' THEN 5 ELSE 99 END
+		  ))
 		  AND (SELECT COUNT(*) FROM companion_continuity_assignments a
 		       JOIN companion_work_subjects ws ON ws.tenant_id=a.tenant_id AND ws.id=a.subject_id
 		       WHERE a.tenant_id=m.tenant_id AND a.pool_id=m.pool_id
@@ -354,7 +365,7 @@ func (r *Repository) Resolve(ctx context.Context, tenantID string, in Normalized
 		            AND a.virployee_id=m.virployee_id AND ws.archived_at IS NULL),
 		         m.created_at,m.virployee_id
 		LIMIT 1
-	`, tenantID, in.PoolID).Scan(&virployeeID)
+	`, tenantID, in.PoolID, in.CapabilityKey).Scan(&virployeeID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		if err := tx.Commit(ctx); err != nil {
 			return ResolveResult{}, err
@@ -658,7 +669,18 @@ func (r *Repository) Reassign(ctx context.Context, tenantID string, assignmentID
 const assignmentEligibilitySQL = `
 	SELECT a.id,a.tenant_id,a.pool_id,a.subject_id,a.virployee_id,a.status,a.version,a.assigned_at,a.updated_at,
 		(m.enabled AND p.archived_at IS NULL AND v.archived_at IS NULL AND v.trashed_at IS NULL
-		 AND v.job_role_id=p.job_role_id)
+		 AND v.job_role_id=p.job_role_id
+		 AND ($4='' OR EXISTS (
+		     SELECT 1 FROM virployee_capabilities vc
+		     JOIN capabilities c ON c.tenant_id=vc.tenant_id AND c.id=vc.capability_id
+		     WHERE vc.tenant_id=a.tenant_id AND vc.virployee_id=a.virployee_id
+		       AND c.capability_key=$4 AND c.archived_at IS NULL AND c.trashed_at IS NULL
+		       AND c.promotion_state='active' AND c.manifest_hash<>'' AND c.conformed_hash=c.manifest_hash
+		       AND CASE v.autonomy WHEN 'A0' THEN 0 WHEN 'A1' THEN 1 WHEN 'A2' THEN 2
+		           WHEN 'A3' THEN 3 WHEN 'A4' THEN 4 WHEN 'A5' THEN 5 ELSE -1 END >=
+		           CASE c.required_autonomy WHEN 'A0' THEN 0 WHEN 'A1' THEN 1 WHEN 'A2' THEN 2
+		           WHEN 'A3' THEN 3 WHEN 'A4' THEN 4 WHEN 'A5' THEN 5 ELSE 99 END
+		 ))
 	FROM companion_continuity_assignments a
 	JOIN companion_routing_pools p ON p.tenant_id=a.tenant_id AND p.id=a.pool_id
 	JOIN companion_routing_pool_members m

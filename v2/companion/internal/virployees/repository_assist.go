@@ -31,6 +31,8 @@ type AssistRun struct {
 	AssignmentID            uuid.UUID
 	AssignmentVersion       int64
 	RepositoryGeneration    string
+	CapabilityKey           string
+	CapabilityManifestHash  string
 	GroundingMode           string
 	ContextHash             string
 	MemoryContextHash       string
@@ -114,13 +116,14 @@ func (r *Repository) BeginAssistRun(ctx context.Context, tenantID string, virplo
 	tag, err := r.pool.Exec(ctx, `
 		INSERT INTO companion_assist_runs (
 			id, tenant_id, virployee_id, assist_type, product_surface, subject_id, repository_generation,
+			capability_key, capability_manifest_hash,
 			idempotency_key, status, input_hash, input_preview, input_json, case_id, responsible_virployee_id,
 			grounding_mode, continuity_assignment_id, continuity_assignment_version, context_hash,
 			job_role_snapshot_hash, source_authorization_hash, started_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'received', $9, $10, $11::jsonb, $12, $13, $14, $15, $16, $17, $18, $19, now(), now())
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8,''), NULLIF($9,''), $10, 'received', $11, $12, $13::jsonb, $14, $15, $16, $17, $18, $19, $20, $21, now(), now())
 		ON CONFLICT (tenant_id, virployee_id, idempotency_key) DO NOTHING
 	`, id, tenantID, virployeeID, metadata.AssistType, metadata.ProductSurface, metadata.SubjectID, metadata.RepositoryGeneration,
-		idempotencyKey, inputHash, inputPreview, []byte(inputJSON), caseID, responsibleID, metadata.GroundingMode,
+		metadata.CapabilityKey, metadata.CapabilityManifestHash, idempotencyKey, inputHash, inputPreview, []byte(inputJSON), caseID, responsibleID, metadata.GroundingMode,
 		nullableAssistUUID(metadata.AssignmentID), metadata.AssignmentVersion, metadata.ContextHash, metadata.JobRoleSnapshotHash,
 		metadata.SourceAuthorizationHash)
 	if err != nil {
@@ -318,6 +321,7 @@ const assistRunSelect = `
 	       assist_type, product_surface, subject_id,
 	       COALESCE(continuity_assignment_id,'00000000-0000-0000-0000-000000000000'::uuid),
 	       continuity_assignment_version,repository_generation,
+	       COALESCE(capability_key,''),COALESCE(capability_manifest_hash,''),
 	       grounding_mode,context_hash,memory_context_hash,memory_references,job_role_snapshot_hash,
 	       source_authorization_hash,
 	       answer_status,citations,source_context,
@@ -336,7 +340,8 @@ func (r *Repository) scanAssistRun(row rowScanner) (AssistRun, error) {
 		&out.ID, &out.TenantID, &out.VirployeeID, &out.CaseID, &out.ResponsibleVirployeeID,
 		&out.OrchestrationPlanID, &out.OrchestrationDeadlineAt, &out.OwnershipVersion,
 		&out.AssistType, &out.ProductSurface, &out.SubjectID, &out.AssignmentID, &out.AssignmentVersion,
-		&out.RepositoryGeneration, &out.GroundingMode, &out.ContextHash, &out.MemoryContextHash, &memoryReferences,
+		&out.RepositoryGeneration, &out.CapabilityKey, &out.CapabilityManifestHash,
+		&out.GroundingMode, &out.ContextHash, &out.MemoryContextHash, &memoryReferences,
 		&out.JobRoleSnapshotHash, &out.SourceAuthorizationHash, &out.AnswerStatus, &citations, &sourceContext, &out.IdempotencyKey, &out.Status,
 		&out.InputHash, &out.InputPreview, &input, &output, &out.OutputText, &out.Answered, &out.Degraded,
 		&out.Model, &out.PromptVersion, &out.Error, &out.DurationMS, &out.StartedAt, &out.CompletedAt,

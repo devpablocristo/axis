@@ -188,3 +188,29 @@ func TestRecurringSchedulerPersistsOneJobPerTimeBucket(t *testing.T) {
 		t.Fatalf("scheduled jobs=%+v err=%v", jobs, err)
 	}
 }
+
+func TestRunningJobCancellationIsRequestedThenAcknowledged(t *testing.T) {
+	repo := NewMemoryRepository()
+	created, _, err := repo.Enqueue(context.Background(), EnqueueInput{TenantID: "tenant", ProductSurface: "nexus", Kind: "test", DedupeKey: "cancel-running", Payload: json.RawMessage(`{}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := repo.Claim(context.Background(), ClaimOptions{WorkerID: "worker", BatchSize: 1})
+	if err != nil || len(claimed) != 1 {
+		t.Fatalf("claim: %+v %v", claimed, err)
+	}
+	if err = repo.Cancel(context.Background(), "tenant", created.ID, "operator_cancelled"); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := repo.Get(context.Background(), "tenant", created.ID)
+	if err != nil || pending.Status != StatusCancelRequested || pending.CompletedAt != nil {
+		t.Fatalf("running cancellation must remain a request until worker acknowledgement: %+v %v", pending, err)
+	}
+	if err = repo.Heartbeat(context.Background(), created.ID, "worker", time.Second); !errors.Is(err, ErrJobCancelled) {
+		t.Fatalf("heartbeat must observe cancellation: %v", err)
+	}
+	finished, err := repo.Get(context.Background(), "tenant", created.ID)
+	if err != nil || finished.Status != StatusCancelled || finished.CompletedAt == nil {
+		t.Fatalf("cancellation must finalize without claiming rollback: %+v %v", finished, err)
+	}
+}

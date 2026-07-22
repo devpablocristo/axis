@@ -66,25 +66,29 @@ type PolicyAudit struct {
 }
 
 type InvocationContext struct {
-	TenantID          string    `json:"tenant_id"`
-	ActorID           string    `json:"actor_id"`
-	ActorRole         string    `json:"actor_role"`
-	VirployeeID       uuid.UUID `json:"virployee_id"`
-	SubjectID         uuid.UUID `json:"subject_id"`
-	CaseID            uuid.UUID `json:"case_id,omitempty"`
-	AssignmentID      uuid.UUID `json:"assignment_id"`
-	AssignmentVersion int64     `json:"assignment_version"`
-	PrincipalType     string    `json:"principal_type"`
-	PrincipalID       string    `json:"principal_id"`
+	TenantID             string    `json:"tenant_id"`
+	ActorID              string    `json:"actor_id"`
+	ActorRole            string    `json:"actor_role"`
+	VirployeeID          uuid.UUID `json:"virployee_id"`
+	SubjectID            uuid.UUID `json:"subject_id"`
+	CaseID               uuid.UUID `json:"case_id,omitempty"`
+	AssignmentID         uuid.UUID `json:"assignment_id"`
+	AssignmentVersion    int64     `json:"assignment_version"`
+	ProductSurface       string    `json:"product_surface,omitempty"`
+	RepositoryGeneration string    `json:"repository_generation,omitempty"`
+	PrincipalType        string    `json:"principal_type"`
+	PrincipalID          string    `json:"principal_id"`
 }
 
 type ContextRequest struct {
-	TenantID    string
-	ActorID     string
-	ActorRole   string
-	VirployeeID uuid.UUID
-	SubjectID   uuid.UUID
-	CaseID      uuid.UUID
+	TenantID             string
+	ActorID              string
+	ActorRole            string
+	VirployeeID          uuid.UUID
+	SubjectID            uuid.UUID
+	CaseID               uuid.UUID
+	ProductSurface       string
+	RepositoryGeneration string
 }
 
 type Tool struct {
@@ -114,10 +118,11 @@ type ToolMeta struct {
 }
 
 type Invocation struct {
-	Context        InvocationContext
-	ToolName       string
-	Arguments      map[string]any
-	IdempotencyKey string
+	Context              InvocationContext
+	ToolName             string
+	Arguments            map[string]any
+	IdempotencyKey       string
+	ExpectedManifestHash string
 }
 
 type InvocationResult struct {

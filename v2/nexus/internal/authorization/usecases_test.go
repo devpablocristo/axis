@@ -43,3 +43,28 @@ func TestFunctionalGrantScopeAndExpiry(t *testing.T) {
 		t.Fatal("grant must enforce max risk")
 	}
 }
+
+func TestOperatorGrantIsExplicitlyScoped(t *testing.T) {
+	now := time.Unix(1700000000, 0).UTC()
+	repo := &fakeRepo{grants: []Grant{{
+		ID: uuid.New(), TenantID: "t", UserID: "operator", RoleKey: RoleOperator,
+		ProductSurface: "axis", ActionTypePattern: "ops.job.*", ResourceType: "job", ResourceID: "job-1",
+		MaxRiskClass: "low", ValidFrom: now.Add(-time.Hour), ValidUntil: now.Add(time.Hour), Revision: 1,
+	}}}
+	uc := NewUseCases(repo)
+	uc.now = func() time.Time { return now }
+	allowed, err := uc.Check(context.Background(), CheckInput{
+		TenantID: "t", ActorID: "operator", ActorRole: "member", Permission: "job.replay",
+		ProductSurface: "axis", ActionType: "ops.job.replay", ResourceType: "job", ResourceID: "job-1", RiskClass: "low",
+	})
+	if err != nil || !allowed.Allowed {
+		t.Fatalf("expected scoped operator grant: %+v %v", allowed, err)
+	}
+	denied, _ := uc.Check(context.Background(), CheckInput{
+		TenantID: "t", ActorID: "operator", ActorRole: "member", Permission: "job.replay",
+		ProductSurface: "axis", ActionType: "ops.job.replay", ResourceType: "job", ResourceID: "job-2", RiskClass: "low",
+	})
+	if denied.Allowed {
+		t.Fatal("operator grant must not escape resource scope")
+	}
+}

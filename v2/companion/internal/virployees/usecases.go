@@ -138,6 +138,31 @@ type KnowledgeRetrieverPort interface {
 	Retrieve(context.Context, knowledgebases.RetrievalScope, string, int) (knowledgebases.Evidence, error)
 }
 
+// GovernedReadInvokerPort routes Assist capability reads through the common
+// ToolInvocationGate. Implementations must re-resolve mutable assignment,
+// policy, promotion, manifest, and authority state immediately before running
+// an executor.
+type GovernedReadInvokerPort interface {
+	SupportsGovernedRead(string) bool
+	InvokeGovernedRead(context.Context, GovernedReadInvocation) (map[string]any, error)
+}
+
+type GovernedReadInvocation struct {
+	TenantID               string
+	ActorID                string
+	VirployeeID            uuid.UUID
+	SubjectID              uuid.UUID
+	CaseID                 uuid.UUID
+	AssignmentID           uuid.UUID
+	AssignmentVersion      int64
+	ProductSurface         string
+	RepositoryGeneration   string
+	CapabilityKey          string
+	CapabilityManifestHash string
+	IdempotencyKey         string
+	Arguments              map[string]any
+}
+
 type ContinuityAssignmentValidatorPort interface {
 	ValidateAssistAssignment(context.Context, string, uuid.UUID, uuid.UUID, uuid.UUID, int64) (int64, error)
 	RequiresAssistAssignment(context.Context, string, uuid.UUID, uuid.UUID) (bool, error)
@@ -212,6 +237,8 @@ type ArtifactIngestorPort interface {
 type AssistMetadata struct {
 	AssistType              string
 	ProductSurface          string
+	CapabilityKey           string
+	CapabilityManifestHash  string
 	SubjectID               string
 	CaseID                  uuid.UUID
 	AssignmentID            uuid.UUID
@@ -286,6 +313,7 @@ type UseCases struct {
 	executors             map[string]ActionExecutorPort
 	memories              MemoryReaderPort
 	knowledge             KnowledgeRetrieverPort
+	governedReads         GovernedReadInvokerPort
 	continuity            ContinuityAssignmentValidatorPort
 	assistExecution       AssistExecutionContextValidatorPort
 	runtime               RuntimePlannerPort
@@ -385,6 +413,8 @@ func (u *UseCases) SetApprovalReader(reader ApprovalReaderPort) {
 func (u *UseCases) SetMemoryReader(reader MemoryReaderPort) { u.memories = reader }
 
 func (u *UseCases) SetKnowledgeRetriever(reader KnowledgeRetrieverPort) { u.knowledge = reader }
+
+func (u *UseCases) SetGovernedReadInvoker(invoker GovernedReadInvokerPort) { u.governedReads = invoker }
 
 func (u *UseCases) SetContinuityAssignmentValidator(validator ContinuityAssignmentValidatorPort) {
 	u.continuity = validator

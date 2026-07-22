@@ -1,4 +1,4 @@
-import { BookOpen, Bot, BriefcaseBusiness, ClipboardCheck, GraduationCap, Network, RefreshCw, Scale, ScrollText, ServerCog, Settings, ShieldCheck, SlidersHorizontal, UsersRound, Wrench } from 'lucide-react'
+import { Activity, BookOpen, Bot, BriefcaseBusiness, ClipboardCheck, GraduationCap, Network, RefreshCw, Scale, ScrollText, ServerCog, Settings, ShieldCheck, SlidersHorizontal, UsersRound, Wrench } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { ApprovalsPage } from './ApprovalsPage'
 import { CapabilitiesPage } from './CapabilitiesPage'
@@ -8,6 +8,7 @@ import { LearningProposalsPage } from './LearningProposalsPage'
 import { JobRolesPage } from './JobRolesPage'
 import { KnowledgeBasesPage } from './KnowledgeBasesPage'
 import { MCPGovernancePage } from './MCPGovernancePage'
+import { OperationsPage } from './OperationsPage'
 import { ProfileTemplatesPage } from './ProfileTemplatesPage'
 import { ProfessionalPoliciesPage } from './ProfessionalPoliciesPage'
 import { TenancyPage } from './TenancyPage'
@@ -161,6 +162,14 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
           >
             <GraduationCap aria-hidden="true" />
             Learning
+          </button>
+          <button
+            type="button"
+            className={activePage === 'operations' ? 'active' : ''}
+            onClick={() => setActivePage('operations')}
+          >
+            <Activity aria-hidden="true" />
+            Operations
           </button>
           <span className="nav-section-label nav-section-label--builder">Builder</span>
           <button
@@ -332,6 +341,8 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
             principalId={principalId}
             organizationName={selectedTenant.org_name}
           />
+        ) : activePage === 'operations' ? (
+          <OperationsPage tenantId={selectedTenant.id} principalId={principalId} productSurface={selectedTenant.product_surface} />
         ) : (
           <VirployeesPage
             tenantId={selectedTenant.id}
@@ -353,7 +364,7 @@ function unique(values: string[]): string[] {
   return Array.from(new Set(values.filter(Boolean))).sort((left, right) => left.localeCompare(right))
 }
 
-type Page = 'virployees' | 'job-roles' | 'capabilities' | 'learning-proposals' | 'profile-templates' | 'knowledge-bases' | 'professional-policies' | 'governance' | 'mcp-governance' | 'approvals' | 'coordination' | 'workforce' | 'admin'
+type Page = 'virployees' | 'job-roles' | 'capabilities' | 'learning-proposals' | 'profile-templates' | 'knowledge-bases' | 'professional-policies' | 'governance' | 'mcp-governance' | 'approvals' | 'coordination' | 'workforce' | 'operations' | 'admin'
 
 type ApprovalReviewContext = {
   approvalId: string
@@ -372,6 +383,7 @@ function pageTitle(page: Page): string {
   if (page === 'approvals') return 'Approvals'
   if (page === 'coordination') return 'Specialist coordination'
   if (page === 'workforce') return 'Workforce continuity'
+  if (page === 'operations') return 'Operations'
   if (page === 'admin') return 'Admin'
   return 'Virployees'
 }

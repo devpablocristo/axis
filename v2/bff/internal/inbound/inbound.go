@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -19,6 +20,7 @@ import (
 
 	ginmw "github.com/devpablocristo/platform/http/gin/go"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 type Binding struct {
@@ -53,6 +55,7 @@ type assistRunEnvelope struct {
 	OwnerSystem          string          `json:"owner_system"`
 	ProductSurface       string          `json:"product_surface"`
 	AssistType           string          `json:"assist_type"`
+	CapabilityKey        string          `json:"capability_key,omitempty"`
 	SubjectType          string          `json:"subject_type"`
 	SubjectID            string          `json:"subject_id"`
 	CaseID               string          `json:"case_id,omitempty"`
@@ -65,7 +68,11 @@ type assistRunResult struct {
 	ID                     string          `json:"id"`
 	CaseID                 string          `json:"case_id,omitempty"`
 	ResponsibleVirployeeID string          `json:"responsible_virployee_id,omitempty"`
+	CapabilityKey          string          `json:"capability_key,omitempty"`
+	CapabilityManifestHash string          `json:"capability_manifest_hash,omitempty"`
 	Status                 string          `json:"status"`
+	AnswerStatus           string          `json:"answer_status,omitempty"`
+	Citations              json.RawMessage `json:"citations,omitempty"`
 	StatusURL              string          `json:"status_url,omitempty"`
 	Output                 json.RawMessage `json:"output,omitempty"`
 	Orchestration          json.RawMessage `json:"orchestration,omitempty"`
@@ -76,7 +83,11 @@ type companionAssistResponse struct {
 	ID                     string          `json:"id"`
 	CaseID                 string          `json:"case_id"`
 	ResponsibleVirployeeID string          `json:"responsible_virployee_id"`
+	CapabilityKey          string          `json:"capability_key"`
+	CapabilityManifestHash string          `json:"capability_manifest_hash"`
 	Status                 string          `json:"status"`
+	AnswerStatus           string          `json:"answer_status"`
+	Citations              json.RawMessage `json:"citations"`
 	Output                 json.RawMessage `json:"output"`
 	Orchestration          json.RawMessage `json:"orchestration"`
 	Error                  string          `json:"error_message"`
@@ -105,6 +116,26 @@ func (h *Handler) AssistRun(c *gin.Context) {
 	if surface := strings.TrimSpace(envelope.ProductSurface); surface != "" && !strings.EqualFold(surface, binding.ProductSurface) {
 		ginmw.WriteError(c, http.StatusForbidden, "forbidden", "product_surface does not match the api key")
 		return
+	}
+	requestedCapability := envelope.CapabilityKey
+	var deprecated bool
+	envelope.CapabilityKey, deprecated = normalizeCapabilityKey(envelope.CapabilityKey)
+	if deprecated {
+		c.Header("Deprecation", "true")
+		c.Header("Warning", `299 Axis "Deprecated capability alias; use `+envelope.CapabilityKey+`"`)
+		slog.WarnContext(c.Request.Context(), "assist_capability_alias_used",
+			"alias", strings.ToLower(strings.TrimSpace(requestedCapability)),
+			"capability_key", envelope.CapabilityKey, "product_surface", binding.ProductSurface)
+	}
+	if isClinicalCapability(envelope.CapabilityKey) {
+		if subjectID, err := uuid.Parse(strings.TrimSpace(envelope.SubjectID)); err != nil || subjectID == uuid.Nil {
+			ginmw.WriteError(c, http.StatusBadRequest, "invalid_subject", "subject_id must be a UUID for clinical capabilities")
+			return
+		}
+		if strings.TrimSpace(envelope.RepositoryGeneration) == "" {
+			ginmw.WriteError(c, http.StatusBadRequest, "repository_generation_required", "repository_generation is required for clinical capabilities")
+			return
+		}
 	}
 	if strings.TrimSpace(binding.RoutingPoolID) != "" && strings.TrimSpace(envelope.SubjectID) == "" {
 		ginmw.WriteError(c, http.StatusBadRequest, "subject_required", "subject_id is required for routed assists")
@@ -232,6 +263,11 @@ func (h *Handler) AssistCapabilities(c *gin.Context) {
 				"application/vnd.openxmlformats-officedocument.*", "application/vnd.oasis.opendocument.*",
 			},
 		},
+		"capabilities": []string{"clinical.records.search", "clinical.timeline.build"},
+		"capability_aliases": gin.H{
+			"medmory.search.query": "clinical.records.search", "medmory.timeline.read": "clinical.timeline.build",
+			"medmory.timeline.build": "clinical.timeline.build",
+		},
 		"limits": gin.H{"max_artifact_bytes": 250 << 20, "max_diagnosis_bytes": 500 << 20, "max_repository_bytes": 5 << 30},
 	})
 }
@@ -240,7 +276,7 @@ func (h *Handler) submit(c *gin.Context, binding Binding, envelope assistRunEnve
 	resolvedBinding := binding
 	assignmentID := strings.TrimSpace(envelope.AssignmentID)
 	if strings.TrimSpace(binding.RoutingPoolID) != "" {
-		resolution, err := h.resolveRouting(c, binding, envelope.SubjectID)
+		resolution, err := h.resolveRouting(c, binding, envelope.SubjectID, envelope.CapabilityKey)
 		if err != nil {
 			return companionAssistResponse{}, Binding{}, err
 		}
@@ -262,7 +298,8 @@ func (h *Handler) submit(c *gin.Context, binding Binding, envelope assistRunEnve
 	body, err := json.Marshal(map[string]any{
 		"input_json": envelope.Input, "idempotency_key": idempotencyKey,
 		"assist_type": envelope.AssistType, "product_surface": binding.ProductSurface,
-		"subject_id": envelope.SubjectID, "repository_generation": envelope.RepositoryGeneration,
+		"capability_key": envelope.CapabilityKey,
+		"subject_id":     envelope.SubjectID, "repository_generation": envelope.RepositoryGeneration,
 		"case_id": envelope.CaseID, "assignment_id": assignmentID,
 	})
 	if err != nil {
@@ -277,8 +314,11 @@ func (h *Handler) submit(c *gin.Context, binding Binding, envelope assistRunEnve
 	return run, resolvedBinding, err
 }
 
-func (h *Handler) resolveRouting(c *gin.Context, binding Binding, subjectID string) (routingResolution, error) {
-	body, err := json.Marshal(map[string]string{"pool_id": binding.RoutingPoolID, "subject_id": strings.TrimSpace(subjectID)})
+func (h *Handler) resolveRouting(c *gin.Context, binding Binding, subjectID, capabilityKey string) (routingResolution, error) {
+	body, err := json.Marshal(map[string]string{
+		"pool_id": binding.RoutingPoolID, "subject_id": strings.TrimSpace(subjectID),
+		"capability_key": strings.TrimSpace(capabilityKey),
+	})
 	if err != nil {
 		return routingResolution{}, err
 	}
@@ -368,8 +408,28 @@ func productResult(run companionAssistResponse) assistRunResult {
 	}
 	return assistRunResult{
 		ID: run.ID, CaseID: run.CaseID, ResponsibleVirployeeID: run.ResponsibleVirployeeID,
-		Status: status, Output: run.Output, Orchestration: run.Orchestration, ErrorMessage: run.Error,
+		CapabilityKey: run.CapabilityKey, CapabilityManifestHash: run.CapabilityManifestHash,
+		Status: status, AnswerStatus: run.AnswerStatus, Citations: run.Citations,
+		Output: run.Output, Orchestration: run.Orchestration, ErrorMessage: run.Error,
 	}
+}
+
+var capabilityAliases = map[string]string{
+	"medmory.search.query": "clinical.records.search", "medmory.timeline.read": "clinical.timeline.build",
+	"medmory.timeline.build": "clinical.timeline.build",
+}
+
+func normalizeCapabilityKey(raw string) (string, bool) {
+	key := strings.ToLower(strings.TrimSpace(raw))
+	canonical, ok := capabilityAliases[key]
+	if ok {
+		return canonical, true
+	}
+	return key, false
+}
+
+func isClinicalCapability(key string) bool {
+	return key == "clinical.records.search" || key == "clinical.timeline.build"
 }
 
 func isTerminal(status string) bool {

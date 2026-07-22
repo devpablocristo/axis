@@ -135,7 +135,20 @@ func (r *MemoryRepository) Heartbeat(_ context.Context, jobID uuid.UUID, workerI
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	job, ok := r.jobs[jobID]
-	if !ok || job.Status != StatusRunning || job.LeaseOwner != strings.TrimSpace(workerID) {
+	if !ok || job.LeaseOwner != strings.TrimSpace(workerID) {
+		return ErrJobNotFound
+	}
+	if job.Status == StatusCancelRequested {
+		now := r.now()
+		job.Status = StatusCancelled
+		job.LeaseOwner = ""
+		job.LeaseUntil = nil
+		job.CompletedAt = &now
+		job.UpdatedAt = now
+		r.jobs[job.ID] = job
+		return ErrJobCancelled
+	}
+	if job.Status != StatusRunning {
 		return ErrJobNotFound
 	}
 	now := r.now()
@@ -151,14 +164,20 @@ func (r *MemoryRepository) Complete(_ context.Context, jobID uuid.UUID, workerID
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	job, ok := r.jobs[jobID]
-	if !ok || job.Status != StatusRunning || job.LeaseOwner != strings.TrimSpace(workerID) {
+	if !ok || (job.Status != StatusRunning && job.Status != StatusCancelRequested) || job.LeaseOwner != strings.TrimSpace(workerID) {
 		return ErrJobNotFound
 	}
 	now := r.now()
-	job.Status = StatusSucceeded
+	if job.Status == StatusCancelRequested {
+		job.Status = StatusCancelled
+	} else {
+		job.Status = StatusSucceeded
+	}
 	job.LeaseOwner = ""
 	job.LeaseUntil = nil
-	job.Evidence = cloneJSON(defaultJSON(evidence))
+	if job.Status == StatusSucceeded {
+		job.Evidence = cloneJSON(defaultJSON(evidence))
+	}
 	job.CompletedAt = &now
 	job.UpdatedAt = now
 	r.jobs[job.ID] = job
@@ -169,7 +188,7 @@ func (r *MemoryRepository) Fail(_ context.Context, input FailInput) (Job, error)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	job, ok := r.jobs[input.JobID]
-	if !ok || job.Status != StatusRunning || job.LeaseOwner != strings.TrimSpace(input.WorkerID) {
+	if !ok || (job.Status != StatusRunning && job.Status != StatusCancelRequested) || job.LeaseOwner != strings.TrimSpace(input.WorkerID) {
 		return Job{}, ErrJobNotFound
 	}
 	now := r.now()
@@ -177,7 +196,10 @@ func (r *MemoryRepository) Fail(_ context.Context, input FailInput) (Job, error)
 	job.LeaseUntil = nil
 	job.LastErrorCode = NormalizeErrorCode(input.ErrorCode)
 	job.Evidence = cloneJSON(defaultJSON(input.Evidence))
-	if input.Retryable && job.Attempts < job.MaxAttempts {
+	if job.Status == StatusCancelRequested {
+		job.Status = StatusCancelled
+		job.CompletedAt = &now
+	} else if input.Retryable && job.Attempts < job.MaxAttempts {
 		job.Status = StatusQueued
 		job.RunAfter = now.Add(defaultDuration(input.Backoff, time.Second))
 	} else {
@@ -197,11 +219,15 @@ func (r *MemoryRepository) Cancel(_ context.Context, tenantID string, jobID uuid
 		return ErrJobNotFound
 	}
 	now := r.now()
-	job.Status = StatusCancelled
-	job.LeaseOwner = ""
-	job.LeaseUntil = nil
+	if job.Status == StatusRunning {
+		job.Status = StatusCancelRequested
+	} else {
+		job.Status = StatusCancelled
+		job.LeaseOwner = ""
+		job.LeaseUntil = nil
+		job.CompletedAt = &now
+	}
 	job.LastErrorCode = NormalizeErrorCode(reasonCode)
-	job.CompletedAt = &now
 	job.UpdatedAt = now
 	r.jobs[job.ID] = job
 	return nil

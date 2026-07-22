@@ -985,6 +985,17 @@ export async function axisFetch<T>(path: string, init: AxisFetchInit = {}): Prom
   return response.json() as Promise<T>
 }
 
+export async function axisDownload(path: string, init: AxisFetchInit = {}): Promise<Blob> {
+  const headers = new Headers(init.headers)
+  if (init.tenantId) headers.set('X-Tenant-ID', init.tenantId)
+  if (init.principalId) headers.set('X-Actor-ID', init.principalId)
+  const token = await resolveAxisAuthToken()
+  if (token) headers.set('Authorization', `Bearer ${token}`)
+  const response = await fetch(path, { method: init.method ?? 'GET', headers })
+  if (!response.ok) throw new Error(await responseErrorMessage(response))
+  return response.blob()
+}
+
 export function getSession(): Promise<Session> {
   return axisFetch<Session>('/api/session')
 }

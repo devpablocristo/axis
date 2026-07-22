@@ -849,6 +849,61 @@ func TestGatewayForwardsGovernanceCheckToNexusWithResolvedTenantHeaders(t *testi
 	}
 }
 
+func TestGatewayRoutesOperationalJobByServiceAndStripsForgedAuthority(t *testing.T) {
+	tenantID := uuid.New()
+	var gotPath, gotActor, gotRole, gotPermissions string
+	nexus := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotActor = r.Header.Get("X-Actor-ID")
+		gotRole = r.Header.Get("X-Axis-Tenant-Role")
+		gotPermissions = r.Header.Get("X-Permissions")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"queued"}`))
+	}))
+	defer nexus.Close()
+	companion := httptest.NewServer(http.NotFoundHandler())
+	defer companion.Close()
+	router := gatewayTestRouterWithTargets(t, &fakeGatewayTenancy{tenant: tenantdomain.Tenant{ID: tenantID, OrgID: "org-a", ProductSurface: "axis", Status: tenantdomain.StatusActive, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}, member: tenantdomain.TenantMember{TenantID: tenantID, UserID: "operator-a", Role: tenantdomain.RoleMember, Status: tenantdomain.StatusActive}}, companion.URL, nexus.URL)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/operations/jobs/nexus/11111111-1111-1111-1111-111111111111/replay", strings.NewReader(`{}`))
+	req.Header.Set("X-Tenant-ID", tenantID.String())
+	req.Header.Set("X-Actor-ID", "operator-a")
+	req.Header.Set("X-Axis-Tenant-Role", "owner")
+	req.Header.Set("X-Permissions", "*")
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if gotPath != "/v1/operations/jobs/11111111-1111-1111-1111-111111111111/replay" {
+		t.Fatalf("unexpected downstream path %q", gotPath)
+	}
+	if gotActor != "operator-a" || gotRole != string(tenantdomain.RoleMember) || gotPermissions != "" {
+		t.Fatalf("authority headers were not derived safely actor=%q role=%q permissions=%q", gotActor, gotRole, gotPermissions)
+	}
+}
+
+func TestOperationsOverviewReportsPartialWhenOneServiceIsDown(t *testing.T) {
+	tenantID := uuid.New()
+	companion := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"healthy","fleet":{"ready":2}}`))
+	}))
+	defer companion.Close()
+	nexus := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	}))
+	defer nexus.Close()
+	router := gatewayTestRouterWithTargets(t, &fakeGatewayTenancy{tenant: tenantdomain.Tenant{ID: tenantID, OrgID: "org-a", ProductSurface: "axis", Status: tenantdomain.StatusActive, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}, member: tenantdomain.TenantMember{TenantID: tenantID, UserID: "auditor-a", Role: tenantdomain.RoleAdmin, Status: tenantdomain.StatusActive}}, companion.URL, nexus.URL)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/operations/overview", nil)
+	req.Header.Set("X-Tenant-ID", tenantID.String())
+	req.Header.Set("X-Actor-ID", "auditor-a")
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"status":"partial"`) || !strings.Contains(rec.Body.String(), `"nexus":{"status":"unavailable"}`) {
+		t.Fatalf("partial outage must remain visible: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
 func gatewayTestRouter(t *testing.T, tenancy TenancyPort, companionURL string) *gin.Engine {
 	return gatewayTestRouterWithSupervisor(t, tenancy, companionURL, nil)
 }

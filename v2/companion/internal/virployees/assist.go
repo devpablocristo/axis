@@ -52,7 +52,8 @@ func (u *UseCases) resolveDocuments(ctx context.Context, inputJSON json.RawMessa
 // SubmitAssist durably stores an idempotent run without performing model work.
 func (u *UseCases) SubmitAssist(ctx context.Context, tenantID string, id uuid.UUID, inputJSON json.RawMessage, idempotencyKey string, metadata AssistMetadata) (AssistRun, bool, error) {
 	tenantID = normalizeTenantID(tenantID)
-	if u.answerer == nil {
+	metadata.CapabilityKey, _ = NormalizeAssistCapabilityKey(metadata.CapabilityKey)
+	if u.answerer == nil && metadata.CapabilityKey != CapabilityClinicalRecordsSearch {
 		return AssistRun{}, false, domainerr.Conflict("runtime answerer is not configured")
 	}
 	if u.assistRepo == nil {
@@ -62,12 +63,35 @@ func (u *UseCases) SubmitAssist(ctx context.Context, tenantID string, id uuid.UU
 		return AssistRun{}, false, domainerr.Validation("input_json must be valid JSON")
 	}
 	metadata.SubjectID = strings.TrimSpace(metadata.SubjectID)
+	metadata.ProductSurface = strings.ToLower(strings.TrimSpace(metadata.ProductSurface))
+	metadata.RepositoryGeneration = strings.TrimSpace(metadata.RepositoryGeneration)
+	idempotencyKey = strings.TrimSpace(idempotencyKey)
+	if isClinicalAssistCapability(metadata.CapabilityKey) {
+		if err := validateClinicalAssistInput(metadata.CapabilityKey, inputJSON); err != nil {
+			return AssistRun{}, false, err
+		}
+		if metadata.SubjectID == "" {
+			return AssistRun{}, false, domainerr.Validation("subject_id is required for clinical capabilities")
+		}
+		if metadata.RepositoryGeneration == "" {
+			return AssistRun{}, false, domainerr.Validation("repository_generation is required for clinical capabilities")
+		}
+		if idempotencyKey == "" {
+			return AssistRun{}, false, domainerr.Validation("Idempotency-Key is required for clinical capabilities")
+		}
+		if metadata.ProductSurface == "" {
+			return AssistRun{}, false, domainerr.Validation("product_surface is required for clinical capabilities")
+		}
+	}
 	if metadata.CaseID != uuid.Nil && metadata.SubjectID == "" {
 		return AssistRun{}, false, domainerr.Validation("subject_id is required when case_id is provided")
 	}
 	var parsedSubjectID uuid.UUID
 	if metadata.SubjectID != "" {
 		parsedSubjectID, _ = uuid.Parse(metadata.SubjectID)
+	}
+	if isClinicalAssistCapability(metadata.CapabilityKey) && parsedSubjectID == uuid.Nil {
+		return AssistRun{}, false, domainerr.Validation("subject_id must be a valid UUID for clinical capabilities")
 	}
 	if metadata.AssignmentID == uuid.Nil && u.continuity != nil {
 		required, requirementErr := u.continuity.RequiresAssistAssignment(ctx, tenantID, parsedSubjectID, id)
@@ -99,14 +123,44 @@ func (u *UseCases) SubmitAssist(ctx context.Context, tenantID string, id uuid.UU
 	if err != nil {
 		return AssistRun{}, false, err
 	}
+	if metadata.CapabilityKey != "" {
+		if !isClinicalAssistCapability(metadata.CapabilityKey) {
+			return AssistRun{}, false, domainerr.Validation("capability_key is not available through Assist")
+		}
+		if u.governedReads == nil || !u.governedReads.SupportsGovernedRead(metadata.CapabilityKey) {
+			return AssistRun{}, false, domainerr.Conflict("executor is not configured for Assist capability")
+		}
+		found := false
+		for _, capability := range runtimeContext.Capabilities {
+			if capability.CapabilityKey != metadata.CapabilityKey {
+				continue
+			}
+			if capability.SideEffectClass != "read" || capability.RequiresNexusApproval ||
+				capability.ManifestHash == "" || capability.ConformedHash != capability.ManifestHash {
+				return AssistRun{}, false, domainerr.Conflict("Assist capability is not an active governed read")
+			}
+			if capability.Manifest.ProductSurface != metadata.ProductSurface {
+				return AssistRun{}, false, domainerr.Forbidden("capability is not enabled for product_surface")
+			}
+			metadata.CapabilityManifestHash = capability.ManifestHash
+			found = true
+			break
+		}
+		if !found {
+			return AssistRun{}, false, domainerr.Forbidden("capability is not assigned to this Virployee")
+		}
+		metadata.GroundingMode = "sources_only"
+	}
 	metadata.GroundingMode = string(runtimeContext.Virployee.GroundingMode)
-	if metadata.GroundingMode == "" {
+	if metadata.CapabilityKey != "" {
+		metadata.GroundingMode = "sources_only"
+	} else if metadata.GroundingMode == "" {
 		metadata.GroundingMode = "general"
 	}
 	metadata.JobRoleSnapshotHash = professionalContextHash(professionalContextFromJobRole(runtimeContext.JobRole))
 	metadata.ContextHash = assistContextHash(tenantID, id, runtimeContext.Virployee.JobRoleID, metadata, nil, "")
 	inputHash := runtraces.HashString(metadata.ContextHash + "\x00" + string(inputJSON))
-	if strings.TrimSpace(idempotencyKey) == "" {
+	if idempotencyKey == "" {
 		idempotencyKey = runtraces.HashString(tenantID + ":" + id.String() + ":" + inputHash)
 	}
 	if err := u.consumeQuota(ctx, quotaKey(tenantID, metadata.ProductSurface, quotas.AreaInbound), idempotencyKey, "virployee", id.String(), 1); err != nil {
@@ -130,6 +184,8 @@ func assistRunScopeMatches(run AssistRun, metadata AssistMetadata) bool {
 		strings.TrimSpace(run.ProductSurface) != strings.TrimSpace(metadata.ProductSurface) ||
 		strings.TrimSpace(run.AssistType) != strings.TrimSpace(metadata.AssistType) ||
 		strings.TrimSpace(run.RepositoryGeneration) != strings.TrimSpace(metadata.RepositoryGeneration) ||
+		strings.TrimSpace(run.CapabilityKey) != strings.TrimSpace(metadata.CapabilityKey) ||
+		strings.TrimSpace(run.CapabilityManifestHash) != strings.TrimSpace(metadata.CapabilityManifestHash) ||
 		run.AssignmentID != metadata.AssignmentID || run.AssignmentVersion != metadata.AssignmentVersion {
 		return false
 	}
@@ -227,6 +283,10 @@ func (u *UseCases) ProcessAssistRun(ctx context.Context, tenantID string, runID 
 		return failed, domainerr.Conflict("Job Role changed after the Assist run was accepted")
 	}
 	run.JobRoleSnapshotHash = currentJobRoleSnapshotHash
+	if snapshotErr := validateAssistCapabilitySnapshot(runtimeContext, run); snapshotErr != nil {
+		failed, _ := u.assistRepo.CompleteAssistRun(ctx, tenantID, run.ID, "failed", nil, "", false, false, "", "", "capability_context_changed", 0)
+		return failed, snapshotErr
+	}
 
 	contentParts, ingested, ingestErr := u.ingestArtifacts(ctx, run)
 	if ingestErr != nil {
@@ -236,6 +296,9 @@ func (u *UseCases) ProcessAssistRun(ctx context.Context, tenantID string, runID 
 		failed, _ := u.assistRepo.CompleteAssistRun(ctx, tenantID, run.ID, "failed", nil, "", false, false, "", "", artifacts.StableErrorCode(ingestErr), 0)
 		u.emitAssistAudit(ctx, tenantID, run.VirployeeID, failed, run.InputHash)
 		return failed, domainerr.Unavailable("required artifact processing failed")
+	}
+	if run.CapabilityKey != "" {
+		return u.processGovernedCapabilityAssist(ctx, run, responsibleID, runtimeContext.Virployee.JobRoleID)
 	}
 	var answerInputJSON json.RawMessage
 	if ingested {
@@ -374,6 +437,7 @@ func responsibleVirployeeID(run AssistRun) uuid.UUID {
 func assistMetadataForRun(run AssistRun) AssistMetadata {
 	return AssistMetadata{
 		AssistType: run.AssistType, ProductSurface: run.ProductSurface, SubjectID: run.SubjectID,
+		CapabilityKey: run.CapabilityKey, CapabilityManifestHash: run.CapabilityManifestHash,
 		CaseID: run.CaseID, AssignmentID: run.AssignmentID, AssignmentVersion: run.AssignmentVersion,
 		RepositoryGeneration: run.RepositoryGeneration, GroundingMode: run.GroundingMode,
 		MemoryContextHash: run.MemoryContextHash, JobRoleSnapshotHash: run.JobRoleSnapshotHash,
@@ -387,6 +451,7 @@ func assistContextHash(tenantID string, virployeeID, jobRoleID uuid.UUID, metada
 		strings.TrimSpace(metadata.SubjectID), metadata.CaseID.String(), metadata.AssignmentID.String(),
 		strconv.FormatInt(metadata.AssignmentVersion, 10), strings.TrimSpace(metadata.ProductSurface),
 		strings.TrimSpace(metadata.AssistType), strings.TrimSpace(metadata.RepositoryGeneration),
+		strings.TrimSpace(metadata.CapabilityKey), strings.TrimSpace(metadata.CapabilityManifestHash),
 		strings.ToLower(strings.TrimSpace(metadata.GroundingMode)), strings.TrimSpace(metadata.MemoryContextHash),
 		strings.TrimSpace(metadata.JobRoleSnapshotHash), strings.TrimSpace(metadata.SourceAuthorizationHash),
 		strings.TrimSpace(policySnapshotHash),
@@ -764,6 +829,8 @@ func (u *UseCases) emitAssistAudit(ctx context.Context, tenantID string, virploy
 		"input_hash": inputHash, "model": run.Model, "prompt_version": run.PromptVersion,
 		"answered": run.Answered, "degraded": run.Degraded, "status": run.Status, "duration_ms": run.DurationMS,
 		"grounding_mode": run.GroundingMode, "answer_status": run.AnswerStatus, "citation_count": len(run.Citations),
+		"capability_key": run.CapabilityKey, "capability_manifest_hash": run.CapabilityManifestHash,
+		"source_authorization_hash": run.SourceAuthorizationHash,
 	}
 	if len(run.Output) > 0 {
 		data["output_hash"] = runtraces.HashString(string(run.Output))

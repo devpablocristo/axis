@@ -33,11 +33,33 @@ func (r *fakeAssistRepo) BeginAssistRun(_ context.Context, tenant string, vid uu
 	}
 	r.current = AssistRun{ID: uuid.New(), TenantID: tenant, VirployeeID: vid, CaseID: metadata.CaseID, AssignmentID: metadata.AssignmentID,
 		AssignmentVersion: metadata.AssignmentVersion, AssistType: metadata.AssistType, ProductSurface: metadata.ProductSurface,
-		SubjectID: metadata.SubjectID, RepositoryGeneration: metadata.RepositoryGeneration, GroundingMode: metadata.GroundingMode,
+		SubjectID: metadata.SubjectID, RepositoryGeneration: metadata.RepositoryGeneration,
+		CapabilityKey: metadata.CapabilityKey, CapabilityManifestHash: metadata.CapabilityManifestHash, GroundingMode: metadata.GroundingMode,
 		ContextHash: metadata.ContextHash, JobRoleSnapshotHash: metadata.JobRoleSnapshotHash,
 		SourceAuthorizationHash: metadata.SourceAuthorizationHash,
 		IdempotencyKey:          idem, Status: "received", InputHash: inputHash, InputJSON: input}
 	return r.current, true, nil
+}
+
+func TestClinicalAssistInputIsClosedBeforeArtifactProcessing(t *testing.T) {
+	if err := validateClinicalAssistInput(CapabilityClinicalRecordsSearch, json.RawMessage(`{"query":"labs","documents":[]}`)); err == nil {
+		t.Fatal("clinical search accepted a non-contract documents field")
+	}
+	if err := validateClinicalAssistInput(CapabilityClinicalTimelineBuild, json.RawMessage(`{"order":"desc","unknown":true}`)); err == nil {
+		t.Fatal("clinical timeline accepted an unknown field")
+	}
+}
+
+func TestAssistRunScopeIncludesCanonicalCapabilitySnapshot(t *testing.T) {
+	metadata := AssistMetadata{CapabilityKey: CapabilityClinicalTimelineBuild, CapabilityManifestHash: strings.Repeat("a", 64)}
+	run := AssistRun{CapabilityKey: metadata.CapabilityKey, CapabilityManifestHash: metadata.CapabilityManifestHash}
+	if !assistRunScopeMatches(run, metadata) {
+		t.Fatal("matching capability snapshot was not considered the same idempotency scope")
+	}
+	metadata.CapabilityManifestHash = strings.Repeat("b", 64)
+	if assistRunScopeMatches(run, metadata) {
+		t.Fatal("changed capability manifest reused an idempotency scope")
+	}
 }
 
 func (r *fakeAssistRepo) ClaimAssistRun(_ context.Context, _ string, id uuid.UUID, recoverPreAnswer bool) (AssistRun, bool, error) {

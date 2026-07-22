@@ -25,6 +25,7 @@ Functional roles are fixed definitions; tenants grant them additively:
 | `approver` | Decide approvals within the granted product, action, resource and risk scope. |
 | `auditor` | Read policy, approval, delegation and metadata-only evaluation history. |
 | `delegation_admin` | Create, review and revoke professional delegations. |
+| `operator` | Read operational state and perform scoped reconciliation, job/outbox recovery, incident actions, legal holds and exports. |
 
 Every grant is tenant-scoped, time-bounded and revocable. Optional scopes cover
 `product_surface`, action patterns, resource type/reference and maximum risk.
@@ -101,6 +102,18 @@ POST                 /governance-policy-promotions/:id/approve|reject
 GET                  /governance-policy-evaluations
 GET                  /governance-policy-changelog
 POST                 /governance/checks/:id/revalidate
+
+GET|POST             /operations/reconciliations
+GET                  /operations/overview|jobs|incidents|slos|legal-holds|exports
+POST                 /operations/jobs/:id/cancel|replay
+POST                 /operations/incidents/:id/acknowledge|suppress|resolve
+PUT                  /operations/slos
+GET|PUT               /operations/notification-policy
+POST                 /operations/legal-holds
+POST                 /operations/legal-holds/:id/release
+POST                 /operations/exports
+POST                 /operations/exports/:id/download-token
+POST                 /internal/operations/findings
 ```
 
 Companion keeps delegation management nested under the Virployee, including
@@ -108,3 +121,17 @@ create, review and revoke operations. Existing tenants receive no automatically
 active policy. Existing delegation rows retain their former authority with
 `critical` maximum risk, unrestricted product and a resource scope pinned to
 their previously linked principal.
+
+The internal finding endpoint accepts only strict, bounded metadata and a UUID
+idempotency key over the authenticated service channel. Nexus deduplicates each
+delivery before changing incident occurrence/revision state. Human operational
+mutations require the corresponding scoped `operator` permission and never
+derive authority from caller-supplied functional-role headers.
+
+Incident notifications are leased from a durable outbox and delivered as
+metadata-only webhooks. Destinations are stored as secret references, plaintext
+HTTP is rejected outside development, retries are bounded, and exhausted
+deliveries enter DLQ for an explicitly authorized replay. Worker controls use a
+shared persistent circuit breaker so all replicas observe `closed`, `open`,
+`half_open` and `paused` consistently; reconciliation and lease recovery jobs
+cannot block themselves.

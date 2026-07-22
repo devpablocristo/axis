@@ -11,10 +11,12 @@ when services collaborate.
   services.
 - `companion` is the workforce/runtime service. It owns Job Roles, Virployees,
   work subjects, stable routing, capabilities, autonomy, scoped memory,
-  knowledge bindings, professional authority and execution orchestration.
+  knowledge bindings, professional authority, execution orchestration and the
+  operational view/reconciliation of its Virployee fleet and durable work.
 - `nexus` is the governance service. It owns action types, additive functional
   role grants, versioned CEL policy evaluation, durable approvals and approval
-  decisions.
+  decisions, plus enterprise operations such as incidents, SLOs, legal holds
+  and governed exports.
 - `runtime` proposes intents from natural language using an LLM (Gemini via
   Vertex AI by default, authenticated with Application Default Credentials). It
   only proposes which assigned capability an input maps to; Companion always
@@ -129,6 +131,25 @@ channel for governance calls to Nexus. Health endpoints remain public.
   PHI, secrets, or signed URLs. Every affected business record still appends
   hash-only metadata to the virployee ledger. Scheduler and worker goroutines
   stop before each service closes its database.
+- Companion exposes a tenant/product-scoped operations surface for fleet health,
+  reconciliation runs, durable jobs, worker controls and Nexus outbox replay.
+  Reconciliation findings use stable fingerprints and carry bounded metadata
+  only; they are committed with a durable outbox record and delivered
+  idempotently to Nexus. Nexus folds those observations into revisioned
+  incidents (`opened`, `observed` or `reopened`) and also reconciles its own
+  approvals, jobs and audit chains. Functional `operator` grants scope reads,
+  safe repair/replay controls, incident actions, legal holds and exports; all
+  mutations remain tenant-bound, authorized, version checked where applicable
+  and idempotent.
+- Job workers share persisted circuit-breaker state across replicas. Retryable
+  dependency failures open a tenant/product/job-kind circuit after the bounded
+  threshold; one half-open probe decides recovery, while protected
+  reconciliation and lease-recovery jobs remain runnable. Incident webhooks
+  are metadata-only, resolve destinations through secret references, and use a
+  leased retry/DLQ outbox. Export jobs publish only complete, hash-manifested
+  artifacts; narrow Virployee, subject, case or audit scopes may select only
+  categories with an exact scoped query, and one-use download tokens never
+  reveal storage URIs.
 - Workforce separates reusable professions (Job Roles), individual
   Virployees, served parties (Work Subjects), pools and continuity assignments.
   Several Virployees may share a profession; one Virployee may serve several

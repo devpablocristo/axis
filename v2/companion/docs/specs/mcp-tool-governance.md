@@ -29,6 +29,14 @@ metadata and opaque internal subject/case references. Those mutable inputs are
 revalidated immediately before execution, so a policy, assignment, delegation,
 functional-authority or manifest change invalidates an earlier approval.
 
+Internal Assist reads use this same gate without making a loopback HTTP call.
+Their invocation context additionally binds the trusted product surface and
+immutable repository generation. Tool resolution rejects a capability from a
+different product surface, and execution rejects an expected manifest hash that
+no longer matches the promoted capability. This lets an accepted Assist run
+reuse the MCP governance path without widening its document snapshot or silently
+switching capability versions.
+
 The database has a uniqueness barrier for write idempotency. Concurrent retries
 with the same key and identical payload/context reuse the prior pending approval;
 reuse with different payload or authority context fails closed. Invocation audit

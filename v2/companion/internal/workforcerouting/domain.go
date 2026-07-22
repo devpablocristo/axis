@@ -161,15 +161,17 @@ type NormalizedRelationshipInput struct {
 }
 
 type ResolveInput struct {
-	PoolID    string
-	SubjectID string
-	ActorID   string
+	PoolID        string
+	SubjectID     string
+	CapabilityKey string
+	ActorID       string
 }
 
 type NormalizedResolveInput struct {
-	PoolID    uuid.UUID
-	SubjectID uuid.UUID
-	ActorID   string
+	PoolID        uuid.UUID
+	SubjectID     uuid.UUID
+	CapabilityKey string
+	ActorID       string
 }
 
 type ReassignInput struct {
@@ -268,7 +270,17 @@ func NormalizeResolveInput(in ResolveInput) (NormalizedResolveInput, error) {
 	if actorID == "" {
 		actorID = "system"
 	}
-	return NormalizedResolveInput{PoolID: poolID, SubjectID: subjectID, ActorID: actorID}, nil
+	capabilityKey := strings.ToLower(strings.TrimSpace(in.CapabilityKey))
+	switch capabilityKey {
+	case "medmory.search.query":
+		capabilityKey = "clinical.records.search"
+	case "medmory.timeline.read", "medmory.timeline.build":
+		capabilityKey = "clinical.timeline.build"
+	}
+	if capabilityKey != "" && !regexp.MustCompile(`^[a-z0-9_-]+\.[a-z0-9_-]+\.[a-z0-9_-]+$`).MatchString(capabilityKey) {
+		return NormalizedResolveInput{}, domainerr.Validation("capability_key must use domain.resource.action")
+	}
+	return NormalizedResolveInput{PoolID: poolID, SubjectID: subjectID, CapabilityKey: capabilityKey, ActorID: actorID}, nil
 }
 
 func NormalizeReassignInput(in ReassignInput) (NormalizedReassignInput, error) {

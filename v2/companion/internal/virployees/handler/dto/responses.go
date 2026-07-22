@@ -23,6 +23,8 @@ type AssistRunResponse struct {
 	AssignmentID           string             `json:"assignment_id,omitempty"`
 	AssignmentVersion      int64              `json:"assignment_version,omitempty"`
 	ResponsibleVirployeeID string             `json:"responsible_virployee_id,omitempty"`
+	CapabilityKey          string             `json:"capability_key,omitempty"`
+	CapabilityManifestHash string             `json:"capability_manifest_hash,omitempty"`
 	Status                 string             `json:"status"`
 	GroundingMode          string             `json:"grounding_mode"`
 	ContextHash            string             `json:"context_hash,omitempty"`

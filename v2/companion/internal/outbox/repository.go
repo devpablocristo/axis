@@ -39,6 +39,11 @@ func (r *Repository) EnqueueTx(ctx context.Context, tx pgx.Tx, input EnqueueInpu
 			return Message{}, false, fmt.Errorf("invalid Nexus outbox audit payload: %w", err)
 		}
 	}
+	if input.Kind == KindOperationalFinding {
+		if _, err := ParseOperationalFinding(input.Payload); err != nil {
+			return Message{}, false, fmt.Errorf("invalid operational finding payload: %w", err)
+		}
+	}
 	message, err := scanMessage(tx.QueryRow(ctx, `
         INSERT INTO companion_nexus_outbox
             (id, tenant_id, aggregate_type, aggregate_id, kind, dedupe_key, payload_json)
@@ -425,7 +430,17 @@ func prefixedColumns(prefix string) string {
 
 func validMessageType(aggregateType, kind string) bool {
 	return (aggregateType == AggregateTypeExecutionAttempt && kind == KindExecutionResult) ||
-		(aggregateType == AggregateTypeProfessionalAuthority && kind == KindAuditEvent)
+		(aggregateType == AggregateTypeProfessionalAuthority && kind == KindAuditEvent) ||
+		(aggregateType == AggregateTypeOperationalFinding && kind == KindOperationalFinding)
+}
+
+func containsString(items []string, value string) bool {
+	for _, item := range items {
+		if item == value {
+			return true
+		}
+	}
+	return false
 }
 
 func sameJSON(left, right json.RawMessage) bool {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/devpablocristo/platform/errors/go/domainerr"
@@ -126,6 +127,8 @@ func (r *Repository) ResolveContext(ctx context.Context, request ContextRequest)
 	var out InvocationContext
 	out.TenantID, out.ActorID, out.ActorRole = request.TenantID, request.ActorID, request.ActorRole
 	out.VirployeeID, out.SubjectID, out.CaseID = request.VirployeeID, request.SubjectID, request.CaseID
+	out.ProductSurface = strings.ToLower(strings.TrimSpace(request.ProductSurface))
+	out.RepositoryGeneration = strings.TrimSpace(request.RepositoryGeneration)
 	var subjectKind string
 	err := r.pool.QueryRow(ctx, `
 		SELECT a.id,a.version,s.kind

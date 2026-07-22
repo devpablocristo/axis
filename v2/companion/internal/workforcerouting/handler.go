@@ -114,8 +114,9 @@ type relationshipRequest struct {
 }
 
 type resolveRequest struct {
-	PoolID    string `json:"pool_id"`
-	SubjectID string `json:"subject_id"`
+	PoolID        string `json:"pool_id"`
+	SubjectID     string `json:"subject_id"`
+	CapabilityKey string `json:"capability_key,omitempty"`
 }
 
 type reassignRequest struct {
@@ -394,7 +395,9 @@ func (h *Handler) resolve(c *gin.Context) {
 	if err := ginmw.BindJSON(c, &req); err != nil {
 		return
 	}
-	out, err := h.ucs.Resolve(c.Request.Context(), tenantID(c), ResolveInput{PoolID: req.PoolID, SubjectID: req.SubjectID, ActorID: actorID(c)})
+	out, err := h.ucs.Resolve(c.Request.Context(), tenantID(c), ResolveInput{
+		PoolID: req.PoolID, SubjectID: req.SubjectID, CapabilityKey: req.CapabilityKey, ActorID: actorID(c),
+	})
 	if respondError(c, err) {
 		return
 	}

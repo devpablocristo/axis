@@ -14,6 +14,7 @@ import (
 type nexusOutboxClient interface {
 	ReportExecutionResult(context.Context, string, string, string, string, string, int64, map[string]any, string, string, string) error
 	AppendAuditEventIdempotent(context.Context, string, string, nexusclient.AuditEvent) error
+	ReportOperationalFinding(context.Context, string, string, json.RawMessage) error
 }
 
 func newNexusOutboxSender(client nexusOutboxClient) outbox.Sender {
@@ -23,6 +24,14 @@ func newNexusOutboxSender(client nexusOutboxClient) outbox.Sender {
 			return sendNexusExecutionResult(ctx, client, message)
 		case message.AggregateType == outbox.AggregateTypeProfessionalAuthority && message.Kind == outbox.KindAuditEvent:
 			return sendNexusAuthorityAudit(ctx, client, message)
+		case message.AggregateType == outbox.AggregateTypeOperationalFinding && message.Kind == outbox.KindOperationalFinding:
+			if err := client.ReportOperationalFinding(ctx, message.TenantID, message.ID.String(), message.Payload); err != nil {
+				if nexusclient.IsPermanentHTTPError(err) {
+					return outbox.Permanent("nexus_rejected", err)
+				}
+				return outbox.Retryable("nexus_unavailable", err)
+			}
+			return nil
 		default:
 			return outbox.Permanent("unsupported_outbox_message", fmt.Errorf("unsupported aggregate and kind"))
 		}

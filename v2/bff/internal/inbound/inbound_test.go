@@ -153,6 +153,32 @@ func TestAssistRunProxiesAndMapsResponse(t *testing.T) {
 	}
 }
 
+func TestAssistRunCanonicalizesLegacyClinicalAlias(t *testing.T) {
+	var gotBody map[string]json.RawMessage
+	companion := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &gotBody)
+		_, _ = w.Write([]byte(`{"id":"run-alias","status":"done","capability_key":"clinical.timeline.build","capability_manifest_hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","answer_status":"completed","citations":[],"output":{"status":"completed"}}`))
+	}))
+	defer companion.Close()
+
+	body := `{"product_surface":"medmory","capability_key":"medmory.timeline.read","subject_id":"11111111-1111-4111-8111-111111111111","repository_generation":"g1","input":{"order":"desc"}}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/assist-runs", strings.NewReader(body))
+	req.Header.Set("X-API-Key", "secret-key")
+	req.Header.Set("Idempotency-Key", "timeline-g1")
+	rec := httptest.NewRecorder()
+	newTestEngine(companion.URL).ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if rec.Header().Get("Deprecation") != "true" || string(gotBody["capability_key"]) != `"clinical.timeline.build"` {
+		t.Fatalf("alias was not deprecated and canonicalized: header=%q body=%+v", rec.Header().Get("Deprecation"), gotBody)
+	}
+	if !strings.Contains(rec.Body.String(), `"capability_manifest_hash"`) || !strings.Contains(rec.Body.String(), `"answer_status":"completed"`) {
+		t.Fatalf("clinical response fields were not propagated: %s", rec.Body.String())
+	}
+}
+
 func TestAssistRunMapsNeedsHumanAsATraceableTerminalResult(t *testing.T) {
 	companion := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"id":"run-human","case_id":"case-human","responsible_virployee_id":"vp-owner","status":"needs_human","output":{"needs_human":true},"orchestration":{"state":"needs_human","pending_human_review":true}}`))
@@ -258,7 +284,7 @@ func TestAssistCapabilitiesAreMachineAuthenticatedAndConservative(t *testing.T) 
 	req.Header.Set("X-API-Key", "secret-key")
 	rec := httptest.NewRecorder()
 	newTestEngine("http://unused").ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "application/pdf") || !strings.Contains(rec.Body.String(), "application/dicom") || !strings.Contains(rec.Body.String(), "needs_human") || !strings.Contains(rec.Body.String(), "orchestration") || strings.Contains(rec.Body.String(), `"status":"pending"`) {
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "application/pdf") || !strings.Contains(rec.Body.String(), "application/dicom") || !strings.Contains(rec.Body.String(), "needs_human") || !strings.Contains(rec.Body.String(), "orchestration") || !strings.Contains(rec.Body.String(), "clinical.records.search") || strings.Contains(rec.Body.String(), `"status":"pending"`) {
 		t.Fatalf("unexpected capabilities: code=%d body=%s", rec.Code, rec.Body.String())
 	}
 }

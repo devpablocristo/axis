@@ -70,6 +70,28 @@ func (c *Client) setTrustedHeaders(req *http.Request, tenantID, actorID string) 
 	}
 }
 
+func (c *Client) ReportOperationalFinding(ctx context.Context, tenantID, idempotencyKey string, payload json.RawMessage) error {
+	if !json.Valid(payload) || strings.TrimSpace(idempotencyKey) == "" {
+		return fmt.Errorf("operational finding metadata is invalid")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/internal/operations/findings", bytes.NewReader(payload))
+	if err != nil {
+		return fmt.Errorf("build operational finding request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", strings.TrimSpace(idempotencyKey))
+	c.setTrustedHeaders(req, tenantID, "service:companion-operations")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("report operational finding: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+		return &HTTPStatusError{Operation: "report operational finding", StatusCode: resp.StatusCode}
+	}
+	return nil
+}
+
 func (c *Client) Check(ctx context.Context, input executiongate.GovernanceCheckInput) (executiongate.GovernanceCheckResult, error) {
 	body := checkRequest{
 		RequesterType:        input.RequesterType,

@@ -15,10 +15,21 @@ import (
 type fakeNexusOutboxClient struct {
 	executionCalls int
 	auditCalls     int
+	findingCalls   int
 	auditTenant    string
 	auditKey       string
 	auditEvent     nexusclient.AuditEvent
 	auditErr       error
+	findingTenant  string
+	findingKey     string
+	findingPayload json.RawMessage
+	findingErr     error
+}
+
+func (f *fakeNexusOutboxClient) ReportOperationalFinding(_ context.Context, tenantID, key string, payload json.RawMessage) error {
+	f.findingCalls++
+	f.findingTenant, f.findingKey, f.findingPayload = tenantID, key, append(json.RawMessage(nil), payload...)
+	return f.findingErr
 }
 
 func (f *fakeNexusOutboxClient) ReportExecutionResult(context.Context, string, string, string, string, string, int64, map[string]any, string, string, string) error {
@@ -117,5 +128,46 @@ func TestNexusOutboxSenderDoesNotRetryRejectedAudit(t *testing.T) {
 	})
 	if err == nil || !errors.Is(err, client.auditErr) {
 		t.Fatalf("Nexus rejection must be returned as a delivery error, got %v", err)
+	}
+}
+
+func TestNexusOutboxSenderDeliversOperationalFinding(t *testing.T) {
+	client := &fakeNexusOutboxClient{}
+	messageID := uuid.New()
+	payload := json.RawMessage(`{"run_id":"` + uuid.NewString() + `","finding_type":"job.dead_letter","severity":"high","resource_type":"job","resource_id":"` + uuid.NewString() + `","fingerprint":"` + strings.Repeat("d", 64) + `","state_based":true,"metadata":{}}`)
+	err := newNexusOutboxSender(client).Send(context.Background(), outbox.Message{
+		ID: messageID, TenantID: "tenant-ops", AggregateType: outbox.AggregateTypeOperationalFinding,
+		AggregateID: uuid.New(), Kind: outbox.KindOperationalFinding, Payload: payload,
+	})
+	if err != nil {
+		t.Fatalf("send operational finding: %v", err)
+	}
+	if client.findingCalls != 1 || client.findingTenant != "tenant-ops" || client.findingKey != messageID.String() || string(client.findingPayload) != string(payload) {
+		t.Fatalf("unexpected finding routing: %+v", client)
+	}
+	if client.auditCalls != 0 || client.executionCalls != 0 {
+		t.Fatalf("finding must not cross existing routes: %+v", client)
+	}
+}
+
+func TestNexusOutboxSenderClassifiesOperationalFindingFailures(t *testing.T) {
+	message := outbox.Message{
+		ID: uuid.New(), TenantID: "tenant-ops", AggregateType: outbox.AggregateTypeOperationalFinding,
+		AggregateID: uuid.New(), Kind: outbox.KindOperationalFinding, Payload: json.RawMessage(`{}`),
+	}
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{name: "rejected", err: &nexusclient.HTTPStatusError{Operation: "report operational finding", StatusCode: 422}},
+		{name: "unavailable", err: errors.New("connection refused")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := &fakeNexusOutboxClient{findingErr: tc.err}
+			err := newNexusOutboxSender(client).Send(context.Background(), message)
+			if err == nil || !errors.Is(err, tc.err) || client.findingCalls != 1 {
+				t.Fatalf("expected routed delivery error wrapping %v, got %v", tc.err, err)
+			}
+		})
 	}
 }

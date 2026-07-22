@@ -13,7 +13,7 @@ sig = "42391a71185db1f8"
 [[bindings]]
 doc = "v2/companion/docs/specs/grounded-knowledge-and-authority.md"
 target = "v2/companion/internal/knowledgebases/domain.go"
-sig = "7bfb0e3e664e3314"
+sig = "dc188807cbe4ad07"
 
 [[bindings]]
 doc = "v2/companion/docs/specs/grounded-knowledge-and-authority.md"
@@ -28,7 +28,7 @@ sig = "89856b771d597dd0"
 [[bindings]]
 doc = "v2/companion/docs/specs/grounded-knowledge-and-authority.md"
 target = "v2/companion/internal/knowledgebases/retriever.go"
-sig = "7474a4bd5475b85c"
+sig = "3aaf9a9f7fc57d46"
 
 [[bindings]]
 doc = "v2/companion/docs/specs/grounded-knowledge-and-authority.md"
@@ -43,7 +43,7 @@ sig = "af70791ff5273cb7"
 [[bindings]]
 doc = "v2/companion/docs/specs/grounded-knowledge-and-authority.md"
 target = "v2/companion/internal/virployees/assist.go"
-sig = "770215e179861c57"
+sig = "98d860e704f01b10"
 
 [[bindings]]
 doc = "v2/companion/docs/specs/grounded-knowledge-and-authority.md"
@@ -98,17 +98,17 @@ sig = "c0e444fd88c93395"
 [[bindings]]
 doc = "v2/companion/docs/specs/mcp-tool-governance.md"
 target = "v2/companion/internal/mcpgovernance/handler.go"
-sig = "b459fc0492548ff0"
+sig = "4cd8a5d49e772e00"
 
 [[bindings]]
 doc = "v2/companion/docs/specs/mcp-tool-governance.md"
 target = "v2/companion/internal/mcpgovernance/repository.go"
-sig = "5a5a04162390fdb9"
+sig = "f1e65c4e1d20c4d6"
 
 [[bindings]]
 doc = "v2/companion/docs/specs/mcp-tool-governance.md"
 target = "v2/companion/internal/mcpgovernance/usecases.go"
-sig = "a49ae80e940d0919"
+sig = "87e15e92a84548e4"
 
 [[bindings]]
 doc = "v2/companion/docs/specs/mcp-tool-governance.md"
@@ -163,7 +163,7 @@ sig = "00dd0bdc0dc071de"
 [[bindings]]
 doc = "v2/companion/docs/specs/memories.md"
 target = "v2/companion/internal/virployees/usecases.go"
-sig = "e0ee45c53e7be039"
+sig = "a5ed90154fb4c47e"
 
 [[bindings]]
 doc = "v2/companion/docs/specs/memories.md"
@@ -203,22 +203,22 @@ sig = "1f63d883cec3f260"
 [[bindings]]
 doc = "v2/companion/docs/specs/workforce-routing.md"
 target = "v2/companion/internal/virployees/assist.go"
-sig = "770215e179861c57"
+sig = "98d860e704f01b10"
 
 [[bindings]]
 doc = "v2/companion/docs/specs/workforce-routing.md"
 target = "v2/companion/internal/workforcerouting/domain.go"
-sig = "4c7a7fffb57faab3"
+sig = "20a0e77855a39271"
 
 [[bindings]]
 doc = "v2/companion/docs/specs/workforce-routing.md"
 target = "v2/companion/internal/workforcerouting/handler.go"
-sig = "6e568aacd52c2a75"
+sig = "d7a7ac95ac49b832"
 
 [[bindings]]
 doc = "v2/companion/docs/specs/workforce-routing.md"
 target = "v2/companion/internal/workforcerouting/repository.go"
-sig = "455312b7b7acafc0"
+sig = "71f8d2026b9ef9fd"
 
 [[bindings]]
 doc = "v2/companion/docs/specs/workforce-routing.md"
@@ -233,7 +233,7 @@ sig = "141e00f9c0d33866"
 [[bindings]]
 doc = "v2/docs/advanced-governance.md"
 target = "v2/bff/internal/gateway/handler.go"
-sig = "c1e019fb74ba8a87"
+sig = "28580b91f02c309c"
 
 [[bindings]]
 doc = "v2/docs/advanced-governance.md"
@@ -243,7 +243,7 @@ sig = "af70791ff5273cb7"
 [[bindings]]
 doc = "v2/docs/advanced-governance.md"
 target = "v2/companion/internal/virployees/usecases.go"
-sig = "e0ee45c53e7be039"
+sig = "a5ed90154fb4c47e"
 
 [[bindings]]
 doc = "v2/docs/advanced-governance.md"
@@ -264,6 +264,11 @@ sig = "2e7c9e5791b1fcec"
 doc = "v2/docs/advanced-governance.md"
 target = "v2/nexus/internal/authorization/usecases.go"
 sig = "feb43cb652ee1d3f"
+
+[[bindings]]
+doc = "v2/docs/advanced-governance.md"
+target = "v2/nexus/internal/enterpriseops/service.go"
+sig = "5c81beb09f088ac8"
 
 [[bindings]]
 doc = "v2/docs/advanced-governance.md"
@@ -302,18 +307,33 @@ sig = "c0994330a067b934"
 
 [[bindings]]
 doc = "v2/docs/axis-os.md"
+target = "v2/companion/internal/operations/repository.go"
+sig = "477f4203ca22ebf6"
+
+[[bindings]]
+doc = "v2/docs/axis-os.md"
 target = "v2/companion/internal/quotas/repository.go"
 sig = "11f5068b4246d1de"
 
 [[bindings]]
 doc = "v2/docs/axis-os.md"
 target = "v2/companion/wire/wire.go"
-sig = "3f8c95cf5ec337dc"
+sig = "094e16322481f498"
+
+[[bindings]]
+doc = "v2/docs/axis-os.md"
+target = "v2/console/src/OperationsPage.tsx"
+sig = "80b9f8c70b80ec21"
+
+[[bindings]]
+doc = "v2/docs/axis-os.md"
+target = "v2/nexus/internal/enterpriseops/service.go"
+sig = "5c81beb09f088ac8"
 
 [[bindings]]
 doc = "v2/docs/axis-os.md"
 target = "v2/nexus/wire/wire.go"
-sig = "e16feec7a27e1dbd"
+sig = "b7e69ca2d7c10c7c"
 
 [[bindings]]
 doc = "v2/docs/axis-os.md"

@@ -229,6 +229,8 @@ func contextRequest(c *gin.Context) (ContextRequest, error) {
 	return ContextRequest{
 		TenantID: tenantID(c), ActorID: actorID(c), ActorRole: strings.TrimSpace(c.GetHeader("X-Axis-Tenant-Role")),
 		VirployeeID: virployeeID, SubjectID: subjectID, CaseID: caseID,
+		ProductSurface:       strings.ToLower(strings.TrimSpace(c.GetHeader("X-Axis-Product-Surface"))),
+		RepositoryGeneration: strings.TrimSpace(c.GetHeader("X-Axis-Repository-Generation")),
 	}, nil
 }
 

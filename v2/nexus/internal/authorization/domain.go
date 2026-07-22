@@ -14,6 +14,7 @@ const (
 	RoleApprover        = "approver"
 	RoleAuditor         = "auditor"
 	RoleDelegationAdmin = "delegation_admin"
+	RoleOperator        = "operator"
 )
 
 type RoleDefinition struct {
@@ -27,6 +28,11 @@ var roleDefinitions = []RoleDefinition{
 	{Key: RoleApprover, Description: "Read and decide scoped approvals", Permissions: []string{"approvals.read", "approvals.decide"}},
 	{Key: RoleAuditor, Description: "Read governance and authority audit data", Permissions: []string{"audit.read", "policies.read", "approvals.read", "delegations.read", "rbac.read"}},
 	{Key: RoleDelegationAdmin, Description: "Read and manage professional delegations", Permissions: []string{"delegations.read", "delegations.write", "delegations.revoke"}},
+	{Key: RoleOperator, Description: "Operate scoped jobs, reconciliation, incidents, holds and exports", Permissions: []string{
+		"ops.read", "reconciliation.run", "job.cancel", "job.replay", "worker.pause", "worker.resume", "outbox.replay",
+		"incident.acknowledge", "incident.suppress", "incident.resolve", "legal_hold.create", "legal_hold.release",
+		"export.create", "export.download",
+	}},
 }
 
 type Grant struct {

@@ -15,6 +15,7 @@ type AssistRequest struct {
 	IdempotencyKey       string          `json:"idempotency_key,omitempty"`
 	AssistType           string          `json:"assist_type,omitempty"`
 	ProductSurface       string          `json:"product_surface,omitempty"`
+	CapabilityKey        string          `json:"capability_key,omitempty"`
 	SubjectID            string          `json:"subject_id,omitempty"`
 	CaseID               string          `json:"case_id,omitempty"`
 	AssignmentID         string          `json:"assignment_id,omitempty"`

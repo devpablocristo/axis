@@ -211,7 +211,8 @@ func assistMetadataFromRequest(req dto.AssistRequest) (AssistMetadata, error) {
 	}
 	return AssistMetadata{
 		AssistType: req.AssistType, ProductSurface: req.ProductSurface, SubjectID: req.SubjectID,
-		CaseID: caseID, AssignmentID: assignmentID, RepositoryGeneration: req.RepositoryGeneration,
+		CapabilityKey: req.CapabilityKey,
+		CaseID:        caseID, AssignmentID: assignmentID, RepositoryGeneration: req.RepositoryGeneration,
 	}, nil
 }
 
@@ -244,6 +245,8 @@ func assistRunToDTO(run AssistRun) dto.AssistRunResponse {
 		AssignmentID:           coordinationResponseUUID(run.AssignmentID),
 		AssignmentVersion:      run.AssignmentVersion,
 		ResponsibleVirployeeID: coordinationResponseUUID(responsibleVirployeeID(run)),
+		CapabilityKey:          run.CapabilityKey,
+		CapabilityManifestHash: run.CapabilityManifestHash,
 		Status:                 run.Status,
 		GroundingMode:          run.GroundingMode,
 		ContextHash:            run.ContextHash,

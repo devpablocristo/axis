@@ -73,6 +73,16 @@ source body or a signed URL. In `general` mode citations are optional and scoped
 memory may be supplied, but tenant/subject/case retrieval constraints still
 apply.
 
+Clinical capability Assist always forces `sources_only`. Search retains the
+retriever score while bounding excerpts and paginating only within one immutable
+repository generation. Timeline supplies at most 200 authorized fragments and
+100.000 characters to the responsible Virployee with its active Job Role and
+profile, plus the manifest output schema. Memory, general knowledge and
+specialist orchestration are never clinical evidence for this path. Companion
+allows one schema/citation repair; any remaining event without an exact allowed
+reference abstains the entire timeline. Date filtering and asc/desc ordering run
+in Go after schema and citation validation.
+
 ## Topic scope
 
 Each Virployee has a revisioned scope policy:
@@ -152,6 +162,11 @@ source identifiers/hashes, the complete source-authorization snapshot and the
 conversation-policy snapshot. Both assignment and source authorization are
 revalidated before execution; reassignment or a binding/version change prevents
 a queued or previously approved run from continuing under stale ownership.
+Capability Assist also binds the canonical capability key and exact manifest
+hash. `product_surface` and `repository_generation` are part of the governed
+ToolInvocationGate context; policy, kill switches, assignment, promotion,
+manifest, autonomy and authority are resolved again immediately before its
+read executor runs.
 
 The side-effect Execution Gate separately binds the exact prepared action,
 memory context hash when used, scope-policy revision, policy-pack

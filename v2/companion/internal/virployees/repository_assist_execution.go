@@ -25,6 +25,25 @@ func (r *Repository) AssistSourceAuthorizationHash(ctx context.Context, tenantID
 		if len(locator) == 0 || !json.Valid(locator) {
 			locator = json.RawMessage(`null`)
 		}
+		// Clinical capability responses intentionally expose only the canonical
+		// document reference. Recover the internal knowledge-base identity from
+		// the tenant-scoped catalog before recomputing authorization.
+		if citation.KnowledgeBaseID == nil {
+			if documentID, parseErr := uuid.Parse(strings.TrimSpace(citation.DocumentID)); parseErr == nil && documentID != uuid.Nil {
+				var knowledgeBaseID uuid.UUID
+				lookupErr := r.pool.QueryRow(ctx, `SELECT knowledge_base_id
+					FROM companion_knowledge_documents
+					WHERE tenant_id=$1 AND id=$2 AND lifecycle_state='active'
+					  AND artifact_virployee_id=$3 AND artifact_product_surface=$4
+					  AND artifact_subject_id=$5 AND artifact_repository_generation=$6
+					  AND source_version=$7 AND source_sha256=$8`, tenantID, documentID, virployeeID,
+					run.ProductSurface, strings.TrimSpace(run.SubjectID), run.RepositoryGeneration,
+					strings.TrimSpace(citation.SourceVersion), strings.TrimSpace(citation.SHA256)).Scan(&knowledgeBaseID)
+				if lookupErr == nil && knowledgeBaseID != uuid.Nil {
+					citation.KnowledgeBaseID = &knowledgeBaseID
+				}
+			}
+		}
 		if citation.KnowledgeBaseID == nil {
 			if strings.TrimSpace(citation.SourceVersion) != strings.TrimSpace(run.RepositoryGeneration) {
 				return "", domainerr.Conflict("Assist artifact source version changed")
@@ -146,7 +165,7 @@ func (r *Repository) ValidateAssistExecutionContext(ctx context.Context, tenantI
 			return err
 		}
 	}
-	if strings.EqualFold(strings.TrimSpace(run.GroundingMode), "sources_only") && len(run.SourceContext) == 0 {
+	if strings.EqualFold(strings.TrimSpace(run.GroundingMode), "sources_only") && len(run.SourceContext) == 0 && run.CapabilityKey == "" {
 		return domainerr.Conflict("source-only Assist has no durable citations")
 	}
 	for _, reference := range run.MemoryReferences {

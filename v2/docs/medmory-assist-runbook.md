@@ -1,4 +1,66 @@
-# medmory → Axis "assist" (diagnóstico) — runbook
+# Medmory → Axis Assist — runbook
+
+## P1: búsqueda y timeline clínicas
+
+Medmory consume estas funciones como capacidades de Virployees administradas
+por Axis; no implementa motores clínicos ni persiste una timeline propia:
+
+| Capacidad canónica | Autonomía | Timeout | Cuotas | Job Roles iniciales |
+| --- | --- | --- | --- | --- |
+| `clinical.records.search` | A0 | 30 s | inbound, embeddings | Medical Historian |
+| `clinical.timeline.build` | A1 | 120 s | inbound, LLM | Medical Historian, Study Analyst, Care Coordinator |
+
+Ambas son `read`, riesgo `medium`, requieren evidencia, tienen un intento y no
+usan aprobación Nexus ni rollback. Ningún Virployee administrativo o de billing
+debe recibirlas. El bootstrap tenant-scoped crea cuotas, manifests, conformance,
+promoción, MCP policy y asignaciones sin tocar otros Job Roles:
+
+```bash
+cd v2/companion
+AXIS_COMPANION_URL=http://127.0.0.1:18081/v1 \
+AXIS_INTERNAL_AUTH_SECRET="$COMPANION_V2_INTERNAL_AUTH_SECRET" \
+AXIS_TENANT_ID=<tenant-uuid> \
+./scripts/onboard-medmory-clinical.sh
+```
+
+El `POST /v1/assist-runs` agrega `capability_key`. Para estas dos claves son
+obligatorios un `subject_id` UUID, `repository_generation` estable e
+`Idempotency-Key`; `case_id` es opcional. Ejemplo de búsqueda:
+
+```bash
+curl -sS -X POST http://127.0.0.1:19080/v1/assist-runs \
+  -H "X-API-Key: $AXIS_API_KEY" -H "Idempotency-Key: patient-search-g42-q1" \
+  -H "Content-Type: application/json" \
+  -d '{"product_surface":"medmory","capability_key":"clinical.records.search",
+       "subject_id":"<subject-uuid>","repository_generation":"g42",
+       "input":{"query":"cambios recientes de hemoglobina","limit":20}}'
+```
+
+Ejemplo de timeline regenerable:
+
+```json
+{
+  "product_surface": "medmory",
+  "capability_key": "clinical.timeline.build",
+  "subject_id": "<subject-uuid>",
+  "repository_generation": "g42",
+  "input": {"date_from":"2025-01-01T00:00:00Z","order":"desc","max_events":100}
+}
+```
+
+La respuesta/polling incluye la clave canónica, `capability_manifest_hash`,
+`answer_status`, `citations` y `output` estructurado. Timeline se reconstruye
+bajo demanda y sólo puede cachearse por generación. Si el corpus supera 200
+partes o 100.000 caracteres devuelve `partial`; si una reparación no elimina
+afirmaciones o citas inválidas, devuelve `abstained` sin eventos.
+
+Aliases temporales: `medmory.search.query` normaliza a search y
+`medmory.timeline.read|build` a timeline antes de routing e idempotencia. El BFF
+responde `Deprecation: true`, emite `assist_capability_alias_used` y siempre
+persiste la clave canónica. Monitorear aliases, abstenciones, truncamiento,
+latencia, cuotas y fallos de autorización antes de retirar compatibilidad.
+
+## Assist diagnóstico existente
 
 medmory (un producto externo, una máquina — no un usuario) le manda a Axis un JSON
 con **referencias a documentos** y recibe un **panorama diagnóstico**. El arco:
@@ -42,9 +104,10 @@ information_needed, disclaimer).
 cd v2 && make up
 # smoke (AXIS_API_KEY = la key que configuraste en BFF_V2_PRODUCT_API_KEYS):
 curl -sS -X POST http://127.0.0.1:19080/v1/assist-runs \
-  -H "X-API-Key: $AXIS_API_KEY" -H "Content-Type: application/json" \
+  -H "X-API-Key: $AXIS_API_KEY" -H "Idempotency-Key: diagnosis-g42-v1" \
+  -H "Content-Type: application/json" \
   -d '{"owner_system":"medmory","product_surface":"medmory","assist_type":"clinical_diagnosis",
-       "subject_type":"repository","subject_id":"default",
+       "subject_type":"repository","subject_id":"<subject-uuid>","repository_generation":"g42",
        "input":{"schema_version":"medmory.diagnosis_input.v1",
                 "documents":[{"key":"labs.txt","read_url":"<url-presignada>","content_type":"text/plain"}]}}'
 ```

@@ -15,6 +15,7 @@ import (
 	"github.com/devpablocristo/companion-v2/internal/artifacts"
 	"github.com/devpablocristo/companion-v2/internal/attestation"
 	"github.com/devpablocristo/companion-v2/internal/capabilities"
+	"github.com/devpablocristo/companion-v2/internal/clinicalcapabilities"
 	"github.com/devpablocristo/companion-v2/internal/executionstats"
 	"github.com/devpablocristo/companion-v2/internal/infra/migrations"
 	"github.com/devpablocristo/companion-v2/internal/jobroles"
@@ -24,6 +25,7 @@ import (
 	"github.com/devpablocristo/companion-v2/internal/mcpgovernance"
 	"github.com/devpablocristo/companion-v2/internal/memories"
 	"github.com/devpablocristo/companion-v2/internal/nexusclient"
+	"github.com/devpablocristo/companion-v2/internal/operations"
 	"github.com/devpablocristo/companion-v2/internal/outbox"
 	"github.com/devpablocristo/companion-v2/internal/professionalauthority"
 	"github.com/devpablocristo/companion-v2/internal/profiletemplates"
@@ -53,6 +55,42 @@ type Dependencies struct {
 // runtimeAnswererAdapter adapts the runtime client's Answer to the virployees
 // RuntimeAnswererPort, keeping the virployees package free of runtimeclient.
 type runtimeAnswererAdapter struct{ client *runtimeclient.Client }
+
+type governedReadInvokerAdapter struct {
+	gate *mcpgovernance.ToolInvocationGate
+}
+
+func (a governedReadInvokerAdapter) SupportsGovernedRead(capabilityKey string) bool {
+	return a.gate != nil && a.gate.HasReadExecutor(capabilityKey)
+}
+
+func (a governedReadInvokerAdapter) InvokeGovernedRead(ctx context.Context, in virployees.GovernedReadInvocation) (map[string]any, error) {
+	if a.gate == nil {
+		return nil, domainerr.Conflict("ToolInvocationGate is not configured")
+	}
+	resolved, err := a.gate.ResolveContext(ctx, mcpgovernance.ContextRequest{
+		TenantID: in.TenantID, ActorID: in.ActorID, ActorRole: "service",
+		VirployeeID: in.VirployeeID, SubjectID: in.SubjectID, CaseID: in.CaseID,
+		ProductSurface: in.ProductSurface, RepositoryGeneration: in.RepositoryGeneration,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if resolved.AssignmentID != in.AssignmentID || resolved.AssignmentVersion != in.AssignmentVersion {
+		return nil, domainerr.Conflict("continuity assignment changed after Assist acceptance")
+	}
+	out, err := a.gate.CallTool(ctx, mcpgovernance.Invocation{
+		Context: resolved, ToolName: in.CapabilityKey, Arguments: in.Arguments,
+		IdempotencyKey: in.IdempotencyKey, ExpectedManifestHash: in.CapabilityManifestHash,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if out.Status != "succeeded" || out.Result == nil {
+		return nil, domainerr.Conflict("governed read did not complete")
+	}
+	return out.Result, nil
+}
 
 type memoryEmbeddingAdapter struct{ client *runtimeclient.Client }
 
@@ -134,6 +172,17 @@ func (a runtimeAnswererAdapter) Answer(ctx context.Context, in virployees.Answer
 // auditEmitterAdapter maps the companion-owned audit event onto the Nexus audit
 // client, keeping the virployees package free of nexusclient.
 type auditEmitterAdapter struct{ client *nexusclient.Client }
+
+type operationsAuthorizationAdapter struct{ client *nexusclient.Client }
+
+func (a operationsAuthorizationAdapter) CheckOperationAuthorization(ctx context.Context, in operations.AuthorizationCheck) (operations.AuthorizationResult, error) {
+	out, err := a.client.CheckDelegationAuthorization(ctx, professionalauthority.DelegationAuthorizationCheck{
+		TenantID: in.TenantID, ActorID: in.ActorID, ActorRole: in.ActorRole,
+		Permission: in.Permission, ProductSurface: in.ProductSurface, ActionType: in.ActionType,
+		ResourceType: in.ResourceType, ResourceID: in.ResourceID, RiskClass: "low",
+	})
+	return operations.AuthorizationResult{Allowed: out.Allowed, Reason: out.Reason}, err
+}
 
 func (a auditEmitterAdapter) AppendAuditEvent(ctx context.Context, in virployees.AuditEventInput) error {
 	return a.client.AppendAuditEvent(ctx, in.TenantID, nexusclient.AuditEvent{
@@ -250,6 +299,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		mcpRepository, capabilitiesUsecases, virployeesUsecases, authorityUsecases,
 		mcpWriteGateAdapter{virployees: virployeesUsecases},
 	)
+	virployeesUsecases.SetGovernedReadInvoker(governedReadInvokerAdapter{gate: mcpUsecases})
 	virployeesUsecases.SetMCPExecutionContextValidator(mcpUsecases)
 	mcpHandler := mcpgovernance.NewHandler(mcpUsecases)
 	var nexusClient *nexusclient.Client
@@ -370,6 +420,11 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 			return nil, err
 		}
 		virployeesUsecases.SetKnowledgeRetriever(knowledgeRetriever)
+		clinicalExecutor := clinicalcapabilities.NewExecutor(
+			knowledgeRetriever, virployeesUsecases, runtimeAnswererAdapter{client: runtimePlanner},
+		)
+		mcpUsecases.RegisterReadExecutor(clinicalcapabilities.RecordsSearchKey, clinicalExecutor)
+		mcpUsecases.RegisterReadExecutor(clinicalcapabilities.TimelineBuildKey, clinicalExecutor)
 	}
 	// Executors are wired per enabled mode (COMPANION_V2_EXECUTION_MODE is a set).
 	// The local simulator and a real external executor can coexist on different
@@ -430,7 +485,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	router.Use(routeAwareBodySizeLimit(config.MaxBodyBytes, config.KnowledgeUploadMaxBodyBytes))
 	router.Use(ginmw.NewCORS(ginmw.CORSConfig{
 		Origins:      config.CORSOrigins,
-		AllowHeaders: []string{"X-Actor-ID", "X-Tenant-ID", "X-Axis-Tenant-Role", "X-Axis-Virployee-ID", "X-Axis-Subject-ID", "X-Axis-Case-ID", "X-Idempotency-Key"},
+		AllowHeaders: []string{"X-Actor-ID", "X-Tenant-ID", "X-Axis-Tenant-Role", "X-Axis-Virployee-ID", "X-Axis-Subject-ID", "X-Axis-Case-ID", "X-Axis-Product-Surface", "X-Axis-Repository-Generation", "X-Idempotency-Key", "Idempotency-Key"},
 	}))
 	ginmw.RegisterHealthEndpoints(router, db.Ping)
 	api := router.Group("/v1")
@@ -452,13 +507,13 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	executionStatsHandler.Routes(api)
 	learningHandler.Routes(api)
 	mcpHandler.AdminRoutes(api)
-
 	server := &http.Server{
 		Addr:    config.Addr(),
 		Handler: tracedServerHandler("companion-v2", observability.Middleware(logger, router)),
 	}
 	backgroundCtx, backgroundCancel := context.WithCancel(ctx)
 	jobsRepository := jobs.NewPostgresRepository(db.Pool())
+	nexusOutboxRepository := outbox.NewRepository(db.Pool())
 	virployeesUsecases.SetAssistQueue(assistQueueAdapter{repository: jobsRepository})
 	virployeesUsecases.SetCoordinationQueue(coordinationQueueAdapter{repository: jobsRepository})
 	jobsWorker := jobs.NewWorker(jobsRepository, jobs.WorkerConfig{
@@ -472,6 +527,13 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		BatchSize: config.WatcherBatchSize, MaxRecoveryAttempts: config.WatcherMaxRecoveries,
 		WorkerID: "companion-watchers-" + uuid.NewString(),
 	}
+	var operationsAuthorizer operations.AuthorizerPort
+	if nexusClient != nil {
+		operationsAuthorizer = operationsAuthorizationAdapter{client: nexusClient}
+	}
+	operationsRepository := operations.NewRepository(db.Pool())
+	operationsUsecases := operations.NewUseCases(operationsRepository, operationsAuthorizer)
+	operations.NewHandler(operationsUsecases).Routes(api)
 	jobsWorker.Register("operational.reconcile", func(jobCtx context.Context, _ jobs.Job) (json.RawMessage, error) {
 		if err := virployeesUsecases.RunOperationalWatchersOnce(jobCtx, watcherConfig); err != nil {
 			return nil, jobs.Retryable("operational_reconcile_failed", err)
@@ -486,6 +548,18 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		}
 		evidence, _ := json.Marshal(map[string]any{"reconciled": true, "assist_runs_requeued": requeued, "coordination": coordination})
 		return evidence, nil
+	})
+	jobsWorker.Register("ops.fleet_reconcile", func(jobCtx context.Context, job jobs.Job) (json.RawMessage, error) {
+		runs, err := operationsUsecases.RunScheduled(jobCtx, "companion")
+		if err != nil {
+			return nil, jobs.Retryable("fleet_reconcile_failed", err)
+		}
+		findings, repaired := 0, 0
+		for _, run := range runs {
+			findings += run.FindingsCount
+			repaired += run.RepairedCount
+		}
+		return json.Marshal(map[string]any{"tenants": len(runs), "findings": findings, "repaired": repaired, "source_job_id": job.ID.String()})
 	})
 	jobsWorker.Register(assistProcessJobKind, func(jobCtx context.Context, job jobs.Job) (json.RawMessage, error) {
 		var payload assistJobPayload
@@ -601,7 +675,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	})
 	var nexusOutbox *outbox.Dispatcher
 	if nexusClient != nil {
-		nexusOutbox = outbox.NewDispatcher(outbox.NewRepository(db.Pool()), newNexusOutboxSender(nexusClient), outbox.DispatcherConfig{
+		nexusOutbox = outbox.NewDispatcher(nexusOutboxRepository, newNexusOutboxSender(nexusClient), outbox.DispatcherConfig{
 			WorkerID:    "companion-nexus-outbox-" + uuid.NewString(),
 			Concurrency: config.JobWorkerConcurrency, PollInterval: config.JobPollInterval,
 			Lease: config.WatcherLease, Timeout: 10 * time.Second,
@@ -617,10 +691,18 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		tracerShutdown: tracerShutdown,
 		watcherCancel:  backgroundCancel,
 	}
-	deps.watcherWG.Add(4)
+	deps.watcherWG.Add(5)
 	go func() {
 		defer deps.watcherWG.Done()
 		jobsWorker.Run(backgroundCtx)
+	}()
+	go func() {
+		defer deps.watcherWG.Done()
+		jobs.RunRecurringScheduler(backgroundCtx, jobsRepository, jobs.RecurringConfig{
+			TenantID: "system", ProductSurface: "companion", Kind: "ops.fleet_reconcile",
+			DedupePrefix: "ops-fleet", Interval: 15 * time.Minute, Timeout: config.JobTimeout,
+			MaxAttempts: config.WatcherMaxRecoveries,
+		})
 	}()
 	go func() {
 		defer deps.watcherWG.Done()

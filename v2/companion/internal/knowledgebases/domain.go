@@ -160,10 +160,12 @@ type ReplaceBindingsInput struct {
 }
 
 type RetrievalScope struct {
-	TenantID    string
-	VirployeeID uuid.UUID
-	SubjectID   string
-	CaseID      uuid.UUID
+	TenantID             string
+	VirployeeID          uuid.UUID
+	SubjectID            string
+	CaseID               uuid.UUID
+	ProductSurface       string
+	RepositoryGeneration string
 }
 
 // Citation is the canonical, Companion-produced source reference. Locator is
@@ -179,6 +181,18 @@ type Citation struct {
 type Evidence struct {
 	Parts     []artifacts.ContentPart
 	Citations []Citation
+}
+
+type SearchMatch struct {
+	Part     artifacts.ContentPart
+	Citation Citation
+	Score    float64
+}
+
+type SearchPage struct {
+	Matches   []SearchMatch
+	HasMore   bool
+	Truncated bool
 }
 
 func normalizeBase(in CreateInput) (CreateInput, error) {
