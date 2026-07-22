@@ -71,6 +71,7 @@ services:
       COMPANION_V2_RUN_MIGRATIONS: ${COMPANION_V2_RUN_MIGRATIONS:-true}
       COMPANION_V2_CORS_ORIGINS: ${COMPANION_V2_CORS_ORIGINS:-http://localhost:19173,http://127.0.0.1:19173,http://console-v2:19173,http://console-v2-e2e:19173}
       COMPANION_V2_NEXUS_BASE_URL: ${COMPANION_V2_NEXUS_BASE_URL:-http://nexus-v2:8080}
+      COMPANION_V2_RUNTIME_BASE_URL: ${COMPANION_V2_RUNTIME_BASE_URL:-http://runtime-v2:8080}
       COMPANION_V2_EXECUTION_MODE: ${COMPANION_V2_EXECUTION_MODE:-local}
       COMPANION_V2_INTERNAL_AUTH_SECRET: ${AXIS_V2_INTERNAL_AUTH_SECRET:-axis-v2-local-internal}
       COMPANION_V2_DATABASE_URL: postgres://${COMPANION_V2_POSTGRES_USER:-postgres}:${COMPANION_V2_POSTGRES_PASSWORD:-postgres}@companion-v2-postgres:5432/${COMPANION_V2_POSTGRES_DB:-companion_v2}?sslmode=disable
@@ -177,6 +178,9 @@ services:
       BFF_V2_NEXUS_BASE_URL: ${BFF_V2_NEXUS_BASE_URL:-http://nexus-v2:8080}
       BFF_V2_IDENTITY_PROVIDER: ${BFF_V2_IDENTITY_PROVIDER:-dev}
       BFF_V2_INTERNAL_AUTH_SECRET: ${AXIS_V2_INTERNAL_AUTH_SECRET:-axis-v2-local-internal}
+      # Product machine credentials for the inbound edge (POST /v1/assist-runs).
+      # Format: <apiKey>=<tenant>|<virployee>|<actor>|<product>, entries comma/newline-separated.
+      BFF_V2_PRODUCT_API_KEYS: ${BFF_V2_PRODUCT_API_KEYS:-}
       BFF_V2_CLERK_SECRET_KEY: ${BFF_V2_CLERK_SECRET_KEY:-${BFF_V2_CLERK_SECRET:-}}
       BFF_V2_CLERK_API_BASE_URL: ${BFF_V2_CLERK_API_BASE_URL:-https://api.clerk.com/v1}
       BFF_V2_CLERK_ISSUER_URL: ${BFF_V2_CLERK_ISSUER_URL:-}
