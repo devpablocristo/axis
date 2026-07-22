@@ -103,8 +103,12 @@ channel for governance calls to Nexus. Health endpoints remain public.
   product + kind + logical key, so replicas cannot process the same logical tick
   twice. Reconciliation finalizes stale assist runs, recovers stale governed
   executions with the original idempotency key, and retries failed execution
-  result reports to Nexus. Persisted failures are stable error codes rather than
-  raw errors, and job events contain operational metadata only — never payloads,
+  result reports to Nexus. Execution completion and creation of its Nexus outbox
+  message are one Companion database transaction. A bounded dispatcher delivers
+  that immutable snapshot with leases, heartbeat, exponential backoff, ten
+  attempts, dead-letter and explicit replay; `nexus_report_status` remains a
+  compatibility projection of the outbox state. Persisted failures are stable
+  error codes rather than raw errors, and operational events contain metadata only — never payloads,
   PHI, secrets, or signed URLs. Every affected business record still appends
   hash-only metadata to the virployee ledger. Scheduler and worker goroutines
   stop before each service closes its database.

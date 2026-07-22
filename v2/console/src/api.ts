@@ -300,7 +300,7 @@ export type VirployeeRunTrace = {
     external_effects: boolean
     resource_id?: string
     duration_ms?: number
-    nexus_report_status?: 'pending' | 'reported' | 'failed'
+    nexus_report_status?: 'pending' | 'reported' | 'failed' | 'dead'
   }
   binding_hash?: string
   created_at: string

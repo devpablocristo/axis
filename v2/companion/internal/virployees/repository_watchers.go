@@ -25,9 +25,7 @@ type ExecutionWork struct {
 type OperationalRepositoryPort interface {
 	FailStaleAssistRuns(context.Context, time.Time, int) ([]TimedOutAssist, error)
 	ClaimStaleExecutions(context.Context, time.Time, int, string, time.Duration, int) ([]ExecutionWork, error)
-	ClaimDueNexusReports(context.Context, time.Time, int, string, time.Duration, int) ([]ExecutionWork, error)
 	ReleaseExecutionRecovery(context.Context, string, uuid.UUID, string) error
-	RecordNexusReportAttempt(context.Context, string, uuid.UUID, string, time.Time, string) error
 }
 
 func (r *Repository) FailStaleAssistRuns(ctx context.Context, cutoff time.Time, limit int) ([]TimedOutAssist, error) {
@@ -63,20 +61,10 @@ func (r *Repository) ClaimStaleExecutions(ctx context.Context, cutoff time.Time,
 		e.status = 'running' AND e.updated_at <= $1
 		AND e.recovery_attempts < $4
 		AND (e.recovery_lease_until IS NULL OR e.recovery_lease_until <= $2)
-	`, "recovery", cutoff, limit, owner, lease, maxAttempts)
+	`, cutoff, limit, owner, lease, maxAttempts)
 }
 
-func (r *Repository) ClaimDueNexusReports(ctx context.Context, pendingCutoff time.Time, limit int, owner string, lease time.Duration, maxAttempts int) ([]ExecutionWork, error) {
-	return r.claimExecutionWork(ctx, `
-		e.status IN ('succeeded','failed') AND e.nexus_report_status IN ('pending','failed')
-		AND ((e.nexus_report_status = 'failed' AND e.nexus_report_next_at <= $2)
-			OR (e.nexus_report_status = 'pending' AND e.updated_at <= $1))
-		AND e.nexus_report_attempts < $4
-		AND (e.report_lease_until IS NULL OR e.report_lease_until <= $2)
-	`, "report", pendingCutoff, limit, owner, lease, maxAttempts)
-}
-
-func (r *Repository) claimExecutionWork(ctx context.Context, predicate, kind string, cutoff time.Time, limit int, owner string, lease time.Duration, maxAttempts int) ([]ExecutionWork, error) {
+func (r *Repository) claimExecutionWork(ctx context.Context, predicate string, cutoff time.Time, limit int, owner string, lease time.Duration, maxAttempts int) ([]ExecutionWork, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return nil, err
@@ -127,11 +115,7 @@ func (r *Repository) claimExecutionWork(ctx context.Context, predicate, kind str
 		return nil, err
 	}
 	if len(ids) > 0 {
-		if kind == "recovery" {
-			_, err = tx.Exec(ctx, `UPDATE companion_execution_attempts SET recovery_lease_owner=$2, recovery_lease_until=$3 WHERE id=ANY($1)`, ids, owner, now.Add(lease))
-		} else {
-			_, err = tx.Exec(ctx, `UPDATE companion_execution_attempts SET report_lease_owner=$2, report_lease_until=$3 WHERE id=ANY($1)`, ids, owner, now.Add(lease))
-		}
+		_, err = tx.Exec(ctx, `UPDATE companion_execution_attempts SET recovery_lease_owner=$2, recovery_lease_until=$3 WHERE id=ANY($1)`, ids, owner, now.Add(lease))
 		if err != nil {
 			return nil, err
 		}
@@ -144,11 +128,6 @@ func (r *Repository) claimExecutionWork(ctx context.Context, predicate, kind str
 
 func (r *Repository) ReleaseExecutionRecovery(ctx context.Context, tenantID string, id uuid.UUID, watcherError string) error {
 	_, err := r.pool.Exec(ctx, `UPDATE companion_execution_attempts SET recovery_attempts=recovery_attempts+1, recovery_lease_owner='', recovery_lease_until=NULL, last_watcher_error=$3 WHERE tenant_id=$1 AND id=$2`, tenantID, id, watcherError)
-	return err
-}
-
-func (r *Repository) RecordNexusReportAttempt(ctx context.Context, tenantID string, id uuid.UUID, status string, next time.Time, watcherError string) error {
-	_, err := r.pool.Exec(ctx, `UPDATE companion_execution_attempts SET nexus_report_status=$3, nexus_report_attempts=nexus_report_attempts+1, nexus_report_next_at=$4, report_lease_owner='', report_lease_until=NULL, last_watcher_error=$5, updated_at=now() WHERE tenant_id=$1 AND id=$2`, tenantID, id, status, next.UTC(), watcherError)
 	return err
 }
 

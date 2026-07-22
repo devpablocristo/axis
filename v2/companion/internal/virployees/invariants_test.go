@@ -489,7 +489,3 @@ func (r *fakeExecRepo) CompleteExecution(_ context.Context, _ string, id uuid.UU
 func (r *fakeExecRepo) CreateLocalCalendarEvent(_ context.Context, _ string, _ uuid.UUID, _ ExecutionAttempt, _ preparedactions.Action) (string, error) {
 	return "res-1", nil
 }
-
-func (r *fakeExecRepo) SetNexusReportStatus(_ context.Context, _ string, _ uuid.UUID, _ string) error {
-	return nil
-}

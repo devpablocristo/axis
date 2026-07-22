@@ -27,10 +27,9 @@ type Config struct {
 	StaleAssistAfter     time.Duration
 	StaleExecutionAfter  time.Duration
 	WatcherLease         time.Duration
-	WatcherReportBackoff time.Duration
+	OutboxBaseBackoff    time.Duration
 	WatcherBatchSize     int
 	WatcherMaxRecoveries int
-	WatcherMaxReports    int
 	JobWorkerConcurrency int
 	JobPollInterval      time.Duration
 	JobTimeout           time.Duration
@@ -71,10 +70,9 @@ func Load() Config {
 		StaleAssistAfter:        time.Duration(envconfig.Int("COMPANION_V2_STALE_ASSIST_SEC", 300)) * time.Second,
 		StaleExecutionAfter:     time.Duration(envconfig.Int("COMPANION_V2_STALE_EXECUTION_SEC", 300)) * time.Second,
 		WatcherLease:            time.Duration(envconfig.Int("COMPANION_V2_WATCHER_LEASE_SEC", 30)) * time.Second,
-		WatcherReportBackoff:    time.Duration(envconfig.Int("COMPANION_V2_REPORT_BACKOFF_SEC", 5)) * time.Second,
+		OutboxBaseBackoff:       time.Duration(envconfig.Int("COMPANION_V2_OUTBOX_BACKOFF_SEC", envconfig.Int("COMPANION_V2_REPORT_BACKOFF_SEC", 5))) * time.Second,
 		WatcherBatchSize:        envconfig.Int("COMPANION_V2_WATCHER_BATCH_SIZE", 50),
 		WatcherMaxRecoveries:    envconfig.Int("COMPANION_V2_RECOVERY_MAX_ATTEMPTS", 3),
-		WatcherMaxReports:       envconfig.Int("COMPANION_V2_REPORT_MAX_ATTEMPTS", 3),
 		JobWorkerConcurrency:    envconfig.Int("COMPANION_V2_JOB_WORKER_CONCURRENCY", 2),
 		JobPollInterval:         time.Duration(envconfig.Int("COMPANION_V2_JOB_POLL_INTERVAL_SEC", 1)) * time.Second,
 		JobTimeout:              time.Duration(envconfig.Int("COMPANION_V2_JOB_TIMEOUT_SEC", 300)) * time.Second,

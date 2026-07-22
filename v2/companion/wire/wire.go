@@ -19,6 +19,7 @@ import (
 	"github.com/devpablocristo/companion-v2/internal/learning"
 	"github.com/devpablocristo/companion-v2/internal/memories"
 	"github.com/devpablocristo/companion-v2/internal/nexusclient"
+	"github.com/devpablocristo/companion-v2/internal/outbox"
 	"github.com/devpablocristo/companion-v2/internal/profiletemplates"
 	"github.com/devpablocristo/companion-v2/internal/runtimeclient"
 	"github.com/devpablocristo/companion-v2/internal/virployees"
@@ -150,11 +151,11 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	}
 	virployeesUsecases.SetCapabilityValidator(capabilitiesUsecases)
 	virployeesUsecases.SetProfileTemplateReader(profileTemplatesUsecases)
+	var nexusClient *nexusclient.Client
 	if config.NexusBaseURL != "" {
-		nexusClient := nexusclient.New(config.NexusBaseURL, &http.Client{Timeout: 5 * time.Second, Transport: otelhttp.NewTransport(http.DefaultTransport)}, config.InternalAuthSecret)
+		nexusClient = nexusclient.New(config.NexusBaseURL, &http.Client{Timeout: 5 * time.Second, Transport: otelhttp.NewTransport(http.DefaultTransport)}, config.InternalAuthSecret)
 		virployeesUsecases.SetGovernanceChecker(nexusClient)
 		virployeesUsecases.SetApprovalReader(nexusClient)
-		virployeesUsecases.SetExecutionResultReporter(nexusClient)
 		// Emit tamper-evident audit events (assist + governed executions) into the
 		// Nexus ledger. Best-effort: emission failures never fail the work.
 		virployeesUsecases.SetAuditEmitter(auditEmitterAdapter{client: nexusClient})
@@ -243,9 +244,8 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	})
 	watcherConfig := virployees.WatcherConfig{
 		StaleAssistAfter: config.StaleAssistAfter, StaleExecutionAfter: config.StaleExecutionAfter,
-		Lease: config.WatcherLease,
-		ReportBackoff: config.WatcherReportBackoff, BatchSize: config.WatcherBatchSize,
-		MaxRecoveryAttempts: config.WatcherMaxRecoveries, MaxReportAttempts: config.WatcherMaxReports,
+		Lease:     config.WatcherLease,
+		BatchSize: config.WatcherBatchSize, MaxRecoveryAttempts: config.WatcherMaxRecoveries,
 		WorkerID: "companion-watchers-" + uuid.NewString(),
 	}
 	jobsWorker.Register("operational.reconcile", func(jobCtx context.Context, _ jobs.Job) (json.RawMessage, error) {
@@ -254,6 +254,27 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		}
 		return json.RawMessage(`{"reconciled":true}`), nil
 	})
+	var nexusOutbox *outbox.Dispatcher
+	if nexusClient != nil {
+		nexusOutbox = outbox.NewDispatcher(outbox.NewRepository(db.Pool()), outbox.SenderFunc(func(deliveryCtx context.Context, message outbox.Message) error {
+			var payload outbox.NexusExecutionResult
+			if err := json.Unmarshal(message.Payload, &payload); err != nil {
+				return outbox.Permanent("invalid_outbox_payload", err)
+			}
+			if payload.GovernanceCheckID == "" || payload.IdempotencyKey == "" || payload.BindingHash == "" || payload.Status == "" {
+				return outbox.Permanent("invalid_outbox_payload", fmt.Errorf("required delivery metadata is missing"))
+			}
+			if err := nexusClient.ReportExecutionResult(deliveryCtx, message.TenantID, payload.GovernanceCheckID, payload.IdempotencyKey, payload.BindingHash, payload.Status, payload.DurationMS, payload.Result); err != nil {
+				return outbox.Retryable("nexus_unavailable", err)
+			}
+			return nil
+		}), outbox.DispatcherConfig{
+			WorkerID:    "companion-nexus-outbox-" + uuid.NewString(),
+			Concurrency: config.JobWorkerConcurrency, PollInterval: config.JobPollInterval,
+			Lease: config.WatcherLease, Timeout: 10 * time.Second,
+			RecoveryBatch: config.WatcherBatchSize, BaseBackoff: config.OutboxBaseBackoff,
+		})
+	}
 
 	deps := &Dependencies{
 		Config:         config,
@@ -268,6 +289,13 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		defer deps.watcherWG.Done()
 		jobsWorker.Run(backgroundCtx)
 	}()
+	if nexusOutbox != nil {
+		deps.watcherWG.Add(1)
+		go func() {
+			defer deps.watcherWG.Done()
+			nexusOutbox.Run(backgroundCtx)
+		}()
+	}
 	go func() {
 		defer deps.watcherWG.Done()
 		jobs.RunRecurringScheduler(backgroundCtx, jobsRepository, jobs.RecurringConfig{

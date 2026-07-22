@@ -31,7 +31,10 @@ The seed is additive. It reuses the base action types/capabilities and updates t
 8. Console lets a human approve/reject from Approvals and return to the Virployee.
 9. The human confirms an exact date, 24-hour time, IANA timezone, duration and attendees.
 10. If approved, a human can manually trigger the local execution from the Virployee Dry Run panel.
-11. Companion validates the approval binding, creates the event idempotently and reports the result to Nexus.
+11. Companion validates the approval binding, creates the event idempotently and
+    commits its result together with a durable Nexus outbox message. The response
+    can expose `nexus_report_status=pending`; an idempotent retry/poll observes
+    `reported` once the dispatcher delivers it.
 
 ## Automated checks
 
@@ -50,7 +53,9 @@ make test-approval-flow-e2e
 make test-console-real-e2e
 ```
 
-`test-approval-flow-e2e` approves one request, executes it locally, and verifies `allow`, `require_approval`, `deny`, idempotent execution and Nexus result reporting.
+`test-approval-flow-e2e` approves one request, executes it locally, and verifies
+`allow`, `require_approval`, `deny`, idempotent execution and eventual Nexus
+result reporting through the outbox.
 `test-console-real-e2e` creates real data through BFF, drives the UI, approves a pending approval, executes it locally, and checks that the Virployee history reflects both `Approved` and `Executed`.
 
 ## Manual UI check

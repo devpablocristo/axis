@@ -48,7 +48,6 @@ type ExecutionRepositoryPort interface {
 	GetExecutionByPreparedAction(ctx context.Context, tenantID string, preparedActionID uuid.UUID) (ExecutionAttempt, error)
 	CompleteExecution(ctx context.Context, tenantID string, id uuid.UUID, status, resourceID string, result map[string]any, executionError string, durationMS int64) (ExecutionAttempt, error)
 	CreateLocalCalendarEvent(ctx context.Context, tenantID string, virployeeID uuid.UUID, attempt ExecutionAttempt, action preparedactions.Action) (string, error)
-	SetNexusReportStatus(ctx context.Context, tenantID string, id uuid.UUID, status string) error
 }
 
 type JobRoleReaderPort interface {
@@ -72,10 +71,6 @@ type GovernanceCheckerPort interface {
 
 type ApprovalReaderPort interface {
 	GetApproval(ctx context.Context, tenantID string, id uuid.UUID) (executiongate.GovernanceApproval, error)
-}
-
-type ExecutionResultReporterPort interface {
-	ReportExecutionResult(ctx context.Context, tenantID, checkID, idempotencyKey, bindingHash, status string, durationMS int64, result map[string]any) error
 }
 
 // AuditEventInput is a companion-owned audit event, mapped to the Nexus audit
@@ -167,7 +162,6 @@ type UseCases struct {
 	profileTemplates ProfileTemplateReaderPort
 	governance       GovernanceCheckerPort
 	approvals        ApprovalReaderPort
-	resultReporter   ExecutionResultReporterPort
 	executors        map[string]ActionExecutorPort
 	memories         MemoryReaderPort
 	runtime          RuntimePlannerPort
@@ -238,10 +232,6 @@ func (u *UseCases) SetGovernanceChecker(checker GovernanceCheckerPort) {
 
 func (u *UseCases) SetApprovalReader(reader ApprovalReaderPort) {
 	u.approvals = reader
-}
-
-func (u *UseCases) SetExecutionResultReporter(reporter ExecutionResultReporterPort) {
-	u.resultReporter = reporter
 }
 
 func (u *UseCases) SetMemoryReader(reader MemoryReaderPort) { u.memories = reader }

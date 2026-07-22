@@ -260,12 +260,24 @@ assert_jq "$approved_approval" '.status == "approved"' "approval should be appro
 approved_lookup="$(api GET "/api/approvals/$approval_id")"
 assert_jq "$approved_lookup" '.status == "approved" and .decided_by != ""' "approved approval should be readable"
 
-simulated_execution="$(api POST "/api/virployees/$virployee_id/executions" "$(jq -n --arg approvalID "$approval_id" '{approval_id: $approvalID}')")"
+execution_payload="$(jq -n --arg approvalID "$approval_id" '{approval_id: $approvalID}')"
+simulated_execution="$(api POST "/api/virployees/$virployee_id/executions" "$execution_payload")"
 assert_jq "$simulated_execution" '.operation == "execution"' "approved approval should create an execution trace"
-assert_jq "$simulated_execution" '.execution_result.status == "succeeded" and .execution_result.mode == "local" and .execution_result.nexus_report_status == "reported"' "local execution should succeed and report to Nexus"
+assert_jq "$simulated_execution" '.execution_result.status == "succeeded" and .execution_result.mode == "local" and (.execution_result.nexus_report_status == "pending" or .execution_result.nexus_report_status == "reported")' "local execution should succeed and enqueue its Nexus report"
+
+# Nexus delivery is an outbox projection now. Re-entering the execution endpoint
+# is idempotent and returns the latest projection without repeating the effect.
+for _ in $(seq 1 20); do
+  if jq -e '.execution_result.nexus_report_status == "reported"' >/dev/null <<<"$simulated_execution"; then
+    break
+  fi
+  sleep 0.25
+  simulated_execution="$(api POST "/api/virployees/$virployee_id/executions" "$execution_payload")"
+done
+assert_jq "$simulated_execution" '.execution_result.nexus_report_status == "reported"' "outbox should eventually report the execution to Nexus"
 
 simulated_trace_id="$(jq -r '.id' <<<"$simulated_execution")"
-simulated_replay="$(api POST "/api/virployees/$virployee_id/executions" "$(jq -n --arg approvalID "$approval_id" '{approval_id: $approvalID}')")"
+simulated_replay="$(api POST "/api/virployees/$virployee_id/executions" "$execution_payload")"
 assert_jq "$simulated_replay" '.id == $traceID' "simulated execution should be idempotent for the same approval" --arg traceID "$simulated_trace_id"
 
 ensure_action_type "calendar.events.create" "Create calendar events" "high" "false" >/dev/null

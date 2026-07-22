@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/devpablocristo/companion-v2/internal/outbox"
 	"github.com/devpablocristo/companion-v2/internal/virployees/preparedactions"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
 	"github.com/google/uuid"
@@ -139,18 +140,65 @@ func (r *Repository) CompleteExecution(ctx context.Context, tenantID string, id 
 	if err != nil {
 		return ExecutionAttempt{}, err
 	}
-	_, err = r.pool.Exec(ctx, `
-		UPDATE companion_execution_attempts
-		SET status = $3, resource_id = $4, result = $5::jsonb, error = $6,
-		    duration_ms = $7, completed_at = now(), updated_at = now(),
-		    recovery_lease_owner = '', recovery_lease_until = NULL, last_watcher_error = ''
-		WHERE tenant_id = $1 AND id = $2
-	`, tenantID, id, status, resourceID, raw, executionError, durationMS)
+	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return ExecutionAttempt{}, err
 	}
-	var preparedActionID uuid.UUID
-	if err := r.pool.QueryRow(ctx, `SELECT prepared_action_id FROM companion_execution_attempts WHERE tenant_id = $1 AND id = $2`, tenantID, id).Scan(&preparedActionID); err != nil {
+	defer func() { _ = tx.Rollback(ctx) }()
+	var preparedActionID, virployeeID uuid.UUID
+	var idempotencyKey string
+	err = tx.QueryRow(ctx, `
+		UPDATE companion_execution_attempts
+		SET status = $3, resource_id = $4, result = $5::jsonb, error = $6,
+		    duration_ms = $7, completed_at = now(), updated_at = now(),
+		    nexus_report_status = 'pending',
+		    recovery_lease_owner = '', recovery_lease_until = NULL, last_watcher_error = ''
+		WHERE tenant_id = $1 AND id = $2
+		RETURNING prepared_action_id, virployee_id, idempotency_key
+	`, tenantID, id, status, resourceID, raw, executionError, durationMS).Scan(&preparedActionID, &virployeeID, &idempotencyKey)
+	if err != nil {
+		return ExecutionAttempt{}, err
+	}
+	var governanceCheckID uuid.UUID
+	var bindingHash string
+	if err := tx.QueryRow(ctx, `
+		SELECT governance_check_id, binding_hash
+		FROM companion_prepared_actions
+		WHERE tenant_id=$1 AND id=$2
+	`, tenantID, preparedActionID).Scan(&governanceCheckID, &bindingHash); err != nil {
+		return ExecutionAttempt{}, err
+	}
+	payload, err := json.Marshal(outbox.NexusExecutionResult{
+		VirployeeID: virployeeID.String(), GovernanceCheckID: governanceCheckID.String(),
+		IdempotencyKey: idempotencyKey, BindingHash: bindingHash, Status: status,
+		DurationMS: durationMS, Result: result,
+	})
+	if err != nil {
+		return ExecutionAttempt{}, err
+	}
+	message, _, err := r.outbox.EnqueueTx(ctx, tx, outbox.EnqueueInput{
+		TenantID: tenantID, AggregateType: "execution_attempt", AggregateID: id,
+		Kind: "execution_result", DedupeKey: id.String(), Payload: payload,
+	})
+	if err != nil {
+		return ExecutionAttempt{}, err
+	}
+	projection := "pending"
+	if message.Status == outbox.StatusDelivered {
+		projection = "reported"
+	} else if message.Status == outbox.StatusDead {
+		projection = "dead"
+	} else if message.Attempts > 0 {
+		projection = "failed"
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE companion_execution_attempts
+		SET nexus_report_status=$3, nexus_report_attempts=$4, nexus_report_next_at=$5
+		WHERE tenant_id=$1 AND id=$2
+	`, tenantID, id, projection, message.Attempts, message.AvailableAt); err != nil {
+		return ExecutionAttempt{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
 		return ExecutionAttempt{}, err
 	}
 	return r.GetExecutionByPreparedAction(ctx, tenantID, preparedActionID)
@@ -181,13 +229,4 @@ func (r *Repository) CreateLocalCalendarEvent(ctx context.Context, tenantID stri
 		return "", err
 	}
 	return existing.String(), nil
-}
-
-func (r *Repository) SetNexusReportStatus(ctx context.Context, tenantID string, id uuid.UUID, status string) error {
-	_, err := r.pool.Exec(ctx, `
-		UPDATE companion_execution_attempts
-		SET nexus_report_status = $3, updated_at = now()
-		WHERE tenant_id = $1 AND id = $2
-	`, tenantID, id, status)
-	return err
 }

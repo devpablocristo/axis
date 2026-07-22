@@ -145,17 +145,9 @@ func (u *UseCases) ExecuteApprovedAction(ctx context.Context, tenantID string, i
 		// duplicate it). Keyed by binding_hash — no external payload/PII.
 		u.emitExecutionAudit(ctx, tenantID, id, prepared.BindingHash, prepared.Action.Action, prepared.GovernanceCheckID.String(), attempt)
 	}
+	// Delivery to Nexus is asynchronous. CompleteExecution atomically created the
+	// outbox message and NexusReportStatus is its backwards-compatible projection.
 	reportStatus := attempt.NexusReportStatus
-	if reportStatus != "reported" && u.resultReporter != nil {
-		reportErr := u.resultReporter.ReportExecutionResult(ctx, tenantID, prepared.GovernanceCheckID.String(), attempt.IdempotencyKey, prepared.BindingHash, attempt.Status, attempt.DurationMS, attempt.Result)
-		reportStatus = "reported"
-		if reportErr != nil {
-			reportStatus = "failed"
-		}
-		if err := u.executionRepo.SetNexusReportStatus(ctx, tenantID, attempt.ID, reportStatus); err != nil {
-			return runtraces.Trace{}, err
-		}
-	}
 	if existing, err := u.executionRepo.FindExecutionTraceByApproval(ctx, tenantID, id, approvalID.String()); err == nil {
 		existing.ExecutionResult.NexusReportStatus = reportStatus
 		return existing, nil
