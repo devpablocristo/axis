@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/devpablocristo/companion-v2/internal/virployees/usecases/domain"
@@ -38,14 +39,29 @@ func (r *fakeAssistRepo) GetAssistRunByKey(context.Context, string, uuid.UUID, s
 }
 
 type fakeAnswerer struct {
-	called bool
-	out    AnswerOutput
-	err    error
+	called    bool
+	lastInput AnswerInput
+	out       AnswerOutput
+	err       error
 }
 
-func (a *fakeAnswerer) Answer(context.Context, AnswerInput) (AnswerOutput, error) {
+func (a *fakeAnswerer) Answer(_ context.Context, in AnswerInput) (AnswerOutput, error) {
 	a.called = true
+	a.lastInput = in
 	return a.out, a.err
+}
+
+type fakeDocFetcher struct {
+	calls int
+	docs  map[string]FetchedDocument
+}
+
+func (f *fakeDocFetcher) Fetch(_ context.Context, key, _, _ string) FetchedDocument {
+	f.calls++
+	if d, ok := f.docs[key]; ok {
+		return d
+	}
+	return FetchedDocument{Key: key, Note: "not stubbed"}
 }
 
 func TestAssistProcessesAndPersistsAnswer(t *testing.T) {
@@ -67,6 +83,34 @@ func TestAssistProcessesAndPersistsAnswer(t *testing.T) {
 	}
 	if string(run.Output) != `{"summary":"ok"}` || repo.completeCalls != 1 {
 		t.Fatalf("expected the model output persisted once, got %+v (completes=%d)", run, repo.completeCalls)
+	}
+}
+
+func TestAssistFetchesDocumentsAndPassesContentToModel(t *testing.T) {
+	uc, created := setupExecutionGateUseCase(t, domain.AutonomyA3)
+	repo := &fakeAssistRepo{reserved: true}
+	ans := &fakeAnswerer{out: AnswerOutput{OutputJSON: json.RawMessage(`{"summary":"ok"}`), Answered: true}}
+	fetcher := &fakeDocFetcher{docs: map[string]FetchedDocument{
+		"labs.txt": {Key: "labs.txt", ContentType: "text/plain", Content: "Glucosa 126 mg/dL", Readable: true},
+	}}
+	uc.assistRepo = repo
+	uc.answerer = ans
+	uc.docFetcher = fetcher
+
+	input := json.RawMessage(`{"schema_version":"medmory.diagnosis_input.v1","documents":[{"key":"labs.txt","read_url":"https://x/labs","content_type":"text/plain"}]}`)
+	if _, err := uc.Assist(context.Background(), "tenant-1", created.ID, input, "idem-docs"); err != nil {
+		t.Fatalf("Assist: %v", err)
+	}
+	if fetcher.calls != 1 {
+		t.Fatalf("expected the document to be fetched once, got %d", fetcher.calls)
+	}
+	// The model must receive the fetched CONTENT, not the raw read_url reference.
+	got := string(ans.lastInput.InputJSON)
+	if !strings.Contains(got, "Glucosa 126 mg/dL") {
+		t.Fatalf("model input must contain the fetched content, got %s", got)
+	}
+	if strings.Contains(got, "read_url") || strings.Contains(got, "https://x/labs") {
+		t.Fatalf("model input must not leak the presigned read_url, got %s", got)
 	}
 }
 

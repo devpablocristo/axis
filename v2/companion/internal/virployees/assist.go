@@ -11,6 +11,37 @@ import (
 	"github.com/google/uuid"
 )
 
+type assistDocRef struct {
+	Key         string `json:"key"`
+	ReadURL     string `json:"read_url"`
+	ContentType string `json:"content_type"`
+}
+
+// resolveDocuments implements the pull model: when the input references documents
+// (a product sends read_url references, not content), Axis fetches each and hands
+// the model the fetched content. Inputs without documents pass through unchanged,
+// and if no fetcher is configured the original input is used as-is (fail-safe).
+func (u *UseCases) resolveDocuments(ctx context.Context, inputJSON json.RawMessage) json.RawMessage {
+	if u.docFetcher == nil {
+		return inputJSON
+	}
+	var parsed struct {
+		Documents []assistDocRef `json:"documents"`
+	}
+	if err := json.Unmarshal(inputJSON, &parsed); err != nil || len(parsed.Documents) == 0 {
+		return inputJSON
+	}
+	fetched := make([]FetchedDocument, 0, len(parsed.Documents))
+	for _, doc := range parsed.Documents {
+		fetched = append(fetched, u.docFetcher.Fetch(ctx, doc.Key, doc.ReadURL, doc.ContentType))
+	}
+	enriched, err := json.Marshal(map[string]any{"documents": fetched})
+	if err != nil {
+		return inputJSON
+	}
+	return enriched
+}
+
 // assistObjectSchema is a minimal "return a JSON object" schema. It triggers the
 // runtime's structured-output path (so Echo/no-model degrades to Answered=false);
 // the exact field shape is driven by the virployee's system prompt, not here.
@@ -64,11 +95,16 @@ func (u *UseCases) Assist(ctx context.Context, tenantID string, id uuid.UUID, in
 		}
 	}
 
+	// Pull model: if the input references documents, fetch their content and give
+	// the model the content, not just the references (the product never sends the
+	// content itself). Non-document inputs are passed through unchanged.
+	answerInputJSON := u.resolveDocuments(ctx, inputJSON)
+
 	started := time.Now()
 	out, answerErr := u.answerer.Answer(ctx, AnswerInput{
 		SystemPrompt:   rc.ProfileTemplate.SystemPrompt,
 		JobRole:        rc.JobRole.Name,
-		InputJSON:      inputJSON,
+		InputJSON:      answerInputJSON,
 		ResponseSchema: assistObjectSchema,
 	})
 	durationMS := time.Since(started).Milliseconds()

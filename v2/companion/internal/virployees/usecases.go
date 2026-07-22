@@ -138,6 +138,7 @@ type UseCases struct {
 	runtime          RuntimePlannerPort
 	answerer         RuntimeAnswererPort
 	assistRepo       AssistRepositoryPort
+	docFetcher       DocumentFetcherPort
 	lifecycle        *lifecycle.Service
 }
 
@@ -212,6 +213,8 @@ func (u *UseCases) SetMemoryReader(reader MemoryReaderPort) { u.memories = reade
 func (u *UseCases) SetRuntimePlanner(planner RuntimePlannerPort) { u.runtime = planner }
 
 func (u *UseCases) SetRuntimeAnswerer(answerer RuntimeAnswererPort) { u.answerer = answerer }
+
+func (u *UseCases) SetDocumentFetcher(fetcher DocumentFetcherPort) { u.docFetcher = fetcher }
 
 func (u *UseCases) RegisterExecutor(action string, executor ActionExecutorPort) {
 	action = strings.TrimSpace(action)
