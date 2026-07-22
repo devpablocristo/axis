@@ -31,6 +31,9 @@ type Config struct {
 	WatcherBatchSize     int
 	WatcherMaxRecoveries int
 	WatcherMaxReports    int
+	JobWorkerConcurrency int
+	JobPollInterval      time.Duration
+	JobTimeout           time.Duration
 
 	// GoogleCalendarID is the calendar the google_calendar executor writes to
 	// (a calendar shared with the workload's service account). Required when
@@ -72,6 +75,9 @@ func Load() Config {
 		WatcherBatchSize:        envconfig.Int("COMPANION_V2_WATCHER_BATCH_SIZE", 50),
 		WatcherMaxRecoveries:    envconfig.Int("COMPANION_V2_RECOVERY_MAX_ATTEMPTS", 3),
 		WatcherMaxReports:       envconfig.Int("COMPANION_V2_REPORT_MAX_ATTEMPTS", 3),
+		JobWorkerConcurrency:    envconfig.Int("COMPANION_V2_JOB_WORKER_CONCURRENCY", 2),
+		JobPollInterval:         time.Duration(envconfig.Int("COMPANION_V2_JOB_POLL_INTERVAL_SEC", 1)) * time.Second,
+		JobTimeout:              time.Duration(envconfig.Int("COMPANION_V2_JOB_TIMEOUT_SEC", 300)) * time.Second,
 		LearningMinExecutions:   envconfig.Int("COMPANION_V2_LEARNING_MIN_EXECUTIONS", 3),
 		LearningEnricherEnabled: envconfig.Bool("COMPANION_V2_LEARNING_ENRICHER_ENABLED", false),
 		ServiceVersion:          envconfig.Get("COMPANION_V2_SERVICE_VERSION", ""),

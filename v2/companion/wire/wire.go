@@ -2,6 +2,7 @@ package wire
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"sync"
@@ -14,6 +15,7 @@ import (
 	"github.com/devpablocristo/companion-v2/internal/executionstats"
 	"github.com/devpablocristo/companion-v2/internal/infra/migrations"
 	"github.com/devpablocristo/companion-v2/internal/jobroles"
+	"github.com/devpablocristo/companion-v2/internal/jobs"
 	"github.com/devpablocristo/companion-v2/internal/learning"
 	"github.com/devpablocristo/companion-v2/internal/memories"
 	"github.com/devpablocristo/companion-v2/internal/nexusclient"
@@ -232,7 +234,26 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		Addr:    config.Addr(),
 		Handler: tracedServerHandler("companion-v2", observability.Middleware(logger, router)),
 	}
-	watcherCtx, watcherCancel := context.WithCancel(ctx)
+	backgroundCtx, backgroundCancel := context.WithCancel(ctx)
+	jobsRepository := jobs.NewPostgresRepository(db.Pool())
+	jobsWorker := jobs.NewWorker(jobsRepository, jobs.WorkerConfig{
+		WorkerID: "companion-jobs-" + uuid.NewString(), Concurrency: config.JobWorkerConcurrency,
+		PollInterval: config.JobPollInterval, LeaseDuration: config.WatcherLease,
+		DefaultTimeout: config.JobTimeout, RecoveryBatch: config.WatcherBatchSize,
+	})
+	watcherConfig := virployees.WatcherConfig{
+		StaleAssistAfter: config.StaleAssistAfter, StaleExecutionAfter: config.StaleExecutionAfter,
+		Lease: config.WatcherLease,
+		ReportBackoff: config.WatcherReportBackoff, BatchSize: config.WatcherBatchSize,
+		MaxRecoveryAttempts: config.WatcherMaxRecoveries, MaxReportAttempts: config.WatcherMaxReports,
+		WorkerID: "companion-watchers-" + uuid.NewString(),
+	}
+	jobsWorker.Register("operational.reconcile", func(jobCtx context.Context, _ jobs.Job) (json.RawMessage, error) {
+		if err := virployeesUsecases.RunOperationalWatchersOnce(jobCtx, watcherConfig); err != nil {
+			return nil, jobs.Retryable("operational_reconcile_failed", err)
+		}
+		return json.RawMessage(`{"reconciled":true}`), nil
+	})
 
 	deps := &Dependencies{
 		Config:         config,
@@ -240,17 +261,19 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		Router:         router,
 		Server:         server,
 		tracerShutdown: tracerShutdown,
-		watcherCancel:  watcherCancel,
+		watcherCancel:  backgroundCancel,
 	}
-	deps.watcherWG.Add(1)
+	deps.watcherWG.Add(2)
 	go func() {
 		defer deps.watcherWG.Done()
-		virployeesUsecases.RunOperationalWatchers(watcherCtx, virployees.WatcherConfig{
-			Interval: config.WatcherInterval, StaleAssistAfter: config.StaleAssistAfter,
-			StaleExecutionAfter: config.StaleExecutionAfter, Lease: config.WatcherLease,
-			ReportBackoff: config.WatcherReportBackoff, BatchSize: config.WatcherBatchSize,
-			MaxRecoveryAttempts: config.WatcherMaxRecoveries, MaxReportAttempts: config.WatcherMaxReports,
-			WorkerID: "companion-" + uuid.NewString(),
+		jobsWorker.Run(backgroundCtx)
+	}()
+	go func() {
+		defer deps.watcherWG.Done()
+		jobs.RunRecurringScheduler(backgroundCtx, jobsRepository, jobs.RecurringConfig{
+			TenantID: "system", ProductSurface: "companion", Kind: "operational.reconcile",
+			Interval: config.WatcherInterval, Timeout: config.JobTimeout,
+			MaxAttempts: config.WatcherMaxRecoveries,
 		})
 	}()
 	return deps, nil

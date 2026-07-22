@@ -11,7 +11,6 @@ import (
 )
 
 type WatcherConfig struct {
-	Interval            time.Duration
 	StaleAssistAfter    time.Duration
 	StaleExecutionAfter time.Duration
 	Lease               time.Duration
@@ -20,28 +19,6 @@ type WatcherConfig struct {
 	MaxRecoveryAttempts int
 	MaxReportAttempts   int
 	WorkerID            string
-}
-
-func (u *UseCases) RunOperationalWatchers(ctx context.Context, config WatcherConfig) {
-	if config.Interval <= 0 {
-		return
-	}
-	run := func() {
-		if err := u.RunOperationalWatchersOnce(ctx, config); err != nil && ctx.Err() == nil {
-			slog.ErrorContext(ctx, "operational watcher failed", "error", err)
-		}
-	}
-	run()
-	ticker := time.NewTicker(config.Interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			run()
-		}
-	}
 }
 
 func (u *UseCases) RunOperationalWatchersOnce(ctx context.Context, config WatcherConfig) error {

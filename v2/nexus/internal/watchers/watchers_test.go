@@ -51,18 +51,3 @@ func TestRunOnceExpiresAndAuditsEachApproval(t *testing.T) {
 		t.Fatal("audit event must bind the expiration to the governed action")
 	}
 }
-
-func TestRunStopsWhenContextIsCancelled(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	done := make(chan struct{})
-	go func() {
-		New(&fakeRepository{}, &fakeAudit{}).Run(ctx, time.Millisecond, 10)
-		close(done)
-	}()
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("watcher did not stop after context cancellation")
-	}
-}

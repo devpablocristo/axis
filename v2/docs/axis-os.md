@@ -96,12 +96,18 @@ channel for governance calls to Nexus. Health endpoints remain public.
   when `NEXUS_V2_SIGNING_KEY` is set; Companion emission is best-effort.
 - Nexus and Companion run context-cancellable operational watchers. Nexus expires
   approvals after their configured TTL and closes the corresponding governance
-  check. Companion finalizes stale assist runs, recovers stale governed
+  check. Each service schedules reconciliation ticks in its own durable
+  PostgreSQL queue; tickers only materialize due work, while bounded workers claim it with
+  `FOR UPDATE SKIP LOCKED`, renewable leases, heartbeats, retries, expired-lease
+  recovery, and a replayable dead-letter state. The job dedupe scope is tenant +
+  product + kind + logical key, so replicas cannot process the same logical tick
+  twice. Reconciliation finalizes stale assist runs, recovers stale governed
   executions with the original idempotency key, and retries failed execution
-  result reports to Nexus with leases and exponential backoff. Database claims
-  use `FOR UPDATE SKIP LOCKED`, so multiple replicas cannot reconcile the same
-  row concurrently. Every reconciliation appends hash-only metadata to the
-  virployee ledger; watcher goroutines stop before their service closes its DB.
+  result reports to Nexus. Persisted failures are stable error codes rather than
+  raw errors, and job events contain operational metadata only — never payloads,
+  PHI, secrets, or signed URLs. Every affected business record still appends
+  hash-only metadata to the virployee ledger. Scheduler and worker goroutines
+  stop before each service closes its database.
 - Virployees remain the first workforce primitive.
 - Virployee-owned lexical memory supports controlled CRUD, recall, lifecycle,
   audit hashes, and safe references in runtime traces.

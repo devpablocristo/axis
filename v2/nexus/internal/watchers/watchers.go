@@ -123,28 +123,4 @@ func (w *Watcher) RunOnce(ctx context.Context, batch int) (int, error) {
 	return len(items), nil
 }
 
-func (w *Watcher) Run(ctx context.Context, interval time.Duration, batch int) {
-	if interval <= 0 {
-		return
-	}
-	run := func() {
-		if count, err := w.RunOnce(ctx, batch); err != nil && ctx.Err() == nil {
-			slog.ErrorContext(ctx, "approval watcher failed", "error", err)
-		} else if count > 0 {
-			slog.InfoContext(ctx, "approval watcher reconciled", "expired", count)
-		}
-	}
-	run()
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			run()
-		}
-	}
-}
-
 var _ RepositoryPort = (*Repository)(nil)

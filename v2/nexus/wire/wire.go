@@ -2,6 +2,7 @@ package wire
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"sync"
@@ -16,10 +17,12 @@ import (
 	"github.com/devpablocristo/nexus-v2/internal/evidence"
 	"github.com/devpablocristo/nexus-v2/internal/governance"
 	"github.com/devpablocristo/nexus-v2/internal/infra/migrations"
+	"github.com/devpablocristo/nexus-v2/internal/jobs"
 	"github.com/devpablocristo/nexus-v2/internal/watchers"
 	postgres "github.com/devpablocristo/platform/databases/postgres/go"
 	ginmw "github.com/devpablocristo/platform/http/gin/go"
 	observability "github.com/devpablocristo/platform/observability/go"
+	"github.com/google/uuid"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
@@ -96,8 +99,21 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	evidenceUseCases := evidence.NewUseCases(auditUseCases, evidence.NewSigner(config.SigningKey, ""))
 	evidenceHandler := evidence.NewHandler(evidenceUseCases)
 
-	watcherCtx, watcherCancel := context.WithCancel(ctx)
+	backgroundCtx, backgroundCancel := context.WithCancel(ctx)
 	approvalWatcher := watchers.New(watchers.NewRepository(db.Pool()), auditUseCases)
+	jobsRepository := jobs.NewPostgresRepository(db.Pool())
+	jobsWorker := jobs.NewWorker(jobsRepository, jobs.WorkerConfig{
+		WorkerID: "nexus-jobs-" + uuid.NewString(), Concurrency: config.JobWorkerConcurrency,
+		PollInterval: config.JobPollInterval, LeaseDuration: config.JobLease,
+		DefaultTimeout: config.JobTimeout, RecoveryBatch: config.WatcherBatchSize,
+	})
+	jobsWorker.Register("approval.expire", func(jobCtx context.Context, _ jobs.Job) (json.RawMessage, error) {
+		count, err := approvalWatcher.RunOnce(jobCtx, config.WatcherBatchSize)
+		if err != nil {
+			return nil, jobs.Retryable("approval_expiration_failed", err)
+		}
+		return json.Marshal(map[string]int{"expired": count})
+	})
 
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
@@ -133,12 +149,20 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		Router:         router,
 		Server:         server,
 		tracerShutdown: tracerShutdown,
-		watcherCancel:  watcherCancel,
+		watcherCancel:  backgroundCancel,
 	}
-	deps.watcherWG.Add(1)
+	deps.watcherWG.Add(2)
 	go func() {
 		defer deps.watcherWG.Done()
-		approvalWatcher.Run(watcherCtx, config.WatcherInterval, config.WatcherBatchSize)
+		jobsWorker.Run(backgroundCtx)
+	}()
+	go func() {
+		defer deps.watcherWG.Done()
+		jobs.RunRecurringScheduler(backgroundCtx, jobsRepository, jobs.RecurringConfig{
+			TenantID: "system", ProductSurface: "nexus", Kind: "approval.expire",
+			Interval: config.WatcherInterval, Timeout: config.JobTimeout,
+			MaxAttempts: config.WatcherMaxAttempts,
+		})
 	}()
 	return deps, nil
 }
