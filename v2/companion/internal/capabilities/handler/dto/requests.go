@@ -1,6 +1,10 @@
 package dto
 
-import "github.com/devpablocristo/companion-v2/internal/capabilities/usecases/domain"
+import (
+	"encoding/json"
+
+	"github.com/devpablocristo/companion-v2/internal/capabilities/usecases/domain"
+)
 
 type CreateCapabilityRequest struct {
 	CapabilityKey         string `json:"capability_key" binding:"required"`
@@ -62,4 +66,30 @@ func (r UpdateCapabilityRequest) ToDomain() domain.UpdateInput {
 
 type LifecycleRequest struct {
 	Reason string `json:"reason"`
+}
+
+type CapabilityManifestRequest struct {
+	Version             string                     `json:"version"`
+	ProductSurface      string                     `json:"product_surface"`
+	InputSchema         json.RawMessage            `json:"input_schema"`
+	OutputSchema        json.RawMessage            `json:"output_schema"`
+	RequiredScopes      []string                   `json:"required_scopes"`
+	Idempotency         domain.IdempotencyContract `json:"idempotency"`
+	RollbackMode        string                     `json:"rollback_mode"`
+	TimeoutMS           int                        `json:"timeout_ms"`
+	Retry               domain.RetryContract       `json:"retry"`
+	Postconditions      []string                   `json:"postconditions"`
+	QuotaAreas          []string                   `json:"quota_areas"`
+	SecretRefs          []string                   `json:"secret_refs"`
+	AttestationRequired bool                       `json:"attestation_required"`
+	CostClass           string                     `json:"cost_class"`
+}
+
+func (r CapabilityManifestRequest) ToDomain() domain.ManifestInput {
+	return domain.ManifestInput{
+		Version: r.Version, ProductSurface: r.ProductSurface, InputSchema: r.InputSchema, OutputSchema: r.OutputSchema,
+		RequiredScopes: r.RequiredScopes, Idempotency: r.Idempotency, RollbackMode: r.RollbackMode,
+		TimeoutMS: r.TimeoutMS, Retry: r.Retry, Postconditions: r.Postconditions, QuotaAreas: r.QuotaAreas,
+		SecretRefs: r.SecretRefs, AttestationRequired: r.AttestationRequired, CostClass: r.CostClass,
+	}
 }

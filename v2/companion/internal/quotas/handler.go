@@ -2,6 +2,7 @@ package quotas
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -42,6 +43,10 @@ func (h *Handler) Upsert(c *gin.Context) {
 		WindowSeconds: request.WindowSeconds, RequestLimit: request.RequestLimit, UnitLimit: request.UnitLimit, Active: active,
 	})
 	if err != nil {
+		if errors.Is(err, ErrPolicyInUse) {
+			ginmw.WriteError(c, http.StatusConflict, "quota_policy_in_use", "quota policy is required by an active capability")
+			return
+		}
 		ginmw.WriteError(c, http.StatusBadRequest, "invalid_quota_policy", "quota policy is invalid")
 		return
 	}

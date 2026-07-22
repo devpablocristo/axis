@@ -119,8 +119,11 @@ type intentDefinition struct {
 // in Fase 2) proposes for an input: an intent and a fallback required autonomy.
 // Go always decides on the proposal; the planner never decides by itself.
 type Proposal struct {
-	Intent           Intent
-	RequiredAutonomy virployeedomain.AutonomyLevel
+	Intent                Intent
+	RequiredAutonomy      virployeedomain.AutonomyLevel
+	InputTokens           int64
+	OutputTokens          int64
+	EstimatedCostMicroUSD int64
 }
 
 // Evaluate runs the deterministic proposer and then decides on the proposal.

@@ -113,28 +113,68 @@ ensure_capability() {
   local key="$1"
   local name="$2"
   local autonomy="$3"
-  local list id payload
+  local risk="$4"
+  local side_effect="$5"
+  local requires_approval="$6"
+  local list id payload manifest
 
   list="$(api GET "/api/capabilities")"
   id="$(jq -r --arg key "$key" '.data[]? | select(.capability_key == $key) | .id' <<<"$list" | head -n 1)"
-  if [[ -n "$id" ]]; then
-    echo "$id"
-    return
-  fi
-
   payload="$(
     jq -n \
       --arg key "$key" \
       --arg name "$name" \
       --arg autonomy "$autonomy" \
+      --arg risk "$risk" \
+      --arg side "$side_effect" \
+      --argjson approval "$requires_approval" \
       '{
         capability_key: $key,
         name: $name,
         description: "Smoke approval flow capability",
-        required_autonomy: $autonomy
+        required_autonomy: $autonomy,
+        risk_class: $risk,
+        side_effect_class: $side,
+        requires_nexus_approval: $approval,
+        evidence_required: true
       }'
   )"
-  api POST "/api/capabilities" "$payload" | jq -r '.id'
+  if [[ -n "$id" ]]; then
+    api PUT "/api/capabilities/$id" "$(jq 'del(.capability_key)' <<<"$payload")" >/dev/null
+  else
+    id="$(api POST "/api/capabilities" "$payload" | jq -r '.id')"
+  fi
+
+  manifest="$(
+    jq -n \
+      --arg side "$side_effect" \
+      --arg scope "$key" \
+      '{
+        version: "1.0.0",
+        product_surface: "axis",
+        input_schema: {type: "object"},
+        output_schema: {type: "object"},
+        required_scopes: [$scope],
+        idempotency: (if $side == "write" then {mode: "required", key_fields: ["tenant_id", "virployee_id", "binding_hash"]} else {mode: "not_applicable", key_fields: []} end),
+        rollback_mode: (if $side == "write" then "manual" else "none" end),
+        timeout_ms: 30000,
+        retry: {max_attempts: 3, backoff_ms: 1000},
+        postconditions: ["Nexus report and evidence are persisted"],
+        quota_areas: (if $side == "write" then ["inbound", "llm", "executors"] else ["inbound", "llm"] end),
+        secret_refs: [],
+        attestation_required: ($side == "write"),
+        cost_class: "low"
+      }'
+  )"
+  api PUT "/api/capabilities/$id/manifest" "$manifest" >/dev/null
+  api POST "/api/capabilities/$id/conform" >/dev/null
+  api POST "/api/capabilities/$id/activate" >/dev/null
+  echo "$id"
+}
+
+ensure_quota_policy() {
+  local area="$1"
+  api PUT "/api/quota-policies/axis/$area" '{"window_seconds":60,"request_limit":1000,"unit_limit":100000000,"active":true}' >/dev/null
 }
 
 create_job_role() {
@@ -228,11 +268,15 @@ latest_runs() {
 
 echo "tenant: $TENANT_ID"
 
+ensure_quota_policy "inbound"
+ensure_quota_policy "llm"
+ensure_quota_policy "executors"
+
 read_action_id="$(ensure_action_type "calendar.events.read" "Read calendar events" "low" "true")"
 create_action_id="$(ensure_action_type "calendar.events.create" "Create calendar events" "high" "true")"
 
-read_capability_id="$(ensure_capability "calendar.events.read" "Read calendar events" "A1")"
-create_capability_id="$(ensure_capability "calendar.events.create" "Create calendar events" "A2")"
+read_capability_id="$(ensure_capability "calendar.events.read" "Read calendar events" "A1" "low" "read" "false")"
+create_capability_id="$(ensure_capability "calendar.events.create" "Create calendar events" "A2" "high" "write" "true")"
 job_role_id="$(create_job_role)"
 profile_template_id="$(create_profile_template)"
 virployee_id="$(create_virployee "$job_role_id" "$profile_template_id" "$read_capability_id" "$create_capability_id")"

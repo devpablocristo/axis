@@ -13,6 +13,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/devpablocristo/companion-v2/internal/quotas"
 	"github.com/devpablocristo/companion-v2/internal/virployees/dryrun"
 	"github.com/devpablocristo/companion-v2/internal/virployees/executiongate"
 	"github.com/devpablocristo/companion-v2/internal/virployees/preparedactions"
@@ -424,10 +425,32 @@ func TestInvariantDryRunFailsClosedToDeterministicWhenRuntimeErrors(t *testing.T
 	}
 }
 
+func TestDryRunReturnsQuotaDenialBeforeCallingRuntime(t *testing.T) {
+	uc, created := setupExecutionGateUseCase(t, domain.AutonomyA3)
+	planner := &trackingPlanner{}
+	uc.SetRuntimePlanner(planner)
+	uc.SetQuotaPorts(&fakeQuota{denyArea: "llm"}, nil)
+
+	_, err := uc.DryRun(context.Background(), "tenant-1", created.ID, "Agendá una reunión mañana")
+	if _, ok := quotas.RetryAfter(err); !ok {
+		t.Fatalf("expected quota denial, got %v", err)
+	}
+	if planner.called {
+		t.Fatal("runtime must not be called after LLM quota denial")
+	}
+}
+
 type erroringPlanner struct{}
 
 func (erroringPlanner) Propose(context.Context, string, runtimecontext.Context) (dryrun.Proposal, error) {
 	return dryrun.Proposal{}, errors.New("runtime unavailable")
+}
+
+type trackingPlanner struct{ called bool }
+
+func (p *trackingPlanner) Propose(context.Context, string, runtimecontext.Context) (dryrun.Proposal, error) {
+	p.called = true
+	return dryrun.Proposal{}, nil
 }
 
 // --- fakes used only by invariant 4 (execution path) ---

@@ -503,6 +503,7 @@ function capabilityColumns(
     { key: 'description', header: 'Description' },
     { key: 'created_at', header: 'Created', className: 'iam-control__created-col', render: (value) => formatDateTime24(String(value ?? '')) },
     { key: 'required_autonomy', header: 'Required autonomy', render: (value) => formatRequiredAutonomy(String(value ?? '')) },
+    { key: 'promotion_state', header: 'Promotion', render: (value) => formatPromotionState(String(value ?? '')) },
     { key: 'stats_activity', header: 'Activity' },
     { key: 'stats_executions', header: 'Executions' },
     { key: 'stats_success', header: 'Success' },
@@ -713,5 +714,12 @@ function formatState(value: string): string {
   if (value === 'active') return 'Active'
   if (value === 'archived') return 'Archived'
   if (value === 'trashed') return 'Trash'
+  return value || '-'
+}
+
+function formatPromotionState(value: string): string {
+  if (value === 'draft') return 'Draft'
+  if (value === 'conformant') return 'Conformant'
+  if (value === 'active') return 'Active'
   return value || '-'
 }

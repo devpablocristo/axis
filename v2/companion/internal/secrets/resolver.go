@@ -37,6 +37,11 @@ type ResolverPort interface {
 	Resolve(context.Context, Ref) (Value, error)
 }
 
+func ValidRef(ref string) bool {
+	resource := strings.TrimSpace(strings.TrimPrefix(ref, "secretmanager://"))
+	return resourcePattern.MatchString(resource)
+}
+
 type GCPResolver struct {
 	endpoint string
 	tokens   oauth2.TokenSource
@@ -59,7 +64,7 @@ func NewGCPResolver(endpoint string, tokens oauth2.TokenSource, client *http.Cli
 
 func (r *GCPResolver) Resolve(ctx context.Context, ref Ref) (Value, error) {
 	resource := strings.TrimSpace(strings.TrimPrefix(string(ref), "secretmanager://"))
-	if !resourcePattern.MatchString(resource) {
+	if !ValidRef(string(ref)) {
 		return Value{}, errors.New("invalid Secret Manager reference")
 	}
 	token, err := r.tokens.Token()

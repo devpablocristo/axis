@@ -175,6 +175,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	capabilitiesHandler := capabilities.NewHandler(capabilitiesUsecases)
 	quotaRepository := quotas.NewRepository(db.Pool(), config.Environment == "production")
 	quotaHandler := quotas.NewHandler(quotaRepository)
+	capabilitiesUsecases.SetQuotaPolicyChecker(quotaRepository)
 
 	profileTemplatesRepo := profiletemplates.NewRepository(db.Pool())
 	profileTemplatesUsecases, err := profiletemplates.NewUseCases(profileTemplatesRepo)
@@ -330,6 +331,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	memoriesHandler := memories.NewHandler(memoriesUsecases)
 	executionStatsHandler := executionstats.NewHandler(executionstats.NewUseCases(executionstats.NewRepository(db.Pool())))
 	learningUsecases := learning.NewUseCases(learning.NewRepository(db.Pool()))
+	learningUsecases.SetQuotaPorts(quotaRepository, quotaRepository)
 	learningUsecases.SetMinExecutions(config.LearningMinExecutions)
 	learningUsecases.SetCapabilityChecker(learning.NewCapabilityChecker(capabilitiesUsecases))
 	learningUsecases.SetMemoryInstaller(learning.NewMemoriesInstaller(memoriesUsecases))

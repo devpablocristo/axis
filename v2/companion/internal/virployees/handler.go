@@ -330,6 +330,9 @@ func (h *Handler) DryRun(c *gin.Context) {
 	}
 	out, err := h.ucs.DryRun(c.Request.Context(), tenantID(c), id, req.Input)
 	if err != nil {
+		if respondQuotaError(c, err) {
+			return
+		}
 		ginmw.Respond(c, err)
 		return
 	}
@@ -347,6 +350,9 @@ func (h *Handler) ExecutionGate(c *gin.Context) {
 	}
 	out, err := h.ucs.ExecutionGate(c.Request.Context(), tenantID(c), id, req.Input, req.ConfirmedDraftToDomain())
 	if err != nil {
+		if respondQuotaError(c, err) {
+			return
+		}
 		ginmw.Respond(c, err)
 		return
 	}

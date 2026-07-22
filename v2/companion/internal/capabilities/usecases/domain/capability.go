@@ -18,6 +18,14 @@ const (
 	StateTrashed  State = "trashed"
 )
 
+type PromotionState string
+
+const (
+	PromotionDraft      PromotionState = "draft"
+	PromotionConformant PromotionState = "conformant"
+	PromotionActive     PromotionState = "active"
+)
+
 type Capability struct {
 	ID               uuid.UUID
 	TenantID         string
@@ -33,6 +41,13 @@ type Capability struct {
 	RequiresNexusApproval bool
 	EvidenceRequired      bool
 	RollbackCapabilityKey string // optional capability_key that undoes this one; "" = none
+	PromotionState        PromotionState
+	Manifest              Manifest
+	ManifestHash          string
+	ConformedHash         string
+	ConformanceReport     ConformanceReport
+	ConformedAt           *time.Time
+	ActivatedAt           *time.Time
 
 	CreatedAt time.Time
 	UpdatedAt time.Time

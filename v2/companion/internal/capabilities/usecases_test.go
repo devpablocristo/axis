@@ -22,6 +22,7 @@ func TestEnsureAssignableUsesRequiredAutonomy(t *testing.T) {
 				CapabilityKey:    "messages.replies.draft",
 				Name:             "Draft replies",
 				RequiredAutonomy: virployeedomain.AutonomyA2,
+				PromotionState:   domain.PromotionActive,
 			},
 		},
 	}
@@ -55,9 +56,57 @@ func (r *fakeCapabilityRepo) Create(_ context.Context, tenantID string, input do
 		Name:             input.Name,
 		Description:      input.Description,
 		RequiredAutonomy: input.RequiredAutonomy,
+		PromotionState:   domain.PromotionDraft,
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	}
+	r.rows[id] = row
+	return row, nil
+}
+
+func (r *fakeCapabilityRepo) UpdateManifest(_ context.Context, tenantID string, id uuid.UUID, manifest domain.Manifest, manifestHash string) (domain.Capability, error) {
+	row, ok := r.rows[id]
+	if !ok || row.TenantID != tenantID || row.State() != domain.StateActive {
+		return domain.Capability{}, domainerr.NotFoundf("capability", id.String())
+	}
+	row.Manifest = manifest
+	row.ManifestHash = manifestHash
+	row.PromotionState = domain.PromotionDraft
+	row.ConformedHash = ""
+	row.ConformanceReport = domain.ConformanceReport{}
+	row.ConformedAt = nil
+	row.ActivatedAt = nil
+	r.rows[id] = row
+	return row, nil
+}
+
+func (r *fakeCapabilityRepo) SaveConformance(_ context.Context, tenantID string, id uuid.UUID, expected domain.Capability, report domain.ConformanceReport) (domain.Capability, error) {
+	row, ok := r.rows[id]
+	if !ok || row.TenantID != tenantID || row.ManifestHash != expected.ManifestHash || row.RiskClass != expected.RiskClass {
+		return domain.Capability{}, domainerr.NotFoundf("capability", id.String())
+	}
+	row.ConformanceReport = report
+	if report.Conformant {
+		row.PromotionState = domain.PromotionConformant
+		row.ConformedHash = expected.ManifestHash
+		now := time.Now().UTC()
+		row.ConformedAt = &now
+	} else {
+		row.PromotionState = domain.PromotionDraft
+		row.ConformedHash = ""
+	}
+	r.rows[id] = row
+	return row, nil
+}
+
+func (r *fakeCapabilityRepo) Activate(_ context.Context, tenantID string, id uuid.UUID, manifestHash string) (domain.Capability, error) {
+	row, ok := r.rows[id]
+	if !ok || row.TenantID != tenantID || row.PromotionState != domain.PromotionConformant || row.ManifestHash != manifestHash || row.ConformedHash != manifestHash {
+		return domain.Capability{}, domainerr.Conflict("capability is not conformant")
+	}
+	row.PromotionState = domain.PromotionActive
+	now := time.Now().UTC()
+	row.ActivatedAt = &now
 	r.rows[id] = row
 	return row, nil
 }
@@ -91,6 +140,15 @@ func (r *fakeCapabilityRepo) Update(_ context.Context, tenantID string, id uuid.
 	row.Name = input.Name
 	row.Description = input.Description
 	row.RequiredAutonomy = input.RequiredAutonomy
+	row.RiskClass = input.Governance.RiskClass
+	row.SideEffectClass = input.Governance.SideEffectClass
+	row.RequiresNexusApproval = input.Governance.RequiresNexusApproval
+	row.EvidenceRequired = input.Governance.EvidenceRequired
+	row.RollbackCapabilityKey = input.Governance.RollbackCapabilityKey
+	row.PromotionState = domain.PromotionDraft
+	row.ConformedHash = ""
+	row.ConformedAt = nil
+	row.ActivatedAt = nil
 	row.UpdatedAt = time.Now().UTC()
 	r.rows[id] = row
 	return row, nil

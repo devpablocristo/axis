@@ -358,6 +358,30 @@ export type CapabilityState = 'active' | 'archived' | 'trashed'
 
 export type CapabilityRiskClass = 'low' | 'medium' | 'high' | 'critical'
 export type CapabilitySideEffectClass = 'read' | 'write'
+export type CapabilityPromotionState = 'draft' | 'conformant' | 'active'
+
+export type CapabilityManifest = {
+  version: string
+  product_surface: string
+  input_schema: Record<string, unknown>
+  output_schema: Record<string, unknown>
+  required_scopes: string[]
+  idempotency: { mode: string; key_fields: string[] }
+  rollback_mode: string
+  timeout_ms: number
+  retry: { max_attempts: number; backoff_ms: number }
+  postconditions: string[]
+  quota_areas: string[]
+  secret_refs: string[]
+  attestation_required: boolean
+  cost_class: string
+}
+
+export type CapabilityConformanceReport = {
+  conformant: boolean
+  manifest_hash: string
+  checks: Array<{ key: string; passed: boolean; reason: string }>
+}
 
 export type Capability = {
   id: string
@@ -371,6 +395,13 @@ export type Capability = {
   requires_nexus_approval: boolean
   evidence_required: boolean
   rollback_capability_key: string
+  promotion_state: CapabilityPromotionState
+  manifest: CapabilityManifest
+  manifest_hash: string
+  conformed_hash: string
+  conformance_report: CapabilityConformanceReport
+  conformed_at: LifecycleTimestamp
+  activated_at: LifecycleTimestamp
   state: CapabilityState
   created_at: string
   updated_at: string
@@ -378,6 +409,8 @@ export type Capability = {
   trashed_at: LifecycleTimestamp
   purge_after: LifecycleTimestamp
 }
+
+export type CapabilityManifestInput = CapabilityManifest
 
 export type CapabilityInput = {
   capability_key?: string
@@ -1155,6 +1188,29 @@ export function updateCapability(
       evidence_required: input.evidence_required,
       rollback_capability_key: input.rollback_capability_key,
     },
+  })
+}
+
+export function updateCapabilityManifest(
+  id: string,
+  manifest: CapabilityManifestInput,
+  tenantId: string,
+  principalId: string,
+): Promise<Capability> {
+  return axisFetch<Capability>(`/api/capabilities/${encodeURIComponent(id)}/manifest`, {
+    method: 'PUT', tenantId, principalId, body: manifest,
+  })
+}
+
+export function conformCapability(id: string, tenantId: string, principalId: string): Promise<Capability> {
+  return axisFetch<Capability>(`/api/capabilities/${encodeURIComponent(id)}/conform`, {
+    method: 'POST', tenantId, principalId, body: {},
+  })
+}
+
+export function activateCapability(id: string, tenantId: string, principalId: string): Promise<Capability> {
+  return axisFetch<Capability>(`/api/capabilities/${encodeURIComponent(id)}/activate`, {
+    method: 'POST', tenantId, principalId, body: {},
   })
 }
 

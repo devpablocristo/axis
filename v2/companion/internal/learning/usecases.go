@@ -3,9 +3,11 @@ package learning
 import (
 	"context"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/devpablocristo/companion-v2/internal/quotas"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
 	"github.com/google/uuid"
 )
@@ -41,6 +43,12 @@ type UseCases struct {
 	memory        MemoryInstaller
 	authz         Authorizer
 	enricher      ProcedureEnricher
+	quota         quotas.QuotaPort
+	ledger        quotas.UsageLedgerPort
+}
+
+func (u *UseCases) SetQuotaPorts(quota quotas.QuotaPort, ledger quotas.UsageLedgerPort) {
+	u.quota, u.ledger = quota, ledger
 }
 
 func NewUseCases(repo RepositoryPort) *UseCases {
@@ -293,7 +301,7 @@ func (u *UseCases) Scan(ctx context.Context, tenantID string, minExecutions int)
 		}
 		title, content := Distill(candidate)
 		evidence := BuildEvidence(candidate)
-		title, content, proposedBy := u.applyEnrichment(ctx, candidate, title, content, evidence)
+		title, content, proposedBy := u.applyEnrichment(ctx, tenantID, candidate, title, content, evidence)
 		proposal, err := u.Ingest(ctx, tenantID, CreateInput{
 			VirployeeID:        virployeeID,
 			CapabilityKey:      candidate.CapabilityKey,
@@ -332,9 +340,20 @@ func (u *UseCases) Scan(ctx context.Context, tenantID string, minExecutions int)
 // ProposedByAnalyzer. Only a clean, usable rewrite is used (ProposedByLLM), with
 // the model/prompt recorded in evidence. It only shapes the proposal's wording;
 // the human Accept gate and eval are unchanged.
-func (u *UseCases) applyEnrichment(ctx context.Context, candidate Candidate, title, content string, evidence map[string]any) (string, string, string) {
+func (u *UseCases) applyEnrichment(ctx context.Context, tenantID string, candidate Candidate, title, content string, evidence map[string]any) (string, string, string) {
 	if u.enricher == nil {
 		return title, content, ProposedByAnalyzer
+	}
+	idempotencyKey := candidate.VirployeeID + ":" + candidate.CapabilityKey + ":" + strconv.FormatInt(candidate.Succeeded, 10)
+	reservedUnits := int64(len(title)+len(content)+3)/4 + 2048
+	if u.quota != nil {
+		if _, err := u.quota.Consume(ctx, quotas.ConsumeRequest{
+			Key:            quotas.Key{TenantID: tenantID, ProductSurface: "axis", Area: quotas.AreaLLM},
+			IdempotencyKey: idempotencyKey, SubjectType: "learning_candidate", SubjectID: candidate.VirployeeID, Units: reservedUnits,
+		}); err != nil {
+			slog.WarnContext(ctx, "learning_enrich_quota_exceeded_fallback_deterministic")
+			return title, content, ProposedByAnalyzer
+		}
 	}
 	ectx, cancel := context.WithTimeout(ctx, enrichTimeout)
 	defer cancel()
@@ -357,6 +376,14 @@ func (u *UseCases) applyEnrichment(ctx context.Context, candidate Candidate, tit
 				"capability_key", candidate.CapabilityKey)
 		}
 		return title, content, ProposedByAnalyzer
+	}
+	if u.ledger != nil {
+		_ = u.ledger.RecordUsage(ctx, quotas.Usage{
+			Key:            quotas.Key{TenantID: tenantID, ProductSurface: "axis", Area: quotas.AreaLLM},
+			IdempotencyKey: idempotencyKey + ":actual", SubjectType: "learning_candidate", SubjectID: candidate.VirployeeID,
+			Units: out.InputTokens + out.OutputTokens, Model: out.ModelID, EstimatedCostMicroUSD: out.EstimatedCostMicroUSD,
+			Metadata: map[string]any{"input_tokens": out.InputTokens, "output_tokens": out.OutputTokens, "estimated": true},
+		})
 	}
 	evidence["enriched_by_model"] = out.ModelID
 	evidence["enrich_prompt_version"] = out.PromptVersion

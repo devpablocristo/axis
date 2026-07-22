@@ -16,7 +16,10 @@ const (
 	AreaExecutors  = "executors"
 )
 
-var ErrPolicyMissing = errors.New("quota policy is required")
+var (
+	ErrPolicyMissing = errors.New("quota policy is required")
+	ErrPolicyInUse   = errors.New("quota policy is required by an active capability")
+)
 
 type Key struct {
 	TenantID       string `json:"tenant_id"`

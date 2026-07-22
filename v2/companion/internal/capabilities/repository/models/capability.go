@@ -20,6 +20,13 @@ type Capability struct {
 	RequiresNexusApproval bool
 	EvidenceRequired      bool
 	RollbackCapabilityKey string
+	PromotionState        domain.PromotionState
+	Manifest              domain.Manifest
+	ManifestHash          string
+	ConformedHash         string
+	ConformanceReport     domain.ConformanceReport
+	ConformedAt           *time.Time
+	ActivatedAt           *time.Time
 	CreatedAt             time.Time
 	UpdatedAt             time.Time
 	ArchivedAt            *time.Time
@@ -40,6 +47,13 @@ func (m Capability) ToDomain() domain.Capability {
 		RequiresNexusApproval: m.RequiresNexusApproval,
 		EvidenceRequired:      m.EvidenceRequired,
 		RollbackCapabilityKey: m.RollbackCapabilityKey,
+		PromotionState:        m.PromotionState,
+		Manifest:              m.Manifest,
+		ManifestHash:          m.ManifestHash,
+		ConformedHash:         m.ConformedHash,
+		ConformanceReport:     m.ConformanceReport,
+		ConformedAt:           m.ConformedAt,
+		ActivatedAt:           m.ActivatedAt,
 		CreatedAt:             m.CreatedAt,
 		UpdatedAt:             m.UpdatedAt,
 		ArchivedAt:            m.ArchivedAt,

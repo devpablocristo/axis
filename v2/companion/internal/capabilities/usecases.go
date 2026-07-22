@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/devpablocristo/companion-v2/internal/capabilities/usecases/domain"
+	"github.com/devpablocristo/companion-v2/internal/secrets"
 	virployeedomain "github.com/devpablocristo/companion-v2/internal/virployees/usecases/domain"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
 	"github.com/devpablocristo/platform/lifecycle/go/lifecycle"
@@ -24,13 +25,19 @@ type RepositoryPort interface {
 	List(ctx context.Context, tenantID string, state domain.State) ([]domain.Capability, error)
 	Get(ctx context.Context, tenantID string, id uuid.UUID) (domain.Capability, error)
 	Update(ctx context.Context, tenantID string, id uuid.UUID, input domain.NormalizedUpdateInput) (domain.Capability, error)
+	UpdateManifest(ctx context.Context, tenantID string, id uuid.UUID, manifest domain.Manifest, manifestHash string) (domain.Capability, error)
+	SaveConformance(ctx context.Context, tenantID string, id uuid.UUID, expected domain.Capability, report domain.ConformanceReport) (domain.Capability, error)
+	Activate(ctx context.Context, tenantID string, id uuid.UUID, manifestHash string) (domain.Capability, error)
 	HasActiveVirployeeAssignments(ctx context.Context, tenantID string, id uuid.UUID) (bool, error)
 }
 
 type UseCases struct {
 	repo      RepositoryPort
 	lifecycle *lifecycle.Service
+	quotas    QuotaPolicyChecker
 }
+
+func (u *UseCases) SetQuotaPolicyChecker(checker QuotaPolicyChecker) { u.quotas = checker }
 
 func NewUseCases(repo RepositoryPort) (*UseCases, error) {
 	policy := &lifecycle.LifecyclePolicy{
@@ -82,6 +89,65 @@ func (u *UseCases) Update(ctx context.Context, tenantID string, id uuid.UUID, in
 		return domain.Capability{}, err
 	}
 	return u.repo.Update(ctx, normalizeTenantID(tenantID), id, normalized)
+}
+
+func (u *UseCases) UpdateManifest(ctx context.Context, tenantID string, id uuid.UUID, input domain.ManifestInput) (domain.Capability, error) {
+	tenantID = normalizeTenantID(tenantID)
+	capability, err := u.repo.Get(ctx, tenantID, id)
+	if err != nil {
+		return domain.Capability{}, err
+	}
+	if capability.State() != domain.StateActive {
+		return domain.Capability{}, domainerr.Conflict("capability is not lifecycle-active")
+	}
+	manifest, manifestHash, err := domain.NormalizeManifest(input)
+	if err != nil {
+		return domain.Capability{}, err
+	}
+	for _, ref := range manifest.SecretRefs {
+		if !secrets.ValidRef(ref) {
+			return domain.Capability{}, domainerr.Validation("secret_refs must contain only Secret Manager references")
+		}
+	}
+	return u.repo.UpdateManifest(ctx, tenantID, id, manifest, manifestHash)
+}
+
+func (u *UseCases) Conform(ctx context.Context, tenantID string, id uuid.UUID) (domain.Capability, domain.ConformanceReport, error) {
+	tenantID = normalizeTenantID(tenantID)
+	capability, err := u.repo.Get(ctx, tenantID, id)
+	if err != nil {
+		return domain.Capability{}, domain.ConformanceReport{}, err
+	}
+	if capability.State() != domain.StateActive {
+		return domain.Capability{}, domain.ConformanceReport{}, domainerr.Conflict("capability is not lifecycle-active")
+	}
+	report, err := validateConformance(ctx, capability, u.quotas)
+	if err != nil {
+		return domain.Capability{}, domain.ConformanceReport{}, err
+	}
+	updated, err := u.repo.SaveConformance(ctx, tenantID, id, capability, report)
+	return updated, report, err
+}
+
+func (u *UseCases) Activate(ctx context.Context, tenantID string, id uuid.UUID) (domain.Capability, domain.ConformanceReport, error) {
+	tenantID = normalizeTenantID(tenantID)
+	capability, err := u.repo.Get(ctx, tenantID, id)
+	if err != nil {
+		return domain.Capability{}, domain.ConformanceReport{}, err
+	}
+	if capability.PromotionState != domain.PromotionConformant || capability.ManifestHash == "" || capability.ConformedHash != capability.ManifestHash {
+		return domain.Capability{}, capability.ConformanceReport, domainerr.Conflict("capability must be conformant for its current manifest before activation")
+	}
+	report, err := validateConformance(ctx, capability, u.quotas)
+	if err != nil {
+		return domain.Capability{}, domain.ConformanceReport{}, err
+	}
+	if !report.Conformant {
+		updated, saveErr := u.repo.SaveConformance(ctx, tenantID, id, capability, report)
+		return updated, report, saveErr
+	}
+	activated, err := u.repo.Activate(ctx, tenantID, id, capability.ManifestHash)
+	return activated, report, err
 }
 
 func (u *UseCases) Archive(ctx context.Context, tenantID string, id uuid.UUID, actor, reason string) error {
@@ -159,6 +225,9 @@ func (u *UseCases) EnsureAssignable(ctx context.Context, tenantID string, ids []
 		}
 		if capability.State() != domain.StateActive {
 			return domainerr.Validation("capability_ids must reference active capabilities in the same tenant")
+		}
+		if capability.PromotionState != domain.PromotionActive {
+			return domainerr.Validation("capability_ids must reference conformant and promoted capabilities in the same tenant")
 		}
 		if !autonomy.Allows(capability.RequiredAutonomy) {
 			return domainerr.Validation("capability " + capability.CapabilityKey + " requires autonomy " + string(capability.RequiredAutonomy) + "; virployee autonomy " + string(autonomy) + " does not allow it")

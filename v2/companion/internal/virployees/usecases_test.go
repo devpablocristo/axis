@@ -348,6 +348,12 @@ func TestUseCasesRuntimeContextReturnsResolvedReferences(t *testing.T) {
 	if len(ctx.Capabilities) != 1 || ctx.Capabilities[0].CapabilityKey != "calendar.events.create" {
 		t.Fatalf("unexpected capabilities: %+v", ctx.Capabilities)
 	}
+	capability := capabilities.rows[capabilityID]
+	capability.PromotionState = capabilitydomain.PromotionDraft
+	capabilities.rows[capabilityID] = capability
+	if _, err := uc.RuntimeContext(context.Background(), "tenant-1", created.ID); !domainerr.IsValidation(err) {
+		t.Fatalf("draft capability assigned before invalidation must fail closed, got %v", err)
+	}
 }
 
 func TestUseCasesRuntimeContextFailsWhenProfileTemplateNoLongerAllowsAutonomy(t *testing.T) {
@@ -1276,6 +1282,9 @@ func (r *fakeCapabilityReader) Get(_ context.Context, tenantID string, id uuid.U
 	row, ok := r.rows[id]
 	if !ok || row.TenantID != tenantID || row.State() == capabilitydomain.StateTrashed {
 		return capabilitydomain.Capability{}, domainerr.NotFoundf("capability", id.String())
+	}
+	if row.PromotionState == "" {
+		row.PromotionState = capabilitydomain.PromotionActive
 	}
 	return row, nil
 }

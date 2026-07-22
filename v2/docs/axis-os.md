@@ -183,6 +183,17 @@ executors reserve capacity before work begins. Denials return `429` with
 `Retry-After`; production has no implicit unlimited policy. The append-only
 usage ledger stores quantities, model/cost metadata and operational subject
 identifiers, never prompts, artifact content, vectors, signed URLs or secrets.
+The reservation also covers Runtime proposal and learning-enrichment calls;
+quota denial happens before the model and optional enrichment degrades to its
+deterministic analyzer without spending tokens.
+
+Capability release is a separate promotion lifecycle: `draft → conformant →
+active`. A normalized manifest hash binds schemas, scopes, idempotency,
+rollback, timeouts/retries, postconditions, quota areas, Secret Manager refs,
+attestation and cost class. Only promoted capabilities are assignable. A
+governance or manifest change invalidates conformance, activation rechecks
+active tenant/product quota policies, and a policy required by an active
+capability cannot be disabled.
 
 Executor credentials and attestation keys are resolved through opaque
 `secret_ref` values by service-local Secret Manager adapters. Secret bytes are

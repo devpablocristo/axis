@@ -92,6 +92,7 @@ type EnrichResult struct {
 	Enriched      bool
 	ModelID       string
 	PromptVersion string
+	Usage         Usage
 }
 
 // Enrich asks the runtime to improve the wording of a distilled procedure.
@@ -128,6 +129,7 @@ func (c *Client) Enrich(ctx context.Context, in EnrichRequest) (EnrichResult, er
 		Enriched:      out.Enriched,
 		ModelID:       out.Model,
 		PromptVersion: out.PromptVersion,
+		Usage:         out.Usage,
 	}, nil
 }
 
@@ -308,8 +310,11 @@ func toProposal(resp proposeResponse) dryrun.Proposal {
 		intent.MatchedBy = []string{"runtime"}
 	}
 	return dryrun.Proposal{
-		Intent:           intent,
-		RequiredAutonomy: virployeedomain.AutonomyLevel(resp.Intent.RequiredAutonomy),
+		Intent:                intent,
+		RequiredAutonomy:      virployeedomain.AutonomyLevel(resp.Intent.RequiredAutonomy),
+		InputTokens:           resp.Usage.InputTokens,
+		OutputTokens:          resp.Usage.OutputTokens,
+		EstimatedCostMicroUSD: resp.Usage.EstimatedCostMicroUSD,
 	}
 }
 
@@ -340,6 +345,7 @@ type proposeResponse struct {
 	Intent        proposedIntent `json:"intent"`
 	Model         string         `json:"model,omitempty"`
 	PromptVersion string         `json:"prompt_version,omitempty"`
+	Usage         Usage          `json:"usage"`
 }
 
 type proposedIntent struct {
@@ -364,6 +370,7 @@ type enrichResponse struct {
 	Enriched      bool   `json:"enriched"`
 	Model         string `json:"model,omitempty"`
 	PromptVersion string `json:"prompt_version,omitempty"`
+	Usage         Usage  `json:"usage"`
 }
 
 type answerRequest struct {

@@ -146,6 +146,25 @@ func (r *Repository) UpsertPolicy(ctx context.Context, policy Policy) (Policy, e
 	if err != nil {
 		return Policy{}, err
 	}
+	if !policy.Active {
+		var inUse bool
+		err := r.pool.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM capabilities
+				WHERE tenant_id = $1
+				  AND promotion_state = 'active'
+				  AND archived_at IS NULL AND trashed_at IS NULL
+				  AND manifest->>'product_surface' = $2
+				  AND (manifest->'quota_areas') ? $3
+			)
+		`, policy.TenantID, policy.ProductSurface, policy.Area).Scan(&inUse)
+		if err != nil {
+			return Policy{}, err
+		}
+		if inUse {
+			return Policy{}, ErrPolicyInUse
+		}
+	}
 	err = r.pool.QueryRow(ctx, `
 		INSERT INTO quota_policies (
 			tenant_id, product_surface, area, window_seconds, request_limit, unit_limit, active

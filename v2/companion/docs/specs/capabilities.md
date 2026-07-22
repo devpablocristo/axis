@@ -24,6 +24,8 @@ Public representation:
   "name": "Analizar estudios médicos",
   "description": "Analiza estudios médicos y comunica sus hallazgos.",
   "required_autonomy": "A1",
+  "promotion_state": "draft",
+  "manifest_hash": "",
   "state": "active",
   "created_at": "2026-07-03T12:00:00Z",
   "updated_at": "2026-07-03T12:00:00Z",
@@ -41,6 +43,15 @@ Fields:
 - `name`: required, clear description of the ability, for example `Analizar estudios médicos`.
 - `description`: optional human explanation.
 - `required_autonomy`: required minimum Virployee autonomy for assignment.
+- `promotion_state`: release gate independent from resource lifecycle. New
+  capabilities start `draft`, pass to `conformant` after validation and become
+  assignable only when explicitly promoted to `active`.
+- `manifest`: versioned execution contract for product surface, schemas,
+  scopes, idempotency, rollback, timeout/retry, postconditions, quota areas,
+  secret references, attestation and cost class.
+- `manifest_hash`: SHA-256 of the normalized manifest. `conformed_hash` must
+  match it before activation; any manifest or governance-contract change
+  clears conformance and returns the capability to `draft`.
 - lifecycle fields: same active, archived, trash and purge semantics used by
   v2 resources.
 
@@ -110,7 +121,8 @@ Rules:
 - `capability_ids` is optional on create and update.
 - missing or empty means no configured capabilities.
 - duplicate IDs are normalized away.
-- every ID must reference an active Capability in the same tenant.
+- every ID must reference a lifecycle-active, promotion-`active` Capability in
+  the same tenant.
 - archived or trashed capabilities cannot be assigned.
 - a Virployee can receive a Capability only when:
 
@@ -123,6 +135,28 @@ Example: a Virployee with `autonomy = A2` can receive a Capability with
 
 This is configuration validation only. It does not execute anything.
 
+## Conformance and promotion
+
+The conformance gate is deterministic and fail-closed. It validates:
+
+- input and output JSON schemas;
+- declared scopes and side-effect governance;
+- evidence, idempotency and rollback policy;
+- bounded timeout, retries and postconditions;
+- active PostgreSQL quota policies for every declared area under
+  `(tenant_id, product_surface, area)`;
+- Secret Manager references only (never inline credentials); and
+- executor attestation for write capabilities.
+
+Write capabilities require Nexus approval, evidence, required idempotency,
+manual or automatic rollback, an executor quota, postconditions and signed
+attestation. All capabilities require an inbound quota and an explicit cost
+class. Conformance stores a structured report and the exact manifest hash.
+Activation rechecks the contract and quotas so a disabled policy cannot be
+promoted accidentally. Existing rows are migrated as active for compatibility;
+once their governed contract changes they enter the same draft gate as new
+rows.
+
 ## API
 
 Companion:
@@ -132,6 +166,9 @@ GET    /v1/capabilities
 POST   /v1/capabilities
 GET    /v1/capabilities/:capability_id
 PUT    /v1/capabilities/:capability_id
+PUT    /v1/capabilities/:capability_id/manifest
+POST   /v1/capabilities/:capability_id/conform
+POST   /v1/capabilities/:capability_id/activate
 POST   /v1/capabilities/:capability_id/archive
 POST   /v1/capabilities/:capability_id/unarchive
 POST   /v1/capabilities/:capability_id/trash
@@ -154,11 +191,7 @@ Capabilities for the current tenant.
 - Tools.
 - Runtime execution.
 - LLM planning.
-- Manifest versions.
-- OAuth scopes.
 - IAM permissions.
-- Nexus approvals or policies.
-- Risk and side-effect fields.
 - Job Role recommended capabilities.
 - Global/product Capability catalog.
 
@@ -169,6 +202,11 @@ Capabilities for the current tenant.
 - `name` is the primary user-facing representation and describes the ability in a clear phrase.
 - `capability_key` is a generated, unique tenant-local compatibility key, not a user-facing identity.
 - Capability has one `required_autonomy`.
+- Capability promotion is `draft → conformant → active` and is bound to the
+  normalized manifest hash.
+- Conformance validates governance, quotas, secrets and attestation before
+  activation.
 - Virployees reference capabilities by UUID.
-- Assignment validates tenant, lifecycle and autonomy compatibility.
-- Manifest, Tool and Nexus integration remain later phases.
+- Assignment validates tenant, lifecycle, promotion and autonomy compatibility.
+- Tool execution and Nexus policy evaluation remain separate bounded contexts;
+  the manifest declares the contract they must satisfy.

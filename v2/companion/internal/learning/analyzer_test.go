@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/devpablocristo/companion-v2/internal/quotas"
 	"github.com/google/uuid"
 )
 
@@ -204,6 +205,28 @@ func TestScanUsesEnrichmentWhenUsable(t *testing.T) {
 	}
 	if got.Title != "Cómo agendar una reunión" || got.Evidence["enriched_by_model"] != "gemini-x" {
 		t.Fatalf("expected enriched text + model evidence, got %+v", got)
+	}
+}
+
+type denyingLearningQuota struct{}
+
+func (denyingLearningQuota) Consume(_ context.Context, request quotas.ConsumeRequest) (quotas.Decision, error) {
+	return quotas.Decision{Allowed: false, PolicyFound: true, RetryAfterSeconds: 9}, &quotas.ExceededError{Key: request.Key, RetryAfter: 9}
+}
+
+func TestScanDoesNotCallEnricherWhenLLMQuotaIsExceeded(t *testing.T) {
+	now := time.Now().UTC()
+	repo := &fakeLearningRepo{candidates: []Candidate{{
+		VirployeeID: uuid.NewString(), CapabilityKey: "calendar.events.create", Succeeded: 5, FirstAt: now, LastAt: now,
+	}}}
+	enricher := &fakeEnricher{out: EnrichOutput{Title: "should not run", Content: "calendar.events.create", Enriched: true}}
+	ucs := NewUseCases(repo)
+	ucs.SetProcedureEnricher(enricher)
+	ucs.SetQuotaPorts(denyingLearningQuota{}, nil)
+
+	result, err := ucs.Scan(context.Background(), "tenant-1", 0)
+	if err != nil || result.Proposed != 1 || enricher.called != 0 || repo.created[0].ProposedBy != ProposedByAnalyzer {
+		t.Fatalf("quota denial must fall back without a paid call: result=%+v called=%d created=%+v err=%v", result, enricher.called, repo.created, err)
 	}
 }
 

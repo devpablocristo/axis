@@ -181,7 +181,7 @@ ensure_capability() {
   local requires_approval="$6"
   local evidence="$7"
   local rollback_key="$8"
-  local list id create_payload update_payload
+  local list id create_payload update_payload manifest rollback_mode
 
   create_payload="$(
     jq -n \
@@ -212,10 +212,48 @@ ensure_capability() {
     # Upsert the governance contract on re-runs (capabilities are not purged).
     update_payload="$(jq 'del(.capability_key)' <<<"$create_payload")"
     api PUT "/api/capabilities/$id" "$update_payload" >/dev/null
-    echo "$id"
-    return
+  else
+    id="$(api POST "/api/capabilities" "$create_payload" | jq -r '.id')"
   fi
-  api POST "/api/capabilities" "$create_payload" | jq -r '.id'
+
+  rollback_mode="none"
+  if [[ "$side_effect" == "write" ]]; then
+    rollback_mode="manual"
+  fi
+  if [[ -n "$rollback_key" ]]; then
+    rollback_mode="automatic"
+  fi
+  manifest="$(
+    jq -n \
+      --arg side "$side_effect" \
+      --arg scope "$key" \
+      --arg rollbackMode "$rollback_mode" \
+      '{
+        version: "1.0.0",
+        product_surface: "axis",
+        input_schema: {type: "object"},
+        output_schema: {type: "object"},
+        required_scopes: [$scope],
+        idempotency: (if $side == "write" then {mode: "required", key_fields: ["tenant_id", "virployee_id", "binding_hash"]} else {mode: "not_applicable", key_fields: []} end),
+        rollback_mode: $rollbackMode,
+        timeout_ms: 30000,
+        retry: {max_attempts: 3, backoff_ms: 1000},
+        postconditions: ["Nexus report and evidence are persisted"],
+        quota_areas: (if $side == "write" then ["inbound", "llm", "executors"] else ["inbound", "llm"] end),
+        secret_refs: [],
+        attestation_required: ($side == "write"),
+        cost_class: "low"
+      }'
+  )"
+  api PUT "/api/capabilities/$id/manifest" "$manifest" >/dev/null
+  api POST "/api/capabilities/$id/conform" >/dev/null
+  api POST "/api/capabilities/$id/activate" >/dev/null
+  echo "$id"
+}
+
+ensure_quota_policy() {
+  local area="$1"
+  api PUT "/api/quota-policies/axis/$area" '{"window_seconds":60,"request_limit":1000,"unit_limit":100000000,"active":true}' >/dev/null
 }
 
 ensure_job_role() {
@@ -357,7 +395,11 @@ delete_action_id="$(ensure_action_type "calendar.events.delete" "Delete calendar
 # calendar.events.delete is the compensation (rollback) for create, so it is
 # created first and referenced by the create capability's rollback_capability_key.
 # create/delete are write actions that require human approval (F6, G3.4/G3.5).
-read_capability_id="$(ensure_capability "calendar.events.read" "Read calendar events" "A1" "low" "read" "false" "false" "")"
+ensure_quota_policy "inbound"
+ensure_quota_policy "llm"
+ensure_quota_policy "executors"
+
+read_capability_id="$(ensure_capability "calendar.events.read" "Read calendar events" "A1" "low" "read" "false" "true" "")"
 delete_capability_id="$(ensure_capability "calendar.events.delete" "Delete calendar events" "A3" "high" "write" "true" "true" "")"
 create_capability_id="$(ensure_capability "calendar.events.create" "Create calendar events" "A2" "high" "write" "true" "true" "calendar.events.delete")"
 job_role_id="$(ensure_job_role)"

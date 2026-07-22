@@ -200,7 +200,7 @@ export function VirployeesPage({
     return jobRoles.filter((jobRole) => jobRole.state === 'active')
   }, [jobRoles])
   const activeCapabilities = useMemo(() => {
-    return capabilities.filter((capability) => capability.state === 'active')
+    return capabilities.filter((capability) => capability.state === 'active' && capability.promotion_state === 'active')
   }, [capabilities])
   const activeProfileTemplates = useMemo(() => {
     return profileTemplates.filter((profile) => profile.state === 'active')

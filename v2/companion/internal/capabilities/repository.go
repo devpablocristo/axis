@@ -3,6 +3,7 @@ package capabilities
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -22,6 +23,11 @@ type Repository struct {
 	pool *pgxpool.Pool
 }
 
+const capabilitySelectColumns = `id::text, tenant_id, capability_key, name, description, required_autonomy,
+	risk_class, side_effect_class, requires_nexus_approval, evidence_required, rollback_capability_key,
+	promotion_state, manifest, manifest_hash, conformed_hash, conformance_report, conformed_at, activated_at,
+	created_at, updated_at, archived_at, trashed_at, purge_after`
+
 func NewRepository(pool *pgxpool.Pool) *Repository {
 	return &Repository{pool: pool}
 }
@@ -36,9 +42,7 @@ func (r *Repository) Create(ctx context.Context, tenantID string, input domain.N
 			created_at, updated_at
 		)
 		VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12)
-		RETURNING id::text, tenant_id, capability_key, name, description, required_autonomy,
-			risk_class, side_effect_class, requires_nexus_approval, evidence_required, rollback_capability_key,
-			created_at, updated_at, archived_at, trashed_at, purge_after
+		RETURNING `+capabilitySelectColumns+`
 	`, id.String(), tenantID, input.CapabilityKey, input.Name, input.Description, string(input.RequiredAutonomy),
 		input.Governance.RiskClass, input.Governance.SideEffectClass, input.Governance.RequiresNexusApproval,
 		input.Governance.EvidenceRequired, input.Governance.RollbackCapabilityKey, now)
@@ -59,9 +63,7 @@ func (r *Repository) List(ctx context.Context, tenantID string, state domain.Sta
 	}
 
 	rows, err := r.pool.Query(ctx, `
-		SELECT id::text, tenant_id, capability_key, name, description, required_autonomy,
-			risk_class, side_effect_class, requires_nexus_approval, evidence_required, rollback_capability_key,
-			created_at, updated_at, archived_at, trashed_at, purge_after
+		SELECT `+capabilitySelectColumns+`
 		FROM capabilities
 		WHERE `+where+`
 		ORDER BY capability_key ASC, id ASC
@@ -87,9 +89,7 @@ func (r *Repository) List(ctx context.Context, tenantID string, state domain.Sta
 
 func (r *Repository) Get(ctx context.Context, tenantID string, id uuid.UUID) (domain.Capability, error) {
 	row := r.pool.QueryRow(ctx, `
-		SELECT id::text, tenant_id, capability_key, name, description, required_autonomy,
-			risk_class, side_effect_class, requires_nexus_approval, evidence_required, rollback_capability_key,
-			created_at, updated_at, archived_at, trashed_at, purge_after
+		SELECT `+capabilitySelectColumns+`
 		FROM capabilities
 		WHERE tenant_id = $1 AND id = $2::uuid AND trashed_at IS NULL
 	`, tenantID, id.String())
@@ -107,14 +107,40 @@ func (r *Repository) Update(ctx context.Context, tenantID string, id uuid.UUID, 
 			requires_nexus_approval = $8,
 			evidence_required = $9,
 			rollback_capability_key = $10,
+			promotion_state = CASE WHEN
+				required_autonomy IS DISTINCT FROM $5 OR
+				risk_class IS DISTINCT FROM $6 OR
+				side_effect_class IS DISTINCT FROM $7 OR
+				requires_nexus_approval IS DISTINCT FROM $8 OR
+				evidence_required IS DISTINCT FROM $9 OR
+				rollback_capability_key IS DISTINCT FROM $10
+				THEN 'draft' ELSE promotion_state END,
+			conformed_hash = CASE WHEN
+				required_autonomy IS DISTINCT FROM $5 OR risk_class IS DISTINCT FROM $6 OR
+				side_effect_class IS DISTINCT FROM $7 OR requires_nexus_approval IS DISTINCT FROM $8 OR
+				evidence_required IS DISTINCT FROM $9 OR rollback_capability_key IS DISTINCT FROM $10
+				THEN '' ELSE conformed_hash END,
+			conformance_report = CASE WHEN
+				required_autonomy IS DISTINCT FROM $5 OR risk_class IS DISTINCT FROM $6 OR
+				side_effect_class IS DISTINCT FROM $7 OR requires_nexus_approval IS DISTINCT FROM $8 OR
+				evidence_required IS DISTINCT FROM $9 OR rollback_capability_key IS DISTINCT FROM $10
+				THEN '{"conformant":false,"checks":[]}'::jsonb ELSE conformance_report END,
+			conformed_at = CASE WHEN
+				required_autonomy IS DISTINCT FROM $5 OR risk_class IS DISTINCT FROM $6 OR
+				side_effect_class IS DISTINCT FROM $7 OR requires_nexus_approval IS DISTINCT FROM $8 OR
+				evidence_required IS DISTINCT FROM $9 OR rollback_capability_key IS DISTINCT FROM $10
+				THEN NULL ELSE conformed_at END,
+			activated_at = CASE WHEN
+				required_autonomy IS DISTINCT FROM $5 OR risk_class IS DISTINCT FROM $6 OR
+				side_effect_class IS DISTINCT FROM $7 OR requires_nexus_approval IS DISTINCT FROM $8 OR
+				evidence_required IS DISTINCT FROM $9 OR rollback_capability_key IS DISTINCT FROM $10
+				THEN NULL ELSE activated_at END,
 			updated_at = $11
 		WHERE tenant_id = $1
 			AND id = $2::uuid
 			AND archived_at IS NULL
 			AND trashed_at IS NULL
-		RETURNING id::text, tenant_id, capability_key, name, description, required_autonomy,
-			risk_class, side_effect_class, requires_nexus_approval, evidence_required, rollback_capability_key,
-			created_at, updated_at, archived_at, trashed_at, purge_after
+		RETURNING `+capabilitySelectColumns+`
 	`, tenantID, id.String(), input.Name, input.Description, string(input.RequiredAutonomy),
 		input.Governance.RiskClass, input.Governance.SideEffectClass, input.Governance.RequiresNexusApproval,
 		input.Governance.EvidenceRequired, input.Governance.RollbackCapabilityKey, time.Now().UTC())
@@ -133,6 +159,82 @@ func (r *Repository) Update(ctx context.Context, tenantID string, id uuid.UUID, 
 		return domain.Capability{}, domainerr.Conflict("capability is not active")
 	}
 	return domain.Capability{}, err
+}
+
+func (r *Repository) UpdateManifest(ctx context.Context, tenantID string, id uuid.UUID, manifest domain.Manifest, manifestHash string) (domain.Capability, error) {
+	raw, err := json.Marshal(manifest)
+	if err != nil {
+		return domain.Capability{}, err
+	}
+	row := r.pool.QueryRow(ctx, `
+		UPDATE capabilities
+		SET manifest = $3::jsonb,
+			manifest_hash = $4,
+			promotion_state = 'draft',
+			conformed_hash = '',
+			conformance_report = '{"conformant":false,"checks":[]}'::jsonb,
+			conformed_at = NULL,
+			activated_at = NULL,
+			updated_at = $5
+		WHERE tenant_id = $1 AND id = $2::uuid
+			AND archived_at IS NULL AND trashed_at IS NULL
+		RETURNING `+capabilitySelectColumns+`
+	`, tenantID, id.String(), raw, manifestHash, time.Now().UTC())
+	return scanCapability(row)
+}
+
+func (r *Repository) SaveConformance(ctx context.Context, tenantID string, id uuid.UUID, expected domain.Capability, report domain.ConformanceReport) (domain.Capability, error) {
+	raw, err := json.Marshal(report)
+	if err != nil {
+		return domain.Capability{}, err
+	}
+	now := time.Now().UTC()
+	row := r.pool.QueryRow(ctx, `
+		UPDATE capabilities
+		SET promotion_state = CASE WHEN $4::boolean THEN 'conformant' ELSE 'draft' END,
+			conformed_hash = CASE WHEN $4::boolean THEN $3::text ELSE '' END,
+			conformance_report = $5::jsonb,
+			conformed_at = CASE WHEN $4::boolean THEN $6::timestamptz ELSE NULL END,
+			activated_at = NULL,
+			updated_at = $6::timestamptz
+		WHERE tenant_id = $1 AND id = $2::uuid
+			AND manifest_hash = $3
+			AND required_autonomy = $7
+			AND risk_class = $8
+			AND side_effect_class = $9
+			AND requires_nexus_approval = $10
+			AND evidence_required = $11
+			AND rollback_capability_key = $12
+			AND archived_at IS NULL AND trashed_at IS NULL
+		RETURNING `+capabilitySelectColumns+`
+	`, tenantID, id.String(), expected.ManifestHash, report.Conformant, raw, now,
+		string(expected.RequiredAutonomy), expected.RiskClass, expected.SideEffectClass,
+		expected.RequiresNexusApproval, expected.EvidenceRequired, expected.RollbackCapabilityKey)
+	return scanCapability(row)
+}
+
+func (r *Repository) Activate(ctx context.Context, tenantID string, id uuid.UUID, manifestHash string) (domain.Capability, error) {
+	now := time.Now().UTC()
+	row := r.pool.QueryRow(ctx, `
+		UPDATE capabilities
+		SET promotion_state = 'active', activated_at = $4, updated_at = $4
+		WHERE tenant_id = $1 AND id = $2::uuid
+			AND promotion_state = 'conformant'
+			AND manifest_hash = $3 AND conformed_hash = $3
+			AND NOT EXISTS (
+				SELECT 1
+				FROM jsonb_array_elements_text(COALESCE(manifest->'quota_areas', '[]'::jsonb)) AS required(area)
+				WHERE NOT EXISTS (
+					SELECT 1 FROM quota_policies qp
+					WHERE qp.tenant_id = capabilities.tenant_id
+					  AND qp.product_surface = manifest->>'product_surface'
+					  AND qp.area = required.area AND qp.active = true
+				)
+			)
+			AND archived_at IS NULL AND trashed_at IS NULL
+		RETURNING `+capabilitySelectColumns+`
+	`, tenantID, id.String(), manifestHash, now)
+	return scanCapability(row)
 }
 
 func (r *Repository) Archive(ctx context.Context, tenantID string, resourceID uuid.UUID, at time.Time) error {
@@ -258,6 +360,8 @@ type scanner interface {
 func scanCapability(row scanner) (domain.Capability, error) {
 	var idText string
 	var requiredAutonomy string
+	var promotionState string
+	var manifestJSON, reportJSON []byte
 	var model models.Capability
 	err := row.Scan(
 		&idText,
@@ -271,6 +375,13 @@ func scanCapability(row scanner) (domain.Capability, error) {
 		&model.RequiresNexusApproval,
 		&model.EvidenceRequired,
 		&model.RollbackCapabilityKey,
+		&promotionState,
+		&manifestJSON,
+		&model.ManifestHash,
+		&model.ConformedHash,
+		&reportJSON,
+		&model.ConformedAt,
+		&model.ActivatedAt,
 		&model.CreatedAt,
 		&model.UpdatedAt,
 		&model.ArchivedAt,
@@ -289,6 +400,13 @@ func scanCapability(row scanner) (domain.Capability, error) {
 	}
 	model.ID = id
 	model.RequiredAutonomy = virployeedomain.AutonomyLevel(requiredAutonomy)
+	model.PromotionState = domain.PromotionState(promotionState)
+	if err := json.Unmarshal(manifestJSON, &model.Manifest); err != nil {
+		return domain.Capability{}, err
+	}
+	if err := json.Unmarshal(reportJSON, &model.ConformanceReport); err != nil {
+		return domain.Capability{}, err
+	}
 	return model.ToDomain(), nil
 }
 

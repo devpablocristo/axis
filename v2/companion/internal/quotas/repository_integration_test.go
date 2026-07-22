@@ -2,6 +2,7 @@ package quotas
 
 import (
 	"context"
+	"errors"
 	"os"
 	"sync"
 	"testing"
@@ -81,6 +82,25 @@ func TestRepositoryConcurrentLimitAndIdempotency(t *testing.T) {
 	}
 	if windowCount != 0 {
 		t.Fatalf("denied first consumption must not create a quota window, got %d", windowCount)
+	}
+
+	protectedKey := Key{TenantID: tenant, ProductSurface: "protected-product", Area: AreaInbound}
+	if _, err := repository.UpsertPolicy(ctx, Policy{Key: protectedKey, WindowSeconds: 60, RequestLimit: 10, UnitLimit: 10, Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO capabilities (
+			id, tenant_id, capability_key, name, description, required_autonomy,
+			risk_class, side_effect_class, requires_nexus_approval, evidence_required,
+			rollback_capability_key, promotion_state, manifest, created_at, updated_at
+		) VALUES ($1::uuid, $2, 'quota.policy.protected', 'Protected', '', 'A1',
+			'low', 'read', false, true, '', 'active', $3::jsonb, now(), now())
+	`, uuid.NewString(), tenant, `{"product_surface":"protected-product","quota_areas":["inbound"]}`); err != nil {
+		t.Fatal(err)
+	}
+	_, err = repository.UpsertPolicy(ctx, Policy{Key: protectedKey, WindowSeconds: 60, RequestLimit: 10, UnitLimit: 10, Active: false})
+	if !errors.Is(err, ErrPolicyInUse) {
+		t.Fatalf("active capability quota policy must not be disabled, got %v", err)
 	}
 
 	if _, err := pool.Exec(ctx, `UPDATE quota_usage_ledger SET units = units WHERE tenant_id = $1`, tenant); err == nil {

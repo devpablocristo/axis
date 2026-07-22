@@ -367,6 +367,9 @@ func (u *UseCases) RuntimeContext(ctx context.Context, tenantID string, id uuid.
 		if capability.State() != capabilitydomain.StateActive {
 			return runtimecontext.Context{}, domainerr.Validation("capability_ids must reference active capabilities in the same tenant")
 		}
+		if capability.PromotionState != capabilitydomain.PromotionActive {
+			return runtimecontext.Context{}, domainerr.Validation("assigned capability is no longer conformant and promoted")
+		}
 		if !virployee.Autonomy.Allows(capability.RequiredAutonomy) {
 			return runtimecontext.Context{}, domainerr.Validation("capability " + capability.CapabilityKey + " requires autonomy " + string(capability.RequiredAutonomy) + "; virployee autonomy " + string(virployee.Autonomy) + " does not allow it")
 		}
@@ -432,6 +435,10 @@ func (u *UseCases) dryRun(ctx context.Context, tenantID string, id uuid.UUID, in
 		runtimeCtx.MemoryContextHash = memories.ContextHash(runtimeCtx.MemoryReferences)
 	}
 	if u.runtime != nil {
+		quotaID := uuid.NewString()
+		if err := u.consumeQuota(ctx, quotaKey(tenantID, "axis", quotas.AreaLLM), quotaID, "virployee", id.String(), estimatedDryRunTokens(input, runtimeCtx)); err != nil {
+			return dryrun.Result{}, err
+		}
 		proposal, err := u.runtime.Propose(ctx, input, runtimeCtx)
 		if err != nil {
 			// Fail-closed transport: if the runtime is unavailable or errors, do
@@ -441,6 +448,7 @@ func (u *UseCases) dryRun(ctx context.Context, tenantID string, id uuid.UUID, in
 			slog.WarnContext(ctx, "runtime_propose_failed_fallback_deterministic", "error", runtraces.RedactText(err.Error()))
 			return dryrun.Evaluate(input, runtimeCtx), nil
 		}
+		u.recordProposalUsage(ctx, tenantID, id, quotaID, proposal)
 		return dryrun.EvaluateWithProposal(input, runtimeCtx, proposal), nil
 	}
 	return dryrun.Evaluate(input, runtimeCtx), nil

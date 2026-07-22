@@ -41,11 +41,14 @@ type EnrichInput struct {
 }
 
 type EnrichOutput struct {
-	Title         string
-	Content       string
-	Enriched      bool
-	ModelID       string
-	PromptVersion string
+	Title                 string
+	Content               string
+	Enriched              bool
+	ModelID               string
+	PromptVersion         string
+	InputTokens           int64
+	OutputTokens          int64
+	EstimatedCostMicroUSD int64
 }
 
 // --- runtime enricher adapter ---
@@ -79,6 +82,8 @@ func (e runtimeEnricher) Enrich(ctx context.Context, in EnrichInput) (EnrichOutp
 		Enriched:      res.Enriched,
 		ModelID:       res.ModelID,
 		PromptVersion: res.PromptVersion,
+		InputTokens:   res.Usage.InputTokens, OutputTokens: res.Usage.OutputTokens,
+		EstimatedCostMicroUSD: res.Usage.EstimatedCostMicroUSD,
 	}, nil
 }
 
@@ -105,7 +110,7 @@ func (c capabilitiesChecker) IsActiveCapability(ctx context.Context, tenantID, c
 		return false, err
 	}
 	for _, capability := range list {
-		if strings.ToLower(capability.CapabilityKey) == key {
+		if strings.ToLower(capability.CapabilityKey) == key && capability.PromotionState == capabilitydomain.PromotionActive {
 			return true, nil
 		}
 	}
