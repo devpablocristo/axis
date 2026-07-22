@@ -15,7 +15,7 @@ const Version = "axis.executor-attestation.v1"
 type Payload struct {
 	Version           string         `json:"version"`
 	ExecutorVersion   string         `json:"executor_version"`
-	TenantID          string         `json:"tenant_id"`
+	OrgID             string         `json:"org_id"`
 	GovernanceCheckID string         `json:"governance_check_id"`
 	BindingHash       string         `json:"binding_hash"`
 	IdempotencyKey    string         `json:"idempotency_key"`

@@ -25,14 +25,14 @@ import {
 } from './api'
 
 type KnowledgeBasesPageProps = {
-  tenantId: string
+  orgId: string
   principalId: string
   productSurface: string
 }
 
 const EMPTY_BASE: Pick<KnowledgeBase, 'name' | 'description' | 'classification'> = { name: '', description: '', classification: 'private' }
 
-export function KnowledgeBasesPage({ tenantId, principalId, productSurface }: KnowledgeBasesPageProps) {
+export function KnowledgeBasesPage({ orgId, principalId, productSurface }: KnowledgeBasesPageProps) {
   const [bases, setBases] = useState<KnowledgeBase[]>([])
   const [documents, setDocuments] = useState<KnowledgeDocument[]>([])
   const [bindings, setBindings] = useState<KnowledgeBindingInput[]>([])
@@ -60,16 +60,16 @@ export function KnowledgeBasesPage({ tenantId, principalId, productSurface }: Kn
   const [notice, setNotice] = useState('')
 
   const loadBase = useCallback(async () => {
-    if (!tenantId || !principalId) return
+    if (!orgId || !principalId) return
     setLoading(true)
     setError('')
     try {
       const [active, archived, nextRoles, nextVirployees, nextSubjects] = await Promise.all([
-        listKnowledgeBases(tenantId, principalId, 'active'),
-        listKnowledgeBases(tenantId, principalId, 'archived'),
-        listJobRoles('active', tenantId, principalId),
-        listVirployees('active', tenantId, principalId),
-        listWorkSubjects(tenantId, principalId),
+        listKnowledgeBases(orgId, principalId, 'active'),
+        listKnowledgeBases(orgId, principalId, 'archived'),
+        listJobRoles('active', orgId, principalId),
+        listVirployees('active', orgId, principalId),
+        listWorkSubjects(orgId, principalId),
       ])
       const nextBases = [...active, ...archived]
       setBases(nextBases)
@@ -82,7 +82,7 @@ export function KnowledgeBasesPage({ tenantId, principalId, productSurface }: Kn
     } finally {
       setLoading(false)
     }
-  }, [principalId, tenantId])
+  }, [principalId, orgId])
 
   const loadSelected = useCallback(async () => {
     if (!selectedBaseId) {
@@ -92,8 +92,8 @@ export function KnowledgeBasesPage({ tenantId, principalId, productSurface }: Kn
     }
     try {
       const [nextDocuments, nextBindings] = await Promise.all([
-        listKnowledgeDocuments(selectedBaseId, tenantId, principalId),
-        listKnowledgeBindings(selectedBaseId, tenantId, principalId),
+        listKnowledgeDocuments(selectedBaseId, orgId, principalId),
+        listKnowledgeBindings(selectedBaseId, orgId, principalId),
       ])
       setDocuments(nextDocuments)
       const normalizedBindings = nextBindings.map(({ scope_type, job_role_id, virployee_id, subject_id, case_id }) => ({
@@ -104,7 +104,7 @@ export function KnowledgeBasesPage({ tenantId, principalId, productSurface }: Kn
     } catch (cause) {
       setError(errorMessage(cause))
     }
-  }, [bases, principalId, selectedBaseId, tenantId])
+  }, [bases, principalId, selectedBaseId, orgId])
 
   useEffect(() => { void loadBase() }, [loadBase])
   useEffect(() => { void loadSelected() }, [loadSelected])
@@ -155,7 +155,7 @@ export function KnowledgeBasesPage({ tenantId, principalId, productSurface }: Kn
       <div className="card workforce-summary">
         <div className="card-header"><h2>Grounded knowledge</h2></div>
         <p>Only authorized professional, Virployee, subject and case libraries are retrieved during Assist.</p>
-        <p className="axis-muted">Direct uploads, connectors and pre-indexed artifacts all pass through the same tenant and patient isolation contract.</p>
+        <p className="axis-muted">Direct uploads, connectors and pre-indexed artifacts all pass through the same organization and patient isolation contract.</p>
       </div>
       {error ? <p role="alert" className="iam-control__inline-error">{error}</p> : null}
       {notice ? <p role="status" className="iam-control__inline-note">{notice}</p> : null}
@@ -166,7 +166,7 @@ export function KnowledgeBasesPage({ tenantId, principalId, productSurface }: Kn
             <form className="workforce-form" onSubmit={(event) => {
               event.preventDefault()
               void mutate(async () => {
-                const created = await createKnowledgeBase(baseDraft, tenantId, principalId)
+                const created = await createKnowledgeBase(baseDraft, orgId, principalId)
                 setBaseDraft(EMPTY_BASE)
                 await loadBase()
                 setSelectedBaseId(created.id)
@@ -196,7 +196,7 @@ export function KnowledgeBasesPage({ tenantId, principalId, productSurface }: Kn
               <div className="knowledge-base-summary">
                 <span>{selectedBase.classification} · {selectedBase.description || 'No description'}</span>
                 <button type="button" className="btn-secondary" disabled={busy} onClick={() => void mutate(async () => {
-                  const next = await setKnowledgeBaseArchived(selectedBase, selectedBase.state === 'active', tenantId, principalId)
+                  const next = await setKnowledgeBaseArchived(selectedBase, selectedBase.state === 'active', orgId, principalId)
                   setNotice(`${next.name} is now ${next.state}.`)
                   await loadBase()
                 })}>{selectedBase.state === 'active' ? 'Archive' : 'Activate'}</button>
@@ -214,7 +214,7 @@ export function KnowledgeBasesPage({ tenantId, principalId, productSurface }: Kn
                   title: uploadDraft.title,
                   target: { virployee_id: uploadDraft.virployee_id, subject_id: uploadDraft.subject_id, document_id: uploadDraft.document_id },
                   file: uploadFile,
-                }, tenantId, principalId)
+                }, orgId, principalId)
                 setUploadDraft((current) => ({ ...current, title: '', document_id: '' }))
                 setUploadFile(null)
                 setUploadInputKey((current) => current + 1)
@@ -256,7 +256,7 @@ export function KnowledgeBasesPage({ tenantId, principalId, productSurface }: Kn
               event.preventDefault()
               if (!selectedBase) return
               void mutate(async () => {
-                await ingestKnowledgeConnector(selectedBase.id, connectorDraft, tenantId, principalId)
+                await ingestKnowledgeConnector(selectedBase.id, connectorDraft, orgId, principalId)
                 setConnectorDraft((current) => ({
                   ...current,
                   title: '',
@@ -314,7 +314,7 @@ export function KnowledgeBasesPage({ tenantId, principalId, productSurface }: Kn
               event.preventDefault()
               if (!selectedBase) return
               void mutate(async () => {
-                await registerKnowledgeDocument(selectedBase.id, documentDraft, tenantId, principalId)
+                await registerKnowledgeDocument(selectedBase.id, documentDraft, orgId, principalId)
                 setDocumentDraft({ title: '', artifact_scope: { virployee_id: '', product_surface: productSurface, subject_id: selectedBase.classification === 'professional' ? 'professional' : '', repository_generation: 'current', document_id: '' } })
                 setNotice('Document registered with its immutable source hash and version.')
 				await loadBase()
@@ -404,7 +404,7 @@ export function KnowledgeBasesPage({ tenantId, principalId, productSurface }: Kn
             <button type="button" className="btn-primary knowledge-save-bindings" disabled={busy || !selectedBase || (selectedBase.classification === 'private' && bindings.length !== 1)} onClick={() => void mutate(async () => {
               if (!selectedBase) return
               const bindingsToSave = selectedBase.classification === 'private' ? bindings.slice(0, 1) : bindings
-              await replaceKnowledgeBindings(selectedBase, bindingsToSave, tenantId, principalId)
+              await replaceKnowledgeBindings(selectedBase, bindingsToSave, orgId, principalId)
               setNotice('Knowledge bindings saved. Prior approvals using the old context are now stale.')
               await loadBase()
               await loadSelected()
@@ -420,7 +420,7 @@ export function KnowledgeBasesPage({ tenantId, principalId, productSurface }: Kn
                   <span>{subjectById.get(document.artifact_scope.subject_id) ?? document.artifact_scope.subject_id} · {shortHash(document.source_sha256)}</span>
                   <button type="button" className="btn-sm btn-danger" disabled={busy} onClick={() => void mutate(async () => {
                     if (!selectedBase) return
-                    await archiveKnowledgeDocument(selectedBase.id, document, tenantId, principalId)
+                    await archiveKnowledgeDocument(selectedBase.id, document, orgId, principalId)
 					await loadBase()
                     await loadSelected()
                   })}>Archive</button>

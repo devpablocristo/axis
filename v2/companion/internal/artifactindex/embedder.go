@@ -94,7 +94,7 @@ func (e *RuntimeEmbedder) consume(ctx context.Context, scope artifacts.Scope, id
 		return nil
 	}
 	_, err := e.quota.Consume(ctx, quotas.ConsumeRequest{
-		Key:            quotas.Key{TenantID: scope.TenantID, ProductSurface: scope.ProductSurface, Area: quotas.AreaEmbeddings},
+		Key:            quotas.Key{OrgID: scope.OrgID, ProductSurface: scope.ProductSurface, Area: quotas.AreaEmbeddings},
 		IdempotencyKey: idempotencyKey, SubjectType: "repository_generation", SubjectID: scope.RepositoryGeneration, Units: units,
 	})
 	return err
@@ -105,7 +105,7 @@ func (e *RuntimeEmbedder) record(ctx context.Context, scope artifacts.Scope, ide
 		return
 	}
 	_ = e.ledger.RecordUsage(ctx, quotas.Usage{
-		Key:            quotas.Key{TenantID: scope.TenantID, ProductSurface: scope.ProductSurface, Area: quotas.AreaEmbeddings},
+		Key:            quotas.Key{OrgID: scope.OrgID, ProductSurface: scope.ProductSurface, Area: quotas.AreaEmbeddings},
 		IdempotencyKey: idempotencyKey + ":actual", SubjectType: "repository_generation", SubjectID: scope.RepositoryGeneration,
 		Units: units, Model: model, Metadata: map[string]any{"estimated": true},
 	})

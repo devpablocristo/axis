@@ -7,7 +7,7 @@ import (
 )
 
 // CorpusReader reconstructs a reusable runtime corpus from already-staged
-// originals and the tenant-scoped index. It never uses the product read URL and
+// originals and the organization-scoped index. It never uses the product read URL and
 // never repeats staging, malware scanning or indexing.
 type CorpusReader struct {
 	catalog   ArtifactCatalogPort

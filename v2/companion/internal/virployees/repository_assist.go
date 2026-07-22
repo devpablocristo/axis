@@ -18,7 +18,7 @@ import (
 // to logs/evidence.
 type AssistRun struct {
 	ID                      uuid.UUID
-	TenantID                string
+	OrgID                   string
 	VirployeeID             uuid.UUID
 	CaseID                  uuid.UUID
 	ResponsibleVirployeeID  uuid.UUID
@@ -63,7 +63,7 @@ type AssistRun struct {
 // BeginAssistRun stores the full input before a durable job is enqueued. A
 // concurrent retry receives the existing run and cannot create a second model
 // invocation for the same stable idempotency key.
-func (r *Repository) BeginAssistRun(ctx context.Context, tenantID string, virployeeID uuid.UUID, metadata AssistMetadata, idempotencyKey, inputHash, inputPreview string, inputJSON json.RawMessage) (AssistRun, bool, error) {
+func (r *Repository) BeginAssistRun(ctx context.Context, orgID string, virployeeID uuid.UUID, metadata AssistMetadata, idempotencyKey, inputHash, inputPreview string, inputJSON json.RawMessage) (AssistRun, bool, error) {
 	if len(inputJSON) == 0 {
 		inputJSON = json.RawMessage(`{}`)
 	}
@@ -71,7 +71,7 @@ func (r *Repository) BeginAssistRun(ctx context.Context, tenantID string, virplo
 	var caseID any
 	responsibleID := virployeeID
 	if metadata.CaseID != uuid.Nil {
-		assistCase, caseErr := r.GetAssistCase(ctx, tenantID, metadata.CaseID)
+		assistCase, caseErr := r.GetAssistCase(ctx, orgID, metadata.CaseID)
 		if caseErr != nil {
 			return AssistRun{}, false, caseErr
 		}
@@ -95,7 +95,7 @@ func (r *Repository) BeginAssistRun(ctx context.Context, tenantID string, virplo
 		caseID = assistCase.ID
 		responsibleID = assistCase.OwnerVirployeeID
 	} else if metadata.SubjectID != "" && metadata.ProductSurface != "" && metadata.AssistType != "" {
-		assistCase, caseErr := r.EnsureAssistCase(ctx, tenantID, virployeeID, metadata)
+		assistCase, caseErr := r.EnsureAssistCase(ctx, orgID, virployeeID, metadata)
 		if caseErr != nil {
 			return AssistRun{}, false, caseErr
 		}
@@ -115,60 +115,60 @@ func (r *Repository) BeginAssistRun(ctx context.Context, tenantID string, virplo
 	}
 	tag, err := r.pool.Exec(ctx, `
 		INSERT INTO companion_assist_runs (
-			id, tenant_id, virployee_id, assist_type, product_surface, subject_id, repository_generation,
+			id, org_id, virployee_id, assist_type, product_surface, subject_id, repository_generation,
 			capability_key, capability_manifest_hash,
 			idempotency_key, status, input_hash, input_preview, input_json, case_id, responsible_virployee_id,
 			grounding_mode, continuity_assignment_id, continuity_assignment_version, context_hash,
 			job_role_snapshot_hash, source_authorization_hash, started_at, updated_at
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8,''), NULLIF($9,''), $10, 'received', $11, $12, $13::jsonb, $14, $15, $16, $17, $18, $19, $20, $21, now(), now())
-		ON CONFLICT (tenant_id, virployee_id, idempotency_key) DO NOTHING
-	`, id, tenantID, virployeeID, metadata.AssistType, metadata.ProductSurface, metadata.SubjectID, metadata.RepositoryGeneration,
+		ON CONFLICT (org_id, virployee_id, idempotency_key) DO NOTHING
+	`, id, orgID, virployeeID, metadata.AssistType, metadata.ProductSurface, metadata.SubjectID, metadata.RepositoryGeneration,
 		metadata.CapabilityKey, metadata.CapabilityManifestHash, idempotencyKey, inputHash, inputPreview, []byte(inputJSON), caseID, responsibleID, metadata.GroundingMode,
 		nullableAssistUUID(metadata.AssignmentID), metadata.AssignmentVersion, metadata.ContextHash, metadata.JobRoleSnapshotHash,
 		metadata.SourceAuthorizationHash)
 	if err != nil {
 		return AssistRun{}, false, err
 	}
-	run, err := r.GetAssistRunByKey(ctx, tenantID, virployeeID, idempotencyKey)
+	run, err := r.GetAssistRunByKey(ctx, orgID, virployeeID, idempotencyKey)
 	return run, tag.RowsAffected() == 1, err
 }
 
 // ClaimAssistRun provides a second idempotency barrier at the work item. The
 // queue lease is renewable; this transition ensures a duplicate delivery still
 // cannot execute the model twice.
-func (r *Repository) ClaimAssistRun(ctx context.Context, tenantID string, id uuid.UUID, recoverPreAnswer bool) (AssistRun, bool, error) {
+func (r *Repository) ClaimAssistRun(ctx context.Context, orgID string, id uuid.UUID, recoverPreAnswer bool) (AssistRun, bool, error) {
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE companion_assist_runs
 		SET status = 'staging', updated_at = now()
-		WHERE tenant_id = $1 AND id = $2
+		WHERE org_id = $1 AND id = $2
 		  AND (status = 'received' OR ($3 AND status IN ('staging','extracting','indexing','planning')))
-	`, tenantID, id, recoverPreAnswer)
+	`, orgID, id, recoverPreAnswer)
 	if err != nil {
 		return AssistRun{}, false, err
 	}
-	run, err := r.GetAssistRunByID(ctx, tenantID, id)
+	run, err := r.GetAssistRunByID(ctx, orgID, id)
 	return run, tag.RowsAffected() == 1, err
 }
 
-func (r *Repository) SetAssistRunStatus(ctx context.Context, tenantID string, id uuid.UUID, status string) (AssistRun, error) {
+func (r *Repository) SetAssistRunStatus(ctx context.Context, orgID string, id uuid.UUID, status string) (AssistRun, error) {
 	_, err := r.pool.Exec(ctx, `
 		UPDATE companion_assist_runs SET status=$3, updated_at=now()
-		WHERE tenant_id=$1 AND id=$2 AND status NOT IN ('done','failed','needs_human')
-	`, tenantID, id, status)
+		WHERE org_id=$1 AND id=$2 AND status NOT IN ('done','failed','needs_human')
+	`, orgID, id, status)
 	if err != nil {
 		return AssistRun{}, err
 	}
-	return r.GetAssistRunByID(ctx, tenantID, id)
+	return r.GetAssistRunByID(ctx, orgID, id)
 }
 
-func (r *Repository) CompleteAssistRunForOwner(ctx context.Context, tenantID string, id uuid.UUID, ownershipVersion int64, status string, output json.RawMessage, outputText string, answered, degraded bool, model, promptVersion, runErr string, durationMS int64) (AssistRun, error) {
+func (r *Repository) CompleteAssistRunForOwner(ctx context.Context, orgID string, id uuid.UUID, ownershipVersion int64, status string, output json.RawMessage, outputText string, answered, degraded bool, model, promptVersion, runErr string, durationMS int64) (AssistRun, error) {
 	if len(output) == 0 {
 		output = json.RawMessage(`{}`)
 	}
 	tag, err := r.pool.Exec(ctx, `UPDATE companion_assist_runs SET status=$4,output=$5::jsonb,output_text=$6,
 		answered=$7,degraded=$8,model=$9,prompt_version=$10,error=$11,duration_ms=$12,
-		completed_at=now(),updated_at=now() WHERE tenant_id=$1 AND id=$2 AND ownership_version=$3
-		AND status NOT IN ('done','failed','needs_human')`, tenantID, id, ownershipVersion, status, []byte(output), outputText,
+		completed_at=now(),updated_at=now() WHERE org_id=$1 AND id=$2 AND ownership_version=$3
+		AND status NOT IN ('done','failed','needs_human')`, orgID, id, ownershipVersion, status, []byte(output), outputText,
 		answered, degraded, model, promptVersion, runErr, durationMS)
 	if err != nil {
 		return AssistRun{}, err
@@ -176,10 +176,10 @@ func (r *Repository) CompleteAssistRunForOwner(ctx context.Context, tenantID str
 	if tag.RowsAffected() != 1 {
 		return AssistRun{}, domainerr.Conflict("assist ownership changed while the answer was being produced")
 	}
-	return r.GetAssistRunByID(ctx, tenantID, id)
+	return r.GetAssistRunByID(ctx, orgID, id)
 }
 
-func (r *Repository) CompleteAssistRun(ctx context.Context, tenantID string, id uuid.UUID, status string, output json.RawMessage, outputText string, answered, degraded bool, model, promptVersion, runErr string, durationMS int64) (AssistRun, error) {
+func (r *Repository) CompleteAssistRun(ctx context.Context, orgID string, id uuid.UUID, status string, output json.RawMessage, outputText string, answered, degraded bool, model, promptVersion, runErr string, durationMS int64) (AssistRun, error) {
 	if len(output) == 0 {
 		output = json.RawMessage(`{}`)
 	}
@@ -187,15 +187,15 @@ func (r *Repository) CompleteAssistRun(ctx context.Context, tenantID string, id 
 		UPDATE companion_assist_runs
 		SET status = $3, output = $4::jsonb, output_text = $5, answered = $6, degraded = $7,
 		    model = $8, prompt_version = $9, error = $10, duration_ms = $11, completed_at = now(), updated_at = now()
-		WHERE tenant_id = $1 AND id = $2
-	`, tenantID, id, status, []byte(output), outputText, answered, degraded, model, promptVersion, runErr, durationMS)
+		WHERE org_id = $1 AND id = $2
+	`, orgID, id, status, []byte(output), outputText, answered, degraded, model, promptVersion, runErr, durationMS)
 	if err != nil {
 		return AssistRun{}, err
 	}
-	return r.GetAssistRunByID(ctx, tenantID, id)
+	return r.GetAssistRunByID(ctx, orgID, id)
 }
 
-func (r *Repository) SetAssistGrounding(ctx context.Context, tenantID string, id uuid.UUID, groundingMode, answerStatus, contextHash string, citations, sourceContext []knowledgebases.Citation, memoryContextHash string, memoryReferences []memories.Reference, jobRoleSnapshotHash, sourceAuthorizationHash string) (AssistRun, error) {
+func (r *Repository) SetAssistGrounding(ctx context.Context, orgID string, id uuid.UUID, groundingMode, answerStatus, contextHash string, citations, sourceContext []knowledgebases.Citation, memoryContextHash string, memoryReferences []memories.Reference, jobRoleSnapshotHash, sourceAuthorizationHash string) (AssistRun, error) {
 	if citations == nil {
 		citations = []knowledgebases.Citation{}
 	}
@@ -221,15 +221,15 @@ func (r *Repository) SetAssistGrounding(ctx context.Context, tenantID string, id
 		SET grounding_mode=$3,answer_status=$4,context_hash=$5,citations=$6::jsonb,
 		    source_context=$7::jsonb,memory_context_hash=$8,memory_references=$9::jsonb,
 		    job_role_snapshot_hash=$10,source_authorization_hash=$11,updated_at=now()
-		WHERE tenant_id=$1 AND id=$2`, tenantID, id, groundingMode, answerStatus, contextHash, raw,
+		WHERE org_id=$1 AND id=$2`, orgID, id, groundingMode, answerStatus, contextHash, raw,
 		rawSourceContext, memoryContextHash, rawMemoryReferences, jobRoleSnapshotHash, sourceAuthorizationHash)
 	if err != nil {
 		return AssistRun{}, err
 	}
-	return r.GetAssistRunByID(ctx, tenantID, id)
+	return r.GetAssistRunByID(ctx, orgID, id)
 }
 
-func (r *Repository) CompleteAssistRunWithGrounding(ctx context.Context, tenantID string, id uuid.UUID, completion AssistCompletion) (AssistRun, error) {
+func (r *Repository) CompleteAssistRunWithGrounding(ctx context.Context, orgID string, id uuid.UUID, completion AssistCompletion) (AssistRun, error) {
 	if len(completion.Output) == 0 {
 		completion.Output = json.RawMessage(`{}`)
 	}
@@ -261,8 +261,8 @@ func (r *Repository) CompleteAssistRunWithGrounding(ctx context.Context, tenantI
 		    source_context=$16::jsonb,memory_context_hash=$17,memory_references=$18::jsonb,
 		    job_role_snapshot_hash=$19,source_authorization_hash=$20,
 		    completed_at=now(),updated_at=now()
-		WHERE tenant_id=$1 AND id=$2 AND status NOT IN ('done','failed','needs_human')`,
-		tenantID, id, completion.Status, []byte(completion.Output), completion.OutputText,
+		WHERE org_id=$1 AND id=$2 AND status NOT IN ('done','failed','needs_human')`,
+		orgID, id, completion.Status, []byte(completion.Output), completion.OutputText,
 		completion.Answered, completion.Degraded, completion.Model, completion.PromptVersion,
 		completion.RunError, completion.DurationMS, completion.GroundingMode, completion.AnswerStatus,
 		completion.ContextHash, citations, sourceContext, completion.MemoryContextHash, memoryReferences,
@@ -273,19 +273,19 @@ func (r *Repository) CompleteAssistRunWithGrounding(ctx context.Context, tenantI
 	if tag.RowsAffected() != 1 {
 		return AssistRun{}, domainerr.Conflict("assist run is already terminal")
 	}
-	return r.GetAssistRunByID(ctx, tenantID, id)
+	return r.GetAssistRunByID(ctx, orgID, id)
 }
 
-func (r *Repository) GetAssistRunByKey(ctx context.Context, tenantID string, virployeeID uuid.UUID, idempotencyKey string) (AssistRun, error) {
+func (r *Repository) GetAssistRunByKey(ctx context.Context, orgID string, virployeeID uuid.UUID, idempotencyKey string) (AssistRun, error) {
 	return r.scanAssistRun(r.pool.QueryRow(ctx, assistRunSelect+`
-		WHERE tenant_id = $1 AND virployee_id = $2 AND idempotency_key = $3
-	`, tenantID, virployeeID, idempotencyKey))
+		WHERE org_id = $1 AND virployee_id = $2 AND idempotency_key = $3
+	`, orgID, virployeeID, idempotencyKey))
 }
 
-func (r *Repository) GetAssistRunByID(ctx context.Context, tenantID string, id uuid.UUID) (AssistRun, error) {
+func (r *Repository) GetAssistRunByID(ctx context.Context, orgID string, id uuid.UUID) (AssistRun, error) {
 	return r.scanAssistRun(r.pool.QueryRow(ctx, assistRunSelect+`
-		WHERE tenant_id = $1 AND id = $2
-	`, tenantID, id))
+		WHERE org_id = $1 AND id = $2
+	`, orgID, id))
 }
 
 func (r *Repository) ListReceivedAssistRuns(ctx context.Context, limit int) ([]AssistRun, error) {
@@ -313,7 +313,7 @@ func (r *Repository) ListReceivedAssistRuns(ctx context.Context, limit int) ([]A
 }
 
 const assistRunSelect = `
-	SELECT id, tenant_id, virployee_id,
+	SELECT id, org_id, virployee_id,
 	       COALESCE(case_id,'00000000-0000-0000-0000-000000000000'::uuid),
 	       COALESCE(responsible_virployee_id,virployee_id),
 	       COALESCE(orchestration_plan_id,'00000000-0000-0000-0000-000000000000'::uuid),
@@ -337,7 +337,7 @@ func (r *Repository) scanAssistRun(row rowScanner) (AssistRun, error) {
 	var out AssistRun
 	var input, output, citations, sourceContext, memoryReferences []byte
 	err := row.Scan(
-		&out.ID, &out.TenantID, &out.VirployeeID, &out.CaseID, &out.ResponsibleVirployeeID,
+		&out.ID, &out.OrgID, &out.VirployeeID, &out.CaseID, &out.ResponsibleVirployeeID,
 		&out.OrchestrationPlanID, &out.OrchestrationDeadlineAt, &out.OwnershipVersion,
 		&out.AssistType, &out.ProductSurface, &out.SubjectID, &out.AssignmentID, &out.AssignmentVersion,
 		&out.RepositoryGeneration, &out.CapabilityKey, &out.CapabilityManifestHash,

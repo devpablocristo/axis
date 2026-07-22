@@ -25,7 +25,7 @@ const (
 
 type Artifact struct {
 	ID          uuid.UUID `json:"id"`
-	TenantID    string    `json:"tenant_id"`
+	OrgID       string    `json:"org_id"`
 	PolicyKey   string    `json:"policy_key"`
 	Name        string    `json:"name"`
 	Description string    `json:"description"`
@@ -37,7 +37,7 @@ type Artifact struct {
 
 type Version struct {
 	ID                uuid.UUID  `json:"id"`
-	TenantID          string     `json:"tenant_id"`
+	OrgID             string     `json:"org_id"`
 	PolicyID          uuid.UUID  `json:"policy_id"`
 	Version           int        `json:"version"`
 	State             string     `json:"state"`
@@ -74,7 +74,7 @@ type CreateVersionInput struct {
 
 type Simulation struct {
 	ID                   uuid.UUID `json:"id"`
-	TenantID             string    `json:"tenant_id"`
+	OrgID                string    `json:"org_id"`
 	PolicyVersionID      uuid.UUID `json:"policy_version_id"`
 	RequestedBy          string    `json:"requested_by"`
 	TotalEvaluated       int       `json:"total_evaluated"`
@@ -88,7 +88,7 @@ type Simulation struct {
 
 type Promotion struct {
 	ID              uuid.UUID  `json:"id"`
-	TenantID        string     `json:"tenant_id"`
+	OrgID           string     `json:"org_id"`
 	PolicyVersionID uuid.UUID  `json:"policy_version_id"`
 	SimulationID    uuid.UUID  `json:"simulation_id"`
 	TargetState     string     `json:"target_state"`
@@ -149,7 +149,7 @@ type EvaluationResult struct {
 
 type Evaluation struct {
 	ID              uuid.UUID `json:"id"`
-	TenantID        string    `json:"tenant_id"`
+	OrgID           string    `json:"org_id"`
 	PolicyVersionID uuid.UUID `json:"policy_version_id"`
 	Mode            string    `json:"mode"`
 	Matched         bool      `json:"matched"`
@@ -162,7 +162,7 @@ type Evaluation struct {
 
 type Change struct {
 	ID              uuid.UUID      `json:"id"`
-	TenantID        string         `json:"tenant_id"`
+	OrgID           string         `json:"org_id"`
 	PolicyID        uuid.UUID      `json:"policy_id"`
 	PolicyVersionID *uuid.UUID     `json:"policy_version_id,omitempty"`
 	ActorID         string         `json:"actor_id"`

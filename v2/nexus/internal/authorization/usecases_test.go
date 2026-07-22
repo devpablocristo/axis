@@ -27,18 +27,18 @@ func (f *fakeRepo) Revoke(_ context.Context, _ string, id uuid.UUID, _ string, _
 }
 func TestFunctionalGrantScopeAndExpiry(t *testing.T) {
 	now := time.Unix(1700000000, 0).UTC()
-	repo := &fakeRepo{grants: []Grant{{ID: uuid.New(), TenantID: "t", UserID: "u", RoleKey: RoleApprover, ActionTypePattern: "calendar.*", MaxRiskClass: "medium", ValidFrom: now.Add(-time.Hour), ValidUntil: now.Add(time.Hour), Revision: 1}}}
+	repo := &fakeRepo{grants: []Grant{{ID: uuid.New(), OrgID: "t", UserID: "u", RoleKey: RoleApprover, ActionTypePattern: "calendar.*", MaxRiskClass: "medium", ValidFrom: now.Add(-time.Hour), ValidUntil: now.Add(time.Hour), Revision: 1}}}
 	uc := NewUseCases(repo)
 	uc.now = func() time.Time { return now }
-	allowed, err := uc.Check(context.Background(), CheckInput{TenantID: "t", ActorID: "u", ActorRole: "member", Permission: "approvals.decide", ActionType: "calendar.events.create", RiskClass: "medium"})
+	allowed, err := uc.Check(context.Background(), CheckInput{OrgID: "t", ActorID: "u", ActorRole: "member", Permission: "approvals.decide", ActionType: "calendar.events.create", RiskClass: "medium"})
 	if err != nil || !allowed.Allowed {
 		t.Fatalf("expected scoped grant: %+v %v", allowed, err)
 	}
-	denied, _ := uc.Check(context.Background(), CheckInput{TenantID: "t", ActorID: "u", ActorRole: "member", Permission: "approvals.decide", ActionType: "payments.send", RiskClass: "medium"})
+	denied, _ := uc.Check(context.Background(), CheckInput{OrgID: "t", ActorID: "u", ActorRole: "member", Permission: "approvals.decide", ActionType: "payments.send", RiskClass: "medium"})
 	if denied.Allowed {
 		t.Fatal("grant must not escape action scope")
 	}
-	high, _ := uc.Check(context.Background(), CheckInput{TenantID: "t", ActorID: "u", ActorRole: "member", Permission: "approvals.decide", ActionType: "calendar.events.create", RiskClass: "high"})
+	high, _ := uc.Check(context.Background(), CheckInput{OrgID: "t", ActorID: "u", ActorRole: "member", Permission: "approvals.decide", ActionType: "calendar.events.create", RiskClass: "high"})
 	if high.Allowed {
 		t.Fatal("grant must enforce max risk")
 	}
@@ -47,21 +47,21 @@ func TestFunctionalGrantScopeAndExpiry(t *testing.T) {
 func TestOperatorGrantIsExplicitlyScoped(t *testing.T) {
 	now := time.Unix(1700000000, 0).UTC()
 	repo := &fakeRepo{grants: []Grant{{
-		ID: uuid.New(), TenantID: "t", UserID: "operator", RoleKey: RoleOperator,
+		ID: uuid.New(), OrgID: "t", UserID: "operator", RoleKey: RoleOperator,
 		ProductSurface: "axis", ActionTypePattern: "ops.job.*", ResourceType: "job", ResourceID: "job-1",
 		MaxRiskClass: "low", ValidFrom: now.Add(-time.Hour), ValidUntil: now.Add(time.Hour), Revision: 1,
 	}}}
 	uc := NewUseCases(repo)
 	uc.now = func() time.Time { return now }
 	allowed, err := uc.Check(context.Background(), CheckInput{
-		TenantID: "t", ActorID: "operator", ActorRole: "member", Permission: "job.replay",
+		OrgID: "t", ActorID: "operator", ActorRole: "member", Permission: "job.replay",
 		ProductSurface: "axis", ActionType: "ops.job.replay", ResourceType: "job", ResourceID: "job-1", RiskClass: "low",
 	})
 	if err != nil || !allowed.Allowed {
 		t.Fatalf("expected scoped operator grant: %+v %v", allowed, err)
 	}
 	denied, _ := uc.Check(context.Background(), CheckInput{
-		TenantID: "t", ActorID: "operator", ActorRole: "member", Permission: "job.replay",
+		OrgID: "t", ActorID: "operator", ActorRole: "member", Permission: "job.replay",
 		ProductSurface: "axis", ActionType: "ops.job.replay", ResourceType: "job", ResourceID: "job-2", RiskClass: "low",
 	})
 	if denied.Allowed {

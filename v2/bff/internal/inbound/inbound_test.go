@@ -12,13 +12,13 @@ import (
 )
 
 func TestParseBindings(t *testing.T) {
-	raw := "medkey=8c3a623a|3e5a24e1|service:medmory|medmory|clinical-pool\n other=t2|v2|a2|ponti"
+	raw := "medkey=8c3a623a|3e5a24e1|service:producta|producta|clinical-pool\n other=t2|v2|a2|productb"
 	b := ParseBindings(raw)
 	if len(b) != 2 {
 		t.Fatalf("expected 2 bindings, got %d", len(b))
 	}
 	m := b["medkey"]
-	if m.TenantID != "8c3a623a" || m.VirployeeID != "3e5a24e1" || m.ActorID != "service:medmory" || m.ProductSurface != "medmory" {
+	if m.ProductID != "8c3a623a" || m.VirployeeID != "3e5a24e1" || m.ActorID != "service:producta" || m.ProductSurface != "producta" {
 		t.Fatalf("unexpected binding: %+v", m)
 	}
 	if m.RoutingPoolID != "clinical-pool" {
@@ -55,13 +55,13 @@ func TestAssistRunResolvesStableAssignmentAndPreservesRouteForPolling(t *testing
 	defer companion.Close()
 
 	bindings := map[string]Binding{"routed-key": {
-		TenantID: "tenant-1", VirployeeID: "vp-legacy", ActorID: "service:medmory",
-		ProductSurface: "medmory", RoutingPoolID: "pool-clinical",
+		ProductID: "product-1", VirployeeID: "vp-legacy", ActorID: "service:producta",
+		ProductSurface: "producta", RoutingPoolID: "pool-clinical",
 	}}
 	handler := NewHandler(bindings, companion.URL, "internal-token", nil)
 	router := gin.New()
 	handler.Routes(router)
-	body := `{"product_surface":"medmory","assist_type":"clinical","subject_id":"patient-a","case_id":"case-1","input":{"question":"status"}}`
+	body := `{"product_surface":"producta","assist_type":"clinical","subject_id":"patient-a","case_id":"case-1","input":{"question":"status"}}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/assist-runs", strings.NewReader(body))
 	req.Header.Set("X-API-Key", "routed-key")
 	req.Header.Set("Idempotency-Key", "patient-a-status")
@@ -99,7 +99,7 @@ func TestAssistRunResolvesStableAssignmentAndPreservesRouteForPolling(t *testing
 func newTestEngine(companionURL string) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	bindings := map[string]Binding{
-		"secret-key": {TenantID: "tenant-1", VirployeeID: "vp-1", ActorID: "service:medmory", ProductSurface: "medmory"},
+		"secret-key": {ProductID: "product-1", VirployeeID: "vp-1", ActorID: "service:producta", ProductSurface: "producta"},
 	}
 	h := NewHandler(bindings, companionURL, "internal-token", nil)
 	r := gin.New()
@@ -108,12 +108,12 @@ func newTestEngine(companionURL string) *gin.Engine {
 }
 
 func TestAssistRunProxiesAndMapsResponse(t *testing.T) {
-	var gotPath, gotToken, gotTenant, gotActor string
+	var gotPath, gotToken, gotProduct, gotActor string
 	var gotBody map[string]json.RawMessage
 	companion := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		gotToken = r.Header.Get("X-Axis-Internal-Token")
-		gotTenant = r.Header.Get("X-Tenant-ID")
+		gotProduct = r.Header.Get("X-Product-ID")
 		gotActor = r.Header.Get("X-Actor-ID")
 		raw, _ := io.ReadAll(r.Body)
 		_ = json.Unmarshal(raw, &gotBody)
@@ -121,7 +121,7 @@ func TestAssistRunProxiesAndMapsResponse(t *testing.T) {
 	}))
 	defer companion.Close()
 
-	body := `{"owner_system":"medmory","product_surface":"medmory","assist_type":"clinical_diagnosis","subject_type":"repository","subject_id":"patient-a","repository_generation":"generation-a","input":{"schema_version":"medmory.diagnosis_input.v1","documents":[{"key":"labs.txt","read_url":"https://x/labs","content_type":"text/plain"}]}}`
+	body := `{"owner_system":"producta","product_surface":"producta","assist_type":"clinical_diagnosis","subject_type":"repository","subject_id":"patient-a","repository_generation":"generation-a","input":{"schema_version":"producta.diagnosis_input.v1","documents":[{"key":"labs.txt","read_url":"https://x/labs","content_type":"text/plain"}]}}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/assist-runs", strings.NewReader(body))
 	req.Header.Set("X-API-Key", "secret-key")
 	req.Header.Set("Idempotency-Key", "doc-123")
@@ -132,8 +132,8 @@ func TestAssistRunProxiesAndMapsResponse(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 	// Forwarded to the bound virployee's assist endpoint with internal auth + context.
-	if gotPath != "/v1/virployees/vp-1/assist-runs" || gotToken != "internal-token" || gotTenant != "tenant-1" || gotActor != "service:medmory" {
-		t.Fatalf("bad forward: path=%s token=%s tenant=%s actor=%s", gotPath, gotToken, gotTenant, gotActor)
+	if gotPath != "/v1/virployees/vp-1/assist-runs" || gotToken != "internal-token" || gotProduct != "product-1" || gotActor != "service:producta" {
+		t.Fatalf("bad forward: path=%s token=%s product=%s actor=%s", gotPath, gotToken, gotProduct, gotActor)
 	}
 	// Only the product's `input` object is forwarded as input_json.
 	if in := string(gotBody["input_json"]); !strings.Contains(in, "documents") || !strings.Contains(in, "labs.txt") {
@@ -153,16 +153,16 @@ func TestAssistRunProxiesAndMapsResponse(t *testing.T) {
 	}
 }
 
-func TestAssistRunCanonicalizesLegacyClinicalAlias(t *testing.T) {
+func TestAssistRunForwardsCanonicalCapabilityWithoutProductTranslation(t *testing.T) {
 	var gotBody map[string]json.RawMessage
 	companion := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
 		_ = json.Unmarshal(raw, &gotBody)
-		_, _ = w.Write([]byte(`{"id":"run-alias","status":"done","capability_key":"clinical.timeline.build","capability_manifest_hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","answer_status":"completed","citations":[],"output":{"status":"completed"}}`))
+		_, _ = w.Write([]byte(`{"id":"run-canonical","status":"done","capability_key":"clinical.timeline.build","capability_manifest_hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","answer_status":"completed","citations":[],"output":{"status":"completed"}}`))
 	}))
 	defer companion.Close()
 
-	body := `{"product_surface":"medmory","capability_key":"medmory.timeline.read","subject_id":"11111111-1111-4111-8111-111111111111","repository_generation":"g1","input":{"order":"desc"}}`
+	body := `{"product_surface":"producta","capability_key":"clinical.timeline.build","subject_id":"11111111-1111-4111-8111-111111111111","repository_generation":"g1","input":{"order":"desc"}}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/assist-runs", strings.NewReader(body))
 	req.Header.Set("X-API-Key", "secret-key")
 	req.Header.Set("Idempotency-Key", "timeline-g1")
@@ -171,8 +171,8 @@ func TestAssistRunCanonicalizesLegacyClinicalAlias(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
-	if rec.Header().Get("Deprecation") != "true" || string(gotBody["capability_key"]) != `"clinical.timeline.build"` {
-		t.Fatalf("alias was not deprecated and canonicalized: header=%q body=%+v", rec.Header().Get("Deprecation"), gotBody)
+	if rec.Header().Get("Deprecation") != "" || string(gotBody["capability_key"]) != `"clinical.timeline.build"` {
+		t.Fatalf("canonical capability was translated: header=%q body=%+v", rec.Header().Get("Deprecation"), gotBody)
 	}
 	if !strings.Contains(rec.Body.String(), `"capability_manifest_hash"`) || !strings.Contains(rec.Body.String(), `"answer_status":"completed"`) {
 		t.Fatalf("clinical response fields were not propagated: %s", rec.Body.String())
@@ -185,7 +185,7 @@ func TestAssistRunMapsNeedsHumanAsATraceableTerminalResult(t *testing.T) {
 	}))
 	defer companion.Close()
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/assist-runs", strings.NewReader(`{"product_surface":"medmory","input":{"documents":[]}}`))
+	req := httptest.NewRequest(http.MethodPost, "/v1/assist-runs", strings.NewReader(`{"product_surface":"producta","input":{"documents":[]}}`))
 	req.Header.Set("X-API-Key", "secret-key")
 	req.Header.Set("Idempotency-Key", "manifest-needs-human")
 	rec := httptest.NewRecorder()
@@ -213,7 +213,7 @@ func TestAssistRunReturns202AndStatusURLWhileDurableWorkContinues(t *testing.T) 
 	}))
 	defer companion.Close()
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/assist-runs", strings.NewReader(`{"product_surface":"medmory","input":{"documents":[]}}`))
+	req := httptest.NewRequest(http.MethodPost, "/v1/assist-runs", strings.NewReader(`{"product_surface":"producta","input":{"documents":[]}}`))
 	req.Header.Set("X-API-Key", "secret-key")
 	req.Header.Set("Idempotency-Key", "manifest-generation-2")
 	rec := httptest.NewRecorder()
@@ -235,7 +235,7 @@ func TestAssistRunPreservesQuotaResponseAndRetryAfter(t *testing.T) {
 		_, _ = w.Write([]byte(`{"error":{"code":"quota_exceeded"}}`))
 	}))
 	defer companion.Close()
-	req := httptest.NewRequest(http.MethodPost, "/v1/assist-runs", strings.NewReader(`{"product_surface":"medmory","input":{"documents":[]}}`))
+	req := httptest.NewRequest(http.MethodPost, "/v1/assist-runs", strings.NewReader(`{"product_surface":"producta","input":{"documents":[]}}`))
 	req.Header.Set("X-API-Key", "secret-key")
 	req.Header.Set("Idempotency-Key", "quota-test")
 	rec := httptest.NewRecorder()
@@ -258,7 +258,7 @@ func TestAssistRunPreferWaitObservesCompletion(t *testing.T) {
 	}))
 	defer companion.Close()
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/assist-runs", strings.NewReader(`{"product_surface":"medmory","input":{"documents":[]}}`))
+	req := httptest.NewRequest(http.MethodPost, "/v1/assist-runs", strings.NewReader(`{"product_surface":"producta","input":{"documents":[]}}`))
 	req.Header.Set("X-API-Key", "secret-key")
 	req.Header.Set("Idempotency-Key", "manifest-generation-3")
 	req.Header.Set("Prefer", "wait=1")
@@ -270,7 +270,7 @@ func TestAssistRunPreferWaitObservesCompletion(t *testing.T) {
 }
 
 func TestAssistRunRequiresStableIdempotencyKey(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPost, "/v1/assist-runs", strings.NewReader(`{"product_surface":"medmory","input":{}}`))
+	req := httptest.NewRequest(http.MethodPost, "/v1/assist-runs", strings.NewReader(`{"product_surface":"producta","input":{}}`))
 	req.Header.Set("X-API-Key", "secret-key")
 	rec := httptest.NewRecorder()
 	newTestEngine("http://unused").ServeHTTP(rec, req)
@@ -301,7 +301,7 @@ func TestAssistRunRejectsUnknownKey(t *testing.T) {
 
 func TestAssistRunRejectsProductMismatch(t *testing.T) {
 	rec := httptest.NewRecorder()
-	body := `{"product_surface":"ponti","input":{}}`
+	body := `{"product_surface":"productb","input":{}}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/assist-runs", strings.NewReader(body))
 	req.Header.Set("X-API-Key", "secret-key")
 	newTestEngine("http://unused").ServeHTTP(rec, req)

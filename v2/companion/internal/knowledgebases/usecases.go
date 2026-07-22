@@ -25,21 +25,21 @@ func NewUseCases(repo *Repository) *UseCases { return &UseCases{repo: repo} }
 
 func (u *UseCases) SetArtifactIngestor(ingestor ArtifactIngestorPort) { u.ingestor = ingestor }
 
-func authorize(tenant, role string) (string, error) {
-	tenant = strings.TrimSpace(tenant)
-	if tenant == "" {
-		return "", domainerr.Validation("tenant context is required")
+func authorize(organization, role string) (string, error) {
+	organization = strings.TrimSpace(organization)
+	if organization == "" {
+		return "", domainerr.Validation("organization context is required")
 	}
 	switch strings.ToLower(strings.TrimSpace(role)) {
 	case "owner", "admin":
-		return tenant, nil
+		return organization, nil
 	default:
 		return "", domainerr.Forbidden("knowledge base management requires an owner or admin")
 	}
 }
 
-func (u *UseCases) Create(ctx context.Context, tenant, role string, in CreateInput) (KnowledgeBase, error) {
-	tenant, err := authorize(tenant, role)
+func (u *UseCases) Create(ctx context.Context, organization, role string, in CreateInput) (KnowledgeBase, error) {
+	organization, err := authorize(organization, role)
 	if err != nil {
 		return KnowledgeBase{}, err
 	}
@@ -47,27 +47,27 @@ func (u *UseCases) Create(ctx context.Context, tenant, role string, in CreateInp
 	if err != nil {
 		return KnowledgeBase{}, err
 	}
-	return u.repo.Create(ctx, tenant, in)
+	return u.repo.Create(ctx, organization, in)
 }
 
-func (u *UseCases) Get(ctx context.Context, tenant, role string, id uuid.UUID) (KnowledgeBase, error) {
-	tenant, err := authorize(tenant, role)
+func (u *UseCases) Get(ctx context.Context, organization, role string, id uuid.UUID) (KnowledgeBase, error) {
+	organization, err := authorize(organization, role)
 	if err != nil {
 		return KnowledgeBase{}, err
 	}
-	return u.repo.Get(ctx, tenant, id)
+	return u.repo.Get(ctx, organization, id)
 }
 
-func (u *UseCases) List(ctx context.Context, tenant, role, state string) ([]KnowledgeBase, error) {
-	tenant, err := authorize(tenant, role)
+func (u *UseCases) List(ctx context.Context, organization, role, state string) ([]KnowledgeBase, error) {
+	organization, err := authorize(organization, role)
 	if err != nil {
 		return nil, err
 	}
-	return u.repo.List(ctx, tenant, state)
+	return u.repo.List(ctx, organization, state)
 }
 
-func (u *UseCases) Update(ctx context.Context, tenant, role string, id uuid.UUID, in UpdateInput) (KnowledgeBase, error) {
-	tenant, err := authorize(tenant, role)
+func (u *UseCases) Update(ctx context.Context, organization, role string, id uuid.UUID, in UpdateInput) (KnowledgeBase, error) {
+	organization, err := authorize(organization, role)
 	if err != nil {
 		return KnowledgeBase{}, err
 	}
@@ -79,22 +79,22 @@ func (u *UseCases) Update(ctx context.Context, tenant, role string, id uuid.UUID
 		return KnowledgeBase{}, domainerr.Validation("expected_version is required")
 	}
 	in.Name, in.Description = normalized.Name, normalized.Description
-	return u.repo.Update(ctx, tenant, id, in)
+	return u.repo.Update(ctx, organization, id, in)
 }
 
-func (u *UseCases) Lifecycle(ctx context.Context, tenant, role string, id uuid.UUID, action string, expectedVersion int64) (KnowledgeBase, error) {
-	tenant, err := authorize(tenant, role)
+func (u *UseCases) Lifecycle(ctx context.Context, organization, role string, id uuid.UUID, action string, expectedVersion int64) (KnowledgeBase, error) {
+	organization, err := authorize(organization, role)
 	if err != nil {
 		return KnowledgeBase{}, err
 	}
 	if expectedVersion <= 0 {
 		return KnowledgeBase{}, domainerr.Validation("expected_version is required")
 	}
-	return u.repo.Lifecycle(ctx, tenant, id, action, expectedVersion)
+	return u.repo.Lifecycle(ctx, organization, id, action, expectedVersion)
 }
 
-func (u *UseCases) RegisterDocument(ctx context.Context, tenant, role string, baseID uuid.UUID, in RegisterDocumentInput) (Document, error) {
-	tenant, err := authorize(tenant, role)
+func (u *UseCases) RegisterDocument(ctx context.Context, organization, role string, baseID uuid.UUID, in RegisterDocumentInput) (Document, error) {
+	organization, err := authorize(organization, role)
 	if err != nil {
 		return Document{}, err
 	}
@@ -106,11 +106,11 @@ func (u *UseCases) RegisterDocument(ctx context.Context, tenant, role string, ba
 	if len([]rune(in.Title)) > 300 {
 		return Document{}, domainerr.Validation("title must not exceed 300 characters")
 	}
-	return u.repo.RegisterDocument(ctx, tenant, baseID, in)
+	return u.repo.RegisterDocument(ctx, organization, baseID, in)
 }
 
-func (u *UseCases) IngestConnector(ctx context.Context, tenant, role string, baseID uuid.UUID, in ConnectorIngestionInput) (Document, error) {
-	tenant, err := authorize(tenant, role)
+func (u *UseCases) IngestConnector(ctx context.Context, organization, role string, baseID uuid.UUID, in ConnectorIngestionInput) (Document, error) {
+	organization, err := authorize(organization, role)
 	if err != nil {
 		return Document{}, err
 	}
@@ -121,9 +121,9 @@ func (u *UseCases) IngestConnector(ctx context.Context, tenant, role string, bas
 	if u.ingestor == nil || u.repo == nil {
 		return Document{}, domainerr.Unavailable("knowledge ingestion pipeline is unavailable")
 	}
-	scope := newIngestionScope(tenant, baseID, target)
+	scope := newIngestionScope(organization, baseID, target)
 	artifactScope := artifactScopeFrom(scope, target.DocumentID)
-	if err := u.repo.ValidateIngestionScope(ctx, tenant, baseID, artifactScope); err != nil {
+	if err := u.repo.ValidateIngestionScope(ctx, organization, baseID, artifactScope); err != nil {
 		return Document{}, err
 	}
 	result, err := u.ingestor.Ingest(ctx, artifacts.IngestRequest{
@@ -143,11 +143,11 @@ func (u *UseCases) IngestConnector(ctx context.Context, tenant, role string, bas
 	if err != nil {
 		return Document{}, domainerr.Unavailable("knowledge connector ingestion failed")
 	}
-	return u.registerIngestedDocument(ctx, tenant, baseID, in.Title, scope, target.DocumentID, result)
+	return u.registerIngestedDocument(ctx, organization, baseID, in.Title, scope, target.DocumentID, result)
 }
 
-func (u *UseCases) IngestUpload(ctx context.Context, tenant, role string, baseID uuid.UUID, in UploadIngestionInput) (Document, error) {
-	tenant, err := authorize(tenant, role)
+func (u *UseCases) IngestUpload(ctx context.Context, organization, role string, baseID uuid.UUID, in UploadIngestionInput) (Document, error) {
+	organization, err := authorize(organization, role)
 	if err != nil {
 		return Document{}, err
 	}
@@ -165,9 +165,9 @@ func (u *UseCases) IngestUpload(ctx context.Context, tenant, role string, baseID
 	if u.ingestor == nil || u.repo == nil {
 		return Document{}, domainerr.Unavailable("knowledge ingestion pipeline is unavailable")
 	}
-	scope := newIngestionScope(tenant, baseID, target)
+	scope := newIngestionScope(organization, baseID, target)
 	artifactScope := artifactScopeFrom(scope, target.DocumentID)
-	if err := u.repo.ValidateIngestionScope(ctx, tenant, baseID, artifactScope); err != nil {
+	if err := u.repo.ValidateIngestionScope(ctx, organization, baseID, artifactScope); err != nil {
 		return Document{}, err
 	}
 	result, err := u.ingestor.IngestUpload(ctx, artifacts.UploadRequest{
@@ -188,12 +188,12 @@ func (u *UseCases) IngestUpload(ctx context.Context, tenant, role string, baseID
 		}
 		return Document{}, domainerr.Unavailable("knowledge upload ingestion failed")
 	}
-	return u.registerIngestedDocument(ctx, tenant, baseID, in.Title, scope, target.DocumentID, result)
+	return u.registerIngestedDocument(ctx, organization, baseID, in.Title, scope, target.DocumentID, result)
 }
 
-func newIngestionScope(tenant string, baseID uuid.UUID, target ingestionTarget) artifacts.Scope {
+func newIngestionScope(organization string, baseID uuid.UUID, target ingestionTarget) artifacts.Scope {
 	return artifacts.Scope{
-		TenantID: tenant, VirployeeID: target.VirployeeID, ProductSurface: KnowledgeProductSurface,
+		OrgID: organization, VirployeeID: target.VirployeeID, ProductSurface: KnowledgeProductSurface,
 		SubjectID: target.SubjectID, RepositoryGeneration: "kb-" + baseID.String() + "-" + uuid.NewString(),
 	}
 }
@@ -205,7 +205,7 @@ func artifactScopeFrom(scope artifacts.Scope, documentID string) ArtifactScope {
 	}
 }
 
-func (u *UseCases) registerIngestedDocument(ctx context.Context, tenant string, baseID uuid.UUID, title string, scope artifacts.Scope, documentID string, result artifacts.IngestResult) (Document, error) {
+func (u *UseCases) registerIngestedDocument(ctx context.Context, organization string, baseID uuid.UUID, title string, scope artifacts.Scope, documentID string, result artifacts.IngestResult) (Document, error) {
 	if len(result.Records) != 1 {
 		return Document{}, domainerr.Unavailable("knowledge ingestion did not produce one verified artifact")
 	}
@@ -213,40 +213,40 @@ func (u *UseCases) registerIngestedDocument(ctx context.Context, tenant string, 
 	if record.Status != artifacts.StatusIndexed || record.Scope != scope || record.Manifest.DocumentID != documentID || !sha256Pattern.MatchString(record.Manifest.SHA256) || record.Manifest.SizeBytes <= 0 {
 		return Document{}, domainerr.Unavailable("knowledge ingestion did not complete verified indexing")
 	}
-	return u.repo.RegisterDocument(ctx, tenant, baseID, RegisterDocumentInput{
+	return u.repo.RegisterDocument(ctx, organization, baseID, RegisterDocumentInput{
 		Title: title, ArtifactScope: artifactScopeFrom(scope, documentID),
 	})
 }
 
-func (u *UseCases) ListDocuments(ctx context.Context, tenant, role string, baseID uuid.UUID, state string) ([]Document, error) {
-	tenant, err := authorize(tenant, role)
+func (u *UseCases) ListDocuments(ctx context.Context, organization, role string, baseID uuid.UUID, state string) ([]Document, error) {
+	organization, err := authorize(organization, role)
 	if err != nil {
 		return nil, err
 	}
-	return u.repo.ListDocuments(ctx, tenant, baseID, state)
+	return u.repo.ListDocuments(ctx, organization, baseID, state)
 }
 
-func (u *UseCases) ArchiveDocument(ctx context.Context, tenant, role string, baseID, documentID uuid.UUID, expectedVersion int64) (Document, error) {
-	tenant, err := authorize(tenant, role)
+func (u *UseCases) ArchiveDocument(ctx context.Context, organization, role string, baseID, documentID uuid.UUID, expectedVersion int64) (Document, error) {
+	organization, err := authorize(organization, role)
 	if err != nil {
 		return Document{}, err
 	}
 	if expectedVersion <= 0 {
 		return Document{}, domainerr.Validation("expected_version is required")
 	}
-	return u.repo.ArchiveDocument(ctx, tenant, baseID, documentID, expectedVersion)
+	return u.repo.ArchiveDocument(ctx, organization, baseID, documentID, expectedVersion)
 }
 
-func (u *UseCases) ListBindings(ctx context.Context, tenant, role string, baseID uuid.UUID) ([]Binding, error) {
-	tenant, err := authorize(tenant, role)
+func (u *UseCases) ListBindings(ctx context.Context, organization, role string, baseID uuid.UUID) ([]Binding, error) {
+	organization, err := authorize(organization, role)
 	if err != nil {
 		return nil, err
 	}
-	return u.repo.ListBindings(ctx, tenant, baseID)
+	return u.repo.ListBindings(ctx, organization, baseID)
 }
 
-func (u *UseCases) ReplaceBindings(ctx context.Context, tenant, role string, baseID uuid.UUID, in ReplaceBindingsInput) ([]Binding, error) {
-	tenant, err := authorize(tenant, role)
+func (u *UseCases) ReplaceBindings(ctx context.Context, organization, role string, baseID uuid.UUID, in ReplaceBindingsInput) ([]Binding, error) {
+	organization, err := authorize(organization, role)
 	if err != nil {
 		return nil, err
 	}
@@ -264,22 +264,22 @@ func (u *UseCases) ReplaceBindings(ctx context.Context, tenant, role string, bas
 		}
 		bindings = append(bindings, binding)
 	}
-	return u.repo.ReplaceBindings(ctx, tenant, baseID, in.ExpectedVersion, bindings)
+	return u.repo.ReplaceBindings(ctx, organization, baseID, in.ExpectedVersion, bindings)
 }
 
-func (u *UseCases) ListForVirployee(ctx context.Context, tenant, role string, virployeeID uuid.UUID) ([]VirployeeKnowledgeBase, error) {
-	tenant, err := authorize(tenant, role)
+func (u *UseCases) ListForVirployee(ctx context.Context, organization, role string, virployeeID uuid.UUID) ([]VirployeeKnowledgeBase, error) {
+	organization, err := authorize(organization, role)
 	if err != nil {
 		return nil, err
 	}
 	if virployeeID == uuid.Nil {
 		return nil, domainerr.Validation("virployee_id is required")
 	}
-	return u.repo.ListForVirployee(ctx, tenant, virployeeID)
+	return u.repo.ListForVirployee(ctx, organization, virployeeID)
 }
 
-func (u *UseCases) SetForVirployee(ctx context.Context, tenant, role string, virployeeID uuid.UUID, in SetVirployeeKnowledgeBaseInput) ([]VirployeeKnowledgeBase, error) {
-	tenant, err := authorize(tenant, role)
+func (u *UseCases) SetForVirployee(ctx context.Context, organization, role string, virployeeID uuid.UUID, in SetVirployeeKnowledgeBaseInput) ([]VirployeeKnowledgeBase, error) {
+	organization, err := authorize(organization, role)
 	if err != nil {
 		return nil, err
 	}
@@ -290,8 +290,8 @@ func (u *UseCases) SetForVirployee(ctx context.Context, tenant, role string, vir
 	if virployeeID == uuid.Nil || in.ExpectedVersion <= 0 {
 		return nil, domainerr.Validation("virployee_id and expected_version are required")
 	}
-	if err := u.repo.SetForVirployee(ctx, tenant, virployeeID, baseID, in.ExpectedVersion, in.Enabled); err != nil {
+	if err := u.repo.SetForVirployee(ctx, organization, virployeeID, baseID, in.ExpectedVersion, in.Enabled); err != nil {
 		return nil, err
 	}
-	return u.repo.ListForVirployee(ctx, tenant, virployeeID)
+	return u.repo.ListForVirployee(ctx, organization, virployeeID)
 }

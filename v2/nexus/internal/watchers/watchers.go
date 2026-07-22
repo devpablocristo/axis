@@ -13,7 +13,7 @@ import (
 
 type ExpiredApproval struct {
 	ID                uuid.UUID
-	TenantID          string
+	OrgID             string
 	GovernanceCheckID uuid.UUID
 	VirployeeID       string
 	BindingHash       string
@@ -53,7 +53,7 @@ func (r *Repository) ExpireApprovals(ctx context.Context, now time.Time, limit i
 			decision_note = 'approval TTL elapsed', decided_at = $1, updated_at = $1
 		FROM due
 		WHERE a.id = due.id
-		RETURNING a.id, a.tenant_id, a.governance_check_id, a.requester_id,
+		RETURNING a.id, a.org_id, a.governance_check_id, a.requester_id,
 			a.binding_hash, a.expires_at
 	`, now.UTC(), limit)
 	if err != nil {
@@ -64,7 +64,7 @@ func (r *Repository) ExpireApprovals(ctx context.Context, now time.Time, limit i
 	var checkIDs []uuid.UUID
 	for rows.Next() {
 		var item ExpiredApproval
-		if err := rows.Scan(&item.ID, &item.TenantID, &item.GovernanceCheckID, &item.VirployeeID, &item.BindingHash, &item.ExpiresAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.OrgID, &item.GovernanceCheckID, &item.VirployeeID, &item.BindingHash, &item.ExpiresAt); err != nil {
 			return nil, err
 		}
 		out = append(out, item)
@@ -103,7 +103,7 @@ func (w *Watcher) RunOnce(ctx context.Context, batch int) (int, error) {
 		return 0, err
 	}
 	for _, item := range items {
-		_, err := w.audit.Append(ctx, item.TenantID, auditdomain.AppendInput{
+		_, err := w.audit.Append(ctx, item.OrgID, auditdomain.AppendInput{
 			VirployeeID: item.VirployeeID,
 			SubjectType: "approval",
 			SubjectID:   item.ID.String(),

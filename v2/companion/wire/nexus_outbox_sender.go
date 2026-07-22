@@ -25,7 +25,7 @@ func newNexusOutboxSender(client nexusOutboxClient) outbox.Sender {
 		case message.AggregateType == outbox.AggregateTypeProfessionalAuthority && message.Kind == outbox.KindAuditEvent:
 			return sendNexusAuthorityAudit(ctx, client, message)
 		case message.AggregateType == outbox.AggregateTypeOperationalFinding && message.Kind == outbox.KindOperationalFinding:
-			if err := client.ReportOperationalFinding(ctx, message.TenantID, message.ID.String(), message.Payload); err != nil {
+			if err := client.ReportOperationalFinding(ctx, message.OrgID, message.ID.String(), message.Payload); err != nil {
 				if nexusclient.IsPermanentHTTPError(err) {
 					return outbox.Permanent("nexus_rejected", err)
 				}
@@ -46,7 +46,7 @@ func sendNexusExecutionResult(ctx context.Context, client nexusOutboxClient, mes
 	if payload.GovernanceCheckID == "" || payload.IdempotencyKey == "" || payload.BindingHash == "" || payload.Status == "" {
 		return outbox.Permanent("invalid_outbox_payload", fmt.Errorf("required delivery metadata is missing"))
 	}
-	if err := client.ReportExecutionResult(ctx, message.TenantID, payload.GovernanceCheckID, payload.IdempotencyKey, payload.BindingHash, payload.Status, payload.DurationMS, payload.Result, payload.AttestationVersion, payload.ExecutorVersion, payload.Attestation); err != nil {
+	if err := client.ReportExecutionResult(ctx, message.OrgID, payload.GovernanceCheckID, payload.IdempotencyKey, payload.BindingHash, payload.Status, payload.DurationMS, payload.Result, payload.AttestationVersion, payload.ExecutorVersion, payload.Attestation); err != nil {
 		return outbox.Retryable("nexus_unavailable", err)
 	}
 	return nil
@@ -57,7 +57,7 @@ func sendNexusAuthorityAudit(ctx context.Context, client nexusOutboxClient, mess
 	if err != nil {
 		return outbox.Permanent("invalid_outbox_payload", err)
 	}
-	if message.ID == uuid.Nil || strings.TrimSpace(message.TenantID) == "" {
+	if message.ID == uuid.Nil || strings.TrimSpace(message.OrgID) == "" {
 		return outbox.Permanent("invalid_outbox_payload", fmt.Errorf("professional authority audit metadata is invalid"))
 	}
 	event := nexusclient.AuditEvent{
@@ -73,7 +73,7 @@ func sendNexusAuthorityAudit(ctx context.Context, client nexusOutboxClient, mess
 			"snapshot_hash": payload.SnapshotHash,
 		},
 	}
-	if err := client.AppendAuditEventIdempotent(ctx, message.TenantID, message.ID.String(), event); err != nil {
+	if err := client.AppendAuditEventIdempotent(ctx, message.OrgID, message.ID.String(), event); err != nil {
 		if nexusclient.IsPermanentHTTPError(err) {
 			return outbox.Permanent("nexus_rejected", err)
 		}

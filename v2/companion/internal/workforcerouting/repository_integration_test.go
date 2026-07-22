@@ -12,7 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func TestRepositoryConcurrentStableAssignmentCapacityAndTenantIsolation(t *testing.T) {
+func TestRepositoryConcurrentStableAssignmentCapacityAndOrgIsolation(t *testing.T) {
 	databaseURL := os.Getenv("COMPANION_V2_WORKFORCE_ROUTING_TEST_DATABASE_URL")
 	if databaseURL == "" {
 		t.Skip("COMPANION_V2_WORKFORCE_ROUTING_TEST_DATABASE_URL is not set")
@@ -24,27 +24,27 @@ func TestRepositoryConcurrentStableAssignmentCapacityAndTenantIsolation(t *testi
 	}
 	defer pool.Close()
 
-	tenantID := "routing-test-" + uuid.NewString()
-	otherTenantID := tenantID + "-other"
+	orgID := "routing-test-" + uuid.NewString()
+	otherOrgID := orgID + "-other"
 	jobRoleID := uuid.New()
 	profileID := uuid.New()
 	virployeeID := uuid.New()
-	seedRoutingPrincipal(t, ctx, pool, tenantID, jobRoleID, profileID, virployeeID)
-	defer cleanupRoutingTenant(t, pool, tenantID)
-	defer cleanupRoutingTenant(t, pool, otherTenantID)
+	seedRoutingPrincipal(t, ctx, pool, orgID, jobRoleID, profileID, virployeeID)
+	defer cleanupRoutingOrg(t, pool, orgID)
+	defer cleanupRoutingOrg(t, pool, otherOrgID)
 
 	repo := NewRepository(pool)
-	routingPool, err := repo.CreateRoutingPool(ctx, tenantID, NormalizedRoutingPoolInput{JobRoleID: jobRoleID, Name: "Clinical team"})
+	routingPool, err := repo.CreateRoutingPool(ctx, orgID, NormalizedRoutingPoolInput{JobRoleID: jobRoleID, Name: "Clinical team"})
 	if err != nil {
 		t.Fatalf("CreateRoutingPool: %v", err)
 	}
-	if _, err := repo.CreateRoutingPool(ctx, tenantID, NormalizedRoutingPoolInput{JobRoleID: jobRoleID, Name: "Parallel clinical team"}); !domainerr.IsConflict(err) {
+	if _, err := repo.CreateRoutingPool(ctx, orgID, NormalizedRoutingPoolInput{JobRoleID: jobRoleID, Name: "Parallel clinical team"}); !domainerr.IsConflict(err) {
 		t.Fatalf("same Job Role must not have parallel active pools: %v", err)
 	}
-	if _, err := repo.UpsertPoolMember(ctx, tenantID, routingPool.ID, virployeeID, UpsertPoolMemberInput{MaxActiveSubjects: 1, Enabled: true}); err != nil {
+	if _, err := repo.UpsertPoolMember(ctx, orgID, routingPool.ID, virployeeID, UpsertPoolMemberInput{MaxActiveSubjects: 1, Enabled: true}); err != nil {
 		t.Fatalf("UpsertPoolMember: %v", err)
 	}
-	subject, err := repo.CreateWorkSubject(ctx, tenantID, NormalizedWorkSubjectInput{Kind: SubjectKindPatient, DisplayName: "Patient A"})
+	subject, err := repo.CreateWorkSubject(ctx, orgID, NormalizedWorkSubjectInput{Kind: SubjectKindPatient, DisplayName: "Patient A"})
 	if err != nil {
 		t.Fatalf("CreateWorkSubject: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestRepositoryConcurrentStableAssignmentCapacityAndTenantIsolation(t *testi
 		go func() {
 			defer wg.Done()
 			<-start
-			result, resolveErr := repo.Resolve(ctx, tenantID, NormalizedResolveInput{PoolID: routingPool.ID, SubjectID: subject.ID, ActorID: "test"})
+			result, resolveErr := repo.Resolve(ctx, orgID, NormalizedResolveInput{PoolID: routingPool.ID, SubjectID: subject.ID, ActorID: "test"})
 			results <- resolveAttempt{result: result, err: resolveErr}
 		}()
 	}
@@ -88,11 +88,11 @@ func TestRepositoryConcurrentStableAssignmentCapacityAndTenantIsolation(t *testi
 		t.Fatalf("expected exactly one created assignment, got %d", created)
 	}
 
-	secondSubject, err := repo.CreateWorkSubject(ctx, tenantID, NormalizedWorkSubjectInput{Kind: SubjectKindPatient, DisplayName: "Patient B"})
+	secondSubject, err := repo.CreateWorkSubject(ctx, orgID, NormalizedWorkSubjectInput{Kind: SubjectKindPatient, DisplayName: "Patient B"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	full, err := repo.Resolve(ctx, tenantID, NormalizedResolveInput{PoolID: routingPool.ID, SubjectID: secondSubject.ID, ActorID: "test"})
+	full, err := repo.Resolve(ctx, orgID, NormalizedResolveInput{PoolID: routingPool.ID, SubjectID: secondSubject.ID, ActorID: "test"})
 	if err != nil {
 		t.Fatalf("Resolve full pool: %v", err)
 	}
@@ -100,68 +100,68 @@ func TestRepositoryConcurrentStableAssignmentCapacityAndTenantIsolation(t *testi
 		t.Fatalf("expected unavailable at capacity, got %+v", full)
 	}
 
-	if _, err := repo.Resolve(ctx, otherTenantID, NormalizedResolveInput{PoolID: routingPool.ID, SubjectID: subject.ID, ActorID: "test"}); !domainerr.IsNotFound(err) {
-		t.Fatalf("expected tenant-scoped not found, got %v", err)
+	if _, err := repo.Resolve(ctx, otherOrgID, NormalizedResolveInput{PoolID: routingPool.ID, SubjectID: subject.ID, ActorID: "test"}); !domainerr.IsNotFound(err) {
+		t.Fatalf("expected organization-scoped not found, got %v", err)
 	}
-	otherAssignments, err := repo.ListAssignments(ctx, otherTenantID, uuid.Nil, uuid.Nil)
+	otherAssignments, err := repo.ListAssignments(ctx, otherOrgID, uuid.Nil, uuid.Nil)
 	if err != nil {
-		t.Fatalf("ListAssignments other tenant: %v", err)
+		t.Fatalf("ListAssignments other organization: %v", err)
 	}
 	if len(otherAssignments) != 0 {
-		t.Fatalf("tenant isolation leaked assignments: %+v", otherAssignments)
+		t.Fatalf("organization isolation leaked assignments: %+v", otherAssignments)
 	}
 
 	var eventCount int
 	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM companion_continuity_assignment_events
-		WHERE tenant_id=$1 AND assignment_id=$2`, tenantID, assignmentID).Scan(&eventCount); err != nil {
+		WHERE org_id=$1 AND assignment_id=$2`, orgID, assignmentID).Scan(&eventCount); err != nil {
 		t.Fatal(err)
 	}
 	if eventCount != 1 {
 		t.Fatalf("idempotent resolve must emit one assignment event, got %d", eventCount)
 	}
-	version, err := repo.ValidateAssistAssignment(ctx, tenantID, assignmentID, subject.ID, virployeeID, 0)
+	version, err := repo.ValidateAssistAssignment(ctx, orgID, assignmentID, subject.ID, virployeeID, 0)
 	if err != nil || version != 1 {
 		t.Fatalf("ValidateAssistAssignment: version=%d err=%v", version, err)
 	}
-	if _, err := repo.ValidateAssistAssignment(ctx, tenantID, assignmentID, secondSubject.ID, virployeeID, 0); !domainerr.IsConflict(err) {
+	if _, err := repo.ValidateAssistAssignment(ctx, orgID, assignmentID, secondSubject.ID, virployeeID, 0); !domainerr.IsConflict(err) {
 		t.Fatalf("assignment must not cross subjects: %v", err)
 	}
-	if required, err := repo.RequiresAssistAssignment(ctx, tenantID, uuid.Nil, virployeeID); err != nil || !required {
+	if required, err := repo.RequiresAssistAssignment(ctx, orgID, uuid.Nil, virployeeID); err != nil || !required {
 		t.Fatalf("active pool member must require assignment for Assist: required=%v err=%v", required, err)
 	}
 	otherSameRoleID := uuid.New()
 	if _, err := pool.Exec(ctx, `INSERT INTO virployees(
-		id,tenant_id,name,job_role_id,profile_template_id,description,supervisor_user_id,autonomy,created_at,updated_at)
-		VALUES ($1,$2,'Dr Unassigned',$3,$4,'','supervisor','A2',now(),now())`, otherSameRoleID, tenantID, jobRoleID, profileID); err != nil {
+		id,org_id,name,job_role_id,profile_template_id,description,supervisor_user_id,autonomy,created_at,updated_at)
+		VALUES ($1,$2,'Dr Unassigned',$3,$4,'','supervisor','A2',now(),now())`, otherSameRoleID, orgID, jobRoleID, profileID); err != nil {
 		t.Fatal(err)
 	}
-	if required, err := repo.RequiresAssistAssignment(ctx, tenantID, subject.ID, otherSameRoleID); err != nil || !required {
+	if required, err := repo.RequiresAssistAssignment(ctx, orgID, subject.ID, otherSameRoleID); err != nil || !required {
 		t.Fatalf("subject assignment must prevent same-profession Virployee bypass: required=%v err=%v", required, err)
 	}
 
 	replacementVirployeeID := uuid.New()
 	if _, err := pool.Exec(ctx, `INSERT INTO virployees(
-		id,tenant_id,name,job_role_id,profile_template_id,description,supervisor_user_id,autonomy,created_at,updated_at)
-		VALUES ($1,$2,'Dr Replacement',$3,$4,'','supervisor','A2',now(),now())`, replacementVirployeeID, tenantID, jobRoleID, profileID); err != nil {
+		id,org_id,name,job_role_id,profile_template_id,description,supervisor_user_id,autonomy,created_at,updated_at)
+		VALUES ($1,$2,'Dr Replacement',$3,$4,'','supervisor','A2',now(),now())`, replacementVirployeeID, orgID, jobRoleID, profileID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.UpsertPoolMember(ctx, tenantID, routingPool.ID, replacementVirployeeID, UpsertPoolMemberInput{MaxActiveSubjects: 1, Enabled: true}); err != nil {
+	if _, err := repo.UpsertPoolMember(ctx, orgID, routingPool.ID, replacementVirployeeID, UpsertPoolMemberInput{MaxActiveSubjects: 1, Enabled: true}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.UpsertPoolMember(ctx, tenantID, routingPool.ID, virployeeID, UpsertPoolMemberInput{MaxActiveSubjects: 1, Enabled: false}); err != nil {
+	if _, err := repo.UpsertPoolMember(ctx, orgID, routingPool.ID, virployeeID, UpsertPoolMemberInput{MaxActiveSubjects: 1, Enabled: false}); err != nil {
 		t.Fatal(err)
 	}
-	if required, err := repo.RequiresAssistAssignment(ctx, tenantID, uuid.Nil, virployeeID); err != nil || !required {
+	if required, err := repo.RequiresAssistAssignment(ctx, orgID, uuid.Nil, virployeeID); err != nil || !required {
 		t.Fatalf("disabled pool member must not bypass continuity routing: required=%v err=%v", required, err)
 	}
-	requiresReassignment, err := repo.Resolve(ctx, tenantID, NormalizedResolveInput{PoolID: routingPool.ID, SubjectID: subject.ID, ActorID: "test"})
+	requiresReassignment, err := repo.Resolve(ctx, orgID, NormalizedResolveInput{PoolID: routingPool.ID, SubjectID: subject.ID, ActorID: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if requiresReassignment.Status != ResolveStatusReassignmentRequired || requiresReassignment.Created {
 		t.Fatalf("disabled assignee must not rotate silently: %+v", requiresReassignment)
 	}
-	reassigned, err := repo.Reassign(ctx, tenantID, assignmentID, NormalizedReassignInput{
+	reassigned, err := repo.Reassign(ctx, orgID, assignmentID, NormalizedReassignInput{
 		VirployeeID: replacementVirployeeID, ExpectedVersion: 1, Reason: "clinician_unavailable", ActorID: "owner-1",
 	})
 	if err != nil {
@@ -170,24 +170,24 @@ func TestRepositoryConcurrentStableAssignmentCapacityAndTenantIsolation(t *testi
 	if reassigned.VirployeeID != replacementVirployeeID || reassigned.Version != 2 {
 		t.Fatalf("unexpected reassignment: %+v", reassigned)
 	}
-	if _, err := repo.ValidateAssistAssignment(ctx, tenantID, assignmentID, subject.ID, virployeeID, 1); !domainerr.IsConflict(err) {
+	if _, err := repo.ValidateAssistAssignment(ctx, orgID, assignmentID, subject.ID, virployeeID, 1); !domainerr.IsConflict(err) {
 		t.Fatalf("old assignee must be invalid after reassignment: %v", err)
 	}
-	if version, err := repo.ValidateAssistAssignment(ctx, tenantID, assignmentID, subject.ID, replacementVirployeeID, 2); err != nil || version != 2 {
+	if version, err := repo.ValidateAssistAssignment(ctx, orgID, assignmentID, subject.ID, replacementVirployeeID, 2); err != nil || version != 2 {
 		t.Fatalf("replacement assignment validation: version=%d err=%v", version, err)
 	}
 	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM companion_continuity_assignment_events
-		WHERE tenant_id=$1 AND assignment_id=$2`, tenantID, assignmentID).Scan(&eventCount); err != nil {
+		WHERE org_id=$1 AND assignment_id=$2`, orgID, assignmentID).Scan(&eventCount); err != nil {
 		t.Fatal(err)
 	}
 	if eventCount != 2 {
 		t.Fatalf("reassignment audit event missing, got %d events", eventCount)
 	}
 
-	testConcurrentCapacityAcrossSubjects(t, ctx, repo, tenantID, jobRoleID, virployeeID)
+	testConcurrentCapacityAcrossSubjects(t, ctx, repo, orgID, jobRoleID, virployeeID)
 }
 
-func TestRepositoryRelationshipsAreAtomicAndTenantScoped(t *testing.T) {
+func TestRepositoryRelationshipsAreAtomicAndOrgScoped(t *testing.T) {
 	databaseURL := os.Getenv("COMPANION_V2_WORKFORCE_ROUTING_TEST_DATABASE_URL")
 	if databaseURL == "" {
 		t.Skip("COMPANION_V2_WORKFORCE_ROUTING_TEST_DATABASE_URL is not set")
@@ -198,23 +198,23 @@ func TestRepositoryRelationshipsAreAtomicAndTenantScoped(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	tenantID := "relationship-test-" + uuid.NewString()
-	otherTenantID := tenantID + "-other"
+	orgID := "relationship-test-" + uuid.NewString()
+	otherOrgID := orgID + "-other"
 	jobRoleID, profileID, virployeeID := uuid.New(), uuid.New(), uuid.New()
-	seedRoutingPrincipal(t, ctx, pool, tenantID, jobRoleID, profileID, virployeeID)
-	defer cleanupRoutingTenant(t, pool, tenantID)
-	defer cleanupRoutingTenant(t, pool, otherTenantID)
+	seedRoutingPrincipal(t, ctx, pool, orgID, jobRoleID, profileID, virployeeID)
+	defer cleanupRoutingOrg(t, pool, orgID)
+	defer cleanupRoutingOrg(t, pool, otherOrgID)
 
 	repo := NewRepository(pool)
-	employer, err := repo.CreateWorkSubject(ctx, tenantID, NormalizedWorkSubjectInput{Kind: SubjectKindOrganization, DisplayName: "Clinic"})
+	employer, err := repo.CreateWorkSubject(ctx, orgID, NormalizedWorkSubjectInput{Kind: SubjectKindOrganization, DisplayName: "Clinic"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	patient, err := repo.CreateWorkSubject(ctx, tenantID, NormalizedWorkSubjectInput{Kind: SubjectKindPatient, DisplayName: "Patient"})
+	patient, err := repo.CreateWorkSubject(ctx, orgID, NormalizedWorkSubjectInput{Kind: SubjectKindPatient, DisplayName: "Patient"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	otherSubject, err := repo.CreateWorkSubject(ctx, otherTenantID, NormalizedWorkSubjectInput{Kind: SubjectKindOrganization, DisplayName: "Other clinic"})
+	otherSubject, err := repo.CreateWorkSubject(ctx, otherOrgID, NormalizedWorkSubjectInput{Kind: SubjectKindOrganization, DisplayName: "Other clinic"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,19 +223,19 @@ func TestRepositoryRelationshipsAreAtomicAndTenantScoped(t *testing.T) {
 		{SubjectID: employer.ID, RelationshipType: RelationshipWorksFor, IsPrimary: true},
 		{SubjectID: patient.ID, RelationshipType: RelationshipServes},
 	}
-	got, err := repo.ReplaceRelationships(ctx, tenantID, virployeeID, items)
+	got, err := repo.ReplaceRelationships(ctx, orgID, virployeeID, items)
 	if err != nil {
 		t.Fatalf("ReplaceRelationships: %v", err)
 	}
 	if len(got) != 2 {
 		t.Fatalf("expected two relationships, got %+v", got)
 	}
-	if _, err := repo.ReplaceRelationships(ctx, tenantID, virployeeID, []NormalizedRelationshipInput{
+	if _, err := repo.ReplaceRelationships(ctx, orgID, virployeeID, []NormalizedRelationshipInput{
 		{SubjectID: otherSubject.ID, RelationshipType: RelationshipWorksFor, IsPrimary: true},
 	}); !domainerr.IsNotFound(err) {
-		t.Fatalf("expected cross-tenant subject rejection, got %v", err)
+		t.Fatalf("expected cross-organization subject rejection, got %v", err)
 	}
-	unchanged, err := repo.ListRelationships(ctx, tenantID, virployeeID)
+	unchanged, err := repo.ListRelationships(ctx, orgID, virployeeID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -249,18 +249,18 @@ type resolveAttempt struct {
 	err    error
 }
 
-func testConcurrentCapacityAcrossSubjects(t *testing.T, ctx context.Context, repo *Repository, tenantID string, jobRoleID, virployeeID uuid.UUID) {
+func testConcurrentCapacityAcrossSubjects(t *testing.T, ctx context.Context, repo *Repository, orgID string, jobRoleID, virployeeID uuid.UUID) {
 	t.Helper()
-	pool, err := repo.CreateRoutingPool(ctx, tenantID, NormalizedRoutingPoolInput{JobRoleID: jobRoleID, Name: "Concurrent capacity"})
+	pool, err := repo.CreateRoutingPool(ctx, orgID, NormalizedRoutingPoolInput{JobRoleID: jobRoleID, Name: "Concurrent capacity"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.UpsertPoolMember(ctx, tenantID, pool.ID, virployeeID, UpsertPoolMemberInput{MaxActiveSubjects: 1, Enabled: true}); err != nil {
+	if _, err := repo.UpsertPoolMember(ctx, orgID, pool.ID, virployeeID, UpsertPoolMemberInput{MaxActiveSubjects: 1, Enabled: true}); err != nil {
 		t.Fatal(err)
 	}
 	subjects := make([]WorkSubject, 2)
 	for i := range subjects {
-		subjects[i], err = repo.CreateWorkSubject(ctx, tenantID, NormalizedWorkSubjectInput{Kind: SubjectKindPatient, DisplayName: fmt.Sprintf("Concurrent patient %d", i)})
+		subjects[i], err = repo.CreateWorkSubject(ctx, orgID, NormalizedWorkSubjectInput{Kind: SubjectKindPatient, DisplayName: fmt.Sprintf("Concurrent patient %d", i)})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -274,7 +274,7 @@ func testConcurrentCapacityAcrossSubjects(t *testing.T, ctx context.Context, rep
 		go func() {
 			defer wg.Done()
 			<-start
-			result, resolveErr := repo.Resolve(ctx, tenantID, NormalizedResolveInput{PoolID: pool.ID, SubjectID: subject.ID, ActorID: "test"})
+			result, resolveErr := repo.Resolve(ctx, orgID, NormalizedResolveInput{PoolID: pool.ID, SubjectID: subject.ID, ActorID: "test"})
 			results <- resolveAttempt{result: result, err: resolveErr}
 		}()
 	}
@@ -298,41 +298,41 @@ func testConcurrentCapacityAcrossSubjects(t *testing.T, ctx context.Context, rep
 	}
 }
 
-func seedRoutingPrincipal(t *testing.T, ctx context.Context, pool *pgxpool.Pool, tenantID string, jobRoleID, profileID, virployeeID uuid.UUID) {
+func seedRoutingPrincipal(t *testing.T, ctx context.Context, pool *pgxpool.Pool, orgID string, jobRoleID, profileID, virployeeID uuid.UUID) {
 	t.Helper()
 	if _, err := pool.Exec(ctx, `INSERT INTO job_roles(
-		id,tenant_id,name,slug,mission,responsibilities_json,success_criteria_json,created_at,updated_at)
-		VALUES ($1,$2,'Doctor',$3,'Care for patients','[]','[]',now(),now())`, jobRoleID, tenantID, "doctor-"+jobRoleID.String()); err != nil {
+		id,org_id,name,slug,mission,responsibilities_json,success_criteria_json,created_at,updated_at)
+		VALUES ($1,$2,'Doctor',$3,'Care for patients','[]','[]',now(),now())`, jobRoleID, orgID, "doctor-"+jobRoleID.String()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO profile_templates(
-		id,tenant_id,name,description,system_prompt,max_autonomy,created_at,updated_at)
-		VALUES ($1,$2,'Clinical','', 'Stay within scope','A2',now(),now())`, profileID, tenantID); err != nil {
+		id,org_id,name,description,system_prompt,max_autonomy,created_at,updated_at)
+		VALUES ($1,$2,'Clinical','', 'Stay within scope','A2',now(),now())`, profileID, orgID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO virployees(
-		id,tenant_id,name,job_role_id,profile_template_id,description,supervisor_user_id,autonomy,created_at,updated_at)
-		VALUES ($1,$2,'Dr Virtual',$3,$4,'','supervisor','A2',now(),now())`, virployeeID, tenantID, jobRoleID, profileID); err != nil {
+		id,org_id,name,job_role_id,profile_template_id,description,supervisor_user_id,autonomy,created_at,updated_at)
+		VALUES ($1,$2,'Dr Virtual',$3,$4,'','supervisor','A2',now(),now())`, virployeeID, orgID, jobRoleID, profileID); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func cleanupRoutingTenant(t *testing.T, pool *pgxpool.Pool, tenantID string) {
+func cleanupRoutingOrg(t *testing.T, pool *pgxpool.Pool, orgID string) {
 	t.Helper()
 	ctx := context.Background()
 	statements := []string{
-		`DELETE FROM companion_continuity_assignment_events WHERE tenant_id=$1`,
-		`DELETE FROM companion_continuity_assignments WHERE tenant_id=$1`,
-		`DELETE FROM companion_virployee_relationships WHERE tenant_id=$1`,
-		`DELETE FROM companion_routing_pool_members WHERE tenant_id=$1`,
-		`DELETE FROM companion_routing_pools WHERE tenant_id=$1`,
-		`DELETE FROM companion_work_subjects WHERE tenant_id=$1`,
-		`DELETE FROM virployees WHERE tenant_id=$1`,
-		`DELETE FROM profile_templates WHERE tenant_id=$1`,
-		`DELETE FROM job_roles WHERE tenant_id=$1`,
+		`DELETE FROM companion_continuity_assignment_events WHERE org_id=$1`,
+		`DELETE FROM companion_continuity_assignments WHERE org_id=$1`,
+		`DELETE FROM companion_virployee_relationships WHERE org_id=$1`,
+		`DELETE FROM companion_routing_pool_members WHERE org_id=$1`,
+		`DELETE FROM companion_routing_pools WHERE org_id=$1`,
+		`DELETE FROM companion_work_subjects WHERE org_id=$1`,
+		`DELETE FROM virployees WHERE org_id=$1`,
+		`DELETE FROM profile_templates WHERE org_id=$1`,
+		`DELETE FROM job_roles WHERE org_id=$1`,
 	}
 	for _, statement := range statements {
-		if _, err := pool.Exec(ctx, statement, tenantID); err != nil {
+		if _, err := pool.Exec(ctx, statement, orgID); err != nil {
 			t.Errorf("cleanup %q: %v", statement, err)
 		}
 	}

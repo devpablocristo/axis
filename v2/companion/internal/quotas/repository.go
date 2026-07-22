@@ -40,7 +40,7 @@ func (r *Repository) Consume(ctx context.Context, request ConsumeRequest) (Decis
 		return Decision{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	lockKey := fmt.Sprintf("%d:%s%d:%s%d:%s%d:%s", len(key.TenantID), key.TenantID,
+	lockKey := fmt.Sprintf("%d:%s%d:%s%d:%s%d:%s", len(key.OrgID), key.OrgID,
 		len(key.ProductSurface), key.ProductSurface, len(key.Area), key.Area,
 		len(request.IdempotencyKey), request.IdempotencyKey)
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, lockKey); err != nil {
@@ -59,9 +59,9 @@ func (r *Repository) Consume(ctx context.Context, request ConsumeRequest) (Decis
 	err = tx.QueryRow(ctx, `
 		SELECT window_seconds, request_limit, unit_limit, active, created_at, updated_at
 		FROM quota_policies
-		WHERE tenant_id = $1 AND product_surface = $2 AND area = $3 AND active = true
+		WHERE org_id = $1 AND product_surface = $2 AND area = $3 AND active = true
 		FOR SHARE
-	`, key.TenantID, key.ProductSurface, key.Area).Scan(
+	`, key.OrgID, key.ProductSurface, key.Area).Scan(
 		&policy.WindowSeconds, &policy.RequestLimit, &policy.UnitLimit, &policy.Active, &policy.CreatedAt, &policy.UpdatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -88,18 +88,18 @@ func (r *Repository) Consume(ctx context.Context, request ConsumeRequest) (Decis
 	decision := Decision{PolicyFound: true, RetryAfterSeconds: retryAfter}
 	err = tx.QueryRow(ctx, `
 		INSERT INTO quota_windows (
-			tenant_id, product_surface, area, window_started_at, request_count, unit_count, updated_at
+			org_id, product_surface, area, window_started_at, request_count, unit_count, updated_at
 		)
 		SELECT $1, $2, $3, $4, 1, $5::bigint, $6
 		WHERE $5::bigint <= $8::bigint
-		ON CONFLICT (tenant_id, product_surface, area, window_started_at) DO UPDATE
+		ON CONFLICT (org_id, product_surface, area, window_started_at) DO UPDATE
 		SET request_count = quota_windows.request_count + 1,
 			unit_count = quota_windows.unit_count + EXCLUDED.unit_count,
 			updated_at = EXCLUDED.updated_at
 		WHERE quota_windows.request_count + 1 <= $7
 		  AND quota_windows.unit_count + EXCLUDED.unit_count <= $8
 		RETURNING request_count, unit_count
-	`, key.TenantID, key.ProductSurface, key.Area, windowStart, request.Units, now,
+	`, key.OrgID, key.ProductSurface, key.Area, windowStart, request.Units, now,
 		policy.RequestLimit, policy.UnitLimit).Scan(&decision.RequestsUsed, &decision.UnitsUsed)
 	if errors.Is(err, pgx.ErrNoRows) {
 		decision.Allowed = false
@@ -132,11 +132,11 @@ func (r *Repository) RecordUsage(ctx context.Context, usage Usage) error {
 	}
 	_, err = r.pool.Exec(ctx, `
 		INSERT INTO quota_usage_ledger (
-			id, tenant_id, product_surface, area, idempotency_key, subject_type, subject_id,
+			id, org_id, product_surface, area, idempotency_key, subject_type, subject_id,
 			units, allowed, policy_found, model, estimated_cost_microusd, metadata
 		) VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, true, false, $9, $10, $11::jsonb)
-		ON CONFLICT (tenant_id, product_surface, area, idempotency_key) DO NOTHING
-	`, uuid.NewString(), key.TenantID, key.ProductSurface, key.Area, usage.IdempotencyKey,
+		ON CONFLICT (org_id, product_surface, area, idempotency_key) DO NOTHING
+	`, uuid.NewString(), key.OrgID, key.ProductSurface, key.Area, usage.IdempotencyKey,
 		usage.SubjectType, usage.SubjectID, usage.Units, usage.Model, usage.EstimatedCostMicroUSD, metadata)
 	return err
 }
@@ -151,13 +151,13 @@ func (r *Repository) UpsertPolicy(ctx context.Context, policy Policy) (Policy, e
 		err := r.pool.QueryRow(ctx, `
 			SELECT EXISTS (
 				SELECT 1 FROM capabilities
-				WHERE tenant_id = $1
+				WHERE org_id = $1
 				  AND promotion_state = 'active'
 				  AND archived_at IS NULL AND trashed_at IS NULL
 				  AND manifest->>'product_surface' = $2
 				  AND (manifest->'quota_areas') ? $3
 			)
-		`, policy.TenantID, policy.ProductSurface, policy.Area).Scan(&inUse)
+		`, policy.OrgID, policy.ProductSurface, policy.Area).Scan(&inUse)
 		if err != nil {
 			return Policy{}, err
 		}
@@ -167,38 +167,38 @@ func (r *Repository) UpsertPolicy(ctx context.Context, policy Policy) (Policy, e
 	}
 	err = r.pool.QueryRow(ctx, `
 		INSERT INTO quota_policies (
-			tenant_id, product_surface, area, window_seconds, request_limit, unit_limit, active
+			org_id, product_surface, area, window_seconds, request_limit, unit_limit, active
 		) VALUES ($1, $2, $3, $4, $5, $6, $7)
-		ON CONFLICT (tenant_id, product_surface, area) DO UPDATE
+		ON CONFLICT (org_id, product_surface, area) DO UPDATE
 		SET window_seconds = EXCLUDED.window_seconds,
 			request_limit = EXCLUDED.request_limit,
 			unit_limit = EXCLUDED.unit_limit,
 			active = EXCLUDED.active,
 			updated_at = now()
 		RETURNING created_at, updated_at
-	`, policy.TenantID, policy.ProductSurface, policy.Area, policy.WindowSeconds,
+	`, policy.OrgID, policy.ProductSurface, policy.Area, policy.WindowSeconds,
 		policy.RequestLimit, policy.UnitLimit, policy.Active).Scan(&policy.CreatedAt, &policy.UpdatedAt)
 	return policy, err
 }
 
-func (r *Repository) ListPolicies(ctx context.Context, tenantID, productSurface string) ([]Policy, error) {
-	key, err := normalizeKey(Key{TenantID: tenantID, ProductSurface: productSurface, Area: "list"})
+func (r *Repository) ListPolicies(ctx context.Context, orgID, productSurface string) ([]Policy, error) {
+	key, err := normalizeKey(Key{OrgID: orgID, ProductSurface: productSurface, Area: "list"})
 	if err != nil {
 		return nil, err
 	}
 	rows, err := r.pool.Query(ctx, `
 		SELECT area, window_seconds, request_limit, unit_limit, active, created_at, updated_at
 		FROM quota_policies
-		WHERE tenant_id = $1 AND product_surface = $2
+		WHERE org_id = $1 AND product_surface = $2
 		ORDER BY area
-	`, key.TenantID, key.ProductSurface)
+	`, key.OrgID, key.ProductSurface)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var policies []Policy
 	for rows.Next() {
-		policy := Policy{Key: Key{TenantID: key.TenantID, ProductSurface: key.ProductSurface}}
+		policy := Policy{Key: Key{OrgID: key.OrgID, ProductSurface: key.ProductSurface}}
 		if err := rows.Scan(&policy.Area, &policy.WindowSeconds, &policy.RequestLimit, &policy.UnitLimit, &policy.Active, &policy.CreatedAt, &policy.UpdatedAt); err != nil {
 			return nil, err
 		}
@@ -207,11 +207,11 @@ func (r *Repository) ListPolicies(ctx context.Context, tenantID, productSurface 
 	return policies, rows.Err()
 }
 
-func (r *Repository) HasActivePolicies(ctx context.Context, tenantID, productSurface string, areas []string) (bool, error) {
+func (r *Repository) HasActivePolicies(ctx context.Context, orgID, productSurface string, areas []string) (bool, error) {
 	if len(areas) == 0 {
 		return false, nil
 	}
-	key, err := normalizeKey(Key{TenantID: tenantID, ProductSurface: productSurface, Area: "check"})
+	key, err := normalizeKey(Key{OrgID: orgID, ProductSurface: productSurface, Area: "check"})
 	if err != nil {
 		return false, err
 	}
@@ -219,8 +219,8 @@ func (r *Repository) HasActivePolicies(ctx context.Context, tenantID, productSur
 	err = r.pool.QueryRow(ctx, `
 		SELECT count(DISTINCT area)
 		FROM quota_policies
-		WHERE tenant_id = $1 AND product_surface = $2 AND active = true AND area = ANY($3::text[])
-	`, key.TenantID, key.ProductSurface, areas).Scan(&count)
+		WHERE org_id = $1 AND product_surface = $2 AND active = true AND area = ANY($3::text[])
+	`, key.OrgID, key.ProductSurface, areas).Scan(&count)
 	return count == len(areas), err
 }
 
@@ -229,8 +229,8 @@ func existingDecision(ctx context.Context, tx pgx.Tx, request ConsumeRequest) (D
 	err := tx.QueryRow(ctx, `
 		SELECT allowed, policy_found, retry_after_seconds
 		FROM quota_usage_ledger
-		WHERE tenant_id = $1 AND product_surface = $2 AND area = $3 AND idempotency_key = $4
-	`, request.TenantID, request.ProductSurface, request.Area, request.IdempotencyKey).Scan(
+		WHERE org_id = $1 AND product_surface = $2 AND area = $3 AND idempotency_key = $4
+	`, request.OrgID, request.ProductSurface, request.Area, request.IdempotencyKey).Scan(
 		&decision.Allowed, &decision.PolicyFound, &decision.RetryAfterSeconds,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -242,10 +242,10 @@ func existingDecision(ctx context.Context, tx pgx.Tx, request ConsumeRequest) (D
 func insertLedger(ctx context.Context, tx pgx.Tx, request ConsumeRequest, decision Decision, metadata []byte, model string, cost int64) error {
 	_, err := tx.Exec(ctx, `
 		INSERT INTO quota_usage_ledger (
-			id, tenant_id, product_surface, area, idempotency_key, subject_type, subject_id,
+			id, org_id, product_surface, area, idempotency_key, subject_type, subject_id,
 			units, allowed, policy_found, retry_after_seconds, model, estimated_cost_microusd, metadata
 		) VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::jsonb)
-	`, uuid.NewString(), request.TenantID, request.ProductSurface, request.Area, request.IdempotencyKey,
+	`, uuid.NewString(), request.OrgID, request.ProductSurface, request.Area, request.IdempotencyKey,
 		request.SubjectType, request.SubjectID, request.Units, decision.Allowed, decision.PolicyFound,
 		decision.RetryAfterSeconds, model, cost, metadata)
 	return err

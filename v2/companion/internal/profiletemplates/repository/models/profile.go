@@ -11,7 +11,7 @@ import (
 
 type ProfileTemplate struct {
 	ID           uuid.UUID
-	TenantID     string
+	OrgID        string
 	Name         string
 	Description  string
 	SystemPrompt string
@@ -26,7 +26,7 @@ type ProfileTemplate struct {
 func (m ProfileTemplate) ToDomain() domain.ProfileTemplate {
 	return domain.ProfileTemplate{
 		ID:           m.ID,
-		TenantID:     m.TenantID,
+		OrgID:        m.OrgID,
 		Name:         m.Name,
 		Description:  m.Description,
 		SystemPrompt: m.SystemPrompt,

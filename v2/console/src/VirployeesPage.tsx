@@ -15,7 +15,7 @@ import {
   type ContinuityAssignment,
   type JobRole,
   type GroundingMode,
-  type TenantUser,
+  type OrgUser,
   type VirployeeAutonomy,
   type VirployeeAutonomyLevel,
   type Virployee,
@@ -86,7 +86,7 @@ type CalendarCreateDraftValues = {
 type CalendarCreateDraftKey = keyof CalendarCreateDraftValues
 
 type VirployeesPageProps = {
-  tenantId: string
+  orgId: string
   principalId: string
   focusDryRunVirployeeId?: string
   onFocusDryRunConsumed?: () => void
@@ -153,7 +153,7 @@ async function listAllLifecycle<T extends { id: string }>(
 }
 
 export function VirployeesPage({
-  tenantId,
+  orgId,
   principalId,
   focusDryRunVirployeeId = '',
   onFocusDryRunConsumed,
@@ -174,7 +174,7 @@ export function VirployeesPage({
   const [autonomyLevels, setAutonomyLevels] = useState<VirployeeAutonomyLevel[]>(FALLBACK_AUTONOMY_LEVELS)
   const [jobRoles, setJobRoles] = useState<JobRole[]>([])
   const [jobRolesError, setJobRolesError] = useState('')
-  const [users, setUsers] = useState<TenantUser[]>([])
+  const [users, setUsers] = useState<OrgUser[]>([])
   const [usersError, setUsersError] = useState('')
   const [capabilities, setCapabilities] = useState<Capability[]>([])
   const [capabilitiesError, setCapabilitiesError] = useState('')
@@ -233,10 +233,10 @@ export function VirployeesPage({
 	const [previewPolicyBinding, setPreviewPolicyBinding] = useState<ProfessionalPolicyBinding | null>(null)
 	const [previewDelegations, setPreviewDelegations] = useState<VirployeeDelegation[]>([])
 	const [memoryRow, setMemoryRow] = useState<Virployee | null>(null)
-  // Gate on tenant only: the browser's principalId is not authoritative (the BFF
+  // Gate on organization only: the browser's principalId is not authoritative (the BFF
   // overwrites X-Actor-ID from the resolved session), and gating on it made the
   // lifecycle actions silently no-op when it was momentarily empty.
-  const isActive = Boolean(tenantId)
+  const isActive = Boolean(orgId)
   const jobRoleByID = useMemo(() => {
     return new Map(jobRoles.map((jobRole) => [jobRole.id, jobRole]))
   }, [jobRoles])
@@ -300,11 +300,11 @@ export function VirployeesPage({
         setVirployeeRows([])
         return []
       }
-      const rows = await listVirployees(lifecycleView, tenantId, principalId)
+      const rows = await listVirployees(lifecycleView, orgId, principalId)
       setVirployeeRows(rows)
       return rows
     },
-  }), [isActive, lifecycleView, principalId, tenantId])
+  }), [isActive, lifecycleView, principalId, orgId])
 
   useEffect(() => {
     setSelectedIds([])
@@ -322,7 +322,7 @@ export function VirployeesPage({
     closePreview()
     closeDryRun()
     closeEdit()
-  }, [lifecycleView, tenantId])
+  }, [lifecycleView, orgId])
 
   useEffect(() => {
     if (!isActive) {
@@ -331,7 +331,7 @@ export function VirployeesPage({
       return
     }
     let cancelled = false
-    listAllLifecycle((view) => listJobRoles(view, tenantId, principalId))
+    listAllLifecycle((view) => listJobRoles(view, orgId, principalId))
       .then((items) => {
         if (cancelled) return
         setJobRoles(items)
@@ -345,7 +345,7 @@ export function VirployeesPage({
     return () => {
       cancelled = true
     }
-  }, [isActive, principalId, reloadVersion, tenantId])
+  }, [isActive, principalId, reloadVersion, orgId])
 
   useEffect(() => {
 	if (!isActive) {
@@ -353,11 +353,11 @@ export function VirployeesPage({
 	  return
 	}
 	let cancelled = false
-	listKnowledgeBases(tenantId, principalId, 'active')
+	listKnowledgeBases(orgId, principalId, 'active')
 	  .then((items) => { if (!cancelled) setKnowledgeCatalog(items) })
 	  .catch(() => { if (!cancelled) setKnowledgeCatalog([]) })
 	return () => { cancelled = true }
-  }, [isActive, principalId, reloadVersion, tenantId])
+  }, [isActive, principalId, reloadVersion, orgId])
 
   useEffect(() => {
     if (!isActive) {
@@ -366,7 +366,7 @@ export function VirployeesPage({
       return
     }
     let cancelled = false
-    listAllLifecycle((view) => listCapabilities(view, tenantId, principalId))
+    listAllLifecycle((view) => listCapabilities(view, orgId, principalId))
       .then((items) => {
         if (cancelled) return
         setCapabilities(items)
@@ -380,7 +380,7 @@ export function VirployeesPage({
     return () => {
       cancelled = true
     }
-  }, [isActive, principalId, reloadVersion, tenantId])
+  }, [isActive, principalId, reloadVersion, orgId])
 
   useEffect(() => {
     if (!isActive) {
@@ -389,7 +389,7 @@ export function VirployeesPage({
       return
     }
     let cancelled = false
-    listAllLifecycle((view) => listProfileTemplates(view, tenantId, principalId))
+    listAllLifecycle((view) => listProfileTemplates(view, orgId, principalId))
       .then((items) => {
         if (cancelled) return
         setProfileTemplates(items)
@@ -403,7 +403,7 @@ export function VirployeesPage({
     return () => {
       cancelled = true
     }
-  }, [isActive, principalId, reloadVersion, tenantId])
+  }, [isActive, principalId, reloadVersion, orgId])
 
   useEffect(() => {
     if (!isActive) {
@@ -412,7 +412,7 @@ export function VirployeesPage({
       return
     }
     let cancelled = false
-    listAllLifecycle((view) => listUsers(view, tenantId, principalId))
+    listAllLifecycle((view) => listUsers(view, orgId, principalId))
       .then((items) => {
         if (cancelled) return
         setUsers(items)
@@ -426,7 +426,7 @@ export function VirployeesPage({
     return () => {
       cancelled = true
     }
-  }, [isActive, principalId, reloadVersion, tenantId])
+  }, [isActive, principalId, reloadVersion, orgId])
 
   useEffect(() => {
     if (!isActive) {
@@ -434,7 +434,7 @@ export function VirployeesPage({
       return
     }
     let cancelled = false
-    listVirployeeAutonomyLevels(tenantId, principalId)
+    listVirployeeAutonomyLevels(orgId, principalId)
       .then((levels) => {
         if (cancelled) return
         const visible = levels.filter((level) => VISIBLE_AUTONOMY_LEVELS.includes(level.level))
@@ -446,7 +446,7 @@ export function VirployeesPage({
     return () => {
       cancelled = true
     }
-  }, [isActive, principalId, tenantId])
+  }, [isActive, principalId, orgId])
 
   useEffect(() => {
     if (!isActive) {
@@ -454,11 +454,11 @@ export function VirployeesPage({
       return
     }
     let cancelled = false
-    listWorkSubjects(tenantId, principalId)
+    listWorkSubjects(orgId, principalId)
       .then((items) => { if (!cancelled) setWorkSubjects(items.filter((item) => item.state === 'active')) })
       .catch(() => { if (!cancelled) setWorkSubjects([]) })
     return () => { cancelled = true }
-  }, [isActive, principalId, reloadVersion, tenantId])
+  }, [isActive, principalId, reloadVersion, orgId])
 
   useEffect(() => {
     if (!isActive) {
@@ -466,11 +466,11 @@ export function VirployeesPage({
       return
     }
     let cancelled = false
-    listProfessionalPolicyPacks(tenantId, principalId)
+    listProfessionalPolicyPacks(orgId, principalId)
       .then((items) => { if (!cancelled) setPolicyPacks(items) })
       .catch(() => { if (!cancelled) setPolicyPacks([]) })
     return () => { cancelled = true }
-  }, [isActive, principalId, reloadVersion, tenantId])
+  }, [isActive, principalId, reloadVersion, orgId])
 
   useEffect(() => {
     const root = rootRef.current
@@ -531,7 +531,7 @@ export function VirployeesPage({
       root.removeEventListener('mouseout', handlePointerOut)
       hideAutonomyBubble()
     }
-  }, [autonomyByLevel, lifecycleView, reloadVersion, tenantId])
+  }, [autonomyByLevel, lifecycleView, reloadVersion, orgId])
 
   const toggleSelected = (id: string, checked: boolean) => {
     setSelectedIds((current) => (
@@ -555,17 +555,17 @@ export function VirployeesPage({
     try {
       for (const id of selectedIds) {
         if (action === 'archive') {
-          await archiveVirployee(id, tenantId, principalId)
+          await archiveVirployee(id, orgId, principalId)
         } else if (action === 'trash') {
-          await trashVirployee(id, tenantId, principalId)
+          await trashVirployee(id, orgId, principalId)
         } else if (action === 'restore') {
           if (lifecycleView === 'archived') {
-            await unarchiveVirployee(id, tenantId, principalId)
+            await unarchiveVirployee(id, orgId, principalId)
           } else {
-            await restoreVirployee(id, tenantId, principalId)
+            await restoreVirployee(id, orgId, principalId)
           }
         } else {
-          await purgeVirployee(id, tenantId, principalId)
+          await purgeVirployee(id, orgId, principalId)
         }
       }
       clearSelected()
@@ -621,7 +621,7 @@ export function VirployeesPage({
     setCreateSaving(true)
     setCreateError('')
     try {
-	  await createVirployee({ ...editPayload(createValues), employer_subject_id: createEmployerSubjectID }, tenantId, principalId)
+	  await createVirployee({ ...editPayload(createValues), employer_subject_id: createEmployerSubjectID }, orgId, principalId)
       closeCreate()
       setReloadVersion((current) => current + 1)
     } catch (error) {
@@ -650,12 +650,12 @@ export function VirployeesPage({
     setEditError('')
     setActionError('')
 	Promise.all([
-	  getVirployeeRelationships(row.id, tenantId, principalId),
-	  listVirployeeAssignments(row.id, tenantId, principalId),
-	  getVirployeeScopePolicy(row.id, tenantId, principalId),
-	  getVirployeeProfessionalPolicyBinding(row.id, tenantId, principalId),
-	  listVirployeeDelegations(row.id, tenantId, principalId),
-	  listVirployeeKnowledgeBases(row.id, tenantId, principalId),
+	  getVirployeeRelationships(row.id, orgId, principalId),
+	  listVirployeeAssignments(row.id, orgId, principalId),
+	  getVirployeeScopePolicy(row.id, orgId, principalId),
+	  getVirployeeProfessionalPolicyBinding(row.id, orgId, principalId),
+	  listVirployeeDelegations(row.id, orgId, principalId),
+	  listVirployeeKnowledgeBases(row.id, orgId, principalId),
 	])
 	  .then(([relationships, assignments, scope, binding, delegations, knowledgeBases]) => {
 		setEditRelationships(relationships.map((item) => ({ subject_id: item.subject_id, type: item.type, is_primary: item.is_primary })))
@@ -691,8 +691,8 @@ export function VirployeesPage({
 	setKnowledgeBusy(true)
 	setEditError('')
 	try {
-	  const effective = await setVirployeeKnowledgeBase(editRow.id, base, enabled, tenantId, principalId)
-	  const catalog = await listKnowledgeBases(tenantId, principalId, 'active')
+	  const effective = await setVirployeeKnowledgeBase(editRow.id, base, enabled, orgId, principalId)
+	  const catalog = await listKnowledgeBases(orgId, principalId, 'active')
 	  setEditKnowledgeBases(effective)
 	  setKnowledgeCatalog(catalog)
 	} catch (error) {
@@ -725,12 +725,12 @@ export function VirployeesPage({
     setPreviewLoading(true)
     setActionError('')
 	Promise.all([
-	  getVirployeeRuntimeContext(row.id, tenantId, principalId),
-	  getVirployeeRelationships(row.id, tenantId, principalId).catch(() => []),
-	  listVirployeeAssignments(row.id, tenantId, principalId).catch(() => []),
-	  getVirployeeScopePolicy(row.id, tenantId, principalId).catch(() => null),
-	  getVirployeeProfessionalPolicyBinding(row.id, tenantId, principalId).catch(() => null),
-	  listVirployeeKnowledgeBases(row.id, tenantId, principalId, {}).catch(() => []),
+	  getVirployeeRuntimeContext(row.id, orgId, principalId),
+	  getVirployeeRelationships(row.id, orgId, principalId).catch(() => []),
+	  listVirployeeAssignments(row.id, orgId, principalId).catch(() => []),
+	  getVirployeeScopePolicy(row.id, orgId, principalId).catch(() => null),
+	  getVirployeeProfessionalPolicyBinding(row.id, orgId, principalId).catch(() => null),
+	  listVirployeeKnowledgeBases(row.id, orgId, principalId, {}).catch(() => []),
 	])
 	      .then(([context, relationships, assignments, scope, binding, knowledgeBases]) => {
         if (previewRequestRef.current !== requestID) return
@@ -762,7 +762,7 @@ export function VirployeesPage({
 			setPreviewDelegations([])
 			setPreviewMCPTools([])
 			setPreviewMCPLoading(false)
-			void listVirployeeKnowledgeBases(row.id, tenantId, principalId, {})
+			void listVirployeeKnowledgeBases(row.id, orgId, principalId, {})
 				.then((items) => {
 					if (previewContextRequestRef.current === requestID) setPreviewKnowledgeBases(items)
 				})
@@ -774,10 +774,10 @@ export function VirployeesPage({
 		const principals = caseID ? [subjectID, caseID] : [subjectID]
 		setPreviewMCPLoading(true)
 		void Promise.all([
-			listAssistCases(tenantId, principalId, { subjectId: subjectID, ownerVirployeeId: row.id }),
-			listVirployeeDelegations(row.id, tenantId, principalId, principals),
-			listVirployeeKnowledgeBases(row.id, tenantId, principalId, { subjectId: subjectID, caseId: caseID }),
-			listMCPTools(row.id, subjectID, caseID, tenantId, principalId),
+			listAssistCases(orgId, principalId, { subjectId: subjectID, ownerVirployeeId: row.id }),
+			listVirployeeDelegations(row.id, orgId, principalId, principals),
+			listVirployeeKnowledgeBases(row.id, orgId, principalId, { subjectId: subjectID, caseId: caseID }),
+			listMCPTools(row.id, subjectID, caseID, orgId, principalId),
 		]).then(([cases, delegations, knowledgeBases, mcpTools]) => {
 			if (previewContextRequestRef.current !== requestID) return
 			setPreviewCases(cases)
@@ -904,7 +904,7 @@ export function VirployeesPage({
     setRunTracesLoading(true)
     setRunTracesError('')
     try {
-      const runs = await listVirployeeRuns(row.id, tenantId, principalId, 20)
+      const runs = await listVirployeeRuns(row.id, orgId, principalId, 20)
       if (runTraceRequestRef.current !== requestID) return
       setRunTraces(runs)
     } catch (error) {
@@ -929,7 +929,7 @@ export function VirployeesPage({
     setCalendarDraftValues(null)
     setConfirmedDraft(null)
     try {
-      const result = await dryRunVirployee(dryRunRow.id, dryRunInput, tenantId, principalId)
+      const result = await dryRunVirployee(dryRunRow.id, dryRunInput, orgId, principalId)
       if (dryRunRequestRef.current !== requestID) return
       setDryRunResult(result)
       setCalendarDraftValues(calendarCreateDraftValuesFromDryRun(result))
@@ -959,7 +959,7 @@ export function VirployeesPage({
     setExecutionGateResult(null)
     if (confirmedDraftForGate) setConfirmedDraft(confirmedDraftForGate)
     try {
-      const result = await checkVirployeeExecutionGate(dryRunRow.id, dryRunInput, tenantId, principalId, confirmedDraftForGate ?? undefined)
+      const result = await checkVirployeeExecutionGate(dryRunRow.id, dryRunInput, orgId, principalId, confirmedDraftForGate ?? undefined)
       if (executionGateRequestRef.current !== requestID) return
       setExecutionGateResult(result)
       setDryRunResult(result.dry_run)
@@ -1000,7 +1000,7 @@ export function VirployeesPage({
         ? `${values.title}\n${values.date} ${values.time} (${values.timezone})\n${values.duration_minutes} minutes\n${values.attendees}`
         : 'Execute the approved prepared action?'
       if (!window.confirm(`Execute this local calendar event?\n\n${summary}`)) return
-      await executeApprovedVirployeeAction(dryRunRow.id, approvalId, tenantId, principalId)
+      await executeApprovedVirployeeAction(dryRunRow.id, approvalId, orgId, principalId)
       if (simulationRequestRef.current !== requestID) return
       await loadRunTraces(dryRunRow)
     } catch (error) {
@@ -1037,15 +1037,15 @@ export function VirployeesPage({
     setEditSaving(true)
     setEditError('')
     try {
-      await updateVirployee(editRow.id, editPayload(editValues), tenantId, principalId)
+      await updateVirployee(editRow.id, editPayload(editValues), orgId, principalId)
 	  if (relationshipsDirty) {
-		await putVirployeeRelationships(editRow.id, editRelationships, tenantId, principalId)
+		await putVirployeeRelationships(editRow.id, editRelationships, orgId, principalId)
 	  }
 	  if (authorityDirty && editScopePolicy) {
-		await putVirployeeScopePolicy(editRow.id, editScopePolicy, tenantId, principalId)
+		await putVirployeeScopePolicy(editRow.id, editScopePolicy, orgId, principalId)
 	  }
 	  if (authorityDirty && editPolicyBinding) {
-		await putVirployeeProfessionalPolicyBinding(editRow.id, editPolicyBinding, tenantId, principalId)
+		await putVirployeeProfessionalPolicyBinding(editRow.id, editPolicyBinding, orgId, principalId)
 	  }
       closeEdit()
       setReloadVersion((current) => current + 1)
@@ -1059,7 +1059,7 @@ export function VirployeesPage({
   if (!isActive) {
     return (
       <section className="page-section">
-        <div className="empty-state">Select an active tenant to manage Virployees.</div>
+        <div className="empty-state">Select an active organization to manage Virployees.</div>
       </section>
     )
   }
@@ -1067,7 +1067,7 @@ export function VirployeesPage({
   return (
     <section ref={rootRef} className="page-section iam-control axis-crud-host virployees-control">
       <CrudPage<Virployee>
-        key={`virployees-${tenantId}-${lifecycleView}-${reloadVersion}`}
+        key={`virployees-${orgId}-${lifecycleView}-${reloadVersion}`}
         dataSource={dataSource}
         stringsBase={defaultCrudStrings}
         strings={{
@@ -1167,7 +1167,7 @@ export function VirployeesPage({
             ) : null}
             {dryRunRow ? (
               <VirployeeDryRunInline
-                tenantId={tenantId}
+                orgId={orgId}
                 principalId={principalId}
                 row={dryRunRow}
                 input={dryRunInput}
@@ -1202,7 +1202,7 @@ export function VirployeesPage({
                 title="Edit virployee"
                 primaryLabel="Save"
 				virployeeId={editRow.id}
-				tenantId={tenantId}
+				orgId={orgId}
 				principalId={principalId}
                 values={editValues}
                 saving={editSaving}
@@ -1235,7 +1235,7 @@ export function VirployeesPage({
                 onSave={() => void saveEdit()}
               />
             ) : null}
-			{memoryRow ? <VirployeeMemoryPanel row={memoryRow} tenantId={tenantId} principalId={principalId} onClose={closeMemory}/> : null}
+			{memoryRow ? <VirployeeMemoryPanel row={memoryRow} orgId={orgId} principalId={principalId} onClose={closeMemory}/> : null}
           </div>
         )}
         toolbarActions={lifecycleToolbarActions(lifecycleView, inlinePanelOpen, setExternalLifecycleView)}
@@ -1249,7 +1249,7 @@ function VirployeeEditInline(props: {
   title: string
   primaryLabel: string
   virployeeId?: string
-  tenantId?: string
+  orgId?: string
   principalId?: string
   values: VirployeeEditValues
   saving: boolean
@@ -1441,7 +1441,7 @@ function VirployeeEditInline(props: {
 			  capabilities={props.capabilities}
 			  subjects={props.workSubjects}
 			  virployeeId={props.virployeeId ?? ''}
-			  tenantId={props.tenantId ?? ''}
+			  orgId={props.orgId ?? ''}
 			  principalId={props.principalId ?? ''}
 			  onScopeChange={props.onScopePolicyChange}
 			  onBindingChange={props.onPolicyBindingChange}
@@ -1513,7 +1513,7 @@ function VirployeePreviewInline(props: {
   loading: boolean
   error: string
   autonomyByLevel: ReadonlyMap<VirployeeAutonomy, VirployeeAutonomyLevel>
-  supervisor?: TenantUser
+  supervisor?: OrgUser
   workSubjects: WorkSubject[]
   relationships: WorkRelationshipInput[]
   assignments: ContinuityAssignment[]
@@ -1851,7 +1851,7 @@ function VirployeeAuthorityEditor(props: {
   capabilities: Capability[]
   subjects: WorkSubject[]
   virployeeId: string
-  tenantId: string
+  orgId: string
   principalId: string
   onScopeChange: (scope: VirployeeScopePolicy) => void
   onBindingChange: (binding: ProfessionalPolicyBinding) => void
@@ -1878,7 +1878,7 @@ function VirployeeAuthorityEditor(props: {
 		max_risk_class: capability.risk_class,
 		purpose: delegationDraft.purpose.trim(),
         valid_until: new Date(delegationDraft.valid_until).toISOString(),
-      }, props.tenantId, props.principalId)
+      }, props.orgId, props.principalId)
       props.onDelegationsChange([...props.delegations, created])
       setDelegationDraft({ subject_id: '', capability_key: '', purpose: '', valid_until: futureLocalDate(30) })
     } catch (cause) {
@@ -1892,7 +1892,7 @@ function VirployeeAuthorityEditor(props: {
 	setDelegationBusy(true)
 	setDelegationError('')
 	try {
-	  const reviewed = await reviewVirployeeDelegation(props.virployeeId, delegation.id, delegation.revision, 'Authority reviewed in console', props.tenantId, props.principalId)
+	  const reviewed = await reviewVirployeeDelegation(props.virployeeId, delegation.id, delegation.revision, 'Authority reviewed in console', props.orgId, props.principalId)
 	  props.onDelegationsChange(props.delegations.map((item) => item.id === reviewed.id ? reviewed : item))
 	} catch (cause) {
 	  setDelegationError(cause instanceof Error ? cause.message : 'Could not review delegation')
@@ -1905,7 +1905,7 @@ function VirployeeAuthorityEditor(props: {
     setDelegationBusy(true)
     setDelegationError('')
     try {
-      const revoked = await revokeVirployeeDelegation(props.virployeeId, delegation.id, delegation.revision, props.tenantId, props.principalId)
+      const revoked = await revokeVirployeeDelegation(props.virployeeId, delegation.id, delegation.revision, props.orgId, props.principalId)
       props.onDelegationsChange(props.delegations.map((item) => item.id === revoked.id ? revoked : item))
     } catch (cause) {
       setDelegationError(cause instanceof Error ? cause.message : 'Could not revoke delegation')
@@ -1986,7 +1986,7 @@ function futureLocalDate(days: number): string {
 }
 
 function VirployeeDryRunInline(props: {
-  tenantId: string
+  orgId: string
   principalId: string
   row: Virployee
   input: string
@@ -2004,7 +2004,7 @@ function VirployeeDryRunInline(props: {
   calendarDraftValues: CalendarCreateDraftValues | null
   confirmedDraft: VirployeeConfirmedDraft | null
   autonomyByLevel: ReadonlyMap<VirployeeAutonomy, VirployeeAutonomyLevel>
-  supervisor?: TenantUser
+  supervisor?: OrgUser
   onInputChange: (value: string) => void
   onRun: () => void
   onCheckExecutionGate: () => void
@@ -2050,7 +2050,7 @@ function VirployeeDryRunInline(props: {
       return
     }
     void loadLatestApproval(latestApprovalID)
-  }, [latestApprovalID, props.principalId, props.tenantId])
+  }, [latestApprovalID, props.principalId, props.orgId])
 
   async function loadLatestApproval(approvalId = latestApprovalID) {
     if (!approvalId) return
@@ -2059,7 +2059,7 @@ function VirployeeDryRunInline(props: {
     setLatestApprovalLoading(true)
     setLatestApprovalError('')
     try {
-      const approval = await getApproval(approvalId, props.tenantId, props.principalId)
+      const approval = await getApproval(approvalId, props.orgId, props.principalId)
       if (latestApprovalRequestRef.current !== requestID) return
       setLatestApproval(approval)
     } catch (error) {
@@ -2208,7 +2208,7 @@ function VirployeeDryRunInline(props: {
             />
 
             <RunTraceHistory
-              tenantId={props.tenantId}
+              orgId={props.orgId}
               principalId={props.principalId}
               runs={props.runTraces}
               loading={props.runTracesLoading}
@@ -2248,7 +2248,7 @@ function VirployeeDryRunInline(props: {
           <>
             <p className="iam-control__inline-note">Dry Run checks the Runtime Context, required Capability and autonomy decision without executing anything.</p>
             <RunTraceHistory
-              tenantId={props.tenantId}
+              orgId={props.orgId}
               principalId={props.principalId}
               runs={props.runTraces}
               loading={props.runTracesLoading}
@@ -2571,7 +2571,7 @@ function ApprovalCheckpointView(props: {
 }
 
 function RunTraceHistory(props: {
-  tenantId: string
+  orgId: string
   principalId: string
   runs: VirployeeRunTrace[]
   loading: boolean
@@ -2588,7 +2588,7 @@ function RunTraceHistory(props: {
   const [approvalByID, setApprovalByID] = useState<Record<string, Approval | null>>({})
 
   useEffect(() => {
-    if (approvalIDs.length === 0 || !props.tenantId || !props.principalId) {
+    if (approvalIDs.length === 0 || !props.orgId || !props.principalId) {
       setApprovalByID({})
       return undefined
     }
@@ -2603,7 +2603,7 @@ function RunTraceHistory(props: {
     void Promise.all(
       approvalIDs.map(async (id): Promise<[string, Approval | null]> => {
         try {
-          return [id, await getApproval(id, props.tenantId, props.principalId)]
+          return [id, await getApproval(id, props.orgId, props.principalId)]
         } catch {
           return [id, null]
         }
@@ -2619,7 +2619,7 @@ function RunTraceHistory(props: {
     return () => {
       cancelled = true
     }
-  }, [approvalKey, props.tenantId, props.principalId])
+  }, [approvalKey, props.orgId, props.principalId])
 
   return (
     <section className="virployee-preview__section" aria-label="Run history">
@@ -2892,7 +2892,7 @@ function virployeeColumns(
   onToggle: (id: string, checked: boolean) => void,
   autonomyByLevel: ReadonlyMap<VirployeeAutonomy, VirployeeAutonomyLevel>,
   jobRoleByID?: ReadonlyMap<string, JobRole>,
-  userByID?: ReadonlyMap<string, TenantUser>,
+  userByID?: ReadonlyMap<string, OrgUser>,
   capabilityByID?: ReadonlyMap<string, Capability>,
 ): CrudPageProps<Virployee>['columns'] {
   return [
@@ -3053,7 +3053,7 @@ function virployeeSearchText(
   row: Virployee,
   autonomyByLevel: ReadonlyMap<VirployeeAutonomy, VirployeeAutonomyLevel>,
   jobRoleByID: ReadonlyMap<string, JobRole>,
-  userByID: ReadonlyMap<string, TenantUser>,
+  userByID: ReadonlyMap<string, OrgUser>,
   capabilityByID: ReadonlyMap<string, Capability>,
   profileTemplateByID: ReadonlyMap<string, ProfileTemplate>,
 ): string {
@@ -3229,7 +3229,7 @@ function jobRoleName(id: string, jobRoleByID?: ReadonlyMap<string, JobRole>): st
   return jobRole?.name ?? shortId(id)
 }
 
-function supervisorName(id: string, userByID?: ReadonlyMap<string, TenantUser>): string {
+function supervisorName(id: string, userByID?: ReadonlyMap<string, OrgUser>): string {
   if (!id) return '-'
   const user = userByID?.get(id)
   return user ? userLabel(user) : shortId(id)
@@ -3242,7 +3242,7 @@ function capabilitySummary(ids: string[], capabilityByID?: ReadonlyMap<string, C
   return `${labels.slice(0, 2).join(', ')} +${labels.length - 2}`
 }
 
-function userLabel(user: TenantUser): string {
+function userLabel(user: OrgUser): string {
   const email = stringValue(user.email)
   return email || user.id
 }

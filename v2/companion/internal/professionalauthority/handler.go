@@ -93,7 +93,7 @@ func (h *Handler) GetScopePolicy(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, err := h.ucs.GetScopePolicy(c.Request.Context(), tenantID(c), id)
+	out, err := h.ucs.GetScopePolicy(c.Request.Context(), orgID(c), id)
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -110,7 +110,7 @@ func (h *Handler) PutScopePolicy(c *gin.Context) {
 	if err := ginmw.BindJSON(c, &req); err != nil {
 		return
 	}
-	out, err := h.ucs.PutScopePolicy(c.Request.Context(), tenantID(c), id, PutScopePolicyInput(req), actor(c))
+	out, err := h.ucs.PutScopePolicy(c.Request.Context(), orgID(c), id, PutScopePolicyInput(req), actor(c))
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -123,7 +123,7 @@ func (h *Handler) CreatePolicyPack(c *gin.Context) {
 	if err := ginmw.BindJSON(c, &req); err != nil {
 		return
 	}
-	out, err := h.ucs.CreatePolicyPack(c.Request.Context(), tenantID(c), CreatePolicyPackInput(req), actor(c))
+	out, err := h.ucs.CreatePolicyPack(c.Request.Context(), orgID(c), CreatePolicyPackInput(req), actor(c))
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -132,7 +132,7 @@ func (h *Handler) CreatePolicyPack(c *gin.Context) {
 }
 
 func (h *Handler) ListPolicyPacks(c *gin.Context) {
-	out, err := h.ucs.ListPolicyPacks(c.Request.Context(), tenantID(c))
+	out, err := h.ucs.ListPolicyPacks(c.Request.Context(), orgID(c))
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -149,7 +149,7 @@ func (h *Handler) GetPolicyPack(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, err := h.ucs.GetPolicyPack(c.Request.Context(), tenantID(c), id)
+	out, err := h.ucs.GetPolicyPack(c.Request.Context(), orgID(c), id)
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -162,7 +162,7 @@ func (h *Handler) GetPolicyBinding(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, err := h.ucs.GetPolicyBinding(c.Request.Context(), tenantID(c), id)
+	out, err := h.ucs.GetPolicyBinding(c.Request.Context(), orgID(c), id)
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -179,7 +179,7 @@ func (h *Handler) PutPolicyBinding(c *gin.Context) {
 	if err := ginmw.BindJSON(c, &req); err != nil {
 		return
 	}
-	out, err := h.ucs.PutPolicyBinding(c.Request.Context(), tenantID(c), id, PutPolicyBindingInput(req), actor(c))
+	out, err := h.ucs.PutPolicyBinding(c.Request.Context(), orgID(c), id, PutPolicyBindingInput(req), actor(c))
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -192,7 +192,7 @@ func (h *Handler) ListDelegations(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, err := h.ucs.ListDelegations(c.Request.Context(), tenantID(c), id, actor(c))
+	out, err := h.ucs.ListDelegations(c.Request.Context(), orgID(c), id, actor(c))
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -228,7 +228,7 @@ func (h *Handler) ReviewDelegation(c *gin.Context) {
 	if err := ginmw.BindJSON(c, &req); err != nil {
 		return
 	}
-	out, err := h.ucs.ReviewDelegation(c.Request.Context(), tenantID(c), virployeeID, delegationID,
+	out, err := h.ucs.ReviewDelegation(c.Request.Context(), orgID(c), virployeeID, delegationID,
 		ReviewDelegationInput(req), actor(c))
 	if err != nil {
 		ginmw.Respond(c, err)
@@ -246,7 +246,7 @@ func (h *Handler) CreateDelegation(c *gin.Context) {
 	if err := ginmw.BindJSON(c, &req); err != nil {
 		return
 	}
-	out, err := h.ucs.CreateDelegation(c.Request.Context(), tenantID(c), id, CreateDelegationInput(req), actor(c))
+	out, err := h.ucs.CreateDelegation(c.Request.Context(), orgID(c), id, CreateDelegationInput(req), actor(c))
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -267,7 +267,7 @@ func (h *Handler) RevokeDelegation(c *gin.Context) {
 	if err := ginmw.BindJSON(c, &req); err != nil {
 		return
 	}
-	out, err := h.ucs.RevokeDelegation(c.Request.Context(), tenantID(c), virployeeID, delegationID,
+	out, err := h.ucs.RevokeDelegation(c.Request.Context(), orgID(c), virployeeID, delegationID,
 		RevokeDelegationInput(req), actor(c))
 	if err != nil {
 		ginmw.Respond(c, err)
@@ -340,10 +340,10 @@ func parseUUIDParam(c *gin.Context, name string) (uuid.UUID, bool) {
 	return id, true
 }
 
-func tenantID(c *gin.Context) string { return strings.TrimSpace(c.GetHeader("X-Tenant-ID")) }
+func orgID(c *gin.Context) string { return strings.TrimSpace(c.GetHeader("X-Org-ID")) }
 
 func actor(c *gin.Context) Actor {
-	return Actor{ID: strings.TrimSpace(c.GetHeader("X-Actor-ID")), Role: strings.TrimSpace(c.GetHeader("X-Axis-Tenant-Role"))}
+	return Actor{ID: strings.TrimSpace(c.GetHeader("X-Actor-ID")), Role: strings.TrimSpace(c.GetHeader("X-Axis-Org-Role"))}
 }
 
 func nonNilStrings(in []string) []string {

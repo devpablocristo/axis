@@ -22,7 +22,7 @@ func NewLocalCalendarExecutor(repo ExecutionRepositoryPort) *LocalCalendarExecut
 	return &LocalCalendarExecutor{repo: repo}
 }
 
-func (e *LocalCalendarExecutor) Execute(ctx context.Context, tenantID string, virployeeID uuid.UUID, attempt ExecutionAttempt, action preparedactions.Action) (ExecutionOutcome, error) {
+func (e *LocalCalendarExecutor) Execute(ctx context.Context, orgID string, virployeeID uuid.UUID, attempt ExecutionAttempt, action preparedactions.Action) (ExecutionOutcome, error) {
 	// The local executor is a simulator with no external effects. A delete
 	// (compensation) is a simulated no-op that still flows through the governed
 	// path with its own binding — it just does not touch a real system.
@@ -39,7 +39,7 @@ func (e *LocalCalendarExecutor) Execute(ctx context.Context, tenantID string, vi
 			},
 		}, nil
 	}
-	resourceID, err := e.repo.CreateLocalCalendarEvent(ctx, tenantID, virployeeID, attempt, action)
+	resourceID, err := e.repo.CreateLocalCalendarEvent(ctx, orgID, virployeeID, attempt, action)
 	if err != nil {
 		return ExecutionOutcome{Mode: "local"}, err
 	}
@@ -76,25 +76,25 @@ func resultBool(m map[string]any, key string) bool {
 	return v
 }
 
-func (u *UseCases) ExecuteApprovedAction(ctx context.Context, tenantID string, id, approvalID uuid.UUID) (runtraces.Trace, error) {
-	tenantID = normalizeTenantID(tenantID)
+func (u *UseCases) ExecuteApprovedAction(ctx context.Context, orgID string, id, approvalID uuid.UUID) (runtraces.Trace, error) {
+	orgID = normalizeOrgID(orgID)
 	if u.approvals == nil {
 		return runtraces.Trace{}, domainerr.Conflict("approval reader is not configured")
 	}
 	if u.executionRepo == nil {
 		return runtraces.Trace{}, domainerr.Conflict("execution repository is not configured")
 	}
-	if _, err := u.repo.Get(ctx, tenantID, id); err != nil {
+	if _, err := u.repo.Get(ctx, orgID, id); err != nil {
 		return runtraces.Trace{}, err
 	}
-	approval, err := u.approvals.GetApproval(ctx, tenantID, approvalID)
+	approval, err := u.approvals.GetApproval(ctx, orgID, approvalID)
 	if err != nil {
 		return runtraces.Trace{}, err
 	}
 	if strings.TrimSpace(approval.Status) != "approved" || strings.TrimSpace(approval.RequesterID) != id.String() {
 		return runtraces.Trace{}, domainerr.Conflict("approval is not executable for this virployee")
 	}
-	prepared, err := u.executionRepo.GetPreparedActionByApproval(ctx, tenantID, id, approvalID)
+	prepared, err := u.executionRepo.GetPreparedActionByApproval(ctx, orgID, id, approvalID)
 	if err != nil {
 		if domainerr.IsNotFound(err) {
 			return runtraces.Trace{}, domainerr.Conflict("approval has no durable prepared action")
@@ -111,14 +111,14 @@ func (u *UseCases) ExecuteApprovedAction(ctx context.Context, tenantID string, i
 	if err != nil || payloadHash != prepared.PayloadHash {
 		return runtraces.Trace{}, domainerr.Conflict("prepared action payload does not match its approved hash")
 	}
-	currentVirployee, currentCapability, err := u.verifyCurrentExecutionEligibility(ctx, tenantID, id, prepared.CapabilityKey, prepared.Action)
+	currentVirployee, currentCapability, err := u.verifyCurrentExecutionEligibility(ctx, orgID, id, prepared.CapabilityKey, prepared.Action)
 	if err != nil {
 		return runtraces.Trace{}, err
 	}
-	if err := u.verifyCurrentProfessionalActionScope(ctx, tenantID, id, currentVirployee.JobRoleID, prepared.CapabilityKey, prepared.Action); err != nil {
+	if err := u.verifyCurrentProfessionalActionScope(ctx, orgID, id, currentVirployee.JobRoleID, prepared.CapabilityKey, prepared.Action); err != nil {
 		return runtraces.Trace{}, err
 	}
-	if err := u.verifyPreparedAssistContext(ctx, tenantID, id, prepared.Action.AssistContext); err != nil {
+	if err := u.verifyPreparedAssistContext(ctx, orgID, id, prepared.Action.AssistContext); err != nil {
 		return runtraces.Trace{}, err
 	}
 	if prepared.Action.MCPContext != nil {
@@ -129,7 +129,7 @@ func (u *UseCases) ExecuteApprovedAction(ctx context.Context, tenantID string, i
 			return runtraces.Trace{}, err
 		}
 	}
-	currentAuthority, err := u.verifyCurrentAuthority(ctx, tenantID, id, currentCapability, prepared.Action, prepared.AuthorityBindingHash)
+	currentAuthority, err := u.verifyCurrentAuthority(ctx, orgID, id, currentCapability, prepared.Action, prepared.AuthorityBindingHash)
 	if err != nil {
 		return runtraces.Trace{}, err
 	}
@@ -138,7 +138,7 @@ func (u *UseCases) ExecuteApprovedAction(ctx context.Context, tenantID string, i
 			return runtraces.Trace{}, domainerr.Conflict("governance revalidation is unavailable")
 		}
 		revalidation, err := u.governanceRevalidator.Revalidate(ctx, executiongate.GovernanceRevalidationInput{
-			TenantID: tenantID, CheckID: prepared.GovernanceCheckID.String(), BindingHash: prepared.BindingHash,
+			OrgID: orgID, CheckID: prepared.GovernanceCheckID.String(), BindingHash: prepared.BindingHash,
 			PolicySnapshotHash: approval.PolicySnapshotHash, AuthorityBindingHash: currentAuthority.SnapshotHash,
 			ScopeRevision: currentAuthority.ScopeRevision, PolicyRevisionHash: currentAuthority.PolicyRevisionHash,
 			DelegationID: currentAuthority.DelegationID, DelegationRevision: currentAuthority.DelegationRevision,
@@ -154,11 +154,11 @@ func (u *UseCases) ExecuteApprovedAction(ctx context.Context, tenantID string, i
 	if executor == nil {
 		return runtraces.Trace{}, domainerr.Conflict("executor is not configured for prepared action")
 	}
-	idempotencyKey := runtraces.HashString(fmt.Sprintf("%s:%s:%s:%s", tenantID, approvalID, prepared.BindingHash, prepared.Action.Action))
-	if err := u.consumeQuota(ctx, quotaKey(tenantID, "axis", "executors"), idempotencyKey, "prepared_action", prepared.ID.String(), 1); err != nil {
+	idempotencyKey := runtraces.HashString(fmt.Sprintf("%s:%s:%s:%s", orgID, approvalID, prepared.BindingHash, prepared.Action.Action))
+	if err := u.consumeQuota(ctx, quotaKey(orgID, "axis", "executors"), idempotencyKey, "prepared_action", prepared.ID.String(), 1); err != nil {
 		return runtraces.Trace{}, err
 	}
-	attempt, created, err := u.executionRepo.BeginExecution(ctx, tenantID, id, prepared.ID, idempotencyKey)
+	attempt, created, err := u.executionRepo.BeginExecution(ctx, orgID, id, prepared.ID, idempotencyKey)
 	if err != nil {
 		return runtraces.Trace{}, err
 	}
@@ -167,7 +167,7 @@ func (u *UseCases) ExecuteApprovedAction(ctx context.Context, tenantID string, i
 	}
 	if created {
 		started := time.Now()
-		outcome, executeErr := executor.Execute(ctx, tenantID, id, attempt, prepared.Action)
+		outcome, executeErr := executor.Execute(ctx, orgID, id, attempt, prepared.Action)
 		durationMS := time.Since(started).Milliseconds()
 		status := "succeeded"
 		errorMessage := ""
@@ -186,25 +186,25 @@ func (u *UseCases) ExecuteApprovedAction(ctx context.Context, tenantID string, i
 			status = "failed"
 			errorMessage = runtraces.RedactText(executeErr.Error())
 		}
-		attempt, err = u.executionRepo.CompleteExecution(ctx, tenantID, attempt.ID, status, resourceID, result, errorMessage, durationMS)
+		attempt, err = u.executionRepo.CompleteExecution(ctx, orgID, attempt.ID, status, resourceID, result, errorMessage, durationMS)
 		if err != nil {
 			return runtraces.Trace{}, err
 		}
 		// Record the real execution in the tamper-evident ledger (best-effort:
 		// emitted once, on the created attempt, so idempotent re-entry does not
 		// duplicate it). Keyed by binding_hash — no external payload/PII.
-		u.emitExecutionAudit(ctx, tenantID, id, prepared.BindingHash, prepared.Action.Action, prepared.GovernanceCheckID.String(), attempt)
+		u.emitExecutionAudit(ctx, orgID, id, prepared.BindingHash, prepared.Action.Action, prepared.GovernanceCheckID.String(), attempt)
 	}
 	// Delivery to Nexus is asynchronous. CompleteExecution atomically created the
 	// outbox message and NexusReportStatus is its backwards-compatible projection.
 	reportStatus := attempt.NexusReportStatus
-	if existing, err := u.executionRepo.FindExecutionTraceByApproval(ctx, tenantID, id, approvalID.String()); err == nil {
+	if existing, err := u.executionRepo.FindExecutionTraceByApproval(ctx, orgID, id, approvalID.String()); err == nil {
 		existing.ExecutionResult.NexusReportStatus = reportStatus
 		return existing, nil
 	} else if !domainerr.IsNotFound(err) {
 		return runtraces.Trace{}, err
 	}
-	source, err := u.repo.FindExecutionGateTraceByApproval(ctx, tenantID, id, approvalID.String())
+	source, err := u.repo.FindExecutionGateTraceByApproval(ctx, orgID, id, approvalID.String())
 	if err != nil {
 		return runtraces.Trace{}, err
 	}
@@ -220,7 +220,7 @@ func (u *UseCases) ExecuteApprovedAction(ctx context.Context, tenantID string, i
 	if attempt.Status == "failed" {
 		message = attempt.Error
 	}
-	return u.repo.CreateRunTrace(ctx, tenantID, runtraces.CreateInput{
+	return u.repo.CreateRunTrace(ctx, orgID, runtraces.CreateInput{
 		VirployeeID: id, Operation: runtraces.OperationExecution, Input: source.InputPreview,
 		InputHash: source.InputHash, InputPreview: source.InputPreview, Intent: source.Intent,
 		CapabilityID: source.CapabilityID, CapabilityKey: source.CapabilityKey,
@@ -238,7 +238,7 @@ func (u *UseCases) ExecuteApprovedAction(ctx context.Context, tenantID string, i
 // emitExecutionAudit records a governed execution in the tamper-evident ledger
 // (Nexus). Best-effort: an audit sink failure never fails the execution. Keyed
 // by binding_hash so it chains alongside the virployee's other events.
-func (u *UseCases) emitExecutionAudit(ctx context.Context, tenantID string, virployeeID uuid.UUID, bindingHash, capabilityKey, governanceCheckID string, attempt ExecutionAttempt) {
+func (u *UseCases) emitExecutionAudit(ctx context.Context, orgID string, virployeeID uuid.UUID, bindingHash, capabilityKey, governanceCheckID string, attempt ExecutionAttempt) {
 	if u.auditEmitter == nil {
 		return
 	}
@@ -260,7 +260,7 @@ func (u *UseCases) emitExecutionAudit(ctx context.Context, tenantID string, virp
 		data["resource_id"] = attempt.ResourceID
 	}
 	if err := u.auditEmitter.AppendAuditEvent(ctx, AuditEventInput{
-		TenantID:    tenantID,
+		OrgID:       orgID,
 		VirployeeID: virployeeID.String(),
 		ActorType:   "virployee",
 		ActorID:     virployeeID.String(),
@@ -271,6 +271,6 @@ func (u *UseCases) emitExecutionAudit(ctx context.Context, tenantID string, virp
 		Data:        data,
 	}); err != nil {
 		slog.ErrorContext(ctx, "audit emit failed for execution",
-			"error", err, "tenant_id", tenantID, "virployee_id", virployeeID.String(), "binding_hash", bindingHash)
+			"error", err, "org_id", orgID, "virployee_id", virployeeID.String(), "binding_hash", bindingHash)
 	}
 }

@@ -17,7 +17,7 @@ func (a coordinationQueueAdapter) EnqueueConsultation(ctx context.Context, item 
 		return err
 	}
 	deadline := time.Now().UTC().Add(timeout)
-	_, _, err = a.repository.Enqueue(ctx, jobs.EnqueueInput{TenantID: item.TenantID, ProductSurface: "companion", Kind: virployees.JobKindSpecialistConsult,
+	_, _, err = a.repository.Enqueue(ctx, jobs.EnqueueInput{OrgID: item.OrgID, ProductSurface: "companion", Kind: virployees.JobKindSpecialistConsult,
 		ShardKey: item.RootRunID.String(), DedupeKey: item.ID.String(), Payload: payload, MaxAttempts: 3, Timeout: timeout, DeadlineAt: &deadline})
 	return err
 }
@@ -27,7 +27,7 @@ func (a coordinationQueueAdapter) EnqueueReconcile(ctx context.Context, plan vir
 	if err != nil {
 		return err
 	}
-	_, _, err = a.repository.Enqueue(ctx, jobs.EnqueueInput{TenantID: plan.TenantID, ProductSurface: "companion", Kind: virployees.JobKindOrchestrationReconcile,
+	_, _, err = a.repository.Enqueue(ctx, jobs.EnqueueInput{OrgID: plan.OrgID, ProductSurface: "companion", Kind: virployees.JobKindOrchestrationReconcile,
 		ShardKey: plan.RootRunID.String(), DedupeKey: plan.ID.String() + ":reconcile:" + trigger, Payload: payload, MaxAttempts: 3, Timeout: 30 * time.Second, DeadlineAt: &plan.DeadlineAt})
 	return err
 }
@@ -37,7 +37,7 @@ func (a coordinationQueueAdapter) EnqueueSynthesis(ctx context.Context, plan vir
 	if err != nil {
 		return err
 	}
-	_, _, err = a.repository.Enqueue(ctx, jobs.EnqueueInput{TenantID: plan.TenantID, ProductSurface: "companion", Kind: virployees.JobKindOrchestrationSynthesis,
+	_, _, err = a.repository.Enqueue(ctx, jobs.EnqueueInput{OrgID: plan.OrgID, ProductSurface: "companion", Kind: virployees.JobKindOrchestrationSynthesis,
 		ShardKey: plan.RootRunID.String(), DedupeKey: plan.ID.String() + ":synthesis", Payload: payload, MaxAttempts: 3, Timeout: 2 * time.Minute, DeadlineAt: &plan.DeadlineAt})
 	return err
 }

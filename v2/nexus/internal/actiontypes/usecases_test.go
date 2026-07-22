@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func TestUseCasesCreateNormalizesTenant(t *testing.T) {
+func TestUseCasesCreateNormalizesOrg(t *testing.T) {
 	repo := newFakeActionTypeRepo()
 	uc := NewUseCases(repo)
 
@@ -22,18 +22,18 @@ func TestUseCasesCreateNormalizesTenant(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
-	if out.TenantID != DefaultTenantID {
-		t.Fatalf("tenant id = %q, want %q", out.TenantID, DefaultTenantID)
+	if out.OrgID != DefaultOrgID {
+		t.Fatalf("organization id = %q, want %q", out.OrgID, DefaultOrgID)
 	}
 	if out.RiskClass != domain.RiskClassMedium {
 		t.Fatalf("risk class = %q, want medium", out.RiskClass)
 	}
 }
 
-func TestUseCasesTenantIsolation(t *testing.T) {
+func TestUseCasesOrgIsolation(t *testing.T) {
 	repo := newFakeActionTypeRepo()
 	uc := NewUseCases(repo)
-	_, err := uc.Create(context.Background(), "tenant-a", domain.CreateInput{
+	_, err := uc.Create(context.Background(), "organization-a", domain.CreateInput{
 		ActionTypeKey: "calendar.events.create",
 		Name:          "Create event",
 	})
@@ -41,13 +41,13 @@ func TestUseCasesTenantIsolation(t *testing.T) {
 		t.Fatalf("Create() error = %v", err)
 	}
 
-	_, err = uc.GetByKey(context.Background(), "tenant-b", "calendar.events.create")
+	_, err = uc.GetByKey(context.Background(), "organization-b", "calendar.events.create")
 	if !domainerr.IsNotFound(err) {
-		t.Fatalf("expected not found for other tenant, got %v", err)
+		t.Fatalf("expected not found for other organization, got %v", err)
 	}
 }
 
-func TestUseCasesGetByKeyFallsBackToDefaultTenant(t *testing.T) {
+func TestUseCasesGetByKeyFallsBackToDefaultOrg(t *testing.T) {
 	repo := newFakeActionTypeRepo()
 	uc := NewUseCases(repo)
 	_, err := uc.Create(context.Background(), "", domain.CreateInput{
@@ -59,12 +59,12 @@ func TestUseCasesGetByKeyFallsBackToDefaultTenant(t *testing.T) {
 		t.Fatalf("Create() error = %v", err)
 	}
 
-	out, err := uc.GetByKey(context.Background(), "tenant-a", "calendar.events.delete")
+	out, err := uc.GetByKey(context.Background(), "organization-a", "calendar.events.delete")
 	if err != nil {
 		t.Fatalf("GetByKey() error = %v", err)
 	}
-	if out.TenantID != DefaultTenantID {
-		t.Fatalf("fallback tenant id = %q, want %q", out.TenantID, DefaultTenantID)
+	if out.OrgID != DefaultOrgID {
+		t.Fatalf("fallback organization id = %q, want %q", out.OrgID, DefaultOrgID)
 	}
 	if out.RiskClass != domain.RiskClassHigh {
 		t.Fatalf("risk class = %q, want high", out.RiskClass)
@@ -79,12 +79,12 @@ func newFakeActionTypeRepo() *fakeActionTypeRepo {
 	return &fakeActionTypeRepo{rows: map[uuid.UUID]domain.ActionType{}}
 }
 
-func (r *fakeActionTypeRepo) Create(_ context.Context, tenantID string, input domain.NormalizedCreateInput) (domain.ActionType, error) {
+func (r *fakeActionTypeRepo) Create(_ context.Context, orgID string, input domain.NormalizedCreateInput) (domain.ActionType, error) {
 	id := uuid.New()
 	now := time.Now().UTC()
 	row := domain.ActionType{
 		ID:            id,
-		TenantID:      tenantID,
+		OrgID:         orgID,
 		ActionTypeKey: input.ActionTypeKey,
 		Name:          input.Name,
 		Description:   input.Description,
@@ -98,36 +98,36 @@ func (r *fakeActionTypeRepo) Create(_ context.Context, tenantID string, input do
 	return row, nil
 }
 
-func (r *fakeActionTypeRepo) List(_ context.Context, tenantID string) ([]domain.ActionType, error) {
+func (r *fakeActionTypeRepo) List(_ context.Context, orgID string) ([]domain.ActionType, error) {
 	out := []domain.ActionType{}
 	for _, row := range r.rows {
-		if row.TenantID == tenantID {
+		if row.OrgID == orgID {
 			out = append(out, row)
 		}
 	}
 	return out, nil
 }
 
-func (r *fakeActionTypeRepo) Get(_ context.Context, tenantID string, id uuid.UUID) (domain.ActionType, error) {
+func (r *fakeActionTypeRepo) Get(_ context.Context, orgID string, id uuid.UUID) (domain.ActionType, error) {
 	row, ok := r.rows[id]
-	if !ok || row.TenantID != tenantID {
+	if !ok || row.OrgID != orgID {
 		return domain.ActionType{}, domainerr.NotFound("action type not found")
 	}
 	return row, nil
 }
 
-func (r *fakeActionTypeRepo) GetByKey(_ context.Context, tenantID string, key string) (domain.ActionType, error) {
+func (r *fakeActionTypeRepo) GetByKey(_ context.Context, orgID string, key string) (domain.ActionType, error) {
 	for _, row := range r.rows {
-		if row.TenantID == tenantID && row.ActionTypeKey == key {
+		if row.OrgID == orgID && row.ActionTypeKey == key {
 			return row, nil
 		}
 	}
 	return domain.ActionType{}, domainerr.NotFound("action type not found")
 }
 
-func (r *fakeActionTypeRepo) Update(_ context.Context, tenantID string, id uuid.UUID, input domain.NormalizedUpdateInput) (domain.ActionType, error) {
+func (r *fakeActionTypeRepo) Update(_ context.Context, orgID string, id uuid.UUID, input domain.NormalizedUpdateInput) (domain.ActionType, error) {
 	row, ok := r.rows[id]
-	if !ok || row.TenantID != tenantID {
+	if !ok || row.OrgID != orgID {
 		return domain.ActionType{}, domainerr.NotFound("action type not found")
 	}
 	row.Name = input.Name

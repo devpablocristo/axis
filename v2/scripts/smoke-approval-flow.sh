@@ -25,11 +25,12 @@ session="$(
     -H "X-Axis-Org-ID: $DEV_ORG_ID"
 )"
 
-TENANT_ID="$(jq -r '.org_id as $orgID | ([.tenants[]? | select(.org_id == $orgID)][0].id // .tenants[0].id // empty)' <<<"$session")"
+ORG_ID="$(jq -r '.organizations[0].id // .org_id // empty' <<<"$session")"
+PRODUCT_SURFACE="$(jq -r '.organizations[0].products[0].product_surface // "axis"' <<<"$session")"
 PRINCIPAL_ID="$(jq -r '.principal_id // .actor_id // empty' <<<"$session")"
 
-if [[ -z "$TENANT_ID" || -z "$PRINCIPAL_ID" ]]; then
-  echo "could not resolve dev tenant/principal from /api/session" >&2
+if [[ -z "$ORG_ID" || -z "$PRINCIPAL_ID" ]]; then
+  echo "could not resolve dev organization/principal from /api/session" >&2
   echo "$session" >&2
   exit 1
 fi
@@ -42,12 +43,14 @@ api() {
   if [[ -n "$body" ]]; then
     curl -sS --fail-with-body -X "$method" "$BFF_URL$path" \
       -H "Content-Type: application/json" \
-      -H "X-Tenant-ID: $TENANT_ID" \
+      -H "X-Org-ID: $ORG_ID" \
+      -H "X-Product-Surface: $PRODUCT_SURFACE" \
       -H "X-Actor-ID: $PRINCIPAL_ID" \
       -d "$body"
   else
     curl -sS --fail-with-body -X "$method" "$BFF_URL$path" \
-      -H "X-Tenant-ID: $TENANT_ID" \
+      -H "X-Org-ID: $ORG_ID" \
+      -H "X-Product-Surface: $PRODUCT_SURFACE" \
       -H "X-Actor-ID: $PRINCIPAL_ID"
   fi
 }
@@ -156,7 +159,7 @@ ensure_capability() {
         input_schema: {type: "object"},
         output_schema: {type: "object"},
         required_scopes: [$scope],
-        idempotency: (if $side == "write" then {mode: "required", key_fields: ["tenant_id", "virployee_id", "binding_hash"]} else {mode: "not_applicable", key_fields: []} end),
+        idempotency: (if $side == "write" then {mode: "required", key_fields: ["org_id", "virployee_id", "binding_hash"]} else {mode: "not_applicable", key_fields: []} end),
         rollback_mode: (if $side == "write" then "manual" else "none" end),
         timeout_ms: 30000,
         retry: {max_attempts: 3, backoff_ms: 1000},
@@ -279,7 +282,7 @@ latest_runs() {
   api GET "/api/virployees/$virployee_id/runs?limit=20"
 }
 
-echo "tenant: $TENANT_ID"
+echo "organization: $ORG_ID"
 
 ensure_quota_policy "inbound"
 ensure_quota_policy "llm"

@@ -209,7 +209,7 @@ func (s *LocalStore) resolveRelative(relative string) (string, error) {
 
 func localObjectPath(scope Scope, manifest Manifest) string {
 	identity := strings.Join([]string{
-		scope.TenantID, scope.VirployeeID.String(), scope.ProductSurface, scope.SubjectID,
+		scope.OrgID, scope.VirployeeID.String(), scope.ProductSurface, scope.SubjectID,
 		scope.RepositoryGeneration, manifest.DocumentID, strings.ToLower(strings.TrimSpace(manifest.SHA256)),
 	}, "\x00")
 	sum := sha256.Sum256([]byte(identity))

@@ -18,14 +18,14 @@ import (
 const enrichTimeout = 15 * time.Second
 
 type RepositoryPort interface {
-	Create(ctx context.Context, tenantID string, input NormalizedCreateInput) (Proposal, error)
-	List(ctx context.Context, tenantID, status string, virployeeID *uuid.UUID) ([]Proposal, error)
-	Get(ctx context.Context, tenantID string, id uuid.UUID) (Proposal, error)
-	Decide(ctx context.Context, tenantID string, id uuid.UUID, status, decidedBy string, memoryID *uuid.UUID) (Proposal, error)
-	AttachMemory(ctx context.Context, tenantID string, id, memoryID uuid.UUID) (Proposal, error)
-	Candidates(ctx context.Context, tenantID string, minExecutions int) ([]Candidate, error)
-	LatestForPair(ctx context.Context, tenantID string, virployeeID uuid.UUID, capabilityKey string) (*Proposal, error)
-	SuccessfulExecutionTraceIDs(ctx context.Context, tenantID string, virployeeID uuid.UUID, capabilityKey string, limit int) ([]string, error)
+	Create(ctx context.Context, orgID string, input NormalizedCreateInput) (Proposal, error)
+	List(ctx context.Context, orgID, status string, virployeeID *uuid.UUID) ([]Proposal, error)
+	Get(ctx context.Context, orgID string, id uuid.UUID) (Proposal, error)
+	Decide(ctx context.Context, orgID string, id uuid.UUID, status, decidedBy string, memoryID *uuid.UUID) (Proposal, error)
+	AttachMemory(ctx context.Context, orgID string, id, memoryID uuid.UUID) (Proposal, error)
+	Candidates(ctx context.Context, orgID string, minExecutions int) ([]Candidate, error)
+	LatestForPair(ctx context.Context, orgID string, virployeeID uuid.UUID, capabilityKey string) (*Proposal, error)
+	SuccessfulExecutionTraceIDs(ctx context.Context, orgID string, virployeeID uuid.UUID, capabilityKey string, limit int) ([]string, error)
 }
 
 const (
@@ -91,24 +91,24 @@ func (u *UseCases) SetProcedureEnricher(enricher ProcedureEnricher) {
 // Ingest files a proposal into the inbox as pending. It is the ONLY entry
 // point for proposals (analyzer in PR2, LLM enricher in PR5) and never touches
 // memories: installation happens exclusively through the human Accept (PR3).
-func (u *UseCases) Ingest(ctx context.Context, tenantID string, input CreateInput) (Proposal, error) {
+func (u *UseCases) Ingest(ctx context.Context, orgID string, input CreateInput) (Proposal, error) {
 	normalized, err := NormalizeCreateInput(input)
 	if err != nil {
 		return Proposal{}, err
 	}
-	return u.repo.Create(ctx, tenantID, normalized)
+	return u.repo.Create(ctx, orgID, normalized)
 }
 
-func (u *UseCases) List(ctx context.Context, tenantID, statusFilter string, virployeeID *uuid.UUID) ([]Proposal, error) {
+func (u *UseCases) List(ctx context.Context, orgID, statusFilter string, virployeeID *uuid.UUID) ([]Proposal, error) {
 	status, err := NormalizeStatusFilter(statusFilter)
 	if err != nil {
 		return nil, err
 	}
-	return u.repo.List(ctx, tenantID, status, virployeeID)
+	return u.repo.List(ctx, orgID, status, virployeeID)
 }
 
-func (u *UseCases) Get(ctx context.Context, tenantID string, id uuid.UUID) (Proposal, error) {
-	return u.repo.Get(ctx, tenantID, id)
+func (u *UseCases) Get(ctx context.Context, orgID string, id uuid.UUID) (Proposal, error) {
+	return u.repo.Get(ctx, orgID, id)
 }
 
 // AcceptResult carries the accepted proposal and the eval that gated it.
@@ -135,23 +135,23 @@ func acceptedEvalReport() EvalReport {
 // proposal that ended dismissed, and only one caller ever installs. If the
 // install fails after the claim, the proposal stays accepted with no memory id
 // and a retry self-heals (the accepted branch re-installs). Idempotent.
-func (u *UseCases) Accept(ctx context.Context, tenantID string, id uuid.UUID, actor, role string) (AcceptResult, error) {
+func (u *UseCases) Accept(ctx context.Context, orgID string, id uuid.UUID, actor, role string) (AcceptResult, error) {
 	actor = orDefaultActor(actor)
 	// Fail closed before any mutation: without these the gate is not enforceable.
 	if u.memory == nil || u.authz == nil {
 		return AcceptResult{}, domainerr.Validation("learning accept is not fully configured")
 	}
-	proposal, err := u.repo.Get(ctx, tenantID, id)
+	proposal, err := u.repo.Get(ctx, orgID, id)
 	if err != nil {
 		return AcceptResult{}, err
 	}
-	if err := u.authz.Authorize(ctx, tenantID, proposal.VirployeeID, actor, role); err != nil {
+	if err := u.authz.Authorize(ctx, orgID, proposal.VirployeeID, actor, role); err != nil {
 		return AcceptResult{}, err
 	}
 
 	switch proposal.Status {
 	case StatusAccepted:
-		return u.ensureInstalled(ctx, tenantID, proposal, actor, acceptedEvalReport())
+		return u.ensureInstalled(ctx, orgID, proposal, actor, acceptedEvalReport())
 	case StatusDismissed:
 		return AcceptResult{}, domainerr.Validation("cannot accept a dismissed proposal")
 	}
@@ -165,34 +165,34 @@ func (u *UseCases) Accept(ctx context.Context, tenantID string, id uuid.UUID, ac
 	}
 
 	// Claim the transition first (atomic, single winner). Only the winner installs.
-	claimed, err := u.repo.Decide(ctx, tenantID, id, StatusAccepted, actor, nil)
+	claimed, err := u.repo.Decide(ctx, orgID, id, StatusAccepted, actor, nil)
 	if err != nil {
 		if domainerr.IsConflict(err) {
 			// Lost the race. Resolve against the latest state.
-			latest, gErr := u.repo.Get(ctx, tenantID, id)
+			latest, gErr := u.repo.Get(ctx, orgID, id)
 			if gErr != nil {
 				return AcceptResult{}, gErr
 			}
 			if latest.Status == StatusAccepted {
-				return u.ensureInstalled(ctx, tenantID, latest, actor, acceptedEvalReport())
+				return u.ensureInstalled(ctx, orgID, latest, actor, acceptedEvalReport())
 			}
 			return AcceptResult{}, domainerr.Conflict("proposal is no longer pending")
 		}
 		return AcceptResult{}, err
 	}
-	return u.ensureInstalled(ctx, tenantID, claimed, actor, report)
+	return u.ensureInstalled(ctx, orgID, claimed, actor, report)
 }
 
 // ensureInstalled installs the procedure memory for an already-accepted
 // proposal and pins its id. It is idempotent: if the memory id is already
 // pinned it returns immediately, and a memory-dedup conflict is treated as
 // already-installed.
-func (u *UseCases) ensureInstalled(ctx context.Context, tenantID string, proposal Proposal, actor string, report EvalReport) (AcceptResult, error) {
+func (u *UseCases) ensureInstalled(ctx context.Context, orgID string, proposal Proposal, actor string, report EvalReport) (AcceptResult, error) {
 	if proposal.MemoryID != nil {
 		return AcceptResult{Proposal: proposal, Eval: report}, nil
 	}
 	source := "learning-proposal:" + proposal.ID.String()
-	memoryID, err := u.memory.InstallProcedure(ctx, tenantID, proposal.VirployeeID, actor, source, proposal.Title, proposal.Content)
+	memoryID, err := u.memory.InstallProcedure(ctx, orgID, proposal.VirployeeID, actor, source, proposal.Title, proposal.Content)
 	if err != nil {
 		if domainerr.IsConflict(err) {
 			// An equivalent active memory already exists; treat as installed.
@@ -203,7 +203,7 @@ func (u *UseCases) ensureInstalled(ctx context.Context, tenantID string, proposa
 		// accepted branch and self-heals.
 		return AcceptResult{Proposal: proposal, Eval: report}, err
 	}
-	if attached, aErr := u.repo.AttachMemory(ctx, tenantID, proposal.ID, memoryID); aErr == nil {
+	if attached, aErr := u.repo.AttachMemory(ctx, orgID, proposal.ID, memoryID); aErr == nil {
 		proposal = attached
 	} else {
 		proposal.MemoryID = &memoryID
@@ -214,16 +214,16 @@ func (u *UseCases) ensureInstalled(ctx context.Context, tenantID string, proposa
 // Dismiss discards a pending proposal. Idempotent; an accepted proposal cannot
 // be dismissed (it is already a memory — dismissing would not remove it).
 // Authorized as a human memory decision for the target virployee.
-func (u *UseCases) Dismiss(ctx context.Context, tenantID string, id uuid.UUID, actor, role string) (Proposal, error) {
+func (u *UseCases) Dismiss(ctx context.Context, orgID string, id uuid.UUID, actor, role string) (Proposal, error) {
 	actor = orDefaultActor(actor)
 	if u.authz == nil {
 		return Proposal{}, domainerr.Validation("learning dismiss is not fully configured")
 	}
-	proposal, err := u.repo.Get(ctx, tenantID, id)
+	proposal, err := u.repo.Get(ctx, orgID, id)
 	if err != nil {
 		return Proposal{}, err
 	}
-	if err := u.authz.Authorize(ctx, tenantID, proposal.VirployeeID, actor, role); err != nil {
+	if err := u.authz.Authorize(ctx, orgID, proposal.VirployeeID, actor, role); err != nil {
 		return Proposal{}, err
 	}
 	switch proposal.Status {
@@ -232,7 +232,7 @@ func (u *UseCases) Dismiss(ctx context.Context, tenantID string, id uuid.UUID, a
 	case StatusAccepted:
 		return Proposal{}, domainerr.Validation("cannot dismiss an accepted proposal")
 	}
-	return u.repo.Decide(ctx, tenantID, id, StatusDismissed, actor, nil)
+	return u.repo.Decide(ctx, orgID, id, StatusDismissed, actor, nil)
 }
 
 func orDefaultActor(actor string) string {
@@ -260,14 +260,14 @@ type ScanResult struct {
 	Proposals  []ProposalRef `json:"proposals"`
 }
 
-// Scan runs the tenant-scoped analyzer: find (virployee, capability) pairs
+// Scan runs the organization-scoped analyzer: find (virployee, capability) pairs
 // with enough successful executions and file a proposal for each, unless the
 // pair already has a pending/accepted proposal (or a dismissal with no new
 // evidence since). Deterministic — no LLM involved. The per-call override can
 // only RAISE the configured threshold: thresholds are governance configuration
 // (gate G4.1) and a caller must not be able to lower the floor and flood the
 // review inbox with one-run "learnings".
-func (u *UseCases) Scan(ctx context.Context, tenantID string, minExecutions int) (ScanResult, error) {
+func (u *UseCases) Scan(ctx context.Context, orgID string, minExecutions int) (ScanResult, error) {
 	if minExecutions < 0 {
 		return ScanResult{}, domainerr.Validation("min_executions must be at least 1")
 	}
@@ -276,7 +276,7 @@ func (u *UseCases) Scan(ctx context.Context, tenantID string, minExecutions int)
 		threshold = minExecutions
 	}
 
-	candidates, err := u.repo.Candidates(ctx, tenantID, threshold)
+	candidates, err := u.repo.Candidates(ctx, orgID, threshold)
 	if err != nil {
 		return ScanResult{}, err
 	}
@@ -287,7 +287,7 @@ func (u *UseCases) Scan(ctx context.Context, tenantID string, minExecutions int)
 			result.Skipped++
 			continue
 		}
-		latest, err := u.repo.LatestForPair(ctx, tenantID, virployeeID, candidate.CapabilityKey)
+		latest, err := u.repo.LatestForPair(ctx, orgID, virployeeID, candidate.CapabilityKey)
 		if err != nil {
 			return ScanResult{}, err
 		}
@@ -295,14 +295,14 @@ func (u *UseCases) Scan(ctx context.Context, tenantID string, minExecutions int)
 			result.Skipped++
 			continue
 		}
-		sources, err := u.repo.SuccessfulExecutionTraceIDs(ctx, tenantID, virployeeID, candidate.CapabilityKey, maxSourceTraceIDs)
+		sources, err := u.repo.SuccessfulExecutionTraceIDs(ctx, orgID, virployeeID, candidate.CapabilityKey, maxSourceTraceIDs)
 		if err != nil {
 			return ScanResult{}, err
 		}
 		title, content := Distill(candidate)
 		evidence := BuildEvidence(candidate)
-		title, content, proposedBy := u.applyEnrichment(ctx, tenantID, candidate, title, content, evidence)
-		proposal, err := u.Ingest(ctx, tenantID, CreateInput{
+		title, content, proposedBy := u.applyEnrichment(ctx, orgID, candidate, title, content, evidence)
+		proposal, err := u.Ingest(ctx, orgID, CreateInput{
 			VirployeeID:        virployeeID,
 			CapabilityKey:      candidate.CapabilityKey,
 			Title:              title,
@@ -340,7 +340,7 @@ func (u *UseCases) Scan(ctx context.Context, tenantID string, minExecutions int)
 // ProposedByAnalyzer. Only a clean, usable rewrite is used (ProposedByLLM), with
 // the model/prompt recorded in evidence. It only shapes the proposal's wording;
 // the human Accept gate and eval are unchanged.
-func (u *UseCases) applyEnrichment(ctx context.Context, tenantID string, candidate Candidate, title, content string, evidence map[string]any) (string, string, string) {
+func (u *UseCases) applyEnrichment(ctx context.Context, orgID string, candidate Candidate, title, content string, evidence map[string]any) (string, string, string) {
 	if u.enricher == nil {
 		return title, content, ProposedByAnalyzer
 	}
@@ -348,7 +348,7 @@ func (u *UseCases) applyEnrichment(ctx context.Context, tenantID string, candida
 	reservedUnits := int64(len(title)+len(content)+3)/4 + 2048
 	if u.quota != nil {
 		if _, err := u.quota.Consume(ctx, quotas.ConsumeRequest{
-			Key:            quotas.Key{TenantID: tenantID, ProductSurface: "axis", Area: quotas.AreaLLM},
+			Key:            quotas.Key{OrgID: orgID, ProductSurface: "axis", Area: quotas.AreaLLM},
 			IdempotencyKey: idempotencyKey, SubjectType: "learning_candidate", SubjectID: candidate.VirployeeID, Units: reservedUnits,
 		}); err != nil {
 			slog.WarnContext(ctx, "learning_enrich_quota_exceeded_fallback_deterministic")
@@ -379,7 +379,7 @@ func (u *UseCases) applyEnrichment(ctx context.Context, tenantID string, candida
 	}
 	if u.ledger != nil {
 		_ = u.ledger.RecordUsage(ctx, quotas.Usage{
-			Key:            quotas.Key{TenantID: tenantID, ProductSurface: "axis", Area: quotas.AreaLLM},
+			Key:            quotas.Key{OrgID: orgID, ProductSurface: "axis", Area: quotas.AreaLLM},
 			IdempotencyKey: idempotencyKey + ":actual", SubjectType: "learning_candidate", SubjectID: candidate.VirployeeID,
 			Units: out.InputTokens + out.OutputTokens, Model: out.ModelID, EstimatedCostMicroUSD: out.EstimatedCostMicroUSD,
 			Metadata: map[string]any{"input_tokens": out.InputTokens, "output_tokens": out.OutputTokens, "estimated": true},

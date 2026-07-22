@@ -1,21 +1,25 @@
 import { parsePaginatedResponse, type PaginatedList as PlatformPaginatedList } from '@devpablocristo/platform-browser/crud'
 
 export type LifecycleTimestamp = string | null
-export type TenantState = 'active' | 'archived' | 'trashed'
+export type OrgState = 'active' | 'archived' | 'trashed'
 
-export type Tenant = {
+export type OrganizationProduct = {
   id: string
-  org_id: string
-  org_name: string
   product_surface: string
-  product_name: string
+  name: string
   status: string
-  state: TenantState
+  state: OrgState
   created_at: string
   updated_at: string
   archived_at: LifecycleTimestamp
   trashed_at: LifecycleTimestamp
   purge_after: LifecycleTimestamp
+}
+
+export type SessionOrganization = {
+  id: string
+  name: string
+  products: OrganizationProduct[]
 }
 
 export type AxisUser = {
@@ -30,7 +34,7 @@ export type Session = {
   org_id: string
   auth_method: string
   user: AxisUser
-  tenants: Tenant[]
+  organizations: SessionOrganization[]
 }
 
 export type AxisOrg = {
@@ -39,9 +43,9 @@ export type AxisOrg = {
   provider: string
   provider_org_id: string
   status: string
-  state: TenantState
-  tenant_count: number
-  has_tenants: boolean
+  state: OrgState
+  product_count: number
+  has_products: boolean
   created_at: string
   updated_at: string
   archived_at: LifecycleTimestamp
@@ -58,7 +62,7 @@ export type Product = {
   product_surface: string
   name: string
   status: string
-  state: TenantState
+  state: OrgState
   created_at: string
   updated_at: string
   archived_at: LifecycleTimestamp
@@ -108,7 +112,7 @@ export type Approval = {
 
 export type AssistCase = {
 	id: string
-	tenant_id: string
+	org_id: string
 	product_surface: string
 	assist_type: string
 	subject_id: string
@@ -124,7 +128,7 @@ export type WorkSubjectKind = 'person' | 'organization' | 'team' | 'patient' | '
 
 export type WorkSubject = {
 	id: string
-	tenant_id: string
+	org_id: string
 	kind: WorkSubjectKind
 	display_name: string
 	external_ref: string
@@ -137,7 +141,7 @@ export type WorkSubjectInput = Pick<WorkSubject, 'kind' | 'display_name' | 'exte
 
 export type RoutingPool = {
 	id: string
-	tenant_id: string
+	org_id: string
 	job_role_id: string
 	name: string
 	state: 'active' | 'archived'
@@ -157,7 +161,7 @@ export type RoutingPoolMember = {
 
 export type ContinuityAssignment = {
 	id: string
-	tenant_id: string
+	org_id: string
 	pool_id: string
 	subject_id: string
 	virployee_id: string
@@ -174,7 +178,7 @@ export type MCPPolicyRule = {
 }
 
 export type MCPPolicy = {
-	tenant_id: string
+	org_id: string
 	enabled: boolean
 	kill_switch: boolean
 	allowed_capabilities: string[]
@@ -214,7 +218,7 @@ export type MCPTool = {
 export type MCPInvocationAudit = {
 	id: string
 	context: {
-		tenant_id: string
+		org_id: string
 		actor_id: string
 		virployee_id: string
 		subject_id: string
@@ -359,7 +363,7 @@ export type ProfessionalPolicyRules = {
 
 export type ProfessionalPolicyPack = {
 	id: string
-	tenant_id: string
+	org_id: string
 	policy_key: string
 	name: string
 	version: number
@@ -400,19 +404,19 @@ export type VirployeeDelegation = {
 
 export type FunctionalRoleDefinition = { key: 'policy_admin' | 'approver' | 'auditor' | 'delegation_admin'; description: string; permissions: string[] }
 export type FunctionalRoleGrant = {
-	id: string; tenant_id: string; user_id: string; role_key: FunctionalRoleDefinition['key']; product_surface?: string
+	id: string; org_id: string; user_id: string; role_key: FunctionalRoleDefinition['key']; product_surface?: string
 	action_type_pattern: string; resource_type?: string; resource_id?: string; max_risk_class: 'low' | 'medium' | 'high' | 'critical'
 	valid_from: string; valid_until: string; revision: number; granted_by: string; revoked_at?: string; revoked_by?: string
 	revocation_reason?: string; created_at: string; updated_at: string
 }
 export type GovernancePolicyVersion = {
-	id: string; tenant_id: string; policy_id: string; version: number; state: 'draft' | 'shadow' | 'active' | 'retired'
+	id: string; org_id: string; policy_id: string; version: number; state: 'draft' | 'shadow' | 'active' | 'retired'
 	product_surface?: string; action_type_pattern: string; target_system?: string; requester_type?: string; expression: string
 	effect: 'allow' | 'deny' | 'require_approval'; risk_override?: '' | 'low' | 'medium' | 'high' | 'critical'; priority: number
 	content_hash: string; created_by: string; created_at: string; retired_at?: string
 }
 export type GovernancePolicy = {
-	id: string; tenant_id: string; policy_key: string; name: string; description: string; created_by: string
+	id: string; org_id: string; policy_key: string; name: string; description: string; created_by: string
 	created_at: string; updated_at: string; versions?: GovernancePolicyVersion[]
 }
 export type GovernancePolicySimulation = {
@@ -434,7 +438,7 @@ export type GovernancePolicyChange = {
 
 export type Handoff = {
 	id: string
-	tenant_id: string
+	org_id: string
 	case_id: string
 	source_run_id?: string
 	from_virployee_id: string
@@ -452,7 +456,7 @@ export type Handoff = {
 
 export type HumanReview = {
 	id: string
-	tenant_id: string
+	org_id: string
 	case_id: string
 	root_run_id: string
 	handoff_id?: string
@@ -468,7 +472,7 @@ export type HumanReview = {
 
 export type OrchestrationPolicy = {
 	id: string
-	tenant_id: string
+	org_id: string
 	product_surface: string
 	assist_type: string
 	entrypoint_virployee_id: string
@@ -487,7 +491,7 @@ export type OrchestrationPolicy = {
 
 export type SpecialistRoute = {
 	id: string
-	tenant_id: string
+	org_id: string
 	product_surface: string
 	assist_type: string
 	entrypoint_virployee_id: string
@@ -499,16 +503,6 @@ export type SpecialistRoute = {
 	version: number
 	created_at: string
 	updated_at: string
-}
-
-export type TenantInput = {
-	org_id?: string
-	org_name?: string
-	product_surface: string
-}
-
-export type TenantUpdateInput = {
-  org_name: string
 }
 
 export type VirployeeState = 'active' | 'archived' | 'trashed'
@@ -752,7 +746,7 @@ export type JobRoleSuccessCriterion = {
 
 export type JobRole = {
   id: string
-  tenant_id: string
+  org_id: string
   name: string
   slug: string
   mission: string
@@ -804,7 +798,7 @@ export type CapabilityConformanceReport = {
 
 export type Capability = {
   id: string
-  tenant_id: string
+  org_id: string
   capability_key: string
   name: string
   description: string
@@ -850,7 +844,7 @@ export type ProfileTemplateState = 'active' | 'archived' | 'trashed'
 
 export type ProfileTemplate = {
   id: string
-  tenant_id: string
+  org_id: string
   name: string
   description: string
   system_prompt: string
@@ -871,15 +865,15 @@ export type ProfileTemplateInput = {
 }
 
 export type UserState = 'active' | 'archived' | 'trashed' | 'pending'
-export type TenantUserRole = 'owner' | 'admin' | 'member'
-export type TenantUserKind = 'user' | 'invitation'
+export type OrgUserRole = 'owner' | 'admin' | 'member'
+export type OrgUserKind = 'user' | 'invitation'
 
-export type TenantUser = {
+export type OrgUser = {
   id: string
-  kind: TenantUserKind
+  kind: OrgUserKind
   email: string
-  role: TenantUserRole
-  tenant_id: string
+  role: OrgUserRole
+  org_id: string
   state: UserState
   created_at: string
   updated_at: string
@@ -888,9 +882,9 @@ export type TenantUser = {
   purge_after: LifecycleTimestamp
 }
 
-export type TenantUserInput = {
+export type OrgUserInput = {
   email: string
-  role: TenantUserRole
+  role: OrgUserRole
 }
 
 type VirployeesListResponse = {
@@ -914,11 +908,7 @@ type ProfileTemplatesListResponse = {
 }
 
 type UsersListResponse = {
-  data: TenantUser[]
-}
-
-type TenantsListResponse = {
-  data: Tenant[]
+  data: OrgUser[]
 }
 
 type OrgsListResponse = {
@@ -938,7 +928,7 @@ type AutonomyLevelsResponse = {
 }
 
 export type AxisFetchInit = {
-  tenantId?: string
+  orgId?: string
   principalId?: string
   method?: string
   body?: unknown
@@ -949,9 +939,14 @@ export type AxisFetchInit = {
 type AxisAuthTokenGetter = () => string | null | undefined | Promise<string | null | undefined>
 
 let axisAuthTokenGetter: AxisAuthTokenGetter | null = null
+let axisProductSurface = ''
 
 export function setAxisAuthTokenGetter(getter: AxisAuthTokenGetter | null) {
   axisAuthTokenGetter = getter
+}
+
+export function setAxisProductSurface(productSurface: string) {
+  axisProductSurface = productSurface.trim()
 }
 
 export async function axisFetch<T>(path: string, init: AxisFetchInit = {}): Promise<T> {
@@ -959,9 +954,10 @@ export async function axisFetch<T>(path: string, init: AxisFetchInit = {}): Prom
   if (init.body !== undefined && init.rawBody === undefined) {
     headers.set('Content-Type', 'application/json')
   }
-  if (init.tenantId) {
-    headers.set('X-Tenant-ID', init.tenantId)
+  if (init.orgId) {
+    headers.set('X-Org-ID', init.orgId)
   }
+  if (axisProductSurface) headers.set('X-Product-Surface', axisProductSurface)
   if (init.principalId) {
     headers.set('X-Actor-ID', init.principalId)
   }
@@ -987,7 +983,8 @@ export async function axisFetch<T>(path: string, init: AxisFetchInit = {}): Prom
 
 export async function axisDownload(path: string, init: AxisFetchInit = {}): Promise<Blob> {
   const headers = new Headers(init.headers)
-  if (init.tenantId) headers.set('X-Tenant-ID', init.tenantId)
+  if (init.orgId) headers.set('X-Org-ID', init.orgId)
+  if (axisProductSurface) headers.set('X-Product-Surface', axisProductSurface)
   if (init.principalId) headers.set('X-Actor-ID', init.principalId)
   const token = await resolveAxisAuthToken()
   if (token) headers.set('Authorization', `Bearer ${token}`)
@@ -1000,18 +997,18 @@ export function getSession(): Promise<Session> {
   return axisFetch<Session>('/api/session')
 }
 
-export function listWorkSubjects(tenantId: string, principalId: string): Promise<WorkSubject[]> {
-	return axisFetch<{ data?: WorkSubject[] } | WorkSubject[]>('/api/work-subjects', { tenantId, principalId })
+export function listWorkSubjects(orgId: string, principalId: string): Promise<WorkSubject[]> {
+	return axisFetch<{ data?: WorkSubject[] } | WorkSubject[]>('/api/work-subjects', { orgId, principalId })
 		.then((payload) => Array.isArray(payload) ? payload : payload.data ?? [])
 }
 
-export function getMCPPolicy(tenantId: string, principalId: string): Promise<MCPPolicy> {
-	return axisFetch<MCPPolicy>('/api/runtime/mcp-policy', { tenantId, principalId })
+export function getMCPPolicy(orgId: string, principalId: string): Promise<MCPPolicy> {
+	return axisFetch<MCPPolicy>('/api/runtime/mcp-policy', { orgId, principalId })
 }
 
-export function putMCPPolicy(policy: MCPPolicy, tenantId: string, principalId: string): Promise<MCPPolicy> {
+export function putMCPPolicy(policy: MCPPolicy, orgId: string, principalId: string): Promise<MCPPolicy> {
 	return axisFetch<MCPPolicy>('/api/runtime/mcp-policy', {
-		method: 'PUT', tenantId, principalId,
+		method: 'PUT', orgId, principalId,
 		body: {
 			enabled: policy.enabled, kill_switch: policy.kill_switch,
 			allowed_capabilities: policy.allowed_capabilities, denied_capabilities: policy.denied_capabilities,
@@ -1023,23 +1020,23 @@ export function putMCPPolicy(policy: MCPPolicy, tenantId: string, principalId: s
 	})
 }
 
-export function listMCPInvocations(tenantId: string, principalId: string, virployeeId = ''): Promise<MCPInvocationAudit[]> {
+export function listMCPInvocations(orgId: string, principalId: string, virployeeId = ''): Promise<MCPInvocationAudit[]> {
 	const params = new URLSearchParams({ limit: '100' })
 	if (virployeeId) params.set('virployee_id', virployeeId)
-	return axisFetch<MCPInvocationAudit[]>(`/api/runtime/mcp-invocations?${params.toString()}`, { tenantId, principalId })
+	return axisFetch<MCPInvocationAudit[]>(`/api/runtime/mcp-invocations?${params.toString()}`, { orgId, principalId })
 }
 
-export function listMCPPolicyAudit(tenantId: string, principalId: string): Promise<MCPPolicyAudit[]> {
-	return axisFetch<MCPPolicyAudit[]>('/api/runtime/mcp-policy/audit?limit=50', { tenantId, principalId })
+export function listMCPPolicyAudit(orgId: string, principalId: string): Promise<MCPPolicyAudit[]> {
+	return axisFetch<MCPPolicyAudit[]>('/api/runtime/mcp-policy/audit?limit=50', { orgId, principalId })
 }
 
-export function listMCPTools(virployeeId: string, subjectId: string, caseId: string, tenantId: string, principalId: string): Promise<MCPTool[]> {
+export function listMCPTools(virployeeId: string, subjectId: string, caseId: string, orgId: string, principalId: string): Promise<MCPTool[]> {
 	return axisFetch<{
 		jsonrpc: string
 		result?: { tools?: MCPTool[] }
 		error?: { message?: string }
 	}>('/api/mcp', {
-		method: 'POST', tenantId, principalId,
+		method: 'POST', orgId, principalId,
 		headers: {
 			'X-Axis-Virployee-ID': virployeeId,
 			'X-Axis-Subject-ID': subjectId,
@@ -1052,64 +1049,64 @@ export function listMCPTools(virployeeId: string, subjectId: string, caseId: str
 	})
 }
 
-export function createWorkSubject(input: WorkSubjectInput, tenantId: string, principalId: string): Promise<WorkSubject> {
-	return axisFetch<WorkSubject>('/api/work-subjects', { method: 'POST', tenantId, principalId, body: input })
+export function createWorkSubject(input: WorkSubjectInput, orgId: string, principalId: string): Promise<WorkSubject> {
+	return axisFetch<WorkSubject>('/api/work-subjects', { method: 'POST', orgId, principalId, body: input })
 }
 
-export function updateWorkSubject(id: string, input: WorkSubjectInput, tenantId: string, principalId: string): Promise<WorkSubject> {
-	return axisFetch<WorkSubject>(`/api/work-subjects/${encodeURIComponent(id)}`, { method: 'PUT', tenantId, principalId, body: input })
+export function updateWorkSubject(id: string, input: WorkSubjectInput, orgId: string, principalId: string): Promise<WorkSubject> {
+	return axisFetch<WorkSubject>(`/api/work-subjects/${encodeURIComponent(id)}`, { method: 'PUT', orgId, principalId, body: input })
 }
 
-export function setWorkSubjectArchived(id: string, archived: boolean, tenantId: string, principalId: string): Promise<void> {
+export function setWorkSubjectArchived(id: string, archived: boolean, orgId: string, principalId: string): Promise<void> {
 	return axisFetch<void>(`/api/work-subjects/${encodeURIComponent(id)}/${archived ? 'archive' : 'unarchive'}`, {
-		method: 'POST', tenantId, principalId, body: { reason: 'console' },
+		method: 'POST', orgId, principalId, body: { reason: 'console' },
 	})
 }
 
-export function listKnowledgeBases(tenantId: string, principalId: string, state = 'active'): Promise<KnowledgeBase[]> {
+export function listKnowledgeBases(orgId: string, principalId: string, state = 'active'): Promise<KnowledgeBase[]> {
 	const params = new URLSearchParams({ state })
-	return axisFetch<{ data?: KnowledgeBase[] } | KnowledgeBase[]>(`/api/knowledge-bases?${params.toString()}`, { tenantId, principalId })
+	return axisFetch<{ data?: KnowledgeBase[] } | KnowledgeBase[]>(`/api/knowledge-bases?${params.toString()}`, { orgId, principalId })
 		.then((payload) => Array.isArray(payload) ? payload : payload.data ?? [])
 }
 
-export function createKnowledgeBase(input: Pick<KnowledgeBase, 'name' | 'description' | 'classification'>, tenantId: string, principalId: string): Promise<KnowledgeBase> {
-	return axisFetch<KnowledgeBase>('/api/knowledge-bases', { method: 'POST', tenantId, principalId, body: input })
+export function createKnowledgeBase(input: Pick<KnowledgeBase, 'name' | 'description' | 'classification'>, orgId: string, principalId: string): Promise<KnowledgeBase> {
+	return axisFetch<KnowledgeBase>('/api/knowledge-bases', { method: 'POST', orgId, principalId, body: input })
 }
 
-export function updateKnowledgeBase(id: string, input: Pick<KnowledgeBase, 'name' | 'description' | 'version'>, tenantId: string, principalId: string): Promise<KnowledgeBase> {
+export function updateKnowledgeBase(id: string, input: Pick<KnowledgeBase, 'name' | 'description' | 'version'>, orgId: string, principalId: string): Promise<KnowledgeBase> {
 	return axisFetch<KnowledgeBase>(`/api/knowledge-bases/${encodeURIComponent(id)}`, {
-		method: 'PUT', tenantId, principalId,
+		method: 'PUT', orgId, principalId,
 		body: { name: input.name, description: input.description, expected_version: input.version },
 	})
 }
 
-export function setKnowledgeBaseArchived(base: KnowledgeBase, archived: boolean, tenantId: string, principalId: string): Promise<KnowledgeBase> {
+export function setKnowledgeBaseArchived(base: KnowledgeBase, archived: boolean, orgId: string, principalId: string): Promise<KnowledgeBase> {
 	return axisFetch<KnowledgeBase>(`/api/knowledge-bases/${encodeURIComponent(base.id)}/${archived ? 'archive' : 'activate'}`, {
-		method: 'POST', tenantId, principalId, body: { expected_version: base.version },
+		method: 'POST', orgId, principalId, body: { expected_version: base.version },
 	})
 }
 
-export function listKnowledgeDocuments(baseId: string, tenantId: string, principalId: string): Promise<KnowledgeDocument[]> {
-	return axisFetch<{ data?: KnowledgeDocument[] } | KnowledgeDocument[]>(`/api/knowledge-bases/${encodeURIComponent(baseId)}/documents?state=active`, { tenantId, principalId })
+export function listKnowledgeDocuments(baseId: string, orgId: string, principalId: string): Promise<KnowledgeDocument[]> {
+	return axisFetch<{ data?: KnowledgeDocument[] } | KnowledgeDocument[]>(`/api/knowledge-bases/${encodeURIComponent(baseId)}/documents?state=active`, { orgId, principalId })
 		.then((payload) => Array.isArray(payload) ? payload : payload.data ?? [])
 }
 
-export function registerKnowledgeDocument(baseId: string, input: Pick<KnowledgeDocument, 'title' | 'artifact_scope'>, tenantId: string, principalId: string): Promise<KnowledgeDocument> {
+export function registerKnowledgeDocument(baseId: string, input: Pick<KnowledgeDocument, 'title' | 'artifact_scope'>, orgId: string, principalId: string): Promise<KnowledgeDocument> {
 	return axisFetch<KnowledgeDocument>(`/api/knowledge-bases/${encodeURIComponent(baseId)}/documents`, {
-		method: 'POST', tenantId, principalId, body: input,
+		method: 'POST', orgId, principalId, body: input,
 	})
 }
 
-export function ingestKnowledgeConnector(baseId: string, input: KnowledgeConnectorIngestion, tenantId: string, principalId: string): Promise<KnowledgeDocument> {
+export function ingestKnowledgeConnector(baseId: string, input: KnowledgeConnectorIngestion, orgId: string, principalId: string): Promise<KnowledgeDocument> {
 	return axisFetch<KnowledgeDocument>(`/api/knowledge-bases/${encodeURIComponent(baseId)}/ingestions/connector`, {
-		method: 'POST', tenantId, principalId, body: input,
+		method: 'POST', orgId, principalId, body: input,
 	})
 }
 
 export function uploadKnowledgeFile(
 	baseId: string,
 	input: { title?: string; target: KnowledgeIngestionTarget; file: File },
-	tenantId: string,
+	orgId: string,
 	principalId: string,
 ): Promise<KnowledgeDocument> {
 	const form = new FormData()
@@ -1119,30 +1116,30 @@ export function uploadKnowledgeFile(
 	form.set('document_id', input.target.document_id)
 	form.set('file', input.file, input.file.name)
 	return axisFetch<KnowledgeDocument>(`/api/knowledge-bases/${encodeURIComponent(baseId)}/ingestions/upload`, {
-		method: 'POST', tenantId, principalId, rawBody: form,
+		method: 'POST', orgId, principalId, rawBody: form,
 	})
 }
 
-export function archiveKnowledgeDocument(baseId: string, document: KnowledgeDocument, tenantId: string, principalId: string): Promise<KnowledgeDocument> {
+export function archiveKnowledgeDocument(baseId: string, document: KnowledgeDocument, orgId: string, principalId: string): Promise<KnowledgeDocument> {
 	return axisFetch<KnowledgeDocument>(`/api/knowledge-bases/${encodeURIComponent(baseId)}/documents/${encodeURIComponent(document.id)}/archive`, {
-		method: 'POST', tenantId, principalId, body: { expected_version: document.version },
+		method: 'POST', orgId, principalId, body: { expected_version: document.version },
 	})
 }
 
-export function listKnowledgeBindings(baseId: string, tenantId: string, principalId: string): Promise<KnowledgeBinding[]> {
-	return axisFetch<{ data?: KnowledgeBinding[] } | KnowledgeBinding[]>(`/api/knowledge-bases/${encodeURIComponent(baseId)}/bindings`, { tenantId, principalId })
+export function listKnowledgeBindings(baseId: string, orgId: string, principalId: string): Promise<KnowledgeBinding[]> {
+	return axisFetch<{ data?: KnowledgeBinding[] } | KnowledgeBinding[]>(`/api/knowledge-bases/${encodeURIComponent(baseId)}/bindings`, { orgId, principalId })
 		.then((payload) => Array.isArray(payload) ? payload : payload.data ?? [])
 }
 
-export function replaceKnowledgeBindings(base: KnowledgeBase, bindings: KnowledgeBindingInput[], tenantId: string, principalId: string): Promise<KnowledgeBinding[]> {
+export function replaceKnowledgeBindings(base: KnowledgeBase, bindings: KnowledgeBindingInput[], orgId: string, principalId: string): Promise<KnowledgeBinding[]> {
 	return axisFetch<{ data?: KnowledgeBinding[] }>(`/api/knowledge-bases/${encodeURIComponent(base.id)}/bindings`, {
-		method: 'PUT', tenantId, principalId, body: { expected_version: base.version, bindings },
+		method: 'PUT', orgId, principalId, body: { expected_version: base.version, bindings },
 	}).then((payload) => payload.data ?? [])
 }
 
 export function listVirployeeKnowledgeBases(
 	virployeeId: string,
-	tenantId: string,
+	orgId: string,
 	principalId: string,
 	preview?: { subjectId?: string; caseId?: string },
 ): Promise<VirployeeKnowledgeBase[]> {
@@ -1154,7 +1151,7 @@ export function listVirployeeKnowledgeBases(
 	}
 	const query = params.size > 0 ? `?${params.toString()}` : ''
 	return axisFetch<{ data?: VirployeeKnowledgeBase[] }>(`/api/virployees/${encodeURIComponent(virployeeId)}/knowledge-bases${query}`, {
-		tenantId,
+		orgId,
 		principalId,
 	}).then((payload) => payload.data ?? [])
 }
@@ -1163,194 +1160,194 @@ export function setVirployeeKnowledgeBase(
 	virployeeId: string,
 	base: KnowledgeBase,
 	enabled: boolean,
-	tenantId: string,
+	orgId: string,
 	principalId: string,
 ): Promise<VirployeeKnowledgeBase[]> {
 	return axisFetch<{ data?: VirployeeKnowledgeBase[] }>(`/api/virployees/${encodeURIComponent(virployeeId)}/knowledge-bases`, {
 		method: 'PUT',
-		tenantId,
+		orgId,
 		principalId,
 		body: { knowledge_base_id: base.id, expected_version: base.version, enabled },
 	}).then((payload) => payload.data ?? [])
 }
 
-export function listRoutingPools(tenantId: string, principalId: string): Promise<RoutingPool[]> {
-	return axisFetch<{ data?: RoutingPool[] } | RoutingPool[]>('/api/routing-pools', { tenantId, principalId })
+export function listRoutingPools(orgId: string, principalId: string): Promise<RoutingPool[]> {
+	return axisFetch<{ data?: RoutingPool[] } | RoutingPool[]>('/api/routing-pools', { orgId, principalId })
 		.then((payload) => Array.isArray(payload) ? payload : payload.data ?? [])
 }
 
-export function createRoutingPool(input: Pick<RoutingPool, 'job_role_id' | 'name'>, tenantId: string, principalId: string): Promise<RoutingPool> {
-	return axisFetch<RoutingPool>('/api/routing-pools', { method: 'POST', tenantId, principalId, body: input })
+export function createRoutingPool(input: Pick<RoutingPool, 'job_role_id' | 'name'>, orgId: string, principalId: string): Promise<RoutingPool> {
+	return axisFetch<RoutingPool>('/api/routing-pools', { method: 'POST', orgId, principalId, body: input })
 }
 
-export function updateRoutingPool(id: string, input: Pick<RoutingPool, 'job_role_id' | 'name'>, tenantId: string, principalId: string): Promise<RoutingPool> {
-	return axisFetch<RoutingPool>(`/api/routing-pools/${encodeURIComponent(id)}`, { method: 'PUT', tenantId, principalId, body: input })
+export function updateRoutingPool(id: string, input: Pick<RoutingPool, 'job_role_id' | 'name'>, orgId: string, principalId: string): Promise<RoutingPool> {
+	return axisFetch<RoutingPool>(`/api/routing-pools/${encodeURIComponent(id)}`, { method: 'PUT', orgId, principalId, body: input })
 }
 
-export function listRoutingPoolMembers(poolId: string, tenantId: string, principalId: string): Promise<RoutingPoolMember[]> {
-	return axisFetch<{ data?: RoutingPoolMember[] } | RoutingPoolMember[]>(`/api/routing-pools/${encodeURIComponent(poolId)}/members`, { tenantId, principalId })
+export function listRoutingPoolMembers(poolId: string, orgId: string, principalId: string): Promise<RoutingPoolMember[]> {
+	return axisFetch<{ data?: RoutingPoolMember[] } | RoutingPoolMember[]>(`/api/routing-pools/${encodeURIComponent(poolId)}/members`, { orgId, principalId })
 		.then((payload) => Array.isArray(payload) ? payload : payload.data ?? [])
 }
 
-export function putRoutingPoolMember(poolId: string, virployeeId: string, input: Pick<RoutingPoolMember, 'max_active_subjects' | 'enabled'>, tenantId: string, principalId: string): Promise<RoutingPoolMember> {
+export function putRoutingPoolMember(poolId: string, virployeeId: string, input: Pick<RoutingPoolMember, 'max_active_subjects' | 'enabled'>, orgId: string, principalId: string): Promise<RoutingPoolMember> {
 	return axisFetch<RoutingPoolMember>(`/api/routing-pools/${encodeURIComponent(poolId)}/members/${encodeURIComponent(virployeeId)}`, {
-		method: 'PUT', tenantId, principalId, body: input,
+		method: 'PUT', orgId, principalId, body: input,
 	})
 }
 
-export function resolveVirployeeRouting(poolId: string, subjectId: string, tenantId: string, principalId: string): Promise<RoutingResolution> {
+export function resolveVirployeeRouting(poolId: string, subjectId: string, orgId: string, principalId: string): Promise<RoutingResolution> {
 	return axisFetch<RoutingResolution>('/api/virployee-routing/resolve', {
-		method: 'POST', tenantId, principalId, body: { pool_id: poolId, subject_id: subjectId },
+		method: 'POST', orgId, principalId, body: { pool_id: poolId, subject_id: subjectId },
 	})
 }
 
-export function listContinuityAssignments(poolId: string, tenantId: string, principalId: string): Promise<ContinuityAssignment[]> {
+export function listContinuityAssignments(poolId: string, orgId: string, principalId: string): Promise<ContinuityAssignment[]> {
 	const params = new URLSearchParams({ pool_id: poolId })
-	return axisFetch<{ data?: ContinuityAssignment[] } | ContinuityAssignment[]>(`/api/virployee-routing/assignments?${params.toString()}`, { tenantId, principalId })
+	return axisFetch<{ data?: ContinuityAssignment[] } | ContinuityAssignment[]>(`/api/virployee-routing/assignments?${params.toString()}`, { orgId, principalId })
 		.then((payload) => Array.isArray(payload) ? payload : payload.data ?? [])
 }
 
 export function reassignContinuityAssignment(
 	assignmentId: string,
 	input: { virployee_id: string; expected_version: number; reason: string },
-	tenantId: string,
+	orgId: string,
 	principalId: string,
 ): Promise<ContinuityAssignment> {
 	return axisFetch<ContinuityAssignment>(`/api/virployee-routing/assignments/${encodeURIComponent(assignmentId)}/reassign`, {
-		method: 'POST', tenantId, principalId, body: input,
+		method: 'POST', orgId, principalId, body: input,
 	})
 }
 
-export function listVirployeeAssignments(virployeeId: string, tenantId: string, principalId: string): Promise<ContinuityAssignment[]> {
-	return axisFetch<{ data?: ContinuityAssignment[] } | ContinuityAssignment[]>(`/api/virployees/${encodeURIComponent(virployeeId)}/assignments`, { tenantId, principalId })
+export function listVirployeeAssignments(virployeeId: string, orgId: string, principalId: string): Promise<ContinuityAssignment[]> {
+	return axisFetch<{ data?: ContinuityAssignment[] } | ContinuityAssignment[]>(`/api/virployees/${encodeURIComponent(virployeeId)}/assignments`, { orgId, principalId })
 		.then((payload) => Array.isArray(payload) ? payload : payload.data ?? [])
 }
 
-export function getVirployeeRelationships(virployeeId: string, tenantId: string, principalId: string): Promise<WorkRelationship[]> {
-	return axisFetch<{ data?: WorkRelationship[] }>(`/api/virployees/${encodeURIComponent(virployeeId)}/relationships`, { tenantId, principalId })
+export function getVirployeeRelationships(virployeeId: string, orgId: string, principalId: string): Promise<WorkRelationship[]> {
+	return axisFetch<{ data?: WorkRelationship[] }>(`/api/virployees/${encodeURIComponent(virployeeId)}/relationships`, { orgId, principalId })
 		.then((payload) => payload.data ?? [])
 }
 
-export function putVirployeeRelationships(virployeeId: string, relationships: WorkRelationshipInput[], tenantId: string, principalId: string): Promise<WorkRelationship[]> {
+export function putVirployeeRelationships(virployeeId: string, relationships: WorkRelationshipInput[], orgId: string, principalId: string): Promise<WorkRelationship[]> {
 	return axisFetch<{ data?: WorkRelationship[] }>(`/api/virployees/${encodeURIComponent(virployeeId)}/relationships`, {
-		method: 'PUT', tenantId, principalId, body: { relationships },
+		method: 'PUT', orgId, principalId, body: { relationships },
 	}).then((payload) => payload.data ?? [])
 }
 
-export function getVirployeeScopePolicy(virployeeId: string, tenantId: string, principalId: string): Promise<VirployeeScopePolicy> {
-	return axisFetch<VirployeeScopePolicy>(`/api/virployees/${encodeURIComponent(virployeeId)}/scope-policy`, { tenantId, principalId })
+export function getVirployeeScopePolicy(virployeeId: string, orgId: string, principalId: string): Promise<VirployeeScopePolicy> {
+	return axisFetch<VirployeeScopePolicy>(`/api/virployees/${encodeURIComponent(virployeeId)}/scope-policy`, { orgId, principalId })
 }
 
-export function putVirployeeScopePolicy(virployeeId: string, input: Pick<VirployeeScopePolicy, 'allowed_topics' | 'prohibited_topics' | 'out_of_scope' | 'revision'>, tenantId: string, principalId: string): Promise<VirployeeScopePolicy> {
+export function putVirployeeScopePolicy(virployeeId: string, input: Pick<VirployeeScopePolicy, 'allowed_topics' | 'prohibited_topics' | 'out_of_scope' | 'revision'>, orgId: string, principalId: string): Promise<VirployeeScopePolicy> {
 	return axisFetch<VirployeeScopePolicy>(`/api/virployees/${encodeURIComponent(virployeeId)}/scope-policy`, {
-		method: 'PUT', tenantId, principalId,
+		method: 'PUT', orgId, principalId,
 		body: { allowed_topics: input.allowed_topics, prohibited_topics: input.prohibited_topics, out_of_scope: input.out_of_scope, expected_revision: input.revision },
 	})
 }
 
-export function listProfessionalPolicyPacks(tenantId: string, principalId: string): Promise<ProfessionalPolicyPack[]> {
-	return axisFetch<{ data?: ProfessionalPolicyPack[] } | ProfessionalPolicyPack[]>('/api/professional-policy-packs', { tenantId, principalId })
+export function listProfessionalPolicyPacks(orgId: string, principalId: string): Promise<ProfessionalPolicyPack[]> {
+	return axisFetch<{ data?: ProfessionalPolicyPack[] } | ProfessionalPolicyPack[]>('/api/professional-policy-packs', { orgId, principalId })
 		.then((payload) => Array.isArray(payload) ? payload : payload.data ?? [])
 }
 
-export function createProfessionalPolicyPack(input: Omit<ProfessionalPolicyPack, 'id' | 'tenant_id' | 'created_at' | 'updated_at'>, tenantId: string, principalId: string): Promise<ProfessionalPolicyPack> {
-	return axisFetch<ProfessionalPolicyPack>('/api/professional-policy-packs', { method: 'POST', tenantId, principalId, body: input })
+export function createProfessionalPolicyPack(input: Omit<ProfessionalPolicyPack, 'id' | 'org_id' | 'created_at' | 'updated_at'>, orgId: string, principalId: string): Promise<ProfessionalPolicyPack> {
+	return axisFetch<ProfessionalPolicyPack>('/api/professional-policy-packs', { method: 'POST', orgId, principalId, body: input })
 }
 
-export function getVirployeeProfessionalPolicyBinding(virployeeId: string, tenantId: string, principalId: string): Promise<ProfessionalPolicyBinding> {
-	return axisFetch<ProfessionalPolicyBinding>(`/api/virployees/${encodeURIComponent(virployeeId)}/professional-policy-packs`, { tenantId, principalId })
+export function getVirployeeProfessionalPolicyBinding(virployeeId: string, orgId: string, principalId: string): Promise<ProfessionalPolicyBinding> {
+	return axisFetch<ProfessionalPolicyBinding>(`/api/virployees/${encodeURIComponent(virployeeId)}/professional-policy-packs`, { orgId, principalId })
 }
 
-export function putVirployeeProfessionalPolicyBinding(virployeeId: string, binding: ProfessionalPolicyBinding, tenantId: string, principalId: string): Promise<ProfessionalPolicyBinding> {
+export function putVirployeeProfessionalPolicyBinding(virployeeId: string, binding: ProfessionalPolicyBinding, orgId: string, principalId: string): Promise<ProfessionalPolicyBinding> {
 	return axisFetch<ProfessionalPolicyBinding>(`/api/virployees/${encodeURIComponent(virployeeId)}/professional-policy-packs`, {
-		method: 'PUT', tenantId, principalId, body: { policy_pack_ids: binding.policy_pack_ids, expected_revision: binding.revision },
+		method: 'PUT', orgId, principalId, body: { policy_pack_ids: binding.policy_pack_ids, expected_revision: binding.revision },
 	})
 }
 
-export function listVirployeeDelegations(virployeeId: string, tenantId: string, principalId: string, principalIds: string[] = []): Promise<VirployeeDelegation[]> {
+export function listVirployeeDelegations(virployeeId: string, orgId: string, principalId: string, principalIds: string[] = []): Promise<VirployeeDelegation[]> {
 	const params = new URLSearchParams()
 	for (const id of principalIds) if (id) params.append('principal_id', id)
 	const query = params.size > 0 ? `?${params.toString()}` : ''
-	return axisFetch<{ data?: VirployeeDelegation[] } | VirployeeDelegation[]>(`/api/virployees/${encodeURIComponent(virployeeId)}/delegations${query}`, { tenantId, principalId })
+	return axisFetch<{ data?: VirployeeDelegation[] } | VirployeeDelegation[]>(`/api/virployees/${encodeURIComponent(virployeeId)}/delegations${query}`, { orgId, principalId })
 		.then((payload) => Array.isArray(payload) ? payload : payload.data ?? [])
 }
 
-export function createVirployeeDelegation(virployeeId: string, input: Pick<VirployeeDelegation, 'principal_type' | 'principal_id' | 'capability_scopes' | 'product_scopes' | 'resource_scopes' | 'max_risk_class' | 'purpose' | 'valid_until'> & { valid_from?: string }, tenantId: string, principalId: string): Promise<VirployeeDelegation> {
+export function createVirployeeDelegation(virployeeId: string, input: Pick<VirployeeDelegation, 'principal_type' | 'principal_id' | 'capability_scopes' | 'product_scopes' | 'resource_scopes' | 'max_risk_class' | 'purpose' | 'valid_until'> & { valid_from?: string }, orgId: string, principalId: string): Promise<VirployeeDelegation> {
 	return axisFetch<VirployeeDelegation>(`/api/virployees/${encodeURIComponent(virployeeId)}/delegations`, {
-		method: 'POST', tenantId, principalId, body: input,
+		method: 'POST', orgId, principalId, body: input,
 	})
 }
 
-export function reviewVirployeeDelegation(virployeeId: string, delegationId: string, expectedRevision: number, note: string, tenantId: string, principalId: string): Promise<VirployeeDelegation> {
+export function reviewVirployeeDelegation(virployeeId: string, delegationId: string, expectedRevision: number, note: string, orgId: string, principalId: string): Promise<VirployeeDelegation> {
 	return axisFetch<VirployeeDelegation>(`/api/virployees/${encodeURIComponent(virployeeId)}/delegations/${encodeURIComponent(delegationId)}/review`, {
-		method: 'POST', tenantId, principalId, body: { expected_revision: expectedRevision, note },
+		method: 'POST', orgId, principalId, body: { expected_revision: expectedRevision, note },
 	})
 }
 
-export function listFunctionalRoleDefinitions(tenantId: string, principalId: string): Promise<FunctionalRoleDefinition[]> {
-	return axisFetch<FunctionalRoleDefinition[]>('/api/role-definitions', { tenantId, principalId })
+export function listFunctionalRoleDefinitions(orgId: string, principalId: string): Promise<FunctionalRoleDefinition[]> {
+	return axisFetch<FunctionalRoleDefinition[]>('/api/role-definitions', { orgId, principalId })
 }
 
-export function listFunctionalRoleGrants(tenantId: string, principalId: string): Promise<FunctionalRoleGrant[]> {
-	return axisFetch<FunctionalRoleGrant[]>('/api/role-grants', { tenantId, principalId })
+export function listFunctionalRoleGrants(orgId: string, principalId: string): Promise<FunctionalRoleGrant[]> {
+	return axisFetch<FunctionalRoleGrant[]>('/api/role-grants', { orgId, principalId })
 }
 
-export function createFunctionalRoleGrant(input: Omit<FunctionalRoleGrant, 'id' | 'tenant_id' | 'revision' | 'granted_by' | 'created_at' | 'updated_at' | 'revoked_at' | 'revoked_by' | 'revocation_reason'>, tenantId: string, principalId: string): Promise<FunctionalRoleGrant> {
-	return axisFetch<FunctionalRoleGrant>('/api/role-grants', { method: 'POST', tenantId, principalId, body: input })
+export function createFunctionalRoleGrant(input: Omit<FunctionalRoleGrant, 'id' | 'org_id' | 'revision' | 'granted_by' | 'created_at' | 'updated_at' | 'revoked_at' | 'revoked_by' | 'revocation_reason'>, orgId: string, principalId: string): Promise<FunctionalRoleGrant> {
+	return axisFetch<FunctionalRoleGrant>('/api/role-grants', { method: 'POST', orgId, principalId, body: input })
 }
 
-export function revokeFunctionalRoleGrant(id: string, revision: number, tenantId: string, principalId: string): Promise<FunctionalRoleGrant> {
-	return axisFetch<FunctionalRoleGrant>(`/api/role-grants/${encodeURIComponent(id)}/revoke`, { method: 'POST', tenantId, principalId, body: { expected_revision: revision, reason: 'console' } })
+export function revokeFunctionalRoleGrant(id: string, revision: number, orgId: string, principalId: string): Promise<FunctionalRoleGrant> {
+	return axisFetch<FunctionalRoleGrant>(`/api/role-grants/${encodeURIComponent(id)}/revoke`, { method: 'POST', orgId, principalId, body: { expected_revision: revision, reason: 'console' } })
 }
 
-export function listGovernancePolicies(tenantId: string, principalId: string): Promise<GovernancePolicy[]> {
-	return axisFetch<GovernancePolicy[]>('/api/governance-policies', { tenantId, principalId })
+export function listGovernancePolicies(orgId: string, principalId: string): Promise<GovernancePolicy[]> {
+	return axisFetch<GovernancePolicy[]>('/api/governance-policies', { orgId, principalId })
 }
 
-export function getGovernancePolicy(id: string, tenantId: string, principalId: string): Promise<GovernancePolicy> {
-	return axisFetch<GovernancePolicy>(`/api/governance-policies/${encodeURIComponent(id)}`, { tenantId, principalId })
+export function getGovernancePolicy(id: string, orgId: string, principalId: string): Promise<GovernancePolicy> {
+	return axisFetch<GovernancePolicy>(`/api/governance-policies/${encodeURIComponent(id)}`, { orgId, principalId })
 }
 
-export function createGovernancePolicy(input: Pick<GovernancePolicy, 'policy_key' | 'name' | 'description'>, tenantId: string, principalId: string): Promise<GovernancePolicy> {
-	return axisFetch<GovernancePolicy>('/api/governance-policies', { method: 'POST', tenantId, principalId, body: input })
+export function createGovernancePolicy(input: Pick<GovernancePolicy, 'policy_key' | 'name' | 'description'>, orgId: string, principalId: string): Promise<GovernancePolicy> {
+	return axisFetch<GovernancePolicy>('/api/governance-policies', { method: 'POST', orgId, principalId, body: input })
 }
 
-export function createGovernancePolicyVersion(policyId: string, input: Pick<GovernancePolicyVersion, 'product_surface' | 'action_type_pattern' | 'target_system' | 'requester_type' | 'expression' | 'effect' | 'risk_override' | 'priority'>, tenantId: string, principalId: string): Promise<GovernancePolicyVersion> {
-	return axisFetch<GovernancePolicyVersion>(`/api/governance-policies/${encodeURIComponent(policyId)}/versions`, { method: 'POST', tenantId, principalId, body: input })
+export function createGovernancePolicyVersion(policyId: string, input: Pick<GovernancePolicyVersion, 'product_surface' | 'action_type_pattern' | 'target_system' | 'requester_type' | 'expression' | 'effect' | 'risk_override' | 'priority'>, orgId: string, principalId: string): Promise<GovernancePolicyVersion> {
+	return axisFetch<GovernancePolicyVersion>(`/api/governance-policies/${encodeURIComponent(policyId)}/versions`, { method: 'POST', orgId, principalId, body: input })
 }
 
-export function simulateGovernancePolicyVersion(id: string, tenantId: string, principalId: string): Promise<GovernancePolicySimulation> {
-	return axisFetch<GovernancePolicySimulation>(`/api/governance-policy-versions/${encodeURIComponent(id)}/simulate`, { method: 'POST', tenantId, principalId, body: {} })
+export function simulateGovernancePolicyVersion(id: string, orgId: string, principalId: string): Promise<GovernancePolicySimulation> {
+	return axisFetch<GovernancePolicySimulation>(`/api/governance-policy-versions/${encodeURIComponent(id)}/simulate`, { method: 'POST', orgId, principalId, body: {} })
 }
 
-export function requestGovernancePolicyPromotion(id: string, simulationId: string, targetState: 'shadow' | 'active', tenantId: string, principalId: string): Promise<GovernancePolicyPromotion> {
-	return axisFetch<GovernancePolicyPromotion>(`/api/governance-policy-versions/${encodeURIComponent(id)}/promotions`, { method: 'POST', tenantId, principalId, body: { simulation_id: simulationId, target_state: targetState } })
+export function requestGovernancePolicyPromotion(id: string, simulationId: string, targetState: 'shadow' | 'active', orgId: string, principalId: string): Promise<GovernancePolicyPromotion> {
+	return axisFetch<GovernancePolicyPromotion>(`/api/governance-policy-versions/${encodeURIComponent(id)}/promotions`, { method: 'POST', orgId, principalId, body: { simulation_id: simulationId, target_state: targetState } })
 }
 
-export function listGovernancePolicyPromotions(tenantId: string, principalId: string): Promise<GovernancePolicyPromotion[]> {
-	return axisFetch<GovernancePolicyPromotion[]>('/api/governance-policy-promotions?limit=200', { tenantId, principalId })
+export function listGovernancePolicyPromotions(orgId: string, principalId: string): Promise<GovernancePolicyPromotion[]> {
+	return axisFetch<GovernancePolicyPromotion[]>('/api/governance-policy-promotions?limit=200', { orgId, principalId })
 }
 
-export function decideGovernancePolicyPromotion(id: string, decision: 'approve' | 'reject', tenantId: string, principalId: string): Promise<GovernancePolicyPromotion> {
-	return axisFetch<GovernancePolicyPromotion>(`/api/governance-policy-promotions/${encodeURIComponent(id)}/${decision}`, { method: 'POST', tenantId, principalId, body: { reason: 'console' } })
+export function decideGovernancePolicyPromotion(id: string, decision: 'approve' | 'reject', orgId: string, principalId: string): Promise<GovernancePolicyPromotion> {
+	return axisFetch<GovernancePolicyPromotion>(`/api/governance-policy-promotions/${encodeURIComponent(id)}/${decision}`, { method: 'POST', orgId, principalId, body: { reason: 'console' } })
 }
 
-export function listGovernancePolicyEvaluations(tenantId: string, principalId: string): Promise<GovernancePolicyEvaluation[]> {
-	return axisFetch<GovernancePolicyEvaluation[]>('/api/governance-policy-evaluations?limit=200', { tenantId, principalId })
+export function listGovernancePolicyEvaluations(orgId: string, principalId: string): Promise<GovernancePolicyEvaluation[]> {
+	return axisFetch<GovernancePolicyEvaluation[]>('/api/governance-policy-evaluations?limit=200', { orgId, principalId })
 }
 
-export function listGovernancePolicyChanges(tenantId: string, principalId: string): Promise<GovernancePolicyChange[]> {
-	return axisFetch<GovernancePolicyChange[]>('/api/governance-policy-changelog?limit=200', { tenantId, principalId })
+export function listGovernancePolicyChanges(orgId: string, principalId: string): Promise<GovernancePolicyChange[]> {
+	return axisFetch<GovernancePolicyChange[]>('/api/governance-policy-changelog?limit=200', { orgId, principalId })
 }
 
-export function revokeVirployeeDelegation(virployeeId: string, delegationId: string, expectedRevision: number, tenantId: string, principalId: string): Promise<VirployeeDelegation> {
+export function revokeVirployeeDelegation(virployeeId: string, delegationId: string, expectedRevision: number, orgId: string, principalId: string): Promise<VirployeeDelegation> {
 	return axisFetch<VirployeeDelegation>(`/api/virployees/${encodeURIComponent(virployeeId)}/delegations/${encodeURIComponent(delegationId)}/revoke`, {
-		method: 'POST', tenantId, principalId, body: { expected_revision: expectedRevision, reason: 'console' },
+		method: 'POST', orgId, principalId, body: { expected_revision: expectedRevision, reason: 'console' },
 	})
 }
 
 export function listAssistCases(
-	tenantId: string,
+	orgId: string,
 	principalId: string,
 	filters: { subjectId?: string; ownerVirployeeId?: string; caseId?: string } = {},
 ): Promise<AssistCase[]> {
@@ -1358,94 +1355,83 @@ export function listAssistCases(
 	if (filters.subjectId) params.set('subject_id', filters.subjectId)
 	if (filters.ownerVirployeeId) params.set('owner_virployee_id', filters.ownerVirployeeId)
 	if (filters.caseId) params.set('case_id', filters.caseId)
-	return axisFetch<AssistCase[]>(`/api/assist-cases?${params.toString()}`, { tenantId, principalId })
+	return axisFetch<AssistCase[]>(`/api/assist-cases?${params.toString()}`, { orgId, principalId })
 }
 
-export function listHandoffs(tenantId: string, principalId: string): Promise<Handoff[]> {
-	return axisFetch<Handoff[]>('/api/handoffs?limit=200', { tenantId, principalId })
+export function listHandoffs(orgId: string, principalId: string): Promise<Handoff[]> {
+	return axisFetch<Handoff[]>('/api/handoffs?limit=200', { orgId, principalId })
 }
 
 export function createHandoff(
 	input: { case_id: string; source_run_id?: string; to_virployee_id: string; reason_code: string; note?: string },
-	tenantId: string,
+	orgId: string,
 	principalId: string,
 ): Promise<Handoff> {
-	return axisFetch<Handoff>('/api/handoffs', { method: 'POST', tenantId, principalId, body: input })
+	return axisFetch<Handoff>('/api/handoffs', { method: 'POST', orgId, principalId, body: input })
 }
 
 export function decideHandoff(
 	id: string,
 	decision: 'accept' | 'reject' | 'cancel',
 	version: number,
-	tenantId: string,
+	orgId: string,
 	principalId: string,
 	note = '',
 ): Promise<Handoff> {
 	return axisFetch<Handoff>(`/api/handoffs/${encodeURIComponent(id)}/${decision}`, {
-		method: 'POST', tenantId, principalId, body: { version, note },
+		method: 'POST', orgId, principalId, body: { version, note },
 	})
 }
 
-export function listHumanReviews(tenantId: string, principalId: string): Promise<HumanReview[]> {
-	return axisFetch<HumanReview[]>('/api/human-reviews', { tenantId, principalId })
+export function listHumanReviews(orgId: string, principalId: string): Promise<HumanReview[]> {
+	return axisFetch<HumanReview[]>('/api/human-reviews', { orgId, principalId })
 }
 
-export function claimHumanReview(id: string, tenantId: string, principalId: string): Promise<HumanReview> {
+export function claimHumanReview(id: string, orgId: string, principalId: string): Promise<HumanReview> {
 	return axisFetch<HumanReview>(`/api/human-reviews/${encodeURIComponent(id)}/claim`, {
-		method: 'POST', tenantId, principalId, body: {},
+		method: 'POST', orgId, principalId, body: {},
 	})
 }
 
 export function resolveHumanReview(
 	id: string,
 	outcome: 'handled_externally' | 'handoff_requested' | 'dismissed',
-	tenantId: string,
+	orgId: string,
 	principalId: string,
 	note = '',
 	handoffId = '',
 ): Promise<HumanReview> {
 	return axisFetch<HumanReview>(`/api/human-reviews/${encodeURIComponent(id)}/resolve`, {
-		method: 'POST', tenantId, principalId, body: { outcome, note, handoff_id: handoffId },
+		method: 'POST', orgId, principalId, body: { outcome, note, handoff_id: handoffId },
 	})
 }
 
-export function listOrchestrationPolicies(tenantId: string, principalId: string): Promise<OrchestrationPolicy[]> {
-	return axisFetch<OrchestrationPolicy[]>('/api/orchestration-policies', { tenantId, principalId })
+export function listOrchestrationPolicies(orgId: string, principalId: string): Promise<OrchestrationPolicy[]> {
+	return axisFetch<OrchestrationPolicy[]>('/api/orchestration-policies', { orgId, principalId })
 }
 
 export function upsertOrchestrationPolicy(
-	input: Omit<OrchestrationPolicy, 'id' | 'tenant_id' | 'version' | 'created_at' | 'updated_at' | 'max_depth'>,
-	tenantId: string,
+	input: Omit<OrchestrationPolicy, 'id' | 'org_id' | 'version' | 'created_at' | 'updated_at' | 'max_depth'>,
+	orgId: string,
 	principalId: string,
 ): Promise<OrchestrationPolicy> {
 	return axisFetch<OrchestrationPolicy>('/api/orchestration-policies', {
-		method: 'PUT', tenantId, principalId, body: input,
+		method: 'PUT', orgId, principalId, body: input,
 	})
 }
 
-export function listSpecialistRoutes(tenantId: string, principalId: string): Promise<SpecialistRoute[]> {
-	return axisFetch<SpecialistRoute[]>('/api/specialist-routes', { tenantId, principalId })
+export function listSpecialistRoutes(orgId: string, principalId: string): Promise<SpecialistRoute[]> {
+	return axisFetch<SpecialistRoute[]>('/api/specialist-routes', { orgId, principalId })
 }
 
 export function upsertSpecialistRoute(
-	input: Omit<SpecialistRoute, 'id' | 'tenant_id' | 'version' | 'created_at' | 'updated_at'>,
-	tenantId: string,
+	input: Omit<SpecialistRoute, 'id' | 'org_id' | 'version' | 'created_at' | 'updated_at'>,
+	orgId: string,
 	principalId: string,
 ): Promise<SpecialistRoute> {
 	return axisFetch<SpecialistRoute>('/api/specialist-routes', {
-		method: 'PUT', tenantId, principalId, body: input,
+		method: 'PUT', orgId, principalId, body: input,
 	})
-}
-
-export function listTenants(
-  lifecycle: 'active' | 'archived' | 'trash',
-  principalId: string,
-): Promise<Tenant[]> {
-  const path =
-    lifecycle === 'active'
-      ? '/api/tenants'
-      : `/api/tenants?lifecycle=${encodeURIComponent(lifecycle)}`
-  return axisFetch<TenantsListResponse>(path, { principalId }).then((payload) => payload.data ?? [])
 }
 
 export function listOrgs(
@@ -1500,65 +1486,67 @@ export function purgeOrg(id: string, principalId: string): Promise<void> {
 
 export function listProducts(
   lifecycle: 'active' | 'archived' | 'trash',
+  organizationId: string,
   principalId: string,
 ): Promise<Product[]> {
+  const base = `/api/organizations/${encodeURIComponent(organizationId)}/products`
   const path =
     lifecycle === 'active'
-      ? '/api/products'
-      : `/api/products?lifecycle=${encodeURIComponent(lifecycle)}`
+      ? base
+      : `${base}?lifecycle=${encodeURIComponent(lifecycle)}`
   return axisFetch<ProductsListResponse>(path, { principalId }).then((payload) => payload.data ?? [])
 }
 
-export function createProduct(input: ProductInput, principalId: string): Promise<Product> {
-  return axisFetch<Product>('/api/products', {
+export function createProduct(input: ProductInput, organizationId: string, principalId: string): Promise<Product> {
+	return axisFetch<Product>(`/api/organizations/${encodeURIComponent(organizationId)}/products`, {
     method: 'POST',
     principalId,
     body: input,
   })
 }
 
-export function updateProduct(id: string, input: ProductInput, principalId: string): Promise<Product> {
-  return axisFetch<Product>(`/api/products/${encodeURIComponent(id)}`, {
+export function updateProduct(id: string, input: ProductInput, organizationId: string, principalId: string): Promise<Product> {
+	return axisFetch<Product>(`/api/organizations/${encodeURIComponent(organizationId)}/products/${encodeURIComponent(id)}`, {
     method: 'PUT',
     principalId,
     body: { name: input.name },
   })
 }
 
-export function archiveProduct(id: string, principalId: string): Promise<void> {
-  return productLifecycleAction(id, 'archive', principalId)
+export function archiveProduct(id: string, organizationId: string, principalId: string): Promise<void> {
+	return productLifecycleAction(id, 'archive', organizationId, principalId)
 }
 
-export function unarchiveProduct(id: string, principalId: string): Promise<void> {
-  return productLifecycleAction(id, 'unarchive', principalId)
+export function unarchiveProduct(id: string, organizationId: string, principalId: string): Promise<void> {
+	return productLifecycleAction(id, 'unarchive', organizationId, principalId)
 }
 
-export function trashProduct(id: string, principalId: string): Promise<void> {
-  return productLifecycleAction(id, 'trash', principalId)
+export function trashProduct(id: string, organizationId: string, principalId: string): Promise<void> {
+	return productLifecycleAction(id, 'trash', organizationId, principalId)
 }
 
-export function restoreProduct(id: string, principalId: string): Promise<void> {
-  return productLifecycleAction(id, 'restore', principalId)
+export function restoreProduct(id: string, organizationId: string, principalId: string): Promise<void> {
+	return productLifecycleAction(id, 'restore', organizationId, principalId)
 }
 
-export function purgeProduct(id: string, principalId: string): Promise<void> {
-	return axisFetch<void>(`/api/products/${encodeURIComponent(id)}/purge`, {
+export function purgeProduct(id: string, organizationId: string, principalId: string): Promise<void> {
+	return axisFetch<void>(`/api/organizations/${encodeURIComponent(organizationId)}/products/${encodeURIComponent(id)}/purge`, {
 		method: 'DELETE',
 		principalId,
 	})
 }
 
 export function listApprovals(
-	tenantId: string,
+	orgId: string,
 	principalId: string,
 	status: Approval['status'] = 'pending',
 	limit = 50,
 ): Promise<Approval[]> {
-	return listApprovalsPage(tenantId, principalId, status, { limit }).then((page) => page.items)
+	return listApprovalsPage(orgId, principalId, status, { limit }).then((page) => page.items)
 }
 
 export function listApprovalsPage(
-	tenantId: string,
+	orgId: string,
 	principalId: string,
 	status: Approval['status'] = 'pending',
 	options: { limit?: number; cursor?: string } = {},
@@ -1571,81 +1559,42 @@ export function listApprovalsPage(
 	}
 	return axisFetch<ApprovalsListResponse>(
 		`/api/approvals?${params.toString()}`,
-		{ tenantId, principalId },
+		{ orgId, principalId },
 	).then((payload) => parsePaginatedResponse<Approval>(payload))
 }
 
-export function getApproval(id: string, tenantId: string, principalId: string): Promise<Approval> {
+export function getApproval(id: string, orgId: string, principalId: string): Promise<Approval> {
 	return axisFetch<Approval>(`/api/approvals/${encodeURIComponent(id)}`, {
-		tenantId,
+		orgId,
 		principalId,
 	})
 }
 
-export function approveApproval(id: string, tenantId: string, principalId: string, note = ''): Promise<Approval> {
+export function approveApproval(id: string, orgId: string, principalId: string, note = ''): Promise<Approval> {
 	return axisFetch<Approval>(`/api/approvals/${encodeURIComponent(id)}/approve`, {
 		method: 'POST',
-		tenantId,
+		orgId,
 		principalId,
 		body: { note },
 	})
 }
 
-export function rejectApproval(id: string, tenantId: string, principalId: string, note = ''): Promise<Approval> {
+export function rejectApproval(id: string, orgId: string, principalId: string, note = ''): Promise<Approval> {
 	return axisFetch<Approval>(`/api/approvals/${encodeURIComponent(id)}/reject`, {
 		method: 'POST',
-		tenantId,
+		orgId,
 		principalId,
 		body: { note },
 	})
 }
 
-export function reviewApproval(id: string, tenantId: string, principalId: string, note: string): Promise<Approval> {
+export function reviewApproval(id: string, orgId: string, principalId: string, note: string): Promise<Approval> {
 	return axisFetch<Approval>(`/api/approvals/${encodeURIComponent(id)}/review`, {
 		method: 'POST',
-		tenantId,
+		orgId,
 		principalId,
 		body: { note },
 	})
-}
-
-export function createTenant(input: TenantInput, principalId: string): Promise<Tenant> {
-  return axisFetch<Tenant>('/api/tenants', {
-    method: 'POST',
-    principalId,
-    body: input,
-  })
-}
-
-export function updateTenant(id: string, input: TenantUpdateInput, principalId: string): Promise<Tenant> {
-  return axisFetch<Tenant>(`/api/tenants/${encodeURIComponent(id)}`, {
-    method: 'PUT',
-    principalId,
-    body: input,
-  })
-}
-
-export function archiveTenant(id: string, principalId: string): Promise<void> {
-  return tenantLifecycleAction(id, 'archive', principalId)
-}
-
-export function unarchiveTenant(id: string, principalId: string): Promise<void> {
-  return tenantLifecycleAction(id, 'unarchive', principalId)
-}
-
-export function trashTenant(id: string, principalId: string): Promise<void> {
-  return tenantLifecycleAction(id, 'trash', principalId)
-}
-
-export function restoreTenant(id: string, principalId: string): Promise<void> {
-  return tenantLifecycleAction(id, 'restore', principalId)
-}
-
-export function purgeTenant(id: string, principalId: string): Promise<void> {
-  return axisFetch<void>(`/api/tenants/${encodeURIComponent(id)}/purge`, {
-    method: 'DELETE',
-    principalId,
-  })
 }
 
 async function resolveAxisAuthToken(): Promise<string> {
@@ -1660,7 +1609,7 @@ async function resolveAxisAuthToken(): Promise<string> {
 
 export function listVirployees(
   lifecycle: 'active' | 'archived' | 'trash',
-  tenantId: string,
+  orgId: string,
   principalId: string,
 ): Promise<Virployee[]> {
   const path =
@@ -1669,21 +1618,21 @@ export function listVirployees(
       : lifecycle === 'archived'
         ? '/api/virployees/archived'
         : '/api/virployees/trash'
-  return axisFetch<VirployeesListResponse>(path, { tenantId, principalId }).then((payload) => payload.data ?? [])
+  return axisFetch<VirployeesListResponse>(path, { orgId, principalId }).then((payload) => payload.data ?? [])
 }
 
 export function listVirployeeAutonomyLevels(
-  tenantId: string,
+  orgId: string,
   principalId: string,
 ): Promise<VirployeeAutonomyLevel[]> {
-  return axisFetch<AutonomyLevelsResponse>('/api/virployees/autonomy-levels', { tenantId, principalId })
+  return axisFetch<AutonomyLevelsResponse>('/api/virployees/autonomy-levels', { orgId, principalId })
     .then((payload) => payload.data ?? [])
 }
 
-export function createVirployee(input: VirployeeInput, tenantId: string, principalId: string): Promise<Virployee> {
+export function createVirployee(input: VirployeeInput, orgId: string, principalId: string): Promise<Virployee> {
   return axisFetch<Virployee>('/api/virployees', {
     method: 'POST',
-    tenantId,
+    orgId,
     principalId,
     body: input,
   })
@@ -1692,12 +1641,12 @@ export function createVirployee(input: VirployeeInput, tenantId: string, princip
 export function updateVirployee(
   id: string,
   input: VirployeeInput,
-  tenantId: string,
+  orgId: string,
   principalId: string,
 ): Promise<Virployee> {
   return axisFetch<Virployee>(`/api/virployees/${encodeURIComponent(id)}`, {
     method: 'PUT',
-    tenantId,
+    orgId,
     principalId,
     body: input,
   })
@@ -1705,36 +1654,36 @@ export function updateVirployee(
 
 export function getVirployeeRuntimeContext(
   id: string,
-  tenantId: string,
+  orgId: string,
   principalId: string,
 ): Promise<VirployeeRuntimeContext> {
   return axisFetch<VirployeeRuntimeContext>(
     `/api/virployees/${encodeURIComponent(id)}/runtime-context`,
-    { tenantId, principalId },
+    { orgId, principalId },
   )
 }
 
-export function listVirployeeMemories(id:string, state:string, query:string, cursor:string, scope:MemoryScope, tenantId:string, principalId:string):Promise<MemoryPage> {
+export function listVirployeeMemories(id:string, state:string, query:string, cursor:string, scope:MemoryScope, orgId:string, principalId:string):Promise<MemoryPage> {
   const params = new URLSearchParams({state, q:query, limit:'50', scope_type:scope.type})
   if (cursor) params.set('cursor',cursor)
   if (scope.subject_id) params.set('subject_id', scope.subject_id)
   if (scope.case_id) params.set('case_id', scope.case_id)
-  return axisFetch<MemoryPage>(`/api/virployees/${encodeURIComponent(id)}/memories?${params}`,{tenantId,principalId})
+  return axisFetch<MemoryPage>(`/api/virployees/${encodeURIComponent(id)}/memories?${params}`,{orgId,principalId})
 }
-export function createVirployeeMemory(id:string,input:MemoryInput,tenantId:string,principalId:string):Promise<VirployeeMemory>{return axisFetch(`/api/virployees/${encodeURIComponent(id)}/memories`,{method:'POST',tenantId,principalId,body:input})}
-export function updateVirployeeMemory(virployeeId:string,id:string,input:MemoryInput,expectedVersion:number,tenantId:string,principalId:string):Promise<VirployeeMemory>{return axisFetch(`/api/virployees/${encodeURIComponent(virployeeId)}/memories/${encodeURIComponent(id)}`,{method:'PUT',tenantId,principalId,body:{...input,expected_version:expectedVersion}})}
-export function recallVirployeeMemories(id:string,query:string,scope:MemoryScope,tenantId:string,principalId:string):Promise<MemoryRecall>{return axisFetch(`/api/virployees/${encodeURIComponent(id)}/memories/recall`,{method:'POST',tenantId,principalId,body:{query,scope}})}
-export function lifecycleVirployeeMemory(virployeeId:string,id:string,action:'archive'|'unarchive'|'trash'|'restore'|'purge',tenantId:string,principalId:string):Promise<void>{return axisFetch(`/api/virployees/${encodeURIComponent(virployeeId)}/memories/${encodeURIComponent(id)}/${action}`,{method:action==='purge'?'DELETE':'POST',tenantId,principalId})}
+export function createVirployeeMemory(id:string,input:MemoryInput,orgId:string,principalId:string):Promise<VirployeeMemory>{return axisFetch(`/api/virployees/${encodeURIComponent(id)}/memories`,{method:'POST',orgId,principalId,body:input})}
+export function updateVirployeeMemory(virployeeId:string,id:string,input:MemoryInput,expectedVersion:number,orgId:string,principalId:string):Promise<VirployeeMemory>{return axisFetch(`/api/virployees/${encodeURIComponent(virployeeId)}/memories/${encodeURIComponent(id)}`,{method:'PUT',orgId,principalId,body:{...input,expected_version:expectedVersion}})}
+export function recallVirployeeMemories(id:string,query:string,scope:MemoryScope,orgId:string,principalId:string):Promise<MemoryRecall>{return axisFetch(`/api/virployees/${encodeURIComponent(id)}/memories/recall`,{method:'POST',orgId,principalId,body:{query,scope}})}
+export function lifecycleVirployeeMemory(virployeeId:string,id:string,action:'archive'|'unarchive'|'trash'|'restore'|'purge',orgId:string,principalId:string):Promise<void>{return axisFetch(`/api/virployees/${encodeURIComponent(virployeeId)}/memories/${encodeURIComponent(id)}/${action}`,{method:action==='purge'?'DELETE':'POST',orgId,principalId})}
 
 export function dryRunVirployee(
   id: string,
   input: string,
-  tenantId: string,
+  orgId: string,
   principalId: string,
 ): Promise<VirployeeDryRun> {
   return axisFetch<VirployeeDryRun>(`/api/virployees/${encodeURIComponent(id)}/dry-run`, {
     method: 'POST',
-    tenantId,
+    orgId,
     principalId,
     body: { input },
   })
@@ -1743,13 +1692,13 @@ export function dryRunVirployee(
 export function checkVirployeeExecutionGate(
   id: string,
   input: string,
-  tenantId: string,
+  orgId: string,
   principalId: string,
   confirmedDraft?: VirployeeConfirmedDraft,
 ): Promise<VirployeeExecutionGate> {
   return axisFetch<VirployeeExecutionGate>(`/api/virployees/${encodeURIComponent(id)}/execution-gate`, {
     method: 'POST',
-    tenantId,
+    orgId,
     principalId,
     body: confirmedDraft ? { input, confirmed_draft: confirmedDraft } : { input },
   })
@@ -1757,25 +1706,25 @@ export function checkVirployeeExecutionGate(
 
 export function listVirployeeRuns(
   id: string,
-  tenantId: string,
+  orgId: string,
   principalId: string,
   limit = 20,
 ): Promise<VirployeeRunTrace[]> {
   return axisFetch<VirployeeRunTracesListResponse>(
     `/api/virployees/${encodeURIComponent(id)}/runs?limit=${encodeURIComponent(String(limit))}`,
-    { tenantId, principalId },
+    { orgId, principalId },
   ).then((payload) => payload.data ?? [])
 }
 
 export function simulateApprovedVirployeeExecution(
   id: string,
   approvalId: string,
-  tenantId: string,
+  orgId: string,
   principalId: string,
 ): Promise<VirployeeRunTrace> {
   return axisFetch<VirployeeRunTrace>(`/api/virployees/${encodeURIComponent(id)}/simulated-executions`, {
     method: 'POST',
-    tenantId,
+    orgId,
     principalId,
     body: { approval_id: approvalId },
   })
@@ -1784,45 +1733,45 @@ export function simulateApprovedVirployeeExecution(
 export function executeApprovedVirployeeAction(
   id: string,
   approvalId: string,
-  tenantId: string,
+  orgId: string,
   principalId: string,
 ): Promise<VirployeeRunTrace> {
   return axisFetch<VirployeeRunTrace>(`/api/virployees/${encodeURIComponent(id)}/executions`, {
     method: 'POST',
-    tenantId,
+    orgId,
     principalId,
     body: { approval_id: approvalId },
   })
 }
 
-export function archiveVirployee(id: string, tenantId: string, principalId: string): Promise<void> {
-  return lifecycleAction('virployees', id, 'archive', tenantId, principalId)
+export function archiveVirployee(id: string, orgId: string, principalId: string): Promise<void> {
+  return lifecycleAction('virployees', id, 'archive', orgId, principalId)
 }
 
-export function unarchiveVirployee(id: string, tenantId: string, principalId: string): Promise<void> {
-  return lifecycleAction('virployees', id, 'unarchive', tenantId, principalId)
+export function unarchiveVirployee(id: string, orgId: string, principalId: string): Promise<void> {
+  return lifecycleAction('virployees', id, 'unarchive', orgId, principalId)
 }
 
-export function trashVirployee(id: string, tenantId: string, principalId: string): Promise<void> {
-  return lifecycleAction('virployees', id, 'trash', tenantId, principalId)
+export function trashVirployee(id: string, orgId: string, principalId: string): Promise<void> {
+  return lifecycleAction('virployees', id, 'trash', orgId, principalId)
 }
 
-export function restoreVirployee(id: string, tenantId: string, principalId: string): Promise<void> {
-  return lifecycleAction('virployees', id, 'restore', tenantId, principalId)
+export function restoreVirployee(id: string, orgId: string, principalId: string): Promise<void> {
+  return lifecycleAction('virployees', id, 'restore', orgId, principalId)
 }
 
-export function purgeVirployee(id: string, tenantId: string, principalId: string): Promise<void> {
+export function purgeVirployee(id: string, orgId: string, principalId: string): Promise<void> {
   // POST, not DELETE: browser extensions (ad blockers) silently block DELETE.
   return axisFetch<void>(`/api/virployees/${encodeURIComponent(id)}/purge`, {
     method: 'POST',
-    tenantId,
+    orgId,
     principalId,
   })
 }
 
 export function listJobRoles(
   lifecycle: 'active' | 'archived' | 'trash',
-  tenantId: string,
+  orgId: string,
   principalId: string,
 ): Promise<JobRole[]> {
   const path =
@@ -1831,13 +1780,13 @@ export function listJobRoles(
       : lifecycle === 'archived'
         ? '/api/job-roles?lifecycle=archived'
         : '/api/job-roles?lifecycle=trash'
-  return axisFetch<JobRolesListResponse>(path, { tenantId, principalId }).then((payload) => payload.data ?? [])
+  return axisFetch<JobRolesListResponse>(path, { orgId, principalId }).then((payload) => payload.data ?? [])
 }
 
-export function createJobRole(input: JobRoleInput, tenantId: string, principalId: string): Promise<JobRole> {
+export function createJobRole(input: JobRoleInput, orgId: string, principalId: string): Promise<JobRole> {
   return axisFetch<JobRole>('/api/job-roles', {
     method: 'POST',
-    tenantId,
+    orgId,
     principalId,
     body: input,
   })
@@ -1846,37 +1795,37 @@ export function createJobRole(input: JobRoleInput, tenantId: string, principalId
 export function updateJobRole(
   id: string,
   input: JobRoleInput,
-  tenantId: string,
+  orgId: string,
   principalId: string,
 ): Promise<JobRole> {
   return axisFetch<JobRole>(`/api/job-roles/${encodeURIComponent(id)}`, {
     method: 'PUT',
-    tenantId,
+    orgId,
     principalId,
     body: input,
   })
 }
 
-export function archiveJobRole(id: string, tenantId: string, principalId: string): Promise<void> {
-  return lifecycleAction('job-roles', id, 'archive', tenantId, principalId)
+export function archiveJobRole(id: string, orgId: string, principalId: string): Promise<void> {
+  return lifecycleAction('job-roles', id, 'archive', orgId, principalId)
 }
 
-export function unarchiveJobRole(id: string, tenantId: string, principalId: string): Promise<void> {
-  return lifecycleAction('job-roles', id, 'unarchive', tenantId, principalId)
+export function unarchiveJobRole(id: string, orgId: string, principalId: string): Promise<void> {
+  return lifecycleAction('job-roles', id, 'unarchive', orgId, principalId)
 }
 
-export function trashJobRole(id: string, tenantId: string, principalId: string): Promise<void> {
-  return lifecycleAction('job-roles', id, 'trash', tenantId, principalId)
+export function trashJobRole(id: string, orgId: string, principalId: string): Promise<void> {
+  return lifecycleAction('job-roles', id, 'trash', orgId, principalId)
 }
 
-export function restoreJobRole(id: string, tenantId: string, principalId: string): Promise<void> {
-  return lifecycleAction('job-roles', id, 'restore', tenantId, principalId)
+export function restoreJobRole(id: string, orgId: string, principalId: string): Promise<void> {
+  return lifecycleAction('job-roles', id, 'restore', orgId, principalId)
 }
 
-export function purgeJobRole(id: string, tenantId: string, principalId: string): Promise<void> {
+export function purgeJobRole(id: string, orgId: string, principalId: string): Promise<void> {
   return axisFetch<void>(`/api/job-roles/${encodeURIComponent(id)}/purge`, {
     method: 'DELETE',
-    tenantId,
+    orgId,
     principalId,
   })
 }
@@ -1893,8 +1842,8 @@ export type CapabilityStats = {
   success_rate: number
 }
 
-export function listCapabilityStats(tenantId: string, principalId: string): Promise<CapabilityStats[]> {
-  return axisFetch<{ data: CapabilityStats[] }>('/api/capability-stats', { tenantId, principalId }).then(
+export function listCapabilityStats(orgId: string, principalId: string): Promise<CapabilityStats[]> {
+  return axisFetch<{ data: CapabilityStats[] }>('/api/capability-stats', { orgId, principalId }).then(
     (payload) => payload.data ?? [],
   )
 }
@@ -1905,7 +1854,7 @@ export type LearningProposalStatus = 'pending' | 'accepted' | 'dismissed'
 
 export type LearningProposal = {
   id: string
-  tenant_id: string
+  org_id: string
   virployee_id: string
   capability_key: string
   title: string
@@ -1948,7 +1897,7 @@ export type LearningScanResult = {
 }
 
 export function listLearningProposals(
-  tenantId: string,
+  orgId: string,
   principalId: string,
   status: LearningProposalStatus = 'pending',
   virployeeId?: string,
@@ -1959,26 +1908,26 @@ export function listLearningProposals(
     params.set('virployee_id', virployeeId)
   }
   return axisFetch<{ data: LearningProposal[] }>(`/api/learning/proposals?${params.toString()}`, {
-    tenantId,
+    orgId,
     principalId,
   }).then((payload) => payload.data ?? [])
 }
 
-export function getLearningProposal(id: string, tenantId: string, principalId: string): Promise<LearningProposal> {
+export function getLearningProposal(id: string, orgId: string, principalId: string): Promise<LearningProposal> {
   return axisFetch<LearningProposal>(`/api/learning/proposals/${encodeURIComponent(id)}`, {
-    tenantId,
+    orgId,
     principalId,
   })
 }
 
 export function acceptLearningProposal(
   id: string,
-  tenantId: string,
+  orgId: string,
   principalId: string,
 ): Promise<LearningAcceptResult> {
   return axisFetch<LearningAcceptResult>(`/api/learning/proposals/${encodeURIComponent(id)}/accept`, {
     method: 'POST',
-    tenantId,
+    orgId,
     principalId,
     body: {},
   })
@@ -1986,21 +1935,21 @@ export function acceptLearningProposal(
 
 export function dismissLearningProposal(
   id: string,
-  tenantId: string,
+  orgId: string,
   principalId: string,
 ): Promise<LearningProposal> {
   return axisFetch<LearningProposal>(`/api/learning/proposals/${encodeURIComponent(id)}/dismiss`, {
     method: 'POST',
-    tenantId,
+    orgId,
     principalId,
     body: {},
   })
 }
 
-export function scanLearning(tenantId: string, principalId: string): Promise<LearningScanResult> {
+export function scanLearning(orgId: string, principalId: string): Promise<LearningScanResult> {
   return axisFetch<LearningScanResult>('/api/learning/scan', {
     method: 'POST',
-    tenantId,
+    orgId,
     principalId,
     body: {},
   })
@@ -2008,7 +1957,7 @@ export function scanLearning(tenantId: string, principalId: string): Promise<Lea
 
 export function listCapabilities(
   lifecycle: 'active' | 'archived' | 'trash',
-  tenantId: string,
+  orgId: string,
   principalId: string,
 ): Promise<Capability[]> {
   const path =
@@ -2017,13 +1966,13 @@ export function listCapabilities(
       : lifecycle === 'archived'
         ? '/api/capabilities?lifecycle=archived'
         : '/api/capabilities?lifecycle=trash'
-  return axisFetch<CapabilitiesListResponse>(path, { tenantId, principalId }).then((payload) => payload.data ?? [])
+  return axisFetch<CapabilitiesListResponse>(path, { orgId, principalId }).then((payload) => payload.data ?? [])
 }
 
-export function createCapability(input: CapabilityInput, tenantId: string, principalId: string): Promise<Capability> {
+export function createCapability(input: CapabilityInput, orgId: string, principalId: string): Promise<Capability> {
   return axisFetch<Capability>('/api/capabilities', {
     method: 'POST',
-    tenantId,
+    orgId,
     principalId,
     body: {
       capability_key: input.capability_key,
@@ -2042,12 +1991,12 @@ export function createCapability(input: CapabilityInput, tenantId: string, princ
 export function updateCapability(
   id: string,
   input: CapabilityInput,
-  tenantId: string,
+  orgId: string,
   principalId: string,
 ): Promise<Capability> {
   return axisFetch<Capability>(`/api/capabilities/${encodeURIComponent(id)}`, {
     method: 'PUT',
-    tenantId,
+    orgId,
     principalId,
     body: {
       name: input.name,
@@ -2065,53 +2014,53 @@ export function updateCapability(
 export function updateCapabilityManifest(
   id: string,
   manifest: CapabilityManifestInput,
-  tenantId: string,
+  orgId: string,
   principalId: string,
 ): Promise<Capability> {
   return axisFetch<Capability>(`/api/capabilities/${encodeURIComponent(id)}/manifest`, {
-    method: 'PUT', tenantId, principalId, body: manifest,
+    method: 'PUT', orgId, principalId, body: manifest,
   })
 }
 
-export function conformCapability(id: string, tenantId: string, principalId: string): Promise<Capability> {
+export function conformCapability(id: string, orgId: string, principalId: string): Promise<Capability> {
   return axisFetch<Capability>(`/api/capabilities/${encodeURIComponent(id)}/conform`, {
-    method: 'POST', tenantId, principalId, body: {},
+    method: 'POST', orgId, principalId, body: {},
   })
 }
 
-export function activateCapability(id: string, tenantId: string, principalId: string): Promise<Capability> {
+export function activateCapability(id: string, orgId: string, principalId: string): Promise<Capability> {
   return axisFetch<Capability>(`/api/capabilities/${encodeURIComponent(id)}/activate`, {
-    method: 'POST', tenantId, principalId, body: {},
+    method: 'POST', orgId, principalId, body: {},
   })
 }
 
-export function archiveCapability(id: string, tenantId: string, principalId: string): Promise<void> {
-  return lifecycleAction('capabilities', id, 'archive', tenantId, principalId)
+export function archiveCapability(id: string, orgId: string, principalId: string): Promise<void> {
+  return lifecycleAction('capabilities', id, 'archive', orgId, principalId)
 }
 
-export function unarchiveCapability(id: string, tenantId: string, principalId: string): Promise<void> {
-  return lifecycleAction('capabilities', id, 'unarchive', tenantId, principalId)
+export function unarchiveCapability(id: string, orgId: string, principalId: string): Promise<void> {
+  return lifecycleAction('capabilities', id, 'unarchive', orgId, principalId)
 }
 
-export function trashCapability(id: string, tenantId: string, principalId: string): Promise<void> {
-  return lifecycleAction('capabilities', id, 'trash', tenantId, principalId)
+export function trashCapability(id: string, orgId: string, principalId: string): Promise<void> {
+  return lifecycleAction('capabilities', id, 'trash', orgId, principalId)
 }
 
-export function restoreCapability(id: string, tenantId: string, principalId: string): Promise<void> {
-  return lifecycleAction('capabilities', id, 'restore', tenantId, principalId)
+export function restoreCapability(id: string, orgId: string, principalId: string): Promise<void> {
+  return lifecycleAction('capabilities', id, 'restore', orgId, principalId)
 }
 
-export function purgeCapability(id: string, tenantId: string, principalId: string): Promise<void> {
+export function purgeCapability(id: string, orgId: string, principalId: string): Promise<void> {
   return axisFetch<void>(`/api/capabilities/${encodeURIComponent(id)}/purge`, {
     method: 'DELETE',
-    tenantId,
+    orgId,
     principalId,
   })
 }
 
 export function listProfileTemplates(
   lifecycle: 'active' | 'archived' | 'trash',
-  tenantId: string,
+  orgId: string,
   principalId: string,
 ): Promise<ProfileTemplate[]> {
   const path =
@@ -2120,17 +2069,17 @@ export function listProfileTemplates(
       : lifecycle === 'archived'
         ? '/api/profile-templates?lifecycle=archived'
         : '/api/profile-templates?lifecycle=trash'
-  return axisFetch<ProfileTemplatesListResponse>(path, { tenantId, principalId }).then((payload) => payload.data ?? [])
+  return axisFetch<ProfileTemplatesListResponse>(path, { orgId, principalId }).then((payload) => payload.data ?? [])
 }
 
 export function createProfileTemplate(
   input: ProfileTemplateInput,
-  tenantId: string,
+  orgId: string,
   principalId: string,
 ): Promise<ProfileTemplate> {
   return axisFetch<ProfileTemplate>('/api/profile-templates', {
     method: 'POST',
-    tenantId,
+    orgId,
     principalId,
     body: input,
   })
@@ -2139,59 +2088,59 @@ export function createProfileTemplate(
 export function updateProfileTemplate(
   id: string,
   input: ProfileTemplateInput,
-  tenantId: string,
+  orgId: string,
   principalId: string,
 ): Promise<ProfileTemplate> {
   return axisFetch<ProfileTemplate>(`/api/profile-templates/${encodeURIComponent(id)}`, {
     method: 'PUT',
-    tenantId,
+    orgId,
     principalId,
     body: input,
   })
 }
 
-export function archiveProfileTemplate(id: string, tenantId: string, principalId: string): Promise<void> {
-  return lifecycleAction('profile-templates', id, 'archive', tenantId, principalId)
+export function archiveProfileTemplate(id: string, orgId: string, principalId: string): Promise<void> {
+  return lifecycleAction('profile-templates', id, 'archive', orgId, principalId)
 }
 
-export function unarchiveProfileTemplate(id: string, tenantId: string, principalId: string): Promise<void> {
-  return lifecycleAction('profile-templates', id, 'unarchive', tenantId, principalId)
+export function unarchiveProfileTemplate(id: string, orgId: string, principalId: string): Promise<void> {
+  return lifecycleAction('profile-templates', id, 'unarchive', orgId, principalId)
 }
 
-export function trashProfileTemplate(id: string, tenantId: string, principalId: string): Promise<void> {
-  return lifecycleAction('profile-templates', id, 'trash', tenantId, principalId)
+export function trashProfileTemplate(id: string, orgId: string, principalId: string): Promise<void> {
+  return lifecycleAction('profile-templates', id, 'trash', orgId, principalId)
 }
 
-export function restoreProfileTemplate(id: string, tenantId: string, principalId: string): Promise<void> {
-  return lifecycleAction('profile-templates', id, 'restore', tenantId, principalId)
+export function restoreProfileTemplate(id: string, orgId: string, principalId: string): Promise<void> {
+  return lifecycleAction('profile-templates', id, 'restore', orgId, principalId)
 }
 
-export function purgeProfileTemplate(id: string, tenantId: string, principalId: string): Promise<void> {
+export function purgeProfileTemplate(id: string, orgId: string, principalId: string): Promise<void> {
   return axisFetch<void>(`/api/profile-templates/${encodeURIComponent(id)}/purge`, {
     method: 'DELETE',
-    tenantId,
+    orgId,
     principalId,
   })
 }
 
 export function listUsers(
   lifecycle: 'active' | 'archived' | 'trash',
-  tenantId: string,
+  orgId: string,
   principalId: string,
-): Promise<TenantUser[]> {
+): Promise<OrgUser[]> {
   const path =
     lifecycle === 'active'
       ? '/api/users'
       : lifecycle === 'archived'
         ? '/api/users?lifecycle=archived'
         : '/api/users?lifecycle=trash'
-  return axisFetch<UsersListResponse>(path, { tenantId, principalId }).then((payload) => payload.data ?? [])
+  return axisFetch<UsersListResponse>(path, { orgId, principalId }).then((payload) => payload.data ?? [])
 }
 
-export function createUser(input: TenantUserInput, tenantId: string, principalId: string): Promise<TenantUser> {
-  return axisFetch<TenantUser>('/api/users', {
+export function createUser(input: OrgUserInput, orgId: string, principalId: string): Promise<OrgUser> {
+  return axisFetch<OrgUser>('/api/users', {
     method: 'POST',
-    tenantId,
+    orgId,
     principalId,
     body: input,
   })
@@ -2199,38 +2148,38 @@ export function createUser(input: TenantUserInput, tenantId: string, principalId
 
 export function updateUser(
   id: string,
-  input: TenantUserInput,
-  tenantId: string,
+  input: OrgUserInput,
+  orgId: string,
   principalId: string,
-): Promise<TenantUser> {
-  return axisFetch<TenantUser>(`/api/users/${encodeURIComponent(id)}`, {
+): Promise<OrgUser> {
+  return axisFetch<OrgUser>(`/api/users/${encodeURIComponent(id)}`, {
     method: 'PUT',
-    tenantId,
+    orgId,
     principalId,
     body: input,
   })
 }
 
-export function archiveUser(id: string, tenantId: string, principalId: string): Promise<void> {
-  return lifecycleAction('users', id, 'archive', tenantId, principalId)
+export function archiveUser(id: string, orgId: string, principalId: string): Promise<void> {
+  return lifecycleAction('users', id, 'archive', orgId, principalId)
 }
 
-export function unarchiveUser(id: string, tenantId: string, principalId: string): Promise<void> {
-  return lifecycleAction('users', id, 'unarchive', tenantId, principalId)
+export function unarchiveUser(id: string, orgId: string, principalId: string): Promise<void> {
+  return lifecycleAction('users', id, 'unarchive', orgId, principalId)
 }
 
-export function trashUser(id: string, tenantId: string, principalId: string): Promise<void> {
-  return lifecycleAction('users', id, 'trash', tenantId, principalId)
+export function trashUser(id: string, orgId: string, principalId: string): Promise<void> {
+  return lifecycleAction('users', id, 'trash', orgId, principalId)
 }
 
-export function restoreUser(id: string, tenantId: string, principalId: string): Promise<void> {
-  return lifecycleAction('users', id, 'restore', tenantId, principalId)
+export function restoreUser(id: string, orgId: string, principalId: string): Promise<void> {
+  return lifecycleAction('users', id, 'restore', orgId, principalId)
 }
 
-export function purgeUser(id: string, tenantId: string, principalId: string): Promise<void> {
+export function purgeUser(id: string, orgId: string, principalId: string): Promise<void> {
   return axisFetch<void>(`/api/users/${encodeURIComponent(id)}/purge`, {
     method: 'DELETE',
-    tenantId,
+    orgId,
     principalId,
   })
 }
@@ -2250,20 +2199,12 @@ function lifecycleAction(
   resource: 'virployees' | 'job-roles' | 'capabilities' | 'profile-templates' | 'users',
   id: string,
   action: string,
-  tenantId: string,
+  orgId: string,
   principalId: string,
 ): Promise<void> {
   return axisFetch<void>(`/api/${resource}/${encodeURIComponent(id)}/${action}`, {
     method: 'POST',
-    tenantId,
-    principalId,
-    body: { reason: 'console' },
-  })
-}
-
-function tenantLifecycleAction(id: string, action: string, principalId: string): Promise<void> {
-  return axisFetch<void>(`/api/tenants/${encodeURIComponent(id)}/${action}`, {
-    method: 'POST',
+    orgId,
     principalId,
     body: { reason: 'console' },
   })
@@ -2277,8 +2218,8 @@ function orgLifecycleAction(id: string, action: string, principalId: string): Pr
   })
 }
 
-function productLifecycleAction(id: string, action: string, principalId: string): Promise<void> {
-  return axisFetch<void>(`/api/products/${encodeURIComponent(id)}/${action}`, {
+function productLifecycleAction(id: string, action: string, organizationId: string, principalId: string): Promise<void> {
+	return axisFetch<void>(`/api/organizations/${encodeURIComponent(organizationId)}/products/${encodeURIComponent(id)}/${action}`, {
     method: 'POST',
     principalId,
     body: { reason: 'console' },

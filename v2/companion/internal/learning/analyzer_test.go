@@ -105,7 +105,7 @@ func TestScanProposesOnlyForNewPairs(t *testing.T) {
 	}
 	ucs := NewUseCases(repo)
 
-	result, err := ucs.Scan(context.Background(), "tenant-1", 0)
+	result, err := ucs.Scan(context.Background(), "organization-1", 0)
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
@@ -129,11 +129,11 @@ func TestScanClampsOverrideToConfiguredFloor(t *testing.T) {
 
 	// An override BELOW the floor must be clamped up: thresholds are
 	// governance configuration and callers cannot lower them (gate G4.1).
-	if result, err := ucs.Scan(context.Background(), "tenant-1", 1); err != nil || result.Threshold != 3 || repo.lastThreshold != 3 {
+	if result, err := ucs.Scan(context.Background(), "organization-1", 1); err != nil || result.Threshold != 3 || repo.lastThreshold != 3 {
 		t.Fatalf("expected floor 3 to win over override 1, got result=%+v lastThreshold=%d err=%v", result, repo.lastThreshold, err)
 	}
 	// An override ABOVE the floor is honored (stricter is allowed).
-	if result, err := ucs.Scan(context.Background(), "tenant-1", 5); err != nil || result.Threshold != 5 || repo.lastThreshold != 5 {
+	if result, err := ucs.Scan(context.Background(), "organization-1", 5); err != nil || result.Threshold != 5 || repo.lastThreshold != 5 {
 		t.Fatalf("expected stricter override 5 to be honored, got result=%+v lastThreshold=%d err=%v", result, repo.lastThreshold, err)
 	}
 }
@@ -143,7 +143,7 @@ func TestScanWatermarkTravelsTyped(t *testing.T) {
 	now := time.Now().UTC()
 	repo := &fakeLearningRepo{candidates: []Candidate{{VirployeeID: learnable.String(), CapabilityKey: "calendar.events.create", Succeeded: 5, FirstAt: now, LastAt: now}}}
 	ucs := NewUseCases(repo)
-	if _, err := ucs.Scan(context.Background(), "tenant-1", 0); err != nil {
+	if _, err := ucs.Scan(context.Background(), "organization-1", 0); err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
 	if len(repo.created) != 1 || repo.created[0].SucceededWatermark != 5 {
@@ -154,7 +154,7 @@ func TestScanWatermarkTravelsTyped(t *testing.T) {
 func TestScanRejectsInvalidThreshold(t *testing.T) {
 	ucs := NewUseCases(&fakeLearningRepo{})
 	ucs.SetMinExecutions(0) // ignored: keeps default
-	if _, err := ucs.Scan(context.Background(), "tenant-1", -1); err == nil {
+	if _, err := ucs.Scan(context.Background(), "organization-1", -1); err == nil {
 		t.Fatal("expected validation error for negative threshold")
 	}
 }
@@ -182,7 +182,7 @@ func scanOneCandidate(t *testing.T, enricher ProcedureEnricher) (*fakeLearningRe
 	if enricher != nil {
 		ucs.SetProcedureEnricher(enricher)
 	}
-	result, err := ucs.Scan(context.Background(), "tenant-1", 0)
+	result, err := ucs.Scan(context.Background(), "organization-1", 0)
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
@@ -224,7 +224,7 @@ func TestScanDoesNotCallEnricherWhenLLMQuotaIsExceeded(t *testing.T) {
 	ucs.SetProcedureEnricher(enricher)
 	ucs.SetQuotaPorts(denyingLearningQuota{}, nil)
 
-	result, err := ucs.Scan(context.Background(), "tenant-1", 0)
+	result, err := ucs.Scan(context.Background(), "organization-1", 0)
 	if err != nil || result.Proposed != 1 || enricher.called != 0 || repo.created[0].ProposedBy != ProposedByAnalyzer {
 		t.Fatalf("quota denial must fall back without a paid call: result=%+v called=%d created=%+v err=%v", result, enricher.called, repo.created, err)
 	}

@@ -32,8 +32,8 @@ type LinkedChain struct {
 
 // VirployeeRef identifies the virtual employee whose ledger this pack covers.
 type VirployeeRef struct {
-	TenantID string `json:"tenant_id"`
-	ID       string `json:"id"`
+	OrgID string `json:"org_id"`
+	ID    string `json:"id"`
 }
 
 // SubjectRef is set when the pack is focused on a single subject (e.g. one

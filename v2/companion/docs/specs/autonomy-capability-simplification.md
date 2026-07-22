@@ -55,7 +55,7 @@ Keep `Autonomy` as the only scale:
 | `A0` | Conversation | Can converse and read contextual information, without recommending or preparing actions. |
 | `A1` | Recommendation | Can read, analyze and recommend actions. |
 | `A2` | Draft | Can prepare plans or executable drafts, without external side effects. |
-| `A3` | Limited execution | Can execute low-risk writes that are reversible, idempotent and scoped to the tenant. |
+| `A3` | Limited execution | Can execute low-risk writes that are reversible, idempotent and scoped to the organization. |
 | `A4` | Governed execution | Can attempt medium-risk actions only with prior approval or a controlled playbook. |
 | `A5` | Broad autonomy | Reserved for broad multi-product autonomy; not enabled by default. |
 
@@ -148,7 +148,7 @@ BFF:
 
 - Gateway continues forwarding Capabilities unchanged except for the new JSON
   field.
-- Tenant/membership validation remains unchanged.
+- Organization/membership validation remains unchanged.
 
 Console:
 

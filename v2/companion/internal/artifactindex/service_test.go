@@ -88,7 +88,7 @@ func (s *fakeStore) Search(_ context.Context, query artifacts.RetrievalQuery, _ 
 }
 
 func TestServiceIndexesAndRetrievesWithinScope(t *testing.T) {
-	scope := artifacts.Scope{TenantID: "tenant-a", VirployeeID: uuid.New(), ProductSurface: "medmory", SubjectID: "subject", RepositoryGeneration: "generation"}
+	scope := artifacts.Scope{OrgID: "organization-a", VirployeeID: uuid.New(), ProductSurface: "producta", SubjectID: "subject", RepositoryGeneration: "generation"}
 	embedder, store := &fakeEmbedder{}, &fakeStore{}
 	service, err := NewService(NewChunker(), embedder, store)
 	if err != nil {
@@ -97,7 +97,7 @@ func TestServiceIndexesAndRetrievesWithinScope(t *testing.T) {
 	if err := service.Index(context.Background(), scope, []artifacts.ContentPart{{Kind: artifacts.PartText, Text: "glucose 126 mg/dL", DocumentID: "doc", SHA256: "sha"}}); err != nil {
 		t.Fatal(err)
 	}
-	if store.scope.TenantID != scope.TenantID || len(store.chunks) != 1 {
+	if store.scope.OrgID != scope.OrgID || len(store.chunks) != 1 {
 		t.Fatalf("index scope/chunks = %#v %d", store.scope, len(store.chunks))
 	}
 	hits, err := service.Retrieve(context.Background(), artifacts.RetrievalQuery{Scope: scope, Text: "glucose", Limit: 5})

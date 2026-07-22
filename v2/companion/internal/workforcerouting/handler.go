@@ -79,7 +79,7 @@ func (h *Handler) listVirployeeAssignments(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, err := h.ucs.ListAssignmentsForVirployee(c.Request.Context(), tenantID(c), virployeeID)
+	out, err := h.ucs.ListAssignmentsForVirployee(c.Request.Context(), orgID(c), virployeeID)
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -127,7 +127,7 @@ type reassignRequest struct {
 
 type workSubjectResponse struct {
 	ID          string     `json:"id"`
-	TenantID    string     `json:"tenant_id"`
+	OrgID       string     `json:"org_id"`
 	Kind        string     `json:"kind"`
 	DisplayName string     `json:"display_name"`
 	ExternalRef string     `json:"external_ref"`
@@ -139,7 +139,7 @@ type workSubjectResponse struct {
 
 type routingPoolResponse struct {
 	ID         string     `json:"id"`
-	TenantID   string     `json:"tenant_id"`
+	OrgID      string     `json:"org_id"`
 	JobRoleID  string     `json:"job_role_id"`
 	Name       string     `json:"name"`
 	State      string     `json:"state"`
@@ -170,7 +170,7 @@ type relationshipResponse struct {
 
 type assignmentResponse struct {
 	ID          string    `json:"id"`
-	TenantID    string    `json:"tenant_id"`
+	OrgID       string    `json:"org_id"`
 	PoolID      string    `json:"pool_id"`
 	SubjectID   string    `json:"subject_id"`
 	VirployeeID string    `json:"virployee_id"`
@@ -191,7 +191,7 @@ func (h *Handler) createWorkSubject(c *gin.Context) {
 	if err := ginmw.BindJSON(c, &req); err != nil {
 		return
 	}
-	out, err := h.ucs.CreateWorkSubject(c.Request.Context(), tenantID(c), CreateWorkSubjectInput(req))
+	out, err := h.ucs.CreateWorkSubject(c.Request.Context(), orgID(c), CreateWorkSubjectInput(req))
 	if respondError(c, err) {
 		return
 	}
@@ -199,7 +199,7 @@ func (h *Handler) createWorkSubject(c *gin.Context) {
 }
 
 func (h *Handler) listWorkSubjects(c *gin.Context) {
-	out, err := h.ucs.ListWorkSubjects(c.Request.Context(), tenantID(c), c.Query("lifecycle"), c.Query("kind"))
+	out, err := h.ucs.ListWorkSubjects(c.Request.Context(), orgID(c), c.Query("lifecycle"), c.Query("kind"))
 	if respondError(c, err) {
 		return
 	}
@@ -215,7 +215,7 @@ func (h *Handler) getWorkSubject(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, err := h.ucs.GetWorkSubject(c.Request.Context(), tenantID(c), id)
+	out, err := h.ucs.GetWorkSubject(c.Request.Context(), orgID(c), id)
 	if respondError(c, err) {
 		return
 	}
@@ -231,7 +231,7 @@ func (h *Handler) updateWorkSubject(c *gin.Context) {
 	if err := ginmw.BindJSON(c, &req); err != nil {
 		return
 	}
-	out, err := h.ucs.UpdateWorkSubject(c.Request.Context(), tenantID(c), id, UpdateWorkSubjectInput(req))
+	out, err := h.ucs.UpdateWorkSubject(c.Request.Context(), orgID(c), id, UpdateWorkSubjectInput(req))
 	if respondError(c, err) {
 		return
 	}
@@ -248,7 +248,7 @@ func (h *Handler) subjectLifecycle(c *gin.Context, fn func(context.Context, stri
 	if !ok {
 		return
 	}
-	if respondError(c, fn(c.Request.Context(), tenantID(c), id)) {
+	if respondError(c, fn(c.Request.Context(), orgID(c), id)) {
 		return
 	}
 	ginmw.WriteNoContent(c)
@@ -259,7 +259,7 @@ func (h *Handler) createRoutingPool(c *gin.Context) {
 	if err := ginmw.BindJSON(c, &req); err != nil {
 		return
 	}
-	out, err := h.ucs.CreateRoutingPool(c.Request.Context(), tenantID(c), CreateRoutingPoolInput(req))
+	out, err := h.ucs.CreateRoutingPool(c.Request.Context(), orgID(c), CreateRoutingPoolInput(req))
 	if respondError(c, err) {
 		return
 	}
@@ -267,7 +267,7 @@ func (h *Handler) createRoutingPool(c *gin.Context) {
 }
 
 func (h *Handler) listRoutingPools(c *gin.Context) {
-	out, err := h.ucs.ListRoutingPools(c.Request.Context(), tenantID(c), c.Query("lifecycle"))
+	out, err := h.ucs.ListRoutingPools(c.Request.Context(), orgID(c), c.Query("lifecycle"))
 	if respondError(c, err) {
 		return
 	}
@@ -283,7 +283,7 @@ func (h *Handler) getRoutingPool(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, err := h.ucs.GetRoutingPool(c.Request.Context(), tenantID(c), id)
+	out, err := h.ucs.GetRoutingPool(c.Request.Context(), orgID(c), id)
 	if respondError(c, err) {
 		return
 	}
@@ -299,7 +299,7 @@ func (h *Handler) updateRoutingPool(c *gin.Context) {
 	if err := ginmw.BindJSON(c, &req); err != nil {
 		return
 	}
-	out, err := h.ucs.UpdateRoutingPool(c.Request.Context(), tenantID(c), id, UpdateRoutingPoolInput(req))
+	out, err := h.ucs.UpdateRoutingPool(c.Request.Context(), orgID(c), id, UpdateRoutingPoolInput(req))
 	if respondError(c, err) {
 		return
 	}
@@ -316,7 +316,7 @@ func (h *Handler) poolLifecycle(c *gin.Context, fn func(context.Context, string,
 	if !ok {
 		return
 	}
-	if respondError(c, fn(c.Request.Context(), tenantID(c), id)) {
+	if respondError(c, fn(c.Request.Context(), orgID(c), id)) {
 		return
 	}
 	ginmw.WriteNoContent(c)
@@ -335,7 +335,7 @@ func (h *Handler) upsertPoolMember(c *gin.Context) {
 	if err := ginmw.BindJSON(c, &req); err != nil {
 		return
 	}
-	out, err := h.ucs.UpsertPoolMember(c.Request.Context(), tenantID(c), poolID, virployeeID, UpsertPoolMemberInput(req))
+	out, err := h.ucs.UpsertPoolMember(c.Request.Context(), orgID(c), poolID, virployeeID, UpsertPoolMemberInput(req))
 	if respondError(c, err) {
 		return
 	}
@@ -347,7 +347,7 @@ func (h *Handler) listPoolMembers(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, err := h.ucs.ListPoolMembers(c.Request.Context(), tenantID(c), poolID)
+	out, err := h.ucs.ListPoolMembers(c.Request.Context(), orgID(c), poolID)
 	if respondError(c, err) {
 		return
 	}
@@ -363,7 +363,7 @@ func (h *Handler) listRelationships(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, err := h.ucs.ListRelationships(c.Request.Context(), tenantID(c), virployeeID)
+	out, err := h.ucs.ListRelationships(c.Request.Context(), orgID(c), virployeeID)
 	if respondError(c, err) {
 		return
 	}
@@ -383,7 +383,7 @@ func (h *Handler) replaceRelationships(c *gin.Context) {
 	for _, item := range req.Relationships {
 		items = append(items, RelationshipInput(item))
 	}
-	out, err := h.ucs.ReplaceRelationships(c.Request.Context(), tenantID(c), virployeeID, items)
+	out, err := h.ucs.ReplaceRelationships(c.Request.Context(), orgID(c), virployeeID, items)
 	if respondError(c, err) {
 		return
 	}
@@ -395,7 +395,7 @@ func (h *Handler) resolve(c *gin.Context) {
 	if err := ginmw.BindJSON(c, &req); err != nil {
 		return
 	}
-	out, err := h.ucs.Resolve(c.Request.Context(), tenantID(c), ResolveInput{
+	out, err := h.ucs.Resolve(c.Request.Context(), orgID(c), ResolveInput{
 		PoolID: req.PoolID, SubjectID: req.SubjectID, CapabilityKey: req.CapabilityKey, ActorID: actorID(c),
 	})
 	if respondError(c, err) {
@@ -410,7 +410,7 @@ func (h *Handler) resolve(c *gin.Context) {
 }
 
 func (h *Handler) listAssignments(c *gin.Context) {
-	out, err := h.ucs.ListAssignments(c.Request.Context(), tenantID(c), c.Query("pool_id"), c.Query("subject_id"))
+	out, err := h.ucs.ListAssignments(c.Request.Context(), orgID(c), c.Query("pool_id"), c.Query("subject_id"))
 	if respondError(c, err) {
 		return
 	}
@@ -418,7 +418,7 @@ func (h *Handler) listAssignments(c *gin.Context) {
 }
 
 func (h *Handler) reassign(c *gin.Context) {
-	if !ownerOrAdmin(c.GetHeader("X-Axis-Tenant-Role")) {
+	if !ownerOrAdmin(c.GetHeader("X-Axis-Org-Role")) {
 		ginmw.Respond(c, domainerr.Forbidden("continuity reassignment requires an owner or admin"))
 		return
 	}
@@ -430,7 +430,7 @@ func (h *Handler) reassign(c *gin.Context) {
 	if err := ginmw.BindJSON(c, &req); err != nil {
 		return
 	}
-	out, err := h.ucs.Reassign(c.Request.Context(), tenantID(c), assignmentID, ReassignInput{
+	out, err := h.ucs.Reassign(c.Request.Context(), orgID(c), assignmentID, ReassignInput{
 		VirployeeID: req.VirployeeID, ExpectedVersion: req.ExpectedVersion, Reason: req.Reason, ActorID: actorID(c),
 	})
 	if respondError(c, err) {
@@ -449,12 +449,12 @@ func ownerOrAdmin(raw string) bool {
 }
 
 func workSubjectFromDomain(item WorkSubject) workSubjectResponse {
-	return workSubjectResponse{ID: item.ID.String(), TenantID: item.TenantID, Kind: string(item.Kind), DisplayName: item.DisplayName,
+	return workSubjectResponse{ID: item.ID.String(), OrgID: item.OrgID, Kind: string(item.Kind), DisplayName: item.DisplayName,
 		ExternalRef: item.ExternalRef, State: string(item.State()), CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt, ArchivedAt: item.ArchivedAt}
 }
 
 func routingPoolFromDomain(item RoutingPool) routingPoolResponse {
-	return routingPoolResponse{ID: item.ID.String(), TenantID: item.TenantID, JobRoleID: item.JobRoleID.String(), Name: item.Name,
+	return routingPoolResponse{ID: item.ID.String(), OrgID: item.OrgID, JobRoleID: item.JobRoleID.String(), Name: item.Name,
 		State: string(item.State()), CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt, ArchivedAt: item.ArchivedAt}
 }
 
@@ -473,7 +473,7 @@ func relationshipsFromDomain(items []VirployeeRelationship) []relationshipRespon
 }
 
 func assignmentFromDomain(item ContinuityAssignment) assignmentResponse {
-	return assignmentResponse{ID: item.ID.String(), TenantID: item.TenantID, PoolID: item.PoolID.String(), SubjectID: item.SubjectID.String(),
+	return assignmentResponse{ID: item.ID.String(), OrgID: item.OrgID, PoolID: item.PoolID.String(), SubjectID: item.SubjectID.String(),
 		VirployeeID: item.VirployeeID.String(), Status: item.Status, Version: item.Version, AssignedAt: item.AssignedAt, UpdatedAt: item.UpdatedAt}
 }
 
@@ -493,8 +493,8 @@ func respondError(c *gin.Context, err error) bool {
 	return true
 }
 
-func tenantID(c *gin.Context) string {
-	value := strings.TrimSpace(c.GetHeader("X-Tenant-ID"))
+func orgID(c *gin.Context) string {
+	value := strings.TrimSpace(c.GetHeader("X-Org-ID"))
 	if value == "" {
 		return "default"
 	}

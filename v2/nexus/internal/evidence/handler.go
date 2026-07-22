@@ -11,7 +11,7 @@ import (
 )
 
 type UseCasesPort interface {
-	Generate(ctx context.Context, tenantID, virployeeID, subject string) (evidencedomain.EvidencePack, error)
+	Generate(ctx context.Context, orgID, virployeeID, subject string) (evidencedomain.EvidencePack, error)
 }
 
 type Handler struct {
@@ -30,10 +30,10 @@ func (h *Handler) Routes(router gin.IRouter) {
 }
 
 func (h *Handler) Generate(c *gin.Context) {
-	tenantID := strings.TrimSpace(c.GetHeader("X-Tenant-ID"))
+	orgID := strings.TrimSpace(c.GetHeader("X-Org-ID"))
 	virployeeID := strings.TrimSpace(c.Param("virployee_id"))
 	subject := strings.TrimSpace(c.Query("subject"))
-	pack, err := h.ucs.Generate(c.Request.Context(), tenantID, virployeeID, subject)
+	pack, err := h.ucs.Generate(c.Request.Context(), orgID, virployeeID, subject)
 	if err != nil {
 		ginmw.Respond(c, err)
 		return

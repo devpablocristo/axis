@@ -39,7 +39,7 @@ func (a mcpWriteGateAdapter) PrepareMCPAction(ctx context.Context, in mcpgoverna
 	}
 	principal := executiongate.PrincipalContext{Type: in.Context.PrincipalType, ID: in.Context.PrincipalID}
 	binding := preparedactions.MCPContextBinding{
-		TenantID: in.Context.TenantID, ActorID: in.Context.ActorID,
+		OrgID: in.Context.OrgID, ActorID: in.Context.ActorID,
 		VirployeeID: in.Context.VirployeeID.String(), SubjectID: in.Context.SubjectID.String(),
 		AssignmentID: in.Context.AssignmentID.String(), AssignmentVersion: in.Context.AssignmentVersion,
 		CapabilityKey: in.Capability.CapabilityKey, CapabilityVersion: in.Capability.Manifest.Version,
@@ -51,7 +51,7 @@ func (a mcpWriteGateAdapter) PrepareMCPAction(ctx context.Context, in mcpgoverna
 		binding.CaseID = in.Context.CaseID.String()
 	}
 	result, err := a.virployees.ExecutionGateFromMCP(
-		ctx, in.Context.TenantID, in.Context.VirployeeID,
+		ctx, in.Context.OrgID, in.Context.VirployeeID,
 		mcpgovernance.BuildDeterministicActionInput(in.Capability.CapabilityKey),
 		&executiongate.ConfirmedDraft{Action: in.Capability.CapabilityKey, Kind: mcpDraftKind(in.Capability.CapabilityKey), Fields: fields},
 		principal, binding,

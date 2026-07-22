@@ -52,7 +52,7 @@ func (h *Handler) Routes(router gin.IRouter) {
 
 func (h *Handler) List(c *gin.Context) {
 	out, err := h.ucs.List(c.Request.Context(), domain.ListInput{
-		TenantID:    c.GetHeader("X-Tenant-ID"),
+		OrgID:       c.GetHeader("X-Org-ID"),
 		PrincipalID: h.principalID(c),
 		State:       c.Query("lifecycle"),
 	})
@@ -68,7 +68,7 @@ func (h *Handler) Create(c *gin.Context) {
 	if err := ginmw.BindJSON(c, &req); err != nil {
 		return
 	}
-	out, err := h.ucs.Create(c.Request.Context(), req.ToDomain(c.GetHeader("X-Tenant-ID"), h.principalID(c)))
+	out, err := h.ucs.Create(c.Request.Context(), req.ToDomain(c.GetHeader("X-Org-ID"), h.principalID(c)))
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -81,7 +81,7 @@ func (h *Handler) Update(c *gin.Context) {
 	if err := ginmw.BindJSON(c, &req); err != nil {
 		return
 	}
-	out, err := h.ucs.Update(c.Request.Context(), req.ToDomain(c.GetHeader("X-Tenant-ID"), h.principalID(c), c.Param("user_id")))
+	out, err := h.ucs.Update(c.Request.Context(), req.ToDomain(c.GetHeader("X-Org-ID"), h.principalID(c), c.Param("user_id")))
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -111,7 +111,7 @@ func (h *Handler) Purge(c *gin.Context) {
 
 func (h *Handler) lifecycleAction(c *gin.Context, fn func(context.Context, domain.LifecycleInput) error) {
 	err := fn(c.Request.Context(), domain.LifecycleInput{
-		TenantID:    c.GetHeader("X-Tenant-ID"),
+		OrgID:       c.GetHeader("X-Org-ID"),
 		PrincipalID: h.principalID(c),
 		UserID:      c.Param("user_id"),
 	})

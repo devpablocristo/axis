@@ -9,17 +9,19 @@ import (
 
 type testOperationsRepo struct {
 	RepositoryPort
-	tenants []string
-	calls   []CreateReconciliationInput
+	organizations []string
+	calls         []CreateReconciliationInput
 }
 
-func (r *testOperationsRepo) ListTenantIDs(context.Context) ([]string, error) { return r.tenants, nil }
+func (r *testOperationsRepo) ListOrgIDs(context.Context) ([]string, error) {
+	return r.organizations, nil
+}
 func (r *testOperationsRepo) Fleet(context.Context, string, string) ([]FleetMember, error) {
 	return []FleetMember{}, nil
 }
 func (r *testOperationsRepo) CreateAndRunReconciliation(_ context.Context, t, p, a string, in CreateReconciliationInput) (ReconciliationRun, bool, error) {
 	r.calls = append(r.calls, in)
-	return ReconciliationRun{ID: uuid.New(), TenantID: t, ProductSurface: p, Mode: in.Mode, TriggerType: in.TriggerType}, true, nil
+	return ReconciliationRun{ID: uuid.New(), OrgID: t, ProductSurface: p, Mode: in.Mode, TriggerType: in.TriggerType}, true, nil
 }
 
 type testOperationsAuthorizer struct {
@@ -35,30 +37,30 @@ func (a *testOperationsAuthorizer) CheckOperationAuthorization(_ context.Context
 
 func TestOperationsFailsClosedWithoutAuthorizer(t *testing.T) {
 	u := NewUseCases(&testOperationsRepo{}, nil)
-	if _, err := u.Fleet(context.Background(), "tenant", "companion", "actor", "member"); err == nil {
+	if _, err := u.Fleet(context.Background(), "organization", "companion", "actor", "member"); err == nil {
 		t.Fatal("operations must fail closed when Nexus authorization is unavailable")
 	}
 }
 func TestOperationsPassesScopedAuthorityMetadata(t *testing.T) {
 	authz := &testOperationsAuthorizer{result: AuthorizationResult{Allowed: true}}
 	u := NewUseCases(&testOperationsRepo{}, authz)
-	_, err := u.Fleet(context.Background(), "tenant-a", "companion", "operator-a", "member")
+	_, err := u.Fleet(context.Background(), "organization-a", "companion", "operator-a", "member")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if authz.input.Permission != "ops.read" || authz.input.ResourceType != "fleet" || authz.input.TenantID != "tenant-a" {
+	if authz.input.Permission != "ops.read" || authz.input.ResourceType != "fleet" || authz.input.OrgID != "organization-a" {
 		t.Fatalf("unexpected authorization input: %+v", authz.input)
 	}
 }
-func TestScheduledReconciliationUsesStableBucketKeyPerTenant(t *testing.T) {
-	repo := &testOperationsRepo{tenants: []string{"tenant-a", "tenant-b"}}
+func TestScheduledReconciliationUsesStableBucketKeyPerOrg(t *testing.T) {
+	repo := &testOperationsRepo{organizations: []string{"organization-a", "organization-b"}}
 	u := NewUseCases(repo, nil)
 	runs, err := u.RunScheduled(context.Background(), "companion")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(runs) != 2 || len(repo.calls) != 2 {
-		t.Fatalf("expected one run per tenant: %+v", runs)
+		t.Fatalf("expected one run per organization: %+v", runs)
 	}
 	if repo.calls[0].IdempotencyKey != repo.calls[1].IdempotencyKey || repo.calls[0].TriggerType != "scheduled" {
 		t.Fatalf("scheduled runs must share a stable bucket key: %+v", repo.calls)

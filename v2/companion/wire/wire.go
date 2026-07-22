@@ -69,7 +69,7 @@ func (a governedReadInvokerAdapter) InvokeGovernedRead(ctx context.Context, in v
 		return nil, domainerr.Conflict("ToolInvocationGate is not configured")
 	}
 	resolved, err := a.gate.ResolveContext(ctx, mcpgovernance.ContextRequest{
-		TenantID: in.TenantID, ActorID: in.ActorID, ActorRole: "service",
+		OrgID: in.OrgID, ActorID: in.ActorID, ActorRole: "service",
 		VirployeeID: in.VirployeeID, SubjectID: in.SubjectID, CaseID: in.CaseID,
 		ProductSurface: in.ProductSurface, RepositoryGeneration: in.RepositoryGeneration,
 	})
@@ -177,7 +177,7 @@ type operationsAuthorizationAdapter struct{ client *nexusclient.Client }
 
 func (a operationsAuthorizationAdapter) CheckOperationAuthorization(ctx context.Context, in operations.AuthorizationCheck) (operations.AuthorizationResult, error) {
 	out, err := a.client.CheckDelegationAuthorization(ctx, professionalauthority.DelegationAuthorizationCheck{
-		TenantID: in.TenantID, ActorID: in.ActorID, ActorRole: in.ActorRole,
+		OrgID: in.OrgID, ActorID: in.ActorID, ActorRole: in.ActorRole,
 		Permission: in.Permission, ProductSurface: in.ProductSurface, ActionType: in.ActionType,
 		ResourceType: in.ResourceType, ResourceID: in.ResourceID, RiskClass: "low",
 	})
@@ -185,7 +185,7 @@ func (a operationsAuthorizationAdapter) CheckOperationAuthorization(ctx context.
 }
 
 func (a auditEmitterAdapter) AppendAuditEvent(ctx context.Context, in virployees.AuditEventInput) error {
-	return a.client.AppendAuditEvent(ctx, in.TenantID, nexusclient.AuditEvent{
+	return a.client.AppendAuditEvent(ctx, in.OrgID, nexusclient.AuditEvent{
 		VirployeeID: in.VirployeeID,
 		ActorType:   in.ActorType,
 		ActorID:     in.ActorID,
@@ -485,7 +485,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	router.Use(routeAwareBodySizeLimit(config.MaxBodyBytes, config.KnowledgeUploadMaxBodyBytes))
 	router.Use(ginmw.NewCORS(ginmw.CORSConfig{
 		Origins:      config.CORSOrigins,
-		AllowHeaders: []string{"X-Actor-ID", "X-Tenant-ID", "X-Axis-Tenant-Role", "X-Axis-Virployee-ID", "X-Axis-Subject-ID", "X-Axis-Case-ID", "X-Axis-Product-Surface", "X-Axis-Repository-Generation", "X-Idempotency-Key", "Idempotency-Key"},
+		AllowHeaders: []string{"X-Actor-ID", "X-Org-ID", "X-Axis-Org-Role", "X-Axis-Virployee-ID", "X-Axis-Subject-ID", "X-Axis-Case-ID", "X-Axis-Product-Surface", "X-Axis-Repository-Generation", "X-Idempotency-Key", "Idempotency-Key"},
 	}))
 	ginmw.RegisterHealthEndpoints(router, db.Ping)
 	api := router.Group("/v1")
@@ -559,7 +559,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 			findings += run.FindingsCount
 			repaired += run.RepairedCount
 		}
-		return json.Marshal(map[string]any{"tenants": len(runs), "findings": findings, "repaired": repaired, "source_job_id": job.ID.String()})
+		return json.Marshal(map[string]any{"organizations": len(runs), "findings": findings, "repaired": repaired, "source_job_id": job.ID.String()})
 	})
 	jobsWorker.Register(assistProcessJobKind, func(jobCtx context.Context, job jobs.Job) (json.RawMessage, error) {
 		var payload assistJobPayload
@@ -570,7 +570,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		if err != nil {
 			return nil, jobs.Permanent("invalid_assist_job", err)
 		}
-		run, processErr := virployeesUsecases.ProcessAssistRun(jobCtx, job.TenantID, runID, job.Attempts > 1)
+		run, processErr := virployeesUsecases.ProcessAssistRun(jobCtx, job.OrgID, runID, job.Attempts > 1)
 		evidence, _ := json.Marshal(map[string]any{"run_id": runID.String(), "status": run.Status})
 		if processErr != nil {
 			if run.Status == "failed" || run.Status == "done" {
@@ -591,7 +591,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		if err != nil {
 			return nil, jobs.Permanent("invalid_specialist_consult_job", err)
 		}
-		item, processErr := virployeesUsecases.ProcessSpecialistConsultation(jobCtx, job.TenantID, id, job.Attempts)
+		item, processErr := virployeesUsecases.ProcessSpecialistConsultation(jobCtx, job.OrgID, id, job.Attempts)
 		evidence, _ := json.Marshal(map[string]any{"consultation_id": id.String(), "status": item.Status, "output_hash": item.OutputHash})
 		if processErr != nil {
 			return evidence, jobs.Retryable("specialist_consult_failed", processErr)
@@ -609,7 +609,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		if err != nil {
 			return nil, jobs.Permanent("invalid_orchestration_reconcile_job", err)
 		}
-		plan, reconcileErr := virployeesUsecases.ReconcileOrchestration(jobCtx, job.TenantID, id)
+		plan, reconcileErr := virployeesUsecases.ReconcileOrchestration(jobCtx, job.OrgID, id)
 		evidence, _ := json.Marshal(map[string]any{"plan_id": id.String(), "status": plan.Status, "completed": plan.CompletedCount, "failed": plan.FailedCount})
 		if reconcileErr != nil {
 			return evidence, jobs.Retryable("orchestration_reconcile_failed", reconcileErr)
@@ -627,7 +627,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		if err != nil {
 			return nil, jobs.Permanent("invalid_orchestration_synthesis_job", err)
 		}
-		run, synthesisErr := virployeesUsecases.SynthesizeOrchestration(jobCtx, job.TenantID, id, job.Attempts)
+		run, synthesisErr := virployeesUsecases.SynthesizeOrchestration(jobCtx, job.OrgID, id, job.Attempts)
 		evidence, _ := json.Marshal(map[string]any{"plan_id": id.String(), "run_id": run.ID.String(), "status": run.Status})
 		if synthesisErr != nil {
 			return evidence, jobs.Retryable("orchestration_synthesis_failed", synthesisErr)
@@ -651,7 +651,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		if err != nil || payload.Version <= 0 {
 			return nil, jobs.Permanent("invalid_memory_index_job", err)
 		}
-		indexed, err := memoriesUsecases.IndexMemory(jobCtx, job.TenantID, memoryID, payload.Version)
+		indexed, err := memoriesUsecases.IndexMemory(jobCtx, job.OrgID, memoryID, payload.Version)
 		if err != nil {
 			if domainerr.IsNotFound(err) || domainerr.IsConflict(err) {
 				return nil, jobs.Permanent("memory_version_stale", err)
@@ -699,7 +699,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	go func() {
 		defer deps.watcherWG.Done()
 		jobs.RunRecurringScheduler(backgroundCtx, jobsRepository, jobs.RecurringConfig{
-			TenantID: "system", ProductSurface: "companion", Kind: "ops.fleet_reconcile",
+			OrgID: "system", ProductSurface: "companion", Kind: "ops.fleet_reconcile",
 			DedupePrefix: "ops-fleet", Interval: 15 * time.Minute, Timeout: config.JobTimeout,
 			MaxAttempts: config.WatcherMaxRecoveries,
 		})
@@ -707,7 +707,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	go func() {
 		defer deps.watcherWG.Done()
 		jobs.RunRecurringScheduler(backgroundCtx, jobsRepository, jobs.RecurringConfig{
-			TenantID: "system", ProductSurface: "companion", Kind: "handoff.expire",
+			OrgID: "system", ProductSurface: "companion", Kind: "handoff.expire",
 			Interval: config.WatcherInterval, Timeout: config.JobTimeout,
 			MaxAttempts: config.WatcherMaxRecoveries,
 		})
@@ -722,7 +722,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	go func() {
 		defer deps.watcherWG.Done()
 		jobs.RunRecurringScheduler(backgroundCtx, jobsRepository, jobs.RecurringConfig{
-			TenantID: "system", ProductSurface: "companion", Kind: "operational.reconcile",
+			OrgID: "system", ProductSurface: "companion", Kind: "operational.reconcile",
 			Interval: config.WatcherInterval, Timeout: config.JobTimeout,
 			MaxAttempts: config.WatcherMaxRecoveries,
 		})
@@ -730,7 +730,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	go func() {
 		defer deps.watcherWG.Done()
 		jobs.RunRecurringScheduler(backgroundCtx, jobsRepository, jobs.RecurringConfig{
-			TenantID: "system", ProductSurface: "companion", Kind: "memory.decay",
+			OrgID: "system", ProductSurface: "companion", Kind: "memory.decay",
 			Interval: config.WatcherInterval, Timeout: config.JobTimeout,
 			MaxAttempts: config.WatcherMaxRecoveries,
 		})

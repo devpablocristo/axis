@@ -17,10 +17,10 @@ func TestRetryAfterOnlyRecognizesQuotaErrors(t *testing.T) {
 
 func TestPolicyValidationRequiresBoundedPositiveLimits(t *testing.T) {
 	valid, err := validatePolicy(Policy{
-		Key:           Key{TenantID: "tenant", ProductSurface: "Medmory", Area: "Inbound"},
+		Key:           Key{OrgID: "organization", ProductSurface: "ProductA", Area: "Inbound"},
 		WindowSeconds: 60, RequestLimit: 10, UnitLimit: 100, Active: true,
 	})
-	if err != nil || valid.ProductSurface != "medmory" || valid.Area != "inbound" {
+	if err != nil || valid.ProductSurface != "producta" || valid.Area != "inbound" {
 		t.Fatalf("valid policy rejected or not normalized: %+v err=%v", valid, err)
 	}
 	if _, err := validatePolicy(Policy{Key: valid.Key, WindowSeconds: 0, RequestLimit: 1, UnitLimit: 1}); err == nil {

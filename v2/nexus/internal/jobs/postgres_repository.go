@@ -14,7 +14,7 @@ import (
 )
 
 const jobColumns = `
-    id, tenant_id, product_surface, kind, shard_key, dedupe_key, payload_json, status,
+    id, org_id, product_surface, kind, shard_key, dedupe_key, payload_json, status,
     priority, attempts, max_attempts, run_after, lease_owner, lease_until, locked_at,
     heartbeat_at, deadline_at, timeout_seconds, last_error_code, evidence_json,
     created_at, updated_at, completed_at`
@@ -40,12 +40,12 @@ func (r *PostgresRepository) Enqueue(ctx context.Context, input EnqueueInput) (J
 
 	row := tx.QueryRow(ctx, `
         INSERT INTO nexus_jobs
-            (id, tenant_id, product_surface, kind, shard_key, dedupe_key, payload_json,
+            (id, org_id, product_surface, kind, shard_key, dedupe_key, payload_json,
              status, priority, max_attempts, run_after, deadline_at, timeout_seconds)
         VALUES ($1,$2,$3,$4,$5,$6,$7,'queued',$8,$9,$10,$11,$12)
-        ON CONFLICT (tenant_id, product_surface, kind, dedupe_key) DO NOTHING
+        ON CONFLICT (org_id, product_surface, kind, dedupe_key) DO NOTHING
         RETURNING `+jobColumns,
-		input.ID, input.TenantID, input.ProductSurface, input.Kind, input.ShardKey,
+		input.ID, input.OrgID, input.ProductSurface, input.Kind, input.ShardKey,
 		input.DedupeKey, input.Payload, input.Priority, input.MaxAttempts, input.RunAfter,
 		input.DeadlineAt, durationSeconds(input.Timeout))
 	job, scanErr := scanJob(row)
@@ -110,12 +110,12 @@ func (r *PostgresRepository) Claim(ctx context.Context, options ClaimOptions) ([
             SELECT job.id, job.priority, job.run_after, job.created_at,
                    COALESCE(control.state,'closed') AS control_state,
                    row_number() OVER (
-                       PARTITION BY job.tenant_id,job.product_surface,job.kind
+                       PARTITION BY job.org_id,job.product_surface,job.kind
                        ORDER BY job.priority DESC,job.run_after,job.created_at,job.id
                    ) AS control_rank
             FROM nexus_jobs AS job
             LEFT JOIN nexus_worker_controls AS control
-              ON control.tenant_id=job.tenant_id
+              ON control.org_id=job.org_id
              AND control.product_surface=job.product_surface
              AND control.kind=job.kind
             WHERE job.status='queued'
@@ -204,15 +204,15 @@ func (r *PostgresRepository) Complete(ctx context.Context, jobID uuid.UUID, work
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	var finalStatus Status
-	var tenantID, productSurface, kind string
+	var orgID, productSurface, kind string
 	err = tx.QueryRow(ctx, `
         UPDATE nexus_jobs
         SET status=CASE WHEN status='cancel_requested' THEN 'cancelled' ELSE 'succeeded' END,
 			lease_owner='', lease_until=NULL, evidence_json=CASE WHEN status='running' THEN $3 ELSE evidence_json END,
             completed_at=now(), updated_at=now()
 		WHERE id=$1 AND lease_owner=$2 AND status IN('running','cancel_requested')
-		RETURNING status,tenant_id,product_surface,kind
-	`, jobID, strings.TrimSpace(workerID), evidence).Scan(&finalStatus, &tenantID, &productSurface, &kind)
+		RETURNING status,org_id,product_surface,kind
+	`, jobID, strings.TrimSpace(workerID), evidence).Scan(&finalStatus, &orgID, &productSurface, &kind)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrJobNotFound
@@ -223,7 +223,7 @@ func (r *PostgresRepository) Complete(ctx context.Context, jobID uuid.UUID, work
 		return err
 	}
 	if finalStatus == StatusSucceeded {
-		if err := closeCircuitAfterProbe(ctx, tx, "nexus_worker_controls", tenantID, productSurface, kind); err != nil {
+		if err := closeCircuitAfterProbe(ctx, tx, "nexus_worker_controls", orgID, productSurface, kind); err != nil {
 			return err
 		}
 	}
@@ -280,7 +280,7 @@ func (r *PostgresRepository) Fail(ctx context.Context, input FailInput) (Job, er
 	return job, nil
 }
 
-func (r *PostgresRepository) Cancel(ctx context.Context, tenantID string, jobID uuid.UUID, reasonCode string) error {
+func (r *PostgresRepository) Cancel(ctx context.Context, orgID string, jobID uuid.UUID, reasonCode string) error {
 	reasonCode = NormalizeErrorCode(reasonCode)
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -295,9 +295,9 @@ func (r *PostgresRepository) Cancel(ctx context.Context, tenantID string, jobID 
 			lease_owner=CASE WHEN status='running' THEN lease_owner ELSE '' END,
 			lease_until=CASE WHEN status='running' THEN lease_until ELSE NULL END,
 			completed_at=CASE WHEN status='running' THEN NULL ELSE now() END,updated_at=now()
-        WHERE tenant_id=$1 AND id=$2 AND status IN ('queued','running')
+        WHERE org_id=$1 AND id=$2 AND status IN ('queued','running')
 		RETURNING status
-	`, strings.TrimSpace(tenantID), jobID, reasonCode).Scan(&status)
+	`, strings.TrimSpace(orgID), jobID, reasonCode).Scan(&status)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrJobNotFound
@@ -311,8 +311,8 @@ func (r *PostgresRepository) Cancel(ctx context.Context, tenantID string, jobID 
 	return commitTx(ctx, tx, "cancel job")
 }
 
-func (r *PostgresRepository) Get(ctx context.Context, tenantID string, jobID uuid.UUID) (Job, error) {
-	job, err := scanJob(r.pool.QueryRow(ctx, `SELECT `+jobColumns+` FROM nexus_jobs WHERE tenant_id=$1 AND id=$2`, strings.TrimSpace(tenantID), jobID))
+func (r *PostgresRepository) Get(ctx context.Context, orgID string, jobID uuid.UUID) (Job, error) {
+	job, err := scanJob(r.pool.QueryRow(ctx, `SELECT `+jobColumns+` FROM nexus_jobs WHERE org_id=$1 AND id=$2`, strings.TrimSpace(orgID), jobID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Job{}, ErrJobNotFound
 	}
@@ -322,12 +322,12 @@ func (r *PostgresRepository) Get(ctx context.Context, tenantID string, jobID uui
 	return job, nil
 }
 
-func (r *PostgresRepository) List(ctx context.Context, tenantID, productSurface, status string, limit int) ([]Job, error) {
+func (r *PostgresRepository) List(ctx context.Context, orgID, productSurface, status string, limit int) ([]Job, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	query := `SELECT ` + jobColumns + ` FROM nexus_jobs WHERE tenant_id=$1`
-	args := []any{strings.TrimSpace(tenantID)}
+	query := `SELECT ` + jobColumns + ` FROM nexus_jobs WHERE org_id=$1`
+	args := []any{strings.TrimSpace(orgID)}
 	if productSurface = strings.TrimSpace(strings.ToLower(productSurface)); productSurface != "" {
 		args = append(args, productSurface)
 		query += fmt.Sprintf(" AND product_surface=$%d", len(args))
@@ -423,7 +423,7 @@ func (r *PostgresRepository) RecoverExpiredLeases(ctx context.Context, limit int
 	return result, nil
 }
 
-func (r *PostgresRepository) ReplayDeadLetter(ctx context.Context, tenantID string, jobID uuid.UUID, runAfter time.Time) (Job, error) {
+func (r *PostgresRepository) ReplayDeadLetter(ctx context.Context, orgID string, jobID uuid.UUID, runAfter time.Time) (Job, error) {
 	if runAfter.IsZero() {
 		runAfter = time.Now().UTC()
 	}
@@ -436,9 +436,9 @@ func (r *PostgresRepository) ReplayDeadLetter(ctx context.Context, tenantID stri
         UPDATE nexus_jobs
         SET status='queued', attempts=0, run_after=$3, lease_owner='', lease_until=NULL,
             locked_at=NULL, heartbeat_at=NULL, last_error_code='', completed_at=NULL, updated_at=now()
-        WHERE tenant_id=$1 AND id=$2 AND status='dead_letter'
+        WHERE org_id=$1 AND id=$2 AND status='dead_letter'
         RETURNING `+jobColumns,
-		strings.TrimSpace(tenantID), jobID, runAfter.UTC()))
+		strings.TrimSpace(orgID), jobID, runAfter.UTC()))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Job{}, ErrJobNotFound
 	}
@@ -458,10 +458,10 @@ func getByDedupe(ctx context.Context, tx pgx.Tx, input EnqueueInput) (Job, error
 	job, err := scanJob(tx.QueryRow(ctx, `
         SELECT `+jobColumns+`
         FROM nexus_jobs
-        WHERE tenant_id=$1 AND product_surface=$2 AND kind=$3 AND dedupe_key=$4
+        WHERE org_id=$1 AND product_surface=$2 AND kind=$3 AND dedupe_key=$4
         ORDER BY created_at
         LIMIT 1
-    `, input.TenantID, input.ProductSurface, input.Kind, input.DedupeKey))
+    `, input.OrgID, input.ProductSurface, input.Kind, input.DedupeKey))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Job{}, ErrJobNotFound
 	}
@@ -480,7 +480,7 @@ func scanJob(row rowScanner) (Job, error) {
 	var payload, evidence []byte
 	var status string
 	err := row.Scan(
-		&job.ID, &job.TenantID, &job.ProductSurface, &job.Kind, &job.ShardKey,
+		&job.ID, &job.OrgID, &job.ProductSurface, &job.Kind, &job.ShardKey,
 		&job.DedupeKey, &payload, &status, &job.Priority, &job.Attempts,
 		&job.MaxAttempts, &job.RunAfter, &job.LeaseOwner, &job.LeaseUntil, &job.LockedAt,
 		&job.HeartbeatAt, &job.DeadlineAt, &job.TimeoutSeconds, &job.LastErrorCode,
@@ -543,11 +543,11 @@ func prefixedJobColumns(prefix string) string {
 	return strings.Join(columns, ", ")
 }
 
-func closeCircuitAfterProbe(ctx context.Context, tx pgx.Tx, controlsTable, tenantID, productSurface, kind string) error {
+func closeCircuitAfterProbe(ctx context.Context, tx pgx.Tx, controlsTable, orgID, productSurface, kind string) error {
 	query := fmt.Sprintf(`UPDATE %s SET state='closed',failure_count=0,failure_window_started_at=NULL,
 		opened_until=NULL,revision=revision+1,changed_by='system:circuit_breaker',reason_code='probe_succeeded',updated_at=now()
-		WHERE tenant_id=$1 AND product_surface=$2 AND kind=$3 AND state='half_open'`, controlsTable)
-	if _, err := tx.Exec(ctx, query, tenantID, productSurface, kind); err != nil {
+		WHERE org_id=$1 AND product_surface=$2 AND kind=$3 AND state='half_open'`, controlsTable)
+	if _, err := tx.Exec(ctx, query, orgID, productSurface, kind); err != nil {
 		return fmt.Errorf("close worker circuit after probe: %w", err)
 	}
 	return nil
@@ -555,11 +555,11 @@ func closeCircuitAfterProbe(ctx context.Context, tx pgx.Tx, controlsTable, tenan
 
 func recordCircuitFailure(ctx context.Context, tx pgx.Tx, controlsTable, definitionsTable string, job Job) error {
 	query := fmt.Sprintf(`
-		INSERT INTO %s(tenant_id,product_surface,kind,state,failure_count,failure_window_started_at,
+		INSERT INTO %s(org_id,product_surface,kind,state,failure_count,failure_window_started_at,
 			opened_until,changed_by,reason_code)
 		SELECT $1,$2,$3,'closed',1,now(),NULL,'system:circuit_breaker','dependency_failure'
 		WHERE NOT COALESCE((SELECT protected FROM %s WHERE product_surface=$2 AND kind=$3),false)
-		ON CONFLICT(tenant_id,product_surface,kind) DO UPDATE SET
+		ON CONFLICT(org_id,product_surface,kind) DO UPDATE SET
 			failure_count=CASE WHEN %s.failure_window_started_at>=now()-interval '1 minute'
 				THEN %s.failure_count+1 ELSE 1 END,
 			failure_window_started_at=CASE WHEN %s.failure_window_started_at>=now()-interval '1 minute'
@@ -578,7 +578,7 @@ func recordCircuitFailure(ctx context.Context, tx pgx.Tx, controlsTable, definit
 		controlsTable, controlsTable, controlsTable, controlsTable,
 		controlsTable, controlsTable, controlsTable, controlsTable, controlsTable,
 		controlsTable, controlsTable, controlsTable, controlsTable, controlsTable)
-	if _, err := tx.Exec(ctx, query, job.TenantID, job.ProductSurface, job.Kind); err != nil {
+	if _, err := tx.Exec(ctx, query, job.OrgID, job.ProductSurface, job.Kind); err != nil {
 		return fmt.Errorf("record worker circuit failure: %w", err)
 	}
 	return nil

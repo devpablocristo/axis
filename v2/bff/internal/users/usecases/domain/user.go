@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	tenantdomain "github.com/devpablocristo/bff-v2/internal/tenancy/usecases/domain"
+	productdomain "github.com/devpablocristo/bff-v2/internal/products/usecases/domain"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
 	"github.com/google/uuid"
 )
@@ -19,18 +19,18 @@ const (
 	KindUser       = "user"
 	KindInvitation = "invitation"
 
-	RoleOwner  = tenantdomain.RoleOwner
-	RoleAdmin  = tenantdomain.RoleAdmin
-	RoleMember = tenantdomain.RoleMember
+	RoleOwner  = productdomain.RoleOwner
+	RoleAdmin  = productdomain.RoleAdmin
+	RoleMember = productdomain.RoleMember
 )
 
 type User struct {
-	ID       string
-	Kind     string
-	Email    string
-	Role     string
-	TenantID uuid.UUID
-	State    string
+	ID    string
+	Kind  string
+	Email string
+	Role  string
+	OrgID uuid.UUID
+	State string
 
 	CreatedAt time.Time
 	UpdatedAt time.Time
@@ -41,20 +41,20 @@ type User struct {
 }
 
 type ListInput struct {
-	TenantID    string
+	OrgID       string
 	PrincipalID string
 	State       string
 }
 
 type CreateInput struct {
-	TenantID    string
+	OrgID       string
 	PrincipalID string
 	Email       string
 	Role        string
 }
 
 type UpdateInput struct {
-	TenantID    string
+	OrgID       string
 	PrincipalID string
 	UserID      string
 	Email       string
@@ -62,31 +62,31 @@ type UpdateInput struct {
 }
 
 type LifecycleInput struct {
-	TenantID    string
+	OrgID       string
 	PrincipalID string
 	UserID      string
 }
 
 type EnsureActiveInput struct {
-	TenantID string
-	UserID   string
+	OrgID  string
+	UserID string
 }
 
 type NormalizedListInput struct {
-	TenantID    uuid.UUID
+	OrgID       uuid.UUID
 	PrincipalID string
 	State       string
 }
 
 type NormalizedCreateInput struct {
-	TenantID    uuid.UUID
+	OrgID       uuid.UUID
 	PrincipalID string
 	Email       string
 	Role        string
 }
 
 type NormalizedUpdateInput struct {
-	TenantID    uuid.UUID
+	OrgID       uuid.UUID
 	PrincipalID string
 	UserID      string
 	Email       string
@@ -94,18 +94,18 @@ type NormalizedUpdateInput struct {
 }
 
 type NormalizedLifecycleInput struct {
-	TenantID    uuid.UUID
+	OrgID       uuid.UUID
 	PrincipalID string
 	UserID      string
 }
 
 type NormalizedEnsureActiveInput struct {
-	TenantID uuid.UUID
-	UserID   string
+	OrgID  uuid.UUID
+	UserID string
 }
 
 func NormalizeListInput(in ListInput) (NormalizedListInput, error) {
-	tenantID, err := tenantdomain.ParseTenantID(in.TenantID)
+	orgID, err := productdomain.ParseOrgID(in.OrgID)
 	if err != nil {
 		return NormalizedListInput{}, err
 	}
@@ -114,14 +114,14 @@ func NormalizeListInput(in ListInput) (NormalizedListInput, error) {
 		return NormalizedListInput{}, domainerr.Validation("principal_id is required")
 	}
 	return NormalizedListInput{
-		TenantID:    tenantID,
+		OrgID:       orgID,
 		PrincipalID: principalID,
 		State:       NormalizeState(in.State),
 	}, nil
 }
 
 func NormalizeCreateInput(in CreateInput) (NormalizedCreateInput, error) {
-	tenantID, principalID, err := normalizeAccess(in.TenantID, in.PrincipalID)
+	orgID, principalID, err := normalizeAccess(in.OrgID, in.PrincipalID)
 	if err != nil {
 		return NormalizedCreateInput{}, err
 	}
@@ -134,7 +134,7 @@ func NormalizeCreateInput(in CreateInput) (NormalizedCreateInput, error) {
 		return NormalizedCreateInput{}, err
 	}
 	return NormalizedCreateInput{
-		TenantID:    tenantID,
+		OrgID:       orgID,
 		PrincipalID: principalID,
 		Email:       email,
 		Role:        role,
@@ -142,7 +142,7 @@ func NormalizeCreateInput(in CreateInput) (NormalizedCreateInput, error) {
 }
 
 func NormalizeUpdateInput(in UpdateInput) (NormalizedUpdateInput, error) {
-	tenantID, principalID, err := normalizeAccess(in.TenantID, in.PrincipalID)
+	orgID, principalID, err := normalizeAccess(in.OrgID, in.PrincipalID)
 	if err != nil {
 		return NormalizedUpdateInput{}, err
 	}
@@ -166,7 +166,7 @@ func NormalizeUpdateInput(in UpdateInput) (NormalizedUpdateInput, error) {
 		return NormalizedUpdateInput{}, err
 	}
 	return NormalizedUpdateInput{
-		TenantID:    tenantID,
+		OrgID:       orgID,
 		PrincipalID: principalID,
 		UserID:      userID,
 		Email:       email,
@@ -175,7 +175,7 @@ func NormalizeUpdateInput(in UpdateInput) (NormalizedUpdateInput, error) {
 }
 
 func NormalizeLifecycleInput(in LifecycleInput) (NormalizedLifecycleInput, error) {
-	tenantID, principalID, err := normalizeAccess(in.TenantID, in.PrincipalID)
+	orgID, principalID, err := normalizeAccess(in.OrgID, in.PrincipalID)
 	if err != nil {
 		return NormalizedLifecycleInput{}, err
 	}
@@ -191,14 +191,14 @@ func NormalizeLifecycleInput(in LifecycleInput) (NormalizedLifecycleInput, error
 		userID = parsed.String()
 	}
 	return NormalizedLifecycleInput{
-		TenantID:    tenantID,
+		OrgID:       orgID,
 		PrincipalID: principalID,
 		UserID:      userID,
 	}, nil
 }
 
 func NormalizeEnsureActiveInput(in EnsureActiveInput) (NormalizedEnsureActiveInput, error) {
-	tenantID, err := tenantdomain.ParseTenantID(in.TenantID)
+	orgID, err := productdomain.ParseOrgID(in.OrgID)
 	if err != nil {
 		return NormalizedEnsureActiveInput{}, err
 	}
@@ -211,8 +211,8 @@ func NormalizeEnsureActiveInput(in EnsureActiveInput) (NormalizedEnsureActiveInp
 		return NormalizedEnsureActiveInput{}, domainerr.Validation("user_id must be a valid UUID")
 	}
 	return NormalizedEnsureActiveInput{
-		TenantID: tenantID,
-		UserID:   parsedUserID.String(),
+		OrgID:  orgID,
+		UserID: parsedUserID.String(),
 	}, nil
 }
 
@@ -270,8 +270,8 @@ func KindFromID(id string) string {
 	return KindUser
 }
 
-func normalizeAccess(rawTenantID, rawPrincipalID string) (uuid.UUID, string, error) {
-	tenantID, err := tenantdomain.ParseTenantID(rawTenantID)
+func normalizeAccess(rawOrgID, rawPrincipalID string) (uuid.UUID, string, error) {
+	orgID, err := productdomain.ParseOrgID(rawOrgID)
 	if err != nil {
 		return uuid.Nil, "", err
 	}
@@ -279,7 +279,7 @@ func normalizeAccess(rawTenantID, rawPrincipalID string) (uuid.UUID, string, err
 	if principalID == "" {
 		return uuid.Nil, "", domainerr.Validation("principal_id is required")
 	}
-	return tenantID, principalID, nil
+	return orgID, principalID, nil
 }
 
 func isInvitationID(id string) bool {

@@ -14,7 +14,7 @@ import (
 // the ONLY way learning writes to memory, and it is only reached from the human
 // Accept path — the golden rule (G4.3): the agent never self-writes procedures.
 type MemoryInstaller interface {
-	InstallProcedure(ctx context.Context, tenantID string, virployeeID uuid.UUID, actor, source, title, content string) (uuid.UUID, error)
+	InstallProcedure(ctx context.Context, orgID string, virployeeID uuid.UUID, actor, source, title, content string) (uuid.UUID, error)
 }
 
 // Authorizer enforces the same per-virployee role gate the human memory-write
@@ -23,7 +23,7 @@ type MemoryInstaller interface {
 // otherwise CreateSystem would bypass the authorization every other write has.
 // memories.UseCases satisfies this directly.
 type Authorizer interface {
-	Authorize(ctx context.Context, tenant string, virployee uuid.UUID, actor, role string) error
+	Authorize(ctx context.Context, organization string, virployee uuid.UUID, actor, role string) error
 }
 
 // ProcedureEnricher rewrites a distilled procedure's wording via the runtime
@@ -90,7 +90,7 @@ func (e runtimeEnricher) Enrich(ctx context.Context, in EnrichInput) (EnrichOutp
 // --- capabilities adapter (CapabilityChecker) ---
 
 type capabilityLister interface {
-	ListActive(ctx context.Context, tenantID string) ([]capabilitydomain.Capability, error)
+	ListActive(ctx context.Context, orgID string) ([]capabilitydomain.Capability, error)
 }
 
 type capabilitiesChecker struct {
@@ -103,9 +103,9 @@ func NewCapabilityChecker(caps capabilityLister) CapabilityChecker {
 	return capabilitiesChecker{caps: caps}
 }
 
-func (c capabilitiesChecker) IsActiveCapability(ctx context.Context, tenantID, capabilityKey string) (bool, error) {
+func (c capabilitiesChecker) IsActiveCapability(ctx context.Context, orgID, capabilityKey string) (bool, error) {
 	key := strings.TrimSpace(strings.ToLower(capabilityKey))
-	list, err := c.caps.ListActive(ctx, tenantID)
+	list, err := c.caps.ListActive(ctx, orgID)
 	if err != nil {
 		return false, err
 	}
@@ -120,7 +120,7 @@ func (c capabilitiesChecker) IsActiveCapability(ctx context.Context, tenantID, c
 // --- memories adapter (MemoryInstaller) ---
 
 type memoryWriter interface {
-	CreateSystem(ctx context.Context, tenant string, virployee uuid.UUID, actor, source string, in memories.CreateInput) (memories.Memory, error)
+	CreateSystem(ctx context.Context, organization string, virployee uuid.UUID, actor, source string, in memories.CreateInput) (memories.Memory, error)
 }
 
 type memoriesInstaller struct {
@@ -133,8 +133,8 @@ func NewMemoriesInstaller(mem memoryWriter) MemoryInstaller {
 	return memoriesInstaller{mem: mem}
 }
 
-func (m memoriesInstaller) InstallProcedure(ctx context.Context, tenantID string, virployeeID uuid.UUID, actor, source, title, content string) (uuid.UUID, error) {
-	created, err := m.mem.CreateSystem(ctx, tenantID, virployeeID, actor, source, memories.CreateInput{
+func (m memoriesInstaller) InstallProcedure(ctx context.Context, orgID string, virployeeID uuid.UUID, actor, source, title, content string) (uuid.UUID, error) {
+	created, err := m.mem.CreateSystem(ctx, orgID, virployeeID, actor, source, memories.CreateInput{
 		Title:   title,
 		Type:    "procedure",
 		Content: content,

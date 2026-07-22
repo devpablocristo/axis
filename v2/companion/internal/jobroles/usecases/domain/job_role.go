@@ -19,7 +19,7 @@ const (
 
 type JobRole struct {
 	ID               uuid.UUID
-	TenantID         string
+	OrgID            string
 	Name             string
 	Slug             string
 	Mission          string

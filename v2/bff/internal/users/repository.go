@@ -23,13 +23,13 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 	return &Repository{pool: pool}
 }
 
-func (r *Repository) Get(ctx context.Context, tenantID uuid.UUID, userID string) (domain.User, error) {
+func (r *Repository) Get(ctx context.Context, orgID uuid.UUID, userID string) (domain.User, error) {
 	row := r.pool.QueryRow(ctx, `
 		SELECT 'user',
 			u.id::text,
 			u.email,
 			m.role,
-			m.tenant_id,
+			m.org_id,
 			CASE
 				WHEN m.trashed_at IS NOT NULL THEN 'trashed'
 				WHEN m.archived_at IS NOT NULL THEN 'archived'
@@ -40,11 +40,11 @@ func (r *Repository) Get(ctx context.Context, tenantID uuid.UUID, userID string)
 			m.archived_at,
 			m.trashed_at,
 			m.purge_after
-		FROM axis_tenant_members m
+		FROM axis_org_members m
 		JOIN axis_users u ON u.id = m.user_id
-		WHERE m.tenant_id = $1::uuid
+		WHERE m.org_id = $1::uuid
 			AND m.user_id = $2::uuid
-	`, tenantID.String(), userID)
+	`, orgID.String(), userID)
 	return scanUser(row)
 }
 
@@ -54,7 +54,7 @@ func (r *Repository) List(ctx context.Context, input domain.NormalizedListInput)
 			u.id::text AS id,
 			u.email,
 			m.role,
-			m.tenant_id,
+			m.org_id,
 			CASE
 				WHEN m.trashed_at IS NOT NULL THEN 'trashed'
 				WHEN m.archived_at IS NOT NULL THEN 'archived'
@@ -65,9 +65,9 @@ func (r *Repository) List(ctx context.Context, input domain.NormalizedListInput)
 			m.archived_at,
 			m.trashed_at,
 			m.purge_after
-		FROM axis_tenant_members m
+		FROM axis_org_members m
 		JOIN axis_users u ON u.id = m.user_id
-		WHERE m.tenant_id = $1::uuid
+		WHERE m.org_id = $1::uuid
 			AND u.status = 'active'
 			AND u.archived_at IS NULL
 			AND u.trashed_at IS NULL
@@ -81,7 +81,7 @@ func (r *Repository) List(ctx context.Context, input domain.NormalizedListInput)
 			'invitation:' || i.id::text AS id,
 			i.email,
 			i.role,
-			i.tenant_id,
+			i.org_id,
 			CASE
 				WHEN i.trashed_at IS NOT NULL THEN 'trashed'
 				WHEN i.archived_at IS NOT NULL THEN 'archived'
@@ -93,14 +93,14 @@ func (r *Repository) List(ctx context.Context, input domain.NormalizedListInput)
 			i.trashed_at,
 			i.purge_after
 		FROM axis_user_invitations i
-		WHERE i.tenant_id = $1::uuid
+		WHERE i.org_id = $1::uuid
 			AND (
 				($2 = 'active' AND i.status = 'pending' AND i.archived_at IS NULL AND i.trashed_at IS NULL)
 				OR ($2 = 'archived' AND i.archived_at IS NOT NULL AND i.trashed_at IS NULL)
 				OR ($2 = 'trashed' AND i.trashed_at IS NOT NULL)
 			)
 		ORDER BY email, id
-	`, input.TenantID.String(), input.State)
+	`, input.OrgID.String(), input.State)
 	if err != nil {
 		return nil, err
 	}
@@ -115,13 +115,13 @@ func (r *Repository) UpsertMembership(ctx context.Context, input UpsertMembershi
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	if err := r.upsertMembership(ctx, tx, input.TenantID, input.UserID, input.Role); err != nil {
+	if err := r.upsertMembership(ctx, tx, input.OrgID, input.UserID, input.Role); err != nil {
 		return domain.User{}, err
 	}
-	if err := r.resolvePendingInvitation(ctx, tx, input.TenantID, input.Email); err != nil {
+	if err := r.resolvePendingInvitation(ctx, tx, input.OrgID, input.Email); err != nil {
 		return domain.User{}, err
 	}
-	out, err := r.getWithTx(ctx, tx, input.TenantID, input.UserID)
+	out, err := r.getWithTx(ctx, tx, input.OrgID, input.UserID)
 	if err != nil {
 		return domain.User{}, err
 	}
@@ -141,7 +141,6 @@ func (r *Repository) UpsertInvitation(ctx context.Context, input UpsertInvitatio
 	row := r.pool.QueryRow(ctx, `
 		INSERT INTO axis_user_invitations (
 			id,
-			tenant_id,
 			org_id,
 			provider,
 			provider_invitation_id,
@@ -151,8 +150,8 @@ func (r *Repository) UpsertInvitation(ctx context.Context, input UpsertInvitatio
 			created_at,
 			updated_at
 		)
-		VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, $8, $9, $9)
-		ON CONFLICT (tenant_id, lower(email)) WHERE status = 'pending' AND archived_at IS NULL AND trashed_at IS NULL
+		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $8)
+		ON CONFLICT (org_id, lower(email)) WHERE status = 'pending' AND archived_at IS NULL AND trashed_at IS NULL
 		DO UPDATE SET
 			role = EXCLUDED.role,
 			provider = EXCLUDED.provider,
@@ -163,14 +162,14 @@ func (r *Repository) UpsertInvitation(ctx context.Context, input UpsertInvitatio
 			'invitation:' || id::text,
 			email,
 			role,
-			tenant_id,
+			org_id,
 			'pending',
 			created_at,
 			updated_at,
 			archived_at,
 			trashed_at,
 			purge_after
-	`, invitationID.String(), input.TenantID.String(), input.OrgID, input.Provider, input.ProviderInvitationID, input.Email, input.Role, status, now)
+	`, invitationID.String(), input.OrgID.String(), input.Provider, input.ProviderInvitationID, input.Email, input.Role, status, now)
 	return scanUser(row)
 }
 
@@ -184,7 +183,7 @@ func (r *Repository) Update(ctx context.Context, input domain.NormalizedUpdateIn
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	if _, err := r.activeMembershipWithTx(ctx, tx, input.TenantID, input.UserID); err != nil {
+	if _, err := r.activeMembershipWithTx(ctx, tx, input.OrgID, input.UserID); err != nil {
 		return domain.User{}, err
 	}
 	now := time.Now().UTC()
@@ -205,22 +204,22 @@ func (r *Repository) Update(ctx context.Context, input domain.NormalizedUpdateIn
 		return domain.User{}, domainerr.NotFound("user not found")
 	}
 	tag, err = tx.Exec(ctx, `
-		UPDATE axis_tenant_members
+		UPDATE axis_org_members
 		SET role = $3,
 			status = 'active',
 			updated_at = $4
-		WHERE tenant_id = $1::uuid
+		WHERE org_id = $1::uuid
 			AND user_id = $2::uuid
 			AND archived_at IS NULL
 			AND trashed_at IS NULL
-	`, input.TenantID.String(), input.UserID, input.Role, now)
+	`, input.OrgID.String(), input.UserID, input.Role, now)
 	if err != nil {
 		return domain.User{}, err
 	}
 	if tag.RowsAffected() == 0 {
-		return domain.User{}, domainerr.NotFound("tenant user not found")
+		return domain.User{}, domainerr.NotFound("organization user not found")
 	}
-	out, err := r.getWithTx(ctx, tx, input.TenantID, input.UserID)
+	out, err := r.getWithTx(ctx, tx, input.OrgID, input.UserID)
 	if err != nil {
 		return domain.User{}, err
 	}
@@ -233,12 +232,12 @@ func (r *Repository) Update(ctx context.Context, input domain.NormalizedUpdateIn
 func (r *Repository) Archive(ctx context.Context, input domain.NormalizedLifecycleInput) error {
 	now := time.Now().UTC()
 	return r.lifecycleMembershipOrInvitation(ctx, input, `
-		UPDATE axis_tenant_members
+		UPDATE axis_org_members
 		SET archived_at = $3,
 			trashed_at = NULL,
 			purge_after = NULL,
 			updated_at = $3
-		WHERE tenant_id = $1::uuid
+		WHERE org_id = $1::uuid
 			AND user_id = $2::uuid
 			AND archived_at IS NULL
 			AND trashed_at IS NULL
@@ -248,7 +247,7 @@ func (r *Repository) Archive(ctx context.Context, input domain.NormalizedLifecyc
 			trashed_at = NULL,
 			purge_after = NULL,
 			updated_at = $3
-		WHERE tenant_id = $1::uuid
+		WHERE org_id = $1::uuid
 			AND id = $2::uuid
 			AND archived_at IS NULL
 			AND trashed_at IS NULL
@@ -258,10 +257,10 @@ func (r *Repository) Archive(ctx context.Context, input domain.NormalizedLifecyc
 func (r *Repository) Unarchive(ctx context.Context, input domain.NormalizedLifecycleInput) error {
 	now := time.Now().UTC()
 	return r.lifecycleMembershipOrInvitation(ctx, input, `
-		UPDATE axis_tenant_members
+		UPDATE axis_org_members
 		SET archived_at = NULL,
 			updated_at = $3
-		WHERE tenant_id = $1::uuid
+		WHERE org_id = $1::uuid
 			AND user_id = $2::uuid
 			AND archived_at IS NOT NULL
 			AND trashed_at IS NULL
@@ -269,7 +268,7 @@ func (r *Repository) Unarchive(ctx context.Context, input domain.NormalizedLifec
 		UPDATE axis_user_invitations
 		SET archived_at = NULL,
 			updated_at = $3
-		WHERE tenant_id = $1::uuid
+		WHERE org_id = $1::uuid
 			AND id = $2::uuid
 			AND archived_at IS NOT NULL
 			AND trashed_at IS NULL
@@ -280,12 +279,12 @@ func (r *Repository) Trash(ctx context.Context, input domain.NormalizedLifecycle
 	now := time.Now().UTC()
 	purgeAfter := now.Add(30 * 24 * time.Hour)
 	return r.lifecycleMembershipOrInvitation(ctx, input, `
-		UPDATE axis_tenant_members
+		UPDATE axis_org_members
 		SET archived_at = NULL,
 			trashed_at = $3,
 			purge_after = $4,
 			updated_at = $3
-		WHERE tenant_id = $1::uuid
+		WHERE org_id = $1::uuid
 			AND user_id = $2::uuid
 			AND trashed_at IS NULL
 	`, `
@@ -294,7 +293,7 @@ func (r *Repository) Trash(ctx context.Context, input domain.NormalizedLifecycle
 			trashed_at = $3,
 			purge_after = $4,
 			updated_at = $3
-		WHERE tenant_id = $1::uuid
+		WHERE org_id = $1::uuid
 			AND id = $2::uuid
 			AND trashed_at IS NULL
 	`, now, &purgeAfter)
@@ -303,11 +302,11 @@ func (r *Repository) Trash(ctx context.Context, input domain.NormalizedLifecycle
 func (r *Repository) Restore(ctx context.Context, input domain.NormalizedLifecycleInput) error {
 	now := time.Now().UTC()
 	return r.lifecycleMembershipOrInvitation(ctx, input, `
-		UPDATE axis_tenant_members
+		UPDATE axis_org_members
 		SET trashed_at = NULL,
 			purge_after = NULL,
 			updated_at = $3
-		WHERE tenant_id = $1::uuid
+		WHERE org_id = $1::uuid
 			AND user_id = $2::uuid
 			AND trashed_at IS NOT NULL
 	`, `
@@ -315,7 +314,7 @@ func (r *Repository) Restore(ctx context.Context, input domain.NormalizedLifecyc
 		SET trashed_at = NULL,
 			purge_after = NULL,
 			updated_at = $3
-		WHERE tenant_id = $1::uuid
+		WHERE org_id = $1::uuid
 			AND id = $2::uuid
 			AND trashed_at IS NOT NULL
 	`, now, nil)
@@ -323,13 +322,13 @@ func (r *Repository) Restore(ctx context.Context, input domain.NormalizedLifecyc
 
 func (r *Repository) Purge(ctx context.Context, input domain.NormalizedLifecycleInput) error {
 	return r.lifecycleMembershipOrInvitation(ctx, input, `
-		DELETE FROM axis_tenant_members
-		WHERE tenant_id = $1::uuid
+		DELETE FROM axis_org_members
+		WHERE org_id = $1::uuid
 			AND user_id = $2::uuid
 			AND trashed_at IS NOT NULL
 	`, `
 		DELETE FROM axis_user_invitations
-		WHERE tenant_id = $1::uuid
+		WHERE org_id = $1::uuid
 			AND id = $2::uuid
 			AND trashed_at IS NOT NULL
 	`, time.Time{}, nil)
@@ -340,9 +339,9 @@ func (r *Repository) ActiveMembershipExists(ctx context.Context, input domain.No
 	err := r.pool.QueryRow(ctx, `
 		SELECT EXISTS (
 			SELECT 1
-			FROM axis_tenant_members m
+			FROM axis_org_members m
 			JOIN axis_users u ON u.id = m.user_id
-			WHERE m.tenant_id = $1::uuid
+			WHERE m.org_id = $1::uuid
 				AND m.user_id = $2::uuid
 				AND m.status = 'active'
 				AND m.archived_at IS NULL
@@ -351,27 +350,27 @@ func (r *Repository) ActiveMembershipExists(ctx context.Context, input domain.No
 				AND u.archived_at IS NULL
 				AND u.trashed_at IS NULL
 		)
-	`, input.TenantID.String(), input.UserID).Scan(&exists)
+	`, input.OrgID.String(), input.UserID).Scan(&exists)
 	return exists, err
 }
 
-func (r *Repository) upsertMembership(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, userID, role string) error {
+func (r *Repository) upsertMembership(ctx context.Context, tx pgx.Tx, orgID uuid.UUID, userID, role string) error {
 	now := time.Now().UTC()
 	_, err := tx.Exec(ctx, `
-		INSERT INTO axis_tenant_members (tenant_id, user_id, role, status, created_at, updated_at)
+		INSERT INTO axis_org_members (org_id, user_id, role, status, created_at, updated_at)
 		VALUES ($1::uuid, $2::uuid, $3, 'active', $4, $4)
-		ON CONFLICT (tenant_id, user_id) DO UPDATE SET
+		ON CONFLICT (org_id, user_id) DO UPDATE SET
 			role = EXCLUDED.role,
 			status = 'active',
 			updated_at = EXCLUDED.updated_at,
 			archived_at = NULL,
 			trashed_at = NULL,
 			purge_after = NULL
-	`, tenantID.String(), userID, role, now)
+	`, orgID.String(), userID, role, now)
 	return err
 }
 
-func (r *Repository) resolvePendingInvitation(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, email string) error {
+func (r *Repository) resolvePendingInvitation(ctx context.Context, tx pgx.Tx, orgID uuid.UUID, email string) error {
 	now := time.Now().UTC()
 	_, err := tx.Exec(ctx, `
 		UPDATE axis_user_invitations
@@ -380,44 +379,44 @@ func (r *Repository) resolvePendingInvitation(ctx context.Context, tx pgx.Tx, te
 			archived_at = NULL,
 			trashed_at = $3,
 			purge_after = $4
-		WHERE tenant_id = $1::uuid
+		WHERE org_id = $1::uuid
 			AND lower(email) = lower($2)
 			AND status = 'pending'
-	`, tenantID.String(), email, now, now.Add(30*24*time.Hour))
+	`, orgID.String(), email, now, now.Add(30*24*time.Hour))
 	return err
 }
 
-func (r *Repository) activeMembershipWithTx(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, userID string) (domain.User, error) {
+func (r *Repository) activeMembershipWithTx(ctx context.Context, tx pgx.Tx, orgID uuid.UUID, userID string) (domain.User, error) {
 	row := tx.QueryRow(ctx, `
 		SELECT 'user',
 			u.id::text,
 			u.email,
 			m.role,
-			m.tenant_id,
+			m.org_id,
 			'active',
 			m.created_at,
 			m.updated_at,
 			m.archived_at,
 			m.trashed_at,
 			m.purge_after
-		FROM axis_tenant_members m
+		FROM axis_org_members m
 		JOIN axis_users u ON u.id = m.user_id
-		WHERE m.tenant_id = $1::uuid
+		WHERE m.org_id = $1::uuid
 			AND m.user_id = $2::uuid
 			AND m.status = 'active'
 			AND m.archived_at IS NULL
 			AND m.trashed_at IS NULL
-	`, tenantID.String(), userID)
+	`, orgID.String(), userID)
 	return scanUser(row)
 }
 
-func (r *Repository) getWithTx(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, userID string) (domain.User, error) {
+func (r *Repository) getWithTx(ctx context.Context, tx pgx.Tx, orgID uuid.UUID, userID string) (domain.User, error) {
 	row := tx.QueryRow(ctx, `
 		SELECT 'user',
 			u.id::text,
 			u.email,
 			m.role,
-			m.tenant_id,
+			m.org_id,
 			CASE
 				WHEN m.trashed_at IS NOT NULL THEN 'trashed'
 				WHEN m.archived_at IS NOT NULL THEN 'archived'
@@ -428,11 +427,11 @@ func (r *Repository) getWithTx(ctx context.Context, tx pgx.Tx, tenantID uuid.UUI
 			m.archived_at,
 			m.trashed_at,
 			m.purge_after
-		FROM axis_tenant_members m
+		FROM axis_org_members m
 		JOIN axis_users u ON u.id = m.user_id
-		WHERE m.tenant_id = $1::uuid
+		WHERE m.org_id = $1::uuid
 			AND m.user_id = $2::uuid
-	`, tenantID.String(), userID)
+	`, orgID.String(), userID)
 	return scanUser(row)
 }
 
@@ -444,7 +443,7 @@ func (r *Repository) updateInvitation(ctx context.Context, input domain.Normaliz
 		SET email = $3,
 			role = $4,
 			updated_at = $5
-		WHERE tenant_id = $1::uuid
+		WHERE org_id = $1::uuid
 			AND id = $2::uuid
 			AND status = 'pending'
 			AND archived_at IS NULL
@@ -453,14 +452,14 @@ func (r *Repository) updateInvitation(ctx context.Context, input domain.Normaliz
 			'invitation:' || id::text,
 			email,
 			role,
-			tenant_id,
+			org_id,
 			'pending',
 			created_at,
 			updated_at,
 			archived_at,
 			trashed_at,
 			purge_after
-	`, input.TenantID.String(), id, input.Email, input.Role, now)
+	`, input.OrgID.String(), id, input.Email, input.Role, now)
 	return scanUser(row)
 }
 
@@ -484,13 +483,13 @@ func (r *Repository) lifecycleMembershipOrInvitation(
 	var tag pgconnTag
 	var err error
 	if purgeAfter != nil {
-		tag, err = r.pool.Exec(ctx, query, input.TenantID.String(), id, now, *purgeAfter)
+		tag, err = r.pool.Exec(ctx, query, input.OrgID.String(), id, now, *purgeAfter)
 	} else if now.IsZero() {
-		tag, err = r.pool.Exec(ctx, query, input.TenantID.String(), id)
+		tag, err = r.pool.Exec(ctx, query, input.OrgID.String(), id)
 	} else {
-		tag, err = r.pool.Exec(ctx, query, input.TenantID.String(), id, now)
+		tag, err = r.pool.Exec(ctx, query, input.OrgID.String(), id, now)
 	}
-	return lifecycleResult(tag.RowsAffected(), err, "tenant user not found")
+	return lifecycleResult(tag.RowsAffected(), err, "organization user not found")
 }
 
 type pgconnTag interface {
@@ -502,13 +501,13 @@ type scanner interface {
 }
 
 func scanUser(row scanner) (domain.User, error) {
-	var model models.TenantUser
+	var model models.ProductUser
 	err := row.Scan(
 		&model.Kind,
 		&model.ID,
 		&model.Email,
 		&model.Role,
-		&model.TenantID,
+		&model.OrgID,
 		&model.State,
 		&model.CreatedAt,
 		&model.UpdatedAt,
@@ -517,7 +516,7 @@ func scanUser(row scanner) (domain.User, error) {
 		&model.PurgeAfter,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return domain.User{}, domainerr.NotFound("tenant user not found")
+		return domain.User{}, domainerr.NotFound("organization user not found")
 	}
 	if err != nil {
 		return domain.User{}, err

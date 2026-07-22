@@ -8,27 +8,27 @@ import (
 	"time"
 )
 
-func TestMemoryRepositoryDedupeIsTenantAndProductScoped(t *testing.T) {
+func TestMemoryRepositoryDedupeIsOrgAndProductScoped(t *testing.T) {
 	t.Parallel()
 	repository := NewMemoryRepository()
 	first, inserted, err := repository.Enqueue(context.Background(), EnqueueInput{
-		TenantID: "tenant-a", ProductSurface: "medmory", Kind: "artifact.extract",
+		OrgID: "organization-a", ProductSurface: "producta", Kind: "artifact.extract",
 		DedupeKey: "document-1", Payload: json.RawMessage(`{"version":1}`),
 	})
 	if err != nil || !inserted {
 		t.Fatalf("first enqueue inserted=%v err=%v", inserted, err)
 	}
 	replaced, inserted, err := repository.Enqueue(context.Background(), EnqueueInput{
-		TenantID: "tenant-a", ProductSurface: "medmory", Kind: "artifact.extract",
+		OrgID: "organization-a", ProductSurface: "producta", Kind: "artifact.extract",
 		DedupeKey: "document-1", Payload: json.RawMessage(`{"version":2}`), ReplacePayload: true,
 	})
 	if err != nil || inserted || replaced.ID != first.ID || string(replaced.Payload) != `{"version":2}` {
 		t.Fatalf("deduplicated enqueue=%+v inserted=%v err=%v", replaced, inserted, err)
 	}
 	for _, input := range []EnqueueInput{
-		{TenantID: "tenant-b", ProductSurface: "medmory", Kind: "artifact.extract", DedupeKey: "document-1"},
-		{TenantID: "tenant-a", ProductSurface: "ponti", Kind: "artifact.extract", DedupeKey: "document-1"},
-		{TenantID: "tenant-a", ProductSurface: "medmory", Kind: "artifact.index", DedupeKey: "document-1"},
+		{OrgID: "organization-b", ProductSurface: "producta", Kind: "artifact.extract", DedupeKey: "document-1"},
+		{OrgID: "organization-a", ProductSurface: "productb", Kind: "artifact.extract", DedupeKey: "document-1"},
+		{OrgID: "organization-a", ProductSurface: "producta", Kind: "artifact.index", DedupeKey: "document-1"},
 	} {
 		if _, inserted, err := repository.Enqueue(context.Background(), input); err != nil || !inserted {
 			t.Fatalf("scoped enqueue %+v inserted=%v err=%v", input, inserted, err)
@@ -42,7 +42,7 @@ func TestMemoryRepositoryExpiredLeaseRecoversThenDeadLetters(t *testing.T) {
 	repository := NewMemoryRepository()
 	repository.SetClock(func() time.Time { return now })
 	job, _, err := repository.Enqueue(context.Background(), EnqueueInput{
-		TenantID: "tenant-a", Kind: "demo", DedupeKey: "demo-1", MaxAttempts: 2,
+		OrgID: "organization-a", Kind: "demo", DedupeKey: "demo-1", MaxAttempts: 2,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -65,11 +65,11 @@ func TestMemoryRepositoryExpiredLeaseRecoversThenDeadLetters(t *testing.T) {
 	if err != nil || recovery.Requeued != 0 || recovery.DeadLetter != 1 {
 		t.Fatalf("second recovery=%+v err=%v", recovery, err)
 	}
-	stored, err := repository.Get(context.Background(), "tenant-a", job.ID)
+	stored, err := repository.Get(context.Background(), "organization-a", job.ID)
 	if err != nil || stored.Status != StatusDeadLetter || stored.LastErrorCode != "lease_expired" {
 		t.Fatalf("stored=%+v err=%v", stored, err)
 	}
-	replayed, err := repository.ReplayDeadLetter(context.Background(), "tenant-a", job.ID, now)
+	replayed, err := repository.ReplayDeadLetter(context.Background(), "organization-a", job.ID, now)
 	if err != nil || replayed.Status != StatusQueued || replayed.Attempts != 0 || replayed.CompletedAt != nil {
 		t.Fatalf("replayed=%+v err=%v", replayed, err)
 	}
@@ -79,7 +79,7 @@ func TestWorkerRetriesThenSucceedsWithoutPersistingRawError(t *testing.T) {
 	t.Parallel()
 	repository := NewMemoryRepository()
 	job, _, err := repository.Enqueue(context.Background(), EnqueueInput{
-		TenantID: "tenant-a", Kind: "demo", DedupeKey: "retry", MaxAttempts: 3,
+		OrgID: "organization-a", Kind: "demo", DedupeKey: "retry", MaxAttempts: 3,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -99,7 +99,7 @@ func TestWorkerRetriesThenSucceedsWithoutPersistingRawError(t *testing.T) {
 	if count, err := worker.RunOnce(context.Background()); err != nil || count != 1 {
 		t.Fatalf("first run count=%d err=%v", count, err)
 	}
-	stored, err := repository.Get(context.Background(), "tenant-a", job.ID)
+	stored, err := repository.Get(context.Background(), "organization-a", job.ID)
 	if err != nil || stored.Status != StatusQueued || stored.LastErrorCode != "provider_unavailable" {
 		t.Fatalf("after retry=%+v err=%v", stored, err)
 	}
@@ -107,7 +107,7 @@ func TestWorkerRetriesThenSucceedsWithoutPersistingRawError(t *testing.T) {
 	if count, err := worker.RunOnce(context.Background()); err != nil || count != 1 {
 		t.Fatalf("second run count=%d err=%v", count, err)
 	}
-	stored, err = repository.Get(context.Background(), "tenant-a", job.ID)
+	stored, err = repository.Get(context.Background(), "organization-a", job.ID)
 	if err != nil || stored.Status != StatusSucceeded || calls != 2 {
 		t.Fatalf("after success=%+v calls=%d err=%v", stored, calls, err)
 	}
@@ -117,7 +117,7 @@ func TestWorkerPermanentFailureAndReplay(t *testing.T) {
 	t.Parallel()
 	repository := NewMemoryRepository()
 	job, _, err := repository.Enqueue(context.Background(), EnqueueInput{
-		TenantID: "tenant-a", Kind: "validate", DedupeKey: "invalid", MaxAttempts: 10,
+		OrgID: "organization-a", Kind: "validate", DedupeKey: "invalid", MaxAttempts: 10,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -129,7 +129,7 @@ func TestWorkerPermanentFailureAndReplay(t *testing.T) {
 	if count, err := worker.RunOnce(context.Background()); err != nil || count != 1 {
 		t.Fatalf("run count=%d err=%v", count, err)
 	}
-	stored, err := repository.Get(context.Background(), "tenant-a", job.ID)
+	stored, err := repository.Get(context.Background(), "organization-a", job.ID)
 	if err != nil || stored.Status != StatusDeadLetter || stored.LastErrorCode != "unsupported_media_type" {
 		t.Fatalf("stored=%+v err=%v", stored, err)
 	}
@@ -138,7 +138,7 @@ func TestWorkerPermanentFailureAndReplay(t *testing.T) {
 func TestWorkerHeartbeatsLongRunningJob(t *testing.T) {
 	repository := NewMemoryRepository()
 	job, _, err := repository.Enqueue(context.Background(), EnqueueInput{
-		TenantID: "tenant-a", Kind: "slow", DedupeKey: "slow-1", Timeout: 2 * time.Second,
+		OrgID: "organization-a", Kind: "slow", DedupeKey: "slow-1", Timeout: 2 * time.Second,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -153,7 +153,7 @@ func TestWorkerHeartbeatsLongRunningJob(t *testing.T) {
 	if count, err := worker.RunOnce(context.Background()); err != nil || count != 1 {
 		t.Fatalf("run count=%d err=%v", count, err)
 	}
-	stored, err := repository.Get(context.Background(), "tenant-a", job.ID)
+	stored, err := repository.Get(context.Background(), "organization-a", job.ID)
 	if err != nil || stored.Status != StatusSucceeded || stored.HeartbeatAt == nil || stored.LockedAt == nil || !stored.HeartbeatAt.After(*stored.LockedAt) {
 		t.Fatalf("expected heartbeat before success, stored=%+v err=%v", stored, err)
 	}
@@ -176,7 +176,7 @@ func TestRecurringSchedulerPersistsOneJobPerTimeBucket(t *testing.T) {
 	go func() {
 		defer close(done)
 		RunRecurringScheduler(ctx, repository, RecurringConfig{
-			TenantID: "system", ProductSurface: "nexus", Kind: "operational.reconcile",
+			OrgID: "system", ProductSurface: "nexus", Kind: "operational.reconcile",
 			Interval: time.Hour, Timeout: time.Minute, MaxAttempts: 3,
 		})
 	}()
@@ -191,7 +191,7 @@ func TestRecurringSchedulerPersistsOneJobPerTimeBucket(t *testing.T) {
 
 func TestRunningJobCancellationIsRequestedThenAcknowledged(t *testing.T) {
 	repo := NewMemoryRepository()
-	created, _, err := repo.Enqueue(context.Background(), EnqueueInput{TenantID: "tenant", ProductSurface: "nexus", Kind: "test", DedupeKey: "cancel-running", Payload: json.RawMessage(`{}`)})
+	created, _, err := repo.Enqueue(context.Background(), EnqueueInput{OrgID: "organization", ProductSurface: "nexus", Kind: "test", DedupeKey: "cancel-running", Payload: json.RawMessage(`{}`)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,17 +199,17 @@ func TestRunningJobCancellationIsRequestedThenAcknowledged(t *testing.T) {
 	if err != nil || len(claimed) != 1 {
 		t.Fatalf("claim: %+v %v", claimed, err)
 	}
-	if err = repo.Cancel(context.Background(), "tenant", created.ID, "operator_cancelled"); err != nil {
+	if err = repo.Cancel(context.Background(), "organization", created.ID, "operator_cancelled"); err != nil {
 		t.Fatal(err)
 	}
-	pending, err := repo.Get(context.Background(), "tenant", created.ID)
+	pending, err := repo.Get(context.Background(), "organization", created.ID)
 	if err != nil || pending.Status != StatusCancelRequested || pending.CompletedAt != nil {
 		t.Fatalf("running cancellation must remain a request until worker acknowledgement: %+v %v", pending, err)
 	}
 	if err = repo.Heartbeat(context.Background(), created.ID, "worker", time.Second); !errors.Is(err, ErrJobCancelled) {
 		t.Fatalf("heartbeat must observe cancellation: %v", err)
 	}
-	finished, err := repo.Get(context.Background(), "tenant", created.ID)
+	finished, err := repo.Get(context.Background(), "organization", created.ID)
 	if err != nil || finished.Status != StatusCancelled || finished.CompletedAt == nil {
 		t.Fatalf("cancellation must finalize without claiming rollback: %+v %v", finished, err)
 	}

@@ -19,7 +19,7 @@ import (
 )
 
 const auditEventColumns = `
-	id, tenant_id, chain_scope, virployee_id, subject_type, subject_id,
+	id, org_id, chain_scope, virployee_id, subject_type, subject_id,
 	event_type, actor_type, actor_id, summary, data, created_at,
 	previous_hash, payload_hash, event_hash, signature_key_id, signature`
 
@@ -72,7 +72,7 @@ func (r *Repository) Append(ctx context.Context, e auditdomain.AuditEvent) (audi
 		e.Data = make(map[string]any)
 	}
 	if e.ChainScope == "" {
-		e.ChainScope = auditdomain.ChainScopeFor(e.TenantID, e.VirployeeID)
+		e.ChainScope = auditdomain.ChainScopeFor(e.OrgID, e.VirployeeID)
 	}
 
 	tx, err := r.pool.Begin(ctx)
@@ -129,12 +129,12 @@ func (r *Repository) Append(ctx context.Context, e auditdomain.AuditEvent) (audi
 	}
 	_, err = tx.Exec(ctx, `
 		INSERT INTO audit_events (
-			id, tenant_id, chain_scope, virployee_id, subject_type, subject_id,
+			id, org_id, chain_scope, virployee_id, subject_type, subject_id,
 			event_type, actor_type, actor_id, summary, data, created_at,
 			previous_hash, payload_hash, event_hash, signature_key_id, signature
 		)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13,$14,$15,$16,$17)
-	`, e.ID, e.TenantID, e.ChainScope, e.VirployeeID, e.SubjectType, e.SubjectID,
+	`, e.ID, e.OrgID, e.ChainScope, e.VirployeeID, e.SubjectType, e.SubjectID,
 		e.EventType, e.ActorType, e.ActorID, e.Summary, data, e.CreatedAt,
 		emptyToNil(e.PreviousHash), e.PayloadHash, e.EventHash, emptyToNil(e.SignatureKeyID), emptyToNil(e.Signature))
 	if err != nil {
@@ -172,12 +172,12 @@ func (r *Repository) ListByScope(ctx context.Context, chainScope string) ([]audi
 // ListVirployeeIDsBySubject locates every independent ledger chain that
 // contributed to one subject. It returns identifiers only; callers still use
 // Replay so each chain is independently hash/signature verified.
-func (r *Repository) ListVirployeeIDsBySubject(ctx context.Context, tenantID, subjectID string) ([]string, error) {
+func (r *Repository) ListVirployeeIDsBySubject(ctx context.Context, orgID, subjectID string) ([]string, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT DISTINCT virployee_id
 		FROM audit_events
-		WHERE tenant_id=$1 AND subject_id=$2
-		ORDER BY virployee_id`, strings.TrimSpace(tenantID), strings.TrimSpace(subjectID))
+		WHERE org_id=$1 AND subject_id=$2
+		ORDER BY virployee_id`, strings.TrimSpace(orgID), strings.TrimSpace(subjectID))
 	if err != nil {
 		return nil, fmt.Errorf("list audit subject chains: %w", err)
 	}
@@ -270,7 +270,7 @@ func ComputeEventHash(e auditdomain.AuditEvent, payloadHash string) (string, err
 func eventPayload(e auditdomain.AuditEvent) map[string]any {
 	return map[string]any{
 		"id":           e.ID.String(),
-		"tenant_id":    e.TenantID,
+		"org_id":       e.OrgID,
 		"virployee_id": e.VirployeeID,
 		"subject_type": e.SubjectType,
 		"subject_id":   e.SubjectID,
@@ -304,7 +304,7 @@ func scanAuditEvent(row rowScanner) (auditdomain.AuditEvent, error) {
 	var data []byte
 	var subjectType, subjectID, previousHash, payloadHash, eventHash, signatureKeyID, signature *string
 	err := row.Scan(
-		&e.ID, &e.TenantID, &e.ChainScope, &e.VirployeeID, &subjectType, &subjectID,
+		&e.ID, &e.OrgID, &e.ChainScope, &e.VirployeeID, &subjectType, &subjectID,
 		&e.EventType, &e.ActorType, &e.ActorID, &e.Summary, &data, &e.CreatedAt,
 		&previousHash, &payloadHash, &eventHash, &signatureKeyID, &signature,
 	)
@@ -330,7 +330,7 @@ func scanAuditEvent(row rowScanner) (auditdomain.AuditEvent, error) {
 }
 
 func sameAuditAppendRequest(existing, requested auditdomain.AuditEvent) bool {
-	if existing.TenantID != requested.TenantID || existing.ChainScope != requested.ChainScope ||
+	if existing.OrgID != requested.OrgID || existing.ChainScope != requested.ChainScope ||
 		existing.VirployeeID != requested.VirployeeID || existing.SubjectType != requested.SubjectType ||
 		existing.SubjectID != requested.SubjectID || existing.EventType != requested.EventType ||
 		existing.ActorType != requested.ActorType || existing.ActorID != requested.ActorID ||

@@ -48,8 +48,8 @@ func (u *UseCases) authorize(ctx context.Context, in AuthorizationCheck) error {
 	}
 	return nil
 }
-func auth(tenant, product, actor, role, permission, action, resourceType, resourceID string) AuthorizationCheck {
-	return AuthorizationCheck{TenantID: strings.TrimSpace(tenant), ProductSurface: strings.TrimSpace(product), ActorID: strings.TrimSpace(actor), ActorRole: strings.TrimSpace(role), Permission: permission, ActionType: action, ResourceType: resourceType, ResourceID: resourceID}
+func auth(organization, product, actor, role, permission, action, resourceType, resourceID string) AuthorizationCheck {
+	return AuthorizationCheck{OrgID: strings.TrimSpace(organization), ProductSurface: strings.TrimSpace(product), ActorID: strings.TrimSpace(actor), ActorRole: strings.TrimSpace(role), Permission: permission, ActionType: action, ResourceType: resourceType, ResourceID: resourceID}
 }
 func (u *UseCases) Fleet(ctx context.Context, t, p, a, r string) ([]FleetMember, error) {
 	if err := u.authorize(ctx, auth(t, p, a, r, "ops.read", "ops.fleet.read", "fleet", "*")); err != nil {
@@ -156,24 +156,24 @@ func (u *UseCases) PutWorkerControl(ctx context.Context, t, p, a, r string, in P
 
 func (u *UseCases) RunScheduled(ctx context.Context, product string) ([]ReconciliationRun, error) {
 	repo, ok := u.repo.(interface {
-		ListTenantIDs(context.Context) ([]string, error)
+		ListOrgIDs(context.Context) ([]string, error)
 	})
 	if !ok {
 		return nil, domainerr.Unavailable("scheduled reconciliation repository is unavailable")
 	}
-	tenants, err := repo.ListTenantIDs(ctx)
+	organizations, err := repo.ListOrgIDs(ctx)
 	if err != nil {
 		return nil, err
 	}
 	bucket := time.Now().UTC().Truncate(15 * time.Minute).Format(time.RFC3339)
-	runs := make([]ReconciliationRun, 0, len(tenants))
-	for _, tenant := range tenants {
+	runs := make([]ReconciliationRun, 0, len(organizations))
+	for _, organization := range organizations {
 		input := CreateReconciliationInput{
 			Mode:           string(ModeDetect),
 			TriggerType:    "scheduled",
 			IdempotencyKey: "scheduled:" + product + ":" + bucket,
 		}
-		run, _, runErr := u.repo.CreateAndRunReconciliation(ctx, tenant, product, "system:reconciler", input)
+		run, _, runErr := u.repo.CreateAndRunReconciliation(ctx, organization, product, "system:reconciler", input)
 		if runErr != nil {
 			return runs, runErr
 		}

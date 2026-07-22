@@ -12,20 +12,10 @@ const (
 	CapabilityClinicalTimelineBuild = "clinical.timeline.build"
 )
 
-var clinicalCapabilityAliases = map[string]string{
-	"medmory.search.query":   CapabilityClinicalRecordsSearch,
-	"medmory.timeline.read":  CapabilityClinicalTimelineBuild,
-	"medmory.timeline.build": CapabilityClinicalTimelineBuild,
-}
-
-// NormalizeAssistCapabilityKey canonicalizes legacy product contracts before
-// routing, manifest lookup, context hashing, and idempotency calculation.
-func NormalizeAssistCapabilityKey(raw string) (canonical string, deprecated bool) {
-	key := strings.ToLower(strings.TrimSpace(raw))
-	if canonical, ok := clinicalCapabilityAliases[key]; ok {
-		return canonical, true
-	}
-	return key, false
+// NormalizeAssistCapabilityKey applies only Axis' generic capability-key
+// normalization. Consumer-specific aliases belong in the consumer adapter.
+func NormalizeAssistCapabilityKey(raw string) string {
+	return strings.ToLower(strings.TrimSpace(raw))
 }
 
 func isClinicalAssistCapability(key string) bool {

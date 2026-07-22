@@ -38,30 +38,30 @@ func validateAssistCapabilitySnapshot(rc runtimecontext.Context, run AssistRun) 
 
 func (u *UseCases) processGovernedCapabilityAssist(ctx context.Context, run AssistRun, responsibleID, jobRoleID uuid.UUID) (AssistRun, error) {
 	if u.governedReads == nil || !u.governedReads.SupportsGovernedRead(run.CapabilityKey) {
-		failed, _ := u.assistRepo.CompleteAssistRun(ctx, run.TenantID, run.ID, "failed", nil, "", false, false, "", "", "capability_executor_unavailable", 0)
+		failed, _ := u.assistRepo.CompleteAssistRun(ctx, run.OrgID, run.ID, "failed", nil, "", false, false, "", "", "capability_executor_unavailable", 0)
 		return failed, domainerr.Conflict("executor is not configured for Assist capability")
 	}
 	var arguments map[string]any
 	if err := json.Unmarshal(run.InputJSON, &arguments); err != nil || arguments == nil {
-		failed, _ := u.assistRepo.CompleteAssistRun(ctx, run.TenantID, run.ID, "failed", nil, "", false, false, "", "", "invalid_capability_input", 0)
+		failed, _ := u.assistRepo.CompleteAssistRun(ctx, run.OrgID, run.ID, "failed", nil, "", false, false, "", "", "invalid_capability_input", 0)
 		return failed, domainerr.Validation("clinical capability input must be a JSON object")
 	}
 	subjectID, err := uuid.Parse(strings.TrimSpace(run.SubjectID))
 	if err != nil || subjectID == uuid.Nil {
-		failed, _ := u.assistRepo.CompleteAssistRun(ctx, run.TenantID, run.ID, "failed", nil, "", false, false, "", "", "invalid_capability_subject", 0)
+		failed, _ := u.assistRepo.CompleteAssistRun(ctx, run.OrgID, run.ID, "failed", nil, "", false, false, "", "", "invalid_capability_subject", 0)
 		return failed, domainerr.Conflict("clinical capability subject is invalid")
 	}
-	if _, err := u.assistRepo.SetAssistRunStatus(ctx, run.TenantID, run.ID, "answering"); err != nil {
+	if _, err := u.assistRepo.SetAssistRunStatus(ctx, run.OrgID, run.ID, "answering"); err != nil {
 		return AssistRun{}, err
 	}
 	if run.CapabilityKey == CapabilityClinicalTimelineBuild {
-		if err := u.consumeQuota(ctx, quotaKey(run.TenantID, run.ProductSurface, quotas.AreaLLM), run.ID.String(), "assist_run", run.ID.String(), estimatedAnswerTokens(run.InputJSON, nil)); err != nil {
+		if err := u.consumeQuota(ctx, quotaKey(run.OrgID, run.ProductSurface, quotas.AreaLLM), run.ID.String(), "assist_run", run.ID.String(), estimatedAnswerTokens(run.InputJSON, nil)); err != nil {
 			return run, err
 		}
 	}
 	started := time.Now()
 	result, invokeErr := u.governedReads.InvokeGovernedRead(ctx, GovernedReadInvocation{
-		TenantID: run.TenantID, ActorID: "service:" + run.ProductSurface,
+		OrgID: run.OrgID, ActorID: "service:" + run.ProductSurface,
 		VirployeeID: responsibleID, SubjectID: subjectID, CaseID: run.CaseID,
 		AssignmentID: run.AssignmentID, AssignmentVersion: run.AssignmentVersion,
 		ProductSurface: run.ProductSurface, RepositoryGeneration: run.RepositoryGeneration,
@@ -70,18 +70,18 @@ func (u *UseCases) processGovernedCapabilityAssist(ctx context.Context, run Assi
 	})
 	durationMS := time.Since(started).Milliseconds()
 	if invokeErr != nil {
-		failed, _ := u.assistRepo.CompleteAssistRun(ctx, run.TenantID, run.ID, "failed", nil, "", false, false, "", "", "governed_capability_failed", durationMS)
-		u.emitAssistAudit(ctx, run.TenantID, responsibleID, failed, run.InputHash)
+		failed, _ := u.assistRepo.CompleteAssistRun(ctx, run.OrgID, run.ID, "failed", nil, "", false, false, "", "", "governed_capability_failed", durationMS)
+		u.emitAssistAudit(ctx, run.OrgID, responsibleID, failed, run.InputHash)
 		return failed, invokeErr
 	}
 	citations, err := canonicalCapabilityCitations(result)
 	if err != nil {
-		failed, _ := u.assistRepo.CompleteAssistRun(ctx, run.TenantID, run.ID, "failed", nil, "", false, false, "", "", "invalid_capability_citations", durationMS)
+		failed, _ := u.assistRepo.CompleteAssistRun(ctx, run.OrgID, run.ID, "failed", nil, "", false, false, "", "", "invalid_capability_citations", durationMS)
 		return failed, err
 	}
 	sourceAuthorizationHash, err := u.resolveAssistSourceAuthorizationHash(ctx, run, responsibleID, jobRoleID, citations)
 	if err != nil {
-		failed, _ := u.assistRepo.CompleteAssistRun(ctx, run.TenantID, run.ID, "failed", nil, "", false, false, "", "", "source_authorization_changed", durationMS)
+		failed, _ := u.assistRepo.CompleteAssistRun(ctx, run.OrgID, run.ID, "failed", nil, "", false, false, "", "", "source_authorization_changed", durationMS)
 		return failed, err
 	}
 	run.SourceAuthorizationHash = sourceAuthorizationHash
@@ -97,7 +97,7 @@ func (u *UseCases) processGovernedCapabilityAssist(ctx context.Context, run Assi
 	}
 	metadata := assistMetadataForRun(run)
 	metadata.SourceAuthorizationHash = sourceAuthorizationHash
-	contextHash := assistContextHash(run.TenantID, responsibleID, jobRoleID, metadata, citations, "")
+	contextHash := assistContextHash(run.OrgID, responsibleID, jobRoleID, metadata, citations, "")
 	done, err := u.completeAssistWithGrounding(ctx, run, AssistCompletion{
 		Status: "done", Output: raw, Answered: answered, DurationMS: durationMS,
 		GroundingMode: "sources_only", AnswerStatus: status, ContextHash: contextHash,
@@ -107,7 +107,7 @@ func (u *UseCases) processGovernedCapabilityAssist(ctx context.Context, run Assi
 	if err != nil {
 		return AssistRun{}, err
 	}
-	u.emitAssistAudit(ctx, run.TenantID, responsibleID, done, run.InputHash)
+	u.emitAssistAudit(ctx, run.OrgID, responsibleID, done, run.InputHash)
 	return done, nil
 }
 

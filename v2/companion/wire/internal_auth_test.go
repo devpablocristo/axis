@@ -15,19 +15,19 @@ func TestInternalAuthMiddlewareRejectsUntrustedRequests(t *testing.T) {
 	router.GET("/v1/test", func(c *gin.Context) { c.Status(http.StatusNoContent) })
 
 	for _, test := range []struct {
-		name   string
-		token  string
-		tenant string
-		actor  string
+		name         string
+		token        string
+		organization string
+		actor        string
 	}{
-		{name: "missing token", tenant: "tenant-1", actor: "actor-1"},
-		{name: "wrong token", token: "wrong", tenant: "tenant-1", actor: "actor-1"},
-		{name: "missing actor", token: "trusted-secret", tenant: "tenant-1"},
+		{name: "missing token", organization: "organization-1", actor: "actor-1"},
+		{name: "wrong token", token: "wrong", organization: "organization-1", actor: "actor-1"},
+		{name: "missing actor", token: "trusted-secret", organization: "organization-1"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "/v1/test", nil)
 			req.Header.Set(internalAuthHeader, test.token)
-			req.Header.Set("X-Tenant-ID", test.tenant)
+			req.Header.Set("X-Org-ID", test.organization)
 			req.Header.Set("X-Actor-ID", test.actor)
 			rec := httptest.NewRecorder()
 			router.ServeHTTP(rec, req)
@@ -45,7 +45,7 @@ func TestInternalAuthMiddlewareAcceptsTrustedContext(t *testing.T) {
 	router.GET("/v1/test", func(c *gin.Context) { c.Status(http.StatusNoContent) })
 	req := httptest.NewRequest(http.MethodGet, "/v1/test", nil)
 	req.Header.Set(internalAuthHeader, "trusted-secret")
-	req.Header.Set("X-Tenant-ID", "tenant-1")
+	req.Header.Set("X-Org-ID", "organization-1")
 	req.Header.Set("X-Actor-ID", "actor-1")
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)

@@ -58,19 +58,19 @@ func New(baseURL string, client *http.Client, internalAuthSecret ...string) *Cli
 	}
 }
 
-func (c *Client) setTrustedHeaders(req *http.Request, tenantID, actorID string) {
+func (c *Client) setTrustedHeaders(req *http.Request, orgID, actorID string) {
 	if c.internalAuthSecret != "" {
 		req.Header.Set("X-Axis-Internal-Token", c.internalAuthSecret)
 	}
-	if strings.TrimSpace(tenantID) != "" {
-		req.Header.Set("X-Tenant-ID", tenantID)
+	if strings.TrimSpace(orgID) != "" {
+		req.Header.Set("X-Org-ID", orgID)
 	}
 	if strings.TrimSpace(actorID) != "" {
 		req.Header.Set("X-Actor-ID", actorID)
 	}
 }
 
-func (c *Client) ReportOperationalFinding(ctx context.Context, tenantID, idempotencyKey string, payload json.RawMessage) error {
+func (c *Client) ReportOperationalFinding(ctx context.Context, orgID, idempotencyKey string, payload json.RawMessage) error {
 	if !json.Valid(payload) || strings.TrimSpace(idempotencyKey) == "" {
 		return fmt.Errorf("operational finding metadata is invalid")
 	}
@@ -80,7 +80,7 @@ func (c *Client) ReportOperationalFinding(ctx context.Context, tenantID, idempot
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Idempotency-Key", strings.TrimSpace(idempotencyKey))
-	c.setTrustedHeaders(req, tenantID, "service:companion-operations")
+	c.setTrustedHeaders(req, orgID, "service:companion-operations")
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return fmt.Errorf("report operational finding: %w", err)
@@ -120,7 +120,7 @@ func (c *Client) Check(ctx context.Context, input executiongate.GovernanceCheckI
 		return executiongate.GovernanceCheckResult{}, fmt.Errorf("build governance check request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	c.setTrustedHeaders(req, input.TenantID, input.RequesterID)
+	c.setTrustedHeaders(req, input.OrgID, input.RequesterID)
 
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -149,12 +149,12 @@ func (c *Client) Check(ctx context.Context, input executiongate.GovernanceCheckI
 	}, nil
 }
 
-func (c *Client) GetApproval(ctx context.Context, tenantID string, id uuid.UUID) (executiongate.GovernanceApproval, error) {
+func (c *Client) GetApproval(ctx context.Context, orgID string, id uuid.UUID) (executiongate.GovernanceApproval, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/v1/approvals/"+id.String(), nil)
 	if err != nil {
 		return executiongate.GovernanceApproval{}, fmt.Errorf("build approval request: %w", err)
 	}
-	c.setTrustedHeaders(req, tenantID, "companion-v2")
+	c.setTrustedHeaders(req, orgID, "companion-v2")
 
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -240,7 +240,7 @@ func (c *Client) Revalidate(ctx context.Context, input executiongate.GovernanceR
 		return executiongate.GovernanceRevalidationResult{}, fmt.Errorf("build governance revalidation: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	c.setTrustedHeaders(req, input.TenantID, "companion-v2")
+	c.setTrustedHeaders(req, input.OrgID, "companion-v2")
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return executiongate.GovernanceRevalidationResult{}, fmt.Errorf("governance revalidation: %w", err)
@@ -273,8 +273,8 @@ func (c *Client) CheckDelegationAuthorization(ctx context.Context, input profess
 		return professionalauthority.DelegationAuthorizationResult{}, fmt.Errorf("build delegation authorization: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Axis-Tenant-Role", input.ActorRole)
-	c.setTrustedHeaders(req, input.TenantID, input.ActorID)
+	req.Header.Set("X-Axis-Org-Role", input.ActorRole)
+	c.setTrustedHeaders(req, input.OrgID, input.ActorID)
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return professionalauthority.DelegationAuthorizationResult{}, fmt.Errorf("delegation authorization: %w", err)
@@ -309,14 +309,14 @@ type AuditEvent struct {
 // AppendAuditEvent records an event in the Nexus audit ledger. Nexus seals it
 // (hash-chains + optionally signs) and holds it append-only, so companion cannot
 // forge or rewrite history. The caller treats failures as best-effort.
-func (c *Client) AppendAuditEvent(ctx context.Context, tenantID string, e AuditEvent) error {
-	return c.AppendAuditEventIdempotent(ctx, tenantID, "", e)
+func (c *Client) AppendAuditEvent(ctx context.Context, orgID string, e AuditEvent) error {
+	return c.AppendAuditEventIdempotent(ctx, orgID, "", e)
 }
 
 // AppendAuditEventIdempotent uses a caller-owned UUID as Nexus's audit event
 // ID. Retrying the same outbox message therefore returns the existing sealed
 // event instead of appending a duplicate to the immutable ledger.
-func (c *Client) AppendAuditEventIdempotent(ctx context.Context, tenantID, idempotencyKey string, e AuditEvent) error {
+func (c *Client) AppendAuditEventIdempotent(ctx context.Context, orgID, idempotencyKey string, e AuditEvent) error {
 	body := map[string]any{
 		"virployee_id": e.VirployeeID,
 		"subject_type": e.SubjectType,
@@ -340,7 +340,7 @@ func (c *Client) AppendAuditEventIdempotent(ctx context.Context, tenantID, idemp
 		req.Header.Set("Idempotency-Key", idempotencyKey)
 	}
 	// Nexus requires a non-empty X-Actor-ID; the acting virployee is the actor.
-	c.setTrustedHeaders(req, tenantID, e.ActorID)
+	c.setTrustedHeaders(req, orgID, e.ActorID)
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return fmt.Errorf("append audit event: %w", err)
@@ -352,7 +352,7 @@ func (c *Client) AppendAuditEventIdempotent(ctx context.Context, tenantID, idemp
 	return nil
 }
 
-func (c *Client) ReportExecutionResult(ctx context.Context, tenantID, checkID, idempotencyKey, bindingHash, status string, durationMS int64, result map[string]any, attestationVersion, executorVersion, signature string) error {
+func (c *Client) ReportExecutionResult(ctx context.Context, orgID, checkID, idempotencyKey, bindingHash, status string, durationMS int64, result map[string]any, attestationVersion, executorVersion, signature string) error {
 	body := map[string]any{
 		"binding_hash": bindingHash, "status": status, "duration_ms": durationMS, "result": result,
 		"attestation_version": attestationVersion, "executor_version": executorVersion, "attestation": signature,
@@ -366,7 +366,7 @@ func (c *Client) ReportExecutionResult(ctx context.Context, tenantID, checkID, i
 		return fmt.Errorf("build execution result request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	c.setTrustedHeaders(req, tenantID, "companion-v2")
+	c.setTrustedHeaders(req, orgID, "companion-v2")
 	req.Header.Set("Idempotency-Key", idempotencyKey)
 	resp, err := c.http.Do(req)
 	if err != nil {

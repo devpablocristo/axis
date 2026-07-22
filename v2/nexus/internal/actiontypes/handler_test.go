@@ -22,7 +22,7 @@ func TestHandlerCreateAndListActionTypes(t *testing.T) {
 		"risk_class":"medium"
 	}`))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Tenant-ID", "tenant-1")
+	req.Header.Set("X-Org-ID", "organization-1")
 	router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
@@ -30,8 +30,8 @@ func TestHandlerCreateAndListActionTypes(t *testing.T) {
 
 	var created dto.ActionTypeResponse
 	decodeJSON(t, rec, &created)
-	if created.TenantID != "tenant-1" {
-		t.Fatalf("tenant id = %q, want tenant-1", created.TenantID)
+	if created.OrgID != "organization-1" {
+		t.Fatalf("organization id = %q, want organization-1", created.OrgID)
 	}
 	if created.RiskClass != "medium" {
 		t.Fatalf("risk class = %q, want medium", created.RiskClass)
@@ -39,7 +39,7 @@ func TestHandlerCreateAndListActionTypes(t *testing.T) {
 
 	rec = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodGet, "/v1/action-types", nil)
-	req.Header.Set("X-Tenant-ID", "tenant-1")
+	req.Header.Set("X-Org-ID", "organization-1")
 	router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())

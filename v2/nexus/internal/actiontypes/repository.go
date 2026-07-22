@@ -21,26 +21,26 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 	return &Repository{pool: pool}
 }
 
-func (r *Repository) Create(ctx context.Context, tenantID string, input domain.NormalizedCreateInput) (domain.ActionType, error) {
+func (r *Repository) Create(ctx context.Context, orgID string, input domain.NormalizedCreateInput) (domain.ActionType, error) {
 	id := uuid.New()
 	now := time.Now().UTC()
 	row := r.pool.QueryRow(ctx, `
 		INSERT INTO action_types (
-			id, tenant_id, action_type_key, name, description, category, risk_class, enabled, created_at, updated_at
+			id, org_id, action_type_key, name, description, category, risk_class, enabled, created_at, updated_at
 		)
 		VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $9)
-		RETURNING id::text, tenant_id, action_type_key, name, description, category, risk_class, enabled, created_at, updated_at
-	`, id.String(), tenantID, input.ActionTypeKey, input.Name, input.Description, input.Category, string(input.RiskClass), input.Enabled, now)
+		RETURNING id::text, org_id, action_type_key, name, description, category, risk_class, enabled, created_at, updated_at
+	`, id.String(), orgID, input.ActionTypeKey, input.Name, input.Description, input.Category, string(input.RiskClass), input.Enabled, now)
 	return scanActionType(row)
 }
 
-func (r *Repository) List(ctx context.Context, tenantID string) ([]domain.ActionType, error) {
+func (r *Repository) List(ctx context.Context, orgID string) ([]domain.ActionType, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT id::text, tenant_id, action_type_key, name, description, category, risk_class, enabled, created_at, updated_at
+		SELECT id::text, org_id, action_type_key, name, description, category, risk_class, enabled, created_at, updated_at
 		FROM action_types
-		WHERE tenant_id = $1
+		WHERE org_id = $1
 		ORDER BY action_type_key ASC, id ASC
-	`, tenantID)
+	`, orgID)
 	if err != nil {
 		return nil, err
 	}
@@ -60,25 +60,25 @@ func (r *Repository) List(ctx context.Context, tenantID string) ([]domain.Action
 	return out, nil
 }
 
-func (r *Repository) Get(ctx context.Context, tenantID string, id uuid.UUID) (domain.ActionType, error) {
+func (r *Repository) Get(ctx context.Context, orgID string, id uuid.UUID) (domain.ActionType, error) {
 	row := r.pool.QueryRow(ctx, `
-		SELECT id::text, tenant_id, action_type_key, name, description, category, risk_class, enabled, created_at, updated_at
+		SELECT id::text, org_id, action_type_key, name, description, category, risk_class, enabled, created_at, updated_at
 		FROM action_types
-		WHERE tenant_id = $1 AND id = $2::uuid
-	`, tenantID, id.String())
+		WHERE org_id = $1 AND id = $2::uuid
+	`, orgID, id.String())
 	return scanActionType(row)
 }
 
-func (r *Repository) GetByKey(ctx context.Context, tenantID string, key string) (domain.ActionType, error) {
+func (r *Repository) GetByKey(ctx context.Context, orgID string, key string) (domain.ActionType, error) {
 	row := r.pool.QueryRow(ctx, `
-		SELECT id::text, tenant_id, action_type_key, name, description, category, risk_class, enabled, created_at, updated_at
+		SELECT id::text, org_id, action_type_key, name, description, category, risk_class, enabled, created_at, updated_at
 		FROM action_types
-		WHERE tenant_id = $1 AND action_type_key = $2
-	`, tenantID, key)
+		WHERE org_id = $1 AND action_type_key = $2
+	`, orgID, key)
 	return scanActionType(row)
 }
 
-func (r *Repository) Update(ctx context.Context, tenantID string, id uuid.UUID, input domain.NormalizedUpdateInput) (domain.ActionType, error) {
+func (r *Repository) Update(ctx context.Context, orgID string, id uuid.UUID, input domain.NormalizedUpdateInput) (domain.ActionType, error) {
 	row := r.pool.QueryRow(ctx, `
 		UPDATE action_types
 		SET name = $3,
@@ -87,9 +87,9 @@ func (r *Repository) Update(ctx context.Context, tenantID string, id uuid.UUID, 
 			risk_class = $6,
 			enabled = $7,
 			updated_at = $8
-		WHERE tenant_id = $1 AND id = $2::uuid
-		RETURNING id::text, tenant_id, action_type_key, name, description, category, risk_class, enabled, created_at, updated_at
-	`, tenantID, id.String(), input.Name, input.Description, input.Category, string(input.RiskClass), input.Enabled, time.Now().UTC())
+		WHERE org_id = $1 AND id = $2::uuid
+		RETURNING id::text, org_id, action_type_key, name, description, category, risk_class, enabled, created_at, updated_at
+	`, orgID, id.String(), input.Name, input.Description, input.Category, string(input.RiskClass), input.Enabled, time.Now().UTC())
 	return scanActionType(row)
 }
 
@@ -103,7 +103,7 @@ func scanActionType(row scanner) (domain.ActionType, error) {
 	var item domain.ActionType
 	err := row.Scan(
 		&idText,
-		&item.TenantID,
+		&item.OrgID,
 		&item.ActionTypeKey,
 		&item.Name,
 		&item.Description,

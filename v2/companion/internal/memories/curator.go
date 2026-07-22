@@ -11,7 +11,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// ConflictReader is the persistence port used by the curator. The tenant and
+// ConflictReader is the persistence port used by the curator. The organization and
 // virployee scope is mandatory so a write can never compare against another
 // customer's memory corpus.
 type ConflictReader interface {
@@ -58,7 +58,7 @@ var poisoningPatterns = []struct {
 	{name: "approval_bypass", markers: []string{"skip nexus", "bypass approval", "without approval", "sin aprobación", "evita nexus"}},
 }
 
-func (c *DefaultCurator) Curate(ctx context.Context, tenant string, virployee, exclude uuid.UUID, input CreateInput) (CuratedInput, error) {
+func (c *DefaultCurator) Curate(ctx context.Context, organization string, virployee, exclude uuid.UUID, input CreateInput) (CuratedInput, error) {
 	in, err := normalizeCreate(input)
 	if err != nil {
 		return CuratedInput{}, err
@@ -113,7 +113,7 @@ func (c *DefaultCurator) Curate(ctx context.Context, tenant string, virployee, e
 	}
 
 	if c.conflicts != nil && oneOf(in.Type, "fact", "preference") {
-		conflict, err := c.conflicts.HasActiveConflict(ctx, strings.TrimSpace(tenant), virployee, exclude, in.Scope, in.Title, in.Type, ContentHash(in.Content))
+		conflict, err := c.conflicts.HasActiveConflict(ctx, strings.TrimSpace(organization), virployee, exclude, in.Scope, in.Title, in.Type, ContentHash(in.Content))
 		if err != nil {
 			return CuratedInput{}, err
 		}

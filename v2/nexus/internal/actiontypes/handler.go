@@ -43,7 +43,7 @@ func (h *Handler) Create(c *gin.Context) {
 	if err := ginmw.BindJSON(c, &req); err != nil {
 		return
 	}
-	out, err := h.ucs.Create(c.Request.Context(), tenantID(c), req.ToDomain())
+	out, err := h.ucs.Create(c.Request.Context(), orgID(c), req.ToDomain())
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -52,7 +52,7 @@ func (h *Handler) Create(c *gin.Context) {
 }
 
 func (h *Handler) List(c *gin.Context) {
-	out, err := h.ucs.List(c.Request.Context(), tenantID(c))
+	out, err := h.ucs.List(c.Request.Context(), orgID(c))
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -65,7 +65,7 @@ func (h *Handler) Get(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, err := h.ucs.Get(c.Request.Context(), tenantID(c), id)
+	out, err := h.ucs.Get(c.Request.Context(), orgID(c), id)
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -82,7 +82,7 @@ func (h *Handler) Update(c *gin.Context) {
 	if err := ginmw.BindJSON(c, &req); err != nil {
 		return
 	}
-	out, err := h.ucs.Update(c.Request.Context(), tenantID(c), id, req.ToDomain())
+	out, err := h.ucs.Update(c.Request.Context(), orgID(c), id, req.ToDomain())
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -90,6 +90,6 @@ func (h *Handler) Update(c *gin.Context) {
 	ginmw.WriteJSON(c, 200, dto.ActionTypeFromDomain(out))
 }
 
-func tenantID(c *gin.Context) string {
-	return strings.TrimSpace(c.GetHeader("X-Tenant-ID"))
+func orgID(c *gin.Context) string {
+	return strings.TrimSpace(c.GetHeader("X-Org-ID"))
 }

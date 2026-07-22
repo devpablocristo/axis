@@ -3,7 +3,7 @@
 Axis v2 separates three authority layers instead of combining them into a
 client-supplied permission set:
 
-- BFF owns verified identity, tenant membership and the base
+- BFF owns verified identity, organization membership and the base
   `owner | admin | member` role.
 - Nexus owns additive functional role grants, governance-policy versions,
   simulations, promotions, evaluations and approvals.
@@ -11,13 +11,13 @@ client-supplied permission set:
   a capability for a product, resource, purpose and bounded risk.
 
 The BFF removes permission, role-grant and functional-role headers supplied by
-the client. It derives tenant and actor context from the session and validates
-that a role-grant recipient is an active user of that tenant before forwarding
+the client. It derives organization and actor context from the session and validates
+that a role-grant recipient is an active user of that organization before forwarding
 the request to Nexus.
 
 ## Functional roles
 
-Functional roles are fixed definitions; tenants grant them additively:
+Functional roles are fixed definitions; organizations grant them additively:
 
 | Role | Authority |
 | --- | --- |
@@ -27,7 +27,7 @@ Functional roles are fixed definitions; tenants grant them additively:
 | `delegation_admin` | Create, review and revoke professional delegations. |
 | `operator` | Read operational state and perform scoped reconciliation, job/outbox recovery, incident actions, legal holds and exports. |
 
-Every grant is tenant-scoped, time-bounded and revocable. Optional scopes cover
+Every grant is organization-scoped, time-bounded and revocable. Optional scopes cover
 `product_surface`, action patterns, resource type/reference and maximum risk.
 Only owners/admins administer grants. A requester cannot decide their own
 approval, and a policy-version creator or promotion requester cannot approve
@@ -65,7 +65,7 @@ serialized so concurrent decisions cannot create two active versions.
 
 ## Delegation and execution binding
 
-A professional delegation matches only when tenant, Virployee, exact principal,
+A professional delegation matches only when organization, Virployee, exact principal,
 capability pattern, product, resource, risk and validity all match. It is not
 transitive and cannot be subdelegated. Changes revoke the old record and create
 a new one; review metadata does not rewrite the original authority.
@@ -117,7 +117,7 @@ POST                 /internal/operations/findings
 ```
 
 Companion keeps delegation management nested under the Virployee, including
-create, review and revoke operations. Existing tenants receive no automatically
+create, review and revoke operations. Existing organizations receive no automatically
 active policy. Existing delegation rows retain their former authority with
 `critical` maximum risk, unrestricted product and a resource scope pinned to
 their previously linked principal.

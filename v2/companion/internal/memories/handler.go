@@ -43,8 +43,8 @@ func (h *Handler) Review(c *gin.Context) {
 	if err := ginmw.BindJSON(c, &request); err != nil {
 		return
 	}
-	tenant, actor, role := auth(c)
-	memory, err := h.u.Review(c, tenant, virployeeID, memoryID, actor, role, request.Decision, request.Note)
+	organization, actor, role := auth(c)
+	memory, err := h.u.Review(c, organization, virployeeID, memoryID, actor, role, request.Decision, request.Note)
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -68,7 +68,7 @@ func ids(c *gin.Context) (uuid.UUID, uuid.UUID, bool) {
 	return v, m, true
 }
 func auth(c *gin.Context) (string, string, string) {
-	return strings.TrimSpace(c.GetHeader("X-Tenant-ID")), strings.TrimSpace(c.GetHeader("X-Actor-ID")), strings.TrimSpace(c.GetHeader("X-Axis-Tenant-Role"))
+	return strings.TrimSpace(c.GetHeader("X-Org-ID")), strings.TrimSpace(c.GetHeader("X-Actor-ID")), strings.TrimSpace(c.GetHeader("X-Axis-Org-Role"))
 }
 
 type createRequest struct {

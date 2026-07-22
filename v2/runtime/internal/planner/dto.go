@@ -49,7 +49,7 @@ type ProposedIntent struct {
 }
 
 // AnswerRequest is what Companion sends when a virployee must PROCESS input data
-// and RESPOND (e.g. a product like medmory sends structured facts and expects a
+// and RESPOND (e.g. a consumer sends structured facts and expects a
 // governed answer). Unlike Propose, this does not classify into a capability: the
 // system prompt bounds the role and the model answers directly. InputJSON is the
 // product's opaque payload; ResponseSchema, when set, forces a structured JSON

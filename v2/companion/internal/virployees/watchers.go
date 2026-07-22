@@ -40,7 +40,7 @@ func (u *UseCases) RunOperationalWatchersOnce(ctx context.Context, config Watche
 		if item.Outcome == "recovered" {
 			eventType, summary = "assist_recovered", "stale pre-answer assist run queued for recovery"
 		}
-		u.emitWatcherAudit(ctx, item.TenantID, item.VirployeeID.String(), "assist_run", item.ID.String(), eventType, summary, map[string]any{
+		u.emitWatcherAudit(ctx, item.OrgID, item.VirployeeID.String(), "assist_run", item.ID.String(), eventType, summary, map[string]any{
 			"run_id": item.ID.String(), "input_hash": item.InputHash,
 		})
 	}
@@ -59,19 +59,19 @@ func (u *UseCases) recoverExecution(ctx context.Context, repo OperationalReposit
 	fail := func(errorCode string) {
 		if attempt.RecoveryAttempts+1 >= config.MaxRecoveryAttempts {
 			message := "execution recovery exhausted"
-			failed, completeErr := u.executionRepo.CompleteExecution(ctx, attempt.TenantID, attempt.ID, "failed", "", map[string]any{"watcher": "recovery_exhausted"}, message, time.Since(attempt.StartedAt).Milliseconds())
+			failed, completeErr := u.executionRepo.CompleteExecution(ctx, attempt.OrgID, attempt.ID, "failed", "", map[string]any{"watcher": "recovery_exhausted"}, message, time.Since(attempt.StartedAt).Milliseconds())
 			if completeErr == nil {
-				u.emitExecutionAudit(ctx, attempt.TenantID, attempt.VirployeeID, prepared.BindingHash, prepared.Action.Action, prepared.GovernanceCheckID.String(), failed)
+				u.emitExecutionAudit(ctx, attempt.OrgID, attempt.VirployeeID, prepared.BindingHash, prepared.Action.Action, prepared.GovernanceCheckID.String(), failed)
 				return
 			}
 		}
-		_ = repo.ReleaseExecutionRecovery(ctx, attempt.TenantID, attempt.ID, errorCode)
+		_ = repo.ReleaseExecutionRecovery(ctx, attempt.OrgID, attempt.ID, errorCode)
 	}
 	if u.approvals == nil {
 		fail("approval_reader_unconfigured")
 		return
 	}
-	approval, err := u.approvals.GetApproval(ctx, attempt.TenantID, prepared.ApprovalID)
+	approval, err := u.approvals.GetApproval(ctx, attempt.OrgID, prepared.ApprovalID)
 	if err != nil {
 		fail("approval_read_failed")
 		return
@@ -91,12 +91,12 @@ func (u *UseCases) recoverExecution(ctx context.Context, repo OperationalReposit
 		fail("executor_unconfigured")
 		return
 	}
-	if err := u.consumeQuota(ctx, quotaKey(attempt.TenantID, "axis", "executors"), attempt.IdempotencyKey, "execution_attempt", attempt.ID.String(), 1); err != nil {
+	if err := u.consumeQuota(ctx, quotaKey(attempt.OrgID, "axis", "executors"), attempt.IdempotencyKey, "execution_attempt", attempt.ID.String(), 1); err != nil {
 		fail("executor_quota_exceeded")
 		return
 	}
 	started := time.Now()
-	outcome, executeErr := executor.Execute(ctx, attempt.TenantID, attempt.VirployeeID, attempt, prepared.Action)
+	outcome, executeErr := executor.Execute(ctx, attempt.OrgID, attempt.VirployeeID, attempt, prepared.Action)
 	result := outcome.Result
 	if result == nil {
 		result = map[string]any{}
@@ -106,22 +106,22 @@ func (u *UseCases) recoverExecution(ctx context.Context, repo OperationalReposit
 	if executeErr != nil {
 		status, message = "failed", runtraces.RedactText(executeErr.Error())
 	}
-	completed, err := u.executionRepo.CompleteExecution(ctx, attempt.TenantID, attempt.ID, status, outcome.ResourceID, result, message, time.Since(started).Milliseconds())
+	completed, err := u.executionRepo.CompleteExecution(ctx, attempt.OrgID, attempt.ID, status, outcome.ResourceID, result, message, time.Since(started).Milliseconds())
 	if err != nil {
 		fail("execution_completion_failed")
 		return
 	}
-	u.emitExecutionAudit(ctx, attempt.TenantID, attempt.VirployeeID, prepared.BindingHash, prepared.Action.Action, prepared.GovernanceCheckID.String(), completed)
-	u.emitWatcherAudit(ctx, attempt.TenantID, attempt.VirployeeID.String(), "execution_attempt", attempt.ID.String(), "execution_recovered", "stale execution recovered idempotently", map[string]any{
+	u.emitExecutionAudit(ctx, attempt.OrgID, attempt.VirployeeID, prepared.BindingHash, prepared.Action.Action, prepared.GovernanceCheckID.String(), completed)
+	u.emitWatcherAudit(ctx, attempt.OrgID, attempt.VirployeeID.String(), "execution_attempt", attempt.ID.String(), "execution_recovered", "stale execution recovered idempotently", map[string]any{
 		"binding_hash": prepared.BindingHash, "status": completed.Status,
 	})
 }
 
-func (u *UseCases) emitWatcherAudit(ctx context.Context, tenantID, virployeeID, subjectType, subjectID, eventType, summary string, data map[string]any) {
+func (u *UseCases) emitWatcherAudit(ctx context.Context, orgID, virployeeID, subjectType, subjectID, eventType, summary string, data map[string]any) {
 	if u.auditEmitter == nil {
 		return
 	}
-	if err := u.auditEmitter.AppendAuditEvent(ctx, AuditEventInput{TenantID: tenantID, VirployeeID: virployeeID, ActorType: "service", ActorID: "companion-watcher", SubjectType: subjectType, SubjectID: subjectID, EventType: eventType, Summary: summary, Data: data}); err != nil {
+	if err := u.auditEmitter.AppendAuditEvent(ctx, AuditEventInput{OrgID: orgID, VirployeeID: virployeeID, ActorType: "service", ActorID: "companion-watcher", SubjectType: subjectType, SubjectID: subjectID, EventType: eventType, Summary: summary, Data: data}); err != nil {
 		slog.ErrorContext(ctx, "watcher audit emit failed", "error", err, "subject_id", subjectID)
 	}
 }

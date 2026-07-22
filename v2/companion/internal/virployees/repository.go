@@ -37,7 +37,7 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 	return &Repository{pool: pool, outbox: outbox.NewRepository(pool), jobs: jobs.NewPostgresRepository(pool)}
 }
 
-func (r *Repository) Create(ctx context.Context, tenantID string, input domain.NormalizedCreateInput) (domain.Virployee, error) {
+func (r *Repository) Create(ctx context.Context, orgID string, input domain.NormalizedCreateInput) (domain.Virployee, error) {
 	id := uuid.New()
 	now := time.Now().UTC()
 	tx, err := r.pool.Begin(ctx)
@@ -47,32 +47,32 @@ func (r *Repository) Create(ctx context.Context, tenantID string, input domain.N
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	row := tx.QueryRow(ctx, `
-		INSERT INTO virployees (id, tenant_id, name, job_role_id, profile_template_id, description, supervisor_user_id, autonomy, grounding_mode, created_at, updated_at)
+		INSERT INTO virployees (id, org_id, name, job_role_id, profile_template_id, description, supervisor_user_id, autonomy, grounding_mode, created_at, updated_at)
 		VALUES ($1::uuid, $2, $3, $4::uuid, $5::uuid, $6, $7, $8, $9, $10, $10)
 		RETURNING id::text, name, job_role_id::text, profile_template_id::text, description, supervisor_user_id::text, autonomy, grounding_mode, created_at, updated_at, archived_at, trashed_at, purge_after
-	`, id.String(), tenantID, input.Name, input.JobRoleID.String(), input.ProfileTemplateID.String(), input.Description, input.SupervisorUserID, string(input.Autonomy), string(input.GroundingMode), now)
+	`, id.String(), orgID, input.Name, input.JobRoleID.String(), input.ProfileTemplateID.String(), input.Description, input.SupervisorUserID, string(input.Autonomy), string(input.GroundingMode), now)
 	item, err := scanVirployee(row)
 	if err != nil {
 		return domain.Virployee{}, err
 	}
-	if err := replaceVirployeeCapabilities(ctx, tx, tenantID, id, input.CapabilityIDs); err != nil {
+	if err := replaceVirployeeCapabilities(ctx, tx, orgID, id, input.CapabilityIDs); err != nil {
 		return domain.Virployee{}, err
 	}
 	if input.EmployerSubjectID != uuid.Nil {
 		var employerExists bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS(
 			SELECT 1 FROM companion_work_subjects
-			WHERE tenant_id=$1 AND id=$2 AND archived_at IS NULL
-		)`, tenantID, input.EmployerSubjectID).Scan(&employerExists); err != nil {
+			WHERE org_id=$1 AND id=$2 AND archived_at IS NULL
+		)`, orgID, input.EmployerSubjectID).Scan(&employerExists); err != nil {
 			return domain.Virployee{}, err
 		}
 		if !employerExists {
-			return domain.Virployee{}, domainerr.Validation("employer_subject_id must reference an active work subject in the tenant")
+			return domain.Virployee{}, domainerr.Validation("employer_subject_id must reference an active work subject in the organization")
 		}
 		if _, err := tx.Exec(ctx, `INSERT INTO companion_virployee_relationships(
-			id,tenant_id,virployee_id,subject_id,relationship_type,is_primary)
+			id,org_id,virployee_id,subject_id,relationship_type,is_primary)
 			VALUES ($1,$2,$3,$4,'works_for',true)
-		`, uuid.New(), tenantID, id, input.EmployerSubjectID); err != nil {
+		`, uuid.New(), orgID, id, input.EmployerSubjectID); err != nil {
 			return domain.Virployee{}, mapVirployeeStorageError(err)
 		}
 	}
@@ -83,15 +83,15 @@ func (r *Repository) Create(ctx context.Context, tenantID string, input domain.N
 	return item, nil
 }
 
-func (r *Repository) List(ctx context.Context, tenantID string, state domain.State) ([]domain.Virployee, error) {
+func (r *Repository) List(ctx context.Context, orgID string, state domain.State) ([]domain.Virployee, error) {
 	var where string
 	switch state {
 	case domain.StateActive, "":
-		where = "tenant_id = $1 AND archived_at IS NULL AND trashed_at IS NULL"
+		where = "org_id = $1 AND archived_at IS NULL AND trashed_at IS NULL"
 	case domain.StateArchived:
-		where = "tenant_id = $1 AND archived_at IS NOT NULL AND trashed_at IS NULL"
+		where = "org_id = $1 AND archived_at IS NOT NULL AND trashed_at IS NULL"
 	case domain.StateTrashed:
-		where = "tenant_id = $1 AND trashed_at IS NOT NULL"
+		where = "org_id = $1 AND trashed_at IS NOT NULL"
 	default:
 		return nil, domainerr.Validation("invalid lifecycle state")
 	}
@@ -101,7 +101,7 @@ func (r *Repository) List(ctx context.Context, tenantID string, state domain.Sta
 		FROM virployees
 		WHERE `+where+`
 		ORDER BY created_at DESC, id DESC
-	`, tenantID)
+	`, orgID)
 	if err != nil {
 		return nil, err
 	}
@@ -118,20 +118,20 @@ func (r *Repository) List(ctx context.Context, tenantID string, state domain.Sta
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	return r.attachRelated(ctx, tenantID, out)
+	return r.attachRelated(ctx, orgID, out)
 }
 
-func (r *Repository) Get(ctx context.Context, tenantID string, id uuid.UUID) (domain.Virployee, error) {
+func (r *Repository) Get(ctx context.Context, orgID string, id uuid.UUID) (domain.Virployee, error) {
 	row := r.pool.QueryRow(ctx, `
 		SELECT id::text, name, job_role_id::text, profile_template_id::text, description, supervisor_user_id::text, autonomy, grounding_mode, created_at, updated_at, archived_at, trashed_at, purge_after
 		FROM virployees
-		WHERE tenant_id = $1 AND id = $2::uuid
-	`, tenantID, id.String())
+		WHERE org_id = $1 AND id = $2::uuid
+	`, orgID, id.String())
 	item, err := scanVirployee(row)
 	if err != nil {
 		return domain.Virployee{}, err
 	}
-	ids, err := r.capabilityIDs(ctx, tenantID, id)
+	ids, err := r.capabilityIDs(ctx, orgID, id)
 	if err != nil {
 		return domain.Virployee{}, err
 	}
@@ -139,7 +139,7 @@ func (r *Repository) Get(ctx context.Context, tenantID string, id uuid.UUID) (do
 	return item, nil
 }
 
-func (r *Repository) Update(ctx context.Context, tenantID string, id uuid.UUID, input domain.NormalizedUpdateInput) (domain.Virployee, error) {
+func (r *Repository) Update(ctx context.Context, orgID string, id uuid.UUID, input domain.NormalizedUpdateInput) (domain.Virployee, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return domain.Virployee{}, err
@@ -156,15 +156,15 @@ func (r *Repository) Update(ctx context.Context, tenantID string, id uuid.UUID, 
 			autonomy = $8,
 			grounding_mode = COALESCE(NULLIF($9, ''), grounding_mode),
 			updated_at = $10
-		WHERE tenant_id = $1
+		WHERE org_id = $1
 			AND id = $2::uuid
 			AND archived_at IS NULL
 			AND trashed_at IS NULL
 		RETURNING id::text, name, job_role_id::text, profile_template_id::text, description, supervisor_user_id::text, autonomy, grounding_mode, created_at, updated_at, archived_at, trashed_at, purge_after
-	`, tenantID, id.String(), input.Name, input.JobRoleID.String(), input.ProfileTemplateID.String(), input.Description, input.SupervisorUserID, string(input.Autonomy), string(input.GroundingMode), time.Now().UTC())
+	`, orgID, id.String(), input.Name, input.JobRoleID.String(), input.ProfileTemplateID.String(), input.Description, input.SupervisorUserID, string(input.Autonomy), string(input.GroundingMode), time.Now().UTC())
 	item, err := scanVirployee(row)
 	if err == nil {
-		if err := replaceVirployeeCapabilities(ctx, tx, tenantID, id, input.CapabilityIDs); err != nil {
+		if err := replaceVirployeeCapabilities(ctx, tx, orgID, id, input.CapabilityIDs); err != nil {
 			return domain.Virployee{}, err
 		}
 		if err := tx.Commit(ctx); err != nil {
@@ -176,7 +176,7 @@ func (r *Repository) Update(ctx context.Context, tenantID string, id uuid.UUID, 
 	if !domainerr.IsNotFound(err) {
 		return domain.Virployee{}, err
 	}
-	state, stateErr := r.State(ctx, tenantID, id)
+	state, stateErr := r.State(ctx, orgID, id)
 	if stateErr != nil {
 		return domain.Virployee{}, stateErr
 	}
@@ -186,77 +186,77 @@ func (r *Repository) Update(ctx context.Context, tenantID string, id uuid.UUID, 
 	return domain.Virployee{}, err
 }
 
-func (r *Repository) Archive(ctx context.Context, tenantID string, resourceID uuid.UUID, at time.Time) error {
+func (r *Repository) Archive(ctx context.Context, orgID string, resourceID uuid.UUID, at time.Time) error {
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE virployees
 		SET archived_at = $3, updated_at = $3
-		WHERE tenant_id = $1
+		WHERE org_id = $1
 			AND id = $2::uuid
 			AND archived_at IS NULL
 			AND trashed_at IS NULL
-	`, tenantID, resourceID.String(), at.UTC())
-	return r.lifecycleResult(ctx, tenantID, resourceID, tag, err)
+	`, orgID, resourceID.String(), at.UTC())
+	return r.lifecycleResult(ctx, orgID, resourceID, tag, err)
 }
 
-func (r *Repository) Unarchive(ctx context.Context, tenantID string, resourceID uuid.UUID) error {
+func (r *Repository) Unarchive(ctx context.Context, orgID string, resourceID uuid.UUID) error {
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE virployees
 		SET archived_at = NULL, updated_at = $3
-		WHERE tenant_id = $1
+		WHERE org_id = $1
 			AND id = $2::uuid
 			AND archived_at IS NOT NULL
 			AND trashed_at IS NULL
-	`, tenantID, resourceID.String(), time.Now().UTC())
-	return r.lifecycleResult(ctx, tenantID, resourceID, tag, err)
+	`, orgID, resourceID.String(), time.Now().UTC())
+	return r.lifecycleResult(ctx, orgID, resourceID, tag, err)
 }
 
-func (r *Repository) Purge(ctx context.Context, tenantID string, resourceID uuid.UUID) error {
+func (r *Repository) Purge(ctx context.Context, orgID string, resourceID uuid.UUID) error {
 	tag, err := r.pool.Exec(ctx, `
 		DELETE FROM virployees
-		WHERE tenant_id = $1 AND id = $2::uuid
+		WHERE org_id = $1 AND id = $2::uuid
 			AND trashed_at IS NOT NULL
-	`, tenantID, resourceID.String())
-	return r.lifecycleResult(ctx, tenantID, resourceID, tag, err)
+	`, orgID, resourceID.String())
+	return r.lifecycleResult(ctx, orgID, resourceID, tag, err)
 }
 
-func (r *Repository) IsArchived(ctx context.Context, tenantID string, resourceID uuid.UUID) (bool, error) {
-	state, err := r.State(ctx, tenantID, resourceID)
+func (r *Repository) IsArchived(ctx context.Context, orgID string, resourceID uuid.UUID) (bool, error) {
+	state, err := r.State(ctx, orgID, resourceID)
 	if err != nil {
 		return false, err
 	}
 	return state == lifecycle.StateArchived, nil
 }
 
-func (r *Repository) Trash(ctx context.Context, tenantID string, resourceID uuid.UUID, at time.Time, purgeAfter *time.Time) error {
+func (r *Repository) Trash(ctx context.Context, orgID string, resourceID uuid.UUID, at time.Time, purgeAfter *time.Time) error {
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE virployees
 		SET archived_at = NULL, trashed_at = $3, purge_after = $4, updated_at = $3
-		WHERE tenant_id = $1
+		WHERE org_id = $1
 			AND id = $2::uuid
 			AND trashed_at IS NULL
-	`, tenantID, resourceID.String(), at.UTC(), nullableTime(purgeAfter))
-	return r.lifecycleResult(ctx, tenantID, resourceID, tag, err)
+	`, orgID, resourceID.String(), at.UTC(), nullableTime(purgeAfter))
+	return r.lifecycleResult(ctx, orgID, resourceID, tag, err)
 }
 
-func (r *Repository) Restore(ctx context.Context, tenantID string, resourceID uuid.UUID) error {
+func (r *Repository) Restore(ctx context.Context, orgID string, resourceID uuid.UUID) error {
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE virployees
 		SET trashed_at = NULL, purge_after = NULL, updated_at = $3
-		WHERE tenant_id = $1
+		WHERE org_id = $1
 			AND id = $2::uuid
 			AND trashed_at IS NOT NULL
-	`, tenantID, resourceID.String(), time.Now().UTC())
-	return r.lifecycleResult(ctx, tenantID, resourceID, tag, err)
+	`, orgID, resourceID.String(), time.Now().UTC())
+	return r.lifecycleResult(ctx, orgID, resourceID, tag, err)
 }
 
-func (r *Repository) State(ctx context.Context, tenantID string, resourceID uuid.UUID) (lifecycle.LifecycleState, error) {
+func (r *Repository) State(ctx context.Context, orgID string, resourceID uuid.UUID) (lifecycle.LifecycleState, error) {
 	var archivedAt sql.NullTime
 	var trashedAt sql.NullTime
 	err := r.pool.QueryRow(ctx, `
 		SELECT archived_at, trashed_at
 		FROM virployees
-		WHERE tenant_id = $1 AND id = $2::uuid
-	`, tenantID, resourceID.String()).Scan(&archivedAt, &trashedAt)
+		WHERE org_id = $1 AND id = $2::uuid
+	`, orgID, resourceID.String()).Scan(&archivedAt, &trashedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", domainerr.NotFoundf("virployee", resourceID.String())
 	}
@@ -273,7 +273,7 @@ func (r *Repository) State(ctx context.Context, tenantID string, resourceID uuid
 	}
 }
 
-func (r *Repository) CreateRunTrace(ctx context.Context, tenantID string, input runtraces.CreateInput) (runtraces.Trace, error) {
+func (r *Repository) CreateRunTrace(ctx context.Context, orgID string, input runtraces.CreateInput) (runtraces.Trace, error) {
 	id := uuid.New()
 	now := time.Now().UTC()
 	intent, err := json.Marshal(runtraces.RedactValue(input.Intent))
@@ -341,7 +341,7 @@ func (r *Repository) CreateRunTrace(ctx context.Context, tenantID string, input 
 	row := r.pool.QueryRow(ctx, `
 		INSERT INTO companion_run_traces (
 			id,
-			tenant_id,
+			org_id,
 			virployee_id,
 			operation,
 			input_hash,
@@ -381,7 +381,7 @@ func (r *Repository) CreateRunTrace(ctx context.Context, tenantID string, input 
 		)
 		RETURNING
 			id::text,
-			tenant_id,
+			org_id,
 			virployee_id::text,
 			operation,
 			input_hash,
@@ -398,15 +398,15 @@ func (r *Repository) CreateRunTrace(ctx context.Context, tenantID string, input 
 			memory_references,
 			memory_context_hash,
 			created_at
-	`, id.String(), tenantID, input.VirployeeID.String(), string(input.Operation), inputHash, inputPreview, string(intent), nullableUUID(input.CapabilityID), input.CapabilityKey, input.DryRunDecision, input.GateDecision, string(checks), nexusResult, executionResult, input.BindingHash, string(memoryReferences), input.MemoryContextHash, now)
+	`, id.String(), orgID, input.VirployeeID.String(), string(input.Operation), inputHash, inputPreview, string(intent), nullableUUID(input.CapabilityID), input.CapabilityKey, input.DryRunDecision, input.GateDecision, string(checks), nexusResult, executionResult, input.BindingHash, string(memoryReferences), input.MemoryContextHash, now)
 	return scanRunTrace(row)
 }
 
-func (r *Repository) ListRunTraces(ctx context.Context, tenantID string, virployeeID uuid.UUID, limit int) ([]runtraces.Trace, error) {
+func (r *Repository) ListRunTraces(ctx context.Context, orgID string, virployeeID uuid.UUID, limit int) ([]runtraces.Trace, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT
 			id::text,
-			tenant_id,
+			org_id,
 			virployee_id::text,
 			operation,
 			input_hash,
@@ -424,11 +424,11 @@ func (r *Repository) ListRunTraces(ctx context.Context, tenantID string, virploy
 			memory_context_hash,
 			created_at
 		FROM companion_run_traces
-		WHERE tenant_id = $1
+		WHERE org_id = $1
 			AND virployee_id = $2::uuid
 		ORDER BY created_at DESC, id DESC
 		LIMIT $3
-	`, tenantID, virployeeID.String(), limit)
+	`, orgID, virployeeID.String(), limit)
 	if err != nil {
 		return nil, err
 	}
@@ -447,14 +447,14 @@ func (r *Repository) ListRunTraces(ctx context.Context, tenantID string, virploy
 
 func (r *Repository) FindExecutionGateTraceByApproval(
 	ctx context.Context,
-	tenantID string,
+	orgID string,
 	virployeeID uuid.UUID,
 	approvalID string,
 ) (runtraces.Trace, error) {
 	row := r.pool.QueryRow(ctx, `
 		SELECT
 			id::text,
-			tenant_id,
+			org_id,
 			virployee_id::text,
 			operation,
 			input_hash,
@@ -472,26 +472,26 @@ func (r *Repository) FindExecutionGateTraceByApproval(
 			memory_context_hash,
 			created_at
 		FROM companion_run_traces
-		WHERE tenant_id = $1
+		WHERE org_id = $1
 			AND virployee_id = $2::uuid
 			AND operation = 'execution_gate'
 			AND nexus_result->>'approval_id' = $3
 		ORDER BY created_at DESC, id DESC
 		LIMIT 1
-	`, tenantID, virployeeID.String(), strings.TrimSpace(approvalID))
+	`, orgID, virployeeID.String(), strings.TrimSpace(approvalID))
 	return scanRunTrace(row)
 }
 
 func (r *Repository) FindSimulatedExecutionTraceByApproval(
 	ctx context.Context,
-	tenantID string,
+	orgID string,
 	virployeeID uuid.UUID,
 	approvalID string,
 ) (runtraces.Trace, error) {
 	row := r.pool.QueryRow(ctx, `
 		SELECT
 			id::text,
-			tenant_id,
+			org_id,
 			virployee_id::text,
 			operation,
 			input_hash,
@@ -509,52 +509,52 @@ func (r *Repository) FindSimulatedExecutionTraceByApproval(
 			memory_context_hash,
 			created_at
 		FROM companion_run_traces
-		WHERE tenant_id = $1
+		WHERE org_id = $1
 			AND virployee_id = $2::uuid
 			AND operation = 'simulated_execution'
 			AND execution_result->>'approval_id' = $3
 		ORDER BY created_at DESC, id DESC
 		LIMIT 1
-	`, tenantID, virployeeID.String(), strings.TrimSpace(approvalID))
+	`, orgID, virployeeID.String(), strings.TrimSpace(approvalID))
 	return scanRunTrace(row)
 }
 
 func (r *Repository) FindExecutionTraceByApproval(
 	ctx context.Context,
-	tenantID string,
+	orgID string,
 	virployeeID uuid.UUID,
 	approvalID string,
 ) (runtraces.Trace, error) {
 	row := r.pool.QueryRow(ctx, `
 		SELECT
-			id::text, tenant_id, virployee_id::text, operation, input_hash, input_preview,
+			id::text, org_id, virployee_id::text, operation, input_hash, input_preview,
 			intent, capability_id::text, capability_key, dry_run_decision, gate_decision,
 			gate_checks, nexus_result, execution_result, binding_hash, memory_references, memory_context_hash, created_at
 		FROM companion_run_traces
-		WHERE tenant_id = $1 AND virployee_id = $2::uuid AND operation = 'execution'
+		WHERE org_id = $1 AND virployee_id = $2::uuid AND operation = 'execution'
 			AND execution_result->>'approval_id' = $3
 		ORDER BY created_at DESC, id DESC
 		LIMIT 1
-	`, tenantID, virployeeID.String(), strings.TrimSpace(approvalID))
+	`, orgID, virployeeID.String(), strings.TrimSpace(approvalID))
 	return scanRunTrace(row)
 }
 
-func (r *Repository) lifecycleResult(ctx context.Context, tenantID string, id uuid.UUID, tag pgconn.CommandTag, err error) error {
+func (r *Repository) lifecycleResult(ctx context.Context, orgID string, id uuid.UUID, tag pgconn.CommandTag, err error) error {
 	if err != nil {
 		return err
 	}
 	if tag.RowsAffected() > 0 {
 		return nil
 	}
-	if _, stateErr := r.State(ctx, tenantID, id); stateErr != nil {
+	if _, stateErr := r.State(ctx, orgID, id); stateErr != nil {
 		return stateErr
 	}
 	return domainerr.Conflict("invalid lifecycle transition")
 }
 
-func (r *Repository) attachRelated(ctx context.Context, tenantID string, items []domain.Virployee) ([]domain.Virployee, error) {
+func (r *Repository) attachRelated(ctx context.Context, orgID string, items []domain.Virployee) ([]domain.Virployee, error) {
 	for i := range items {
-		ids, err := r.capabilityIDs(ctx, tenantID, items[i].ID)
+		ids, err := r.capabilityIDs(ctx, orgID, items[i].ID)
 		if err != nil {
 			return nil, err
 		}
@@ -563,14 +563,14 @@ func (r *Repository) attachRelated(ctx context.Context, tenantID string, items [
 	return items, nil
 }
 
-func (r *Repository) capabilityIDs(ctx context.Context, tenantID string, virployeeID uuid.UUID) ([]uuid.UUID, error) {
+func (r *Repository) capabilityIDs(ctx context.Context, orgID string, virployeeID uuid.UUID) ([]uuid.UUID, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT capability_id::text
 		FROM virployee_capabilities
-		WHERE tenant_id = $1
+		WHERE org_id = $1
 			AND virployee_id = $2::uuid
 		ORDER BY capability_id::text ASC
-	`, tenantID, virployeeID.String())
+	`, orgID, virployeeID.String())
 	if err != nil {
 		return nil, err
 	}
@@ -594,22 +594,22 @@ func (r *Repository) capabilityIDs(ctx context.Context, tenantID string, virploy
 func replaceVirployeeCapabilities(
 	ctx context.Context,
 	tx pgx.Tx,
-	tenantID string,
+	orgID string,
 	virployeeID uuid.UUID,
 	capabilityIDs []uuid.UUID,
 ) error {
 	if _, err := tx.Exec(ctx, `
 		DELETE FROM virployee_capabilities
-		WHERE tenant_id = $1
+		WHERE org_id = $1
 			AND virployee_id = $2::uuid
-	`, tenantID, virployeeID.String()); err != nil {
+	`, orgID, virployeeID.String()); err != nil {
 		return err
 	}
 	for _, capabilityID := range capabilityIDs {
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO virployee_capabilities (tenant_id, virployee_id, capability_id)
+			INSERT INTO virployee_capabilities (org_id, virployee_id, capability_id)
 			VALUES ($1, $2::uuid, $3::uuid)
-		`, tenantID, virployeeID.String(), capabilityID.String()); err != nil {
+		`, orgID, virployeeID.String(), capabilityID.String()); err != nil {
 			return mapVirployeeStorageError(err)
 		}
 	}
@@ -684,7 +684,7 @@ func scanRunTrace(row scanner) (runtraces.Trace, error) {
 	var item runtraces.Trace
 	err := row.Scan(
 		&idText,
-		&item.TenantID,
+		&item.OrgID,
 		&virployeeIDText,
 		&operation,
 		&item.InputHash,

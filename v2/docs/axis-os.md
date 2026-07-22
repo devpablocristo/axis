@@ -1,13 +1,13 @@
 # Axis OS v2
 
 Axis v2 is a digital work operating system. It is not a CRUD app: it defines
-identity, tenancy, workforce, runtime boundaries, and the request context used
+identity, organization ownership, workforce, runtime boundaries, and the request context used
 when services collaborate.
 
 ## Services
 
 - `bff` is the HTTP shell and control plane for the OS. It owns human identity,
-  session resolution, tenancy, memberships, and the gateway into downstream
+  session resolution, organizations, memberships, products, and the gateway into downstream
   services.
 - `companion` is the workforce/runtime service. It owns Job Roles, Virployees,
   work subjects, stable routing, capabilities, autonomy, scoped memory,
@@ -20,8 +20,8 @@ when services collaborate.
 - `runtime` proposes intents from natural language using an LLM (Gemini via
   Vertex AI by default, authenticated with Application Default Credentials). It
   only proposes which assigned capability an input maps to; Companion always
-  decides. Without credentials it falls back to an Echo provider (no external
-  calls), and Companion only consults it when pointed at it.
+  decides. Without credentials Runtime reports the Echo fallback explicitly
+  (no external calls), and Companion uses its scoped deterministic matcher.
 - Services communicate through HTTP. No service imports another service's
   internal packages.
 
@@ -32,9 +32,10 @@ when services collaborate.
 - `actor` is the audit/event wording for who did something. In deployed
   environments BFF derives it from the verified Clerk session and replaces
   caller-supplied identity headers. Development mode may use `X-Actor-ID`.
-- `tenant` is the product work context for an organization:
-  `tenant = org_id + product_surface`.
-- `membership` connects a principal/user to a tenant and grants a tenant role.
+- `organization` is the sole customer ownership, membership and isolation boundary.
+- `product` is a child of exactly one organization and is selected by
+  `product_surface` inside that organization.
+- `membership` connects a principal/user to an organization and grants an organization role.
 - `gateway` is the BFF boundary that validates OS context before forwarding to
   a downstream service.
 
@@ -43,19 +44,17 @@ when services collaborate.
 Every request forwarded by BFF to Companion must be resolved into:
 
 - `principal_id`: who is acting.
-- `tenant_id`: where the action is happening.
-- `org_id`: effective customer organization.
-- `product_surface`: product surface for the tenant.
-- `membership_role`: principal role in the tenant.
+- `org_id`: the effective customer organization where the action happens.
+- `product_surface`: the selected product owned by that organization.
+- `membership_role`: principal role in the organization.
 
 BFF forwards that context to Companion and Nexus with:
 
-- `X-Tenant-ID`
-- `X-Axis-Org-ID`
+- `X-Org-ID`
 - `X-Product-Surface`
 - `X-Actor-ID`
 - `X-Axis-Forwarded-By`
-- `X-Axis-Tenant-Role`
+- `X-Axis-Org-Role`
 
 Downstream services accept business routes only when the request also carries
 the shared internal authentication token. Companion uses the same protected
@@ -90,19 +89,21 @@ channel for governance calls to Nexus. Health endpoints remain public.
   jobs, logs and evidence contain only identifiers, hashes and status metadata.
   This is not the action path — anything with external effects still routes
   through the Execution Gate and Nexus.
-- Companion tenancy storage is deferred; BFF validates tenancy before forwarding.
+- BFF owns organization membership and product ownership. Companion persists
+  `org_id` on its own records and independently enforces that boundary after
+  BFF resolves the request context.
 - A product (machine, not a Clerk user) can call the BFF inbound edge
-  `POST /v1/assist-runs` with an API key that maps to a tenant + virployee; the
+  `POST /v1/assist-runs` with an API key that maps to an organization + virployee; the
   request is submitted to Companion's durable assist queue. BFF returns `200`
   when an optional bounded synchronous wait observes completion, otherwise
   `202` with `id` and `status_url`; `GET /v1/assist-runs/:id` polls the same
-  tenant/virployee-scoped row. `GET /v1/assist-capabilities` exposes the current
+  organization/virployee-scoped row. `GET /v1/assist-capabilities` exposes the current
   ingress contract and limits. This edge is separate from the human-session
   `/api` surface.
 - Every virployee has a tamper-evident audit ledger held by Nexus: assist runs
   and governed executions append a hash-chained, optionally HMAC-signed event
   (`POST /v1/audit/events`), chained per virployee (`chain_scope =
-  <tenant>/<virployee>`). The ledger is append-only at the DB level;
+  <organization>/<virployee>`). The ledger is append-only at the DB level;
   `GET /v1/audit/virployees/:id/verify` recomputes the chain and
   `GET /v1/evidence/virployees/:id` returns a signed, exportable evidence pack
   (`?subject=` focuses it on one run). Events carry only hashes + metadata — an
@@ -116,7 +117,7 @@ channel for governance calls to Nexus. Health endpoints remain public.
   recovery, and a replayable dead-letter state. A lost lease may resume
   `staging|extracting|indexing` from the verified staged original, but never
   replays an `answering` state because the model call may already have occurred.
-  The job dedupe scope is tenant +
+  The job dedupe scope is organization +
   product + kind + logical key, so replicas cannot process the same logical tick
   twice. Reconciliation re-enqueues received assist rows, safely resets stale
   pre-answer assists within a bounded recovery budget, finalizes stale answering
@@ -131,7 +132,7 @@ channel for governance calls to Nexus. Health endpoints remain public.
   PHI, secrets, or signed URLs. Every affected business record still appends
   hash-only metadata to the virployee ledger. Scheduler and worker goroutines
   stop before each service closes its database.
-- Companion exposes a tenant/product-scoped operations surface for fleet health,
+- Companion exposes an organization/product-scoped operations surface for fleet health,
   reconciliation runs, durable jobs, worker controls and Nexus outbox replay.
   Reconciliation findings use stable fingerprints and carry bounded metadata
   only; they are committed with a durable outbox record and delivered
@@ -139,10 +140,10 @@ channel for governance calls to Nexus. Health endpoints remain public.
   incidents (`opened`, `observed` or `reopened`) and also reconciles its own
   approvals, jobs and audit chains. Functional `operator` grants scope reads,
   safe repair/replay controls, incident actions, legal holds and exports; all
-  mutations remain tenant-bound, authorized, version checked where applicable
+  mutations remain organization-bound, authorized, version checked where applicable
   and idempotent.
 - Job workers share persisted circuit-breaker state across replicas. Retryable
-  dependency failures open a tenant/product/job-kind circuit after the bounded
+  dependency failures open an organization/product/job-kind circuit after the bounded
   threshold; one half-open probe decides recovery, while protected
   reconciliation and lease-recovery jobs remain runnable. Incident webhooks
   are metadata-only, resolve destinations through secret references, and use a
@@ -172,14 +173,14 @@ channel for governance calls to Nexus. Health endpoints remain public.
 A Job Role is a reusable professional contract with mission, responsibilities
 and success criteria. A Routing Pool points to one Job Role and contains active,
 enabled Virployees with individual `max_active_subjects`. Resolution is
-serialized per tenant/pool: it returns the existing continuity assignment or
+serialized per organization/pool: it returns the existing continuity assignment or
 chooses the least-loaded eligible member. A full pool returns `unavailable`; an
 ineligible existing member returns `reassignment_required` and is never rotated
 silently. Owner/admin reassignment is version checked and append-only audited.
 
 Work Subjects represent people, patients, organizations and teams. Explicit
 `works_for`, `serves` and `reports_to` relationships state who employs and who
-is served by each Virployee; tenant ownership remains the storage and
+is served by each Virployee; organization ownership remains the storage and
 authorization boundary. Assist binds its `subject_id`, optional `case_id` and
 resolved assignment before work begins. See
 [Workforce continuity and routing](../companion/docs/specs/workforce-routing.md).
@@ -188,7 +189,7 @@ Knowledge Bases reference only documents already verified and indexed by the
 artifact pipeline. `professional` bases accept only the non-personal
 `professional` artifact subject and profession/Virployee bindings; `private`
 bases accept one exact subject and subject/case bindings. Resolution applies
-tenant/Virployee/subject/case predicates before ranking and validates document
+organization/Virployee/subject/case predicates before ranking and validates document
 identity, source version and SHA-256 again after ranking. Newly created
 Virployees default to `sources_only`: an answer needs retrieved text and at
 least one citation that Companion validates against the actual fragments,
@@ -211,7 +212,7 @@ authority before processing or an external effect. See
 ## Governed specialist orchestration
 
 Companion models a product interaction as a durable assist case. The case key is
-tenant + product + assist type + subject + entrypoint Virployee, and exactly one
+organization + product + assist type + subject + entrypoint Virployee, and exactly one
 Virployee owns the final response at a time. An assist run snapshots that owner
 and an optimistic `ownership_version`; synthesis and completion use that version
 as a compare-and-swap guard so a stale worker cannot publish after a handoff.
@@ -239,7 +240,7 @@ safely for reconciliation. `planning`, `consulting`, `synthesizing` and
 `needs_human` are first-class persisted assist states.
 
 Ownership transfer is explicit rather than an LLM tool call. The current owner's
-human supervisor, a tenant admin or owner creates a one-hour handoff request; the requester,
+human supervisor, an organization admin or owner creates a one-hour handoff request; the requester,
 Virployees and service principals cannot decide it, and a target-side authorized
 human accepts or rejects using the current version. Acceptance atomically changes
 the case owner and every non-terminal run's responsible Virployee/version. A
@@ -275,7 +276,7 @@ The ingestion application core depends on hexagonal ports:
 `ArtifactStorePort`, `FormatAdapter`, `ExtractionPort`, `ChunkerPort`,
 `EmbeddingPort`, `VectorStorePort`, `ArtifactRetrieverPort` and
 `MultimodalAnswerPort`. Adapters may fetch from product URLs, scan, stage in a
-tenant-prefixed GCS bucket, extract or preserve native media, and later index
+organization-prefixed GCS bucket, extract or preserve native media, and later index
 derived chunks. The original remains authoritative; text, OCR, captions,
 transcripts, tables and keyframes are versioned derivatives and never replace
 it.
@@ -293,7 +294,7 @@ it can reach indexing or Runtime.
 `artifactindex` is a separate Companion bounded context, not an extension of
 Virployee memory. It chunks only verified derivatives and stores 768-dimensional
 `gemini-embedding-001` vectors in pgvector together with FTS text and source
-provenance. Tenant, virployee, product, subject, repository generation and model
+provenance. Organization, virployee, product, subject, repository generation and model
 are applied as SQL predicates before ranking; retrieval combines cosine and FTS
 scores. Extractor, chunker and embedding versions are part of the stored index
 contract, so changing one replaces affected chunks rather than mixing versions.
@@ -302,7 +303,7 @@ authenticated surface. Document and query task types stay distinct and input
 truncation is disabled so incomplete clinical evidence fails visibly.
 
 Resource governance is owned by the `quotas` bounded context. `QuotaPort` and
-`UsageLedgerPort` are backed by PostgreSQL fixed windows keyed by tenant,
+`UsageLedgerPort` are backed by PostgreSQL fixed windows keyed by organization,
 product surface and area. An idempotency key makes retries free of duplicate
 charges; one atomic statement enforces request and unit ceilings across all
 replicas. Inbound assists, artifact bytes, LLM work, embeddings and external
@@ -319,7 +320,7 @@ active`. A normalized manifest hash binds schemas, scopes, idempotency,
 rollback, timeouts/retries, postconditions, quota areas, Secret Manager refs,
 attestation and cost class. Only promoted capabilities are assignable. A
 governance or manifest change invalidates conformance, activation rechecks
-active tenant/product quota policies, and a policy required by an active
+active organization/product quota policies, and a policy required by an active
 capability cannot be disabled.
 
 Executor credentials and attestation keys are resolved through opaque
@@ -332,7 +333,7 @@ domain separator, but never persists that derived key.
 
 Companion's MCP surface is a governed facade over promoted capabilities, not a
 second tool registry. `tools/list` is contextual to an active Virployee and its
-selected work subject/case assignment, and applies the same tenant, Job Role,
+selected work subject/case assignment, and applies the same organization, Job Role,
 professional authority, delegation, autonomy, quota and executor checks as
 `tools/call`. Writes require stable idempotency and enter the existing Execution
 Gate/Nexus approval path. Nexus and the MCP audit receive metadata, hashes and
@@ -340,12 +341,12 @@ internal references only; arguments, results, conversations and documents stay
 inside Companion.
 
 Nexus owns approval separation of duties. Only forwarded human supervisors,
-tenant admins, or owners may decide; the requester, virployee identities and
+organization admins, or owners may decide; the requester, virployee identities and
 service principals cannot approve their own work. Normal high-risk approvals
 need one decision. Critical break-glass approvals need two different approvers,
 a non-empty justification and later review; any rejection terminates the chain.
 Every decision is an append-only row and an event in the virployee ledger.
-Executor results carry a canonical HMAC-SHA256 attestation over the tenant,
+Executor results carry a canonical HMAC-SHA256 attestation over the organization,
 governance check, binding, idempotency key, status, duration, result and executor
 version. Nexus verifies it before persisting an external effect, and the signed
 evidence pack includes the resulting decision and attestation ledger events.
@@ -354,7 +355,7 @@ Each artifact is capped at 250 MiB, one diagnosis at 500 MiB and a product
 repository at 5 GiB. Fetching is streamed through a bounded spool, verifies the
 declared byte count and SHA-256, sniffs the actual MIME, and fails closed on a
 corrupt, unsupported or required unreadable artifact. A binary is never
-represented as empty text. Staged objects are tenant/virployee/subject scoped,
+represented as empty text. Staged objects are organization/virployee/subject scoped,
 carry a 24-hour expiry contract and, in production, require a dedicated GCS
 bucket with CMEK. Assist states progress through `received`, `staging`,
 `extracting`, `indexing`, optional `planning|consulting|synthesizing`, `answering`

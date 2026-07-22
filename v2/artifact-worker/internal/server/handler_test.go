@@ -36,7 +36,7 @@ func extractionRequest(t *testing.T, token, declaredHash string) *http.Request {
 		declaredHash = hex.EncodeToString(sum[:])
 	}
 	metadata, _ := json.Marshal(extractor.Metadata{
-		Profile: "image", Scope: extractor.Scope{TenantID: "tenant-1"},
+		Profile: "image", Scope: extractor.Scope{OrgID: "organization-1"},
 		Manifest: extractor.Manifest{DocumentID: "doc-1", Name: "scan.tiff", SHA256: declaredHash, SizeBytes: int64(len(artifact))},
 	})
 	body := new(bytes.Buffer)

@@ -8,19 +8,19 @@ import (
 
 	"github.com/devpablocristo/bff-v2/internal/identity"
 	identitydomain "github.com/devpablocristo/bff-v2/internal/identity/usecases/domain"
-	tenantdomain "github.com/devpablocristo/bff-v2/internal/tenancy/usecases/domain"
+	productdomain "github.com/devpablocristo/bff-v2/internal/products/usecases/domain"
 	userdomain "github.com/devpablocristo/bff-v2/internal/users/usecases/domain"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
 	"github.com/google/uuid"
 )
 
 func TestUsersListAllowsAnyActiveMember(t *testing.T) {
-	tenantID := uuid.New()
-	repo := newFakeUsersRepo(tenantID)
-	uc := newUsersUC(repo, &fakeUsersTenancy{tenantID: tenantID, role: tenantdomain.RoleMember})
+	orgID := uuid.New()
+	repo := newFakeUsersRepo(orgID)
+	uc := newUsersUC(repo, &fakeUsersOrganizationAccess{orgID: orgID, role: productdomain.RoleMember})
 
 	out, err := uc.List(context.Background(), userdomain.ListInput{
-		TenantID:    tenantID.String(),
+		OrgID:       orgID.String(),
 		PrincipalID: "principal",
 	})
 	if err != nil {
@@ -32,11 +32,11 @@ func TestUsersListAllowsAnyActiveMember(t *testing.T) {
 }
 
 func TestUsersCreateRequiresAdminOrOwner(t *testing.T) {
-	tenantID := uuid.New()
-	uc := newUsersUC(newFakeUsersRepo(tenantID), &fakeUsersTenancy{tenantID: tenantID, role: tenantdomain.RoleMember})
+	orgID := uuid.New()
+	uc := newUsersUC(newFakeUsersRepo(orgID), &fakeUsersOrganizationAccess{orgID: orgID, role: productdomain.RoleMember})
 
 	_, err := uc.Create(context.Background(), userdomain.CreateInput{
-		TenantID:    tenantID.String(),
+		OrgID:       orgID.String(),
 		PrincipalID: "principal",
 		Email:       "user@example.com",
 		Role:        userdomain.RoleMember,
@@ -47,11 +47,11 @@ func TestUsersCreateRequiresAdminOrOwner(t *testing.T) {
 }
 
 func TestUsersAdminCannotAssignOwner(t *testing.T) {
-	tenantID := uuid.New()
-	uc := newUsersUC(newFakeUsersRepo(tenantID), &fakeUsersTenancy{tenantID: tenantID, role: tenantdomain.RoleAdmin})
+	orgID := uuid.New()
+	uc := newUsersUC(newFakeUsersRepo(orgID), &fakeUsersOrganizationAccess{orgID: orgID, role: productdomain.RoleAdmin})
 
 	_, err := uc.Create(context.Background(), userdomain.CreateInput{
-		TenantID:    tenantID.String(),
+		OrgID:       orgID.String(),
 		PrincipalID: "principal",
 		Email:       "owner@example.com",
 		Role:        userdomain.RoleOwner,
@@ -62,11 +62,11 @@ func TestUsersAdminCannotAssignOwner(t *testing.T) {
 }
 
 func TestUsersOwnerCanAssignOwner(t *testing.T) {
-	tenantID := uuid.New()
-	uc := newUsersUC(newFakeUsersRepo(tenantID), &fakeUsersTenancy{tenantID: tenantID, role: tenantdomain.RoleOwner})
+	orgID := uuid.New()
+	uc := newUsersUC(newFakeUsersRepo(orgID), &fakeUsersOrganizationAccess{orgID: orgID, role: productdomain.RoleOwner})
 
 	out, err := uc.Create(context.Background(), userdomain.CreateInput{
-		TenantID:    tenantID.String(),
+		OrgID:       orgID.String(),
 		PrincipalID: "principal",
 		Email:       "owner@example.com",
 		Role:        userdomain.RoleOwner,
@@ -80,28 +80,28 @@ func TestUsersOwnerCanAssignOwner(t *testing.T) {
 }
 
 func TestUsersEnsureActiveRequiresActiveMembership(t *testing.T) {
-	tenantID := uuid.New()
-	repo := newFakeUsersRepo(tenantID)
+	orgID := uuid.New()
+	repo := newFakeUsersRepo(orgID)
 	activeUserID := uuid.NewString()
 	repo.active[activeUserID] = true
-	uc := newUsersUC(repo, &fakeUsersTenancy{tenantID: tenantID, role: tenantdomain.RoleAdmin})
+	uc := newUsersUC(repo, &fakeUsersOrganizationAccess{orgID: orgID, role: productdomain.RoleAdmin})
 
-	if err := uc.EnsureActive(context.Background(), tenantID.String(), activeUserID); err != nil {
+	if err := uc.EnsureActive(context.Background(), orgID.String(), activeUserID); err != nil {
 		t.Fatalf("EnsureActive: %v", err)
 	}
-	if err := uc.EnsureActive(context.Background(), tenantID.String(), uuid.NewString()); !domainerr.IsValidation(err) {
+	if err := uc.EnsureActive(context.Background(), orgID.String(), uuid.NewString()); !domainerr.IsValidation(err) {
 		t.Fatalf("expected validation for missing active membership, got %v", err)
 	}
 }
 
 func TestUsersUnknownProviderEmailCreatesProviderUserMembership(t *testing.T) {
-	tenantID := uuid.New()
-	repo := newFakeUsersRepo(tenantID)
+	orgID := uuid.New()
+	repo := newFakeUsersRepo(orgID)
 	provider := &fakeUsersProvider{missing: true}
-	uc := newUsersUCWithProvider(repo, &fakeUsersTenancy{tenantID: tenantID, role: tenantdomain.RoleOwner}, provider)
+	uc := newUsersUCWithProvider(repo, &fakeUsersOrganizationAccess{orgID: orgID, role: productdomain.RoleOwner}, provider)
 
 	out, err := uc.Create(context.Background(), userdomain.CreateInput{
-		TenantID:    tenantID.String(),
+		OrgID:       orgID.String(),
 		PrincipalID: "principal",
 		Email:       "unknown@example.com",
 		Role:        userdomain.RoleMember,
@@ -110,7 +110,7 @@ func TestUsersUnknownProviderEmailCreatesProviderUserMembership(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 	if out.Kind != userdomain.KindUser || out.State != userdomain.StateActive {
-		t.Fatalf("expected active tenant user, got %+v", out)
+		t.Fatalf("expected active organization user, got %+v", out)
 	}
 	if out.Email != "unknown@example.com" {
 		t.Fatalf("expected created provider user email, got %+v", out)
@@ -121,16 +121,16 @@ func TestUsersUnknownProviderEmailCreatesProviderUserMembership(t *testing.T) {
 }
 
 func TestUsersUpdateSyncsClerkEmailAndMembership(t *testing.T) {
-	tenantID := uuid.New()
+	orgID := uuid.New()
 	userID := uuid.NewString()
-	repo := newFakeUsersRepo(tenantID)
+	repo := newFakeUsersRepo(orgID)
 	repo.rows[userID] = userdomain.User{
-		ID:       userID,
-		Kind:     userdomain.KindUser,
-		Email:    "old@example.com",
-		Role:     userdomain.RoleMember,
-		TenantID: tenantID,
-		State:    userdomain.StateActive,
+		ID:    userID,
+		Kind:  userdomain.KindUser,
+		Email: "old@example.com",
+		Role:  userdomain.RoleMember,
+		OrgID: orgID,
+		State: userdomain.StateActive,
 	}
 	repo.active[userID] = true
 	identityUC := &fakeUsersIdentity{users: map[string]identitydomain.User{
@@ -143,10 +143,10 @@ func TestUsersUpdateSyncsClerkEmailAndMembership(t *testing.T) {
 		},
 	}}
 	provider := &fakeUsersProvider{}
-	uc := NewUseCases(repo, &fakeUsersTenancy{tenantID: tenantID, role: tenantdomain.RoleOwner}, identityUC, provider, provider, provider, Options{})
+	uc := NewUseCases(repo, &fakeUsersOrganizationAccess{orgID: orgID, role: productdomain.RoleOwner}, identityUC, provider, provider, provider, Options{})
 
 	out, err := uc.Update(context.Background(), userdomain.UpdateInput{
-		TenantID:    tenantID.String(),
+		OrgID:       orgID.String(),
 		PrincipalID: "principal",
 		UserID:      userID,
 		Email:       "new@example.com",
@@ -167,16 +167,16 @@ func TestUsersUpdateSyncsClerkEmailAndMembership(t *testing.T) {
 }
 
 func TestUsersPurgeDeletesClerkMembershipOnly(t *testing.T) {
-	tenantID := uuid.New()
+	orgID := uuid.New()
 	userID := uuid.NewString()
-	repo := newFakeUsersRepo(tenantID)
+	repo := newFakeUsersRepo(orgID)
 	repo.rows[userID] = userdomain.User{
-		ID:       userID,
-		Kind:     userdomain.KindUser,
-		Email:    "delete@example.com",
-		Role:     userdomain.RoleMember,
-		TenantID: tenantID,
-		State:    userdomain.StateTrashed,
+		ID:    userID,
+		Kind:  userdomain.KindUser,
+		Email: "delete@example.com",
+		Role:  userdomain.RoleMember,
+		OrgID: orgID,
+		State: userdomain.StateTrashed,
 	}
 	identityUC := &fakeUsersIdentity{users: map[string]identitydomain.User{
 		userID: {
@@ -188,10 +188,10 @@ func TestUsersPurgeDeletesClerkMembershipOnly(t *testing.T) {
 		},
 	}}
 	provider := &fakeUsersProvider{}
-	uc := NewUseCases(repo, &fakeUsersTenancy{tenantID: tenantID, role: tenantdomain.RoleOwner}, identityUC, provider, provider, provider, Options{})
+	uc := NewUseCases(repo, &fakeUsersOrganizationAccess{orgID: orgID, role: productdomain.RoleOwner}, identityUC, provider, provider, provider, Options{})
 
 	if err := uc.Purge(context.Background(), userdomain.LifecycleInput{
-		TenantID:    tenantID.String(),
+		OrgID:       orgID.String(),
 		PrincipalID: "principal",
 		UserID:      userID,
 	}); err != nil {
@@ -207,31 +207,31 @@ func TestUsersPurgeDeletesClerkMembershipOnly(t *testing.T) {
 		t.Fatalf("must not delete local identity mirror, got %q", identityUC.deletedID)
 	}
 	if _, ok := repo.rows[userID]; ok {
-		t.Fatalf("expected tenant user membership purged")
+		t.Fatalf("expected organization user membership purged")
 	}
 }
 
-func newUsersUC(repo *fakeUsersRepo, tenancy *fakeUsersTenancy) *UseCases {
-	return newUsersUCWithProvider(repo, tenancy, &fakeUsersProvider{})
+func newUsersUC(repo *fakeUsersRepo, products *fakeUsersOrganizationAccess) *UseCases {
+	return newUsersUCWithProvider(repo, products, &fakeUsersProvider{})
 }
 
-func newUsersUCWithProvider(repo *fakeUsersRepo, tenancy *fakeUsersTenancy, provider *fakeUsersProvider) *UseCases {
+func newUsersUCWithProvider(repo *fakeUsersRepo, products *fakeUsersOrganizationAccess, provider *fakeUsersProvider) *UseCases {
 	identityUC := &fakeUsersIdentity{}
-	return NewUseCases(repo, tenancy, identityUC, provider, provider, provider, Options{})
+	return NewUseCases(repo, products, identityUC, provider, provider, provider, Options{})
 }
 
 type fakeUsersRepo struct {
-	tenantID      uuid.UUID
+	orgID         uuid.UUID
 	rows          map[string]userdomain.User
 	active        map[string]bool
 	lastListState string
 }
 
-func newFakeUsersRepo(tenantID uuid.UUID) *fakeUsersRepo {
+func newFakeUsersRepo(orgID uuid.UUID) *fakeUsersRepo {
 	return &fakeUsersRepo{
-		tenantID: tenantID,
-		rows:     map[string]userdomain.User{},
-		active:   map[string]bool{},
+		orgID:  orgID,
+		rows:   map[string]userdomain.User{},
+		active: map[string]bool{},
 	}
 }
 
@@ -246,10 +246,10 @@ func (r *fakeUsersRepo) List(_ context.Context, input userdomain.NormalizedListI
 	return out, nil
 }
 
-func (r *fakeUsersRepo) Get(_ context.Context, tenantID uuid.UUID, userID string) (userdomain.User, error) {
+func (r *fakeUsersRepo) Get(_ context.Context, orgID uuid.UUID, userID string) (userdomain.User, error) {
 	row, ok := r.rows[userID]
-	if !ok || row.TenantID != tenantID {
-		return userdomain.User{}, domainerr.NotFound("tenant user not found")
+	if !ok || row.OrgID != orgID {
+		return userdomain.User{}, domainerr.NotFound("organization user not found")
 	}
 	return row, nil
 }
@@ -261,7 +261,7 @@ func (r *fakeUsersRepo) UpsertMembership(_ context.Context, input UpsertMembersh
 		Kind:      userdomain.KindUser,
 		Email:     input.Email,
 		Role:      input.Role,
-		TenantID:  input.TenantID,
+		OrgID:     input.OrgID,
 		State:     userdomain.StateActive,
 		CreatedAt: now,
 		UpdatedAt: now,
@@ -278,7 +278,7 @@ func (r *fakeUsersRepo) UpsertInvitation(_ context.Context, input UpsertInvitati
 		Kind:      userdomain.KindInvitation,
 		Email:     input.Email,
 		Role:      input.Role,
-		TenantID:  input.TenantID,
+		OrgID:     input.OrgID,
 		State:     userdomain.StatePending,
 		CreatedAt: now,
 		UpdatedAt: now,
@@ -290,7 +290,7 @@ func (r *fakeUsersRepo) UpsertInvitation(_ context.Context, input UpsertInvitati
 func (r *fakeUsersRepo) Update(_ context.Context, input userdomain.NormalizedUpdateInput) (userdomain.User, error) {
 	row, ok := r.rows[input.UserID]
 	if !ok {
-		return userdomain.User{}, domainerr.NotFound("tenant user not found")
+		return userdomain.User{}, domainerr.NotFound("organization user not found")
 	}
 	row.Email = input.Email
 	row.Role = input.Role
@@ -322,13 +322,13 @@ func (r *fakeUsersRepo) Purge(_ context.Context, input userdomain.NormalizedLife
 }
 
 func (r *fakeUsersRepo) ActiveMembershipExists(_ context.Context, input userdomain.NormalizedEnsureActiveInput) (bool, error) {
-	return input.TenantID == r.tenantID && r.active[input.UserID], nil
+	return input.OrgID == r.orgID && r.active[input.UserID], nil
 }
 
 func (r *fakeUsersRepo) setState(userID, state string) error {
 	row, ok := r.rows[userID]
 	if !ok {
-		return domainerr.NotFound("tenant user not found")
+		return domainerr.NotFound("organization user not found")
 	}
 	row.State = state
 	r.rows[userID] = row
@@ -336,37 +336,28 @@ func (r *fakeUsersRepo) setState(userID, state string) error {
 	return nil
 }
 
-type fakeUsersTenancy struct {
-	tenantID uuid.UUID
-	role     string
-	err      error
+type fakeUsersOrganizationAccess struct {
+	orgID uuid.UUID
+	role  string
+	err   error
 }
 
-func (f *fakeUsersTenancy) ResolveAccess(context.Context, string, string) (tenantdomain.Tenant, tenantdomain.TenantMember, error) {
+func (f *fakeUsersOrganizationAccess) ResolveOrganizationAccess(context.Context, string, string) (productdomain.Org, productdomain.OrgMember, error) {
 	if f.err != nil {
-		return tenantdomain.Tenant{}, tenantdomain.TenantMember{}, f.err
+		return productdomain.Org{}, productdomain.OrgMember{}, f.err
 	}
-	return tenantdomain.Tenant{
-			ID:             f.tenantID,
-			OrgID:          uuid.NewString(),
-			ProductSurface: "axis",
-			Status:         tenantdomain.StatusActive,
-		}, tenantdomain.TenantMember{
-			TenantID: f.tenantID,
-			UserID:   uuid.NewString(),
-			Role:     f.role,
-			Status:   tenantdomain.StatusActive,
+	return productdomain.Org{
+			ID:            f.orgID.String(),
+			Provider:      identitydomain.ProviderDev,
+			ProviderOrgID: "dev-org",
+			Name:          "Dev Org",
+			Status:        productdomain.StatusActive,
+		}, productdomain.OrgMember{
+			OrgID:  f.orgID,
+			UserID: uuid.NewString(),
+			Role:   f.role,
+			Status: productdomain.StatusActive,
 		}, nil
-}
-
-func (f *fakeUsersTenancy) OrgByID(context.Context, string) (tenantdomain.Org, error) {
-	return tenantdomain.Org{
-		ID:            uuid.NewString(),
-		Provider:      identitydomain.ProviderDev,
-		ProviderOrgID: "dev-org",
-		Name:          "Dev Org",
-		Status:        tenantdomain.StatusActive,
-	}, nil
 }
 
 type fakeUsersIdentity struct {

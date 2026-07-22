@@ -40,8 +40,8 @@ func (h *Handler) IngestConnector(c *gin.Context) {
 	if !ok {
 		return
 	}
-	tenant, role := auth(c)
-	if _, err := authorize(tenant, role); err != nil {
+	organization, role := auth(c)
+	if _, err := authorize(organization, role); err != nil {
 		ginmw.Respond(c, err)
 		return
 	}
@@ -49,7 +49,7 @@ func (h *Handler) IngestConnector(c *gin.Context) {
 	if err := ginmw.BindJSON(c, &in); err != nil {
 		return
 	}
-	out, err := h.u.IngestConnector(c, tenant, role, baseID, in)
+	out, err := h.u.IngestConnector(c, organization, role, baseID, in)
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -62,8 +62,8 @@ func (h *Handler) IngestUpload(c *gin.Context) {
 	if !ok {
 		return
 	}
-	tenant, role := auth(c)
-	if _, err := authorize(tenant, role); err != nil {
+	organization, role := auth(c)
+	if _, err := authorize(organization, role); err != nil {
 		ginmw.Respond(c, err)
 		return
 	}
@@ -92,10 +92,10 @@ func (h *Handler) IngestUpload(c *gin.Context) {
 				return
 			}
 			// Metadata parts are deliberately required before the file. Opening a
-			// multipart part reads only its headers; UseCases performs the tenant,
+			// multipart part reads only its headers; UseCases performs the organization,
 			// Virployee, subject and classification preflight before the pipeline
 			// starts consuming bytes from this reader.
-			out, ingestErr := h.u.IngestUpload(c, tenant, role, baseID, UploadIngestionInput{
+			out, ingestErr := h.u.IngestUpload(c, organization, role, baseID, UploadIngestionInput{
 				Title: values["title"],
 				Target: IngestionTargetInput{
 					VirployeeID: values["virployee_id"], SubjectID: values["subject_id"], DocumentID: values["document_id"],
@@ -173,8 +173,8 @@ func (h *Handler) ListForVirployee(c *gin.Context) {
 	if !ok {
 		return
 	}
-	tenant, role := auth(c)
-	out, err := h.u.ListForVirployee(c, tenant, role, virployeeID)
+	organization, role := auth(c)
+	out, err := h.u.ListForVirployee(c, organization, role, virployeeID)
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -221,8 +221,8 @@ func (h *Handler) SetForVirployee(c *gin.Context) {
 	if err := ginmw.BindJSON(c, &in); err != nil {
 		return
 	}
-	tenant, role := auth(c)
-	out, err := h.u.SetForVirployee(c, tenant, role, virployeeID, in)
+	organization, role := auth(c)
+	out, err := h.u.SetForVirployee(c, organization, role, virployeeID, in)
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -231,7 +231,7 @@ func (h *Handler) SetForVirployee(c *gin.Context) {
 }
 
 func auth(c *gin.Context) (string, string) {
-	return strings.TrimSpace(c.GetHeader("X-Tenant-ID")), strings.TrimSpace(c.GetHeader("X-Axis-Tenant-Role"))
+	return strings.TrimSpace(c.GetHeader("X-Org-ID")), strings.TrimSpace(c.GetHeader("X-Axis-Org-Role"))
 }
 
 func pathID(c *gin.Context, name string) (uuid.UUID, bool) {
@@ -248,8 +248,8 @@ func (h *Handler) Create(c *gin.Context) {
 	if err := ginmw.BindJSON(c, &in); err != nil {
 		return
 	}
-	tenant, role := auth(c)
-	out, err := h.u.Create(c, tenant, role, in)
+	organization, role := auth(c)
+	out, err := h.u.Create(c, organization, role, in)
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -258,8 +258,8 @@ func (h *Handler) Create(c *gin.Context) {
 }
 
 func (h *Handler) List(c *gin.Context) {
-	tenant, role := auth(c)
-	out, err := h.u.List(c, tenant, role, c.Query("state"))
+	organization, role := auth(c)
+	out, err := h.u.List(c, organization, role, c.Query("state"))
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -272,8 +272,8 @@ func (h *Handler) Get(c *gin.Context) {
 	if !ok {
 		return
 	}
-	tenant, role := auth(c)
-	out, err := h.u.Get(c, tenant, role, id)
+	organization, role := auth(c)
+	out, err := h.u.Get(c, organization, role, id)
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -290,8 +290,8 @@ func (h *Handler) Update(c *gin.Context) {
 	if err := ginmw.BindJSON(c, &in); err != nil {
 		return
 	}
-	tenant, role := auth(c)
-	out, err := h.u.Update(c, tenant, role, id, in)
+	organization, role := auth(c)
+	out, err := h.u.Update(c, organization, role, id, in)
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -312,8 +312,8 @@ func (h *Handler) lifecycle(c *gin.Context, action string) {
 	if err := ginmw.BindJSON(c, &in); err != nil {
 		return
 	}
-	tenant, role := auth(c)
-	out, err := h.u.Lifecycle(c, tenant, role, id, action, in.ExpectedVersion)
+	organization, role := auth(c)
+	out, err := h.u.Lifecycle(c, organization, role, id, action, in.ExpectedVersion)
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -330,8 +330,8 @@ func (h *Handler) RegisterDocument(c *gin.Context) {
 	if err := ginmw.BindJSON(c, &in); err != nil {
 		return
 	}
-	tenant, role := auth(c)
-	out, err := h.u.RegisterDocument(c, tenant, role, baseID, in)
+	organization, role := auth(c)
+	out, err := h.u.RegisterDocument(c, organization, role, baseID, in)
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -344,8 +344,8 @@ func (h *Handler) ListDocuments(c *gin.Context) {
 	if !ok {
 		return
 	}
-	tenant, role := auth(c)
-	out, err := h.u.ListDocuments(c, tenant, role, baseID, c.Query("state"))
+	organization, role := auth(c)
+	out, err := h.u.ListDocuments(c, organization, role, baseID, c.Query("state"))
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -366,8 +366,8 @@ func (h *Handler) ArchiveDocument(c *gin.Context) {
 	if err := ginmw.BindJSON(c, &in); err != nil {
 		return
 	}
-	tenant, role := auth(c)
-	out, err := h.u.ArchiveDocument(c, tenant, role, baseID, documentID, in.ExpectedVersion)
+	organization, role := auth(c)
+	out, err := h.u.ArchiveDocument(c, organization, role, baseID, documentID, in.ExpectedVersion)
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -380,8 +380,8 @@ func (h *Handler) ListBindings(c *gin.Context) {
 	if !ok {
 		return
 	}
-	tenant, role := auth(c)
-	out, err := h.u.ListBindings(c, tenant, role, baseID)
+	organization, role := auth(c)
+	out, err := h.u.ListBindings(c, organization, role, baseID)
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -398,8 +398,8 @@ func (h *Handler) ReplaceBindings(c *gin.Context) {
 	if err := ginmw.BindJSON(c, &in); err != nil {
 		return
 	}
-	tenant, role := auth(c)
-	out, err := h.u.ReplaceBindings(c, tenant, role, baseID, in)
+	organization, role := auth(c)
+	out, err := h.u.ReplaceBindings(c, organization, role, baseID, in)
 	if err != nil {
 		ginmw.Respond(c, err)
 		return

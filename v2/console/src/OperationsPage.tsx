@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import { axisDownload, axisFetch } from './api'
 import { formatDateTime24 } from './formatters'
 
-type Props = { tenantId: string; principalId: string; productSurface: string }
+type Props = { orgId: string; principalId: string; productSurface: string }
 type ServiceOverview = { status?: string; fleet?: Record<string, number>; jobs?: Record<string, number>; outbox?: Record<string, number>; incidents?: Record<string, number>; active_holds?: number; exports?: Record<string, number>; oldest_queued_job_age_seconds?: number; oldest_outbox_age_seconds?: number }
 type OperationsOverview = { status: 'healthy' | 'partial' | 'unavailable'; services: Record<'companion' | 'nexus', ServiceOverview> }
 type FleetMember = { virployee_id: string; name: string; status: string; job_role_name: string; autonomy: string; active_subjects: number; max_active_subjects: number; pending_jobs: number; recent_errors: number; authority_state: string; last_success_at?: string }
@@ -19,7 +19,7 @@ type NotificationPolicy = { enabled: boolean; webhook_secret_ref: string; revisi
 type DownloadToken = { token: string; export_id: string; manifest_hash: string; expires_at: string }
 type Tab = 'fleet' | 'reconciliation' | 'delivery' | 'incidents' | 'retention'
 
-export function OperationsPage({ tenantId, principalId, productSurface }: Props) {
+export function OperationsPage({ orgId, principalId, productSurface }: Props) {
   const [overview, setOverview] = useState<OperationsOverview | null>(null)
   const [fleet, setFleet] = useState<FleetMember[]>([])
   const [jobs, setJobs] = useState<Job[]>([])
@@ -35,11 +35,11 @@ export function OperationsPage({ tenantId, principalId, productSurface }: Props)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
-  const [holdScope, setHoldScope] = useState({ scope_type: 'tenant', scope_id: tenantId, reason_code: 'legal_preservation' })
+  const [holdScope, setHoldScope] = useState({ scope_type: 'organization', scope_id: orgId, reason_code: 'legal_preservation' })
 
   const api = useCallback(<T,>(path: string, method = 'GET', body?: unknown, idempotencyKey?: string) => axisFetch<T>(path, {
-    method, body, tenantId, principalId, headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
-  }), [principalId, tenantId])
+    method, body, orgId, principalId, headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
+  }), [principalId, orgId])
 
   const load = useCallback(async () => {
     setLoading(true); setError('')
@@ -66,7 +66,7 @@ export function OperationsPage({ tenantId, principalId, productSurface }: Props)
   }, [api])
 
   useEffect(() => { void load() }, [load])
-  useEffect(() => { setHoldScope((current) => ({ ...current, scope_id: current.scope_type === 'tenant' ? tenantId : current.scope_id })) }, [tenantId])
+  useEffect(() => { setHoldScope((current) => ({ ...current, scope_id: current.scope_type === 'organization' ? orgId : current.scope_id })) }, [orgId])
 
   const run = async (key: string, action: (idempotencyKey: string) => Promise<void>) => {
     if (busy) return
@@ -75,7 +75,7 @@ export function OperationsPage({ tenantId, principalId, productSurface }: Props)
   }
   const downloadExport = async (item: ExportItem) => {
     const token = await api<DownloadToken>(`/api/operations/exports/${item.id}/download-token`, 'POST')
-    const blob = await axisDownload(`/api/operations/exports/${item.id}/download?token=${encodeURIComponent(token.token)}`, { tenantId, principalId })
+    const blob = await axisDownload(`/api/operations/exports/${item.id}/download?token=${encodeURIComponent(token.token)}`, { orgId, principalId })
     const objectURL = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = objectURL; link.download = `axis-export-${item.id}.zip`; link.click()
@@ -87,7 +87,7 @@ export function OperationsPage({ tenantId, principalId, productSurface }: Props)
   if (loading && !overview) return <div className="spinner" />
   return <section className="operations-page">
     <header className="operations-rail">
-      <div className="operations-rail__title"><span>Tenant control plane</span><h2>Know what can run, what is stuck, and what requires a person.</h2><p>Operational views contain identifiers, hashes and error codes only. Subject content stays outside this surface.</p></div>
+      <div className="operations-rail__title"><span>Organization control plane</span><h2>Know what can run, what is stuck, and what requires a person.</h2><p>Operational views contain identifiers, hashes and error codes only. Subject content stays outside this surface.</p></div>
       <div className="operations-rail__services" aria-label="Service health path">
         <ServiceNode name="Companion" state={serviceState('companion')} detail={`${fleet.length} Virployees`} />
         <i aria-hidden="true" />
@@ -103,13 +103,13 @@ export function OperationsPage({ tenantId, principalId, productSurface }: Props)
 
     {activeTab === 'fleet' ? <div className="operations-grid">
       <article className="card operations-card operations-card--wide"><CardHeading icon={<Stethoscope />} title="Fleet condition" note="Derived from current Virployees; no separate Agent records." />
-        <div className="table-wrap"><table><thead><tr><th>Virployee</th><th>Role</th><th>State</th><th>Subjects</th><th>Queue</th><th>Authority</th><th>Last success</th></tr></thead><tbody>{fleet.length===0?<EmptyRow span={7} text="No Virployees are available in this tenant."/>:fleet.map((item)=><tr key={item.virployee_id}><td><strong>{item.name}</strong><code>{short(item.virployee_id)}</code></td><td>{item.job_role_name}</td><td><Status value={item.status}/></td><td>{item.active_subjects} / {item.max_active_subjects || '—'}</td><td>{item.pending_jobs}</td><td>{item.authority_state}</td><td>{item.last_success_at?formatDateTime24(item.last_success_at):'Never'}</td></tr>)}</tbody></table></div>
+        <div className="table-wrap"><table><thead><tr><th>Virployee</th><th>Role</th><th>State</th><th>Subjects</th><th>Queue</th><th>Authority</th><th>Last success</th></tr></thead><tbody>{fleet.length===0?<EmptyRow span={7} text="No Virployees are available in this organization."/>:fleet.map((item)=><tr key={item.virployee_id}><td><strong>{item.name}</strong><code>{short(item.virployee_id)}</code></td><td>{item.job_role_name}</td><td><Status value={item.status}/></td><td>{item.active_subjects} / {item.max_active_subjects || '—'}</td><td>{item.pending_jobs}</td><td>{item.authority_state}</td><td>{item.last_success_at?formatDateTime24(item.last_success_at):'Never'}</td></tr>)}</tbody></table></div>
       </article>
     </div> : null}
 
     {activeTab === 'reconciliation' ? <div className="operations-grid">
       <article className="card operations-card"><CardHeading icon={<RotateCcw />} title="Run a reconciliation" note="Detect first. Safe repair only recovers deterministic runtime state." />
-        <div className="operations-action-stack">{(['companion','nexus'] as const).map((service)=><div key={service}><strong>{service}</strong><span>Tenant + {productSurface}</span><button className="btn-secondary" disabled={!!busy} onClick={() => void run(`detect-${service}`, async(key)=>{await api(`/api/operations/reconciliations?service=${service}`,'POST',{mode:'detect'},key)})}>Detect</button><button className="btn-primary" disabled={!!busy} onClick={() => void run(`repair-${service}`, async(key)=>{await api(`/api/operations/reconciliations?service=${service}`,'POST',{mode:'safe_repair'},key)})}>Safe repair</button></div>)}</div>
+        <div className="operations-action-stack">{(['companion','nexus'] as const).map((service)=><div key={service}><strong>{service}</strong><span>Organization + {productSurface}</span><button className="btn-secondary" disabled={!!busy} onClick={() => void run(`detect-${service}`, async(key)=>{await api(`/api/operations/reconciliations?service=${service}`,'POST',{mode:'detect'},key)})}>Detect</button><button className="btn-primary" disabled={!!busy} onClick={() => void run(`repair-${service}`, async(key)=>{await api(`/api/operations/reconciliations?service=${service}`,'POST',{mode:'safe_repair'},key)})}>Safe repair</button></div>)}</div>
       </article>
       <article className="card operations-card operations-card--wide"><CardHeading title="Immutable reports" note="Report hashes bind the observed finding set."/><div className="table-wrap"><table><thead><tr><th>Service</th><th>Mode</th><th>Result</th><th>Findings</th><th>Repaired</th><th>Report</th><th>Started</th></tr></thead><tbody>{reconciliations.length===0?<EmptyRow span={7} text="No reconciliation has run yet."/>:reconciliations.map((item)=><tr key={item.id}><td>{item.product_surface}</td><td>{item.mode}</td><td><Status value={item.status}/></td><td>{item.findings_count}</td><td>{item.repaired_count}</td><td><code>{short(item.report_hash)}</code></td><td>{formatDateTime24(item.started_at)}</td></tr>)}</tbody></table></div></article>
     </div> : null}
@@ -127,8 +127,8 @@ export function OperationsPage({ tenantId, principalId, productSurface }: Props)
     </div> : null}
 
     {activeTab === 'retention' ? <div className="operations-grid">
-      <article className="card operations-card"><CardHeading icon={<ShieldAlert/>} title="Create legal hold" note="Covered data cannot be purged until the hold is released."/><form className="operations-form" onSubmit={event=>{event.preventDefault();void run('hold',async key=>{await api('/api/operations/legal-holds','POST',holdScope,key)})}}><label className="form-group">Scope<select value={holdScope.scope_type} onChange={event=>setHoldScope({...holdScope,scope_type:event.currentTarget.value,scope_id:event.currentTarget.value==='tenant'?tenantId:''})}>{['tenant','virployee','work_subject','case','audit_chain','export'].map(value=><option key={value}>{value}</option>)}</select></label><label className="form-group">Scope ID<input required value={holdScope.scope_id} onChange={event=>setHoldScope({...holdScope,scope_id:event.currentTarget.value})}/></label><label className="form-group">Reason code<input required value={holdScope.reason_code} onChange={event=>setHoldScope({...holdScope,reason_code:event.currentTarget.value})}/></label><button className="btn-primary" disabled={!!busy}>Create hold</button></form></article>
-      <article className="card operations-card"><CardHeading icon={<FileArchive/>} title="Create export" note="The artifact publishes only when every selected section succeeds."/><div className="operations-export-create"><p>Tenant governance metadata · audit, approvals, policies, grants, incidents and holds.</p><button className="btn-primary" disabled={!!busy} onClick={()=>void run('export',async key=>{await api('/api/operations/exports','POST',{scope_type:'tenant',scope_id:tenantId,categories:['audit','approvals','policies','role_grants','incidents','legal_holds']},key)})}>Create tenant export</button></div></article>
+      <article className="card operations-card"><CardHeading icon={<ShieldAlert/>} title="Create legal hold" note="Covered data cannot be purged until the hold is released."/><form className="operations-form" onSubmit={event=>{event.preventDefault();void run('hold',async key=>{await api('/api/operations/legal-holds','POST',holdScope,key)})}}><label className="form-group">Scope<select value={holdScope.scope_type} onChange={event=>setHoldScope({...holdScope,scope_type:event.currentTarget.value,scope_id:event.currentTarget.value==='organization'?orgId:''})}>{['organization','virployee','work_subject','case','audit_chain','export'].map(value=><option key={value}>{value}</option>)}</select></label><label className="form-group">Scope ID<input required value={holdScope.scope_id} onChange={event=>setHoldScope({...holdScope,scope_id:event.currentTarget.value})}/></label><label className="form-group">Reason code<input required value={holdScope.reason_code} onChange={event=>setHoldScope({...holdScope,reason_code:event.currentTarget.value})}/></label><button className="btn-primary" disabled={!!busy}>Create hold</button></form></article>
+      <article className="card operations-card"><CardHeading icon={<FileArchive/>} title="Create export" note="The artifact publishes only when every selected section succeeds."/><div className="operations-export-create"><p>Organization governance metadata · audit, approvals, policies, grants, incidents and holds.</p><button className="btn-primary" disabled={!!busy} onClick={()=>void run('export',async key=>{await api('/api/operations/exports','POST',{scope_type:'organization',scope_id:orgId,categories:['audit','approvals','policies','role_grants','incidents','legal_holds']},key)})}>Create organization export</button></div></article>
       <article className="card operations-card operations-card--wide"><CardHeading title="Preservation ledger"/><div className="table-wrap"><table><thead><tr><th>Scope</th><th>Reason</th><th>Status</th><th>Created</th><th /></tr></thead><tbody>{holds.length===0?<EmptyRow span={5} text="No legal holds are active or released."/>:holds.map(item=><tr key={item.id}><td>{item.scope_type}<code>{short(item.scope_id)}</code></td><td>{item.reason_code}</td><td><Status value={item.status}/></td><td>{formatDateTime24(item.created_at)}</td><td>{item.status==='active'?<button className="btn-secondary" disabled={!!busy} onClick={()=>void run(`release-${item.id}`,async key=>{await api(`/api/operations/legal-holds/${item.id}/release`,'POST',{reason_code:'operator_released',expected_revision:item.revision},key)})}>Release</button>:null}</td></tr>)}</tbody></table></div></article>
       <article className="card operations-card operations-card--wide"><CardHeading title="Export artifacts" note="Manifest and per-file hashes make tampering visible."/><div className="table-wrap"><table><thead><tr><th>Requested</th><th>Scope</th><th>Categories</th><th>Status</th><th>Manifest</th><th>Expires</th><th /></tr></thead><tbody>{exports.length===0?<EmptyRow span={7} text="No enterprise exports have been requested."/>:exports.map(item=><tr key={item.id}><td>{formatDateTime24(item.requested_at)}</td><td>{item.scope_type}</td><td>{Array.isArray(item.categories)?item.categories.join(', '):'—'}</td><td><Status value={item.status}/></td><td><code>{short(item.manifest_hash||'')}</code></td><td>{item.expires_at?formatDateTime24(item.expires_at):'—'}</td><td>{item.status==='ready'?<button className="btn-secondary" disabled={!!busy} onClick={()=>void run(`download-${item.id}`,async()=>{await downloadExport(item)})}>Download</button>:null}</td></tr>)}</tbody></table></div></article>
     </div> : null}

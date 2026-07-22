@@ -42,7 +42,7 @@ Evaluation criteria:
 | `supervisor_user_id` | yes | no | no | yes | yes | `core` | Required opaque string in v2.1. It names the responsible human, not the creator and not auth. |
 | `status` | yes | yes | yes | yes | yes | `core` | Add operational status separate from lifecycle. Values: `draft`, `active`, `disabled`, `suspended`, `error`. Default `draft`. |
 | lifecycle `state` | no | no | no | partial | yes | `metadata` | Keep as technical lifecycle derived from timestamps: `active`, `archived`, `trashed`. Do not use it as operational readiness. |
-| `job_role_id` | yes | yes | partial | partial | yes | `core` | Required UUID in v2.1. Replaces `role` as the work-function reference and must point to an active Job Role in the same tenant. |
+| `job_role_id` | yes | yes | partial | partial | yes | `core` | Required UUID in v2.1. Replaces `role` as the work-function reference and must point to an active Job Role in the same organization. |
 | `profile_template_id` | no | no | yes | yes | yes | `core` | Required live reference to an active Profile Template. Editing the template changes the expected behavior of Virployees that use it. |
 | `virployee_profile` | no | no | yes | yes | partial | `out` | Do not store a snapshot in the Virployee CRUD model now. Exact prompt/config snapshots belong later in runtime or audit logs. |
 | `autonomy` | no | partial | yes | yes | yes | `core` | Optional in `POST`, default `A1`. Values: `A0` to `A5`. This is the minimum runtime safety control. |
@@ -117,7 +117,7 @@ Required request fields:
 - `name`
 - `supervisor_user_id`
 - `job_role_id`
-- `employer_subject_id` (active person, organization or team in the tenant)
+- `employer_subject_id` (active person, organization or team in the organization)
 
 Optional request fields:
 
@@ -135,17 +135,17 @@ Server-generated or server-derived fields:
 References stored as opaque values in v2.1:
 
 - `supervisor_user_id`: opaque string; no auth or user module yet.
-- `job_role_id`: UUID; must reference an active Job Role in the same tenant.
+- `job_role_id`: UUID; must reference an active Job Role in the same organization.
 
 Memory is intentionally not stored as `memory_id` on the Virployee. The
-standalone `memories` module owns multiple governed records scoped by tenant,
+standalone `memories` module owns multiple governed records scoped by organization,
 Virployee, subject and optional case and supplies safe references to runtime
 contracts.
 
 ## Explicit Non-Goals
 
 - Do not import or depend on Axis v1.
-- Do not design public tenants, orgs or product surfaces in this step.
+- Do not design public organizations, orgs or product surfaces in this step.
 - Do not add tasks or LLM providers to the Virployee module.
 - Do not treat `job_role_id` as authorization. Permissions and approvals remain
   separate concerns.

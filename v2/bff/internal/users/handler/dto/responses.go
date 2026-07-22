@@ -11,7 +11,7 @@ type UserResponse struct {
 	Kind       string     `json:"kind"`
 	Email      string     `json:"email"`
 	Role       string     `json:"role"`
-	TenantID   string     `json:"tenant_id"`
+	OrgID      string     `json:"org_id"`
 	State      string     `json:"state"`
 	CreatedAt  time.Time  `json:"created_at"`
 	UpdatedAt  time.Time  `json:"updated_at"`
@@ -30,7 +30,7 @@ func UserFromDomain(user domain.User) UserResponse {
 		Kind:       user.Kind,
 		Email:      user.Email,
 		Role:       user.Role,
-		TenantID:   user.TenantID.String(),
+		OrgID:      user.OrgID.String(),
 		State:      user.State,
 		CreatedAt:  user.CreatedAt,
 		UpdatedAt:  user.UpdatedAt,

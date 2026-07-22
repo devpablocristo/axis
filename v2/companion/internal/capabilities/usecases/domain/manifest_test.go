@@ -7,7 +7,7 @@ import (
 
 func TestNormalizeManifestProducesStableHash(t *testing.T) {
 	first := ManifestInput{
-		Version: "1.2.3", ProductSurface: " Medmory ",
+		Version: "1.2.3", ProductSurface: " ProductA ",
 		InputSchema:    json.RawMessage(`{"properties":{"x":{"type":"string"}},"type":"object"}`),
 		OutputSchema:   json.RawMessage(`{"type":"object"}`),
 		RequiredScopes: []string{"documents:read", "assist:run", "documents:read"},
@@ -27,7 +27,7 @@ func TestNormalizeManifestProducesStableHash(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if oneHash != twoHash || one.ProductSurface != "medmory" || len(one.RequiredScopes) != 2 || len(two.QuotaAreas) != 2 {
+	if oneHash != twoHash || one.ProductSurface != "producta" || len(one.RequiredScopes) != 2 || len(two.QuotaAreas) != 2 {
 		t.Fatalf("manifest must normalize deterministically: one=%+v two=%+v hashes=%s/%s", one, two, oneHash, twoHash)
 	}
 }

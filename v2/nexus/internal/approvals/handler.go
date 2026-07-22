@@ -45,7 +45,7 @@ func (h *Handler) List(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, err := h.ucs.List(c.Request.Context(), tenantID(c), input)
+	out, err := h.ucs.List(c.Request.Context(), orgID(c), input)
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -58,7 +58,7 @@ func (h *Handler) Get(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, err := h.ucs.Get(c.Request.Context(), tenantID(c), id)
+	out, err := h.ucs.Get(c.Request.Context(), orgID(c), id)
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -90,7 +90,7 @@ func (h *Handler) decide(
 	if err := ginmw.BindJSON(c, &req); err != nil {
 		return
 	}
-	out, err := fn(c.Request.Context(), tenantID(c), id, domain.DecisionActor{ID: actorID(c), Role: actorRole(c)}, req.ToDomain())
+	out, err := fn(c.Request.Context(), orgID(c), id, domain.DecisionActor{ID: actorID(c), Role: actorRole(c)}, req.ToDomain())
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -114,8 +114,8 @@ func parseListInput(c *gin.Context) (domain.ListInput, bool) {
 	}, true
 }
 
-func tenantID(c *gin.Context) string {
-	return strings.TrimSpace(c.GetHeader("X-Tenant-ID"))
+func orgID(c *gin.Context) string {
+	return strings.TrimSpace(c.GetHeader("X-Org-ID"))
 }
 
 func actorID(c *gin.Context) string {
@@ -123,5 +123,5 @@ func actorID(c *gin.Context) string {
 }
 
 func actorRole(c *gin.Context) string {
-	return strings.TrimSpace(c.GetHeader("X-Axis-Tenant-Role"))
+	return strings.TrimSpace(c.GetHeader("X-Axis-Org-Role"))
 }

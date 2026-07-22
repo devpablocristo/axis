@@ -17,26 +17,26 @@ import (
 
 // resolveAssistExecutionBinding reconstructs the complete, current provenance
 // for a completed Assist. It never accepts a context hash from an HTTP caller.
-func (u *UseCases) resolveAssistExecutionBinding(ctx context.Context, tenantID string, virployeeID, runID uuid.UUID) (*preparedactions.AssistContextBinding, error) {
+func (u *UseCases) resolveAssistExecutionBinding(ctx context.Context, orgID string, virployeeID, runID uuid.UUID) (*preparedactions.AssistContextBinding, error) {
 	if runID == uuid.Nil {
 		return nil, nil
 	}
 	if u.assistRepo == nil {
 		return nil, domainerr.Conflict("Assist repository is not configured")
 	}
-	run, err := u.assistRepo.GetAssistRunByID(ctx, tenantID, runID)
+	run, err := u.assistRepo.GetAssistRunByID(ctx, orgID, runID)
 	if err != nil {
 		return nil, err
 	}
 	if responsibleVirployeeID(run) != virployeeID {
-		// Hide the existence of a run owned by another Virployee in the tenant.
+		// Hide the existence of a run owned by another Virployee in the organization.
 		return nil, domainerr.NotFound("assist run not found")
 	}
 	if run.Status != "done" || !run.Answered || run.AnswerStatus != "answered" || strings.TrimSpace(run.ContextHash) == "" {
 		return nil, domainerr.Conflict("assist run is not a completed, answered, context-bound run")
 	}
 
-	virployee, err := u.repo.Get(ctx, tenantID, virployeeID)
+	virployee, err := u.repo.Get(ctx, orgID, virployeeID)
 	if err != nil {
 		return nil, err
 	}
@@ -50,7 +50,7 @@ func (u *UseCases) resolveAssistExecutionBinding(ctx context.Context, tenantID s
 	if currentGrounding != strings.ToLower(strings.TrimSpace(run.GroundingMode)) {
 		return nil, domainerr.Conflict("virployee grounding policy changed after the Assist run")
 	}
-	role, err := u.jobRoles.Get(ctx, tenantID, virployee.JobRoleID)
+	role, err := u.jobRoles.Get(ctx, orgID, virployee.JobRoleID)
 	if err != nil {
 		return nil, domainerr.Conflict("Job Role could not be revalidated")
 	}
@@ -70,21 +70,21 @@ func (u *UseCases) resolveAssistExecutionBinding(ctx context.Context, tenantID s
 		if parseErr != nil || subjectID == uuid.Nil {
 			return nil, domainerr.Conflict("Assist assignment subject is invalid")
 		}
-		if _, err := u.continuity.ValidateAssistAssignment(ctx, tenantID, run.AssignmentID, subjectID, virployeeID, run.AssignmentVersion); err != nil {
+		if _, err := u.continuity.ValidateAssistAssignment(ctx, orgID, run.AssignmentID, subjectID, virployeeID, run.AssignmentVersion); err != nil {
 			return nil, err
 		}
 	}
 	if u.assistExecution == nil {
 		return nil, domainerr.Conflict("Assist execution context validator is not configured")
 	}
-	if err := u.assistExecution.ValidateAssistExecutionContext(ctx, tenantID, virployeeID, virployee.JobRoleID, run); err != nil {
+	if err := u.assistExecution.ValidateAssistExecutionContext(ctx, orgID, virployeeID, virployee.JobRoleID, run); err != nil {
 		return nil, err
 	}
 	if strings.TrimSpace(run.SourceAuthorizationHash) == "" {
 		return nil, domainerr.Conflict("Assist source authorization provenance is missing")
 	}
 	currentSourceAuthorizationHash, err := u.assistExecution.AssistSourceAuthorizationHash(
-		ctx, tenantID, virployeeID, virployee.JobRoleID, run, run.SourceContext,
+		ctx, orgID, virployeeID, virployee.JobRoleID, run, run.SourceContext,
 	)
 	if err != nil || currentSourceAuthorizationHash != run.SourceAuthorizationHash {
 		return nil, domainerr.Conflict("Assist source authorization changed after completion")
@@ -97,12 +97,12 @@ func (u *UseCases) resolveAssistExecutionBinding(ctx context.Context, tenantID s
 		return nil, domainerr.Conflict("Assist memory context references are missing")
 	}
 
-	policySnapshotHash, err := u.currentAssistPolicySnapshot(ctx, tenantID, virployeeID, virployee.JobRoleID, run)
+	policySnapshotHash, err := u.currentAssistPolicySnapshot(ctx, orgID, virployeeID, virployee.JobRoleID, run)
 	if err != nil {
 		return nil, err
 	}
 	recomputed := assistContextHash(
-		tenantID,
+		orgID,
 		virployeeID,
 		virployee.JobRoleID,
 		assistMetadataForRun(run),
@@ -129,13 +129,13 @@ func (u *UseCases) resolveAssistExecutionBinding(ctx context.Context, tenantID s
 	}, nil
 }
 
-func (u *UseCases) currentAssistPolicySnapshot(ctx context.Context, tenantID string, virployeeID, jobRoleID uuid.UUID, run AssistRun) (string, error) {
+func (u *UseCases) currentAssistPolicySnapshot(ctx context.Context, orgID string, virployeeID, jobRoleID uuid.UUID, run AssistRun) (string, error) {
 	evaluator, ok := u.authority.(ConversationScopeEvaluatorPort)
 	if !ok || evaluator == nil {
 		return "", nil
 	}
 	result, err := evaluator.EvaluateConversationScope(ctx, executiongate.ConversationScopeInput{
-		TenantID: tenantID, VirployeeID: virployeeID, JobRoleID: jobRoleID,
+		OrgID: orgID, VirployeeID: virployeeID, JobRoleID: jobRoleID,
 		Query: assistRetrievalQuery(run.InputJSON),
 	})
 	if err != nil {
@@ -150,7 +150,7 @@ func (u *UseCases) currentAssistPolicySnapshot(ctx context.Context, tenantID str
 	return result.SnapshotHash, nil
 }
 
-func (u *UseCases) verifyPreparedAssistContext(ctx context.Context, tenantID string, virployeeID uuid.UUID, expected *preparedactions.AssistContextBinding) error {
+func (u *UseCases) verifyPreparedAssistContext(ctx context.Context, orgID string, virployeeID uuid.UUID, expected *preparedactions.AssistContextBinding) error {
 	if expected == nil {
 		return nil
 	}
@@ -158,7 +158,7 @@ func (u *UseCases) verifyPreparedAssistContext(ctx context.Context, tenantID str
 	if err != nil || runID == uuid.Nil {
 		return domainerr.Conflict("prepared action has an invalid Assist run binding")
 	}
-	current, err := u.resolveAssistExecutionBinding(ctx, tenantID, virployeeID, runID)
+	current, err := u.resolveAssistExecutionBinding(ctx, orgID, virployeeID, runID)
 	if err != nil {
 		return err
 	}
@@ -200,14 +200,14 @@ func professionalActionScopeQuery(capabilityKey string, action *preparedactions.
 	return strings.TrimSpace(strings.Join(parts, " "))
 }
 
-func (u *UseCases) evaluateProfessionalActionScope(ctx context.Context, tenantID string, virployeeID, jobRoleID uuid.UUID, capabilityKey string, action *preparedactions.Action) (executiongate.ConversationScopeResult, *preparedactions.ProfessionalScopeBinding, bool) {
+func (u *UseCases) evaluateProfessionalActionScope(ctx context.Context, orgID string, virployeeID, jobRoleID uuid.UUID, capabilityKey string, action *preparedactions.Action) (executiongate.ConversationScopeResult, *preparedactions.ProfessionalScopeBinding, bool) {
 	evaluator, ok := u.authority.(ConversationScopeEvaluatorPort)
 	if !ok || evaluator == nil {
 		return executiongate.ConversationScopeResult{}, nil, false
 	}
 	query := professionalActionScopeQuery(capabilityKey, action)
 	result, err := evaluator.EvaluateConversationScope(ctx, executiongate.ConversationScopeInput{
-		TenantID: tenantID, VirployeeID: virployeeID, JobRoleID: jobRoleID, Query: query,
+		OrgID: orgID, VirployeeID: virployeeID, JobRoleID: jobRoleID, Query: query,
 	})
 	if err != nil {
 		return executiongate.ConversationScopeResult{Allowed: false, Reason: "professional scope evaluation is unavailable"}, nil, true
@@ -222,7 +222,7 @@ func (u *UseCases) evaluateProfessionalActionScope(ctx context.Context, tenantID
 	}, true
 }
 
-func (u *UseCases) verifyCurrentProfessionalActionScope(ctx context.Context, tenantID string, virployeeID, jobRoleID uuid.UUID, capabilityKey string, action preparedactions.Action) error {
+func (u *UseCases) verifyCurrentProfessionalActionScope(ctx context.Context, orgID string, virployeeID, jobRoleID uuid.UUID, capabilityKey string, action preparedactions.Action) error {
 	if action.ProfessionalScope == nil {
 		return nil // durable legacy approvals predate professional-scope binding
 	}
@@ -235,7 +235,7 @@ func (u *UseCases) verifyCurrentProfessionalActionScope(ctx context.Context, ten
 		return domainerr.Conflict("prepared action professional-scope query changed")
 	}
 	result, err := evaluator.EvaluateConversationScope(ctx, executiongate.ConversationScopeInput{
-		TenantID: tenantID, VirployeeID: virployeeID, JobRoleID: jobRoleID, Query: query,
+		OrgID: orgID, VirployeeID: virployeeID, JobRoleID: jobRoleID, Query: query,
 	})
 	if err != nil || !result.Allowed {
 		return domainerr.Conflict("professional scope no longer permits this action")

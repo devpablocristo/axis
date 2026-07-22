@@ -23,8 +23,8 @@ func TestRPCInitializeAndContextualToolsList(t *testing.T) {
 	}
 
 	headers := map[string]string{
-		"X-Tenant-ID": request.TenantID, "X-Actor-ID": request.ActorID,
-		"X-Axis-Tenant-Role":  request.ActorRole,
+		"X-Org-ID": request.OrgID, "X-Actor-ID": request.ActorID,
+		"X-Axis-Org-Role":     request.ActorRole,
 		"X-Axis-Virployee-ID": request.VirployeeID.String(), "X-Axis-Subject-ID": request.SubjectID.String(),
 	}
 	listed := rpcTestRequest(t, router, `{"jsonrpc":"2.0","id":"list","method":"tools/list","params":{}}`, headers)
@@ -56,8 +56,8 @@ func TestRPCRejectsTrailingJSONAndOversizedArguments(t *testing.T) {
 		t.Fatalf("trailing JSON must be rejected: %s", trailing.Body.String())
 	}
 	headers := map[string]string{
-		"X-Tenant-ID": request.TenantID, "X-Actor-ID": request.ActorID,
-		"X-Axis-Tenant-Role": request.ActorRole, "X-Axis-Virployee-ID": request.VirployeeID.String(),
+		"X-Org-ID": request.OrgID, "X-Actor-ID": request.ActorID,
+		"X-Axis-Org-Role": request.ActorRole, "X-Axis-Virployee-ID": request.VirployeeID.String(),
 		"X-Axis-Subject-ID": request.SubjectID.String(),
 	}
 	body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"calendar.events.read","arguments":{"value":"` + strings.Repeat("x", maxArgumentsBytes) + `"}}}`

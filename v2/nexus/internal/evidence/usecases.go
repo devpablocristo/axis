@@ -15,7 +15,7 @@ const EvidenceVersion = "1.1"
 // AuditReader is the read side of the audit ledger the evidence pack is built
 // from. The audit UseCases satisfy it.
 type AuditReader interface {
-	Replay(ctx context.Context, tenantID, virployeeID string) (audit.ReplayOutput, error)
+	Replay(ctx context.Context, orgID, virployeeID string) (audit.ReplayOutput, error)
 }
 
 type subjectAuditReader interface {
@@ -36,8 +36,8 @@ func NewUseCases(reader AuditReader, signer *Signer) *UseCases {
 // Generate assembles and signs an evidence pack for a virployee's ledger. When
 // subject is non-empty the timeline is focused on that subject (e.g. one
 // diagnosis run) while the integrity block still proves the whole chain intact.
-func (u *UseCases) Generate(ctx context.Context, tenantID, virployeeID, subject string) (evidencedomain.EvidencePack, error) {
-	replay, err := u.audit.Replay(ctx, tenantID, virployeeID)
+func (u *UseCases) Generate(ctx context.Context, orgID, virployeeID, subject string) (evidencedomain.EvidencePack, error) {
+	replay, err := u.audit.Replay(ctx, orgID, virployeeID)
 	if err != nil {
 		return evidencedomain.EvidencePack{}, err
 	}
@@ -47,8 +47,8 @@ func (u *UseCases) Generate(ctx context.Context, tenantID, virployeeID, subject 
 		GeneratedAt: time.Now().UTC(),
 		Scope:       replay.Scope,
 		Virployee: evidencedomain.VirployeeRef{
-			TenantID: strings.TrimSpace(tenantID),
-			ID:       replay.VirployeeID,
+			OrgID: strings.TrimSpace(orgID),
+			ID:    replay.VirployeeID,
 		},
 	}
 	if replay.Integrity != nil {
@@ -83,7 +83,7 @@ func (u *UseCases) Generate(ctx context.Context, tenantID, virployeeID, subject 
 	if subject != "" {
 		pack.Subject = &evidencedomain.SubjectRef{ID: subject, ChainEventCount: len(replay.Timeline)}
 		if reader, ok := u.audit.(subjectAuditReader); ok {
-			chains, chainErr := reader.ReplaySubject(ctx, tenantID, subject)
+			chains, chainErr := reader.ReplaySubject(ctx, orgID, subject)
 			if chainErr != nil {
 				return evidencedomain.EvidencePack{}, chainErr
 			}

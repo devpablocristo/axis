@@ -19,7 +19,7 @@ Public representation:
 ```json
 {
   "id": "uuid",
-  "tenant_id": "tenant-id",
+  "org_id": "org-id",
   "capability_key": "analizar.estudios.medicos",
   "name": "Analizar estudios médicos",
   "description": "Analiza estudios médicos y comunica sus hallazgos.",
@@ -38,8 +38,8 @@ Public representation:
 Fields:
 
 - `id`: server-generated UUID and the relationship identity.
-- `tenant_id`: request context tenant; Capabilities are tenant-scoped in v2.
-- `capability_key`: stable internal compatibility key, unique per tenant. The Console generates it and does not expose it as the Capability's user-facing identity.
+- `org_id`: request context organization; Capabilities are organization-scoped in v2.
+- `capability_key`: stable internal compatibility key, unique per organization. The Console generates it and does not expose it as the Capability's user-facing identity.
 - `name`: required, clear description of the ability, for example `Analizar estudios médicos`.
 - `description`: optional human explanation.
 - `required_autonomy`: required minimum Virployee autonomy for assignment.
@@ -83,7 +83,7 @@ rules are:
 - each segment uses lowercase letters only;
 - `ñ` is allowed;
 - numbers, spaces, hyphens, underscores and accents are not allowed;
-- unique inside the same tenant;
+- unique inside the same organization;
 - describes the work ability, not the tool implementation.
 
 Examples:
@@ -122,7 +122,7 @@ Rules:
 - missing or empty means no configured capabilities.
 - duplicate IDs are normalized away.
 - every ID must reference a lifecycle-active, promotion-`active` Capability in
-  the same tenant.
+  the same organization.
 - archived or trashed capabilities cannot be assigned.
 - a Virployee can receive a Capability only when:
 
@@ -137,8 +137,8 @@ This is configuration validation only. It does not execute anything.
 
 ## Clinical read capabilities
 
-Axis defines two tenant-scoped, product-neutral keys whose first manifest uses
-`product_surface=medmory`:
+Axis defines two organization-scoped, product-neutral keys. The consumer must provide
+its own `product_surface` when it installs the manifest:
 
 - `clinical.records.search`: A0, read-only, medium risk, evidence required,
   30-second timeout, one attempt, inbound/embeddings quotas.
@@ -147,7 +147,7 @@ Axis defines two tenant-scoped, product-neutral keys whose first manifest uses
 
 Their input and output schemas set `additionalProperties=false`. Search returns
 bounded excerpts, scores and canonical document/source/hash/locator references;
-its opaque cursor is bound to tenant, Virployee, subject, case, product,
+its opaque cursor is bound to organization, Virployee, subject, case, product,
 repository generation, query and manifest hash. Timeline is a projection, not
 a persisted clinical entity. It returns ordered events, coverage and canonical
 references, with `completed|partial|abstained` status.
@@ -156,8 +156,8 @@ Assist accepts a nullable `capability_key` for backward compatibility. When it
 is present, only these registered read executors are valid: write, unknown or
 executor-less capabilities fail closed. The accepted run snapshots the
 canonical key and manifest hash; both participate in context/idempotency and
-are checked again before execution. Legacy Medmory aliases normalize before
-routing and hashing and never own manifests.
+are checked again before execution. Axis does not translate product-owned
+aliases; a consumer adapter must send the canonical capability key.
 
 `/v1/virployee-routing:resolve` includes the optional canonical capability key.
 Existing assignments become `reassignment_required` when their member no
@@ -173,7 +173,7 @@ The conformance gate is deterministic and fail-closed. It validates:
 - evidence, idempotency and rollback policy;
 - bounded timeout, retries and postconditions;
 - active PostgreSQL quota policies for every declared area under
-  `(tenant_id, product_surface, area)`;
+  `(org_id, product_surface, area)`;
 - Secret Manager references only (never inline credentials); and
 - executor attestation for write capabilities.
 
@@ -213,7 +213,7 @@ PUT  /v1/virployees/:virployee_id
 ```
 
 BFF and Console should only forward, display and select active Companion
-Capabilities for the current tenant.
+Capabilities for the current organization.
 
 ## Explicit Non-Goals
 
@@ -223,20 +223,20 @@ Capabilities for the current tenant.
 - IAM permissions.
 - Job Role recommended capabilities.
 - Global/product Capability catalog.
-- Persisted clinical timeline tables or Medmory-owned clinical engines.
+- Persisted clinical timeline tables or consumer-owned clinical engines.
 
 ## Decision Summary
 
 - Capability is a minimal Companion domain entity.
-- Capability is tenant-scoped and identified by UUID.
+- Capability is organization-scoped and identified by UUID.
 - `name` is the primary user-facing representation and describes the ability in a clear phrase.
-- `capability_key` is a generated, unique tenant-local compatibility key, not a user-facing identity.
+- `capability_key` is a generated, unique organization-local compatibility key, not a user-facing identity.
 - Capability has one `required_autonomy`.
 - Capability promotion is `draft → conformant → active` and is bound to the
   normalized manifest hash.
 - Conformance validates governance, quotas, secrets and attestation before
   activation.
 - Virployees reference capabilities by UUID.
-- Assignment validates tenant, lifecycle, promotion and autonomy compatibility.
+- Assignment validates organization, lifecycle, promotion and autonomy compatibility.
 - Tool execution and Nexus policy evaluation remain separate bounded contexts;
   the manifest declares the contract they must satisfy.

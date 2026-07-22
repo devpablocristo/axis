@@ -26,25 +26,25 @@ func TestCoordinationPlanIsAtomicAndHandoffDecisionIsSingleWinner(t *testing.T) 
 	defer pool.Close()
 
 	repository := NewRepository(pool)
-	tenantID := "coordination-test-" + uuid.NewString()
+	orgID := "coordination-test-" + uuid.NewString()
 	jobRoleID, profileID := uuid.New(), uuid.New()
 	ownerID, specialistID, capabilityID := uuid.New(), uuid.New(), uuid.New()
 	t.Cleanup(func() {
 		cleanupCtx := context.Background()
-		_, _ = pool.Exec(cleanupCtx, `DELETE FROM companion_jobs WHERE tenant_id=$1`, tenantID)
-		_, _ = pool.Exec(cleanupCtx, `DELETE FROM companion_human_reviews WHERE tenant_id=$1`, tenantID)
-		_, _ = pool.Exec(cleanupCtx, `DELETE FROM companion_handoffs WHERE tenant_id=$1`, tenantID)
-		_, _ = pool.Exec(cleanupCtx, `UPDATE companion_assist_runs SET orchestration_plan_id=NULL WHERE tenant_id=$1`, tenantID)
-		_, _ = pool.Exec(cleanupCtx, `DELETE FROM companion_orchestration_plans WHERE tenant_id=$1`, tenantID)
-		_, _ = pool.Exec(cleanupCtx, `DELETE FROM companion_assist_runs WHERE tenant_id=$1`, tenantID)
-		_, _ = pool.Exec(cleanupCtx, `DELETE FROM companion_orchestration_policies WHERE tenant_id=$1`, tenantID)
-		_, _ = pool.Exec(cleanupCtx, `DELETE FROM companion_specialist_routes WHERE tenant_id=$1`, tenantID)
-		_, _ = pool.Exec(cleanupCtx, `DELETE FROM companion_assist_cases WHERE tenant_id=$1`, tenantID)
+		_, _ = pool.Exec(cleanupCtx, `DELETE FROM companion_jobs WHERE org_id=$1`, orgID)
+		_, _ = pool.Exec(cleanupCtx, `DELETE FROM companion_human_reviews WHERE org_id=$1`, orgID)
+		_, _ = pool.Exec(cleanupCtx, `DELETE FROM companion_handoffs WHERE org_id=$1`, orgID)
+		_, _ = pool.Exec(cleanupCtx, `UPDATE companion_assist_runs SET orchestration_plan_id=NULL WHERE org_id=$1`, orgID)
+		_, _ = pool.Exec(cleanupCtx, `DELETE FROM companion_orchestration_plans WHERE org_id=$1`, orgID)
+		_, _ = pool.Exec(cleanupCtx, `DELETE FROM companion_assist_runs WHERE org_id=$1`, orgID)
+		_, _ = pool.Exec(cleanupCtx, `DELETE FROM companion_orchestration_policies WHERE org_id=$1`, orgID)
+		_, _ = pool.Exec(cleanupCtx, `DELETE FROM companion_specialist_routes WHERE org_id=$1`, orgID)
+		_, _ = pool.Exec(cleanupCtx, `DELETE FROM companion_assist_cases WHERE org_id=$1`, orgID)
 		_, _ = pool.Exec(cleanupCtx, `DELETE FROM virployee_capabilities WHERE virployee_id IN ($1,$2)`, ownerID, specialistID)
-		_, _ = pool.Exec(cleanupCtx, `DELETE FROM virployees WHERE tenant_id=$1`, tenantID)
-		_, _ = pool.Exec(cleanupCtx, `DELETE FROM capabilities WHERE tenant_id=$1`, tenantID)
-		_, _ = pool.Exec(cleanupCtx, `DELETE FROM job_roles WHERE tenant_id=$1`, tenantID)
-		_, _ = pool.Exec(cleanupCtx, `DELETE FROM profile_templates WHERE tenant_id=$1`, tenantID)
+		_, _ = pool.Exec(cleanupCtx, `DELETE FROM virployees WHERE org_id=$1`, orgID)
+		_, _ = pool.Exec(cleanupCtx, `DELETE FROM capabilities WHERE org_id=$1`, orgID)
+		_, _ = pool.Exec(cleanupCtx, `DELETE FROM job_roles WHERE org_id=$1`, orgID)
+		_, _ = pool.Exec(cleanupCtx, `DELETE FROM profile_templates WHERE org_id=$1`, orgID)
 	})
 
 	now := time.Now().UTC()
@@ -52,11 +52,11 @@ func TestCoordinationPlanIsAtomicAndHandoffDecisionIsSingleWinner(t *testing.T) 
 		query string
 		args  []any
 	}{
-		{`INSERT INTO job_roles (id,tenant_id,name,slug,mission,created_at,updated_at) VALUES ($1,$2,'Coordination role',$3,'',$4,$4)`, []any{jobRoleID, tenantID, "coordination-" + jobRoleID.String(), now}},
-		{`INSERT INTO profile_templates (id,tenant_id,name,description,system_prompt,max_autonomy,created_at,updated_at) VALUES ($1,$2,'Coordination profile','','test','A2',$3,$3)`, []any{profileID, tenantID, now}},
-		{`INSERT INTO virployees (id,tenant_id,name,job_role_id,profile_template_id,description,supervisor_user_id,autonomy,created_at,updated_at) VALUES ($1,$2,'Owner',$3,$4,'','supervisor-a','A2',$5,$5)`, []any{ownerID, tenantID, jobRoleID, profileID, now}},
-		{`INSERT INTO virployees (id,tenant_id,name,job_role_id,profile_template_id,description,supervisor_user_id,autonomy,created_at,updated_at) VALUES ($1,$2,'Specialist',$3,$4,'','supervisor-b','A2',$5,$5)`, []any{specialistID, tenantID, jobRoleID, profileID, now}},
-		{`INSERT INTO capabilities (id,tenant_id,capability_key,name,description,required_autonomy,risk_class,side_effect_class,requires_nexus_approval,evidence_required,rollback_capability_key,promotion_state,manifest,created_at,updated_at) VALUES ($1,$2,'test.specialist.consult','Test consult','','A1','low','read',false,true,'','active','{}'::jsonb,$3,$3)`, []any{capabilityID, tenantID, now}},
+		{`INSERT INTO job_roles (id,org_id,name,slug,mission,created_at,updated_at) VALUES ($1,$2,'Coordination role',$3,'',$4,$4)`, []any{jobRoleID, orgID, "coordination-" + jobRoleID.String(), now}},
+		{`INSERT INTO profile_templates (id,org_id,name,description,system_prompt,max_autonomy,created_at,updated_at) VALUES ($1,$2,'Coordination profile','','test','A2',$3,$3)`, []any{profileID, orgID, now}},
+		{`INSERT INTO virployees (id,org_id,name,job_role_id,profile_template_id,description,supervisor_user_id,autonomy,created_at,updated_at) VALUES ($1,$2,'Owner',$3,$4,'','supervisor-a','A2',$5,$5)`, []any{ownerID, orgID, jobRoleID, profileID, now}},
+		{`INSERT INTO virployees (id,org_id,name,job_role_id,profile_template_id,description,supervisor_user_id,autonomy,created_at,updated_at) VALUES ($1,$2,'Specialist',$3,$4,'','supervisor-b','A2',$5,$5)`, []any{specialistID, orgID, jobRoleID, profileID, now}},
+		{`INSERT INTO capabilities (id,org_id,capability_key,name,description,required_autonomy,risk_class,side_effect_class,requires_nexus_approval,evidence_required,rollback_capability_key,promotion_state,manifest,created_at,updated_at) VALUES ($1,$2,'test.specialist.consult','Test consult','','A1','low','read',false,true,'','active','{}'::jsonb,$3,$3)`, []any{capabilityID, orgID, now}},
 	}
 	for _, statement := range statements {
 		if _, err := pool.Exec(ctx, statement.query, statement.args...); err != nil {
@@ -64,13 +64,13 @@ func TestCoordinationPlanIsAtomicAndHandoffDecisionIsSingleWinner(t *testing.T) 
 		}
 	}
 
-	metadata := AssistMetadata{ProductSurface: "medmory", AssistType: "clinical_diagnosis", SubjectID: "subject-" + uuid.NewString(), RepositoryGeneration: "generation-a"}
-	run, created, err := repository.BeginAssistRun(ctx, tenantID, ownerID, metadata, "idem-"+uuid.NewString(), strings.Repeat("a", 64), "", json.RawMessage(`{"documents":[]}`))
+	metadata := AssistMetadata{ProductSurface: "producta", AssistType: "clinical_diagnosis", SubjectID: "subject-" + uuid.NewString(), RepositoryGeneration: "generation-a"}
+	run, created, err := repository.BeginAssistRun(ctx, orgID, ownerID, metadata, "idem-"+uuid.NewString(), strings.Repeat("a", 64), "", json.RawMessage(`{"documents":[]}`))
 	if err != nil || !created {
 		t.Fatalf("begin assist run: created=%v err=%v", created, err)
 	}
-	policy, err := repository.UpsertOrchestrationPolicy(ctx, tenantID, OrchestrationPolicy{
-		ProductSurface: "medmory", AssistType: "clinical_diagnosis", EntrypointVirployeeID: ownerID,
+	policy, err := repository.UpsertOrchestrationPolicy(ctx, orgID, OrchestrationPolicy{
+		ProductSurface: "producta", AssistType: "clinical_diagnosis", EntrypointVirployeeID: ownerID,
 		Mode: OrchestrationModeActive, SelectorCapabilityID: capabilityID, SynthesisCapabilityID: capabilityID,
 		OutputSchema: map[string]any{"type": "object"}, MaxSpecialists: 3, MaxDepth: 1,
 		ConsultationTimeoutSeconds: 120, OrchestrationTimeoutSeconds: 300,
@@ -99,30 +99,30 @@ func TestCoordinationPlanIsAtomicAndHandoffDecisionIsSingleWinner(t *testing.T) 
 		t.Fatalf("orchestration plan did not snapshot its output schema: first=%+v second=%+v", plan.OutputSchema, again.OutputSchema)
 	}
 	var planCount, consultationCount, jobCount int
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM companion_orchestration_plans WHERE tenant_id=$1 AND root_run_id=$2`, tenantID, run.ID).Scan(&planCount); err != nil {
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM companion_orchestration_plans WHERE org_id=$1 AND root_run_id=$2`, orgID, run.ID).Scan(&planCount); err != nil {
 		t.Fatal(err)
 	}
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM companion_specialist_consultations WHERE tenant_id=$1 AND plan_id=$2`, tenantID, plan.ID).Scan(&consultationCount); err != nil {
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM companion_specialist_consultations WHERE org_id=$1 AND plan_id=$2`, orgID, plan.ID).Scan(&consultationCount); err != nil {
 		t.Fatal(err)
 	}
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM companion_jobs WHERE tenant_id=$1 AND kind=$2`, tenantID, JobKindSpecialistConsult).Scan(&jobCount); err != nil {
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM companion_jobs WHERE org_id=$1 AND kind=$2`, orgID, JobKindSpecialistConsult).Scan(&jobCount); err != nil {
 		t.Fatal(err)
 	}
 	if planCount != 1 || consultationCount != 1 || jobCount != 1 {
 		t.Fatalf("plan transaction duplicated durable state: plans=%d consultations=%d jobs=%d", planCount, consultationCount, jobCount)
 	}
-	if _, err := pool.Exec(ctx, `UPDATE companion_specialist_consultations SET status='running' WHERE tenant_id=$1 AND id=$2`, tenantID, persisted[0].ID); err != nil {
+	if _, err := pool.Exec(ctx, `UPDATE companion_specialist_consultations SET status='running' WHERE org_id=$1 AND id=$2`, orgID, persisted[0].ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, reclaimed, err := repository.ClaimConsultation(ctx, tenantID, persisted[0].ID); err != nil {
+	if _, reclaimed, err := repository.ClaimConsultation(ctx, orgID, persisted[0].ID); err != nil {
 		t.Fatal(err)
 	} else if reclaimed {
 		t.Fatal("a running specialist consultation must not be reclaimed after an ambiguous lease loss")
 	}
-	if _, err := pool.Exec(ctx, `UPDATE companion_specialist_consultations SET status='queued' WHERE tenant_id=$1 AND id=$2`, tenantID, persisted[0].ID); err != nil {
+	if _, err := pool.Exec(ctx, `UPDATE companion_specialist_consultations SET status='queued' WHERE org_id=$1 AND id=$2`, orgID, persisted[0].ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := repository.SetPlanStatus(ctx, tenantID, plan.ID, "ready"); err != nil {
+	if err := repository.SetPlanStatus(ctx, orgID, plan.ID, "ready"); err != nil {
 		t.Fatal(err)
 	}
 	claimCh := make(chan bool, 2)
@@ -131,7 +131,7 @@ func TestCoordinationPlanIsAtomicAndHandoffDecisionIsSingleWinner(t *testing.T) 
 		claimWG.Add(1)
 		go func() {
 			defer claimWG.Done()
-			_, claimed, claimErr := repository.ClaimSynthesis(ctx, tenantID, plan.ID)
+			_, claimed, claimErr := repository.ClaimSynthesis(ctx, orgID, plan.ID)
 			if claimErr != nil {
 				t.Errorf("claim synthesis: %v", claimErr)
 			}
@@ -150,7 +150,7 @@ func TestCoordinationPlanIsAtomicAndHandoffDecisionIsSingleWinner(t *testing.T) 
 		t.Fatalf("exactly one concurrent synthesis claim must win, got %d", claimWinners)
 	}
 
-	handoff, err := repository.CreateHandoff(ctx, tenantID, ownerID, "supervisor-a", CreateHandoffInput{CaseID: run.CaseID, SourceRunID: &run.ID, ToID: specialistID, ReasonCode: "clinical_scope"})
+	handoff, err := repository.CreateHandoff(ctx, orgID, ownerID, "supervisor-a", CreateHandoffInput{CaseID: run.CaseID, SourceRunID: &run.ID, ToID: specialistID, ReasonCode: "clinical_scope"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +160,7 @@ func TestCoordinationPlanIsAtomicAndHandoffDecisionIsSingleWinner(t *testing.T) 
 		wg.Add(1)
 		go func(actor string) {
 			defer wg.Done()
-			_, decideErr := repository.DecideHandoff(ctx, tenantID, handoff.ID, actor, "accept", DecideHandoffInput{Version: handoff.Version})
+			_, decideErr := repository.DecideHandoff(ctx, orgID, handoff.ID, actor, "accept", DecideHandoffInput{Version: handoff.Version})
 			errCh <- decideErr
 		}(actorID)
 	}
@@ -175,7 +175,7 @@ func TestCoordinationPlanIsAtomicAndHandoffDecisionIsSingleWinner(t *testing.T) 
 	if succeeded != 1 {
 		t.Fatalf("exactly one concurrent handoff decision must win, got %d", succeeded)
 	}
-	assistCase, err := repository.GetAssistCase(ctx, tenantID, run.CaseID)
+	assistCase, err := repository.GetAssistCase(ctx, orgID, run.CaseID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +184,7 @@ func TestCoordinationPlanIsAtomicAndHandoffDecisionIsSingleWinner(t *testing.T) 
 	}
 	var responsibleID uuid.UUID
 	var ownershipVersion int64
-	if err := pool.QueryRow(ctx, `SELECT responsible_virployee_id,ownership_version FROM companion_assist_runs WHERE tenant_id=$1 AND id=$2`, tenantID, run.ID).Scan(&responsibleID, &ownershipVersion); err != nil {
+	if err := pool.QueryRow(ctx, `SELECT responsible_virployee_id,ownership_version FROM companion_assist_runs WHERE org_id=$1 AND id=$2`, orgID, run.ID).Scan(&responsibleID, &ownershipVersion); err != nil {
 		t.Fatal(err)
 	}
 	if responsibleID != specialistID || ownershipVersion != 2 {

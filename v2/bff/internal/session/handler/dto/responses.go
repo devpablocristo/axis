@@ -4,17 +4,17 @@ import (
 	"time"
 
 	userdomain "github.com/devpablocristo/bff-v2/internal/identity/usecases/domain"
+	productdomain "github.com/devpablocristo/bff-v2/internal/products/usecases/domain"
 	sessiondomain "github.com/devpablocristo/bff-v2/internal/session/usecases/domain"
-	tenantdomain "github.com/devpablocristo/bff-v2/internal/tenancy/usecases/domain"
 )
 
 type SessionResponse struct {
-	PrincipalID string           `json:"principal_id"`
-	ActorID     string           `json:"actor_id"`
-	OrgID       string           `json:"org_id"`
-	AuthMethod  string           `json:"auth_method"`
-	User        UserResponse     `json:"user"`
-	Tenants     []TenantResponse `json:"tenants"`
+	PrincipalID   string                 `json:"principal_id"`
+	ActorID       string                 `json:"actor_id"`
+	OrgID         string                 `json:"org_id"`
+	AuthMethod    string                 `json:"auth_method"`
+	User          UserResponse           `json:"user"`
+	Organizations []OrganizationResponse `json:"organizations"`
 }
 
 type UserResponse struct {
@@ -30,12 +30,16 @@ type UserResponse struct {
 	PurgeAfter     *time.Time `json:"purge_after"`
 }
 
-type TenantResponse struct {
+type OrganizationResponse struct {
+	ID       string            `json:"id"`
+	Name     string            `json:"name"`
+	Products []ProductResponse `json:"products"`
+}
+
+type ProductResponse struct {
 	ID             string     `json:"id"`
-	OrgID          string     `json:"org_id"`
-	OrgName        string     `json:"org_name"`
 	ProductSurface string     `json:"product_surface"`
-	ProductName    string     `json:"product_name"`
+	Name           string     `json:"name"`
 	Status         string     `json:"status"`
 	State          string     `json:"state"`
 	CreatedAt      time.Time  `json:"created_at"`
@@ -46,17 +50,24 @@ type TenantResponse struct {
 }
 
 func SessionFromDomain(session sessiondomain.Session) SessionResponse {
-	tenants := make([]TenantResponse, 0, len(session.Tenants))
-	for _, tenant := range session.Tenants {
-		tenants = append(tenants, TenantFromDomain(tenant))
+	organizations := make([]OrganizationResponse, 0)
+	positions := make(map[string]int)
+	for _, product := range session.Products {
+		position, ok := positions[product.OrgID]
+		if !ok {
+			position = len(organizations)
+			positions[product.OrgID] = position
+			organizations = append(organizations, OrganizationResponse{ID: product.OrgID, Name: product.OrgName, Products: []ProductResponse{}})
+		}
+		organizations[position].Products = append(organizations[position].Products, ProductFromDomain(product))
 	}
 	return SessionResponse{
-		PrincipalID: session.PrincipalID,
-		ActorID:     session.PrincipalID,
-		OrgID:       session.OrgID,
-		AuthMethod:  session.AuthMethod,
-		User:        UserFromDomain(session.User),
-		Tenants:     tenants,
+		PrincipalID:   session.PrincipalID,
+		ActorID:       session.PrincipalID,
+		OrgID:         session.OrgID,
+		AuthMethod:    session.AuthMethod,
+		User:          UserFromDomain(session.User),
+		Organizations: organizations,
 	}
 }
 
@@ -75,19 +86,17 @@ func UserFromDomain(user userdomain.User) UserResponse {
 	}
 }
 
-func TenantFromDomain(tenant tenantdomain.Tenant) TenantResponse {
-	return TenantResponse{
-		ID:             tenant.ID.String(),
-		OrgID:          tenant.OrgID,
-		OrgName:        tenant.OrgName,
-		ProductSurface: tenant.ProductSurface,
-		ProductName:    tenant.ProductName,
-		Status:         tenant.Status,
-		State:          tenant.State(),
-		CreatedAt:      tenant.CreatedAt,
-		UpdatedAt:      tenant.UpdatedAt,
-		ArchivedAt:     tenant.ArchivedAt,
-		TrashedAt:      tenant.TrashedAt,
-		PurgeAfter:     tenant.PurgeAfter,
+func ProductFromDomain(product productdomain.Product) ProductResponse {
+	return ProductResponse{
+		ID:             product.ID.String(),
+		ProductSurface: product.ProductSurface,
+		Name:           product.ProductName,
+		Status:         product.Status,
+		State:          product.State(),
+		CreatedAt:      product.CreatedAt,
+		UpdatedAt:      product.UpdatedAt,
+		ArchivedAt:     product.ArchivedAt,
+		TrashedAt:      product.TrashedAt,
+		PurgeAfter:     product.PurgeAfter,
 	}
 }

@@ -256,7 +256,7 @@ function orgColumns(
     selectionColumn<AxisOrg>(selectedIds, onToggle),
     { key: 'name', header: 'Org', className: 'iam-control__primary-col', ...crudPrimaryStickyColumn },
     { key: 'created_at', header: 'Created', className: 'iam-control__created-col', render: (value) => formatDateTime24(String(value ?? '')) },
-    { key: 'tenant_count', header: 'Tenants', render: (value) => Number(value || 0) },
+    { key: 'product_count', header: 'Products', render: (value) => Number(value || 0) },
     { key: 'state', header: 'State', render: (value) => formatState(String(value ?? '')) },
   ]
 }
@@ -285,7 +285,7 @@ function orgSearchText(row: AxisOrg): string {
     row.name,
     row.provider,
     row.provider_org_id,
-    row.tenant_count,
+    row.product_count,
     row.status,
     row.state,
   ].join(' ')
@@ -305,7 +305,7 @@ function selectionColumn<T extends AxisOrg>(
       <input
         type="checkbox"
         aria-label={`Select ${row.id}`}
-        title={isOrgLifecycleLocked(row) ? 'Remove all tenants before archiving or deleting this org.' : undefined}
+        title={isOrgLifecycleLocked(row) ? 'Remove all organizations before archiving or deleting this org.' : undefined}
         disabled={isOrgLifecycleLocked(row)}
         checked={selectedIds.includes(row.id)}
         onClick={(event) => event.stopPropagation()}
@@ -334,7 +334,7 @@ function CreateAndBulkActions(props: {
       createOpen={props.createOpen}
       editOpen={props.editOpen}
       busy={props.busy}
-      blockedMessage={props.view === 'active' && props.blockedCount > 0 ? 'Orgs with tenants cannot be archived or deleted.' : undefined}
+      blockedMessage={props.view === 'active' && props.blockedCount > 0 ? 'Orgs with organizations cannot be archived or deleted.' : undefined}
       onCreate={props.onCreate}
       onEdit={props.onEdit}
       onClear={props.onClear}
@@ -344,7 +344,7 @@ function CreateAndBulkActions(props: {
 }
 
 function isOrgLifecycleLocked(row: AxisOrg): boolean {
-  return row.has_tenants || row.tenant_count > 0
+  return row.has_products || row.product_count > 0
 }
 
 function lifecycleToolbarActions(view: CrudLifecycleView, createOpen: boolean, onChange: (view: CrudLifecycleView) => void) {

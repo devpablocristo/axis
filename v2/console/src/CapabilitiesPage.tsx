@@ -31,7 +31,7 @@ type CrudLifecycleView = 'active' | 'archived' | 'trash'
 type BulkAction = 'archive' | 'trash' | 'restore' | 'purge'
 
 type CapabilitiesPageProps = {
-  tenantId: string
+  orgId: string
   principalId: string
 }
 
@@ -103,7 +103,7 @@ function formatStatsSuccess(item?: CapabilityStats): string {
   return `${Math.round(item.success_rate * 100)}%`
 }
 
-export function CapabilitiesPage({ tenantId, principalId }: CapabilitiesPageProps) {
+export function CapabilitiesPage({ orgId, principalId }: CapabilitiesPageProps) {
   const rootRef = useRef<HTMLElement | null>(null)
   const [lifecycleView, setLifecycleView] = useState<CrudLifecycleView>('active')
   const [selectedIds, setSelectedIds] = useState<string[]>([])
@@ -114,7 +114,7 @@ export function CapabilitiesPage({ tenantId, principalId }: CapabilitiesPageProp
   const [bulkBusy, setBulkBusy] = useState(false)
   const [reloadVersion, setReloadVersion] = useState(0)
   const [actionError, setActionError] = useState('')
-  const isActive = Boolean(tenantId && principalId)
+  const isActive = Boolean(orgId && principalId)
   const formFields = useMemo(() => capabilityFormFields(), [])
   const selectedRow = selectedIds.length === 1 ? selectedRowsById[selectedIds[0]] ?? null : null
 
@@ -123,18 +123,18 @@ export function CapabilitiesPage({ tenantId, principalId }: CapabilitiesPageProp
       if (!isActive) return Promise.resolve([])
       // Stats degrade gracefully: a stats hiccup must not break the CRUD list.
       return Promise.all([
-        listCapabilities(lifecycleView, tenantId, principalId),
-        listCapabilityStats(tenantId, principalId).catch(() => [] as CapabilityStats[]),
+        listCapabilities(lifecycleView, orgId, principalId),
+        listCapabilityStats(orgId, principalId).catch(() => [] as CapabilityStats[]),
       ]).then(([capabilities, stats]) => toCapabilityRows(capabilities, stats))
     },
-  }), [isActive, lifecycleView, principalId, tenantId])
+  }), [isActive, lifecycleView, principalId, orgId])
 
   useEffect(() => {
     setSelectedIds([])
     setSelectedRowsById({})
     closeForm()
     setActionError('')
-  }, [lifecycleView, tenantId])
+  }, [lifecycleView, orgId])
 
   useEffect(() => {
     const root = rootRef.current
@@ -196,7 +196,7 @@ export function CapabilitiesPage({ tenantId, principalId }: CapabilitiesPageProp
       root.removeEventListener('mouseout', handlePointerOut)
       hideFieldHelp()
     }
-  }, [tenantId, lifecycleView, reloadVersion])
+  }, [orgId, lifecycleView, reloadVersion])
 
   const toggleSelected = (row: Capability, checked: boolean) => {
     setSelectedRowsById((current) => {
@@ -247,9 +247,9 @@ export function CapabilitiesPage({ tenantId, principalId }: CapabilitiesPageProp
     setActionError('')
     try {
       if (formMode === 'create') {
-        await createCapability(capabilityPayload(formValues), tenantId, principalId)
+        await createCapability(capabilityPayload(formValues), orgId, principalId)
       } else if (selectedRow) {
-        await updateCapability(selectedRow.id, capabilityPayload(formValues), tenantId, principalId)
+        await updateCapability(selectedRow.id, capabilityPayload(formValues), orgId, principalId)
       }
       closeForm()
       clearSelected()
@@ -268,17 +268,17 @@ export function CapabilitiesPage({ tenantId, principalId }: CapabilitiesPageProp
     try {
       for (const id of selectedIds) {
         if (action === 'archive') {
-          await archiveCapability(id, tenantId, principalId)
+          await archiveCapability(id, orgId, principalId)
         } else if (action === 'trash') {
-          await trashCapability(id, tenantId, principalId)
+          await trashCapability(id, orgId, principalId)
         } else if (action === 'restore') {
           if (lifecycleView === 'archived') {
-            await unarchiveCapability(id, tenantId, principalId)
+            await unarchiveCapability(id, orgId, principalId)
           } else {
-            await restoreCapability(id, tenantId, principalId)
+            await restoreCapability(id, orgId, principalId)
           }
         } else {
-          await purgeCapability(id, tenantId, principalId)
+          await purgeCapability(id, orgId, principalId)
         }
       }
       clearSelected()
@@ -293,7 +293,7 @@ export function CapabilitiesPage({ tenantId, principalId }: CapabilitiesPageProp
   if (!isActive) {
     return (
       <section className="page-section">
-        <div className="empty-state">Select an active tenant to manage Capabilities.</div>
+        <div className="empty-state">Select an active organization to manage Capabilities.</div>
       </section>
     )
   }
@@ -301,7 +301,7 @@ export function CapabilitiesPage({ tenantId, principalId }: CapabilitiesPageProp
   return (
     <section ref={rootRef} className="page-section iam-control axis-crud-host capabilities-control">
       <CrudPage<CapabilityRow>
-        key={`capabilities-${tenantId}-${lifecycleView}-${reloadVersion}`}
+        key={`capabilities-${orgId}-${lifecycleView}-${reloadVersion}`}
         dataSource={dataSource}
         stringsBase={defaultCrudStrings}
         strings={{
@@ -468,7 +468,7 @@ function requiredAutonomyDefinition(value: string): {
   if (value === 'A3') {
     return {
       label: 'A3 - Limited execution',
-      description: 'Can execute low-risk writes that are reversible, idempotent and scoped to the tenant.',
+      description: 'Can execute low-risk writes that are reversible, idempotent and scoped to the organization.',
       effect: 'Virployees below A3 cannot receive it.',
     }
   }

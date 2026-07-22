@@ -22,7 +22,7 @@ type UseCasesPort interface {
 }
 
 type SupervisorValidatorPort interface {
-	EnsureActive(ctx context.Context, tenantID, userID string) error
+	EnsureActive(ctx context.Context, productID, userID string) error
 }
 
 type Options struct {
@@ -180,7 +180,7 @@ func (h *Handler) ForwardOperationsJob(c *gin.Context) {
 }
 
 func (h *Handler) OperationsOverview(c *gin.Context) {
-	resolved, err := h.ucs.Resolve(c.Request.Context(), gatewaydomain.ResolveInput{TenantID: c.GetHeader("X-Tenant-ID"), PrincipalID: h.principalID(c)})
+	resolved, err := h.ucs.Resolve(c.Request.Context(), gatewaydomain.ResolveInput{OrgID: c.GetHeader("X-Org-ID"), ProductSurface: c.GetHeader("X-Product-Surface"), PrincipalID: h.principalID(c)})
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -238,17 +238,17 @@ func (h *Handler) OperationsOverview(c *gin.Context) {
 
 func (h *Handler) setTrustedHeaders(req *http.Request, resolved gatewaydomain.ResolvedContext) {
 	req.Header.Set("X-Actor-ID", resolved.PrincipalID)
-	req.Header.Set("X-Tenant-ID", resolved.TenantID)
-	req.Header.Set("X-Axis-Org-ID", resolved.OrgID)
+	req.Header.Set("X-Org-ID", resolved.OrgID)
+	req.Header.Set("X-Org-ID", resolved.OrgID)
 	req.Header.Set("X-Product-Surface", resolved.ProductSurface)
 	req.Header.Set("X-Axis-Forwarded-By", "bff-v2")
-	req.Header.Set("X-Axis-Tenant-Role", resolved.MembershipRole)
+	req.Header.Set("X-Axis-Org-Role", resolved.MembershipRole)
 	req.Header.Set("X-Axis-Internal-Token", h.options.InternalAuthSecret)
 }
 
 func (h *Handler) forward(c *gin.Context, targetURL func(string, string) string, validateSupervisor bool) {
 	resolved, err := h.ucs.Resolve(c.Request.Context(), gatewaydomain.ResolveInput{
-		TenantID:    c.GetHeader("X-Tenant-ID"),
+		OrgID: c.GetHeader("X-Org-ID"), ProductSurface: c.GetHeader("X-Product-Surface"),
 		PrincipalID: h.principalID(c),
 	})
 	if err != nil {
@@ -279,7 +279,7 @@ func (h *Handler) forward(c *gin.Context, targetURL func(string, string) string,
 	req.Header = c.Request.Header.Clone()
 	req.Header.Del("Cookie")
 	req.Header.Del("Authorization")
-	req.Header.Del("X-Axis-Tenant-Role")
+	req.Header.Del("X-Axis-Org-Role")
 	req.Header.Del("X-Axis-Internal-Token")
 	req.Header.Del("X-Axis-Functional-Roles")
 	req.Header.Del("X-Axis-Role-Grants")
@@ -287,11 +287,11 @@ func (h *Handler) forward(c *gin.Context, targetURL func(string, string) string,
 	req.Header.Del("X-Permissions")
 	req.Header.Del("X-Roles")
 	req.Header.Set("X-Actor-ID", resolved.PrincipalID)
-	req.Header.Set("X-Tenant-ID", resolved.TenantID)
-	req.Header.Set("X-Axis-Org-ID", resolved.OrgID)
+	req.Header.Set("X-Org-ID", resolved.OrgID)
+	req.Header.Set("X-Org-ID", resolved.OrgID)
 	req.Header.Set("X-Product-Surface", resolved.ProductSurface)
 	req.Header.Set("X-Axis-Forwarded-By", "bff-v2")
-	req.Header.Set("X-Axis-Tenant-Role", resolved.MembershipRole)
+	req.Header.Set("X-Axis-Org-Role", resolved.MembershipRole)
 	req.Header.Set("X-Axis-Internal-Token", h.options.InternalAuthSecret)
 
 	resp, err := h.client.Do(req)
@@ -335,7 +335,7 @@ func (h *Handler) validateVirployeeSupervisor(c *gin.Context, resolved gatewaydo
 			return domainerr.Validation("invalid request body")
 		}
 	}
-	if err := h.options.SupervisorValidator.EnsureActive(c.Request.Context(), resolved.TenantID, payload.SupervisorUserID); err != nil {
+	if err := h.options.SupervisorValidator.EnsureActive(c.Request.Context(), resolved.OrgID, payload.SupervisorUserID); err != nil {
 		return err
 	}
 	c.Request.Body = io.NopCloser(bytes.NewReader(body))
@@ -370,7 +370,7 @@ func (h *Handler) validateRoleGrantUser(c *gin.Context, resolved gatewaydomain.R
 	if len(bytes.TrimSpace(body)) == 0 || json.Unmarshal(body, &payload) != nil || strings.TrimSpace(payload.UserID) == "" {
 		return domainerr.Validation("user_id is required")
 	}
-	if err := h.options.SupervisorValidator.EnsureActive(c.Request.Context(), resolved.TenantID, payload.UserID); err != nil {
+	if err := h.options.SupervisorValidator.EnsureActive(c.Request.Context(), resolved.OrgID, payload.UserID); err != nil {
 		return err
 	}
 	c.Request.Body = io.NopCloser(bytes.NewReader(body))

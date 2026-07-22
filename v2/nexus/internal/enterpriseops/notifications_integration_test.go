@@ -34,22 +34,22 @@ func TestNotificationOutboxDeliveryIsDurableAndMetadataOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	tenant := "notifications-test-" + uuid.NewString()
+	organization := "notifications-test-" + uuid.NewString()
 	incidentID, outboxID := uuid.New(), uuid.New()
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM operational_notification_outbox WHERE tenant_id=$1`, tenant)
-		_, _ = pool.Exec(context.Background(), `DELETE FROM operational_incident_events WHERE tenant_id=$1`, tenant)
-		_, _ = pool.Exec(context.Background(), `DELETE FROM operational_incidents WHERE tenant_id=$1`, tenant)
-		_, _ = pool.Exec(context.Background(), `DELETE FROM operational_notification_policy WHERE tenant_id=$1`, tenant)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM operational_notification_outbox WHERE org_id=$1`, organization)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM operational_incident_events WHERE org_id=$1`, organization)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM operational_incidents WHERE org_id=$1`, organization)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM operational_notification_policy WHERE org_id=$1`, organization)
 	})
-	if _, err = pool.Exec(ctx, `INSERT INTO operational_notification_policy(tenant_id,enabled,webhook_secret_ref,changed_by)VALUES($1,true,'env://TEST_WEBHOOK','test')`, tenant); err != nil {
+	if _, err = pool.Exec(ctx, `INSERT INTO operational_notification_policy(org_id,enabled,webhook_secret_ref,changed_by)VALUES($1,true,'env://TEST_WEBHOOK','test')`, organization); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = pool.Exec(ctx, `INSERT INTO operational_incidents(id,tenant_id,fingerprint,source,incident_type,resource_type,resource_id,severity)VALUES($1,$2,$3,'test','job.dead_letter','job',$4,'high')`, incidentID, tenant, hash(tenant+incidentID.String()), incidentID.String()); err != nil {
+	if _, err = pool.Exec(ctx, `INSERT INTO operational_incidents(id,org_id,fingerprint,source,incident_type,resource_type,resource_id,severity)VALUES($1,$2,$3,'test','job.dead_letter','job',$4,'high')`, incidentID, organization, hash(organization+incidentID.String()), incidentID.String()); err != nil {
 		t.Fatal(err)
 	}
 	payload := json.RawMessage(`{"incident_id":"` + incidentID.String() + `","severity":"high","incident_type":"job.dead_letter"}`)
-	if _, err = pool.Exec(ctx, `INSERT INTO operational_notification_outbox(id,tenant_id,incident_id,event_type,dedupe_key,payload_json)VALUES($1,$2,$3,'opened',$4,$5)`, outboxID, tenant, incidentID, uuid.NewString(), payload); err != nil {
+	if _, err = pool.Exec(ctx, `INSERT INTO operational_notification_outbox(id,org_id,incident_id,event_type,dedupe_key,payload_json)VALUES($1,$2,$3,'opened',$4,$5)`, outboxID, organization, incidentID, uuid.NewString(), payload); err != nil {
 		t.Fatal(err)
 	}
 	sender := &recordingNotificationSender{}
@@ -60,7 +60,7 @@ func TestNotificationOutboxDeliveryIsDurableAndMetadataOnly(t *testing.T) {
 		t.Fatalf("delivered=%d payloads=%d err=%v", delivered, len(sender.payloads), err)
 	}
 	var status, errorCode string
-	if err = pool.QueryRow(ctx, `SELECT status,last_error_code FROM operational_notification_outbox WHERE tenant_id=$1 AND id=$2`, tenant, outboxID).Scan(&status, &errorCode); err != nil {
+	if err = pool.QueryRow(ctx, `SELECT status,last_error_code FROM operational_notification_outbox WHERE org_id=$1 AND id=$2`, organization, outboxID).Scan(&status, &errorCode); err != nil {
 		t.Fatal(err)
 	}
 	if status != "delivered" || errorCode != "" {

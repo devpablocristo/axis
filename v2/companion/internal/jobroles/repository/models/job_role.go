@@ -9,7 +9,7 @@ import (
 
 type JobRole struct {
 	ID               uuid.UUID
-	TenantID         string
+	OrgID            string
 	Name             string
 	Slug             string
 	Mission          string
@@ -29,7 +29,7 @@ func (m JobRole) ToDomain() domain.JobRole {
 	copy(successCriteria, m.SuccessCriteria)
 	return domain.JobRole{
 		ID:               m.ID,
-		TenantID:         m.TenantID,
+		OrgID:            m.OrgID,
 		Name:             m.Name,
 		Slug:             m.Slug,
 		Mission:          m.Mission,

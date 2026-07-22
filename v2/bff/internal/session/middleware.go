@@ -17,7 +17,7 @@ const authenticatedSessionKey = "axis.authenticated_session"
 func NewAuthenticationMiddleware(ucs UseCasesPort, trustDevHeaders bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if trustDevHeaders && c.Request.URL.Path != "/api/session" {
-			c.Request.Header.Del("X-Axis-Tenant-Role")
+			c.Request.Header.Del("X-Axis-Org-Role")
 			c.Request.Header.Del("X-Axis-Internal-Token")
 			c.Next()
 			return
@@ -38,7 +38,7 @@ func NewAuthenticationMiddleware(ucs UseCasesPort, trustDevHeaders bool) gin.Han
 		c.Request.Header.Del("X-Actor-ID")
 		c.Request.Header.Del("X-Actor-Email")
 		c.Request.Header.Del("X-Axis-Org-ID")
-		c.Request.Header.Del("X-Axis-Tenant-Role")
+		c.Request.Header.Del("X-Axis-Org-Role")
 		c.Request.Header.Del("X-Axis-Internal-Token")
 		c.Request.Header.Set("X-Actor-ID", strings.TrimSpace(resolved.PrincipalID))
 		c.Request.Header.Set("X-Actor-Email", strings.TrimSpace(resolved.User.Email))

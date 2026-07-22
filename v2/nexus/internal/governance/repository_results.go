@@ -16,7 +16,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-func (r *Repository) RecordExecutionResult(ctx context.Context, tenantID, checkID string, input domain.ExecutionResultInput) (domain.ExecutionResult, error) {
+func (r *Repository) RecordExecutionResult(ctx context.Context, orgID, checkID string, input domain.ExecutionResultInput) (domain.ExecutionResult, error) {
 	parsedCheckID, err := uuid.Parse(strings.TrimSpace(checkID))
 	if err != nil {
 		return domain.ExecutionResult{}, domainerr.Validation("invalid governance check id")
@@ -25,9 +25,9 @@ func (r *Repository) RecordExecutionResult(ctx context.Context, tenantID, checkI
 	err = r.pool.QueryRow(ctx, `
 		SELECT c.binding_hash, c.decision, COALESCE(a.status, ''), c.requester_id
 		FROM governance_checks c
-		LEFT JOIN approvals a ON a.governance_check_id = c.id AND a.tenant_id = c.tenant_id
-		WHERE c.tenant_id = $1 AND c.id = $2
-	`, tenantID, parsedCheckID).Scan(&bindingHash, &decision, &approvalStatus, &requesterID)
+		LEFT JOIN approvals a ON a.governance_check_id = c.id AND a.org_id = c.org_id
+		WHERE c.org_id = $1 AND c.id = $2
+	`, orgID, parsedCheckID).Scan(&bindingHash, &decision, &approvalStatus, &requesterID)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return domain.ExecutionResult{}, domainerr.NotFound("governance check not found")
@@ -53,12 +53,12 @@ func (r *Repository) RecordExecutionResult(ctx context.Context, tenantID, checkI
 	now := time.Now().UTC()
 	tag, err := r.pool.Exec(ctx, `
 		INSERT INTO governance_execution_results (
-			id, tenant_id, governance_check_id, idempotency_key, request_fingerprint,
+			id, org_id, governance_check_id, idempotency_key, request_fingerprint,
 			binding_hash, status, duration_ms, result, attestation_version,
 			executor_version, attestation, result_hash, created_at, updated_at
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12, $13, $14, $14)
-		ON CONFLICT (tenant_id, governance_check_id) DO NOTHING
-	`, id, tenantID, parsedCheckID, input.IdempotencyKey, fingerprint, input.BindingHash, input.Status, input.DurationMS, raw, input.AttestationVersion, input.ExecutorVersion, input.Attestation, resultHash, now)
+		ON CONFLICT (org_id, governance_check_id) DO NOTHING
+	`, id, orgID, parsedCheckID, input.IdempotencyKey, fingerprint, input.BindingHash, input.Status, input.DurationMS, raw, input.AttestationVersion, input.ExecutorVersion, input.Attestation, resultHash, now)
 	if err != nil {
 		return domain.ExecutionResult{}, fmt.Errorf("record execution result: %w", err)
 	}
@@ -70,8 +70,8 @@ func (r *Repository) RecordExecutionResult(ctx context.Context, tenantID, checkI
 		SELECT id::text, governance_check_id::text, request_fingerprint, binding_hash, status, duration_ms, result,
 		       idempotency_key, attestation_version, executor_version, attestation, result_hash
 		FROM governance_execution_results
-		WHERE tenant_id = $1 AND governance_check_id = $2
-	`, tenantID, parsedCheckID).Scan(&out.ID, &out.GovernanceCheckID, &storedFingerprint, &out.BindingHash, &out.Status, &out.DurationMS, &storedRaw,
+		WHERE org_id = $1 AND governance_check_id = $2
+	`, orgID, parsedCheckID).Scan(&out.ID, &out.GovernanceCheckID, &storedFingerprint, &out.BindingHash, &out.Status, &out.DurationMS, &storedRaw,
 		&out.IdempotencyKey, &out.AttestationVersion, &out.ExecutorVersion, &out.Attestation, &out.ResultHash)
 	if err != nil {
 		return domain.ExecutionResult{}, err

@@ -3,32 +3,36 @@ package domain
 import (
 	"strings"
 
-	tenantdomain "github.com/devpablocristo/bff-v2/internal/tenancy/usecases/domain"
+	productdomain "github.com/devpablocristo/bff-v2/internal/products/usecases/domain"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
 )
 
 type ResolveInput struct {
-	TenantID    string
-	PrincipalID string
+	OrgID          string
+	ProductSurface string
+	PrincipalID    string
 }
 
 type ResolvedContext struct {
 	PrincipalID    string
-	TenantID       string
 	OrgID          string
 	ProductSurface string
 	MembershipRole string
-	Tenant         tenantdomain.Tenant
-	Member         tenantdomain.TenantMember
+	Product        productdomain.Product
+	Member         productdomain.OrgMember
 }
 
 func NormalizeResolveInput(in ResolveInput) (ResolveInput, error) {
 	out := ResolveInput{
-		TenantID:    strings.TrimSpace(in.TenantID),
-		PrincipalID: strings.TrimSpace(in.PrincipalID),
+		OrgID:          strings.TrimSpace(in.OrgID),
+		ProductSurface: strings.ToLower(strings.TrimSpace(in.ProductSurface)),
+		PrincipalID:    strings.TrimSpace(in.PrincipalID),
 	}
-	if out.TenantID == "" {
-		return ResolveInput{}, domainerr.Validation("tenant_id is required")
+	if out.OrgID == "" {
+		return ResolveInput{}, domainerr.Validation("org_id is required")
+	}
+	if out.ProductSurface == "" {
+		return ResolveInput{}, domainerr.Validation("product_surface is required")
 	}
 	if out.PrincipalID == "" {
 		return ResolveInput{}, domainerr.Validation("principal_id is required")

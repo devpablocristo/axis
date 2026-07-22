@@ -28,3 +28,10 @@ func TestEmbeddingProviderUsesDeterministicFallbackOnlyOutsideProduction(t *test
 		t.Fatalf("explicitly disabled fallback must fail closed, got %q", disabled.Model())
 	}
 }
+
+func TestLLMProviderReportsEchoWhenVertexIsNotConfigured(t *testing.T) {
+	provider, model := buildProvider(context.Background(), cfg.Config{LLMProvider: "vertex", LLMModel: "gemini-test"})
+	if provider == nil || model != "echo" {
+		t.Fatalf("expected explicit echo model, got provider=%#v model=%q", provider, model)
+	}
+}

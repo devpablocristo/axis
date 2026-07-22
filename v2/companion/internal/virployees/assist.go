@@ -50,9 +50,9 @@ func (u *UseCases) resolveDocuments(ctx context.Context, inputJSON json.RawMessa
 }
 
 // SubmitAssist durably stores an idempotent run without performing model work.
-func (u *UseCases) SubmitAssist(ctx context.Context, tenantID string, id uuid.UUID, inputJSON json.RawMessage, idempotencyKey string, metadata AssistMetadata) (AssistRun, bool, error) {
-	tenantID = normalizeTenantID(tenantID)
-	metadata.CapabilityKey, _ = NormalizeAssistCapabilityKey(metadata.CapabilityKey)
+func (u *UseCases) SubmitAssist(ctx context.Context, orgID string, id uuid.UUID, inputJSON json.RawMessage, idempotencyKey string, metadata AssistMetadata) (AssistRun, bool, error) {
+	orgID = normalizeOrgID(orgID)
+	metadata.CapabilityKey = NormalizeAssistCapabilityKey(metadata.CapabilityKey)
 	if u.answerer == nil && metadata.CapabilityKey != CapabilityClinicalRecordsSearch {
 		return AssistRun{}, false, domainerr.Conflict("runtime answerer is not configured")
 	}
@@ -94,7 +94,7 @@ func (u *UseCases) SubmitAssist(ctx context.Context, tenantID string, id uuid.UU
 		return AssistRun{}, false, domainerr.Validation("subject_id must be a valid UUID for clinical capabilities")
 	}
 	if metadata.AssignmentID == uuid.Nil && u.continuity != nil {
-		required, requirementErr := u.continuity.RequiresAssistAssignment(ctx, tenantID, parsedSubjectID, id)
+		required, requirementErr := u.continuity.RequiresAssistAssignment(ctx, orgID, parsedSubjectID, id)
 		if requirementErr != nil {
 			return AssistRun{}, false, requirementErr
 		}
@@ -112,14 +112,14 @@ func (u *UseCases) SubmitAssist(ctx context.Context, tenantID string, id uuid.UU
 		if parsedSubjectID == uuid.Nil {
 			return AssistRun{}, false, domainerr.Validation("subject_id must be a valid work subject UUID when assignment_id is provided")
 		}
-		version, validationErr := u.continuity.ValidateAssistAssignment(ctx, tenantID, metadata.AssignmentID, parsedSubjectID, id, 0)
+		version, validationErr := u.continuity.ValidateAssistAssignment(ctx, orgID, metadata.AssignmentID, parsedSubjectID, id, 0)
 		if validationErr != nil {
 			return AssistRun{}, false, validationErr
 		}
 		metadata.AssignmentVersion = version
 	}
 	// Fail before accepting work when the virployee/profile is not executable.
-	runtimeContext, err := u.RuntimeContext(ctx, tenantID, id)
+	runtimeContext, err := u.RuntimeContext(ctx, orgID, id)
 	if err != nil {
 		return AssistRun{}, false, err
 	}
@@ -158,15 +158,15 @@ func (u *UseCases) SubmitAssist(ctx context.Context, tenantID string, id uuid.UU
 		metadata.GroundingMode = "general"
 	}
 	metadata.JobRoleSnapshotHash = professionalContextHash(professionalContextFromJobRole(runtimeContext.JobRole))
-	metadata.ContextHash = assistContextHash(tenantID, id, runtimeContext.Virployee.JobRoleID, metadata, nil, "")
+	metadata.ContextHash = assistContextHash(orgID, id, runtimeContext.Virployee.JobRoleID, metadata, nil, "")
 	inputHash := runtraces.HashString(metadata.ContextHash + "\x00" + string(inputJSON))
 	if idempotencyKey == "" {
-		idempotencyKey = runtraces.HashString(tenantID + ":" + id.String() + ":" + inputHash)
+		idempotencyKey = runtraces.HashString(orgID + ":" + id.String() + ":" + inputHash)
 	}
-	if err := u.consumeQuota(ctx, quotaKey(tenantID, metadata.ProductSurface, quotas.AreaInbound), idempotencyKey, "virployee", id.String(), 1); err != nil {
+	if err := u.consumeQuota(ctx, quotaKey(orgID, metadata.ProductSurface, quotas.AreaInbound), idempotencyKey, "virployee", id.String(), 1); err != nil {
 		return AssistRun{}, false, err
 	}
-	run, reserved, err := u.assistRepo.BeginAssistRun(ctx, tenantID, id, metadata, idempotencyKey, inputHash, runtraces.InputPreview(string(inputJSON)), inputJSON)
+	run, reserved, err := u.assistRepo.BeginAssistRun(ctx, orgID, id, metadata, idempotencyKey, inputHash, runtraces.InputPreview(string(inputJSON)), inputJSON)
 	if err != nil {
 		return AssistRun{}, false, err
 	}
@@ -195,11 +195,11 @@ func assistRunScopeMatches(run AssistRun, metadata AssistMetadata) bool {
 // SubmitAssistAsync persists then enqueues identifier-only work. If enqueueing
 // is interrupted, operational reconciliation finds the received row and queues
 // it later; no request depends on a process-local goroutine.
-func (u *UseCases) SubmitAssistAsync(ctx context.Context, tenantID string, id uuid.UUID, inputJSON json.RawMessage, idempotencyKey string, metadata AssistMetadata) (AssistRun, error) {
+func (u *UseCases) SubmitAssistAsync(ctx context.Context, orgID string, id uuid.UUID, inputJSON json.RawMessage, idempotencyKey string, metadata AssistMetadata) (AssistRun, error) {
 	if u.assistQueue == nil {
 		return AssistRun{}, domainerr.Conflict("assist queue is not configured")
 	}
-	run, reserved, err := u.SubmitAssist(ctx, tenantID, id, inputJSON, idempotencyKey, metadata)
+	run, reserved, err := u.SubmitAssist(ctx, orgID, id, inputJSON, idempotencyKey, metadata)
 	if err != nil {
 		return AssistRun{}, err
 	}
@@ -216,8 +216,8 @@ func (u *UseCases) SubmitAssistAsync(ctx context.Context, tenantID string, id uu
 
 // Assist preserves the synchronous internal endpoint while sharing the same
 // durable reservation and claim semantics as asynchronous product work.
-func (u *UseCases) Assist(ctx context.Context, tenantID string, id uuid.UUID, inputJSON json.RawMessage, idempotencyKey string, metadata AssistMetadata) (AssistRun, error) {
-	run, reserved, err := u.SubmitAssist(ctx, tenantID, id, inputJSON, idempotencyKey, metadata)
+func (u *UseCases) Assist(ctx context.Context, orgID string, id uuid.UUID, inputJSON json.RawMessage, idempotencyKey string, metadata AssistMetadata) (AssistRun, error) {
+	run, reserved, err := u.SubmitAssist(ctx, orgID, id, inputJSON, idempotencyKey, metadata)
 	if err != nil {
 		return AssistRun{}, err
 	}
@@ -233,13 +233,13 @@ func (u *UseCases) Assist(ctx context.Context, tenantID string, id uuid.UUID, in
 			return AssistRun{}, domainerr.Conflict("assist run already in progress")
 		}
 	}
-	return u.ProcessAssistRun(ctx, run.TenantID, run.ID, false)
+	return u.ProcessAssistRun(ctx, run.OrgID, run.ID, false)
 }
 
 // ProcessAssistRun is the durable job handler's domain operation.
-func (u *UseCases) ProcessAssistRun(ctx context.Context, tenantID string, runID uuid.UUID, recoverPreAnswer bool) (AssistRun, error) {
-	tenantID = normalizeTenantID(tenantID)
-	run, claimed, err := u.assistRepo.ClaimAssistRun(ctx, tenantID, runID, recoverPreAnswer)
+func (u *UseCases) ProcessAssistRun(ctx context.Context, orgID string, runID uuid.UUID, recoverPreAnswer bool) (AssistRun, error) {
+	orgID = normalizeOrgID(orgID)
+	run, claimed, err := u.assistRepo.ClaimAssistRun(ctx, orgID, runID, recoverPreAnswer)
 	if err != nil {
 		return AssistRun{}, err
 	}
@@ -259,32 +259,32 @@ func (u *UseCases) ProcessAssistRun(ctx context.Context, tenantID string, runID 
 	run.ResponsibleVirployeeID = responsibleID
 	if run.AssignmentID != uuid.Nil {
 		if u.continuity == nil {
-			failed, _ := u.assistRepo.CompleteAssistRun(ctx, tenantID, run.ID, "failed", nil, "", false, false, "", "", "assignment_validation_unavailable", 0)
+			failed, _ := u.assistRepo.CompleteAssistRun(ctx, orgID, run.ID, "failed", nil, "", false, false, "", "", "assignment_validation_unavailable", 0)
 			return failed, domainerr.Conflict("continuity assignment validator is not configured")
 		}
 		subjectID, parseErr := uuid.Parse(strings.TrimSpace(run.SubjectID))
 		if parseErr != nil || subjectID == uuid.Nil {
-			failed, _ := u.assistRepo.CompleteAssistRun(ctx, tenantID, run.ID, "failed", nil, "", false, false, "", "", "invalid_assignment_subject", 0)
+			failed, _ := u.assistRepo.CompleteAssistRun(ctx, orgID, run.ID, "failed", nil, "", false, false, "", "", "invalid_assignment_subject", 0)
 			return failed, domainerr.Conflict("Assist run has an invalid assignment subject")
 		}
-		if _, validationErr := u.continuity.ValidateAssistAssignment(ctx, tenantID, run.AssignmentID, subjectID, responsibleID, run.AssignmentVersion); validationErr != nil {
-			failed, _ := u.assistRepo.CompleteAssistRun(ctx, tenantID, run.ID, "failed", nil, "", false, false, "", "", "assignment_changed", 0)
+		if _, validationErr := u.continuity.ValidateAssistAssignment(ctx, orgID, run.AssignmentID, subjectID, responsibleID, run.AssignmentVersion); validationErr != nil {
+			failed, _ := u.assistRepo.CompleteAssistRun(ctx, orgID, run.ID, "failed", nil, "", false, false, "", "", "assignment_changed", 0)
 			return failed, validationErr
 		}
 	}
-	runtimeContext, err := u.RuntimeContext(ctx, tenantID, responsibleID)
+	runtimeContext, err := u.RuntimeContext(ctx, orgID, responsibleID)
 	if err != nil {
-		failed, _ := u.assistRepo.CompleteAssistRun(ctx, tenantID, run.ID, "failed", nil, "", false, false, "", "", "runtime_context_unavailable", 0)
+		failed, _ := u.assistRepo.CompleteAssistRun(ctx, orgID, run.ID, "failed", nil, "", false, false, "", "", "runtime_context_unavailable", 0)
 		return failed, err
 	}
 	currentJobRoleSnapshotHash := professionalContextHash(professionalContextFromJobRole(runtimeContext.JobRole))
 	if run.JobRoleSnapshotHash != "" && run.JobRoleSnapshotHash != currentJobRoleSnapshotHash {
-		failed, _ := u.assistRepo.CompleteAssistRun(ctx, tenantID, run.ID, "failed", nil, "", false, false, "", "", "job_role_changed", 0)
+		failed, _ := u.assistRepo.CompleteAssistRun(ctx, orgID, run.ID, "failed", nil, "", false, false, "", "", "job_role_changed", 0)
 		return failed, domainerr.Conflict("Job Role changed after the Assist run was accepted")
 	}
 	run.JobRoleSnapshotHash = currentJobRoleSnapshotHash
 	if snapshotErr := validateAssistCapabilitySnapshot(runtimeContext, run); snapshotErr != nil {
-		failed, _ := u.assistRepo.CompleteAssistRun(ctx, tenantID, run.ID, "failed", nil, "", false, false, "", "", "capability_context_changed", 0)
+		failed, _ := u.assistRepo.CompleteAssistRun(ctx, orgID, run.ID, "failed", nil, "", false, false, "", "", "capability_context_changed", 0)
 		return failed, snapshotErr
 	}
 
@@ -293,8 +293,8 @@ func (u *UseCases) ProcessAssistRun(ctx context.Context, tenantID string, runID 
 		if _, quotaExceeded := quotas.RetryAfter(ingestErr); quotaExceeded {
 			return run, ingestErr
 		}
-		failed, _ := u.assistRepo.CompleteAssistRun(ctx, tenantID, run.ID, "failed", nil, "", false, false, "", "", artifacts.StableErrorCode(ingestErr), 0)
-		u.emitAssistAudit(ctx, tenantID, run.VirployeeID, failed, run.InputHash)
+		failed, _ := u.assistRepo.CompleteAssistRun(ctx, orgID, run.ID, "failed", nil, "", false, false, "", "", artifacts.StableErrorCode(ingestErr), 0)
+		u.emitAssistAudit(ctx, orgID, run.VirployeeID, failed, run.InputHash)
 		return failed, domainerr.Unavailable("required artifact processing failed")
 	}
 	if run.CapabilityKey != "" {
@@ -315,21 +315,21 @@ func (u *UseCases) ProcessAssistRun(ctx context.Context, tenantID string, runID 
 	}
 	query := assistRetrievalQuery(run.InputJSON)
 	scopeSnapshotHash := ""
-	if scope, evaluated := u.evaluateConversationScope(ctx, tenantID, responsibleID, runtimeContext.Virployee.JobRoleID, query); evaluated {
+	if scope, evaluated := u.evaluateConversationScope(ctx, orgID, responsibleID, runtimeContext.Virployee.JobRoleID, query); evaluated {
 		scopeSnapshotHash = scope.SnapshotHash
 		if !scope.Allowed {
-			contextHash := assistContextHash(tenantID, responsibleID, runtimeContext.Virployee.JobRoleID, assistMetadataForRun(run), nil, scopeSnapshotHash)
+			contextHash := assistContextHash(orgID, responsibleID, runtimeContext.Virployee.JobRoleID, assistMetadataForRun(run), nil, scopeSnapshotHash)
 			return u.completeScopeDecisionAssist(ctx, run, responsibleID, groundingMode, scope.Decision, scope.Reason, contextHash)
 		}
 	}
 	allowedCitations := citationsForParts(contentParts, run.RepositoryGeneration)
 	if u.knowledge != nil {
 		evidence, retrievalErr := u.knowledge.Retrieve(ctx, knowledgebases.RetrievalScope{
-			TenantID: tenantID, VirployeeID: responsibleID, SubjectID: run.SubjectID, CaseID: run.CaseID,
+			OrgID: orgID, VirployeeID: responsibleID, SubjectID: run.SubjectID, CaseID: run.CaseID,
 		}, query, 12)
 		if retrievalErr != nil {
 			if groundingMode == "sources_only" && !hasTextEvidence(contentParts) {
-				contextHash := assistContextHash(tenantID, responsibleID, runtimeContext.Virployee.JobRoleID, assistMetadataForRun(run), allowedCitations, scopeSnapshotHash)
+				contextHash := assistContextHash(orgID, responsibleID, runtimeContext.Virployee.JobRoleID, assistMetadataForRun(run), allowedCitations, scopeSnapshotHash)
 				return u.completeAbstainedAssist(ctx, run, responsibleID, groundingMode, "retrieval_unavailable", contextHash)
 			}
 			slog.WarnContext(ctx, "knowledge_retrieval_failed", "error", runtraces.RedactText(retrievalErr.Error()), "assist_run_id", run.ID.String())
@@ -342,12 +342,12 @@ func (u *UseCases) ProcessAssistRun(ctx context.Context, tenantID string, runID 
 		ctx, run, responsibleID, runtimeContext.Virployee.JobRoleID, allowedCitations,
 	)
 	if sourceAuthorizationErr != nil {
-		failed, _ := u.assistRepo.CompleteAssistRun(ctx, tenantID, run.ID, "failed", nil, "", false, false, "", "", "source_authorization_changed", 0)
+		failed, _ := u.assistRepo.CompleteAssistRun(ctx, orgID, run.ID, "failed", nil, "", false, false, "", "", "source_authorization_changed", 0)
 		return failed, sourceAuthorizationErr
 	}
 	run.SourceAuthorizationHash = sourceAuthorizationHash
 	if groundingMode == "sources_only" && !hasTextEvidence(contentParts) {
-		contextHash := assistContextHash(tenantID, responsibleID, runtimeContext.Virployee.JobRoleID, assistMetadataForRun(run), allowedCitations, scopeSnapshotHash)
+		contextHash := assistContextHash(orgID, responsibleID, runtimeContext.Virployee.JobRoleID, assistMetadataForRun(run), allowedCitations, scopeSnapshotHash)
 		return u.completeAbstainedAssist(ctx, run, responsibleID, groundingMode, "no_source_evidence", contextHash)
 	}
 	var memoryReferences []memories.Reference
@@ -360,10 +360,10 @@ func (u *UseCases) ProcessAssistRun(ctx context.Context, tenantID string, runID 
 			return orchestrated, orchestrationErr
 		}
 	}
-	if err := u.consumeQuota(ctx, quotaKey(tenantID, run.ProductSurface, quotas.AreaLLM), run.ID.String(), "assist_run", run.ID.String(), estimatedAnswerTokens(answerInputJSON, contentParts)); err != nil {
+	if err := u.consumeQuota(ctx, quotaKey(orgID, run.ProductSurface, quotas.AreaLLM), run.ID.String(), "assist_run", run.ID.String(), estimatedAnswerTokens(answerInputJSON, contentParts)); err != nil {
 		return run, err
 	}
-	run, err = u.assistRepo.SetAssistRunStatus(ctx, tenantID, run.ID, "answering")
+	run, err = u.assistRepo.SetAssistRunStatus(ctx, orgID, run.ID, "answering")
 	if err != nil {
 		return AssistRun{}, err
 	}
@@ -379,8 +379,8 @@ func (u *UseCases) ProcessAssistRun(ctx context.Context, tenantID string, runID 
 	durationMS := time.Since(started).Milliseconds()
 	if answerErr != nil {
 		failedErr := runtraces.RedactText(answerErr.Error())
-		failed, _ := u.assistRepo.CompleteAssistRun(ctx, tenantID, run.ID, "failed", nil, "", false, false, "", "", failedErr, durationMS)
-		u.emitAssistAudit(ctx, tenantID, run.VirployeeID, failed, run.InputHash)
+		failed, _ := u.assistRepo.CompleteAssistRun(ctx, orgID, run.ID, "failed", nil, "", false, false, "", "", failedErr, durationMS)
+		u.emitAssistAudit(ctx, orgID, run.VirployeeID, failed, run.InputHash)
 		return failed, domainerr.Unavailable("assist runtime failed")
 	}
 	u.recordLLMUsage(ctx, run, "answer", out)
@@ -411,7 +411,7 @@ func (u *UseCases) ProcessAssistRun(ctx context.Context, tenantID string, runID 
 	degraded := !out.Answered && groundingMode != "sources_only"
 	metadata := assistMetadataForRun(run)
 	metadata.MemoryContextHash = memoryContextHash
-	contextHash := assistContextHash(tenantID, responsibleID, runtimeContext.Virployee.JobRoleID, metadata, allowedCitations, scopeSnapshotHash)
+	contextHash := assistContextHash(orgID, responsibleID, runtimeContext.Virployee.JobRoleID, metadata, allowedCitations, scopeSnapshotHash)
 	done, err := u.completeAssistWithGrounding(ctx, run, AssistCompletion{
 		Status: "done", Output: out.OutputJSON, OutputText: out.OutputText, Answered: out.Answered,
 		Degraded: degraded, Model: out.ModelID, PromptVersion: out.PromptVersion, DurationMS: durationMS,
@@ -423,7 +423,7 @@ func (u *UseCases) ProcessAssistRun(ctx context.Context, tenantID string, runID 
 	if err != nil {
 		return AssistRun{}, err
 	}
-	u.emitAssistAudit(ctx, tenantID, responsibleID, done, run.InputHash)
+	u.emitAssistAudit(ctx, orgID, responsibleID, done, run.InputHash)
 	return done, nil
 }
 
@@ -445,9 +445,9 @@ func assistMetadataForRun(run AssistRun) AssistMetadata {
 	}
 }
 
-func assistContextHash(tenantID string, virployeeID, jobRoleID uuid.UUID, metadata AssistMetadata, citations []knowledgebases.Citation, policySnapshotHash string) string {
+func assistContextHash(orgID string, virployeeID, jobRoleID uuid.UUID, metadata AssistMetadata, citations []knowledgebases.Citation, policySnapshotHash string) string {
 	parts := []string{
-		"assist-context.v1", strings.TrimSpace(tenantID), virployeeID.String(), jobRoleID.String(),
+		"assist-context.v1", strings.TrimSpace(orgID), virployeeID.String(), jobRoleID.String(),
 		strings.TrimSpace(metadata.SubjectID), metadata.CaseID.String(), metadata.AssignmentID.String(),
 		strconv.FormatInt(metadata.AssignmentVersion, 10), strings.TrimSpace(metadata.ProductSurface),
 		strings.TrimSpace(metadata.AssistType), strings.TrimSpace(metadata.RepositoryGeneration),
@@ -474,7 +474,7 @@ func assistContextHash(tenantID string, virployeeID, jobRoleID uuid.UUID, metada
 
 func (u *UseCases) resolveAssistSourceAuthorizationHash(ctx context.Context, run AssistRun, virployeeID, jobRoleID uuid.UUID, citations []knowledgebases.Citation) (string, error) {
 	if u.assistExecution != nil {
-		return u.assistExecution.AssistSourceAuthorizationHash(ctx, run.TenantID, virployeeID, jobRoleID, run, citations)
+		return u.assistExecution.AssistSourceAuthorizationHash(ctx, run.OrgID, virployeeID, jobRoleID, run, citations)
 	}
 	// Non-database adapters still bind the exact source set. Production wires
 	// the Repository above and therefore also binds monotonic catalog revisions.
@@ -569,7 +569,7 @@ func (u *UseCases) addScopedMemoryContext(ctx context.Context, run AssistRun, re
 	} else if strings.TrimSpace(run.SubjectID) != "" {
 		scope = memories.Scope{Type: memories.ScopeSubject, SubjectID: run.SubjectID}
 	}
-	items, err := reader.RecallScopedInternal(ctx, run.TenantID, responsibleID, scope, query, 5)
+	items, err := reader.RecallScopedInternal(ctx, run.OrgID, responsibleID, scope, query, 5)
 	if err != nil {
 		slog.WarnContext(ctx, "scoped_memory_recall_failed", "error", runtraces.RedactText(err.Error()), "assist_run_id", run.ID.String())
 		return input, nil, ""
@@ -681,7 +681,7 @@ func (u *UseCases) completeAbstainedAssist(ctx context.Context, run AssistRun, r
 	if err != nil {
 		return AssistRun{}, err
 	}
-	u.emitAssistAudit(ctx, run.TenantID, responsibleID, done, run.InputHash)
+	u.emitAssistAudit(ctx, run.OrgID, responsibleID, done, run.InputHash)
 	return done, nil
 }
 
@@ -703,7 +703,7 @@ func (u *UseCases) completeScopeDecisionAssist(ctx context.Context, run AssistRu
 	if err != nil {
 		return AssistRun{}, err
 	}
-	u.emitAssistAudit(ctx, run.TenantID, responsibleID, done, run.InputHash)
+	u.emitAssistAudit(ctx, run.OrgID, responsibleID, done, run.InputHash)
 	return done, nil
 }
 
@@ -712,7 +712,7 @@ func (u *UseCases) completeAssistWithGrounding(ctx context.Context, run AssistRu
 	if !ok || writer == nil {
 		return AssistRun{}, domainerr.Conflict("Assist repository does not support atomic grounded completion")
 	}
-	return writer.CompleteAssistRunWithGrounding(ctx, run.TenantID, run.ID, completion)
+	return writer.CompleteAssistRunWithGrounding(ctx, run.OrgID, run.ID, completion)
 }
 
 func (u *UseCases) ingestArtifacts(ctx context.Context, run AssistRun) ([]artifacts.ContentPart, bool, error) {
@@ -741,12 +741,12 @@ func (u *UseCases) ingestArtifacts(ctx context.Context, run AssistRun) ([]artifa
 		})
 		totalBytes += doc.SizeBytes
 	}
-	if err := u.consumeQuota(ctx, quotaKey(run.TenantID, run.ProductSurface, quotas.AreaBytes), run.ID.String(), "assist_run", run.ID.String(), totalBytes); err != nil {
+	if err := u.consumeQuota(ctx, quotaKey(run.OrgID, run.ProductSurface, quotas.AreaBytes), run.ID.String(), "assist_run", run.ID.String(), totalBytes); err != nil {
 		return nil, true, err
 	}
 	result, err := u.artifactIngestor.Ingest(ctx, artifacts.IngestRequest{
 		Scope: artifacts.Scope{
-			TenantID: run.TenantID, VirployeeID: run.VirployeeID, ProductSurface: run.ProductSurface,
+			OrgID: run.OrgID, VirployeeID: run.VirployeeID, ProductSurface: run.ProductSurface,
 			SubjectID: run.SubjectID, RepositoryGeneration: caseScopedRepositoryGeneration(run.RepositoryGeneration, run.CaseID),
 		},
 		Artifacts: manifests,
@@ -761,7 +761,7 @@ func (u *UseCases) ingestArtifacts(ctx context.Context, run AssistRun) ([]artifa
 			if assistStatus == "" {
 				return nil
 			}
-			_, progressErr := u.assistRepo.SetAssistRunStatus(progressCtx, run.TenantID, run.ID, assistStatus)
+			_, progressErr := u.assistRepo.SetAssistRunStatus(progressCtx, run.OrgID, run.ID, assistStatus)
 			return progressErr
 		},
 	})
@@ -779,8 +779,8 @@ func caseScopedRepositoryGeneration(repositoryGeneration string, caseID uuid.UUI
 	return repositoryGeneration + ":case:" + caseID.String()
 }
 
-func (u *UseCases) GetAssistRun(ctx context.Context, tenantID string, virployeeID, runID uuid.UUID) (AssistRun, error) {
-	run, err := u.assistRepo.GetAssistRunByID(ctx, normalizeTenantID(tenantID), runID)
+func (u *UseCases) GetAssistRun(ctx context.Context, orgID string, virployeeID, runID uuid.UUID) (AssistRun, error) {
+	run, err := u.assistRepo.GetAssistRunByID(ctx, normalizeOrgID(orgID), runID)
 	if err != nil {
 		return AssistRun{}, err
 	}
@@ -788,7 +788,7 @@ func (u *UseCases) GetAssistRun(ctx context.Context, tenantID string, virployeeI
 		if u.coordinationRepo == nil {
 			return AssistRun{}, domainerr.NotFound("assist run not found")
 		}
-		assistCase, caseErr := u.coordinationRepo.GetAssistCase(ctx, normalizeTenantID(tenantID), run.CaseID)
+		assistCase, caseErr := u.coordinationRepo.GetAssistCase(ctx, normalizeOrgID(orgID), run.CaseID)
 		if caseErr != nil || assistCase.OwnerVirployeeID != virployeeID {
 			return AssistRun{}, domainerr.NotFound("assist run not found")
 		}
@@ -817,7 +817,7 @@ func (u *UseCases) RequeueReceivedAssistRuns(ctx context.Context, limit int) (in
 	return len(runs), nil
 }
 
-func (u *UseCases) emitAssistAudit(ctx context.Context, tenantID string, virployeeID uuid.UUID, run AssistRun, inputHash string) {
+func (u *UseCases) emitAssistAudit(ctx context.Context, orgID string, virployeeID uuid.UUID, run AssistRun, inputHash string) {
 	if u.auditEmitter == nil {
 		return
 	}
@@ -839,9 +839,9 @@ func (u *UseCases) emitAssistAudit(ctx context.Context, tenantID string, virploy
 		data["error"] = run.Error
 	}
 	if err := u.auditEmitter.AppendAuditEvent(ctx, AuditEventInput{
-		TenantID: tenantID, VirployeeID: virployeeID.String(), ActorType: "virployee", ActorID: virployeeID.String(),
+		OrgID: orgID, VirployeeID: virployeeID.String(), ActorType: "virployee", ActorID: virployeeID.String(),
 		SubjectType: "assist_run", SubjectID: run.ID.String(), EventType: eventType, Summary: summary, Data: data,
 	}); err != nil {
-		slog.ErrorContext(ctx, "audit emit failed for assist run", "error", err, "tenant_id", tenantID, "virployee_id", virployeeID.String(), "assist_run_id", run.ID.String())
+		slog.ErrorContext(ctx, "audit emit failed for assist run", "error", err, "org_id", orgID, "virployee_id", virployeeID.String(), "assist_run_id", run.ID.String())
 	}
 }

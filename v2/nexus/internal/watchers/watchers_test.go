@@ -30,7 +30,7 @@ func (f *fakeAudit) Append(_ context.Context, _ string, in auditdomain.AppendInp
 func TestRunOnceExpiresAndAuditsEachApproval(t *testing.T) {
 	now := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
 	repo := &fakeRepository{items: []ExpiredApproval{{
-		ID: uuid.New(), TenantID: "tenant-1", GovernanceCheckID: uuid.New(),
+		ID: uuid.New(), OrgID: "organization-1", GovernanceCheckID: uuid.New(),
 		VirployeeID: uuid.NewString(), BindingHash: "sha256:binding", ExpiresAt: now.Add(-time.Minute),
 	}}}
 	audit := &fakeAudit{}

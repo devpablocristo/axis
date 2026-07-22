@@ -10,9 +10,9 @@ import { LifecycleBulkActions } from './LifecycleBulkActions'
 import { crudPrimaryStickyColumn, crudSelectionStickyColumn } from './crudTableColumns'
 import { formatDateTime24 } from './formatters'
 import {
-  type TenantUser,
-  type TenantUserInput,
-  type TenantUserRole,
+  type OrgUser,
+  type OrgUserInput,
+  type OrgUserRole,
   archiveUser,
   createUser,
   listUsers,
@@ -27,11 +27,11 @@ type CrudLifecycleView = 'active' | 'archived' | 'trash'
 type BulkAction = 'archive' | 'trash' | 'restore' | 'purge'
 
 type UsersPageProps = {
-  tenantId: string
+  orgId: string
   principalId: string
 }
 
-const USER_ROLES: Array<{ label: string; value: TenantUserRole }> = [
+const USER_ROLES: Array<{ label: string; value: OrgUserRole }> = [
   { label: 'Owner', value: 'owner' },
   { label: 'Admin', value: 'admin' },
   { label: 'Member', value: 'member' },
@@ -41,32 +41,32 @@ const CrudPage = PlatformCrudPage as unknown as <T extends { id: string }>(
   props: CrudPageProps<T>,
 ) => ReactElement
 
-export function UsersPage({ tenantId, principalId }: UsersPageProps) {
+export function UsersPage({ orgId, principalId }: UsersPageProps) {
   const [lifecycleView, setLifecycleView] = useState<CrudLifecycleView>('active')
   const [selectedIds, setSelectedIds] = useState<string[]>([])
-  const [selectedRowsById, setSelectedRowsById] = useState<Record<string, TenantUser>>({})
+  const [selectedRowsById, setSelectedRowsById] = useState<Record<string, OrgUser>>({})
   const [formMode, setFormMode] = useState<'create' | 'edit' | null>(null)
   const [formValues, setFormValues] = useState<CrudFormValues>({})
   const [formSaving, setFormSaving] = useState(false)
   const [bulkBusy, setBulkBusy] = useState(false)
   const [reloadVersion, setReloadVersion] = useState(0)
   const [actionError, setActionError] = useState('')
-  const isActive = Boolean(tenantId && principalId)
+  const isActive = Boolean(orgId && principalId)
   const formFields = useMemo(() => userFormFields(), [])
   const selectedRow = selectedIds.length === 1 ? selectedRowsById[selectedIds[0]] ?? null : null
 
-  const dataSource: NonNullable<CrudPageProps<TenantUser>['dataSource']> = useMemo(() => ({
-    list: () => isActive ? listUsers(lifecycleView, tenantId, principalId) : Promise.resolve([]),
-  }), [isActive, lifecycleView, principalId, tenantId])
+  const dataSource: NonNullable<CrudPageProps<OrgUser>['dataSource']> = useMemo(() => ({
+    list: () => isActive ? listUsers(lifecycleView, orgId, principalId) : Promise.resolve([]),
+  }), [isActive, lifecycleView, principalId, orgId])
 
   useEffect(() => {
     setSelectedIds([])
     setSelectedRowsById({})
     closeForm()
     setActionError('')
-  }, [lifecycleView, tenantId])
+  }, [lifecycleView, orgId])
 
-  const toggleSelected = (row: TenantUser, checked: boolean) => {
+  const toggleSelected = (row: OrgUser, checked: boolean) => {
     setSelectedRowsById((current) => {
       const next = { ...current }
       if (checked) next[row.id] = row
@@ -92,7 +92,7 @@ export function UsersPage({ tenantId, principalId }: UsersPageProps) {
 
   const openCreate = () => {
     setFormMode('create')
-    setFormValues({ ...emptyFormValues<TenantUser>(formFields), role: 'member' })
+    setFormValues({ ...emptyFormValues<OrgUser>(formFields), role: 'member' })
     setActionError('')
   }
 
@@ -115,9 +115,9 @@ export function UsersPage({ tenantId, principalId }: UsersPageProps) {
     setActionError('')
     try {
       if (formMode === 'create') {
-        await createUser(userPayload(formValues), tenantId, principalId)
+        await createUser(userPayload(formValues), orgId, principalId)
       } else if (selectedRow) {
-        await updateUser(selectedRow.id, userPayload(formValues), tenantId, principalId)
+        await updateUser(selectedRow.id, userPayload(formValues), orgId, principalId)
       }
       closeForm()
       clearSelected()
@@ -136,17 +136,17 @@ export function UsersPage({ tenantId, principalId }: UsersPageProps) {
     try {
       for (const id of selectedIds) {
         if (action === 'archive') {
-          await archiveUser(id, tenantId, principalId)
+          await archiveUser(id, orgId, principalId)
         } else if (action === 'trash') {
-          await trashUser(id, tenantId, principalId)
+          await trashUser(id, orgId, principalId)
         } else if (action === 'restore') {
           if (lifecycleView === 'archived') {
-            await unarchiveUser(id, tenantId, principalId)
+            await unarchiveUser(id, orgId, principalId)
           } else {
-            await restoreUser(id, tenantId, principalId)
+            await restoreUser(id, orgId, principalId)
           }
         } else {
-          await purgeUser(id, tenantId, principalId)
+          await purgeUser(id, orgId, principalId)
         }
       }
       clearSelected()
@@ -161,15 +161,15 @@ export function UsersPage({ tenantId, principalId }: UsersPageProps) {
   if (!isActive) {
     return (
       <section className="page-section">
-        <div className="empty-state">Select an active tenant to manage Users.</div>
+        <div className="empty-state">Select an active organization to manage Users.</div>
       </section>
     )
   }
 
   return (
     <section className="page-section iam-control axis-crud-host">
-      <CrudPage<TenantUser>
-        key={`users-${tenantId}-${lifecycleView}-${reloadVersion}`}
+      <CrudPage<OrgUser>
+        key={`users-${orgId}-${lifecycleView}-${reloadVersion}`}
         dataSource={dataSource}
         stringsBase={defaultCrudStrings}
         strings={{
@@ -214,7 +214,7 @@ export function UsersPage({ tenantId, principalId }: UsersPageProps) {
             />
             {actionError ? <p role="alert" className="iam-control__inline-error">{actionError}</p> : null}
             {formMode ? (
-              <EntityFormPanel<TenantUser>
+              <EntityFormPanel<OrgUser>
                 title={formMode === 'create' ? 'New user' : 'Edit user'}
                 mode={formMode}
                 fields={formFields}
@@ -238,10 +238,10 @@ export function UsersPage({ tenantId, principalId }: UsersPageProps) {
 
 function userColumns(
   selectedIds: string[],
-  onToggle: (row: TenantUser, checked: boolean) => void,
-): CrudPageProps<TenantUser>['columns'] {
+  onToggle: (row: OrgUser, checked: boolean) => void,
+): CrudPageProps<OrgUser>['columns'] {
   return [
-    selectionColumn<TenantUser>(selectedIds, onToggle),
+    selectionColumn<OrgUser>(selectedIds, onToggle),
     { key: 'email', header: 'Email', className: 'iam-control__primary-col', ...crudPrimaryStickyColumn },
     { key: 'created_at', header: 'Created', className: 'iam-control__created-col', render: (value) => formatDateTime24(String(value ?? '')) },
     { key: 'role', header: 'Role', render: (value) => formatRole(String(value ?? '')) },
@@ -249,7 +249,7 @@ function userColumns(
   ]
 }
 
-function userFormFields(): CrudPageProps<TenantUser>['formFields'] {
+function userFormFields(): CrudPageProps<OrgUser>['formFields'] {
   return [
     { key: 'email', label: 'Email' },
     {
@@ -262,14 +262,14 @@ function userFormFields(): CrudPageProps<TenantUser>['formFields'] {
   ]
 }
 
-function userToFormValues(row: TenantUser): CrudFormValues {
+function userToFormValues(row: OrgUser): CrudFormValues {
   return {
     email: row.email,
     role: row.role || 'member',
   }
 }
 
-function userPayload(values: CrudFormValues): TenantUserInput {
+function userPayload(values: CrudFormValues): OrgUserInput {
   return {
     email: stringValue(values.email).toLowerCase(),
     role: roleValue(values.role),
@@ -280,7 +280,7 @@ function isValidUserForm(values: CrudFormValues): boolean {
   return isEmail(stringValue(values.email)) && isUserRole(stringValue(values.role) || 'member')
 }
 
-function userSearchText(row: TenantUser): string {
+function userSearchText(row: OrgUser): string {
   return [
     row.id,
     row.kind,
@@ -290,7 +290,7 @@ function userSearchText(row: TenantUser): string {
   ].join(' ')
 }
 
-function selectionColumn<T extends TenantUser>(
+function selectionColumn<T extends OrgUser>(
   selectedIds: string[],
   onToggle: (row: T, checked: boolean) => void,
 ): NonNullable<CrudPageProps<T>['columns']>[number] {
@@ -350,12 +350,12 @@ function stringValue(value: CrudFormValues[string]): string {
   return String(value ?? '').trim()
 }
 
-function roleValue(value: CrudFormValues[string]): TenantUserRole {
+function roleValue(value: CrudFormValues[string]): OrgUserRole {
   const role = stringValue(value)
   return isUserRole(role) ? role : 'member'
 }
 
-function isUserRole(value: string): value is TenantUserRole {
+function isUserRole(value: string): value is OrgUserRole {
   return value === 'owner' || value === 'admin' || value === 'member'
 }
 

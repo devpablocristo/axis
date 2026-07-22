@@ -27,7 +27,7 @@ type CrudLifecycleView = 'active' | 'archived' | 'trash'
 type BulkAction = 'archive' | 'trash' | 'restore' | 'purge'
 
 type ProfileTemplatesPageProps = {
-  tenantId: string
+  orgId: string
   principalId: string
 }
 
@@ -44,7 +44,7 @@ const CrudPage = PlatformCrudPage as unknown as <T extends { id: string }>(
   props: CrudPageProps<T>,
 ) => ReactElement
 
-export function ProfileTemplatesPage({ tenantId, principalId }: ProfileTemplatesPageProps) {
+export function ProfileTemplatesPage({ orgId, principalId }: ProfileTemplatesPageProps) {
   const rootRef = useRef<HTMLElement | null>(null)
   const [lifecycleView, setLifecycleView] = useState<CrudLifecycleView>('active')
   const [selectedIds, setSelectedIds] = useState<string[]>([])
@@ -55,20 +55,20 @@ export function ProfileTemplatesPage({ tenantId, principalId }: ProfileTemplates
   const [bulkBusy, setBulkBusy] = useState(false)
   const [reloadVersion, setReloadVersion] = useState(0)
   const [actionError, setActionError] = useState('')
-  const isActive = Boolean(tenantId && principalId)
+  const isActive = Boolean(orgId && principalId)
   const formFields = useMemo(() => profileFormFields(), [])
   const selectedRow = selectedIds.length === 1 ? selectedRowsById[selectedIds[0]] ?? null : null
 
   const dataSource: NonNullable<CrudPageProps<ProfileTemplate>['dataSource']> = useMemo(() => ({
-    list: () => isActive ? listProfileTemplates(lifecycleView, tenantId, principalId) : Promise.resolve([]),
-  }), [isActive, lifecycleView, principalId, tenantId])
+    list: () => isActive ? listProfileTemplates(lifecycleView, orgId, principalId) : Promise.resolve([]),
+  }), [isActive, lifecycleView, principalId, orgId])
 
   useEffect(() => {
     setSelectedIds([])
     setSelectedRowsById({})
     closeForm()
     setActionError('')
-  }, [lifecycleView, tenantId])
+  }, [lifecycleView, orgId])
 
   useEffect(() => {
     const root = rootRef.current
@@ -130,7 +130,7 @@ export function ProfileTemplatesPage({ tenantId, principalId }: ProfileTemplates
       root.removeEventListener('mouseout', handlePointerOut)
       hideFieldHelp()
     }
-  }, [tenantId, lifecycleView, reloadVersion])
+  }, [orgId, lifecycleView, reloadVersion])
 
   const toggleSelected = (row: ProfileTemplate, checked: boolean) => {
     setSelectedRowsById((current) => {
@@ -181,9 +181,9 @@ export function ProfileTemplatesPage({ tenantId, principalId }: ProfileTemplates
     setActionError('')
     try {
       if (formMode === 'create') {
-        await createProfileTemplate(profilePayload(formValues), tenantId, principalId)
+        await createProfileTemplate(profilePayload(formValues), orgId, principalId)
       } else if (selectedRow) {
-        await updateProfileTemplate(selectedRow.id, profilePayload(formValues), tenantId, principalId)
+        await updateProfileTemplate(selectedRow.id, profilePayload(formValues), orgId, principalId)
       }
       closeForm()
       clearSelected()
@@ -202,17 +202,17 @@ export function ProfileTemplatesPage({ tenantId, principalId }: ProfileTemplates
     try {
       for (const id of selectedIds) {
         if (action === 'archive') {
-          await archiveProfileTemplate(id, tenantId, principalId)
+          await archiveProfileTemplate(id, orgId, principalId)
         } else if (action === 'trash') {
-          await trashProfileTemplate(id, tenantId, principalId)
+          await trashProfileTemplate(id, orgId, principalId)
         } else if (action === 'restore') {
           if (lifecycleView === 'archived') {
-            await unarchiveProfileTemplate(id, tenantId, principalId)
+            await unarchiveProfileTemplate(id, orgId, principalId)
           } else {
-            await restoreProfileTemplate(id, tenantId, principalId)
+            await restoreProfileTemplate(id, orgId, principalId)
           }
         } else {
-          await purgeProfileTemplate(id, tenantId, principalId)
+          await purgeProfileTemplate(id, orgId, principalId)
         }
       }
       clearSelected()
@@ -227,7 +227,7 @@ export function ProfileTemplatesPage({ tenantId, principalId }: ProfileTemplates
   if (!isActive) {
     return (
       <section className="page-section">
-        <div className="empty-state">Select an active tenant to manage Profile Templates.</div>
+        <div className="empty-state">Select an active organization to manage Profile Templates.</div>
       </section>
     )
   }
@@ -235,7 +235,7 @@ export function ProfileTemplatesPage({ tenantId, principalId }: ProfileTemplates
   return (
     <section ref={rootRef} className="page-section iam-control axis-crud-host">
       <CrudPage<ProfileTemplate>
-        key={`profile-templates-${tenantId}-${lifecycleView}-${reloadVersion}`}
+        key={`profile-templates-${orgId}-${lifecycleView}-${reloadVersion}`}
         dataSource={dataSource}
         stringsBase={defaultCrudStrings}
         strings={{
@@ -402,7 +402,7 @@ function maxAutonomyDefinition(value: string): {
   if (value === 'A3') {
     return {
       label: 'A3 - Limited execution',
-      description: 'Can execute low-risk writes that are reversible, idempotent and scoped to the tenant.',
+      description: 'Can execute low-risk writes that are reversible, idempotent and scoped to the organization.',
       effect: 'Virployees above A3 cannot use this template.',
     }
   }

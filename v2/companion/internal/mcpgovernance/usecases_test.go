@@ -201,7 +201,7 @@ func TestToolContextHashBindsProductAndRepositoryGeneration(t *testing.T) {
 	_, repo, capability, virployee, _ := testUseCases(t, "read")
 	tool := toolFromCapability(capability, "authority-hash")
 	base := repo.resolved
-	base.ProductSurface, base.RepositoryGeneration = "medmory", "generation-a"
+	base.ProductSurface, base.RepositoryGeneration = "producta", "generation-a"
 	first, err := toolContextHash(base, virployee, repo.policy, tool)
 	if err != nil {
 		t.Fatal(err)
@@ -228,10 +228,10 @@ func TestValidateJSONSchema(t *testing.T) {
 
 func testUseCases(t *testing.T, sideEffect string) (*UseCases, *fakeRepository, capabilitydomain.Capability, virployeedomain.Virployee, ContextRequest) {
 	t.Helper()
-	tenantID := "tenant-1"
+	orgID := "organization-1"
 	virployeeID, subjectID, assignmentID, roleID, capabilityID := uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New()
 	capability := capabilitydomain.Capability{
-		ID: capabilityID, TenantID: tenantID, CapabilityKey: "calendar.events." + map[string]string{"read": "read", "write": "create"}[sideEffect],
+		ID: capabilityID, OrgID: orgID, CapabilityKey: "calendar.events." + map[string]string{"read": "read", "write": "create"}[sideEffect],
 		Name: "Calendar", Description: "Calendar tool", RequiredAutonomy: virployeedomain.AutonomyA3,
 		RiskClass: "medium", SideEffectClass: sideEffect, RequiresNexusApproval: sideEffect == "write",
 		PromotionState: capabilitydomain.PromotionActive, ManifestHash: "manifest-hash", ConformedHash: "manifest-hash",
@@ -244,13 +244,13 @@ func testUseCases(t *testing.T, sideEffect string) (*UseCases, *fakeRepository, 
 	}
 	virployee := virployeedomain.Virployee{ID: virployeeID, JobRoleID: roleID, CapabilityIDs: []uuid.UUID{capabilityID}, Autonomy: virployeedomain.AutonomyA3, CreatedAt: time.Now()}
 	resolved := InvocationContext{
-		TenantID: tenantID, ActorID: "actor-1", ActorRole: "owner", VirployeeID: virployeeID,
+		OrgID: orgID, ActorID: "actor-1", ActorRole: "owner", VirployeeID: virployeeID,
 		SubjectID: subjectID, AssignmentID: assignmentID, AssignmentVersion: 3,
 		PrincipalType: "person", PrincipalID: subjectID.String(),
 	}
-	repo := &fakeRepository{policy: DefaultPolicy(tenantID), resolved: resolved}
+	repo := &fakeRepository{policy: DefaultPolicy(orgID), resolved: resolved}
 	repo.policy.Enabled, repo.policy.Version = true, 1
 	uc := NewUseCases(repo, fakeCatalog{items: []capabilitydomain.Capability{capability}}, fakeVirployees{item: virployee}, fakeAuthority{allowed: true, hash: "authority-hash"}, nil)
 	uc.now = func() time.Time { return time.Unix(1_700_000_000, 0).UTC() }
-	return uc, repo, capability, virployee, ContextRequest{TenantID: tenantID, ActorID: "actor-1", ActorRole: "owner", VirployeeID: virployeeID, SubjectID: subjectID}
+	return uc, repo, capability, virployee, ContextRequest{OrgID: orgID, ActorID: "actor-1", ActorRole: "owner", VirployeeID: virployeeID, SubjectID: subjectID}
 }

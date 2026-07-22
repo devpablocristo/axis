@@ -28,7 +28,7 @@ func (h *Handler) Routes(router gin.IRouter) {
 }
 
 func (h *Handler) list(c *gin.Context) {
-	out, err := h.ucs.ListArtifacts(c, tenant(c), actor(c), role(c))
+	out, err := h.ucs.ListArtifacts(c, organization(c), actor(c), role(c))
 	respond(c, http.StatusOK, out, err)
 }
 
@@ -37,7 +37,7 @@ func (h *Handler) create(c *gin.Context) {
 	if err := ginmw.BindJSON(c, &input); err != nil {
 		return
 	}
-	out, err := h.ucs.CreateArtifact(c, tenant(c), actor(c), role(c), input)
+	out, err := h.ucs.CreateArtifact(c, organization(c), actor(c), role(c), input)
 	respond(c, http.StatusCreated, out, err)
 }
 
@@ -46,7 +46,7 @@ func (h *Handler) get(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, err := h.ucs.GetArtifact(c, tenant(c), actor(c), role(c), id)
+	out, err := h.ucs.GetArtifact(c, organization(c), actor(c), role(c), id)
 	respond(c, http.StatusOK, out, err)
 }
 
@@ -59,7 +59,7 @@ func (h *Handler) createVersion(c *gin.Context) {
 	if err := ginmw.BindJSON(c, &input); err != nil {
 		return
 	}
-	out, err := h.ucs.CreateVersion(c, tenant(c), actor(c), role(c), id, input)
+	out, err := h.ucs.CreateVersion(c, organization(c), actor(c), role(c), id, input)
 	respond(c, http.StatusCreated, out, err)
 }
 
@@ -68,7 +68,7 @@ func (h *Handler) simulate(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, err := h.ucs.Simulate(c, tenant(c), actor(c), role(c), id)
+	out, err := h.ucs.Simulate(c, organization(c), actor(c), role(c), id)
 	respond(c, http.StatusOK, out, err)
 }
 
@@ -81,7 +81,7 @@ func (h *Handler) requestPromotion(c *gin.Context) {
 	if err := ginmw.BindJSON(c, &input); err != nil {
 		return
 	}
-	out, err := h.ucs.RequestPromotion(c, tenant(c), actor(c), role(c), id, input)
+	out, err := h.ucs.RequestPromotion(c, organization(c), actor(c), role(c), id, input)
 	respond(c, http.StatusAccepted, out, err)
 }
 
@@ -97,25 +97,25 @@ func (h *Handler) decidePromotion(c *gin.Context, approve bool) {
 	if err := ginmw.BindJSON(c, &input); err != nil {
 		return
 	}
-	out, err := h.ucs.DecidePromotion(c, tenant(c), actor(c), role(c), id, approve, input)
+	out, err := h.ucs.DecidePromotion(c, organization(c), actor(c), role(c), id, approve, input)
 	respond(c, http.StatusOK, out, err)
 }
 
 func (h *Handler) evaluations(c *gin.Context) {
 	limit, _ := strconv.Atoi(c.Query("limit"))
-	out, err := h.ucs.ListEvaluations(c, tenant(c), actor(c), role(c), limit)
+	out, err := h.ucs.ListEvaluations(c, organization(c), actor(c), role(c), limit)
 	respond(c, http.StatusOK, out, err)
 }
 
 func (h *Handler) promotions(c *gin.Context) {
 	limit, _ := strconv.Atoi(c.Query("limit"))
-	out, err := h.ucs.ListPromotions(c, tenant(c), actor(c), role(c), limit)
+	out, err := h.ucs.ListPromotions(c, organization(c), actor(c), role(c), limit)
 	respond(c, http.StatusOK, out, err)
 }
 
 func (h *Handler) changelog(c *gin.Context) {
 	limit, _ := strconv.Atoi(c.Query("limit"))
-	out, err := h.ucs.ListChanges(c, tenant(c), actor(c), role(c), limit)
+	out, err := h.ucs.ListChanges(c, organization(c), actor(c), role(c), limit)
 	respond(c, http.StatusOK, out, err)
 }
 
@@ -127,6 +127,6 @@ func respond(c *gin.Context, status int, value any, err error) {
 	ginmw.WriteJSON(c, status, value)
 }
 
-func tenant(c *gin.Context) string { return strings.TrimSpace(c.GetHeader("X-Tenant-ID")) }
-func actor(c *gin.Context) string  { return strings.TrimSpace(c.GetHeader("X-Actor-ID")) }
-func role(c *gin.Context) string   { return strings.TrimSpace(c.GetHeader("X-Axis-Tenant-Role")) }
+func organization(c *gin.Context) string { return strings.TrimSpace(c.GetHeader("X-Org-ID")) }
+func actor(c *gin.Context) string        { return strings.TrimSpace(c.GetHeader("X-Actor-ID")) }
+func role(c *gin.Context) string         { return strings.TrimSpace(c.GetHeader("X-Axis-Org-Role")) }

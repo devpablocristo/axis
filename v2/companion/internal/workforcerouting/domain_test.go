@@ -35,11 +35,11 @@ func TestNormalizeRelationshipsRequiresOnePrimaryEmployer(t *testing.T) {
 func TestNormalizeRoutingInputs(t *testing.T) {
 	poolID := uuid.New()
 	subjectID := uuid.New()
-	got, err := NormalizeResolveInput(ResolveInput{PoolID: poolID.String(), SubjectID: subjectID.String(), CapabilityKey: "medmory.timeline.read", ActorID: " "})
+	got, err := NormalizeResolveInput(ResolveInput{PoolID: poolID.String(), SubjectID: subjectID.String(), CapabilityKey: " ProductA.Timeline.Read ", ActorID: " "})
 	if err != nil {
 		t.Fatalf("NormalizeResolveInput: %v", err)
 	}
-	if got.PoolID != poolID || got.SubjectID != subjectID || got.CapabilityKey != "clinical.timeline.build" || got.ActorID != "system" {
+	if got.PoolID != poolID || got.SubjectID != subjectID || got.CapabilityKey != "producta.timeline.read" || got.ActorID != "system" {
 		t.Fatalf("unexpected resolve input: %+v", got)
 	}
 	if _, err := NormalizePoolMemberInput(UpsertPoolMemberInput{MaxActiveSubjects: 0}); !domainerr.IsValidation(err) {

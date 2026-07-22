@@ -33,13 +33,13 @@ func TestAuthorityRevisionChangesActionBinding(t *testing.T) {
 		},
 		RuntimeContext: runtimecontext.Context{Virployee: domain.Virployee{ID: virployeeID}},
 	}
-	first, err := bindingHashForAuthority("tenant-a", result, nil, &executiongate.AuthorityCheckResult{
+	first, err := bindingHashForAuthority("organization-a", result, nil, &executiongate.AuthorityCheckResult{
 		Allowed: true, SnapshotHash: "snapshot-a", ScopeRevision: 1, PolicyRevisionHash: "policy-a",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := bindingHashForAuthority("tenant-a", result, nil, &executiongate.AuthorityCheckResult{
+	second, err := bindingHashForAuthority("organization-a", result, nil, &executiongate.AuthorityCheckResult{
 		Allowed: true, SnapshotHash: "snapshot-b", ScopeRevision: 2, PolicyRevisionHash: "policy-a",
 	})
 	if err != nil {
@@ -56,7 +56,7 @@ func TestAuthorityRevalidationUsesPrincipalPersistedWithAction(t *testing.T) {
 	uc.SetAuthorityEvaluator(evaluator)
 	capability := capabilitydomain.Capability{CapabilityKey: "calendar.events.create", RiskClass: "high", Manifest: capabilitydomain.Manifest{ProductSurface: "calendar"}}
 	action := preparedactions.Action{PrincipalType: "person", PrincipalID: "patient-a"}
-	if _, err := uc.verifyCurrentAuthority(context.Background(), "tenant-1", created.ID, capability, action, "snapshot-a"); err != nil {
+	if _, err := uc.verifyCurrentAuthority(context.Background(), "organization-1", created.ID, capability, action, "snapshot-a"); err != nil {
 		t.Fatalf("verify authority: %v", err)
 	}
 	if evaluator.input.PrincipalType != "person" || evaluator.input.PrincipalID != "patient-a" {

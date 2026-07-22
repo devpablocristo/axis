@@ -42,7 +42,7 @@ Out of scope for the Virployee CRUD resource itself:
 ## Architecture Rules
 
 - `companion` is standalone inside `v2`.
-- Use the Ponti-style module structure:
+- Use the standard Companion module structure:
   - `handler`
   - `handler/dto`
   - `usecases`
@@ -89,13 +89,13 @@ Fields:
 - `id`: server-generated UUID.
 - `name`: required, trimmed, non-empty.
 - `job_role_id`: required UUID reference to an active Job Role in the same
-  tenant. It replaces the old free-text `role`.
+  organization. It replaces the old free-text `role`.
 - `profile_template_id`: required UUID reference to an active Profile Template
-  in the same tenant. This is a live reference: editing the Profile Template
+  in the same organization. This is a live reference: editing the Profile Template
   changes the expected behavior for Virployees that use it.
 - `description`: optional, trimmed.
 - `supervisor_user_id`: required opaque string reference to the human
-  responsible for the Virployee. BFF validates it against tenant Users before
+  responsible for the Virployee. BFF validates it against organization Users before
   forwarding requests; Companion only stores the reference.
 - `autonomy`: optional input. If empty, it defaults to global `A1`. Accepted
   values are `A0`, `A1`, `A2`, `A3`, `A4` and `A5`; runtime and the Execution
@@ -127,7 +127,7 @@ The scale is cumulative: a higher level includes the lower levels. For example,
 | `A0` | Conversation | Can hold conversation and read contextual information, without recommending or preparing actions. |
 | `A1` | Recommendation | Can read, analyze and recommend actions. |
 | `A2` | Draft | Can prepare plans or executable drafts, without external side effects. |
-| `A3` | Limited execution | Can execute low-risk writes that are reversible, idempotent and scoped to the tenant. |
+| `A3` | Limited execution | Can execute low-risk writes that are reversible, idempotent and scoped to the organization. |
 | `A4` | Governed execution | Can attempt medium-risk actions only with prior approval or a controlled playbook. |
 | `A5` | Broad autonomy | Reserved for broad multi-product autonomy; not enabled by default. |
 
@@ -206,16 +206,16 @@ or:
 If lifecycle requires an actor internally, read `X-Actor-ID`. If missing, use
 `system`. `X-Actor-ID` is not authentication.
 
-## Tenancy
+## Organization boundary
 
-Companion reads `X-Tenant-ID` as request context for Job Roles and Virployees.
+Companion reads `X-Org-ID` as request context for Job Roles and Virployees.
 If the header is missing, direct local/dev calls fall back to:
 
 ```text
 default
 ```
 
-BFF v2 is responsible for validating tenant membership before forwarding
+BFF v2 is responsible for validating organization membership before forwarding
 requests to Companion. Companion does not import BFF code.
 
 ## Persistence
@@ -227,7 +227,7 @@ Use Postgres from the first implementation.
 Required columns:
 
 - `id uuid primary key`
-- `tenant_id text not null default 'default'`
+- `org_id text not null default 'default'`
 - `name text not null`
 - `job_role_id uuid not null references job_roles(id)`
 - `description text not null default ''`
@@ -242,11 +242,11 @@ Required columns:
 
 Indexes:
 
-- `(tenant_id, archived_at, trashed_at)`
-- `(tenant_id, id)`
+- `(org_id, archived_at, trashed_at)`
+- `(org_id, id)`
 - `(job_role_id)`
 
-`tenant_id` scopes both Virployees and Job Roles.
+`org_id` scopes both Virployees and Job Roles.
 
 ### lifecycle audit
 
@@ -326,7 +326,7 @@ Response: `201 Created`
 
 `employer_subject_id` is required and is created atomically as the Virployee's
 primary `works_for` relationship. It must reference an active work subject in
-the same tenant.
+the same organization.
 
 ```json
 {
@@ -351,9 +351,9 @@ Validation:
 
 - `name` is required.
 - `job_role_id` is required, must be a UUID and must reference an active Job
-  Role in the same tenant.
+  Role in the same organization.
 - `profile_template_id` is required, must be a UUID and must reference an active
-  Profile Template in the same tenant.
+  Profile Template in the same organization.
 - `supervisor_user_id` is required, trimmed and must be non-empty.
 - `autonomy` is optional. Empty or omitted values default to `A1`.
 - `autonomy` must be one of `A0`, `A1`, `A2`, `A3`, `A4` or `A5`.
@@ -557,5 +557,5 @@ Do not expose raw internal errors in HTTP responses.
 - Trash removes it from active/archived and shows it in trash.
 - Restore returns it to active list.
 - Purge permanently removes it.
-- Public API does not require or return tenants.
+- Public API does not require or return organizations.
 - No dependency on Axis v1 services or packages.

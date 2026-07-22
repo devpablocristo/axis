@@ -22,7 +22,7 @@ import {
   type Virployee,
 } from './api'
 
-type Props = { tenantId: string; principalId: string; productSurface: string }
+type Props = { orgId: string; principalId: string; productSurface: string }
 
 const emptyPolicy = {
   assistType: 'clinical_diagnosis', entrypoint: '', mode: 'shadow' as OrchestrationPolicy['mode'],
@@ -34,7 +34,7 @@ const emptyRoute = {
   requirement: 'selector_allowed' as SpecialistRoute['requirement_mode'], enabled: true,
 }
 
-export function CoordinationPage({ tenantId, principalId, productSurface }: Props) {
+export function CoordinationPage({ orgId, principalId, productSurface }: Props) {
   const [cases, setCases] = useState<AssistCase[]>([])
   const [handoffs, setHandoffs] = useState<Handoff[]>([])
   const [reviews, setReviews] = useState<HumanReview[]>([])
@@ -54,19 +54,19 @@ export function CoordinationPage({ tenantId, principalId, productSurface }: Prop
   const openReviews = reviews.filter((item) => item.status !== 'resolved')
 
   useEffect(() => {
-    if (!tenantId || !principalId) return
+    if (!orgId || !principalId) return
     void load()
-  }, [tenantId, principalId])
+  }, [orgId, principalId])
 
   async function load() {
     setLoading(true)
     setError('')
     try {
       const [nextCases, nextHandoffs, nextReviews, nextPolicies, nextRoutes, nextVirployees, nextCapabilities] = await Promise.all([
-        listAssistCases(tenantId, principalId), listHandoffs(tenantId, principalId),
-        listHumanReviews(tenantId, principalId), listOrchestrationPolicies(tenantId, principalId),
-        listSpecialistRoutes(tenantId, principalId), listVirployees('active', tenantId, principalId),
-        listCapabilities('active', tenantId, principalId),
+        listAssistCases(orgId, principalId), listHandoffs(orgId, principalId),
+        listHumanReviews(orgId, principalId), listOrchestrationPolicies(orgId, principalId),
+        listSpecialistRoutes(orgId, principalId), listVirployees('active', orgId, principalId),
+        listCapabilities('active', orgId, principalId),
       ])
       setCases(nextCases); setHandoffs(nextHandoffs); setReviews(nextReviews)
       setPolicies(nextPolicies); setRoutes(nextRoutes); setVirployees(nextVirployees); setCapabilities(nextCapabilities)
@@ -91,12 +91,12 @@ export function CoordinationPage({ tenantId, principalId, productSurface }: Prop
     const reason = window.prompt('Reason code', 'specialist_ownership_transfer')?.trim()
     if (!reason) return
     const note = window.prompt('Operational note (optional)')?.trim() ?? ''
-    void run(`case:${item.id}`, () => createHandoff({ case_id: item.id, to_virployee_id: target, reason_code: reason, note }, tenantId, principalId))
+    void run(`case:${item.id}`, () => createHandoff({ case_id: item.id, to_virployee_id: target, reason_code: reason, note }, orgId, principalId))
   }
 
   function handoffDecision(item: Handoff, decision: 'accept' | 'reject' | 'cancel') {
     const note = decision === 'cancel' ? '' : window.prompt(`${decision} note (optional)`)?.trim() ?? ''
-    void run(`handoff:${item.id}`, () => decideHandoff(item.id, decision, item.version, tenantId, principalId, note))
+    void run(`handoff:${item.id}`, () => decideHandoff(item.id, decision, item.version, orgId, principalId, note))
   }
 
   function resolveReview(item: HumanReview) {
@@ -105,7 +105,7 @@ export function CoordinationPage({ tenantId, principalId, productSurface }: Prop
     const note = window.prompt('Review note (optional)')?.trim() ?? ''
     const handoffID = raw === 'handoff_requested' ? window.prompt('Handoff ID')?.trim() ?? '' : ''
     if (raw === 'handoff_requested' && !handoffID) return
-    void run(`review:${item.id}`, () => resolveHumanReview(item.id, raw, tenantId, principalId, note, handoffID))
+    void run(`review:${item.id}`, () => resolveHumanReview(item.id, raw, orgId, principalId, note, handoffID))
   }
 
   function savePolicy() {
@@ -124,7 +124,7 @@ export function CoordinationPage({ tenantId, principalId, productSurface }: Prop
       output_schema: outputSchema, max_specialists: policyForm.maxSpecialists,
       consultation_timeout_seconds: policyForm.consultationTimeout,
       orchestration_timeout_seconds: policyForm.orchestrationTimeout,
-    }, tenantId, principalId))
+    }, orgId, principalId))
   }
 
   function saveRoute() {
@@ -133,7 +133,7 @@ export function CoordinationPage({ tenantId, principalId, productSurface }: Prop
       entrypoint_virployee_id: routeForm.entrypoint, specialty_code: routeForm.code,
       target_virployee_id: routeForm.target, capability_id: routeForm.capability,
       requirement_mode: routeForm.requirement, enabled: routeForm.enabled,
-    }, tenantId, principalId))
+    }, orgId, principalId))
   }
 
   return (
@@ -181,7 +181,7 @@ export function CoordinationPage({ tenantId, principalId, productSurface }: Prop
             <div><strong>{item.reason_code}</strong><span className={`coordination-status coordination-status--${item.urgency}`}>{item.urgency}</span></div>
             <p>Run {short(item.root_run_id)} · {item.status}</p>
             <small>{item.reviewer_user_id ? `Reviewer: ${item.reviewer_user_id}` : 'Unclaimed'}</small>
-            {item.status === 'pending' ? <button type="button" className="btn-primary" disabled={Boolean(busy)} onClick={() => void run(`review:${item.id}`, () => claimHumanReview(item.id, tenantId, principalId))}>Claim</button> : null}
+            {item.status === 'pending' ? <button type="button" className="btn-primary" disabled={Boolean(busy)} onClick={() => void run(`review:${item.id}`, () => claimHumanReview(item.id, orgId, principalId))}>Claim</button> : null}
             {item.status === 'claimed' ? <button type="button" className="btn-primary" disabled={Boolean(busy)} onClick={() => resolveReview(item)}>Resolve</button> : null}
           </article>)}
         </CoordinationSection>

@@ -19,7 +19,6 @@ import (
 	"github.com/devpablocristo/bff-v2/internal/orgs"
 	"github.com/devpablocristo/bff-v2/internal/products"
 	"github.com/devpablocristo/bff-v2/internal/session"
-	"github.com/devpablocristo/bff-v2/internal/tenancy"
 	"github.com/devpablocristo/bff-v2/internal/users"
 	authnoidc "github.com/devpablocristo/platform/authn/go/oidc"
 	postgres "github.com/devpablocristo/platform/databases/postgres/go"
@@ -90,16 +89,14 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	}
 
 	productsRepo := products.NewRepository(db.Pool())
-	tenancyRepo := tenancy.NewRepository(db.Pool())
-	tenancyUC := tenancy.NewUseCasesWithProductResolver(tenancyRepo, productsRepo, orgProvider)
+	productsUC := products.NewUseCases(productsRepo, orgProvider)
 	orgsRepo := orgs.NewRepository(db.Pool())
-	orgsUC := orgs.NewUseCases(orgsRepo, tenancyUC, orgProvider)
-	productsUC := products.NewUseCases(productsRepo, tenancyUC)
+	orgsUC := orgs.NewUseCases(orgsRepo, productsUC, orgProvider)
 
 	usersRepo := users.NewRepository(db.Pool())
 	usersUC := users.NewUseCases(
 		usersRepo,
-		tenancyUC,
+		productsUC,
 		identityUC,
 		identityProvider,
 		orgProvider,
@@ -107,14 +104,14 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		users.Options{InvitationRedirectURL: config.ClerkInviteRedirectURL},
 	)
 
-	sessionUC := session.NewUseCases(identityUC, tenancyUC, session.Defaults{
+	sessionUC := session.NewUseCases(identityUC, productsUC, session.Defaults{
 		PrincipalID:    config.DevPrincipalID,
 		PrincipalEmail: config.DevPrincipalEmail,
 		OrgID:          config.DevOrgID,
 	}, tokenVerifier, orgProvider)
 	sessionHandler := session.NewHandler(sessionUC)
 
-	gatewayUC, err := gateway.NewUseCases(tenancyUC, config.CompanionBaseURL, config.NexusBaseURL)
+	gatewayUC, err := gateway.NewUseCases(productsUC, config.CompanionBaseURL, config.NexusBaseURL)
 	if err != nil {
 		db.Close()
 		return nil, err
@@ -138,7 +135,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 			"X-Actor-ID",
 			"X-Actor-Email",
 			"X-Axis-Org-ID",
-			"X-Tenant-ID",
+			"X-Product-ID",
 			"X-Axis-Virployee-ID",
 			"X-Axis-Subject-ID",
 			"X-Axis-Case-ID",
@@ -148,7 +145,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	ginmw.RegisterHealthEndpoints(router, db.Ping)
 
 	api := router.Group("/api")
-	identity.NewWebhookHandler(identityUC, tenancyUC, config.ClerkWebhookSecret).Routes(api)
+	identity.NewWebhookHandler(identityUC, productsUC, config.ClerkWebhookSecret).Routes(api)
 	protected := api.Group("")
 	protected.Use(session.NewAuthenticationMiddleware(sessionUC, config.IdentityProvider == "dev" || config.Environment == "test"))
 	sessionHandler.Routes(protected)
@@ -157,18 +154,15 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	}).Routes(protected)
 	products.NewHandler(productsUC, products.HandlerOptions{
 		DefaultPrincipalID: config.DevPrincipalID,
-	}).Routes(protected)
-	tenancy.NewHandler(tenancyUC, tenancy.HandlerOptions{
-		DefaultPrincipalID: config.DevPrincipalID,
-	}).Routes(protected)
+	}).OrganizationProductRoutes(protected)
 	users.NewHandler(usersUC, users.HandlerOptions{
 		DefaultPrincipalID: config.DevPrincipalID,
 	}).Routes(protected)
 	gatewayHandler.Routes(protected)
 
 	// Product-facing inbound edge (machine auth via API key), mounted at the root
-	// OUTSIDE the human-session middleware. A product (e.g. medmory) POSTs
-	// /v1/assist-runs with an API key that maps to a tenant + virployee.
+	// OUTSIDE the human-session middleware. A configured consumer POSTs
+	// /v1/assist-runs with an API key that maps to a product + virployee.
 	if bindings := inbound.ParseBindings(config.ProductAPIKeys); len(bindings) > 0 {
 		inbound.NewHandler(bindings, config.CompanionBaseURL, config.InternalAuthSecret, nil).Routes(router)
 	}

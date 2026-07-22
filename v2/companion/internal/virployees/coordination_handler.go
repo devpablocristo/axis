@@ -36,7 +36,7 @@ func (h *CoordinationHandler) Routes(router gin.IRouter) {
 
 func (h *CoordinationHandler) listCases(c *gin.Context) {
 	limit := parseCoordinationLimit(c)
-	items, err := h.ucs.ListAssistCases(c.Request.Context(), tenantID(c), c.Query("status"), limit)
+	items, err := h.ucs.ListAssistCases(c.Request.Context(), orgID(c), c.Query("status"), limit)
 	if err == nil {
 		subjectID := strings.TrimSpace(c.Query("subject_id"))
 		ownerID := strings.TrimSpace(c.Query("owner_virployee_id"))
@@ -69,11 +69,11 @@ func (h *CoordinationHandler) getCase(c *gin.Context) {
 	if !ok {
 		return
 	}
-	item, err := h.ucs.GetAssistCase(c.Request.Context(), tenantID(c), id)
+	item, err := h.ucs.GetAssistCase(c.Request.Context(), orgID(c), id)
 	respondCoordination(c, item, err)
 }
 func (h *CoordinationHandler) listPolicies(c *gin.Context) {
-	items, err := h.ucs.ListOrchestrationPolicies(c.Request.Context(), tenantID(c))
+	items, err := h.ucs.ListOrchestrationPolicies(c.Request.Context(), orgID(c))
 	respondCoordination(c, items, err)
 }
 func (h *CoordinationHandler) upsertPolicy(c *gin.Context) {
@@ -82,7 +82,7 @@ func (h *CoordinationHandler) upsertPolicy(c *gin.Context) {
 		ginmw.Respond(c, ginmw.ErrBadInput)
 		return
 	}
-	item, err := h.ucs.UpsertOrchestrationPolicy(c.Request.Context(), tenantID(c), coordinationActor(c), req.domain())
+	item, err := h.ucs.UpsertOrchestrationPolicy(c.Request.Context(), orgID(c), coordinationActor(c), req.domain())
 	respondCoordination(c, item, err)
 }
 func (h *CoordinationHandler) listRoutes(c *gin.Context) {
@@ -95,7 +95,7 @@ func (h *CoordinationHandler) listRoutes(c *gin.Context) {
 		}
 		entrypoint = parsed
 	}
-	items, err := h.ucs.ListSpecialistRoutes(c.Request.Context(), tenantID(c), c.Query("product_surface"), c.Query("assist_type"), entrypoint)
+	items, err := h.ucs.ListSpecialistRoutes(c.Request.Context(), orgID(c), c.Query("product_surface"), c.Query("assist_type"), entrypoint)
 	respondCoordination(c, items, err)
 }
 func (h *CoordinationHandler) upsertRoute(c *gin.Context) {
@@ -104,11 +104,11 @@ func (h *CoordinationHandler) upsertRoute(c *gin.Context) {
 		ginmw.Respond(c, ginmw.ErrBadInput)
 		return
 	}
-	item, err := h.ucs.UpsertSpecialistRoute(c.Request.Context(), tenantID(c), coordinationActor(c), req.domain())
+	item, err := h.ucs.UpsertSpecialistRoute(c.Request.Context(), orgID(c), coordinationActor(c), req.domain())
 	respondCoordination(c, item, err)
 }
 func (h *CoordinationHandler) listHandoffs(c *gin.Context) {
-	items, err := h.ucs.ListHandoffs(c.Request.Context(), tenantID(c), c.Query("status"), parseCoordinationLimit(c))
+	items, err := h.ucs.ListHandoffs(c.Request.Context(), orgID(c), c.Query("status"), parseCoordinationLimit(c))
 	respondCoordination(c, items, err)
 }
 func (h *CoordinationHandler) getHandoff(c *gin.Context) {
@@ -116,7 +116,7 @@ func (h *CoordinationHandler) getHandoff(c *gin.Context) {
 	if !ok {
 		return
 	}
-	item, err := h.ucs.GetHandoff(c.Request.Context(), tenantID(c), id)
+	item, err := h.ucs.GetHandoff(c.Request.Context(), orgID(c), id)
 	respondCoordination(c, item, err)
 }
 func (h *CoordinationHandler) createHandoff(c *gin.Context) {
@@ -130,7 +130,7 @@ func (h *CoordinationHandler) createHandoff(c *gin.Context) {
 		ginmw.Respond(c, ginmw.ErrBadInput)
 		return
 	}
-	item, err := h.ucs.CreateHandoff(c.Request.Context(), tenantID(c), coordinationActor(c), in)
+	item, err := h.ucs.CreateHandoff(c.Request.Context(), orgID(c), coordinationActor(c), in)
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -149,7 +149,7 @@ func (h *CoordinationHandler) decideHandoff(c *gin.Context, decision string) {
 		ginmw.Respond(c, ginmw.ErrBadInput)
 		return
 	}
-	item, err := h.ucs.DecideHandoff(c.Request.Context(), tenantID(c), id, coordinationActor(c), decision, DecideHandoffInput(req))
+	item, err := h.ucs.DecideHandoff(c.Request.Context(), orgID(c), id, coordinationActor(c), decision, DecideHandoffInput(req))
 	respondCoordination(c, item, err)
 }
 func (h *CoordinationHandler) cancelHandoff(c *gin.Context) {
@@ -162,11 +162,11 @@ func (h *CoordinationHandler) cancelHandoff(c *gin.Context) {
 		ginmw.Respond(c, ginmw.ErrBadInput)
 		return
 	}
-	item, err := h.ucs.CancelHandoff(c.Request.Context(), tenantID(c), id, coordinationActor(c), req.Version)
+	item, err := h.ucs.CancelHandoff(c.Request.Context(), orgID(c), id, coordinationActor(c), req.Version)
 	respondCoordination(c, item, err)
 }
 func (h *CoordinationHandler) listReviews(c *gin.Context) {
-	items, err := h.ucs.ListHumanReviews(c.Request.Context(), tenantID(c), c.Query("status"))
+	items, err := h.ucs.ListHumanReviews(c.Request.Context(), orgID(c), c.Query("status"))
 	respondCoordination(c, items, err)
 }
 func (h *CoordinationHandler) claimReview(c *gin.Context) {
@@ -174,7 +174,7 @@ func (h *CoordinationHandler) claimReview(c *gin.Context) {
 	if !ok {
 		return
 	}
-	item, err := h.ucs.ClaimHumanReview(c.Request.Context(), tenantID(c), id, coordinationActor(c))
+	item, err := h.ucs.ClaimHumanReview(c.Request.Context(), orgID(c), id, coordinationActor(c))
 	respondCoordination(c, item, err)
 }
 func (h *CoordinationHandler) resolveReview(c *gin.Context) {
@@ -192,7 +192,7 @@ func (h *CoordinationHandler) resolveReview(c *gin.Context) {
 		ginmw.Respond(c, ginmw.ErrBadInput)
 		return
 	}
-	item, err := h.ucs.ResolveHumanReview(c.Request.Context(), tenantID(c), id, coordinationActor(c), in)
+	item, err := h.ucs.ResolveHumanReview(c.Request.Context(), orgID(c), id, coordinationActor(c), in)
 	respondCoordination(c, item, err)
 }
 
@@ -289,7 +289,7 @@ func (r resolveReviewRequest) domain() (ResolveReviewInput, bool) {
 }
 
 func coordinationActor(c *gin.Context) CoordinationActor {
-	return CoordinationActor{ID: actorID(c), Role: strings.TrimSpace(c.GetHeader("X-Axis-Tenant-Role"))}
+	return CoordinationActor{ID: actorID(c), Role: strings.TrimSpace(c.GetHeader("X-Axis-Org-Role"))}
 }
 func coordinationUUID(c *gin.Context, param string) (uuid.UUID, bool) {
 	id, err := uuid.Parse(strings.TrimSpace(c.Param(param)))

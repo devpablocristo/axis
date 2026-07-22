@@ -19,7 +19,7 @@ const (
 
 type Approval struct {
 	ID                 uuid.UUID
-	TenantID           string
+	OrgID              string
 	GovernanceCheckID  uuid.UUID
 	RequesterID        string
 	ProductSurface     string

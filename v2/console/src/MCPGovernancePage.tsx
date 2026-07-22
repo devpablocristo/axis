@@ -10,7 +10,7 @@ import {
 } from './api'
 import { formatDateTime24 } from './formatters'
 
-export function MCPGovernancePage({ tenantId, principalId }: { tenantId: string; principalId: string }) {
+export function MCPGovernancePage({ orgId, principalId }: { orgId: string; principalId: string }) {
 	const [policy, setPolicy] = useState<MCPPolicy | null>(null)
 	const [invocations, setInvocations] = useState<MCPInvocationAudit[]>([])
 	const [policyAudit, setPolicyAudit] = useState<MCPPolicyAudit[]>([])
@@ -20,14 +20,14 @@ export function MCPGovernancePage({ tenantId, principalId }: { tenantId: string;
 	const [switchesText, setSwitchesText] = useState('')
 
 	const load = useCallback(async () => {
-		if (!tenantId) return
+		if (!orgId) return
 		setLoading(true)
 		setError('')
 		try {
 			const [nextPolicy, nextInvocations, nextPolicyAudit] = await Promise.all([
-				getMCPPolicy(tenantId, principalId),
-				listMCPInvocations(tenantId, principalId),
-				listMCPPolicyAudit(tenantId, principalId),
+				getMCPPolicy(orgId, principalId),
+				listMCPInvocations(orgId, principalId),
+				listMCPPolicyAudit(orgId, principalId),
 			])
 			setPolicy(nextPolicy)
 			setInvocations(nextInvocations)
@@ -38,7 +38,7 @@ export function MCPGovernancePage({ tenantId, principalId }: { tenantId: string;
 		} finally {
 			setLoading(false)
 		}
-	}, [principalId, tenantId])
+	}, [principalId, orgId])
 
 	useEffect(() => { void load() }, [load])
 
@@ -48,10 +48,10 @@ export function MCPGovernancePage({ tenantId, principalId }: { tenantId: string;
 		setError('')
 		try {
 			const killSwitches = Object.fromEntries(splitLines(switchesText).map((key) => [key, true]))
-			const saved = await putMCPPolicy({ ...policy, capability_kill_switches: killSwitches }, tenantId, principalId)
+			const saved = await putMCPPolicy({ ...policy, capability_kill_switches: killSwitches }, orgId, principalId)
 			setPolicy(saved)
 			setSwitchesText(Object.keys(killSwitches).sort().join('\n'))
-			setInvocations(await listMCPInvocations(tenantId, principalId))
+			setInvocations(await listMCPInvocations(orgId, principalId))
 		} catch (cause) {
 			setError(cause instanceof Error ? cause.message : 'Could not save MCP governance')
 		} finally {
@@ -84,7 +84,7 @@ export function MCPGovernancePage({ tenantId, principalId }: { tenantId: string;
 			</div>
 
 			<div className="card">
-				<div className="card-header"><div><h2>Policy changes</h2><p className="axis-muted">Tenant policy revision history and responsible actor.</p></div></div>
+				<div className="card-header"><div><h2>Policy changes</h2><p className="axis-muted">Organization policy revision history and responsible actor.</p></div></div>
 				<div className="table-wrap"><table><thead><tr><th>Time</th><th>Actor</th><th>Previous</th><th>New</th></tr></thead><tbody>
 					{policyAudit.length === 0 ? <tr><td colSpan={4}>No policy changes</td></tr> : policyAudit.map((item) => <tr key={item.id}><td>{formatDateTime24(item.created_at)}</td><td>{item.actor_id}</td><td>v{item.previous_version}</td><td>v{item.new_version}</td></tr>)}
 				</tbody></table></div>

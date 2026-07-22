@@ -23,7 +23,7 @@ type Rule struct {
 }
 
 type Policy struct {
-	TenantID               string          `json:"tenant_id"`
+	OrgID                  string          `json:"org_id"`
 	Enabled                bool            `json:"enabled"`
 	KillSwitch             bool            `json:"kill_switch"`
 	AllowedCapabilities    []string        `json:"allowed_capabilities"`
@@ -56,7 +56,7 @@ type PutPolicyInput struct {
 
 type PolicyAudit struct {
 	ID              uuid.UUID `json:"id"`
-	TenantID        string    `json:"tenant_id"`
+	OrgID           string    `json:"org_id"`
 	ActorID         string    `json:"actor_id"`
 	PreviousVersion int64     `json:"previous_version"`
 	NewVersion      int64     `json:"new_version"`
@@ -66,7 +66,7 @@ type PolicyAudit struct {
 }
 
 type InvocationContext struct {
-	TenantID             string    `json:"tenant_id"`
+	OrgID                string    `json:"org_id"`
 	ActorID              string    `json:"actor_id"`
 	ActorRole            string    `json:"actor_role"`
 	VirployeeID          uuid.UUID `json:"virployee_id"`
@@ -81,7 +81,7 @@ type InvocationContext struct {
 }
 
 type ContextRequest struct {
-	TenantID             string
+	OrgID                string
 	ActorID              string
 	ActorRole            string
 	VirployeeID          uuid.UUID
@@ -162,9 +162,9 @@ type IdempotentReplayError struct{ Prior InvocationAudit }
 
 func (e *IdempotentReplayError) Error() string { return "MCP write is an idempotent replay" }
 
-func DefaultPolicy(tenantID string) Policy {
+func DefaultPolicy(orgID string) Policy {
 	return Policy{
-		TenantID: tenantID, Enabled: false, MaxRiskClass: "high",
+		OrgID: orgID, Enabled: false, MaxRiskClass: "high",
 		MaxCallsPerMinute: 120, MaxConcurrency: 10,
 		AllowedCapabilities: []string{}, DeniedCapabilities: []string{},
 		CapabilityKillSwitches: map[string]bool{}, ProductRules: map[string]Rule{}, JobRoleRules: map[string]Rule{},
@@ -278,10 +278,10 @@ func AllowsPolicy(policy Policy, capability capabilitydomain.Capability, jobRole
 		return false, "capability_kill_switch"
 	}
 	if matchesAny(policy.DeniedCapabilities, key) {
-		return false, "tenant_denylist"
+		return false, "org_denylist"
 	}
 	if len(policy.AllowedCapabilities) > 0 && !matchesAny(policy.AllowedCapabilities, key) {
-		return false, "tenant_allowlist"
+		return false, "org_allowlist"
 	}
 	if riskRank[capability.RiskClass] > riskRank[policy.MaxRiskClass] {
 		return false, "risk_limit"

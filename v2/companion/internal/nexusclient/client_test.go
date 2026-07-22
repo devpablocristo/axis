@@ -14,7 +14,7 @@ import (
 )
 
 func TestCheckSendsGovernanceRequestToNexus(t *testing.T) {
-	var gotTenant string
+	var gotOrg string
 	var gotActor string
 	var gotInternalToken string
 	var gotBody map[string]any
@@ -25,7 +25,7 @@ func TestCheckSendsGovernanceRequestToNexus(t *testing.T) {
 		if r.URL.Path != "/v1/governance/check" {
 			t.Fatalf("unexpected path %s", r.URL.Path)
 		}
-		gotTenant = r.Header.Get("X-Tenant-ID")
+		gotOrg = r.Header.Get("X-Org-ID")
 		gotActor = r.Header.Get("X-Actor-ID")
 		gotInternalToken = r.Header.Get("X-Axis-Internal-Token")
 		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
@@ -48,7 +48,7 @@ func TestCheckSendsGovernanceRequestToNexus(t *testing.T) {
 
 	client := New(srv.URL, srv.Client(), "trusted-secret")
 	out, err := client.Check(context.Background(), executiongate.GovernanceCheckInput{
-		TenantID:       "tenant-1",
+		OrgID:          "organization-1",
 		RequesterType:  "virployee",
 		RequesterID:    "virployee-1",
 		ActionType:     "calendar.events.delete",
@@ -60,8 +60,8 @@ func TestCheckSendsGovernanceRequestToNexus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Check: %v", err)
 	}
-	if gotTenant != "tenant-1" {
-		t.Fatalf("expected tenant header tenant-1, got %q", gotTenant)
+	if gotOrg != "organization-1" {
+		t.Fatalf("expected organization header organization-1, got %q", gotOrg)
 	}
 	if gotActor != "virployee-1" || gotInternalToken != "trusted-secret" {
 		t.Fatalf("expected trusted actor and token headers, got actor=%q token=%q", gotActor, gotInternalToken)
@@ -97,7 +97,7 @@ func TestRevalidateSendsMetadataOnlyAuthorityBinding(t *testing.T) {
 	}))
 	defer srv.Close()
 	out, err := New(srv.URL, srv.Client()).Revalidate(context.Background(), executiongate.GovernanceRevalidationInput{
-		TenantID: "tenant-1", CheckID: checkID, BindingHash: "binding-a", PolicySnapshotHash: "snapshot-a",
+		OrgID: "organization-1", CheckID: checkID, BindingHash: "binding-a", PolicySnapshotHash: "snapshot-a",
 		AuthorityBindingHash: "authority-a", ScopeRevision: 3, PolicyRevisionHash: "professional-a",
 		DelegationID: "delegation-a", DelegationRevision: 2,
 	})
@@ -112,12 +112,12 @@ func TestCheckDelegationAuthorizationUsesInternalEndpoint(t *testing.T) {
 		if r.URL.Path != "/v1/internal/authorization:check" {
 			t.Fatalf("unexpected path %s", r.URL.Path)
 		}
-		gotRole = r.Header.Get("X-Axis-Tenant-Role")
+		gotRole = r.Header.Get("X-Axis-Org-Role")
 		_, _ = w.Write([]byte(`{"allowed":true,"reason":"functional grant"}`))
 	}))
 	defer srv.Close()
 	out, err := New(srv.URL, srv.Client()).CheckDelegationAuthorization(context.Background(), professionalauthority.DelegationAuthorizationCheck{
-		TenantID: "tenant-1", ActorID: "delegate-1", ActorRole: "member", Permission: "delegations.write",
+		OrgID: "organization-1", ActorID: "delegate-1", ActorRole: "member", Permission: "delegations.write",
 		ProductSurface: "clinical", ActionType: "records.read", ResourceType: "case", ResourceID: "case-a", RiskClass: "medium",
 	})
 	if err != nil || !out.Allowed || gotRole != "member" {
@@ -127,7 +127,7 @@ func TestCheckDelegationAuthorizationUsesInternalEndpoint(t *testing.T) {
 
 func TestGetApprovalReadsNexusApproval(t *testing.T) {
 	approvalID := uuid.New()
-	var gotTenant string
+	var gotOrg string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			t.Fatalf("expected GET, got %s", r.Method)
@@ -135,7 +135,7 @@ func TestGetApprovalReadsNexusApproval(t *testing.T) {
 		if r.URL.Path != "/v1/approvals/"+approvalID.String() {
 			t.Fatalf("unexpected path %s", r.URL.Path)
 		}
-		gotTenant = r.Header.Get("X-Tenant-ID")
+		gotOrg = r.Header.Get("X-Org-ID")
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
 			"id":"` + approvalID.String() + `",
@@ -147,12 +147,12 @@ func TestGetApprovalReadsNexusApproval(t *testing.T) {
 	defer srv.Close()
 
 	client := New(srv.URL, srv.Client())
-	out, err := client.GetApproval(context.Background(), "tenant-1", approvalID)
+	out, err := client.GetApproval(context.Background(), "organization-1", approvalID)
 	if err != nil {
 		t.Fatalf("GetApproval: %v", err)
 	}
-	if gotTenant != "tenant-1" {
-		t.Fatalf("expected tenant header tenant-1, got %q", gotTenant)
+	if gotOrg != "organization-1" {
+		t.Fatalf("expected organization header organization-1, got %q", gotOrg)
 	}
 	if out.ID != approvalID.String() || out.RequesterID != "virployee-1" || out.BindingHash != "binding-123" || out.Status != "approved" {
 		t.Fatalf("unexpected approval: %+v", out)
@@ -164,7 +164,7 @@ func TestGetApprovalMapsNotFound(t *testing.T) {
 	defer srv.Close()
 
 	client := New(srv.URL, srv.Client())
-	_, err := client.GetApproval(context.Background(), "tenant-1", uuid.New())
+	_, err := client.GetApproval(context.Background(), "organization-1", uuid.New())
 	if !domainerr.IsNotFound(err) {
 		t.Fatalf("expected not found, got %v", err)
 	}
@@ -172,21 +172,21 @@ func TestGetApprovalMapsNotFound(t *testing.T) {
 
 func TestAppendAuditEventIdempotentSendsStableEventKey(t *testing.T) {
 	id := uuid.NewString()
-	var gotKey, gotTenant string
+	var gotKey, gotOrg string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotKey = r.Header.Get("Idempotency-Key")
-		gotTenant = r.Header.Get("X-Tenant-ID")
+		gotOrg = r.Header.Get("X-Org-ID")
 		w.WriteHeader(http.StatusCreated)
 	}))
 	defer srv.Close()
 	client := New(srv.URL, srv.Client())
-	if err := client.AppendAuditEventIdempotent(context.Background(), "tenant-1", id, AuditEvent{
+	if err := client.AppendAuditEventIdempotent(context.Background(), "organization-1", id, AuditEvent{
 		VirployeeID: "vp-1", ActorType: "human", ActorID: "owner-1", EventType: "scope_policy_changed",
 	}); err != nil {
 		t.Fatalf("append audit: %v", err)
 	}
-	if gotKey != id || gotTenant != "tenant-1" {
-		t.Fatalf("unexpected idempotency/tenant headers: key=%q tenant=%q", gotKey, gotTenant)
+	if gotKey != id || gotOrg != "organization-1" {
+		t.Fatalf("unexpected idempotency/organization headers: key=%q organization=%q", gotKey, gotOrg)
 	}
 }
 
@@ -195,7 +195,7 @@ func TestAppendAuditEventClassifiesNexusFourHundreds(t *testing.T) {
 		w.WriteHeader(http.StatusConflict)
 	}))
 	defer srv.Close()
-	err := New(srv.URL, srv.Client()).AppendAuditEventIdempotent(context.Background(), "tenant-1", uuid.NewString(), AuditEvent{
+	err := New(srv.URL, srv.Client()).AppendAuditEventIdempotent(context.Background(), "organization-1", uuid.NewString(), AuditEvent{
 		VirployeeID: "vp-1", ActorID: "owner-1", EventType: "scope_policy_changed",
 	})
 	if !IsPermanentHTTPError(err) {

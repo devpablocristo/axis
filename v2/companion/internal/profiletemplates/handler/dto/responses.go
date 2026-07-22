@@ -8,7 +8,7 @@ import (
 
 type ProfileTemplateResponse struct {
 	ID           string     `json:"id"`
-	TenantID     string     `json:"tenant_id"`
+	OrgID        string     `json:"org_id"`
 	Name         string     `json:"name"`
 	Description  string     `json:"description"`
 	SystemPrompt string     `json:"system_prompt"`
@@ -28,7 +28,7 @@ type ListProfileTemplatesResponse struct {
 func ProfileTemplateFromDomain(profile domain.ProfileTemplate) ProfileTemplateResponse {
 	return ProfileTemplateResponse{
 		ID:           profile.ID.String(),
-		TenantID:     profile.TenantID,
+		OrgID:        profile.OrgID,
 		Name:         profile.Name,
 		Description:  profile.Description,
 		SystemPrompt: profile.SystemPrompt,

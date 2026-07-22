@@ -17,7 +17,7 @@ migration.
 
 ## Knowledge Bases
 
-A Knowledge Base is a tenant-owned, versioned collection of references to
+A Knowledge Base is an organization-owned, versioned collection of references to
 documents already verified and indexed by the artifact pipeline. Every base is
 classified as `professional` or `private`; omitted classification defaults to
 `private`, including all rows that existed before classification was added.
@@ -35,7 +35,7 @@ Each base has one or more bindings:
 | `subject` | One exact Virployee and subject. |
 | `case` | One exact Virployee, subject and Assist case. |
 
-Only active bases and documents participate. Resolution first applies tenant
+Only active bases and documents participate. Resolution first applies organization
 and binding predicates, then retrieves artifact chunks. Companion filters the
 ranked results again by registered document ID, source version and SHA-256, so a
 sibling document from the same artifact generation cannot enter context.
@@ -54,7 +54,7 @@ same Virployee.
 
 ## Sources-only answers and citations
 
-Assist resolves context from the current tenant, Virployee, subject and optional
+Assist resolves context from the current organization, Virployee, subject and optional
 case. In `sources_only` mode:
 
 1. Runtime receives the request as a question/context, plus only verified text
@@ -65,12 +65,12 @@ case. In `sources_only` mode:
 4. An answered response must cite at least one supplied document identifier.
 5. Companion accepts a citation only when its document ID, optional SHA-256 and
    optional locator match an actually retrieved fragment. Any unsupported,
-   cross-subject or cross-tenant citation converts the answer to abstention.
+   cross-subject or cross-organization citation converts the answer to abstention.
 
 Assist persists `grounding_mode`, `answer_status` and canonical validated
 citations. Citation records contain source identifiers and locators, never the
 source body or a signed URL. In `general` mode citations are optional and scoped
-memory may be supplied, but tenant/subject/case retrieval constraints still
+memory may be supplied, but organization/subject/case retrieval constraints still
 apply.
 
 Clinical capability Assist always forces `sources_only`. Search retains the
@@ -99,7 +99,7 @@ rules.
 
 ## Versioned professional policy packs
 
-A Professional Policy Pack is immutable by `(tenant, policy_key, version)` and
+A Professional Policy Pack is immutable by `(organization, policy_key, version)` and
 may belong to a Job Role. Resolution automatically selects the latest active
 version of every pack for the Virployee's profession, plus packs explicitly
 bound to that Virployee. Rules can define:
@@ -136,11 +136,11 @@ capability. The prepared action, authority snapshot and revalidation all bind
 that principal, so a delegation for one patient/customer cannot authorize work
 for another.
 
-Tenant owners/admins may manage every professional authority resource. A user
+Organization owners/admins may manage every professional authority resource. A user
 with a current, matching Nexus `delegation_admin` grant may create, review and
 revoke delegations only inside that grant's scope. Other scope-policy,
 policy-pack and continuity changes remain owner/admin-only. Read and write
-operations remain tenant scoped.
+operations remain organization scoped.
 
 ## Action authorization and context binding
 
@@ -155,7 +155,7 @@ AND required delegation is current
 AND Nexus allows it or its exact approval is valid
 ```
 
-Every Assist run persists a deterministic `context_hash` over tenant,
+Every Assist run persists a deterministic `context_hash` over organization,
 responsible Virployee and Job Role, subject, case, continuity
 assignment/version, product/assist/repository scope, grounding mode, resolved
 source identifiers/hashes, the complete source-authorization snapshot and the

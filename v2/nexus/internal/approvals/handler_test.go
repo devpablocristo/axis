@@ -21,13 +21,13 @@ func TestHandlerListApprovals(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/v1/approvals?status=pending&limit=10&cursor=cursor-1", nil)
-	req.Header.Set("X-Tenant-ID", "tenant-1")
+	req.Header.Set("X-Org-ID", "organization-1")
 	router.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
-	if fake.lastTenant != "tenant-1" || fake.lastInput.StatusRaw != "pending" || fake.lastInput.Limit != 10 || fake.lastInput.Cursor != "cursor-1" {
+	if fake.lastOrg != "organization-1" || fake.lastInput.StatusRaw != "pending" || fake.lastInput.Limit != 10 || fake.lastInput.Cursor != "cursor-1" {
 		t.Fatalf("unexpected list call: %+v", fake)
 	}
 	var payload struct {
@@ -55,13 +55,13 @@ func TestHandlerGetApproval(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/v1/approvals/"+id.String(), nil)
-	req.Header.Set("X-Tenant-ID", "tenant-1")
+	req.Header.Set("X-Org-ID", "organization-1")
 	router.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
-	if fake.lastTenant != "tenant-1" || fake.lastID != id {
+	if fake.lastOrg != "organization-1" || fake.lastID != id {
 		t.Fatalf("unexpected get call: %+v", fake)
 	}
 	var payload struct {
@@ -82,9 +82,9 @@ func TestHandlerApproveApproval(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/approvals/"+id.String()+"/approve", strings.NewReader(`{"note":"approved"}`))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Tenant-ID", "tenant-1")
+	req.Header.Set("X-Org-ID", "organization-1")
 	req.Header.Set("X-Actor-ID", "approver-1")
-	req.Header.Set("X-Axis-Tenant-Role", "admin")
+	req.Header.Set("X-Axis-Org-Role", "admin")
 	router.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
@@ -110,7 +110,7 @@ func decodeApprovalsJSON(t *testing.T, rec *httptest.ResponseRecorder, out any) 
 }
 
 type handlerFakeUseCases struct {
-	lastTenant   string
+	lastOrg      string
 	lastInput    domain.ListInput
 	lastID       uuid.UUID
 	lastActor    domain.DecisionActor
@@ -118,62 +118,62 @@ type handlerFakeUseCases struct {
 	lastDecision string
 }
 
-func (f *handlerFakeUseCases) List(_ context.Context, tenantID string, input domain.ListInput) (domain.ListPage, error) {
-	f.lastTenant = tenantID
+func (f *handlerFakeUseCases) List(_ context.Context, orgID string, input domain.ListInput) (domain.ListPage, error) {
+	f.lastOrg = orgID
 	f.lastInput = input
 	return domain.ListPage{
-		Items:      []domain.Approval{fakeApproval(tenantID, domain.StatusPending)},
+		Items:      []domain.Approval{fakeApproval(orgID, domain.StatusPending)},
 		HasMore:    true,
 		NextCursor: "cursor-2",
 	}, nil
 }
 
-func (f *handlerFakeUseCases) Get(_ context.Context, tenantID string, id uuid.UUID) (domain.Approval, error) {
-	f.lastTenant = tenantID
+func (f *handlerFakeUseCases) Get(_ context.Context, orgID string, id uuid.UUID) (domain.Approval, error) {
+	f.lastOrg = orgID
 	f.lastID = id
-	item := fakeApproval(tenantID, domain.StatusPending)
+	item := fakeApproval(orgID, domain.StatusPending)
 	item.ID = id
 	return item, nil
 }
 
-func (f *handlerFakeUseCases) Approve(_ context.Context, tenantID string, id uuid.UUID, actor domain.DecisionActor, input domain.DecisionInput) (domain.Approval, error) {
-	f.lastTenant = tenantID
+func (f *handlerFakeUseCases) Approve(_ context.Context, orgID string, id uuid.UUID, actor domain.DecisionActor, input domain.DecisionInput) (domain.Approval, error) {
+	f.lastOrg = orgID
 	f.lastID = id
 	f.lastActor = actor
 	f.lastNote = input.Note
 	f.lastDecision = "approve"
-	item := fakeApproval(tenantID, domain.StatusApproved)
+	item := fakeApproval(orgID, domain.StatusApproved)
 	item.ID = id
 	item.DecidedBy = actor.ID
 	item.DecisionNote = input.Note
 	return item, nil
 }
 
-func (f *handlerFakeUseCases) Reject(_ context.Context, tenantID string, id uuid.UUID, actor domain.DecisionActor, input domain.DecisionInput) (domain.Approval, error) {
-	f.lastTenant = tenantID
+func (f *handlerFakeUseCases) Reject(_ context.Context, orgID string, id uuid.UUID, actor domain.DecisionActor, input domain.DecisionInput) (domain.Approval, error) {
+	f.lastOrg = orgID
 	f.lastID = id
 	f.lastActor = actor
 	f.lastNote = input.Note
 	f.lastDecision = "reject"
-	item := fakeApproval(tenantID, domain.StatusRejected)
+	item := fakeApproval(orgID, domain.StatusRejected)
 	item.ID = id
 	item.DecidedBy = actor.ID
 	item.DecisionNote = input.Note
 	return item, nil
 }
 
-func (f *handlerFakeUseCases) Review(_ context.Context, tenantID string, id uuid.UUID, actor domain.DecisionActor, input domain.DecisionInput) (domain.Approval, error) {
-	f.lastTenant, f.lastID, f.lastActor, f.lastNote, f.lastDecision = tenantID, id, actor, input.Note, "review"
-	item := fakeApproval(tenantID, domain.StatusApproved)
+func (f *handlerFakeUseCases) Review(_ context.Context, orgID string, id uuid.UUID, actor domain.DecisionActor, input domain.DecisionInput) (domain.Approval, error) {
+	f.lastOrg, f.lastID, f.lastActor, f.lastNote, f.lastDecision = orgID, id, actor, input.Note, "review"
+	item := fakeApproval(orgID, domain.StatusApproved)
 	item.ID, item.ReviewedBy, item.ReviewNote = id, actor.ID, input.Note
 	return item, nil
 }
 
-func fakeApproval(tenantID string, status domain.Status) domain.Approval {
+func fakeApproval(orgID string, status domain.Status) domain.Approval {
 	now := time.Now().UTC()
 	return domain.Approval{
 		ID:                uuid.New(),
-		TenantID:          tenantID,
+		OrgID:             orgID,
 		GovernanceCheckID: uuid.New(),
 		RequesterID:       "virployee-1",
 		ActionType:        "calendar.events.delete",

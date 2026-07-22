@@ -144,7 +144,7 @@ func readMultipart(writer http.ResponseWriter, request *http.Request, workDir st
 		_ = part.Close()
 	}
 	if !gotMetadata || !gotArtifact || strings.TrimSpace(metadata.Profile) == "" ||
-		strings.TrimSpace(metadata.Scope.TenantID) == "" || strings.TrimSpace(metadata.Manifest.DocumentID) == "" {
+		strings.TrimSpace(metadata.Scope.OrgID) == "" || strings.TrimSpace(metadata.Manifest.DocumentID) == "" {
 		return extractor.Metadata{}, "", extractor.ErrInvalidRequest
 	}
 	if metadata.Manifest.SizeBytes > 0 {

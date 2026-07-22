@@ -1,12 +1,12 @@
 // Package executionstats aggregates per-capability outcome metrics for a
-// tenant from the run traces and execution attempts Companion already
+// organization from the run traces and execution attempts Companion already
 // persists. Fase 3: the metrics INFORM (console, and later the Fase 4
 // learning analyzer and Nexus risk) but never auto-escalate autonomy or
 // promote procedures — every transition stays human-decided (gate G4.5).
 //
 // Extrapolated from v1 nexus/internal/requests/execution_stats.go: the
 // aggregation pattern and the -1 "no data" sentinel are kept, but the keying
-// is (tenant, capability_key) — never a bare action_type across tenants.
+// is (organization, capability_key) — never a bare action_type across organizations.
 package executionstats
 
 import "sort"
@@ -15,7 +15,7 @@ import "sort"
 // to rate (v1 pattern: -1 means "no data", distinct from a real 0%).
 const NoDataRate = -1.0
 
-// CapabilityStats are the aggregated outcomes for one capability in a tenant.
+// CapabilityStats are the aggregated outcomes for one capability in a organization.
 type CapabilityStats struct {
 	CapabilityKey       string  `json:"capability_key"`
 	DryRuns             int64   `json:"dry_runs"`

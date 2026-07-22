@@ -327,7 +327,7 @@ func knownIntentDefinitions() []intentDefinition {
 }
 
 // catalogForCapabilities builds the intent catalog from ONLY the capabilities
-// assigned to the virployee (data-driven per tenant, replacing the former
+// assigned to the virployee (data-driven per organization, replacing the former
 // global literal). An action the virployee does not have assigned is not
 // recognizable, so the deterministic matcher can never infer an intent for an
 // unassigned capability. This is the Fase 1 gate that scopes what the runtime

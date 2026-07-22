@@ -7,7 +7,7 @@ import {
   type ProfessionalPolicyPack,
 } from './api'
 
-export function ProfessionalPoliciesPage({ tenantId, principalId }: { tenantId: string; principalId: string }) {
+export function ProfessionalPoliciesPage({ orgId, principalId }: { orgId: string; principalId: string }) {
   const [packs, setPacks] = useState<ProfessionalPolicyPack[]>([])
   const [roles, setRoles] = useState<JobRole[]>([])
   const [draft, setDraft] = useState({
@@ -20,7 +20,7 @@ export function ProfessionalPoliciesPage({ tenantId, principalId }: { tenantId: 
   const load = useCallback(async () => {
     try {
       const [nextPacks, nextRoles] = await Promise.all([
-        listProfessionalPolicyPacks(tenantId, principalId), listJobRoles('active', tenantId, principalId),
+        listProfessionalPolicyPacks(orgId, principalId), listJobRoles('active', orgId, principalId),
       ])
       setPacks(nextPacks)
       setRoles(nextRoles)
@@ -28,7 +28,7 @@ export function ProfessionalPoliciesPage({ tenantId, principalId }: { tenantId: 
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not load professional policies')
     }
-  }, [principalId, tenantId])
+  }, [principalId, orgId])
 
   useEffect(() => { void load() }, [load])
 
@@ -50,7 +50,7 @@ export function ProfessionalPoliciesPage({ tenantId, principalId }: { tenantId: 
               out_of_scope: draft.out_of_scope, allowed_capabilities: lines(draft.allowed_capabilities),
               prohibited_capabilities: lines(draft.prohibited_capabilities), delegation_required: draft.delegation_required,
             },
-          }, tenantId, principalId)
+          }, orgId, principalId)
             .then(async () => {
               setDraft({ policy_key: '', name: '', version: 1, job_role_id: '', allowed_topics: '', prohibited_topics: '', allowed_capabilities: '', prohibited_capabilities: '', out_of_scope: 'abstain', delegation_required: false })
               await load()

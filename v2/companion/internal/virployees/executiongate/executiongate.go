@@ -49,7 +49,7 @@ type Result struct {
 }
 
 type GovernanceCheckInput struct {
-	TenantID             string
+	OrgID                string
 	ProductSurface       string
 	RequesterType        string
 	RequesterID          string
@@ -91,7 +91,7 @@ type GovernanceApproval struct {
 }
 
 type GovernanceRevalidationInput struct {
-	TenantID             string
+	OrgID                string
 	CheckID              string
 	BindingHash          string
 	PolicySnapshotHash   string
@@ -111,7 +111,7 @@ type GovernanceRevalidationResult struct {
 // AuthorityCheckInput is deliberately limited to stable identifiers. Policy
 // text, principal display data and user content never cross the execution gate.
 type AuthorityCheckInput struct {
-	TenantID       string
+	OrgID          string
 	VirployeeID    uuid.UUID
 	JobRoleID      uuid.UUID
 	CapabilityKey  string

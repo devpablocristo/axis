@@ -12,24 +12,24 @@ import (
 	"github.com/google/uuid"
 )
 
-func TestHandlerResolveUsesTenantActorAndSafeRoute(t *testing.T) {
+func TestHandlerResolveUsesOrgActorAndSafeRoute(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	assignment := ContinuityAssignment{ID: uuid.New(), TenantID: "tenant-1", PoolID: uuid.New(), SubjectID: uuid.New(), VirployeeID: uuid.New(), Status: "active", Version: 1}
+	assignment := ContinuityAssignment{ID: uuid.New(), OrgID: "organization-1", PoolID: uuid.New(), SubjectID: uuid.New(), VirployeeID: uuid.New(), Status: "active", Version: 1}
 	stub := &handlerUseCasesStub{resolveResult: ResolveResult{Status: ResolveStatusAssigned, Created: true, Assignment: &assignment}}
 	router := gin.New()
 	NewHandler(stub).Routes(router.Group("/v1"))
 	body, _ := json.Marshal(resolveRequest{PoolID: assignment.PoolID.String(), SubjectID: assignment.SubjectID.String()})
 	req := httptest.NewRequest(http.MethodPost, "/v1/virployee-routing/resolve", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Tenant-ID", "tenant-1")
+	req.Header.Set("X-Org-ID", "organization-1")
 	req.Header.Set("X-Actor-ID", "owner-1")
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
-	if stub.tenantID != "tenant-1" || stub.resolveInput.ActorID != "owner-1" {
-		t.Fatalf("request context was not forwarded: tenant=%q input=%+v", stub.tenantID, stub.resolveInput)
+	if stub.orgID != "organization-1" || stub.resolveInput.ActorID != "owner-1" {
+		t.Fatalf("request context was not forwarded: organization=%q input=%+v", stub.orgID, stub.resolveInput)
 	}
 	var response resolveResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
@@ -42,14 +42,14 @@ func TestHandlerResolveUsesTenantActorAndSafeRoute(t *testing.T) {
 
 func TestHandlerResolveSupportsActionStyleContractRoute(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	assignment := ContinuityAssignment{ID: uuid.New(), TenantID: "tenant-1", PoolID: uuid.New(), SubjectID: uuid.New(), VirployeeID: uuid.New(), Status: "active", Version: 1}
+	assignment := ContinuityAssignment{ID: uuid.New(), OrgID: "organization-1", PoolID: uuid.New(), SubjectID: uuid.New(), VirployeeID: uuid.New(), Status: "active", Version: 1}
 	stub := &handlerUseCasesStub{resolveResult: ResolveResult{Status: ResolveStatusAssigned, Assignment: &assignment}}
 	router := gin.New()
 	NewHandler(stub).Routes(router.Group("/v1"))
 	body, _ := json.Marshal(resolveRequest{PoolID: assignment.PoolID.String(), SubjectID: assignment.SubjectID.String()})
 	req := httptest.NewRequest(http.MethodPost, "/v1/virployee-routing:resolve", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Tenant-ID", "tenant-1")
+	req.Header.Set("X-Org-ID", "organization-1")
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -69,7 +69,7 @@ func TestHandlerReplaceRelationships(t *testing.T) {
 	body := []byte(`{"relationships":[{"subject_id":"` + employerID.String() + `","type":"works_for","is_primary":true}]}`)
 	req := httptest.NewRequest(http.MethodPut, "/v1/virployees/"+virployeeID.String()+"/relationships", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Tenant-ID", "tenant-1")
+	req.Header.Set("X-Org-ID", "organization-1")
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -83,25 +83,25 @@ func TestHandlerReplaceRelationships(t *testing.T) {
 func TestHandlerListsOnlyVirployeeAssignments(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	virployeeID := uuid.New()
-	assignment := ContinuityAssignment{ID: uuid.New(), TenantID: "tenant-1", PoolID: uuid.New(), SubjectID: uuid.New(), VirployeeID: virployeeID, Status: "active", Version: 1}
+	assignment := ContinuityAssignment{ID: uuid.New(), OrgID: "organization-1", PoolID: uuid.New(), SubjectID: uuid.New(), VirployeeID: virployeeID, Status: "active", Version: 1}
 	stub := &handlerUseCasesStub{assignments: []ContinuityAssignment{assignment}}
 	router := gin.New()
 	NewHandler(stub).Routes(router.Group("/v1"))
 	req := httptest.NewRequest(http.MethodGet, "/v1/virployees/"+virployeeID.String()+"/assignments", nil)
-	req.Header.Set("X-Tenant-ID", "tenant-1")
+	req.Header.Set("X-Org-ID", "organization-1")
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
-	if stub.virployeeID != virployeeID || stub.tenantID != "tenant-1" {
-		t.Fatalf("unexpected scope: tenant=%q virployee=%s", stub.tenantID, stub.virployeeID)
+	if stub.virployeeID != virployeeID || stub.orgID != "organization-1" {
+		t.Fatalf("unexpected scope: organization=%q virployee=%s", stub.orgID, stub.virployeeID)
 	}
 }
 
 func TestHandlerReassignRequiresOwnerOrAdmin(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	assignment := ContinuityAssignment{ID: uuid.New(), TenantID: "tenant-1", PoolID: uuid.New(), SubjectID: uuid.New(), VirployeeID: uuid.New(), Status: "active", Version: 2}
+	assignment := ContinuityAssignment{ID: uuid.New(), OrgID: "organization-1", PoolID: uuid.New(), SubjectID: uuid.New(), VirployeeID: uuid.New(), Status: "active", Version: 2}
 	for _, tc := range []struct {
 		name       string
 		role       string
@@ -120,9 +120,9 @@ func TestHandlerReassignRequiresOwnerOrAdmin(t *testing.T) {
 			body := []byte(`{"virployee_id":"` + assignment.VirployeeID.String() + `","expected_version":1,"reason":"manual_reassignment"}`)
 			req := httptest.NewRequest(http.MethodPost, "/v1/virployee-routing/assignments/"+assignment.ID.String()+"/reassign", bytes.NewReader(body))
 			req.Header.Set("Content-Type", "application/json")
-			req.Header.Set("X-Tenant-ID", "tenant-1")
+			req.Header.Set("X-Org-ID", "organization-1")
 			req.Header.Set("X-Actor-ID", "actor-1")
-			req.Header.Set("X-Axis-Tenant-Role", tc.role)
+			req.Header.Set("X-Axis-Org-Role", tc.role)
 			rec := httptest.NewRecorder()
 			router.ServeHTTP(rec, req)
 			if rec.Code != tc.wantStatus {
@@ -137,7 +137,7 @@ func TestHandlerReassignRequiresOwnerOrAdmin(t *testing.T) {
 
 type handlerUseCasesStub struct {
 	UseCasesPort
-	tenantID           string
+	orgID              string
 	virployeeID        uuid.UUID
 	resolveInput       ResolveInput
 	resolveResult      ResolveResult
@@ -148,26 +148,26 @@ type handlerUseCasesStub struct {
 	reassignCalls      int
 }
 
-func (s *handlerUseCasesStub) ListAssignmentsForVirployee(_ context.Context, tenantID string, virployeeID uuid.UUID) ([]ContinuityAssignment, error) {
-	s.tenantID = tenantID
+func (s *handlerUseCasesStub) ListAssignmentsForVirployee(_ context.Context, orgID string, virployeeID uuid.UUID) ([]ContinuityAssignment, error) {
+	s.orgID = orgID
 	s.virployeeID = virployeeID
 	return s.assignments, nil
 }
 
-func (s *handlerUseCasesStub) Reassign(_ context.Context, tenantID string, assignmentID uuid.UUID, in ReassignInput) (ContinuityAssignment, error) {
-	s.tenantID = tenantID
+func (s *handlerUseCasesStub) Reassign(_ context.Context, orgID string, assignmentID uuid.UUID, in ReassignInput) (ContinuityAssignment, error) {
+	s.orgID = orgID
 	s.reassignCalls++
 	return s.reassignResult, nil
 }
 
-func (s *handlerUseCasesStub) Resolve(_ context.Context, tenantID string, in ResolveInput) (ResolveResult, error) {
-	s.tenantID = tenantID
+func (s *handlerUseCasesStub) Resolve(_ context.Context, orgID string, in ResolveInput) (ResolveResult, error) {
+	s.orgID = orgID
 	s.resolveInput = in
 	return s.resolveResult, nil
 }
 
-func (s *handlerUseCasesStub) ReplaceRelationships(_ context.Context, tenantID string, virployeeID uuid.UUID, in []RelationshipInput) ([]VirployeeRelationship, error) {
-	s.tenantID = tenantID
+func (s *handlerUseCasesStub) ReplaceRelationships(_ context.Context, orgID string, virployeeID uuid.UUID, in []RelationshipInput) ([]VirployeeRelationship, error) {
+	s.orgID = orgID
 	s.virployeeID = virployeeID
 	s.relationshipInputs = in
 	return s.relationships, nil

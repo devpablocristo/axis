@@ -25,7 +25,7 @@ func TestAuthenticationMiddlewareReplacesSpoofedIdentityHeaders(t *testing.T) {
 		if c.GetHeader("X-Actor-ID") != "trusted-user" || c.GetHeader("X-Actor-Email") != "trusted@example.com" || c.GetHeader("X-Axis-Org-ID") != "trusted-org" {
 			t.Fatalf("identity headers were not rebound: %+v", c.Request.Header)
 		}
-		if c.GetHeader("X-Axis-Tenant-Role") != "" || c.GetHeader("X-Axis-Internal-Token") != "" {
+		if c.GetHeader("X-Axis-Org-Role") != "" || c.GetHeader("X-Axis-Internal-Token") != "" {
 			t.Fatalf("untrusted internal headers survived: %+v", c.Request.Header)
 		}
 		c.Status(http.StatusNoContent)
@@ -36,7 +36,7 @@ func TestAuthenticationMiddlewareReplacesSpoofedIdentityHeaders(t *testing.T) {
 	req.Header.Set("X-Actor-ID", "spoofed-user")
 	req.Header.Set("X-Actor-Email", "spoofed@example.com")
 	req.Header.Set("X-Axis-Org-ID", "spoofed-org")
-	req.Header.Set("X-Axis-Tenant-Role", "owner")
+	req.Header.Set("X-Axis-Org-Role", "owner")
 	req.Header.Set("X-Axis-Internal-Token", "spoofed-secret")
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)

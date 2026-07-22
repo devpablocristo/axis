@@ -14,7 +14,7 @@ func TestEvaluatorDenyPrecedesAllowRegardlessOfPriority(t *testing.T) {
 		policyVersion(EffectAllow, StateActive, 1, "true"),
 		policyVersion(EffectDeny, StateActive, 900, "true"),
 	}
-	result, err := evaluator.Evaluate(context.Background(), "tenant-1", versions, safeInput("medium"))
+	result, err := evaluator.Evaluate(context.Background(), "organization-1", versions, safeInput("medium"))
 	if err != nil {
 		t.Fatalf("Evaluate: %v", err)
 	}
@@ -26,11 +26,11 @@ func TestEvaluatorDenyPrecedesAllowRegardlessOfPriority(t *testing.T) {
 func TestEvaluatorShadowRecordsWithoutChangingDecision(t *testing.T) {
 	recorder := &evaluationRecorder{}
 	evaluator := NewEvaluator(recorder)
-	emptySnapshot, err := evaluator.Evaluate(context.Background(), "tenant-1", nil, safeInput("low"))
+	emptySnapshot, err := evaluator.Evaluate(context.Background(), "organization-1", nil, safeInput("low"))
 	if err != nil {
 		t.Fatalf("Evaluate empty policy set: %v", err)
 	}
-	result, err := evaluator.Evaluate(context.Background(), "tenant-1", []Version{policyVersion(EffectDeny, StateShadow, 1, "true")}, safeInput("low"))
+	result, err := evaluator.Evaluate(context.Background(), "organization-1", []Version{policyVersion(EffectDeny, StateShadow, 1, "true")}, safeInput("low"))
 	if err != nil {
 		t.Fatalf("Evaluate: %v", err)
 	}
@@ -48,7 +48,7 @@ func TestEvaluatorShadowRecordsWithoutChangingDecision(t *testing.T) {
 func TestEvaluatorCannotLowerRiskOrBypassHighRiskApproval(t *testing.T) {
 	version := policyVersion(EffectAllow, StateActive, 1, "true")
 	version.RiskOverride = "low"
-	result, err := NewEvaluator(nil).Evaluate(context.Background(), "tenant-1", []Version{version}, safeInput("high"))
+	result, err := NewEvaluator(nil).Evaluate(context.Background(), "organization-1", []Version{version}, safeInput("high"))
 	if err != nil {
 		t.Fatalf("Evaluate: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestEvaluatorCannotLowerRiskOrBypassHighRiskApproval(t *testing.T) {
 
 func TestEvaluatorEnforcedCELFailureCloses(t *testing.T) {
 	version := policyVersion(EffectAllow, StateActive, 1, `resource.missing.startsWith("x")`)
-	if _, err := NewEvaluator(nil).Evaluate(context.Background(), "tenant-1", []Version{version}, safeInput("low")); err == nil {
+	if _, err := NewEvaluator(nil).Evaluate(context.Background(), "organization-1", []Version{version}, safeInput("low")); err == nil {
 		t.Fatal("expected enforced CEL evaluation to fail closed")
 	}
 }

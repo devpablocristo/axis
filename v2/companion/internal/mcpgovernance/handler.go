@@ -158,11 +158,11 @@ func (h *Handler) RPC(c *gin.Context) {
 }
 
 func (h *Handler) GetPolicy(c *gin.Context) {
-	if !ownerOrAdmin(c.GetHeader("X-Axis-Tenant-Role")) {
+	if !ownerOrAdmin(c.GetHeader("X-Axis-Org-Role")) {
 		ginmw.Respond(c, domainerr.Forbidden("MCP policy requires an owner or admin"))
 		return
 	}
-	out, err := h.ucs.GetPolicy(c.Request.Context(), tenantID(c))
+	out, err := h.ucs.GetPolicy(c.Request.Context(), orgID(c))
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -175,7 +175,7 @@ func (h *Handler) PutPolicy(c *gin.Context) {
 	if err := ginmw.BindJSON(c, &input); err != nil {
 		return
 	}
-	out, err := h.ucs.PutPolicy(c.Request.Context(), tenantID(c), actorID(c), c.GetHeader("X-Axis-Tenant-Role"), input)
+	out, err := h.ucs.PutPolicy(c.Request.Context(), orgID(c), actorID(c), c.GetHeader("X-Axis-Org-Role"), input)
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -184,7 +184,7 @@ func (h *Handler) PutPolicy(c *gin.Context) {
 }
 
 func (h *Handler) ListPolicyAudit(c *gin.Context) {
-	out, err := h.ucs.ListPolicyAudit(c.Request.Context(), tenantID(c), c.GetHeader("X-Axis-Tenant-Role"), queryLimit(c))
+	out, err := h.ucs.ListPolicyAudit(c.Request.Context(), orgID(c), c.GetHeader("X-Axis-Org-Role"), queryLimit(c))
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -202,7 +202,7 @@ func (h *Handler) ListInvocations(c *gin.Context) {
 		}
 		virployeeID = parsed
 	}
-	out, err := h.ucs.ListInvocations(c.Request.Context(), tenantID(c), c.GetHeader("X-Axis-Tenant-Role"), virployeeID, queryLimit(c))
+	out, err := h.ucs.ListInvocations(c.Request.Context(), orgID(c), c.GetHeader("X-Axis-Org-Role"), virployeeID, queryLimit(c))
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -227,7 +227,7 @@ func contextRequest(c *gin.Context) (ContextRequest, error) {
 		}
 	}
 	return ContextRequest{
-		TenantID: tenantID(c), ActorID: actorID(c), ActorRole: strings.TrimSpace(c.GetHeader("X-Axis-Tenant-Role")),
+		OrgID: orgID(c), ActorID: actorID(c), ActorRole: strings.TrimSpace(c.GetHeader("X-Axis-Org-Role")),
 		VirployeeID: virployeeID, SubjectID: subjectID, CaseID: caseID,
 		ProductSurface:       strings.ToLower(strings.TrimSpace(c.GetHeader("X-Axis-Product-Surface"))),
 		RepositoryGeneration: strings.TrimSpace(c.GetHeader("X-Axis-Repository-Generation")),
@@ -289,8 +289,8 @@ func safeToolError(err error) string {
 	}
 }
 
-func tenantID(c *gin.Context) string { return strings.TrimSpace(c.GetHeader("X-Tenant-ID")) }
-func actorID(c *gin.Context) string  { return strings.TrimSpace(c.GetHeader("X-Actor-ID")) }
+func orgID(c *gin.Context) string   { return strings.TrimSpace(c.GetHeader("X-Org-ID")) }
+func actorID(c *gin.Context) string { return strings.TrimSpace(c.GetHeader("X-Actor-ID")) }
 
 func queryLimit(c *gin.Context) int {
 	value, _ := strconv.Atoi(strings.TrimSpace(c.Query("limit")))

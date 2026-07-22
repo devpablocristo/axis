@@ -11,10 +11,10 @@ import { MCPGovernancePage } from './MCPGovernancePage'
 import { OperationsPage } from './OperationsPage'
 import { ProfileTemplatesPage } from './ProfileTemplatesPage'
 import { ProfessionalPoliciesPage } from './ProfessionalPoliciesPage'
-import { TenancyPage } from './TenancyPage'
+import { OrganizationAdminPage } from './OrganizationAdminPage'
 import { VirployeesPage } from './VirployeesPage'
 import { WorkforcePage } from './WorkforcePage'
-import { getSession, type Session, type Tenant } from './api'
+import { getSession, setAxisProductSurface, type Session } from './api'
 
 type LoadState<T> = {
   data: T | null
@@ -48,43 +48,31 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
     void refresh()
   }, [refresh])
 
-  const tenants = session.data?.tenants ?? []
-  const workspaceOrgs = useMemo(() => unique(tenants.map((tenant) => tenant.org_id)), [tenants])
-  const orgLabels = useMemo(() => {
-    const labels = new Map<string, string>()
-    for (const tenant of tenants) {
-      if (!labels.has(tenant.org_id)) {
-        labels.set(tenant.org_id, tenant.org_name || tenant.org_id)
-      }
-    }
-    return labels
-  }, [tenants])
-  const workspaceProducts = useMemo(() => {
-    const labels = new Map<string, string>()
-    for (const tenant of tenants) {
-      if (tenant.org_id !== orgId) continue
-      if (!labels.has(tenant.product_surface)) {
-        labels.set(tenant.product_surface, tenant.product_name || tenant.product_surface)
-      }
-    }
-    return Array.from(labels.entries())
-      .map(([value, label]) => ({ value, label }))
-      .sort((left, right) => left.label.localeCompare(right.label))
-  }, [orgId, tenants])
+  const organizations = session.data?.organizations ?? []
+  const selectedOrganization = useMemo(
+    () => organizations.find((organization) => organization.id === orgId) ?? null,
+    [orgId, organizations],
+  )
+  const workspaceProducts = useMemo(
+    () => (selectedOrganization?.products ?? [])
+      .map((product) => ({ value: product.product_surface, label: product.name || product.product_surface }))
+      .sort((left, right) => left.label.localeCompare(right.label)),
+    [selectedOrganization],
+  )
   const workspaceProductValues = useMemo(() => workspaceProducts.map((product) => product.value), [workspaceProducts])
-  const selectedTenant = useMemo(
-    () => tenants.find((tenant) => tenant.org_id === orgId && tenant.product_surface === productSurface) ?? null,
-    [orgId, productSurface, tenants],
+  const selectedProduct = useMemo(
+    () => selectedOrganization?.products.find((product) => product.product_surface === productSurface) ?? null,
+    [productSurface, selectedOrganization],
   )
   const principalId = session.data?.principal_id || session.data?.actor_id || ''
   const principalEmail = session.data?.user?.email || ''
 
   useEffect(() => {
-    if (workspaceOrgs.length === 0) return
-    if (!orgId || !workspaceOrgs.includes(orgId)) {
-      setOrgId(workspaceOrgs[0])
-    }
-  }, [orgId, workspaceOrgs])
+		if (organizations.length === 0) return
+		if (!orgId || !organizations.some((organization) => organization.id === orgId)) {
+			setOrgId(organizations[0].id)
+		}
+	}, [orgId, organizations])
 
   useEffect(() => {
     if (workspaceProducts.length === 0) return
@@ -98,12 +86,9 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
   }, [orgId])
 
   useEffect(() => {
+    setAxisProductSurface(productSurface)
     if (productSurface) localStorage.setItem('axis.v2.product_surface', productSurface)
   }, [productSurface])
-
-  useEffect(() => {
-    if (selectedTenant?.id) localStorage.setItem('axis.v2.tenant_id', selectedTenant.id)
-  }, [selectedTenant?.id])
 
   return (
     <div className="app-shell">
@@ -247,13 +232,13 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
             <p className="axis-muted">{principalEmail || 'loading'}</p>
           </div>
           <div className="toolbar">
-            {tenants.length > 0 ? (
+			{organizations.length > 0 ? (
               <>
                 <label className="topbar-org">
                   <span>Org</span>
                   <select value={orgId} onChange={(event) => setOrgId(event.target.value)}>
-                    {workspaceOrgs.map((org) => (
-                      <option key={org} value={org}>{orgLabels.get(org) ?? org}</option>
+					{organizations.map((organization) => (
+						<option key={organization.id} value={organization.id}>{organization.name || organization.id}</option>
                     ))}
                   </select>
                 </label>
@@ -285,39 +270,39 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
         {session.loading && !session.data ? (
           <div className="spinner" />
         ) : activePage === 'admin' ? (
-          <TenancyPage
-            tenantId={selectedTenant?.id ?? ''}
+          <OrganizationAdminPage
+            organizationId={selectedOrganization?.id ?? ''}
+            orgId={selectedProduct?.id ?? ''}
             principalId={principalId}
-            sessionTenants={tenants}
             onSessionChanged={refresh}
           />
-        ) : tenants.length === 0 ? (
-          <section className="empty-state">No tenants are available for this user.</section>
-        ) : selectedTenant == null ? (
-          <section className="empty-state">No active tenant matches the selected combination.</section>
+		) : organizations.length === 0 ? (
+			<section className="empty-state">No organizations are available for this user.</section>
+		) : selectedProduct == null ? (
+			<section className="empty-state">No product belongs to the selected organization.</section>
         ) : activePage === 'job-roles' ? (
-          <JobRolesPage tenantId={selectedTenant.id} principalId={principalId} />
+          <JobRolesPage orgId={(selectedOrganization?.id ?? "")} principalId={principalId} />
         ) : activePage === 'capabilities' ? (
-          <CapabilitiesPage tenantId={selectedTenant.id} principalId={principalId} />
+          <CapabilitiesPage orgId={(selectedOrganization?.id ?? "")} principalId={principalId} />
         ) : activePage === 'learning-proposals' ? (
-          <LearningProposalsPage tenantId={selectedTenant.id} principalId={principalId} />
+          <LearningProposalsPage orgId={(selectedOrganization?.id ?? "")} principalId={principalId} />
         ) : activePage === 'profile-templates' ? (
-          <ProfileTemplatesPage tenantId={selectedTenant.id} principalId={principalId} />
+          <ProfileTemplatesPage orgId={(selectedOrganization?.id ?? "")} principalId={principalId} />
         ) : activePage === 'knowledge-bases' ? (
           <KnowledgeBasesPage
-            tenantId={selectedTenant.id}
+            orgId={(selectedOrganization?.id ?? "")}
             principalId={principalId}
-            productSurface={selectedTenant.product_surface}
+            productSurface={selectedProduct.product_surface}
           />
         ) : activePage === 'professional-policies' ? (
-          <ProfessionalPoliciesPage tenantId={selectedTenant.id} principalId={principalId} />
+          <ProfessionalPoliciesPage orgId={(selectedOrganization?.id ?? "")} principalId={principalId} />
         ) : activePage === 'mcp-governance' ? (
-          <MCPGovernancePage tenantId={selectedTenant.id} principalId={principalId} />
+          <MCPGovernancePage orgId={(selectedOrganization?.id ?? "")} principalId={principalId} />
         ) : activePage === 'governance' ? (
-          <GovernancePage tenantId={selectedTenant.id} principalId={principalId} productSurface={selectedTenant.product_surface} />
+          <GovernancePage orgId={(selectedOrganization?.id ?? "")} principalId={principalId} productSurface={selectedProduct.product_surface} />
         ) : activePage === 'approvals' ? (
           <ApprovalsPage
-            tenantId={selectedTenant.id}
+            orgId={(selectedOrganization?.id ?? "")}
             principalId={principalId}
             focusApprovalId={approvalReviewContext?.approvalId ?? ''}
             onReturnToVirployee={approvalReviewContext?.returnVirployeeId
@@ -331,21 +316,21 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
           />
         ) : activePage === 'coordination' ? (
           <CoordinationPage
-            tenantId={selectedTenant.id}
+            orgId={(selectedOrganization?.id ?? "")}
             principalId={principalId}
-            productSurface={selectedTenant.product_surface}
+            productSurface={selectedProduct.product_surface}
           />
         ) : activePage === 'workforce' ? (
           <WorkforcePage
-            tenantId={selectedTenant.id}
+            orgId={(selectedOrganization?.id ?? "")}
             principalId={principalId}
-            organizationName={selectedTenant.org_name}
+            organizationName={selectedOrganization?.name ?? ''}
           />
         ) : activePage === 'operations' ? (
-          <OperationsPage tenantId={selectedTenant.id} principalId={principalId} productSurface={selectedTenant.product_surface} />
+          <OperationsPage orgId={(selectedOrganization?.id ?? "")} principalId={principalId} productSurface={selectedProduct.product_surface} />
         ) : (
           <VirployeesPage
-            tenantId={selectedTenant.id}
+            orgId={(selectedOrganization?.id ?? "")}
             principalId={principalId}
             focusDryRunVirployeeId={focusDryRunVirployeeId}
             onFocusDryRunConsumed={() => setFocusDryRunVirployeeId('')}
@@ -358,10 +343,6 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
       </main>
     </div>
   )
-}
-
-function unique(values: string[]): string[] {
-  return Array.from(new Set(values.filter(Boolean))).sort((left, right) => left.localeCompare(right))
 }
 
 type Page = 'virployees' | 'job-roles' | 'capabilities' | 'learning-proposals' | 'profile-templates' | 'knowledge-bases' | 'professional-policies' | 'governance' | 'mcp-governance' | 'approvals' | 'coordination' | 'workforce' | 'operations' | 'admin'

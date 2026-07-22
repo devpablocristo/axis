@@ -42,15 +42,15 @@ func NewUseCases(repo RepositoryPort) *UseCases {
 	return &UseCases{repo: repo}
 }
 
-func (u *UseCases) CreateWorkSubject(ctx context.Context, tenantID string, in CreateWorkSubjectInput) (WorkSubject, error) {
+func (u *UseCases) CreateWorkSubject(ctx context.Context, orgID string, in CreateWorkSubjectInput) (WorkSubject, error) {
 	normalized, err := NormalizeWorkSubjectInput(in)
 	if err != nil {
 		return WorkSubject{}, err
 	}
-	return u.repo.CreateWorkSubject(ctx, normalizeTenantID(tenantID), normalized)
+	return u.repo.CreateWorkSubject(ctx, normalizeOrgID(orgID), normalized)
 }
 
-func (u *UseCases) ListWorkSubjects(ctx context.Context, tenantID, state, kind string) ([]WorkSubject, error) {
+func (u *UseCases) ListWorkSubjects(ctx context.Context, orgID, state, kind string) ([]WorkSubject, error) {
 	normalizedState, err := normalizeResourceState(state)
 	if err != nil {
 		return nil, err
@@ -63,98 +63,98 @@ func (u *UseCases) ListWorkSubjects(ctx context.Context, tenantID, state, kind s
 			return nil, domainerr.Validation("invalid subject kind")
 		}
 	}
-	return u.repo.ListWorkSubjects(ctx, normalizeTenantID(tenantID), normalizedState, normalizedKind)
+	return u.repo.ListWorkSubjects(ctx, normalizeOrgID(orgID), normalizedState, normalizedKind)
 }
 
-func (u *UseCases) GetWorkSubject(ctx context.Context, tenantID string, id uuid.UUID) (WorkSubject, error) {
-	return u.repo.GetWorkSubject(ctx, normalizeTenantID(tenantID), id)
+func (u *UseCases) GetWorkSubject(ctx context.Context, orgID string, id uuid.UUID) (WorkSubject, error) {
+	return u.repo.GetWorkSubject(ctx, normalizeOrgID(orgID), id)
 }
 
-func (u *UseCases) UpdateWorkSubject(ctx context.Context, tenantID string, id uuid.UUID, in UpdateWorkSubjectInput) (WorkSubject, error) {
+func (u *UseCases) UpdateWorkSubject(ctx context.Context, orgID string, id uuid.UUID, in UpdateWorkSubjectInput) (WorkSubject, error) {
 	normalized, err := NormalizeWorkSubjectInput(in)
 	if err != nil {
 		return WorkSubject{}, err
 	}
-	return u.repo.UpdateWorkSubject(ctx, normalizeTenantID(tenantID), id, normalized)
+	return u.repo.UpdateWorkSubject(ctx, normalizeOrgID(orgID), id, normalized)
 }
 
-func (u *UseCases) ArchiveWorkSubject(ctx context.Context, tenantID string, id uuid.UUID) error {
-	return u.repo.SetWorkSubjectArchived(ctx, normalizeTenantID(tenantID), id, true)
+func (u *UseCases) ArchiveWorkSubject(ctx context.Context, orgID string, id uuid.UUID) error {
+	return u.repo.SetWorkSubjectArchived(ctx, normalizeOrgID(orgID), id, true)
 }
 
-func (u *UseCases) UnarchiveWorkSubject(ctx context.Context, tenantID string, id uuid.UUID) error {
-	return u.repo.SetWorkSubjectArchived(ctx, normalizeTenantID(tenantID), id, false)
+func (u *UseCases) UnarchiveWorkSubject(ctx context.Context, orgID string, id uuid.UUID) error {
+	return u.repo.SetWorkSubjectArchived(ctx, normalizeOrgID(orgID), id, false)
 }
 
-func (u *UseCases) CreateRoutingPool(ctx context.Context, tenantID string, in CreateRoutingPoolInput) (RoutingPool, error) {
+func (u *UseCases) CreateRoutingPool(ctx context.Context, orgID string, in CreateRoutingPoolInput) (RoutingPool, error) {
 	normalized, err := NormalizeRoutingPoolInput(in)
 	if err != nil {
 		return RoutingPool{}, err
 	}
-	return u.repo.CreateRoutingPool(ctx, normalizeTenantID(tenantID), normalized)
+	return u.repo.CreateRoutingPool(ctx, normalizeOrgID(orgID), normalized)
 }
 
-func (u *UseCases) ListRoutingPools(ctx context.Context, tenantID, state string) ([]RoutingPool, error) {
+func (u *UseCases) ListRoutingPools(ctx context.Context, orgID, state string) ([]RoutingPool, error) {
 	normalizedState, err := normalizeResourceState(state)
 	if err != nil {
 		return nil, err
 	}
-	return u.repo.ListRoutingPools(ctx, normalizeTenantID(tenantID), normalizedState)
+	return u.repo.ListRoutingPools(ctx, normalizeOrgID(orgID), normalizedState)
 }
 
-func (u *UseCases) GetRoutingPool(ctx context.Context, tenantID string, id uuid.UUID) (RoutingPool, error) {
-	return u.repo.GetRoutingPool(ctx, normalizeTenantID(tenantID), id)
+func (u *UseCases) GetRoutingPool(ctx context.Context, orgID string, id uuid.UUID) (RoutingPool, error) {
+	return u.repo.GetRoutingPool(ctx, normalizeOrgID(orgID), id)
 }
 
-func (u *UseCases) UpdateRoutingPool(ctx context.Context, tenantID string, id uuid.UUID, in UpdateRoutingPoolInput) (RoutingPool, error) {
+func (u *UseCases) UpdateRoutingPool(ctx context.Context, orgID string, id uuid.UUID, in UpdateRoutingPoolInput) (RoutingPool, error) {
 	normalized, err := NormalizeRoutingPoolInput(in)
 	if err != nil {
 		return RoutingPool{}, err
 	}
-	return u.repo.UpdateRoutingPool(ctx, normalizeTenantID(tenantID), id, normalized)
+	return u.repo.UpdateRoutingPool(ctx, normalizeOrgID(orgID), id, normalized)
 }
 
-func (u *UseCases) ArchiveRoutingPool(ctx context.Context, tenantID string, id uuid.UUID) error {
-	return u.repo.SetRoutingPoolArchived(ctx, normalizeTenantID(tenantID), id, true)
+func (u *UseCases) ArchiveRoutingPool(ctx context.Context, orgID string, id uuid.UUID) error {
+	return u.repo.SetRoutingPoolArchived(ctx, normalizeOrgID(orgID), id, true)
 }
 
-func (u *UseCases) UnarchiveRoutingPool(ctx context.Context, tenantID string, id uuid.UUID) error {
-	return u.repo.SetRoutingPoolArchived(ctx, normalizeTenantID(tenantID), id, false)
+func (u *UseCases) UnarchiveRoutingPool(ctx context.Context, orgID string, id uuid.UUID) error {
+	return u.repo.SetRoutingPoolArchived(ctx, normalizeOrgID(orgID), id, false)
 }
 
-func (u *UseCases) UpsertPoolMember(ctx context.Context, tenantID string, poolID, virployeeID uuid.UUID, in UpsertPoolMemberInput) (PoolMember, error) {
+func (u *UseCases) UpsertPoolMember(ctx context.Context, orgID string, poolID, virployeeID uuid.UUID, in UpsertPoolMemberInput) (PoolMember, error) {
 	normalized, err := NormalizePoolMemberInput(in)
 	if err != nil {
 		return PoolMember{}, err
 	}
-	return u.repo.UpsertPoolMember(ctx, normalizeTenantID(tenantID), poolID, virployeeID, normalized)
+	return u.repo.UpsertPoolMember(ctx, normalizeOrgID(orgID), poolID, virployeeID, normalized)
 }
 
-func (u *UseCases) ListPoolMembers(ctx context.Context, tenantID string, poolID uuid.UUID) ([]PoolMember, error) {
-	return u.repo.ListPoolMembers(ctx, normalizeTenantID(tenantID), poolID)
+func (u *UseCases) ListPoolMembers(ctx context.Context, orgID string, poolID uuid.UUID) ([]PoolMember, error) {
+	return u.repo.ListPoolMembers(ctx, normalizeOrgID(orgID), poolID)
 }
 
-func (u *UseCases) ListRelationships(ctx context.Context, tenantID string, virployeeID uuid.UUID) ([]VirployeeRelationship, error) {
-	return u.repo.ListRelationships(ctx, normalizeTenantID(tenantID), virployeeID)
+func (u *UseCases) ListRelationships(ctx context.Context, orgID string, virployeeID uuid.UUID) ([]VirployeeRelationship, error) {
+	return u.repo.ListRelationships(ctx, normalizeOrgID(orgID), virployeeID)
 }
 
-func (u *UseCases) ReplaceRelationships(ctx context.Context, tenantID string, virployeeID uuid.UUID, items []RelationshipInput) ([]VirployeeRelationship, error) {
+func (u *UseCases) ReplaceRelationships(ctx context.Context, orgID string, virployeeID uuid.UUID, items []RelationshipInput) ([]VirployeeRelationship, error) {
 	normalized, err := NormalizeRelationships(items)
 	if err != nil {
 		return nil, err
 	}
-	return u.repo.ReplaceRelationships(ctx, normalizeTenantID(tenantID), virployeeID, normalized)
+	return u.repo.ReplaceRelationships(ctx, normalizeOrgID(orgID), virployeeID, normalized)
 }
 
-func (u *UseCases) Resolve(ctx context.Context, tenantID string, in ResolveInput) (ResolveResult, error) {
+func (u *UseCases) Resolve(ctx context.Context, orgID string, in ResolveInput) (ResolveResult, error) {
 	normalized, err := NormalizeResolveInput(in)
 	if err != nil {
 		return ResolveResult{}, err
 	}
-	return u.repo.Resolve(ctx, normalizeTenantID(tenantID), normalized)
+	return u.repo.Resolve(ctx, normalizeOrgID(orgID), normalized)
 }
 
-func (u *UseCases) ListAssignments(ctx context.Context, tenantID, poolID, subjectID string) ([]ContinuityAssignment, error) {
+func (u *UseCases) ListAssignments(ctx context.Context, orgID, poolID, subjectID string) ([]ContinuityAssignment, error) {
 	var parsedPoolID uuid.UUID
 	var parsedSubjectID uuid.UUID
 	var err error
@@ -170,54 +170,54 @@ func (u *UseCases) ListAssignments(ctx context.Context, tenantID, poolID, subjec
 			return nil, err
 		}
 	}
-	return u.repo.ListAssignments(ctx, normalizeTenantID(tenantID), parsedPoolID, parsedSubjectID)
+	return u.repo.ListAssignments(ctx, normalizeOrgID(orgID), parsedPoolID, parsedSubjectID)
 }
 
-func (u *UseCases) ListAssignmentsForVirployee(ctx context.Context, tenantID string, virployeeID uuid.UUID) ([]ContinuityAssignment, error) {
+func (u *UseCases) ListAssignmentsForVirployee(ctx context.Context, orgID string, virployeeID uuid.UUID) ([]ContinuityAssignment, error) {
 	if virployeeID == uuid.Nil {
 		return nil, domainerr.Validation("virployee_id is required")
 	}
-	return u.repo.ListAssignmentsForVirployee(ctx, normalizeTenantID(tenantID), virployeeID)
+	return u.repo.ListAssignmentsForVirployee(ctx, normalizeOrgID(orgID), virployeeID)
 }
 
-func (u *UseCases) Reassign(ctx context.Context, tenantID string, assignmentID uuid.UUID, in ReassignInput) (ContinuityAssignment, error) {
+func (u *UseCases) Reassign(ctx context.Context, orgID string, assignmentID uuid.UUID, in ReassignInput) (ContinuityAssignment, error) {
 	normalized, err := NormalizeReassignInput(in)
 	if err != nil {
 		return ContinuityAssignment{}, err
 	}
-	return u.repo.Reassign(ctx, normalizeTenantID(tenantID), assignmentID, normalized)
+	return u.repo.Reassign(ctx, normalizeOrgID(orgID), assignmentID, normalized)
 }
 
 // ValidateAssistAssignment binds Assist work to the current stable assignment.
 // expectedVersion is zero while accepting a new run and the persisted version
 // when a worker revalidates it before reading subject-scoped context.
-func (u *UseCases) ValidateAssistAssignment(ctx context.Context, tenantID string, assignmentID, subjectID, virployeeID uuid.UUID, expectedVersion int64) (int64, error) {
+func (u *UseCases) ValidateAssistAssignment(ctx context.Context, orgID string, assignmentID, subjectID, virployeeID uuid.UUID, expectedVersion int64) (int64, error) {
 	if assignmentID == uuid.Nil || subjectID == uuid.Nil || virployeeID == uuid.Nil {
 		return 0, domainerr.Validation("assignment_id, subject_id and virployee_id are required")
 	}
 	if expectedVersion < 0 {
 		return 0, domainerr.Validation("expected assignment version cannot be negative")
 	}
-	return u.repo.ValidateAssistAssignment(ctx, normalizeTenantID(tenantID), assignmentID, subjectID, virployeeID, expectedVersion)
+	return u.repo.ValidateAssistAssignment(ctx, normalizeOrgID(orgID), assignmentID, subjectID, virployeeID, expectedVersion)
 }
 
 // RequiresAssistAssignment prevents callers from bypassing continuity routing
 // by omitting assignment_id. A Virployee in any active pool is routed for all
 // work, and an existing subject+profession assignment is authoritative even if
 // the caller targets another Virployee of that profession.
-func (u *UseCases) RequiresAssistAssignment(ctx context.Context, tenantID string, subjectID, virployeeID uuid.UUID) (bool, error) {
+func (u *UseCases) RequiresAssistAssignment(ctx context.Context, orgID string, subjectID, virployeeID uuid.UUID) (bool, error) {
 	if virployeeID == uuid.Nil {
 		return false, domainerr.Validation("virployee_id is required")
 	}
-	return u.repo.RequiresAssistAssignment(ctx, normalizeTenantID(tenantID), subjectID, virployeeID)
+	return u.repo.RequiresAssistAssignment(ctx, normalizeOrgID(orgID), subjectID, virployeeID)
 }
 
-func normalizeTenantID(tenantID string) string {
-	tenantID = strings.TrimSpace(tenantID)
-	if tenantID == "" {
+func normalizeOrgID(orgID string) string {
+	orgID = strings.TrimSpace(orgID)
+	if orgID == "" {
 		return "default"
 	}
-	return tenantID
+	return orgID
 }
 
 func normalizeResourceState(raw string) (ResourceState, error) {

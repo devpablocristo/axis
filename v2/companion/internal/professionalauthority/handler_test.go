@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func TestHandlerScopePolicyUsesTrustedTenantRole(t *testing.T) {
+func TestHandlerScopePolicyUsesTrustedOrgRole(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := &fakeRepository{}
 	handler := NewHandler(NewUseCases(repo))
@@ -24,9 +24,9 @@ func TestHandlerScopePolicyUsesTrustedTenantRole(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPut, "/virployees/"+id.String()+"/scope-policy",
 			strings.NewReader(`{"allowed_topics":["appointments"],"prohibited_topics":["diagnosis"],"out_of_scope":"escalate","expected_revision":0}`))
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("X-Tenant-ID", "tenant-a")
+		req.Header.Set("X-Org-ID", "organization-a")
 		req.Header.Set("X-Actor-ID", "user-a")
-		req.Header.Set("X-Axis-Tenant-Role", role)
+		req.Header.Set("X-Axis-Org-Role", role)
 		router.ServeHTTP(rec, req)
 		return rec
 	}

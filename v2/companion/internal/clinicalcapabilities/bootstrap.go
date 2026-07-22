@@ -1,6 +1,8 @@
 package clinicalcapabilities
 
 import (
+	"strings"
+
 	"github.com/devpablocristo/companion-v2/internal/capabilities/usecases/domain"
 	"github.com/devpablocristo/companion-v2/internal/quotas"
 )
@@ -18,7 +20,10 @@ type Definition struct {
 	JobRoleNames          []string        `json:"job_role_names"`
 }
 
-func Definitions() []Definition {
+// Definitions renders reusable clinical capability templates for the product
+// surface selected by the consumer. Axis does not own or default that value.
+func Definitions(productSurface string) []Definition {
+	productSurface = strings.ToLower(strings.TrimSpace(productSurface))
 	return []Definition{
 		{
 			CapabilityKey: RecordsSearchKey, Name: "Clinical records search",
@@ -26,9 +31,9 @@ func Definitions() []Definition {
 			RequiredAutonomy: "A0", RiskClass: "medium", SideEffectClass: "read",
 			RequiresNexusApproval: false, EvidenceRequired: true,
 			Manifest: domain.Manifest{
-				Version: "1.0.0", ProductSurface: "medmory", InputSchema: SearchInputSchema(), OutputSchema: SearchOutputSchema(),
+				Version: "1.0.0", ProductSurface: productSurface, InputSchema: SearchInputSchema(), OutputSchema: SearchOutputSchema(),
 				RequiredScopes: []string{"assist:run", "documents:read"},
-				Idempotency:    domain.IdempotencyContract{Mode: "required", KeyFields: []string{"tenant_id", "subject_id", "case_id", "repository_generation", "query", "cursor"}},
+				Idempotency:    domain.IdempotencyContract{Mode: "required", KeyFields: []string{"org_id", "subject_id", "case_id", "repository_generation", "query", "cursor"}},
 				RollbackMode:   "none", TimeoutMS: 30000, Retry: domain.RetryContract{MaxAttempts: 1, BackoffMS: 1000},
 				Postconditions: []string{"result references remain bound to the authorized repository generation"},
 				QuotaAreas:     []string{quotas.AreaInbound, quotas.AreaEmbeddings}, CostClass: "medium",
@@ -41,9 +46,9 @@ func Definitions() []Definition {
 			RequiredAutonomy: "A1", RiskClass: "medium", SideEffectClass: "read",
 			RequiresNexusApproval: false, EvidenceRequired: true,
 			Manifest: domain.Manifest{
-				Version: "1.0.0", ProductSurface: "medmory", InputSchema: TimelineInputSchema(), OutputSchema: TimelineOutputSchema(),
+				Version: "1.0.0", ProductSurface: productSurface, InputSchema: TimelineInputSchema(), OutputSchema: TimelineOutputSchema(),
 				RequiredScopes: []string{"assist:run", "documents:read"},
-				Idempotency:    domain.IdempotencyContract{Mode: "required", KeyFields: []string{"tenant_id", "subject_id", "case_id", "repository_generation", "date_from", "date_to", "order", "max_events", "focus"}},
+				Idempotency:    domain.IdempotencyContract{Mode: "required", KeyFields: []string{"org_id", "subject_id", "case_id", "repository_generation", "date_from", "date_to", "order", "max_events", "focus"}},
 				RollbackMode:   "none", TimeoutMS: 120000, Retry: domain.RetryContract{MaxAttempts: 1, BackoffMS: 1000},
 				Postconditions: []string{"every emitted event has at least one canonical authorized reference"},
 				QuotaAreas:     []string{quotas.AreaInbound, quotas.AreaLLM}, CostClass: "medium",

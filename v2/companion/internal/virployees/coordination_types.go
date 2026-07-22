@@ -26,7 +26,7 @@ const (
 
 type AssistCase struct {
 	ID                    uuid.UUID  `json:"id"`
-	TenantID              string     `json:"tenant_id"`
+	OrgID                 string     `json:"org_id"`
 	ProductSurface        string     `json:"product_surface"`
 	AssistType            string     `json:"assist_type"`
 	SubjectID             string     `json:"subject_id"`
@@ -41,7 +41,7 @@ type AssistCase struct {
 
 type OrchestrationPolicy struct {
 	ID                          uuid.UUID      `json:"id"`
-	TenantID                    string         `json:"tenant_id"`
+	OrgID                       string         `json:"org_id"`
 	ProductSurface              string         `json:"product_surface"`
 	AssistType                  string         `json:"assist_type"`
 	EntrypointVirployeeID       uuid.UUID      `json:"entrypoint_virployee_id"`
@@ -60,7 +60,7 @@ type OrchestrationPolicy struct {
 
 type SpecialistRoute struct {
 	ID                    uuid.UUID `json:"id"`
-	TenantID              string    `json:"tenant_id"`
+	OrgID                 string    `json:"org_id"`
 	ProductSurface        string    `json:"product_surface"`
 	AssistType            string    `json:"assist_type"`
 	EntrypointVirployeeID uuid.UUID `json:"entrypoint_virployee_id"`
@@ -76,7 +76,7 @@ type SpecialistRoute struct {
 
 type OrchestrationPlan struct {
 	ID                     uuid.UUID       `json:"id"`
-	TenantID               string          `json:"tenant_id"`
+	OrgID                  string          `json:"org_id"`
 	CaseID                 uuid.UUID       `json:"case_id"`
 	RootRunID              uuid.UUID       `json:"root_run_id"`
 	PolicyID               uuid.UUID       `json:"policy_id"`
@@ -100,7 +100,7 @@ type OrchestrationPlan struct {
 
 type SpecialistConsultation struct {
 	ID                uuid.UUID       `json:"id"`
-	TenantID          string          `json:"tenant_id"`
+	OrgID             string          `json:"org_id"`
 	PlanID            uuid.UUID       `json:"plan_id"`
 	RootRunID         uuid.UUID       `json:"root_run_id"`
 	CaseID            uuid.UUID       `json:"case_id"`
@@ -125,7 +125,7 @@ type SpecialistConsultation struct {
 
 type Handoff struct {
 	ID              uuid.UUID  `json:"id"`
-	TenantID        string     `json:"tenant_id"`
+	OrgID           string     `json:"org_id"`
 	CaseID          uuid.UUID  `json:"case_id"`
 	SourceRunID     *uuid.UUID `json:"source_run_id,omitempty"`
 	FromVirployeeID uuid.UUID  `json:"from_virployee_id"`
@@ -146,7 +146,7 @@ type Handoff struct {
 
 type HumanReview struct {
 	ID             uuid.UUID  `json:"id"`
-	TenantID       string     `json:"tenant_id"`
+	OrgID          string     `json:"org_id"`
 	CaseID         uuid.UUID  `json:"case_id"`
 	RootRunID      uuid.UUID  `json:"root_run_id"`
 	HandoffID      *uuid.UUID `json:"handoff_id,omitempty"`

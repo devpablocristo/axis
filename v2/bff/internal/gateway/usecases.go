@@ -6,20 +6,20 @@ import (
 	"strings"
 
 	gatewaydomain "github.com/devpablocristo/bff-v2/internal/gateway/usecases/domain"
-	tenantdomain "github.com/devpablocristo/bff-v2/internal/tenancy/usecases/domain"
+	productdomain "github.com/devpablocristo/bff-v2/internal/products/usecases/domain"
 )
 
-type TenancyPort interface {
-	ResolveAccess(ctx context.Context, tenantID, principalID string) (tenantdomain.Tenant, tenantdomain.TenantMember, error)
+type OrganizationAccessPort interface {
+	ResolveOrgAccess(ctx context.Context, orgID, productSurface, principalID string) (productdomain.Product, productdomain.OrgMember, error)
 }
 
 type UseCases struct {
-	tenancy          TenancyPort
+	products         OrganizationAccessPort
 	companionBaseURL *url.URL
 	nexusBaseURL     *url.URL
 }
 
-func NewUseCases(tenancy TenancyPort, companionBaseURL string, nexusBaseURL string) (*UseCases, error) {
+func NewUseCases(products OrganizationAccessPort, companionBaseURL string, nexusBaseURL string) (*UseCases, error) {
 	companionURL, err := parseBaseURL(companionBaseURL)
 	if err != nil {
 		return nil, err
@@ -28,7 +28,7 @@ func NewUseCases(tenancy TenancyPort, companionBaseURL string, nexusBaseURL stri
 	if err != nil {
 		return nil, err
 	}
-	return &UseCases{tenancy: tenancy, companionBaseURL: companionURL, nexusBaseURL: nexusURL}, nil
+	return &UseCases{products: products, companionBaseURL: companionURL, nexusBaseURL: nexusURL}, nil
 }
 
 func (u *UseCases) Resolve(ctx context.Context, input gatewaydomain.ResolveInput) (gatewaydomain.ResolvedContext, error) {
@@ -36,17 +36,16 @@ func (u *UseCases) Resolve(ctx context.Context, input gatewaydomain.ResolveInput
 	if err != nil {
 		return gatewaydomain.ResolvedContext{}, err
 	}
-	tenant, member, err := u.tenancy.ResolveAccess(ctx, normalized.TenantID, normalized.PrincipalID)
+	product, member, err := u.products.ResolveOrgAccess(ctx, normalized.OrgID, normalized.ProductSurface, normalized.PrincipalID)
 	if err != nil {
 		return gatewaydomain.ResolvedContext{}, err
 	}
 	return gatewaydomain.ResolvedContext{
 		PrincipalID:    member.UserID,
-		TenantID:       tenant.ID.String(),
-		OrgID:          tenant.OrgID,
-		ProductSurface: tenant.ProductSurface,
+		OrgID:          product.OrgID,
+		ProductSurface: product.ProductSurface,
 		MembershipRole: member.Role,
-		Tenant:         tenant,
+		Product:        product,
 		Member:         member,
 	}, nil
 }

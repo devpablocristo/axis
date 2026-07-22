@@ -71,7 +71,7 @@ type CreateReconciliationInput struct {
 
 type ReconciliationRun struct {
 	ID             uuid.UUID  `json:"id"`
-	TenantID       string     `json:"tenant_id"`
+	OrgID          string     `json:"org_id"`
 	ProductSurface string     `json:"product_surface"`
 	Mode           string     `json:"mode"`
 	TriggerType    string     `json:"trigger"`
@@ -91,7 +91,7 @@ type ReconciliationRun struct {
 type Finding struct {
 	ID           uuid.UUID       `json:"id"`
 	RunID        uuid.UUID       `json:"run_id"`
-	TenantID     string          `json:"tenant_id"`
+	OrgID        string          `json:"org_id"`
 	FindingType  string          `json:"finding_type"`
 	Severity     string          `json:"severity"`
 	ResourceType string          `json:"resource_type"`
@@ -148,7 +148,7 @@ type OutboxMessage struct {
 
 type WorkerControl struct {
 	ID                     uuid.UUID  `json:"id"`
-	TenantID               string     `json:"tenant_id"`
+	OrgID                  string     `json:"org_id"`
 	ProductSurface         string     `json:"product_surface"`
 	JobKind                string     `json:"job_kind"`
 	State                  string     `json:"state"`
@@ -169,7 +169,7 @@ type PutWorkerControlInput struct {
 	ExpectedVersion int64  `json:"expected_version"`
 }
 
-type AuthorizationCheck struct{ TenantID, ProductSurface, ActorID, ActorRole, Permission, ActionType, ResourceType, ResourceID string }
+type AuthorizationCheck struct{ OrgID, ProductSurface, ActorID, ActorRole, Permission, ActionType, ResourceType, ResourceID string }
 type AuthorizationResult struct {
 	Allowed      bool
 	Reason       string

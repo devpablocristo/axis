@@ -16,19 +16,19 @@ type fakeNexusOutboxClient struct {
 	executionCalls int
 	auditCalls     int
 	findingCalls   int
-	auditTenant    string
+	auditOrg       string
 	auditKey       string
 	auditEvent     nexusclient.AuditEvent
 	auditErr       error
-	findingTenant  string
+	findingOrg     string
 	findingKey     string
 	findingPayload json.RawMessage
 	findingErr     error
 }
 
-func (f *fakeNexusOutboxClient) ReportOperationalFinding(_ context.Context, tenantID, key string, payload json.RawMessage) error {
+func (f *fakeNexusOutboxClient) ReportOperationalFinding(_ context.Context, orgID, key string, payload json.RawMessage) error {
 	f.findingCalls++
-	f.findingTenant, f.findingKey, f.findingPayload = tenantID, key, append(json.RawMessage(nil), payload...)
+	f.findingOrg, f.findingKey, f.findingPayload = orgID, key, append(json.RawMessage(nil), payload...)
 	return f.findingErr
 }
 
@@ -37,9 +37,9 @@ func (f *fakeNexusOutboxClient) ReportExecutionResult(context.Context, string, s
 	return nil
 }
 
-func (f *fakeNexusOutboxClient) AppendAuditEventIdempotent(_ context.Context, tenantID, key string, event nexusclient.AuditEvent) error {
+func (f *fakeNexusOutboxClient) AppendAuditEventIdempotent(_ context.Context, orgID, key string, event nexusclient.AuditEvent) error {
 	f.auditCalls++
-	f.auditTenant, f.auditKey, f.auditEvent = tenantID, key, event
+	f.auditOrg, f.auditKey, f.auditEvent = orgID, key, event
 	return f.auditErr
 }
 
@@ -56,13 +56,13 @@ func TestNexusOutboxSenderDeliversMetadataOnlyAuthorityAudit(t *testing.T) {
 	}
 	sender := newNexusOutboxSender(client)
 	err = sender.Send(context.Background(), outbox.Message{
-		ID: messageID, TenantID: "tenant-1", AggregateType: outbox.AggregateTypeProfessionalAuthority,
+		ID: messageID, OrgID: "organization-1", AggregateType: outbox.AggregateTypeProfessionalAuthority,
 		AggregateID: subjectID, Kind: outbox.KindAuditEvent, Payload: payload,
 	})
 	if err != nil {
 		t.Fatalf("send audit: %v", err)
 	}
-	if client.auditCalls != 1 || client.executionCalls != 0 || client.auditTenant != "tenant-1" || client.auditKey != messageID.String() {
+	if client.auditCalls != 1 || client.executionCalls != 0 || client.auditOrg != "organization-1" || client.auditKey != messageID.String() {
 		t.Fatalf("unexpected routing: %+v", client)
 	}
 	if len(client.auditEvent.Data) != 2 || client.auditEvent.Data["revision"] != int64(2) || client.auditEvent.Data["snapshot_hash"] != strings.Repeat("a", 64) {
@@ -81,13 +81,13 @@ func TestNexusOutboxSenderRejectsUnknownAuditFieldsAndCrossedPair(t *testing.T) 
 	}`)
 	sender := newNexusOutboxSender(client)
 	if err := sender.Send(context.Background(), outbox.Message{
-		ID: uuid.New(), TenantID: "tenant-1", AggregateType: outbox.AggregateTypeProfessionalAuthority,
+		ID: uuid.New(), OrgID: "organization-1", AggregateType: outbox.AggregateTypeProfessionalAuthority,
 		AggregateID: subjectID, Kind: outbox.KindAuditEvent, Payload: raw,
 	}); err == nil {
 		t.Fatal("unknown audit payload fields must be rejected")
 	}
 	if err := sender.Send(context.Background(), outbox.Message{
-		ID: uuid.New(), TenantID: "tenant-1", AggregateType: outbox.AggregateTypeExecutionAttempt,
+		ID: uuid.New(), OrgID: "organization-1", AggregateType: outbox.AggregateTypeExecutionAttempt,
 		AggregateID: subjectID, Kind: outbox.KindAuditEvent, Payload: json.RawMessage(`{}`),
 	}); err == nil {
 		t.Fatal("crossed aggregate/kind pair must be rejected")
@@ -104,7 +104,7 @@ func TestNexusOutboxSenderKeepsExecutionResultRoute(t *testing.T) {
 	})
 	sender := newNexusOutboxSender(client)
 	if err := sender.Send(context.Background(), outbox.Message{
-		ID: uuid.New(), TenantID: "tenant-1", AggregateType: outbox.AggregateTypeExecutionAttempt,
+		ID: uuid.New(), OrgID: "organization-1", AggregateType: outbox.AggregateTypeExecutionAttempt,
 		AggregateID: uuid.New(), Kind: outbox.KindExecutionResult, Payload: payload,
 	}); err != nil {
 		t.Fatalf("send execution result: %v", err)
@@ -123,7 +123,7 @@ func TestNexusOutboxSenderDoesNotRetryRejectedAudit(t *testing.T) {
 		Summary: "professional policy pack created", Revision: 1, SnapshotHash: strings.Repeat("c", 64),
 	})
 	err := newNexusOutboxSender(client).Send(context.Background(), outbox.Message{
-		ID: uuid.New(), TenantID: "tenant-1", AggregateType: outbox.AggregateTypeProfessionalAuthority,
+		ID: uuid.New(), OrgID: "organization-1", AggregateType: outbox.AggregateTypeProfessionalAuthority,
 		AggregateID: subjectID, Kind: outbox.KindAuditEvent, Payload: payload,
 	})
 	if err == nil || !errors.Is(err, client.auditErr) {
@@ -136,13 +136,13 @@ func TestNexusOutboxSenderDeliversOperationalFinding(t *testing.T) {
 	messageID := uuid.New()
 	payload := json.RawMessage(`{"run_id":"` + uuid.NewString() + `","finding_type":"job.dead_letter","severity":"high","resource_type":"job","resource_id":"` + uuid.NewString() + `","fingerprint":"` + strings.Repeat("d", 64) + `","state_based":true,"metadata":{}}`)
 	err := newNexusOutboxSender(client).Send(context.Background(), outbox.Message{
-		ID: messageID, TenantID: "tenant-ops", AggregateType: outbox.AggregateTypeOperationalFinding,
+		ID: messageID, OrgID: "organization-ops", AggregateType: outbox.AggregateTypeOperationalFinding,
 		AggregateID: uuid.New(), Kind: outbox.KindOperationalFinding, Payload: payload,
 	})
 	if err != nil {
 		t.Fatalf("send operational finding: %v", err)
 	}
-	if client.findingCalls != 1 || client.findingTenant != "tenant-ops" || client.findingKey != messageID.String() || string(client.findingPayload) != string(payload) {
+	if client.findingCalls != 1 || client.findingOrg != "organization-ops" || client.findingKey != messageID.String() || string(client.findingPayload) != string(payload) {
 		t.Fatalf("unexpected finding routing: %+v", client)
 	}
 	if client.auditCalls != 0 || client.executionCalls != 0 {
@@ -152,7 +152,7 @@ func TestNexusOutboxSenderDeliversOperationalFinding(t *testing.T) {
 
 func TestNexusOutboxSenderClassifiesOperationalFindingFailures(t *testing.T) {
 	message := outbox.Message{
-		ID: uuid.New(), TenantID: "tenant-ops", AggregateType: outbox.AggregateTypeOperationalFinding,
+		ID: uuid.New(), OrgID: "organization-ops", AggregateType: outbox.AggregateTypeOperationalFinding,
 		AggregateID: uuid.New(), Kind: outbox.KindOperationalFinding, Payload: json.RawMessage(`{}`),
 	}
 	for _, tc := range []struct {

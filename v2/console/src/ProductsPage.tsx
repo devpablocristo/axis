@@ -26,6 +26,7 @@ type CrudLifecycleView = 'active' | 'archived' | 'trash'
 type BulkAction = 'archive' | 'trash' | 'restore' | 'purge'
 
 type ProductsPageProps = {
+  organizationId: string
   principalId: string
   onSessionChanged: () => void | Promise<void>
 }
@@ -34,7 +35,7 @@ const CrudPage = PlatformCrudPage as unknown as <T extends { id: string }>(
   props: CrudPageProps<T>,
 ) => ReactElement
 
-export function ProductsPage({ principalId, onSessionChanged }: ProductsPageProps) {
+export function ProductsPage({ organizationId, principalId, onSessionChanged }: ProductsPageProps) {
   const [lifecycleView, setLifecycleView] = useState<CrudLifecycleView>('active')
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [selectedRowsById, setSelectedRowsById] = useState<Record<string, Product>>({})
@@ -54,8 +55,8 @@ export function ProductsPage({ principalId, onSessionChanged }: ProductsPageProp
   }, [onSessionChanged])
 
   const dataSource: NonNullable<CrudPageProps<Product>['dataSource']> = useMemo(() => ({
-    list: () => isActive ? listProducts(lifecycleView, principalId) : Promise.resolve([]),
-  }), [isActive, lifecycleView, principalId])
+    list: () => isActive && organizationId ? listProducts(lifecycleView, organizationId, principalId) : Promise.resolve([]),
+  }), [isActive, lifecycleView, organizationId, principalId])
 
   useEffect(() => {
     setSelectedIds([])
@@ -113,9 +114,9 @@ export function ProductsPage({ principalId, onSessionChanged }: ProductsPageProp
     setActionError('')
     try {
       if (formMode === 'create') {
-        await createProduct(productPayload(formValues, true), principalId)
+		await createProduct(productPayload(formValues, true), organizationId, principalId)
       } else if (selectedRow) {
-        await updateProduct(selectedRow.id, productPayload(formValues, false), principalId)
+		await updateProduct(selectedRow.id, productPayload(formValues, false), organizationId, principalId)
       }
       closeForm()
       clearSelected()
@@ -134,17 +135,17 @@ export function ProductsPage({ principalId, onSessionChanged }: ProductsPageProp
     try {
       for (const id of selectedIds) {
         if (action === 'archive') {
-          await archiveProduct(id, principalId)
+			await archiveProduct(id, organizationId, principalId)
         } else if (action === 'trash') {
-          await trashProduct(id, principalId)
+			await trashProduct(id, organizationId, principalId)
         } else if (action === 'restore') {
           if (lifecycleView === 'archived') {
-            await unarchiveProduct(id, principalId)
+				await unarchiveProduct(id, organizationId, principalId)
           } else {
-            await restoreProduct(id, principalId)
+            await restoreProduct(id, organizationId, principalId)
           }
         } else {
-          await purgeProduct(id, principalId)
+          await purgeProduct(id, organizationId, principalId)
         }
       }
       clearSelected()

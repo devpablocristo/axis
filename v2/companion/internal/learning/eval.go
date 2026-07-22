@@ -7,9 +7,9 @@ import (
 )
 
 // CapabilityChecker reports whether a capability_key is a real, active
-// capability of the tenant. The eval fails closed if this is unavailable.
+// capability of the organization. The eval fails closed if this is unavailable.
 type CapabilityChecker interface {
-	IsActiveCapability(ctx context.Context, tenantID, capabilityKey string) (bool, error)
+	IsActiveCapability(ctx context.Context, orgID, capabilityKey string) (bool, error)
 }
 
 const (
@@ -74,15 +74,15 @@ func Evaluate(ctx context.Context, checker CapabilityChecker, proposal Proposal)
 		report.Checks = append(report.Checks, EvalCheck{Key: key, Status: status, Reason: reason})
 	}
 
-	// 1. The procedure must reference a real, active capability of the tenant.
+	// 1. The procedure must reference a real, active capability of the organization.
 	if checker == nil {
 		add("capability_real", "capability checker unavailable", false)
 	} else {
-		active, err := checker.IsActiveCapability(ctx, proposal.TenantID, proposal.CapabilityKey)
+		active, err := checker.IsActiveCapability(ctx, proposal.OrgID, proposal.CapabilityKey)
 		if err != nil {
 			return EvalReport{}, err
 		}
-		add("capability_real", "capability_key must be an active capability of the tenant", active)
+		add("capability_real", "capability_key must be an active capability of the organization", active)
 	}
 
 	// 2. Installable as a procedure memory (same limits the memories module

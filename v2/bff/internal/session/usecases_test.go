@@ -6,15 +6,15 @@ import (
 	"time"
 
 	userdomain "github.com/devpablocristo/bff-v2/internal/identity/usecases/domain"
+	productdomain "github.com/devpablocristo/bff-v2/internal/products/usecases/domain"
 	sessiondomain "github.com/devpablocristo/bff-v2/internal/session/usecases/domain"
-	tenantdomain "github.com/devpablocristo/bff-v2/internal/tenancy/usecases/domain"
 	"github.com/google/uuid"
 )
 
-func TestResolveEnsuresUserAndDefaultTenant(t *testing.T) {
+func TestResolveEnsuresUserAndDefaultProduct(t *testing.T) {
 	identity := &fakeSessionIdentity{}
-	tenancy := &fakeSessionTenancy{}
-	uc := NewUseCases(identity, tenancy, Defaults{
+	products := &fakeSessionOrganizationAccess{}
+	uc := NewUseCases(identity, products, Defaults{
 		PrincipalID:    "dev-user",
 		PrincipalEmail: "dev@example.local",
 		OrgID:          "dev-org",
@@ -24,24 +24,24 @@ func TestResolveEnsuresUserAndDefaultTenant(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	if out.PrincipalID != identity.userID || out.OrgID != tenancy.orgID {
+	if out.PrincipalID != identity.userID || out.OrgID != products.orgID {
 		t.Fatalf("unexpected session identity: %+v", out)
 	}
 	if identity.ensured.ProviderUserID != "dev-user" {
 		t.Fatalf("expected principal ensured, got %+v", identity.ensured)
 	}
-	if tenancy.defaultOrgID != "dev-org" || tenancy.defaultUserID != identity.userID {
-		t.Fatalf("expected default tenant ensure, got org=%q user=%q", tenancy.defaultOrgID, tenancy.defaultUserID)
+	if products.defaultOrgID != "dev-org" || products.defaultUserID != identity.userID {
+		t.Fatalf("expected default product ensure, got org=%q user=%q", products.defaultOrgID, products.defaultUserID)
 	}
-	if len(out.Tenants) != 1 || out.Tenants[0].ProductSurface != tenantdomain.DefaultProductSurface {
-		t.Fatalf("expected default tenant in session, got %+v", out.Tenants)
+	if len(out.Products) != 1 || out.Products[0].ProductSurface != productdomain.DefaultProductSurface {
+		t.Fatalf("expected default product in session, got %+v", out.Products)
 	}
 }
 
-func TestResolveClerkEnsuresProviderTenantMembership(t *testing.T) {
+func TestResolveClerkEnsuresProviderOrgMembershipForProduct(t *testing.T) {
 	identity := &fakeSessionIdentity{}
-	tenancy := &fakeSessionTenancy{}
-	uc := NewUseCases(identity, tenancy, Defaults{}, &fakeTokenVerifier{
+	products := &fakeSessionOrganizationAccess{}
+	uc := NewUseCases(identity, products, Defaults{}, &fakeTokenVerifier{
 		claims: map[string]any{
 			"sub":      "user_clerk",
 			"email":    "clerk@example.com",
@@ -60,15 +60,15 @@ func TestResolveClerkEnsuresProviderTenantMembership(t *testing.T) {
 	if out.AuthMethod != "clerk" || out.User.Email != "clerk@example.com" {
 		t.Fatalf("unexpected clerk session: %+v", out)
 	}
-	if tenancy.defaultOrgID != "org_clerk" || tenancy.defaultUserID != identity.userID {
-		t.Fatalf("expected clerk tenant membership ensure, got org=%q user=%q want user=%q", tenancy.defaultOrgID, tenancy.defaultUserID, identity.userID)
+	if products.defaultOrgID != "org_clerk" || products.defaultUserID != identity.userID {
+		t.Fatalf("expected clerk product membership ensure, got org=%q user=%q want user=%q", products.defaultOrgID, products.defaultUserID, identity.userID)
 	}
 }
 
 func TestResolveClerkDoesNotFallBackToDevWithoutToken(t *testing.T) {
 	identity := &fakeSessionIdentity{}
-	tenancy := &fakeSessionTenancy{}
-	uc := NewUseCases(identity, tenancy, Defaults{
+	products := &fakeSessionOrganizationAccess{}
+	uc := NewUseCases(identity, products, Defaults{
 		PrincipalID:    "dev-user",
 		PrincipalEmail: "dev@example.local",
 		OrgID:          "dev-org",
@@ -82,10 +82,10 @@ func TestResolveClerkDoesNotFallBackToDevWithoutToken(t *testing.T) {
 	}
 }
 
-func TestResolveClerkWithoutOrgUsesDefaultTenant(t *testing.T) {
+func TestResolveClerkWithoutOrgUsesDefaultProduct(t *testing.T) {
 	identity := &fakeSessionIdentity{}
-	tenancy := &fakeSessionTenancy{}
-	uc := NewUseCases(identity, tenancy, Defaults{OrgID: "dev-org"}, &fakeTokenVerifier{
+	products := &fakeSessionOrganizationAccess{}
+	uc := NewUseCases(identity, products, Defaults{OrgID: "dev-org"}, &fakeTokenVerifier{
 		claims: map[string]any{
 			"sub":   "user_clerk",
 			"email": "clerk@example.com",
@@ -101,17 +101,17 @@ func TestResolveClerkWithoutOrgUsesDefaultTenant(t *testing.T) {
 	if out.AuthMethod != "clerk" || out.User.Email != "clerk@example.com" {
 		t.Fatalf("unexpected clerk session: %+v", out)
 	}
-	if tenancy.defaultOrgID != "dev-org" || tenancy.defaultUserID != identity.userID {
-		t.Fatalf("expected default tenant membership ensure, got org=%q user=%q want user=%q", tenancy.defaultOrgID, tenancy.defaultUserID, identity.userID)
+	if products.defaultOrgID != "dev-org" || products.defaultUserID != identity.userID {
+		t.Fatalf("expected default product membership ensure, got org=%q user=%q want user=%q", products.defaultOrgID, products.defaultUserID, identity.userID)
 	}
-	if len(out.Tenants) != 1 || out.Tenants[0].ProductSurface != tenantdomain.DefaultProductSurface {
-		t.Fatalf("expected default tenant in session, got %+v", out.Tenants)
+	if len(out.Products) != 1 || out.Products[0].ProductSurface != productdomain.DefaultProductSurface {
+		t.Fatalf("expected default product in session, got %+v", out.Products)
 	}
 }
 
 func TestResolveClerkListsUserOrgMemberships(t *testing.T) {
 	identity := &fakeSessionIdentity{}
-	tenancy := &fakeSessionTenancy{}
+	products := &fakeSessionOrganizationAccess{}
 	orgs := &fakeSessionOrgProvider{
 		memberships: []userdomain.ProviderOrgMembership{
 			{
@@ -134,7 +134,7 @@ func TestResolveClerkListsUserOrgMemberships(t *testing.T) {
 			},
 		},
 	}
-	uc := NewUseCases(identity, tenancy, Defaults{}, &fakeTokenVerifier{
+	uc := NewUseCases(identity, products, Defaults{}, &fakeTokenVerifier{
 		claims: map[string]any{
 			"sub":    "user_clerk",
 			"email":  "clerk@example.com",
@@ -151,14 +151,14 @@ func TestResolveClerkListsUserOrgMemberships(t *testing.T) {
 	if got := orgs.providerUserID; got != "user_clerk" {
 		t.Fatalf("expected provider user lookup, got %q", got)
 	}
-	if len(out.Tenants) != 2 {
-		t.Fatalf("expected two Clerk org tenants, got %+v", out.Tenants)
+	if len(out.Products) != 2 {
+		t.Fatalf("expected two Clerk org products, got %+v", out.Products)
 	}
-	if out.Tenants[0].OrgName != "Org A" || out.Tenants[1].OrgName != "Org B" {
-		t.Fatalf("expected active Clerk org first, got %+v", out.Tenants)
+	if out.Products[0].OrgName != "Org A" || out.Products[1].OrgName != "Org B" {
+		t.Fatalf("expected active Clerk org first, got %+v", out.Products)
 	}
-	if tenancy.roles["org_a"] != tenantdomain.RoleAdmin || tenancy.roles["org_b"] != tenantdomain.RoleMember {
-		t.Fatalf("expected roles from Clerk memberships, got %+v", tenancy.roles)
+	if products.roles["org_a"] != productdomain.RoleAdmin || products.roles["org_b"] != productdomain.RoleMember {
+		t.Fatalf("expected roles from Clerk memberships, got %+v", products.roles)
 	}
 }
 
@@ -176,39 +176,39 @@ func (f *fakeSessionIdentity) Ensure(_ context.Context, input userdomain.EnsureI
 	return userdomain.User{ID: f.userID, Provider: input.Provider, ProviderUserID: input.ProviderUserID, Email: input.Email, Status: userdomain.StatusActive, CreatedAt: now, UpdatedAt: now}, nil
 }
 
-type fakeSessionTenancy struct {
+type fakeSessionOrganizationAccess struct {
 	defaultOrgID  string
 	defaultUserID string
 	orgID         string
-	tenant        tenantdomain.Tenant
-	tenants       []tenantdomain.Tenant
+	product       productdomain.Product
+	products      []productdomain.Product
 	roles         map[string]string
 }
 
-func (f *fakeSessionTenancy) EnsureDefaultTenant(_ context.Context, orgID, _, userID string) (tenantdomain.Tenant, error) {
+func (f *fakeSessionOrganizationAccess) EnsureDefaultProduct(_ context.Context, orgID, _, userID string) (productdomain.Product, error) {
 	f.defaultOrgID = orgID
 	f.defaultUserID = userID
 	now := time.Now().UTC()
 	if f.orgID == "" {
 		f.orgID = uuid.NewString()
 	}
-	f.tenant = tenantdomain.Tenant{
+	f.product = productdomain.Product{
 		ID:             uuid.New(),
 		OrgID:          f.orgID,
 		OrgName:        orgID,
-		ProductSurface: tenantdomain.DefaultProductSurface,
-		Status:         tenantdomain.StatusActive,
+		ProductSurface: productdomain.DefaultProductSurface,
+		Status:         productdomain.StatusActive,
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
-	return f.tenant, nil
+	return f.product, nil
 }
 
-func (f *fakeSessionTenancy) EnsureProviderDefaultTenant(_ context.Context, input tenantdomain.EnsureOrgInput, userID string) (tenantdomain.Tenant, error) {
-	return f.EnsureDefaultTenant(context.Background(), input.ProviderOrgID, input.Name, userID)
+func (f *fakeSessionOrganizationAccess) EnsureProviderDefaultProduct(_ context.Context, input productdomain.EnsureOrgInput, userID string) (productdomain.Product, error) {
+	return f.EnsureDefaultProduct(context.Background(), input.ProviderOrgID, input.Name, userID)
 }
 
-func (f *fakeSessionTenancy) EnsureProviderDefaultTenantWithRole(_ context.Context, input tenantdomain.EnsureOrgInput, userID, role string) (tenantdomain.Tenant, error) {
+func (f *fakeSessionOrganizationAccess) EnsureProviderDefaultProductWithRole(_ context.Context, input productdomain.EnsureOrgInput, userID, role string) (productdomain.Product, error) {
 	f.defaultOrgID = input.ProviderOrgID
 	f.defaultUserID = userID
 	if f.roles == nil {
@@ -216,25 +216,25 @@ func (f *fakeSessionTenancy) EnsureProviderDefaultTenantWithRole(_ context.Conte
 	}
 	f.roles[input.ProviderOrgID] = role
 	now := time.Now().UTC()
-	tenant := tenantdomain.Tenant{
+	product := productdomain.Product{
 		ID:             uuid.New(),
 		OrgID:          uuid.NewString(),
 		OrgName:        input.Name,
-		ProductSurface: tenantdomain.DefaultProductSurface,
-		Status:         tenantdomain.StatusActive,
+		ProductSurface: productdomain.DefaultProductSurface,
+		Status:         productdomain.StatusActive,
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
-	f.tenant = tenant
-	f.tenants = append(f.tenants, tenant)
-	return tenant, nil
+	f.product = product
+	f.products = append(f.products, product)
+	return product, nil
 }
 
-func (f *fakeSessionTenancy) ListForPrincipal(context.Context, string) ([]tenantdomain.Tenant, error) {
-	if len(f.tenants) > 0 {
-		return f.tenants, nil
+func (f *fakeSessionOrganizationAccess) ListForPrincipal(context.Context, string) ([]productdomain.Product, error) {
+	if len(f.products) > 0 {
+		return f.products, nil
 	}
-	return []tenantdomain.Tenant{f.tenant}, nil
+	return []productdomain.Product{f.product}, nil
 }
 
 type fakeSessionOrgProvider struct {

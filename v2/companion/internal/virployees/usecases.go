@@ -26,46 +26,46 @@ import (
 
 const (
 	ResourceTypeVirployee = "virployee"
-	DefaultTenantID       = "default"
+	DefaultOrgID          = "default"
 	DefaultActorID        = "system"
 )
 
 type RepositoryPort interface {
 	lifecycle.RepositoryPort
 
-	Create(ctx context.Context, tenantID string, input domain.NormalizedCreateInput) (domain.Virployee, error)
-	List(ctx context.Context, tenantID string, state domain.State) ([]domain.Virployee, error)
-	Get(ctx context.Context, tenantID string, id uuid.UUID) (domain.Virployee, error)
-	Update(ctx context.Context, tenantID string, id uuid.UUID, input domain.NormalizedUpdateInput) (domain.Virployee, error)
-	CreateRunTrace(ctx context.Context, tenantID string, input runtraces.CreateInput) (runtraces.Trace, error)
-	ListRunTraces(ctx context.Context, tenantID string, virployeeID uuid.UUID, limit int) ([]runtraces.Trace, error)
-	FindExecutionGateTraceByApproval(ctx context.Context, tenantID string, virployeeID uuid.UUID, approvalID string) (runtraces.Trace, error)
-	FindSimulatedExecutionTraceByApproval(ctx context.Context, tenantID string, virployeeID uuid.UUID, approvalID string) (runtraces.Trace, error)
+	Create(ctx context.Context, orgID string, input domain.NormalizedCreateInput) (domain.Virployee, error)
+	List(ctx context.Context, orgID string, state domain.State) ([]domain.Virployee, error)
+	Get(ctx context.Context, orgID string, id uuid.UUID) (domain.Virployee, error)
+	Update(ctx context.Context, orgID string, id uuid.UUID, input domain.NormalizedUpdateInput) (domain.Virployee, error)
+	CreateRunTrace(ctx context.Context, orgID string, input runtraces.CreateInput) (runtraces.Trace, error)
+	ListRunTraces(ctx context.Context, orgID string, virployeeID uuid.UUID, limit int) ([]runtraces.Trace, error)
+	FindExecutionGateTraceByApproval(ctx context.Context, orgID string, virployeeID uuid.UUID, approvalID string) (runtraces.Trace, error)
+	FindSimulatedExecutionTraceByApproval(ctx context.Context, orgID string, virployeeID uuid.UUID, approvalID string) (runtraces.Trace, error)
 }
 
 type ExecutionRepositoryPort interface {
-	FindExecutionTraceByApproval(ctx context.Context, tenantID string, virployeeID uuid.UUID, approvalID string) (runtraces.Trace, error)
-	SavePreparedAction(ctx context.Context, tenantID string, virployeeID uuid.UUID, checkID, approvalID string, capabilityKey, payloadHash, bindingHash string, action preparedactions.Action) (PreparedActionRecord, error)
-	GetPreparedActionByApproval(ctx context.Context, tenantID string, virployeeID, approvalID uuid.UUID) (PreparedActionRecord, error)
-	BeginExecution(ctx context.Context, tenantID string, virployeeID uuid.UUID, preparedActionID uuid.UUID, idempotencyKey string) (ExecutionAttempt, bool, error)
-	GetExecutionByPreparedAction(ctx context.Context, tenantID string, preparedActionID uuid.UUID) (ExecutionAttempt, error)
-	CompleteExecution(ctx context.Context, tenantID string, id uuid.UUID, status, resourceID string, result map[string]any, executionError string, durationMS int64) (ExecutionAttempt, error)
-	CreateLocalCalendarEvent(ctx context.Context, tenantID string, virployeeID uuid.UUID, attempt ExecutionAttempt, action preparedactions.Action) (string, error)
+	FindExecutionTraceByApproval(ctx context.Context, orgID string, virployeeID uuid.UUID, approvalID string) (runtraces.Trace, error)
+	SavePreparedAction(ctx context.Context, orgID string, virployeeID uuid.UUID, checkID, approvalID string, capabilityKey, payloadHash, bindingHash string, action preparedactions.Action) (PreparedActionRecord, error)
+	GetPreparedActionByApproval(ctx context.Context, orgID string, virployeeID, approvalID uuid.UUID) (PreparedActionRecord, error)
+	BeginExecution(ctx context.Context, orgID string, virployeeID uuid.UUID, preparedActionID uuid.UUID, idempotencyKey string) (ExecutionAttempt, bool, error)
+	GetExecutionByPreparedAction(ctx context.Context, orgID string, preparedActionID uuid.UUID) (ExecutionAttempt, error)
+	CompleteExecution(ctx context.Context, orgID string, id uuid.UUID, status, resourceID string, result map[string]any, executionError string, durationMS int64) (ExecutionAttempt, error)
+	CreateLocalCalendarEvent(ctx context.Context, orgID string, virployeeID uuid.UUID, attempt ExecutionAttempt, action preparedactions.Action) (string, error)
 }
 
 type JobRoleReaderPort interface {
-	EnsureActive(ctx context.Context, tenantID string, id uuid.UUID) error
-	Get(ctx context.Context, tenantID string, id uuid.UUID) (jobroledomain.JobRole, error)
+	EnsureActive(ctx context.Context, orgID string, id uuid.UUID) error
+	Get(ctx context.Context, orgID string, id uuid.UUID) (jobroledomain.JobRole, error)
 }
 
 type CapabilityValidatorPort interface {
-	EnsureAssignable(ctx context.Context, tenantID string, ids []uuid.UUID, autonomy domain.AutonomyLevel) error
-	Get(ctx context.Context, tenantID string, id uuid.UUID) (capabilitydomain.Capability, error)
+	EnsureAssignable(ctx context.Context, orgID string, ids []uuid.UUID, autonomy domain.AutonomyLevel) error
+	Get(ctx context.Context, orgID string, id uuid.UUID) (capabilitydomain.Capability, error)
 }
 
 type ProfileTemplateReaderPort interface {
-	EnsureUsableByVirployee(ctx context.Context, tenantID string, id uuid.UUID, autonomy domain.AutonomyLevel) error
-	Get(ctx context.Context, tenantID string, id uuid.UUID) (profiletemplatedomain.ProfileTemplate, error)
+	EnsureUsableByVirployee(ctx context.Context, orgID string, id uuid.UUID, autonomy domain.AutonomyLevel) error
+	Get(ctx context.Context, orgID string, id uuid.UUID) (profiletemplatedomain.ProfileTemplate, error)
 }
 
 type GovernanceCheckerPort interface {
@@ -77,7 +77,7 @@ type GovernanceRevalidatorPort interface {
 }
 
 type ApprovalReaderPort interface {
-	GetApproval(ctx context.Context, tenantID string, id uuid.UUID) (executiongate.GovernanceApproval, error)
+	GetApproval(ctx context.Context, orgID string, id uuid.UUID) (executiongate.GovernanceApproval, error)
 }
 
 // MCPExecutionContextValidatorPort revalidates the server-derived MCP policy,
@@ -91,7 +91,7 @@ type MCPExecutionContextValidatorPort interface {
 // ledger by the wire adapter. Data must hold only hashes + non-sensitive
 // metadata (never PHI or raw content).
 type AuditEventInput struct {
-	TenantID    string
+	OrgID       string
 	VirployeeID string
 	ActorType   string
 	ActorID     string
@@ -123,7 +123,7 @@ type ExecutionOutcome struct {
 }
 
 type ActionExecutorPort interface {
-	Execute(ctx context.Context, tenantID string, virployeeID uuid.UUID, attempt ExecutionAttempt, action preparedactions.Action) (ExecutionOutcome, error)
+	Execute(ctx context.Context, orgID string, virployeeID uuid.UUID, attempt ExecutionAttempt, action preparedactions.Action) (ExecutionOutcome, error)
 }
 
 type MemoryReaderPort interface {
@@ -148,7 +148,7 @@ type GovernedReadInvokerPort interface {
 }
 
 type GovernedReadInvocation struct {
-	TenantID               string
+	OrgID                  string
 	ActorID                string
 	VirployeeID            uuid.UUID
 	SubjectID              uuid.UUID
@@ -171,7 +171,7 @@ type ContinuityAssignmentValidatorPort interface {
 // AssistExecutionContextValidatorPort validates mutable database state that a
 // completed Assist depended on (case ownership and every cited source). The
 // immutable hashes are recomputed in the usecase; this port only answers from
-// current tenant-scoped rows.
+// current organization-scoped rows.
 type AssistExecutionContextValidatorPort interface {
 	ValidateAssistExecutionContext(context.Context, string, uuid.UUID, uuid.UUID, AssistRun) error
 	AssistSourceAuthorizationHash(context.Context, string, uuid.UUID, uuid.UUID, AssistRun, []knowledgebases.Citation) (string, error)
@@ -253,12 +253,12 @@ type AssistMetadata struct {
 
 // AssistRepositoryPort persists product assist runs (reserve-before-LLM).
 type AssistRepositoryPort interface {
-	BeginAssistRun(ctx context.Context, tenantID string, virployeeID uuid.UUID, metadata AssistMetadata, idempotencyKey, inputHash, inputPreview string, inputJSON json.RawMessage) (AssistRun, bool, error)
-	ClaimAssistRun(ctx context.Context, tenantID string, id uuid.UUID, recoverPreAnswer bool) (AssistRun, bool, error)
-	SetAssistRunStatus(ctx context.Context, tenantID string, id uuid.UUID, status string) (AssistRun, error)
-	CompleteAssistRun(ctx context.Context, tenantID string, id uuid.UUID, status string, output json.RawMessage, outputText string, answered, degraded bool, model, promptVersion, runErr string, durationMS int64) (AssistRun, error)
-	GetAssistRunByKey(ctx context.Context, tenantID string, virployeeID uuid.UUID, idempotencyKey string) (AssistRun, error)
-	GetAssistRunByID(ctx context.Context, tenantID string, id uuid.UUID) (AssistRun, error)
+	BeginAssistRun(ctx context.Context, orgID string, virployeeID uuid.UUID, metadata AssistMetadata, idempotencyKey, inputHash, inputPreview string, inputJSON json.RawMessage) (AssistRun, bool, error)
+	ClaimAssistRun(ctx context.Context, orgID string, id uuid.UUID, recoverPreAnswer bool) (AssistRun, bool, error)
+	SetAssistRunStatus(ctx context.Context, orgID string, id uuid.UUID, status string) (AssistRun, error)
+	CompleteAssistRun(ctx context.Context, orgID string, id uuid.UUID, status string, output json.RawMessage, outputText string, answered, degraded bool, model, promptVersion, runErr string, durationMS int64) (AssistRun, error)
+	GetAssistRunByKey(ctx context.Context, orgID string, virployeeID uuid.UUID, idempotencyKey string) (AssistRun, error)
+	GetAssistRunByID(ctx context.Context, orgID string, id uuid.UUID) (AssistRun, error)
 	ListReceivedAssistRuns(ctx context.Context, limit int) ([]AssistRun, error)
 }
 
@@ -449,66 +449,66 @@ func (u *UseCases) RegisterExecutor(action string, executor ActionExecutorPort) 
 	}
 }
 
-func (u *UseCases) Create(ctx context.Context, tenantID string, input domain.CreateInput) (domain.Virployee, error) {
+func (u *UseCases) Create(ctx context.Context, orgID string, input domain.CreateInput) (domain.Virployee, error) {
 	normalized, err := domain.NormalizeCreateInput(input)
 	if err != nil {
 		return domain.Virployee{}, err
 	}
-	if err := u.jobRoles.EnsureActive(ctx, normalizeTenantID(tenantID), normalized.JobRoleID); err != nil {
+	if err := u.jobRoles.EnsureActive(ctx, normalizeOrgID(orgID), normalized.JobRoleID); err != nil {
 		return domain.Virployee{}, err
 	}
-	if err := u.profileTemplates.EnsureUsableByVirployee(ctx, normalizeTenantID(tenantID), normalized.ProfileTemplateID, normalized.Autonomy); err != nil {
+	if err := u.profileTemplates.EnsureUsableByVirployee(ctx, normalizeOrgID(orgID), normalized.ProfileTemplateID, normalized.Autonomy); err != nil {
 		return domain.Virployee{}, err
 	}
-	if err := u.capabilities.EnsureAssignable(ctx, normalizeTenantID(tenantID), normalized.CapabilityIDs, normalized.Autonomy); err != nil {
+	if err := u.capabilities.EnsureAssignable(ctx, normalizeOrgID(orgID), normalized.CapabilityIDs, normalized.Autonomy); err != nil {
 		return domain.Virployee{}, err
 	}
-	return u.repo.Create(ctx, normalizeTenantID(tenantID), normalized)
+	return u.repo.Create(ctx, normalizeOrgID(orgID), normalized)
 }
 
-func (u *UseCases) ListActive(ctx context.Context, tenantID string) ([]domain.Virployee, error) {
-	return u.repo.List(ctx, normalizeTenantID(tenantID), domain.StateActive)
+func (u *UseCases) ListActive(ctx context.Context, orgID string) ([]domain.Virployee, error) {
+	return u.repo.List(ctx, normalizeOrgID(orgID), domain.StateActive)
 }
 
-func (u *UseCases) ListArchived(ctx context.Context, tenantID string) ([]domain.Virployee, error) {
-	return u.repo.List(ctx, normalizeTenantID(tenantID), domain.StateArchived)
+func (u *UseCases) ListArchived(ctx context.Context, orgID string) ([]domain.Virployee, error) {
+	return u.repo.List(ctx, normalizeOrgID(orgID), domain.StateArchived)
 }
 
-func (u *UseCases) ListTrash(ctx context.Context, tenantID string) ([]domain.Virployee, error) {
-	return u.repo.List(ctx, normalizeTenantID(tenantID), domain.StateTrashed)
+func (u *UseCases) ListTrash(ctx context.Context, orgID string) ([]domain.Virployee, error) {
+	return u.repo.List(ctx, normalizeOrgID(orgID), domain.StateTrashed)
 }
 
-func (u *UseCases) Get(ctx context.Context, tenantID string, id uuid.UUID) (domain.Virployee, error) {
-	return u.repo.Get(ctx, normalizeTenantID(tenantID), id)
+func (u *UseCases) Get(ctx context.Context, orgID string, id uuid.UUID) (domain.Virployee, error) {
+	return u.repo.Get(ctx, normalizeOrgID(orgID), id)
 }
 
-func (u *UseCases) RuntimeContext(ctx context.Context, tenantID string, id uuid.UUID) (runtimecontext.Context, error) {
-	tenantID = normalizeTenantID(tenantID)
-	virployee, err := u.repo.Get(ctx, tenantID, id)
+func (u *UseCases) RuntimeContext(ctx context.Context, orgID string, id uuid.UUID) (runtimecontext.Context, error) {
+	orgID = normalizeOrgID(orgID)
+	virployee, err := u.repo.Get(ctx, orgID, id)
 	if err != nil {
 		return runtimecontext.Context{}, err
 	}
 
-	jobRole, err := u.jobRoles.Get(ctx, tenantID, virployee.JobRoleID)
+	jobRole, err := u.jobRoles.Get(ctx, orgID, virployee.JobRoleID)
 	if err != nil {
 		if domainerr.IsNotFound(err) {
-			return runtimecontext.Context{}, domainerr.Validation("job_role_id must reference an active job role in the same tenant")
+			return runtimecontext.Context{}, domainerr.Validation("job_role_id must reference an active job role in the same organization")
 		}
 		return runtimecontext.Context{}, err
 	}
 	if jobRole.State() != jobroledomain.StateActive {
-		return runtimecontext.Context{}, domainerr.Validation("job_role_id must reference an active job role in the same tenant")
+		return runtimecontext.Context{}, domainerr.Validation("job_role_id must reference an active job role in the same organization")
 	}
 
-	profileTemplate, err := u.profileTemplates.Get(ctx, tenantID, virployee.ProfileTemplateID)
+	profileTemplate, err := u.profileTemplates.Get(ctx, orgID, virployee.ProfileTemplateID)
 	if err != nil {
 		if domainerr.IsNotFound(err) {
-			return runtimecontext.Context{}, domainerr.Validation("profile_template_id must reference an active profile template in the same tenant")
+			return runtimecontext.Context{}, domainerr.Validation("profile_template_id must reference an active profile template in the same organization")
 		}
 		return runtimecontext.Context{}, err
 	}
 	if profileTemplate.State() != profiletemplatedomain.StateActive {
-		return runtimecontext.Context{}, domainerr.Validation("profile_template_id must reference an active profile template in the same tenant")
+		return runtimecontext.Context{}, domainerr.Validation("profile_template_id must reference an active profile template in the same organization")
 	}
 	if !profileTemplate.MaxAutonomy.Allows(virployee.Autonomy) {
 		return runtimecontext.Context{}, domainerr.Validation("profile template " + profileTemplate.Name + " allows max autonomy " + string(profileTemplate.MaxAutonomy) + "; virployee autonomy " + string(virployee.Autonomy) + " exceeds it")
@@ -516,15 +516,15 @@ func (u *UseCases) RuntimeContext(ctx context.Context, tenantID string, id uuid.
 
 	capabilities := make([]capabilitydomain.Capability, 0, len(virployee.CapabilityIDs))
 	for _, capabilityID := range virployee.CapabilityIDs {
-		capability, err := u.capabilities.Get(ctx, tenantID, capabilityID)
+		capability, err := u.capabilities.Get(ctx, orgID, capabilityID)
 		if err != nil {
 			if domainerr.IsNotFound(err) {
-				return runtimecontext.Context{}, domainerr.Validation("capability_ids must reference active capabilities in the same tenant")
+				return runtimecontext.Context{}, domainerr.Validation("capability_ids must reference active capabilities in the same organization")
 			}
 			return runtimecontext.Context{}, err
 		}
 		if capability.State() != capabilitydomain.StateActive {
-			return runtimecontext.Context{}, domainerr.Validation("capability_ids must reference active capabilities in the same tenant")
+			return runtimecontext.Context{}, domainerr.Validation("capability_ids must reference active capabilities in the same organization")
 		}
 		if capability.PromotionState != capabilitydomain.PromotionActive {
 			return runtimecontext.Context{}, domainerr.Validation("assigned capability is no longer conformant and promoted")
@@ -542,7 +542,7 @@ func (u *UseCases) RuntimeContext(ctx context.Context, tenantID string, id uuid.
 		Capabilities:    capabilities,
 	}
 	if u.memories != nil {
-		items, recallErr := u.memories.RecallInternal(ctx, tenantID, id, virployee.Name+" "+virployee.Description, 5)
+		items, recallErr := u.memories.RecallInternal(ctx, orgID, id, virployee.Name+" "+virployee.Description, 5)
 		if recallErr != nil {
 			return runtimecontext.Context{}, recallErr
 		}
@@ -557,29 +557,29 @@ func (u *UseCases) RuntimeContext(ctx context.Context, tenantID string, id uuid.
 	return result, nil
 }
 
-func (u *UseCases) DryRun(ctx context.Context, tenantID string, id uuid.UUID, input string) (dryrun.Result, error) {
-	tenantID = normalizeTenantID(tenantID)
-	result, err := u.dryRun(ctx, tenantID, id, input)
+func (u *UseCases) DryRun(ctx context.Context, orgID string, id uuid.UUID, input string) (dryrun.Result, error) {
+	orgID = normalizeOrgID(orgID)
+	result, err := u.dryRun(ctx, orgID, id, input)
 	if err != nil {
 		return dryrun.Result{}, err
 	}
-	if err := u.recordDryRunTrace(ctx, tenantID, result); err != nil {
+	if err := u.recordDryRunTrace(ctx, orgID, result); err != nil {
 		return dryrun.Result{}, err
 	}
 	return result, nil
 }
 
-func (u *UseCases) dryRun(ctx context.Context, tenantID string, id uuid.UUID, input string) (dryrun.Result, error) {
+func (u *UseCases) dryRun(ctx context.Context, orgID string, id uuid.UUID, input string) (dryrun.Result, error) {
 	input = strings.TrimSpace(input)
 	if input == "" {
 		return dryrun.Result{}, domainerr.Validation("input is required")
 	}
-	runtimeCtx, err := u.RuntimeContext(ctx, tenantID, id)
+	runtimeCtx, err := u.RuntimeContext(ctx, orgID, id)
 	if err != nil {
 		return dryrun.Result{}, err
 	}
 	if u.memories != nil {
-		items, recallErr := u.memories.RecallInternal(ctx, tenantID, id, input, 5)
+		items, recallErr := u.memories.RecallInternal(ctx, orgID, id, input, 5)
 		if recallErr != nil {
 			return dryrun.Result{}, recallErr
 		}
@@ -595,7 +595,7 @@ func (u *UseCases) dryRun(ctx context.Context, tenantID string, id uuid.UUID, in
 	}
 	if u.runtime != nil {
 		quotaID := uuid.NewString()
-		if err := u.consumeQuota(ctx, quotaKey(tenantID, "axis", quotas.AreaLLM), quotaID, "virployee", id.String(), estimatedDryRunTokens(input, runtimeCtx)); err != nil {
+		if err := u.consumeQuota(ctx, quotaKey(orgID, "axis", quotas.AreaLLM), quotaID, "virployee", id.String(), estimatedDryRunTokens(input, runtimeCtx)); err != nil {
 			return dryrun.Result{}, err
 		}
 		proposal, err := u.runtime.Propose(ctx, input, runtimeCtx)
@@ -607,7 +607,13 @@ func (u *UseCases) dryRun(ctx context.Context, tenantID string, id uuid.UUID, in
 			slog.WarnContext(ctx, "runtime_propose_failed_fallback_deterministic", "error", runtraces.RedactText(err.Error()))
 			return dryrun.Evaluate(input, runtimeCtx), nil
 		}
-		u.recordProposalUsage(ctx, tenantID, id, quotaID, proposal)
+		u.recordProposalUsage(ctx, orgID, id, quotaID, proposal)
+		// Echo means no LLM is configured. Its empty proposal is transport
+		// success, not a semantic decision, so retain the scoped deterministic
+		// matcher used when the runtime is absent or unavailable.
+		if !proposal.Intent.Matched && proposal.Intent.ModelID == "echo" {
+			return dryrun.Evaluate(input, runtimeCtx), nil
+		}
 		return dryrun.EvaluateWithProposal(input, runtimeCtx, proposal), nil
 	}
 	return dryrun.Evaluate(input, runtimeCtx), nil
@@ -615,7 +621,7 @@ func (u *UseCases) dryRun(ctx context.Context, tenantID string, id uuid.UUID, in
 
 func (u *UseCases) ExecutionGate(
 	ctx context.Context,
-	tenantID string,
+	orgID string,
 	id uuid.UUID,
 	input string,
 	confirmedDraft *executiongate.ConfirmedDraft,
@@ -632,14 +638,14 @@ func (u *UseCases) ExecutionGate(
 			return executiongate.Result{}, domainerr.Validation(err.Error())
 		}
 	}
-	return u.executionGate(ctx, tenantID, id, input, confirmedDraft, principal, uuid.Nil, nil, "")
+	return u.executionGate(ctx, orgID, id, input, confirmedDraft, principal, uuid.Nil, nil, "")
 }
 
 // ExecutionGateWithAssistRun is the HTTP-facing bound variant. assistRunID is
 // an identifier only: all hashes and provenance are loaded server-side.
 func (u *UseCases) ExecutionGateWithAssistRun(
 	ctx context.Context,
-	tenantID string,
+	orgID string,
 	id uuid.UUID,
 	input string,
 	confirmedDraft *executiongate.ConfirmedDraft,
@@ -650,7 +656,7 @@ func (u *UseCases) ExecutionGateWithAssistRun(
 	if err != nil {
 		return executiongate.Result{}, domainerr.Validation(err.Error())
 	}
-	return u.executionGate(ctx, tenantID, id, input, confirmedDraft, normalized, assistRunID, nil, "")
+	return u.executionGate(ctx, orgID, id, input, confirmedDraft, normalized, assistRunID, nil, "")
 }
 
 // ExecutionGateFromMCP is the governed entrypoint used by the MCP facade. The
@@ -658,7 +664,7 @@ func (u *UseCases) ExecutionGateWithAssistRun(
 // documents are never added to it.
 func (u *UseCases) ExecutionGateFromMCP(
 	ctx context.Context,
-	tenantID string,
+	orgID string,
 	id uuid.UUID,
 	input string,
 	confirmedDraft *executiongate.ConfirmedDraft,
@@ -669,12 +675,12 @@ func (u *UseCases) ExecutionGateFromMCP(
 	if err != nil {
 		return executiongate.Result{}, domainerr.Validation(err.Error())
 	}
-	return u.executionGate(ctx, tenantID, id, input, confirmedDraft, normalized, uuid.Nil, &binding, binding.CapabilityKey)
+	return u.executionGate(ctx, orgID, id, input, confirmedDraft, normalized, uuid.Nil, &binding, binding.CapabilityKey)
 }
 
 func (u *UseCases) executionGate(
 	ctx context.Context,
-	tenantID string,
+	orgID string,
 	id uuid.UUID,
 	input string,
 	confirmedDraft *executiongate.ConfirmedDraft,
@@ -683,13 +689,13 @@ func (u *UseCases) executionGate(
 	mcpBinding *preparedactions.MCPContextBinding,
 	forcedCapabilityKey string,
 ) (executiongate.Result, error) {
-	tenantID = normalizeTenantID(tenantID)
+	orgID = normalizeOrgID(orgID)
 	var result dryrun.Result
 	var err error
 	if strings.TrimSpace(forcedCapabilityKey) != "" {
-		result, err = u.dryRunForCapability(ctx, tenantID, id, input, forcedCapabilityKey)
+		result, err = u.dryRunForCapability(ctx, orgID, id, input, forcedCapabilityKey)
 	} else {
-		result, err = u.dryRun(ctx, tenantID, id, input)
+		result, err = u.dryRun(ctx, orgID, id, input)
 	}
 	if err != nil {
 		return executiongate.Result{}, err
@@ -712,12 +718,12 @@ func (u *UseCases) executionGate(
 		}
 		preparedAction = prepared
 	}
-	assistBinding, err := u.resolveAssistExecutionBinding(ctx, tenantID, id, assistRunID)
+	assistBinding, err := u.resolveAssistExecutionBinding(ctx, orgID, id, assistRunID)
 	if err != nil {
 		return executiongate.Result{}, err
 	}
 	scopeResult, professionalScope, scopeEvaluated := u.evaluateProfessionalActionScope(
-		ctx, tenantID, id, result.RuntimeContext.Virployee.JobRoleID, result.Intent.CapabilityKey, preparedAction,
+		ctx, orgID, id, result.RuntimeContext.Virployee.JobRoleID, result.Intent.CapabilityKey, preparedAction,
 	)
 	if preparedAction != nil {
 		preparedAction.AssistContext = assistBinding
@@ -734,7 +740,7 @@ func (u *UseCases) executionGate(
 		if !ok {
 			gate = executiongate.ApplyAuthorityUnavailable(gate)
 		} else {
-			evaluated, authorityErr := u.evaluateAuthority(ctx, tenantID, id, result.RuntimeContext.Virployee.JobRoleID, capability, principal, mcpBinding)
+			evaluated, authorityErr := u.evaluateAuthority(ctx, orgID, id, result.RuntimeContext.Virployee.JobRoleID, capability, principal, mcpBinding)
 			if authorityErr != nil {
 				gate = executiongate.ApplyAuthorityUnavailable(gate)
 			} else {
@@ -743,13 +749,13 @@ func (u *UseCases) executionGate(
 			}
 		}
 	}
-	bindingHash, err := bindingHashForAuthorityContext(tenantID, result, preparedAction, authority, assistBinding, professionalScope)
+	bindingHash, err := bindingHashForAuthorityContext(orgID, result, preparedAction, authority, assistBinding, professionalScope)
 	if err != nil {
 		return executiongate.Result{}, err
 	}
 	gate.BindingHash = bindingHash
 	if gate.Gate.Decision != executiongate.DecisionPass {
-		if err := u.recordExecutionGateTrace(ctx, tenantID, gate, nil, bindingHash); err != nil {
+		if err := u.recordExecutionGateTrace(ctx, orgID, gate, nil, bindingHash); err != nil {
 			return executiongate.Result{}, err
 		}
 		return gate, nil
@@ -761,12 +767,12 @@ func (u *UseCases) executionGate(
 			BindingHash: bindingHash,
 			Error:       "governance checker is not configured",
 		}
-		if err := u.recordExecutionGateTrace(ctx, tenantID, gate, nexus, bindingHash); err != nil {
+		if err := u.recordExecutionGateTrace(ctx, orgID, gate, nexus, bindingHash); err != nil {
 			return executiongate.Result{}, err
 		}
 		return gate, nil
 	}
-	governance, err := u.governance.Check(ctx, governanceInput(tenantID, result, bindingHash, mcpBinding, authority))
+	governance, err := u.governance.Check(ctx, governanceInput(orgID, result, bindingHash, mcpBinding, authority))
 	if err != nil {
 		gate = executiongate.ApplyGovernanceUnavailable(gate)
 		nexus := &runtraces.NexusResult{
@@ -774,7 +780,7 @@ func (u *UseCases) executionGate(
 			BindingHash: bindingHash,
 			Error:       runtraces.RedactText(err.Error()),
 		}
-		if err := u.recordExecutionGateTrace(ctx, tenantID, gate, nexus, bindingHash); err != nil {
+		if err := u.recordExecutionGateTrace(ctx, orgID, gate, nexus, bindingHash); err != nil {
 			return executiongate.Result{}, err
 		}
 		return gate, nil
@@ -789,7 +795,7 @@ func (u *UseCases) executionGate(
 		if u.executionRepo == nil {
 			return executiongate.Result{}, domainerr.Conflict("execution repository is not configured")
 		}
-		if _, saveErr := u.executionRepo.SavePreparedAction(ctx, tenantID, id, governance.CheckID, governance.ApprovalID, result.Intent.CapabilityKey, payloadHash, bindingHash, *preparedAction); saveErr != nil {
+		if _, saveErr := u.executionRepo.SavePreparedAction(ctx, orgID, id, governance.CheckID, governance.ApprovalID, result.Intent.CapabilityKey, payloadHash, bindingHash, *preparedAction); saveErr != nil {
 			return executiongate.Result{}, saveErr
 		}
 		var parsedApprovalID uuid.UUID
@@ -805,7 +811,7 @@ func (u *UseCases) executionGate(
 			if !ok {
 				return executiongate.Result{}, domainerr.Conflict("execution repository cannot bind Nexus policy authority")
 			}
-			if bindErr := policyRepo.BindPreparedActionNexusPolicy(ctx, tenantID, id, parsedApprovalID, governance.PolicySnapshotHash); bindErr != nil {
+			if bindErr := policyRepo.BindPreparedActionNexusPolicy(ctx, orgID, id, parsedApprovalID, governance.PolicySnapshotHash); bindErr != nil {
 				return executiongate.Result{}, bindErr
 			}
 		}
@@ -814,12 +820,12 @@ func (u *UseCases) executionGate(
 			if !ok {
 				return executiongate.Result{}, domainerr.Conflict("execution repository cannot bind professional authority")
 			}
-			if bindErr := authorityRepo.BindPreparedActionAuthority(ctx, tenantID, id, parsedApprovalID, authority.SnapshotHash); bindErr != nil {
+			if bindErr := authorityRepo.BindPreparedActionAuthority(ctx, orgID, id, parsedApprovalID, authority.SnapshotHash); bindErr != nil {
 				return executiongate.Result{}, bindErr
 			}
 		}
 	}
-	if err := u.recordExecutionGateTrace(ctx, tenantID, gate, nexusTraceFrom(governance, bindingHash), bindingHash); err != nil {
+	if err := u.recordExecutionGateTrace(ctx, orgID, gate, nexusTraceFrom(governance, bindingHash), bindingHash); err != nil {
 		return executiongate.Result{}, err
 	}
 	return gate, nil
@@ -838,8 +844,8 @@ func runtimeCapability(capabilities []capabilitydomain.Capability, key string) (
 // dryRunForCapability skips intent inference for a server-selected MCP tool.
 // The capability still passes through the regular deterministic assignment,
 // autonomy, draft, authority and governance checks.
-func (u *UseCases) dryRunForCapability(ctx context.Context, tenantID string, id uuid.UUID, input, capabilityKey string) (dryrun.Result, error) {
-	runtimeCtx, err := u.RuntimeContext(ctx, tenantID, id)
+func (u *UseCases) dryRunForCapability(ctx context.Context, orgID string, id uuid.UUID, input, capabilityKey string) (dryrun.Result, error) {
+	runtimeCtx, err := u.RuntimeContext(ctx, orgID, id)
 	if err != nil {
 		return dryrun.Result{}, err
 	}
@@ -869,23 +875,23 @@ func (u *UseCases) dryRunForCapability(ctx context.Context, tenantID string, id 
 	return dryrun.EvaluateWithProposal(input, runtimeCtx, proposal), nil
 }
 
-func (u *UseCases) ListRuns(ctx context.Context, tenantID string, id uuid.UUID, limit int) ([]runtraces.Trace, error) {
-	tenantID = normalizeTenantID(tenantID)
-	if _, err := u.repo.Get(ctx, tenantID, id); err != nil {
+func (u *UseCases) ListRuns(ctx context.Context, orgID string, id uuid.UUID, limit int) ([]runtraces.Trace, error) {
+	orgID = normalizeOrgID(orgID)
+	if _, err := u.repo.Get(ctx, orgID, id); err != nil {
 		return nil, err
 	}
-	return u.repo.ListRunTraces(ctx, tenantID, id, normalizeRunTraceLimit(limit))
+	return u.repo.ListRunTraces(ctx, orgID, id, normalizeRunTraceLimit(limit))
 }
 
-func (u *UseCases) SimulateApprovedExecution(ctx context.Context, tenantID string, id uuid.UUID, approvalID uuid.UUID) (runtraces.Trace, error) {
-	tenantID = normalizeTenantID(tenantID)
+func (u *UseCases) SimulateApprovedExecution(ctx context.Context, orgID string, id uuid.UUID, approvalID uuid.UUID) (runtraces.Trace, error) {
+	orgID = normalizeOrgID(orgID)
 	if u.approvals == nil {
 		return runtraces.Trace{}, domainerr.Conflict("approval reader is not configured")
 	}
-	if _, err := u.repo.Get(ctx, tenantID, id); err != nil {
+	if _, err := u.repo.Get(ctx, orgID, id); err != nil {
 		return runtraces.Trace{}, err
 	}
-	approval, err := u.approvals.GetApproval(ctx, tenantID, approvalID)
+	approval, err := u.approvals.GetApproval(ctx, orgID, approvalID)
 	if err != nil {
 		return runtraces.Trace{}, err
 	}
@@ -898,12 +904,12 @@ func (u *UseCases) SimulateApprovedExecution(ctx context.Context, tenantID strin
 	if strings.TrimSpace(approval.BindingHash) == "" {
 		return runtraces.Trace{}, domainerr.Conflict("approval has no binding hash")
 	}
-	if existing, err := u.repo.FindSimulatedExecutionTraceByApproval(ctx, tenantID, id, approvalID.String()); err == nil {
+	if existing, err := u.repo.FindSimulatedExecutionTraceByApproval(ctx, orgID, id, approvalID.String()); err == nil {
 		return existing, nil
 	} else if !domainerr.IsNotFound(err) {
 		return runtraces.Trace{}, err
 	}
-	source, err := u.repo.FindExecutionGateTraceByApproval(ctx, tenantID, id, approvalID.String())
+	source, err := u.repo.FindExecutionGateTraceByApproval(ctx, orgID, id, approvalID.String())
 	if err != nil {
 		return runtraces.Trace{}, err
 	}
@@ -916,7 +922,7 @@ func (u *UseCases) SimulateApprovedExecution(ctx context.Context, tenantID strin
 	nexus := *source.NexusResult
 	nexus.ApprovalStatus = approval.Status
 	nexus.BindingHash = approval.BindingHash
-	return u.repo.CreateRunTrace(ctx, tenantID, runtraces.CreateInput{
+	return u.repo.CreateRunTrace(ctx, orgID, runtraces.CreateInput{
 		VirployeeID:    id,
 		Operation:      runtraces.OperationSimulatedExecution,
 		Input:          source.InputPreview,
@@ -948,80 +954,80 @@ func (u *UseCases) SimulateApprovedExecution(ctx context.Context, tenantID strin
 	})
 }
 
-func (u *UseCases) Update(ctx context.Context, tenantID string, id uuid.UUID, input domain.UpdateInput) (domain.Virployee, error) {
+func (u *UseCases) Update(ctx context.Context, orgID string, id uuid.UUID, input domain.UpdateInput) (domain.Virployee, error) {
 	normalized, err := domain.NormalizeUpdateInput(input)
 	if err != nil {
 		return domain.Virployee{}, err
 	}
-	if err := u.jobRoles.EnsureActive(ctx, normalizeTenantID(tenantID), normalized.JobRoleID); err != nil {
+	if err := u.jobRoles.EnsureActive(ctx, normalizeOrgID(orgID), normalized.JobRoleID); err != nil {
 		return domain.Virployee{}, err
 	}
-	if err := u.profileTemplates.EnsureUsableByVirployee(ctx, normalizeTenantID(tenantID), normalized.ProfileTemplateID, normalized.Autonomy); err != nil {
+	if err := u.profileTemplates.EnsureUsableByVirployee(ctx, normalizeOrgID(orgID), normalized.ProfileTemplateID, normalized.Autonomy); err != nil {
 		return domain.Virployee{}, err
 	}
-	if err := u.capabilities.EnsureAssignable(ctx, normalizeTenantID(tenantID), normalized.CapabilityIDs, normalized.Autonomy); err != nil {
+	if err := u.capabilities.EnsureAssignable(ctx, normalizeOrgID(orgID), normalized.CapabilityIDs, normalized.Autonomy); err != nil {
 		return domain.Virployee{}, err
 	}
-	return u.repo.Update(ctx, normalizeTenantID(tenantID), id, normalized)
+	return u.repo.Update(ctx, normalizeOrgID(orgID), id, normalized)
 }
 
-func (u *UseCases) Archive(ctx context.Context, tenantID string, id uuid.UUID, actor, reason string) error {
+func (u *UseCases) Archive(ctx context.Context, orgID string, id uuid.UUID, actor, reason string) error {
 	return u.lifecycle.Archive(ctx, &lifecycle.ArchiveRequest{
 		ResourceType: ResourceTypeVirployee,
 		ResourceID:   id,
-		TenantID:     normalizeTenantID(tenantID),
+		TenantID:     normalizeOrgID(orgID),
 		Actor:        normalizeActor(actor),
 		Reason:       strings.TrimSpace(reason),
 	})
 }
 
-func (u *UseCases) Unarchive(ctx context.Context, tenantID string, id uuid.UUID, actor, reason string) error {
+func (u *UseCases) Unarchive(ctx context.Context, orgID string, id uuid.UUID, actor, reason string) error {
 	return u.lifecycle.Unarchive(ctx, &lifecycle.UnarchiveRequest{
 		ResourceType: ResourceTypeVirployee,
 		ResourceID:   id,
-		TenantID:     normalizeTenantID(tenantID),
+		TenantID:     normalizeOrgID(orgID),
 		Actor:        normalizeActor(actor),
 		Reason:       strings.TrimSpace(reason),
 	})
 }
 
-func (u *UseCases) Trash(ctx context.Context, tenantID string, id uuid.UUID, actor, reason string) error {
+func (u *UseCases) Trash(ctx context.Context, orgID string, id uuid.UUID, actor, reason string) error {
 	return u.lifecycle.Trash(ctx, &lifecycle.TrashRequest{
 		ResourceType: ResourceTypeVirployee,
 		ResourceID:   id,
-		TenantID:     normalizeTenantID(tenantID),
+		TenantID:     normalizeOrgID(orgID),
 		Actor:        normalizeActor(actor),
 		Reason:       strings.TrimSpace(reason),
 	})
 }
 
-func (u *UseCases) Restore(ctx context.Context, tenantID string, id uuid.UUID, actor, reason string) error {
+func (u *UseCases) Restore(ctx context.Context, orgID string, id uuid.UUID, actor, reason string) error {
 	return u.lifecycle.Restore(ctx, &lifecycle.RestoreRequest{
 		ResourceType: ResourceTypeVirployee,
 		ResourceID:   id,
-		TenantID:     normalizeTenantID(tenantID),
+		TenantID:     normalizeOrgID(orgID),
 		Actor:        normalizeActor(actor),
 		Reason:       strings.TrimSpace(reason),
 	})
 }
 
-func (u *UseCases) Purge(ctx context.Context, tenantID string, id uuid.UUID, actor, reason string) error {
+func (u *UseCases) Purge(ctx context.Context, orgID string, id uuid.UUID, actor, reason string) error {
 	return u.lifecycle.Purge(ctx, &lifecycle.PurgeRequest{
 		ResourceType:  ResourceTypeVirployee,
 		ResourceID:    id,
-		TenantID:      normalizeTenantID(tenantID),
+		TenantID:      normalizeOrgID(orgID),
 		Actor:         normalizeActor(actor),
 		Reason:        strings.TrimSpace(reason),
 		MustBeTrashed: true,
 	})
 }
 
-func normalizeTenantID(tenantID string) string {
-	tenantID = strings.TrimSpace(tenantID)
-	if tenantID == "" {
-		return DefaultTenantID
+func normalizeOrgID(orgID string) string {
+	orgID = strings.TrimSpace(orgID)
+	if orgID == "" {
+		return DefaultOrgID
 	}
-	return tenantID
+	return orgID
 }
 
 func normalizeActor(actor string) string {
@@ -1032,13 +1038,13 @@ func normalizeActor(actor string) string {
 	return actor
 }
 
-func governanceInput(tenantID string, result dryrun.Result, bindingHash string, mcpBinding *preparedactions.MCPContextBinding, authority ...*executiongate.AuthorityCheckResult) executiongate.GovernanceCheckInput {
+func governanceInput(orgID string, result dryrun.Result, bindingHash string, mcpBinding *preparedactions.MCPContextBinding, authority ...*executiongate.AuthorityCheckResult) executiongate.GovernanceCheckInput {
 	productSurface := "companion"
 	if capability, ok := runtimeCapability(result.RuntimeContext.Capabilities, result.Intent.CapabilityKey); ok && strings.TrimSpace(capability.Manifest.ProductSurface) != "" {
 		productSurface = capability.Manifest.ProductSurface
 	}
 	out := executiongate.GovernanceCheckInput{
-		TenantID:         normalizeTenantID(tenantID),
+		OrgID:            normalizeOrgID(orgID),
 		ProductSurface:   productSurface,
 		RequesterType:    "virployee",
 		RequesterID:      result.RuntimeContext.Virployee.ID.String(),
@@ -1073,9 +1079,9 @@ func governanceInput(tenantID string, result dryrun.Result, bindingHash string, 
 	return out
 }
 
-func (u *UseCases) recordDryRunTrace(ctx context.Context, tenantID string, result dryrun.Result) error {
+func (u *UseCases) recordDryRunTrace(ctx context.Context, orgID string, result dryrun.Result) error {
 	capabilityID, capabilityKey := capabilityTraceFields(result)
-	_, err := u.repo.CreateRunTrace(ctx, tenantID, runtraces.CreateInput{
+	_, err := u.repo.CreateRunTrace(ctx, orgID, runtraces.CreateInput{
 		VirployeeID:       result.RuntimeContext.Virployee.ID,
 		Operation:         runtraces.OperationDryRun,
 		Input:             result.Input,
@@ -1092,13 +1098,13 @@ func (u *UseCases) recordDryRunTrace(ctx context.Context, tenantID string, resul
 
 func (u *UseCases) recordExecutionGateTrace(
 	ctx context.Context,
-	tenantID string,
+	orgID string,
 	result executiongate.Result,
 	nexus *runtraces.NexusResult,
 	bindingHash string,
 ) error {
 	capabilityID, capabilityKey := capabilityTraceFields(result.DryRun)
-	_, err := u.repo.CreateRunTrace(ctx, tenantID, runtraces.CreateInput{
+	_, err := u.repo.CreateRunTrace(ctx, orgID, runtraces.CreateInput{
 		VirployeeID:       result.DryRun.RuntimeContext.Virployee.ID,
 		Operation:         runtraces.OperationExecutionGate,
 		Input:             result.Input,
@@ -1166,19 +1172,19 @@ func gateChecksTrace(checks []executiongate.Check) []runtraces.GateCheck {
 	return out
 }
 
-func bindingHashForAuthority(tenantID string, result dryrun.Result, prepared *preparedactions.Action, authority *executiongate.AuthorityCheckResult) (string, error) {
-	return bindingHashForAuthorityContext(tenantID, result, prepared, authority, nil, nil)
+func bindingHashForAuthority(orgID string, result dryrun.Result, prepared *preparedactions.Action, authority *executiongate.AuthorityCheckResult) (string, error) {
+	return bindingHashForAuthorityContext(orgID, result, prepared, authority, nil, nil)
 }
 
 func bindingHashForAuthorityContext(
-	tenantID string,
+	orgID string,
 	result dryrun.Result,
 	prepared *preparedactions.Action,
 	authority *executiongate.AuthorityCheckResult,
 	assist *preparedactions.AssistContextBinding,
 	professionalScope *preparedactions.ProfessionalScopeBinding,
 ) (string, error) {
-	binding := actionBinding(tenantID, result, prepared)
+	binding := actionBinding(orgID, result, prepared)
 	if binding != nil && authority != nil {
 		binding["professional_authority"] = map[string]any{
 			"snapshot_hash":        authority.SnapshotHash,
@@ -1198,7 +1204,7 @@ func bindingHashForAuthorityContext(
 	return runtraces.BindingHash(binding)
 }
 
-func actionBinding(tenantID string, result dryrun.Result, prepared *preparedactions.Action) map[string]any {
+func actionBinding(orgID string, result dryrun.Result, prepared *preparedactions.Action) map[string]any {
 	if !result.Intent.Matched {
 		return nil
 	}
@@ -1208,7 +1214,7 @@ func actionBinding(tenantID string, result dryrun.Result, prepared *preparedacti
 	}
 	binding := map[string]any{
 		"schema_version":      "tool_intent.v1",
-		"tenant_id":           normalizeTenantID(tenantID),
+		"org_id":              normalizeOrgID(orgID),
 		"virployee_id":        result.RuntimeContext.Virployee.ID.String(),
 		"operation":           "execution_gate",
 		"capability_key":      result.Intent.CapabilityKey,

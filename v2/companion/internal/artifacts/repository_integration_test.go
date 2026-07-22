@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func TestArtifactCatalogIsTenantScopedAndRejectsManifestOverwrite(t *testing.T) {
+func TestArtifactCatalogIsOrgScopedAndRejectsManifestOverwrite(t *testing.T) {
 	databaseURL := os.Getenv("COMPANION_V2_ARTIFACT_TEST_DATABASE_URL")
 	if databaseURL == "" {
 		t.Skip("COMPANION_V2_ARTIFACT_TEST_DATABASE_URL is not set")
@@ -23,13 +23,13 @@ func TestArtifactCatalogIsTenantScopedAndRejectsManifestOverwrite(t *testing.T) 
 	defer pool.Close()
 	repository := NewRepository(pool)
 	virployeeID := uuid.New()
-	tenantA, tenantB := "artifact-a-"+uuid.NewString(), "artifact-b-"+uuid.NewString()
+	orgA, orgB := "artifact-a-"+uuid.NewString(), "artifact-b-"+uuid.NewString()
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM companion_artifacts WHERE tenant_id=ANY($1)`, []string{tenantA, tenantB})
+		_, _ = pool.Exec(context.Background(), `DELETE FROM companion_artifacts WHERE org_id=ANY($1)`, []string{orgA, orgB})
 	})
-	scopeA := Scope{TenantID: tenantA, VirployeeID: virployeeID, ProductSurface: "medmory", SubjectID: "patient-a", RepositoryGeneration: "generation-a"}
+	scopeA := Scope{OrgID: orgA, VirployeeID: virployeeID, ProductSurface: "producta", SubjectID: "patient-a", RepositoryGeneration: "generation-a"}
 	scopeB := scopeA
-	scopeB.TenantID = tenantB
+	scopeB.OrgID = orgB
 	manifest := Manifest{DocumentID: "doc-1", Name: "labs.pdf", SourceRef: "opaque/ref", ReadURL: "https://signed.example/secret", SHA256: "abc", MIMEType: "application/pdf", SizeBytes: 100, Required: true}
 	recordA, err := repository.UpsertManifest(ctx, scopeA, manifest)
 	if err != nil {
@@ -39,11 +39,11 @@ func TestArtifactCatalogIsTenantScopedAndRejectsManifestOverwrite(t *testing.T) 
 		t.Fatal(err)
 	}
 	items, err := repository.ListGeneration(ctx, scopeA)
-	if err != nil || len(items) != 1 || items[0].Scope.TenantID != tenantA {
-		t.Fatalf("tenant scoped list failed: items=%+v err=%v", items, err)
+	if err != nil || len(items) != 1 || items[0].Scope.OrgID != orgA {
+		t.Fatalf("organization scoped list failed: items=%+v err=%v", items, err)
 	}
-	if _, err := repository.SetStatus(ctx, tenantB, recordA.ID, StatusStaged, "gs://stage/a", "application/pdf", ""); err != pgx.ErrNoRows {
-		t.Fatalf("cross-tenant status mutation must not find row, got %v", err)
+	if _, err := repository.SetStatus(ctx, orgB, recordA.ID, StatusStaged, "gs://stage/a", "application/pdf", ""); err != pgx.ErrNoRows {
+		t.Fatalf("cross-organization status mutation must not find row, got %v", err)
 	}
 	changed := manifest
 	changed.SHA256 = "different"

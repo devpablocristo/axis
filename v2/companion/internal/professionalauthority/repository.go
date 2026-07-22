@@ -27,11 +27,11 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 	return &Repository{pool: pool, nexusOutbox: outbox.NewRepository(pool)}
 }
 
-func (r *Repository) EnsureVirployee(ctx context.Context, tenantID string, virployeeID uuid.UUID) error {
+func (r *Repository) EnsureVirployee(ctx context.Context, orgID string, virployeeID uuid.UUID) error {
 	var exists bool
 	err := r.pool.QueryRow(ctx, `SELECT EXISTS (
-		SELECT 1 FROM virployees WHERE tenant_id=$1 AND id=$2 AND trashed_at IS NULL
-	)`, tenantID, virployeeID).Scan(&exists)
+		SELECT 1 FROM virployees WHERE org_id=$1 AND id=$2 AND trashed_at IS NULL
+	)`, orgID, virployeeID).Scan(&exists)
 	if err != nil {
 		return err
 	}
@@ -41,16 +41,16 @@ func (r *Repository) EnsureVirployee(ctx context.Context, tenantID string, virpl
 	return nil
 }
 
-func (r *Repository) GetScopePolicy(ctx context.Context, tenantID string, virployeeID uuid.UUID) (ScopePolicy, error) {
+func (r *Repository) GetScopePolicy(ctx context.Context, orgID string, virployeeID uuid.UUID) (ScopePolicy, error) {
 	return scanScopePolicy(r.pool.QueryRow(ctx, `
-		SELECT tenant_id, virployee_id, allowed_topics, prohibited_topics, out_of_scope,
+		SELECT org_id, virployee_id, allowed_topics, prohibited_topics, out_of_scope,
 		       revision, created_at, updated_at
 		FROM professional_scope_policies
-		WHERE tenant_id=$1 AND virployee_id=$2
-	`, tenantID, virployeeID))
+		WHERE org_id=$1 AND virployee_id=$2
+	`, orgID, virployeeID))
 }
 
-func (r *Repository) PutScopePolicy(ctx context.Context, tenantID string, virployeeID uuid.UUID, input PutScopePolicyInput, actorID string, at time.Time) (ScopePolicy, error) {
+func (r *Repository) PutScopePolicy(ctx context.Context, orgID string, virployeeID uuid.UUID, input PutScopePolicyInput, actorID string, at time.Time) (ScopePolicy, error) {
 	allowed, _ := json.Marshal(input.AllowedTopics)
 	prohibited, _ := json.Marshal(input.ProhibitedTopics)
 	tx, err := r.pool.Begin(ctx)
@@ -58,21 +58,21 @@ func (r *Repository) PutScopePolicy(ctx context.Context, tenantID string, virplo
 		return ScopePolicy{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	if err := ensureVirployeeTx(ctx, tx, tenantID, virployeeID); err != nil {
+	if err := ensureVirployeeTx(ctx, tx, orgID, virployeeID); err != nil {
 		return ScopePolicy{}, err
 	}
 	var current int64
 	err = tx.QueryRow(ctx, `SELECT revision FROM professional_scope_policies
-		WHERE tenant_id=$1 AND virployee_id=$2 FOR UPDATE`, tenantID, virployeeID).Scan(&current)
+		WHERE org_id=$1 AND virployee_id=$2 FOR UPDATE`, orgID, virployeeID).Scan(&current)
 	var policy ScopePolicy
 	switch {
 	case errors.Is(err, pgx.ErrNoRows) && input.ExpectedRevision == 0:
 		policy, err = scanScopePolicy(tx.QueryRow(ctx, `
 			INSERT INTO professional_scope_policies
-				(tenant_id,virployee_id,allowed_topics,prohibited_topics,out_of_scope,revision,created_at,updated_at)
+				(org_id,virployee_id,allowed_topics,prohibited_topics,out_of_scope,revision,created_at,updated_at)
 			VALUES ($1,$2,$3::jsonb,$4::jsonb,$5,1,$6,$6)
-			RETURNING tenant_id,virployee_id,allowed_topics,prohibited_topics,out_of_scope,revision,created_at,updated_at
-		`, tenantID, virployeeID, allowed, prohibited, string(input.OutOfScope), at.UTC()))
+			RETURNING org_id,virployee_id,allowed_topics,prohibited_topics,out_of_scope,revision,created_at,updated_at
+		`, orgID, virployeeID, allowed, prohibited, string(input.OutOfScope), at.UTC()))
 	case errors.Is(err, pgx.ErrNoRows):
 		return ScopePolicy{}, domainerr.Conflict("scope policy revision does not match")
 	case err != nil:
@@ -84,15 +84,15 @@ func (r *Repository) PutScopePolicy(ctx context.Context, tenantID string, virplo
 			UPDATE professional_scope_policies
 			SET allowed_topics=$3::jsonb,prohibited_topics=$4::jsonb,out_of_scope=$5,
 			    revision=revision+1,updated_at=$6
-			WHERE tenant_id=$1 AND virployee_id=$2
-			RETURNING tenant_id,virployee_id,allowed_topics,prohibited_topics,out_of_scope,revision,created_at,updated_at
-		`, tenantID, virployeeID, allowed, prohibited, string(input.OutOfScope), at.UTC()))
+			WHERE org_id=$1 AND virployee_id=$2
+			RETURNING org_id,virployee_id,allowed_topics,prohibited_topics,out_of_scope,revision,created_at,updated_at
+		`, orgID, virployeeID, allowed, prohibited, string(input.OutOfScope), at.UTC()))
 	}
 	if err != nil {
 		return ScopePolicy{}, err
 	}
 	if err := r.enqueueAuthorityEvent(ctx, tx, authorityEvent{
-		TenantID: tenantID, VirployeeID: &virployeeID, EventType: "scope_policy_changed",
+		OrgID: orgID, VirployeeID: &virployeeID, EventType: "scope_policy_changed",
 		SubjectType: "scope_policy", SubjectID: virployeeID.String(), ActorID: actorID,
 		Revision: policy.Revision, SnapshotHash: hashParts(allowed, prohibited, []byte(input.OutOfScope)), At: at,
 	}); err != nil {
@@ -104,7 +104,7 @@ func (r *Repository) PutScopePolicy(ctx context.Context, tenantID string, virplo
 	return policy, nil
 }
 
-func (r *Repository) CreatePolicyPack(ctx context.Context, tenantID string, input CreatePolicyPackInput, jobRoleID *uuid.UUID, actorID string, at time.Time) (PolicyPack, error) {
+func (r *Repository) CreatePolicyPack(ctx context.Context, orgID string, input CreatePolicyPackInput, jobRoleID *uuid.UUID, actorID string, at time.Time) (PolicyPack, error) {
 	rules, err := json.Marshal(input.Rules)
 	if err != nil {
 		return PolicyPack{}, err
@@ -117,20 +117,20 @@ func (r *Repository) CreatePolicyPack(ctx context.Context, tenantID string, inpu
 	if jobRoleID != nil {
 		var exists bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM job_roles
-			WHERE tenant_id=$1 AND id=$2 AND archived_at IS NULL AND trashed_at IS NULL)`, tenantID, *jobRoleID).Scan(&exists); err != nil {
+			WHERE org_id=$1 AND id=$2 AND archived_at IS NULL AND trashed_at IS NULL)`, orgID, *jobRoleID).Scan(&exists); err != nil {
 			return PolicyPack{}, err
 		}
 		if !exists {
-			return PolicyPack{}, domainerr.Validation("job_role_id must reference an active job role in the same tenant")
+			return PolicyPack{}, domainerr.Validation("job_role_id must reference an active job role in the same organization")
 		}
 	}
 	id := uuid.New()
 	pack, err := scanPolicyPack(tx.QueryRow(ctx, `
 		INSERT INTO professional_policy_packs
-			(id,tenant_id,policy_key,name,version,job_role_id,rules,revision,active,created_at,updated_at)
+			(id,org_id,policy_key,name,version,job_role_id,rules,revision,active,created_at,updated_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,1,true,$8,$8)
-		RETURNING id,tenant_id,policy_key,name,version,job_role_id,rules,revision,active,created_at,updated_at
-	`, id, tenantID, input.PolicyKey, input.Name, input.Version, jobRoleID, rules, at.UTC()))
+		RETURNING id,org_id,policy_key,name,version,job_role_id,rules,revision,active,created_at,updated_at
+	`, id, orgID, input.PolicyKey, input.Name, input.Version, jobRoleID, rules, at.UTC()))
 	if err != nil {
 		if isUniqueViolation(err) {
 			return PolicyPack{}, domainerr.Conflict("policy pack version already exists")
@@ -138,7 +138,7 @@ func (r *Repository) CreatePolicyPack(ctx context.Context, tenantID string, inpu
 		return PolicyPack{}, err
 	}
 	if err := r.enqueueAuthorityEvent(ctx, tx, authorityEvent{
-		TenantID: tenantID, EventType: "professional_policy_pack_created", SubjectType: "professional_policy_pack",
+		OrgID: orgID, EventType: "professional_policy_pack_created", SubjectType: "professional_policy_pack",
 		SubjectID: id.String(), ActorID: actorID, Revision: pack.Revision, SnapshotHash: hashParts(rules), At: at,
 	}); err != nil {
 		return PolicyPack{}, err
@@ -149,12 +149,12 @@ func (r *Repository) CreatePolicyPack(ctx context.Context, tenantID string, inpu
 	return pack, nil
 }
 
-func (r *Repository) ListPolicyPacks(ctx context.Context, tenantID string) ([]PolicyPack, error) {
+func (r *Repository) ListPolicyPacks(ctx context.Context, orgID string) ([]PolicyPack, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT id,tenant_id,policy_key,name,version,job_role_id,rules,revision,active,created_at,updated_at
-		FROM professional_policy_packs WHERE tenant_id=$1 AND active=true
+		SELECT id,org_id,policy_key,name,version,job_role_id,rules,revision,active,created_at,updated_at
+		FROM professional_policy_packs WHERE org_id=$1 AND active=true
 		ORDER BY policy_key,version DESC,id
-	`, tenantID)
+	`, orgID)
 	if err != nil {
 		return nil, err
 	}
@@ -162,18 +162,18 @@ func (r *Repository) ListPolicyPacks(ctx context.Context, tenantID string) ([]Po
 	return scanPolicyPacks(rows)
 }
 
-func (r *Repository) GetPolicyPack(ctx context.Context, tenantID string, id uuid.UUID) (PolicyPack, error) {
+func (r *Repository) GetPolicyPack(ctx context.Context, orgID string, id uuid.UUID) (PolicyPack, error) {
 	return scanPolicyPack(r.pool.QueryRow(ctx, `
-		SELECT id,tenant_id,policy_key,name,version,job_role_id,rules,revision,active,created_at,updated_at
-		FROM professional_policy_packs WHERE tenant_id=$1 AND id=$2 AND active=true
-	`, tenantID, id))
+		SELECT id,org_id,policy_key,name,version,job_role_id,rules,revision,active,created_at,updated_at
+		FROM professional_policy_packs WHERE org_id=$1 AND id=$2 AND active=true
+	`, orgID, id))
 }
 
-func (r *Repository) GetPolicyBinding(ctx context.Context, tenantID string, virployeeID uuid.UUID) (PolicyBinding, error) {
+func (r *Repository) GetPolicyBinding(ctx context.Context, orgID string, virployeeID uuid.UUID) (PolicyBinding, error) {
 	var out PolicyBinding
-	err := r.pool.QueryRow(ctx, `SELECT tenant_id,virployee_id,revision,created_at,updated_at
-		FROM virployee_policy_bindings WHERE tenant_id=$1 AND virployee_id=$2`, tenantID, virployeeID).
-		Scan(&out.TenantID, &out.VirployeeID, &out.Revision, &out.CreatedAt, &out.UpdatedAt)
+	err := r.pool.QueryRow(ctx, `SELECT org_id,virployee_id,revision,created_at,updated_at
+		FROM virployee_policy_bindings WHERE org_id=$1 AND virployee_id=$2`, orgID, virployeeID).
+		Scan(&out.OrgID, &out.VirployeeID, &out.Revision, &out.CreatedAt, &out.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return PolicyBinding{}, domainerr.NotFound("policy binding not found")
 	}
@@ -181,7 +181,7 @@ func (r *Repository) GetPolicyBinding(ctx context.Context, tenantID string, virp
 		return PolicyBinding{}, err
 	}
 	rows, err := r.pool.Query(ctx, `SELECT policy_pack_id FROM virployee_policy_pack_assignments
-		WHERE tenant_id=$1 AND virployee_id=$2 ORDER BY policy_pack_id`, tenantID, virployeeID)
+		WHERE org_id=$1 AND virployee_id=$2 ORDER BY policy_pack_id`, orgID, virployeeID)
 	if err != nil {
 		return PolicyBinding{}, err
 	}
@@ -196,34 +196,34 @@ func (r *Repository) GetPolicyBinding(ctx context.Context, tenantID string, virp
 	return out, rows.Err()
 }
 
-func (r *Repository) PutPolicyBinding(ctx context.Context, tenantID string, virployeeID uuid.UUID, ids []uuid.UUID, expectedRevision int64, actorID string, at time.Time) (PolicyBinding, error) {
+func (r *Repository) PutPolicyBinding(ctx context.Context, orgID string, virployeeID uuid.UUID, ids []uuid.UUID, expectedRevision int64, actorID string, at time.Time) (PolicyBinding, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return PolicyBinding{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	if err := ensureVirployeeTx(ctx, tx, tenantID, virployeeID); err != nil {
+	if err := ensureVirployeeTx(ctx, tx, orgID, virployeeID); err != nil {
 		return PolicyBinding{}, err
 	}
 	if len(ids) > 0 {
 		var count int
 		if err := tx.QueryRow(ctx, `SELECT count(*) FROM professional_policy_packs
-			WHERE tenant_id=$1 AND active=true AND id=ANY($2::uuid[])`, tenantID, ids).Scan(&count); err != nil {
+			WHERE org_id=$1 AND active=true AND id=ANY($2::uuid[])`, orgID, ids).Scan(&count); err != nil {
 			return PolicyBinding{}, err
 		}
 		if count != len(ids) {
-			return PolicyBinding{}, domainerr.Validation("policy_pack_ids must reference active packs in the same tenant")
+			return PolicyBinding{}, domainerr.Validation("policy_pack_ids must reference active packs in the same organization")
 		}
 	}
 	var current int64
 	err = tx.QueryRow(ctx, `SELECT revision FROM virployee_policy_bindings
-		WHERE tenant_id=$1 AND virployee_id=$2 FOR UPDATE`, tenantID, virployeeID).Scan(&current)
+		WHERE org_id=$1 AND virployee_id=$2 FOR UPDATE`, orgID, virployeeID).Scan(&current)
 	var revision int64
 	switch {
 	case errors.Is(err, pgx.ErrNoRows) && expectedRevision == 0:
 		revision = 1
 		if _, err = tx.Exec(ctx, `INSERT INTO virployee_policy_bindings
-			(tenant_id,virployee_id,revision,created_at,updated_at) VALUES ($1,$2,1,$3,$3)`, tenantID, virployeeID, at.UTC()); err != nil {
+			(org_id,virployee_id,revision,created_at,updated_at) VALUES ($1,$2,1,$3,$3)`, orgID, virployeeID, at.UTC()); err != nil {
 			return PolicyBinding{}, err
 		}
 	case errors.Is(err, pgx.ErrNoRows):
@@ -235,21 +235,21 @@ func (r *Repository) PutPolicyBinding(ctx context.Context, tenantID string, virp
 	default:
 		revision = current + 1
 		if _, err = tx.Exec(ctx, `UPDATE virployee_policy_bindings SET revision=$3,updated_at=$4
-			WHERE tenant_id=$1 AND virployee_id=$2`, tenantID, virployeeID, revision, at.UTC()); err != nil {
+			WHERE org_id=$1 AND virployee_id=$2`, orgID, virployeeID, revision, at.UTC()); err != nil {
 			return PolicyBinding{}, err
 		}
 	}
-	if _, err := tx.Exec(ctx, `DELETE FROM virployee_policy_pack_assignments WHERE tenant_id=$1 AND virployee_id=$2`, tenantID, virployeeID); err != nil {
+	if _, err := tx.Exec(ctx, `DELETE FROM virployee_policy_pack_assignments WHERE org_id=$1 AND virployee_id=$2`, orgID, virployeeID); err != nil {
 		return PolicyBinding{}, err
 	}
 	for _, id := range ids {
 		if _, err := tx.Exec(ctx, `INSERT INTO virployee_policy_pack_assignments
-			(tenant_id,virployee_id,policy_pack_id,created_at) VALUES ($1,$2,$3,$4)`, tenantID, virployeeID, id, at.UTC()); err != nil {
+			(org_id,virployee_id,policy_pack_id,created_at) VALUES ($1,$2,$3,$4)`, orgID, virployeeID, id, at.UTC()); err != nil {
 			return PolicyBinding{}, err
 		}
 	}
 	if err := r.enqueueAuthorityEvent(ctx, tx, authorityEvent{
-		TenantID: tenantID, VirployeeID: &virployeeID, EventType: "professional_policy_binding_changed",
+		OrgID: orgID, VirployeeID: &virployeeID, EventType: "professional_policy_binding_changed",
 		SubjectType: "professional_policy_binding", SubjectID: virployeeID.String(), ActorID: actorID,
 		Revision: revision, SnapshotHash: hashUUIDs(ids), At: at,
 	}); err != nil {
@@ -258,10 +258,10 @@ func (r *Repository) PutPolicyBinding(ctx context.Context, tenantID string, virp
 	if err := tx.Commit(ctx); err != nil {
 		return PolicyBinding{}, err
 	}
-	return r.GetPolicyBinding(ctx, tenantID, virployeeID)
+	return r.GetPolicyBinding(ctx, orgID, virployeeID)
 }
 
-func (r *Repository) CreateDelegation(ctx context.Context, tenantID string, virployeeID uuid.UUID, input CreateDelegationInput, actorID string, at time.Time) (Delegation, error) {
+func (r *Repository) CreateDelegation(ctx context.Context, orgID string, virployeeID uuid.UUID, input CreateDelegationInput, actorID string, at time.Time) (Delegation, error) {
 	scopes, _ := json.Marshal(input.CapabilityScopes)
 	products, _ := json.Marshal(input.ProductScopes)
 	resources, _ := json.Marshal(input.ResourceScopes)
@@ -270,25 +270,25 @@ func (r *Repository) CreateDelegation(ctx context.Context, tenantID string, virp
 		return Delegation{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	if err := ensureVirployeeTx(ctx, tx, tenantID, virployeeID); err != nil {
+	if err := ensureVirployeeTx(ctx, tx, orgID, virployeeID); err != nil {
 		return Delegation{}, err
 	}
 	id := uuid.New()
 	delegation, err := scanDelegation(tx.QueryRow(ctx, `
 		INSERT INTO professional_delegations
-			(id,tenant_id,virployee_id,principal_type,principal_id,capability_scopes,product_scopes,resource_scopes,
+			(id,org_id,virployee_id,principal_type,principal_id,capability_scopes,product_scopes,resource_scopes,
 			 max_risk_class,purpose,granted_by,valid_from,valid_until,revision,created_at,updated_at)
 		VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8::jsonb,$9,$10,$11,$12,$13,1,$14,$14)
-		RETURNING id,tenant_id,virployee_id,principal_type,principal_id,capability_scopes,
+		RETURNING id,org_id,virployee_id,principal_type,principal_id,capability_scopes,
 		          product_scopes,resource_scopes,max_risk_class,purpose,granted_by,valid_from,valid_until,revision,
 		          revoked_at,revoked_by,revocation_reason,reviewed_at,reviewed_by,review_note,created_at,updated_at
-	`, id, tenantID, virployeeID, input.PrincipalType, input.PrincipalID, scopes, products, resources,
+	`, id, orgID, virployeeID, input.PrincipalType, input.PrincipalID, scopes, products, resources,
 		input.MaxRiskClass, input.Purpose, actorID, *input.ValidFrom, input.ValidUntil, at.UTC()))
 	if err != nil {
 		return Delegation{}, err
 	}
 	if err := r.enqueueAuthorityEvent(ctx, tx, authorityEvent{
-		TenantID: tenantID, VirployeeID: &virployeeID, EventType: "delegation_created",
+		OrgID: orgID, VirployeeID: &virployeeID, EventType: "delegation_created",
 		SubjectType: "delegation", SubjectID: id.String(), ActorID: actorID,
 		Revision: delegation.Revision, SnapshotHash: delegation.ConditionsHash(), At: at,
 	}); err != nil {
@@ -300,14 +300,14 @@ func (r *Repository) CreateDelegation(ctx context.Context, tenantID string, virp
 	return delegation, nil
 }
 
-func (r *Repository) ListDelegations(ctx context.Context, tenantID string, virployeeID uuid.UUID) ([]Delegation, error) {
+func (r *Repository) ListDelegations(ctx context.Context, orgID string, virployeeID uuid.UUID) ([]Delegation, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT id,tenant_id,virployee_id,principal_type,principal_id,capability_scopes,
+		SELECT id,org_id,virployee_id,principal_type,principal_id,capability_scopes,
 		       product_scopes,resource_scopes,max_risk_class,purpose,granted_by,valid_from,valid_until,revision,
 		       revoked_at,revoked_by,revocation_reason,reviewed_at,reviewed_by,review_note,created_at,updated_at
-		FROM professional_delegations WHERE tenant_id=$1 AND virployee_id=$2
+		FROM professional_delegations WHERE org_id=$1 AND virployee_id=$2
 		ORDER BY created_at DESC,id
-	`, tenantID, virployeeID)
+	`, orgID, virployeeID)
 	if err != nil {
 		return nil, err
 	}
@@ -323,7 +323,7 @@ func (r *Repository) ListDelegations(ctx context.Context, tenantID string, virpl
 	return out, rows.Err()
 }
 
-func (r *Repository) RevokeDelegation(ctx context.Context, tenantID string, virployeeID, delegationID uuid.UUID, input RevokeDelegationInput, actorID string, at time.Time) (Delegation, error) {
+func (r *Repository) RevokeDelegation(ctx context.Context, orgID string, virployeeID, delegationID uuid.UUID, input RevokeDelegationInput, actorID string, at time.Time) (Delegation, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return Delegation{}, err
@@ -332,15 +332,15 @@ func (r *Repository) RevokeDelegation(ctx context.Context, tenantID string, virp
 	delegation, err := scanDelegation(tx.QueryRow(ctx, `
 		UPDATE professional_delegations
 		SET revoked_at=$5,revoked_by=$6,revocation_reason=$7,revision=revision+1,updated_at=$5
-		WHERE tenant_id=$1 AND virployee_id=$2 AND id=$3 AND revision=$4 AND revoked_at IS NULL
-		RETURNING id,tenant_id,virployee_id,principal_type,principal_id,capability_scopes,
+		WHERE org_id=$1 AND virployee_id=$2 AND id=$3 AND revision=$4 AND revoked_at IS NULL
+		RETURNING id,org_id,virployee_id,principal_type,principal_id,capability_scopes,
 		          product_scopes,resource_scopes,max_risk_class,purpose,granted_by,valid_from,valid_until,revision,
 		          revoked_at,revoked_by,revocation_reason,reviewed_at,reviewed_by,review_note,created_at,updated_at
-	`, tenantID, virployeeID, delegationID, input.ExpectedRevision, at.UTC(), actorID, input.Reason))
+	`, orgID, virployeeID, delegationID, input.ExpectedRevision, at.UTC(), actorID, input.Reason))
 	if domainerr.IsNotFound(err) {
 		var exists bool
 		if scanErr := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM professional_delegations
-			WHERE tenant_id=$1 AND virployee_id=$2 AND id=$3)`, tenantID, virployeeID, delegationID).Scan(&exists); scanErr != nil {
+			WHERE org_id=$1 AND virployee_id=$2 AND id=$3)`, orgID, virployeeID, delegationID).Scan(&exists); scanErr != nil {
 			return Delegation{}, scanErr
 		}
 		if !exists {
@@ -352,7 +352,7 @@ func (r *Repository) RevokeDelegation(ctx context.Context, tenantID string, virp
 		return Delegation{}, err
 	}
 	if err := r.enqueueAuthorityEvent(ctx, tx, authorityEvent{
-		TenantID: tenantID, VirployeeID: &virployeeID, EventType: "delegation_revoked",
+		OrgID: orgID, VirployeeID: &virployeeID, EventType: "delegation_revoked",
 		SubjectType: "delegation", SubjectID: delegationID.String(), ActorID: actorID,
 		Revision: delegation.Revision, SnapshotHash: hashParts([]byte(delegationID.String()), []byte(fmt.Sprint(delegation.Revision))), At: at,
 	}); err != nil {
@@ -364,7 +364,7 @@ func (r *Repository) RevokeDelegation(ctx context.Context, tenantID string, virp
 	return delegation, nil
 }
 
-func (r *Repository) ReviewDelegation(ctx context.Context, tenantID string, virployeeID, delegationID uuid.UUID, input ReviewDelegationInput, actorID string, at time.Time) (Delegation, error) {
+func (r *Repository) ReviewDelegation(ctx context.Context, orgID string, virployeeID, delegationID uuid.UUID, input ReviewDelegationInput, actorID string, at time.Time) (Delegation, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return Delegation{}, err
@@ -372,18 +372,18 @@ func (r *Repository) ReviewDelegation(ctx context.Context, tenantID string, virp
 	defer func() { _ = tx.Rollback(ctx) }()
 	delegation, err := scanDelegation(tx.QueryRow(ctx, `UPDATE professional_delegations
 		SET reviewed_at=$5,reviewed_by=$6,review_note=$7,revision=revision+1,updated_at=$5
-		WHERE tenant_id=$1 AND virployee_id=$2 AND id=$3 AND revision=$4 AND revoked_at IS NULL AND valid_until>$5
-		RETURNING id,tenant_id,virployee_id,principal_type,principal_id,capability_scopes,
+		WHERE org_id=$1 AND virployee_id=$2 AND id=$3 AND revision=$4 AND revoked_at IS NULL AND valid_until>$5
+		RETURNING id,org_id,virployee_id,principal_type,principal_id,capability_scopes,
 		 product_scopes,resource_scopes,max_risk_class,purpose,granted_by,valid_from,valid_until,revision,
 		 revoked_at,revoked_by,revocation_reason,reviewed_at,reviewed_by,review_note,created_at,updated_at`,
-		tenantID, virployeeID, delegationID, input.ExpectedRevision, at.UTC(), actorID, input.Note))
+		orgID, virployeeID, delegationID, input.ExpectedRevision, at.UTC(), actorID, input.Note))
 	if domainerr.IsNotFound(err) {
 		return Delegation{}, domainerr.Conflict("delegation is unavailable or revision does not match")
 	}
 	if err != nil {
 		return Delegation{}, err
 	}
-	if err := r.enqueueAuthorityEvent(ctx, tx, authorityEvent{TenantID: tenantID, VirployeeID: &virployeeID,
+	if err := r.enqueueAuthorityEvent(ctx, tx, authorityEvent{OrgID: orgID, VirployeeID: &virployeeID,
 		EventType: "delegation_reviewed", SubjectType: "delegation", SubjectID: delegationID.String(), ActorID: actorID,
 		Revision: delegation.Revision, SnapshotHash: hashParts([]byte(delegation.ConditionsHash()), []byte(fmt.Sprint(delegation.Revision))), At: at}); err != nil {
 		return Delegation{}, err
@@ -394,44 +394,44 @@ func (r *Repository) ReviewDelegation(ctx context.Context, tenantID string, virp
 	return delegation, nil
 }
 
-func (r *Repository) ResolveAuthority(ctx context.Context, tenantID string, virployeeID uuid.UUID) (ResolvedAuthority, error) {
-	out := ResolvedAuthority{TenantID: tenantID, VirployeeID: virployeeID}
+func (r *Repository) ResolveAuthority(ctx context.Context, orgID string, virployeeID uuid.UUID) (ResolvedAuthority, error) {
+	out := ResolvedAuthority{OrgID: orgID, VirployeeID: virployeeID}
 	if err := r.pool.QueryRow(ctx, `SELECT job_role_id FROM virployees
-		WHERE tenant_id=$1 AND id=$2 AND archived_at IS NULL AND trashed_at IS NULL`, tenantID, virployeeID).Scan(&out.JobRoleID); err != nil {
+		WHERE org_id=$1 AND id=$2 AND archived_at IS NULL AND trashed_at IS NULL`, orgID, virployeeID).Scan(&out.JobRoleID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ResolvedAuthority{}, domainerr.NotFound("active virployee not found")
 		}
 		return ResolvedAuthority{}, err
 	}
-	scope, err := r.GetScopePolicy(ctx, tenantID, virployeeID)
+	scope, err := r.GetScopePolicy(ctx, orgID, virployeeID)
 	if err == nil {
 		out.Scope = scope
 	} else if domainerr.IsNotFound(err) {
-		out.Scope = ScopePolicy{TenantID: tenantID, VirployeeID: virployeeID, OutOfScope: OutOfScopeAbstain}
+		out.Scope = ScopePolicy{OrgID: orgID, VirployeeID: virployeeID, OutOfScope: OutOfScopeAbstain}
 	} else {
 		return ResolvedAuthority{}, err
 	}
-	binding, err := r.GetPolicyBinding(ctx, tenantID, virployeeID)
+	binding, err := r.GetPolicyBinding(ctx, orgID, virployeeID)
 	if err == nil {
 		out.BindingRevision = binding.Revision
 	} else if !domainerr.IsNotFound(err) {
 		return ResolvedAuthority{}, err
 	}
 	rows, err := r.pool.Query(ctx, `
-		SELECT p.id,p.tenant_id,p.policy_key,p.name,p.version,p.job_role_id,p.rules,p.revision,p.active,p.created_at,p.updated_at
+		SELECT p.id,p.org_id,p.policy_key,p.name,p.version,p.job_role_id,p.rules,p.revision,p.active,p.created_at,p.updated_at
 		FROM professional_policy_packs p
-		WHERE p.tenant_id=$1 AND p.active=true AND (
+		WHERE p.org_id=$1 AND p.active=true AND (
 			(p.job_role_id=$3 AND NOT EXISTS (
 				SELECT 1 FROM professional_policy_packs newer
-				WHERE newer.tenant_id=p.tenant_id AND newer.policy_key=p.policy_key
+				WHERE newer.org_id=p.org_id AND newer.policy_key=p.policy_key
 				  AND newer.job_role_id=p.job_role_id AND newer.active=true AND newer.version>p.version
 			)) OR EXISTS (
 				SELECT 1 FROM virployee_policy_pack_assignments a
-				WHERE a.tenant_id=p.tenant_id AND a.policy_pack_id=p.id AND a.virployee_id=$2
+				WHERE a.org_id=p.org_id AND a.policy_pack_id=p.id AND a.virployee_id=$2
 			)
 		)
 		ORDER BY p.id
-	`, tenantID, virployeeID, out.JobRoleID)
+	`, orgID, virployeeID, out.JobRoleID)
 	if err != nil {
 		return ResolvedAuthority{}, err
 	}
@@ -440,7 +440,7 @@ func (r *Repository) ResolveAuthority(ctx context.Context, tenantID string, virp
 	if err != nil {
 		return ResolvedAuthority{}, err
 	}
-	out.Delegations, err = r.ListDelegations(ctx, tenantID, virployeeID)
+	out.Delegations, err = r.ListDelegations(ctx, orgID, virployeeID)
 	if err != nil {
 		return ResolvedAuthority{}, err
 	}
@@ -453,7 +453,7 @@ func scanScopePolicy(row scanner) (ScopePolicy, error) {
 	var out ScopePolicy
 	var allowed, prohibited []byte
 	var outOfScope string
-	err := row.Scan(&out.TenantID, &out.VirployeeID, &allowed, &prohibited, &outOfScope, &out.Revision, &out.CreatedAt, &out.UpdatedAt)
+	err := row.Scan(&out.OrgID, &out.VirployeeID, &allowed, &prohibited, &outOfScope, &out.Revision, &out.CreatedAt, &out.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ScopePolicy{}, domainerr.NotFound("scope policy not found")
 	}
@@ -474,7 +474,7 @@ func scanPolicyPack(row scanner) (PolicyPack, error) {
 	var out PolicyPack
 	var jobRoleID *uuid.UUID
 	var rules []byte
-	err := row.Scan(&out.ID, &out.TenantID, &out.PolicyKey, &out.Name, &out.Version, &jobRoleID, &rules,
+	err := row.Scan(&out.ID, &out.OrgID, &out.PolicyKey, &out.Name, &out.Version, &jobRoleID, &rules,
 		&out.Revision, &out.Active, &out.CreatedAt, &out.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return PolicyPack{}, domainerr.NotFound("professional policy pack not found")
@@ -504,7 +504,7 @@ func scanPolicyPacks(rows pgx.Rows) ([]PolicyPack, error) {
 func scanDelegation(row scanner) (Delegation, error) {
 	var out Delegation
 	var scopes, products, resources []byte
-	err := row.Scan(&out.ID, &out.TenantID, &out.VirployeeID, &out.PrincipalType, &out.PrincipalID,
+	err := row.Scan(&out.ID, &out.OrgID, &out.VirployeeID, &out.PrincipalType, &out.PrincipalID,
 		&scopes, &products, &resources, &out.MaxRiskClass, &out.Purpose, &out.GrantedBy,
 		&out.ValidFrom, &out.ValidUntil, &out.Revision, &out.RevokedAt, &out.RevokedBy,
 		&out.RevocationReason, &out.ReviewedAt, &out.ReviewedBy, &out.ReviewNote, &out.CreatedAt, &out.UpdatedAt)
@@ -526,10 +526,10 @@ func scanDelegation(row scanner) (Delegation, error) {
 	return out, nil
 }
 
-func ensureVirployeeTx(ctx context.Context, tx pgx.Tx, tenantID string, virployeeID uuid.UUID) error {
+func ensureVirployeeTx(ctx context.Context, tx pgx.Tx, orgID string, virployeeID uuid.UUID) error {
 	var exists bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM virployees
-		WHERE tenant_id=$1 AND id=$2 AND trashed_at IS NULL)`, tenantID, virployeeID).Scan(&exists); err != nil {
+		WHERE org_id=$1 AND id=$2 AND trashed_at IS NULL)`, orgID, virployeeID).Scan(&exists); err != nil {
 		return err
 	}
 	if !exists {
@@ -539,7 +539,7 @@ func ensureVirployeeTx(ctx context.Context, tx pgx.Tx, tenantID string, virploye
 }
 
 type authorityEvent struct {
-	TenantID     string
+	OrgID        string
 	VirployeeID  *uuid.UUID
 	EventType    string
 	SubjectType  string
@@ -579,7 +579,7 @@ func (r *Repository) enqueueAuthorityEvent(ctx context.Context, tx pgx.Tx, event
 	}
 	_, _, err = r.nexusOutbox.EnqueueTx(ctx, tx, outbox.EnqueueInput{
 		ID:            uuid.New(),
-		TenantID:      event.TenantID,
+		OrgID:         event.OrgID,
 		AggregateType: outbox.AggregateTypeProfessionalAuthority,
 		AggregateID:   aggregateID,
 		Kind:          outbox.KindAuditEvent,

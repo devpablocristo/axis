@@ -11,7 +11,7 @@ import (
 	"golang.org/x/oauth2"
 )
 
-func TestGCSStoreUsesCMEKAndOpaqueTenantScopedObjectName(t *testing.T) {
+func TestGCSStoreUsesCMEKAndOpaqueOrgScopedObjectName(t *testing.T) {
 	var gotName, gotKMS, gotAuth, gotBody string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
@@ -46,8 +46,8 @@ func TestGCSStoreUsesCMEKAndOpaqueTenantScopedObjectName(t *testing.T) {
 	if gotKMS == "" || gotAuth != "Bearer test-token" || gotBody != "verified bytes" {
 		t.Fatalf("upload missing security/data: kms=%q auth=%q body=%q", gotKMS, gotAuth, gotBody)
 	}
-	if !strings.Contains(gotName, "tenant-a/medmory/") || strings.Contains(gotName, "patient-a") || strings.Contains(gotName, "patient-lab.pdf") {
-		t.Fatalf("object must be tenant-scoped with opaque subject/document segments: %q", gotName)
+	if !strings.Contains(gotName, "organization-a/producta/") || strings.Contains(gotName, "patient-a") || strings.Contains(gotName, "patient-lab.pdf") {
+		t.Fatalf("object must be organization-scoped with opaque subject/document segments: %q", gotName)
 	}
 	if !strings.HasPrefix(stored.URI, "gs://axis-stage/") || stored.ExpiresAt.IsZero() {
 		t.Fatalf("unexpected stored artifact: %+v", stored)

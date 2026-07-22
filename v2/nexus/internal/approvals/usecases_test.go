@@ -15,11 +15,11 @@ import (
 
 func TestUseCasesListDefaultsToPending(t *testing.T) {
 	repo := newFakeRepo()
-	pending := repo.add("tenant-1", domain.StatusPending)
-	repo.add("tenant-1", domain.StatusApproved)
+	pending := repo.add("organization-1", domain.StatusPending)
+	repo.add("organization-1", domain.StatusApproved)
 	uc := NewUseCases(repo)
 
-	out, err := uc.List(context.Background(), "tenant-1", domain.ListInput{})
+	out, err := uc.List(context.Background(), "organization-1", domain.ListInput{})
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -31,13 +31,13 @@ func TestUseCasesListDefaultsToPending(t *testing.T) {
 func TestUseCasesListCursorPaginatesApprovals(t *testing.T) {
 	repo := newFakeRepo()
 	base := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-	first := repo.addAt("tenant-1", domain.StatusPending, base.Add(3*time.Minute))
-	second := repo.addAt("tenant-1", domain.StatusPending, base.Add(2*time.Minute))
-	third := repo.addAt("tenant-1", domain.StatusPending, base.Add(time.Minute))
-	repo.addAt("tenant-1", domain.StatusApproved, base.Add(4*time.Minute))
+	first := repo.addAt("organization-1", domain.StatusPending, base.Add(3*time.Minute))
+	second := repo.addAt("organization-1", domain.StatusPending, base.Add(2*time.Minute))
+	third := repo.addAt("organization-1", domain.StatusPending, base.Add(time.Minute))
+	repo.addAt("organization-1", domain.StatusApproved, base.Add(4*time.Minute))
 	uc := NewUseCases(repo)
 
-	page, err := uc.List(context.Background(), "tenant-1", domain.ListInput{StatusRaw: "pending", Limit: 2})
+	page, err := uc.List(context.Background(), "organization-1", domain.ListInput{StatusRaw: "pending", Limit: 2})
 	if err != nil {
 		t.Fatalf("List first page: %v", err)
 	}
@@ -48,7 +48,7 @@ func TestUseCasesListCursorPaginatesApprovals(t *testing.T) {
 		t.Fatalf("unexpected first page: %+v", page.Items)
 	}
 
-	next, err := uc.List(context.Background(), "tenant-1", domain.ListInput{StatusRaw: "pending", Limit: 2, Cursor: page.NextCursor})
+	next, err := uc.List(context.Background(), "organization-1", domain.ListInput{StatusRaw: "pending", Limit: 2, Cursor: page.NextCursor})
 	if err != nil {
 		t.Fatalf("List next page: %v", err)
 	}
@@ -62,31 +62,31 @@ func TestUseCasesListCursorPaginatesApprovals(t *testing.T) {
 
 func TestUseCasesGet(t *testing.T) {
 	repo := newFakeRepo()
-	item := repo.add("tenant-1", domain.StatusPending)
-	repo.add("tenant-2", domain.StatusPending)
+	item := repo.add("organization-1", domain.StatusPending)
+	repo.add("organization-2", domain.StatusPending)
 	uc := NewUseCases(repo)
 
-	out, err := uc.Get(context.Background(), "tenant-1", item.ID)
+	out, err := uc.Get(context.Background(), "organization-1", item.ID)
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	if out.ID != item.ID || out.TenantID != "tenant-1" {
+	if out.ID != item.ID || out.OrgID != "organization-1" {
 		t.Fatalf("unexpected item: %+v", out)
 	}
 
-	_, err = uc.Get(context.Background(), "tenant-2", item.ID)
+	_, err = uc.Get(context.Background(), "organization-2", item.ID)
 	if !domainerr.IsNotFound(err) {
-		t.Fatalf("expected not found for another tenant, got %v", err)
+		t.Fatalf("expected not found for another organization, got %v", err)
 	}
 }
 
 func TestUseCasesApproveAndReject(t *testing.T) {
 	repo := newFakeRepo()
-	approve := repo.add("tenant-1", domain.StatusPending)
-	reject := repo.add("tenant-1", domain.StatusPending)
+	approve := repo.add("organization-1", domain.StatusPending)
+	reject := repo.add("organization-1", domain.StatusPending)
 	uc := NewUseCases(repo)
 
-	approved, err := uc.Approve(context.Background(), "tenant-1", approve.ID, domain.DecisionActor{ID: "approver-1", Role: "admin"}, domain.DecisionInput{Note: "ok"})
+	approved, err := uc.Approve(context.Background(), "organization-1", approve.ID, domain.DecisionActor{ID: "approver-1", Role: "admin"}, domain.DecisionInput{Note: "ok"})
 	if err != nil {
 		t.Fatalf("Approve: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestUseCasesApproveAndReject(t *testing.T) {
 		t.Fatalf("unexpected approved item: %+v", approved)
 	}
 
-	rejected, err := uc.Reject(context.Background(), "tenant-1", reject.ID, domain.DecisionActor{ID: "approver-2", Role: "owner"}, domain.DecisionInput{Note: "no"})
+	rejected, err := uc.Reject(context.Background(), "organization-1", reject.ID, domain.DecisionActor{ID: "approver-2", Role: "owner"}, domain.DecisionInput{Note: "no"})
 	if err != nil {
 		t.Fatalf("Reject: %v", err)
 	}
@@ -105,26 +105,26 @@ func TestUseCasesApproveAndReject(t *testing.T) {
 
 func TestUseCasesRejectsInvalidDecisions(t *testing.T) {
 	repo := newFakeRepo()
-	item := repo.add("tenant-1", domain.StatusApproved)
+	item := repo.add("organization-1", domain.StatusApproved)
 	uc := NewUseCases(repo)
 
-	_, err := uc.Approve(context.Background(), "tenant-1", item.ID, domain.DecisionActor{ID: "approver-1", Role: "admin"}, domain.DecisionInput{})
+	_, err := uc.Approve(context.Background(), "organization-1", item.ID, domain.DecisionActor{ID: "approver-1", Role: "admin"}, domain.DecisionInput{})
 	if !domainerr.IsConflict(err) {
 		t.Fatalf("expected conflict deciding already decided approval, got %v", err)
 	}
 
-	pending := repo.add("tenant-1", domain.StatusPending)
-	_, err = uc.Approve(context.Background(), "tenant-1", pending.ID, domain.DecisionActor{}, domain.DecisionInput{})
+	pending := repo.add("organization-1", domain.StatusPending)
+	_, err = uc.Approve(context.Background(), "organization-1", pending.ID, domain.DecisionActor{}, domain.DecisionInput{})
 	if !domainerr.IsValidation(err) {
 		t.Fatalf("expected validation for missing actor, got %v", err)
 	}
 
-	_, err = uc.List(context.Background(), "tenant-1", domain.ListInput{StatusRaw: "bad"})
+	_, err = uc.List(context.Background(), "organization-1", domain.ListInput{StatusRaw: "bad"})
 	if !domainerr.IsValidation(err) {
 		t.Fatalf("expected validation for invalid status, got %v", err)
 	}
 
-	_, err = uc.List(context.Background(), "tenant-1", domain.ListInput{Cursor: "bad-cursor"})
+	_, err = uc.List(context.Background(), "organization-1", domain.ListInput{Cursor: "bad-cursor"})
 	if !domainerr.IsValidation(err) {
 		t.Fatalf("expected validation for invalid cursor, got %v", err)
 	}
@@ -132,7 +132,7 @@ func TestUseCasesRejectsInvalidDecisions(t *testing.T) {
 
 func TestUseCasesEnforcesSupervisorAndHumanSeparationOfDuties(t *testing.T) {
 	repo := newFakeRepo()
-	item := repo.add("tenant-1", domain.StatusPending)
+	item := repo.add("organization-1", domain.StatusPending)
 	uc := NewUseCases(repo)
 
 	for name, actor := range map[string]domain.DecisionActor{
@@ -142,13 +142,13 @@ func TestUseCasesEnforcesSupervisorAndHumanSeparationOfDuties(t *testing.T) {
 		"requester":         {ID: item.RequesterID, Role: "admin"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := uc.Approve(context.Background(), "tenant-1", item.ID, actor, domain.DecisionInput{}); !domainerr.IsForbidden(err) {
+			if _, err := uc.Approve(context.Background(), "organization-1", item.ID, actor, domain.DecisionInput{}); !domainerr.IsForbidden(err) {
 				t.Fatalf("expected forbidden, got %v", err)
 			}
 		})
 	}
 
-	approved, err := uc.Approve(context.Background(), "tenant-1", item.ID, domain.DecisionActor{ID: item.SupervisorUserID, Role: "member"}, domain.DecisionInput{})
+	approved, err := uc.Approve(context.Background(), "organization-1", item.ID, domain.DecisionActor{ID: item.SupervisorUserID, Role: "member"}, domain.DecisionInput{})
 	if err != nil || approved.Status != domain.StatusApproved {
 		t.Fatalf("assigned supervisor should approve: approval=%+v err=%v", approved, err)
 	}
@@ -156,12 +156,12 @@ func TestUseCasesEnforcesSupervisorAndHumanSeparationOfDuties(t *testing.T) {
 
 func TestUseCasesAllowsScopedFunctionalApprover(t *testing.T) {
 	repo := newFakeRepo()
-	item := repo.add("tenant-1", domain.StatusPending)
+	item := repo.add("organization-1", domain.StatusPending)
 	uc := NewUseCases(repo)
 	authorizer := &fakeApprovalAuthorizer{allowed: true}
 	uc.SetAuthorizer(authorizer)
 
-	approved, err := uc.Approve(context.Background(), "tenant-1", item.ID, domain.DecisionActor{ID: "functional-approver", Role: "member"}, domain.DecisionInput{})
+	approved, err := uc.Approve(context.Background(), "organization-1", item.ID, domain.DecisionActor{ID: "functional-approver", Role: "member"}, domain.DecisionInput{})
 	if err != nil || approved.Status != domain.StatusApproved {
 		t.Fatalf("functional approver should approve in scope: approval=%+v err=%v", approved, err)
 	}
@@ -174,7 +174,7 @@ func TestUseCasesAllowsScopedFunctionalApprover(t *testing.T) {
 
 func TestUseCasesBreakGlassRequiresTwoPeopleAndIndependentReview(t *testing.T) {
 	repo := newFakeRepo()
-	item := repo.add("tenant-1", domain.StatusPending)
+	item := repo.add("organization-1", domain.StatusPending)
 	item.ApprovalKind = "break_glass"
 	item.QuorumRequired = 2
 	item.PostReviewRequired = true
@@ -183,24 +183,24 @@ func TestUseCasesBreakGlassRequiresTwoPeopleAndIndependentReview(t *testing.T) {
 	uc := NewUseCases(repo)
 	uc.SetAuditEmitter(audit)
 
-	if _, err := uc.Approve(context.Background(), "tenant-1", item.ID, domain.DecisionActor{ID: "admin-1", Role: "admin"}, domain.DecisionInput{}); !domainerr.IsValidation(err) {
+	if _, err := uc.Approve(context.Background(), "organization-1", item.ID, domain.DecisionActor{ID: "admin-1", Role: "admin"}, domain.DecisionInput{}); !domainerr.IsValidation(err) {
 		t.Fatalf("expected mandatory justification, got %v", err)
 	}
-	first, err := uc.Approve(context.Background(), "tenant-1", item.ID, domain.DecisionActor{ID: "admin-1", Role: "admin"}, domain.DecisionInput{Note: "patient safety incident"})
+	first, err := uc.Approve(context.Background(), "organization-1", item.ID, domain.DecisionActor{ID: "admin-1", Role: "admin"}, domain.DecisionInput{Note: "patient safety incident"})
 	if err != nil || first.Status != domain.StatusPending || first.ApprovalCount != 1 {
 		t.Fatalf("first decision must remain pending: approval=%+v err=%v", first, err)
 	}
-	if _, err := uc.Approve(context.Background(), "tenant-1", item.ID, domain.DecisionActor{ID: "admin-1", Role: "admin"}, domain.DecisionInput{Note: "again"}); !domainerr.IsConflict(err) {
+	if _, err := uc.Approve(context.Background(), "organization-1", item.ID, domain.DecisionActor{ID: "admin-1", Role: "admin"}, domain.DecisionInput{Note: "again"}); !domainerr.IsConflict(err) {
 		t.Fatalf("same actor must not count twice, got %v", err)
 	}
-	second, err := uc.Approve(context.Background(), "tenant-1", item.ID, domain.DecisionActor{ID: "owner-2", Role: "owner"}, domain.DecisionInput{Note: "independent confirmation"})
+	second, err := uc.Approve(context.Background(), "organization-1", item.ID, domain.DecisionActor{ID: "owner-2", Role: "owner"}, domain.DecisionInput{Note: "independent confirmation"})
 	if err != nil || second.Status != domain.StatusApproved || second.ApprovalCount != 2 {
 		t.Fatalf("second distinct decision must approve: approval=%+v err=%v", second, err)
 	}
-	if _, err := uc.Review(context.Background(), "tenant-1", item.ID, domain.DecisionActor{ID: "admin-1", Role: "admin"}, domain.DecisionInput{Note: "review"}); !domainerr.IsConflict(err) {
+	if _, err := uc.Review(context.Background(), "organization-1", item.ID, domain.DecisionActor{ID: "admin-1", Role: "admin"}, domain.DecisionInput{Note: "review"}); !domainerr.IsConflict(err) {
 		t.Fatalf("approver cannot review own break-glass action, got %v", err)
 	}
-	reviewed, err := uc.Review(context.Background(), "tenant-1", item.ID, domain.DecisionActor{ID: "owner-3", Role: "owner"}, domain.DecisionInput{Note: "controls followed"})
+	reviewed, err := uc.Review(context.Background(), "organization-1", item.ID, domain.DecisionActor{ID: "owner-3", Role: "owner"}, domain.DecisionInput{Note: "controls followed"})
 	if err != nil || reviewed.ReviewedBy != "owner-3" || reviewed.ReviewedAt == nil {
 		t.Fatalf("independent review failed: approval=%+v err=%v", reviewed, err)
 	}
@@ -217,14 +217,14 @@ func newFakeRepo() *fakeRepo {
 	return &fakeRepo{rows: make(map[uuid.UUID]domain.Approval)}
 }
 
-func (r *fakeRepo) add(tenantID string, status domain.Status) domain.Approval {
-	return r.addAt(tenantID, status, time.Now().UTC())
+func (r *fakeRepo) add(orgID string, status domain.Status) domain.Approval {
+	return r.addAt(orgID, status, time.Now().UTC())
 }
 
-func (r *fakeRepo) addAt(tenantID string, status domain.Status, now time.Time) domain.Approval {
+func (r *fakeRepo) addAt(orgID string, status domain.Status, now time.Time) domain.Approval {
 	row := domain.Approval{
 		ID:                uuid.New(),
-		TenantID:          tenantID,
+		OrgID:             orgID,
 		GovernanceCheckID: uuid.New(),
 		RequesterID:       "virployee-1",
 		ProductSurface:    "axis",
@@ -247,10 +247,10 @@ func (r *fakeRepo) addAt(tenantID string, status domain.Status, now time.Time) d
 	return row
 }
 
-func (r *fakeRepo) List(_ context.Context, tenantID string, status domain.Status, limit int, after *domain.ListCursor) ([]domain.Approval, error) {
+func (r *fakeRepo) List(_ context.Context, orgID string, status domain.Status, limit int, after *domain.ListCursor) ([]domain.Approval, error) {
 	out := []domain.Approval{}
 	for _, row := range r.rows {
-		if row.TenantID != tenantID || row.Status != status {
+		if row.OrgID != orgID || row.Status != status {
 			continue
 		}
 		if after != nil && !isAfterCursor(row, *after) {
@@ -280,17 +280,17 @@ func isAfterCursor(row domain.Approval, after domain.ListCursor) bool {
 	return false
 }
 
-func (r *fakeRepo) Get(_ context.Context, tenantID string, id uuid.UUID) (domain.Approval, error) {
+func (r *fakeRepo) Get(_ context.Context, orgID string, id uuid.UUID) (domain.Approval, error) {
 	row, ok := r.rows[id]
-	if !ok || row.TenantID != tenantID {
+	if !ok || row.OrgID != orgID {
 		return domain.Approval{}, domainerr.NotFound("approval not found")
 	}
 	return row, nil
 }
 
-func (r *fakeRepo) Decide(_ context.Context, tenantID string, id uuid.UUID, status domain.Status, actorID, actorRole, note string) (domain.Approval, error) {
+func (r *fakeRepo) Decide(_ context.Context, orgID string, id uuid.UUID, status domain.Status, actorID, actorRole, note string) (domain.Approval, error) {
 	row, ok := r.rows[id]
-	if !ok || row.TenantID != tenantID {
+	if !ok || row.OrgID != orgID {
 		return domain.Approval{}, domainerr.NotFound("approval not found")
 	}
 	if row.Status != domain.StatusPending {
@@ -322,9 +322,9 @@ func (r *fakeRepo) Decide(_ context.Context, tenantID string, id uuid.UUID, stat
 	return row, nil
 }
 
-func (r *fakeRepo) Review(_ context.Context, tenantID string, id uuid.UUID, actorID, note string) (domain.Approval, error) {
+func (r *fakeRepo) Review(_ context.Context, orgID string, id uuid.UUID, actorID, note string) (domain.Approval, error) {
 	row, ok := r.rows[id]
-	if !ok || row.TenantID != tenantID {
+	if !ok || row.OrgID != orgID {
 		return domain.Approval{}, domainerr.NotFound("approval not found")
 	}
 	if row.ApprovalKind != "break_glass" || row.Status != domain.StatusApproved || row.ReviewedAt != nil {

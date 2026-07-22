@@ -25,7 +25,7 @@ func sealChain(t *testing.T, r *Repository, events []auditdomain.AuditEvent) []a
 			e.Data = map[string]any{}
 		}
 		if e.ChainScope == "" {
-			e.ChainScope = auditdomain.ChainScopeFor(e.TenantID, e.VirployeeID)
+			e.ChainScope = auditdomain.ChainScopeFor(e.OrgID, e.VirployeeID)
 		}
 		e.PreviousHash = prev
 		ph, eh, sig, err := r.sealEvent(e)
@@ -45,13 +45,13 @@ func sealChain(t *testing.T, r *Repository, events []auditdomain.AuditEvent) []a
 func sampleEvents() []auditdomain.AuditEvent {
 	return []auditdomain.AuditEvent{
 		{
-			TenantID: "tenant-1", VirployeeID: "vp-1", EventType: auditdomain.EventAssistCompleted,
-			SubjectType: "assist_run", SubjectID: "run-1", ActorType: "service", ActorID: "service:medmory",
+			OrgID: "organization-1", VirployeeID: "vp-1", EventType: auditdomain.EventAssistCompleted,
+			SubjectType: "assist_run", SubjectID: "run-1", ActorType: "service", ActorID: "service:producta",
 			Summary: "Diagnóstico completado", Data: map[string]any{"output_hash": "abc", "answered": true},
 		},
 		{
-			TenantID: "tenant-1", VirployeeID: "vp-1", EventType: auditdomain.EventExecutionSucceeded,
-			SubjectType: "binding", SubjectID: "bind-1", ActorType: "service", ActorID: "service:medmory",
+			OrgID: "organization-1", VirployeeID: "vp-1", EventType: auditdomain.EventExecutionSucceeded,
+			SubjectType: "binding", SubjectID: "bind-1", ActorType: "service", ActorID: "service:producta",
 			Summary: "Ejecución ok", Data: map[string]any{"binding_hash": "def"},
 		},
 	}
@@ -193,17 +193,17 @@ func (f *fakeRepo) VerifySignatures([]auditdomain.AuditEvent) error { return nil
 func TestAppendValidation(t *testing.T) {
 	uc := NewUseCases(&fakeRepo{})
 	cases := []struct {
-		name   string
-		tenant string
-		in     auditdomain.AppendInput
+		name         string
+		organization string
+		in           auditdomain.AppendInput
 	}{
-		{"missing tenant", "", auditdomain.AppendInput{VirployeeID: "vp", EventType: "x"}},
+		{"missing organization", "", auditdomain.AppendInput{VirployeeID: "vp", EventType: "x"}},
 		{"missing virployee", "t", auditdomain.AppendInput{EventType: "x"}},
 		{"missing event_type", "t", auditdomain.AppendInput{VirployeeID: "vp"}},
 		{"invalid idempotency key", "t", auditdomain.AppendInput{VirployeeID: "vp", EventType: "x", IdempotencyKey: "not-a-uuid"}},
 	}
 	for _, tc := range cases {
-		if _, err := uc.Append(context.Background(), tc.tenant, tc.in); !domainerr.IsValidation(err) {
+		if _, err := uc.Append(context.Background(), tc.organization, tc.in); !domainerr.IsValidation(err) {
 			t.Fatalf("%s: expected validation error, got %v", tc.name, err)
 		}
 	}
@@ -213,7 +213,7 @@ func TestAppendUsesUUIDIdempotencyKeyAsEventID(t *testing.T) {
 	repo := &fakeRepo{}
 	uc := NewUseCases(repo)
 	id := uuid.New()
-	_, err := uc.Append(context.Background(), "tenant-1", auditdomain.AppendInput{
+	_, err := uc.Append(context.Background(), "organization-1", auditdomain.AppendInput{
 		IdempotencyKey: id.String(), VirployeeID: "vp-1", EventType: auditdomain.EventAssistCompleted,
 	})
 	if err != nil {
@@ -226,7 +226,7 @@ func TestAppendUsesUUIDIdempotencyKeyAsEventID(t *testing.T) {
 
 func TestSameAuditAppendRequestIgnoresDeliveryTimeButRejectsChangedPayload(t *testing.T) {
 	base := auditdomain.AuditEvent{
-		ID: uuid.New(), TenantID: "tenant-1", ChainScope: "tenant-1/vp-1", VirployeeID: "vp-1",
+		ID: uuid.New(), OrgID: "organization-1", ChainScope: "organization-1/vp-1", VirployeeID: "vp-1",
 		SubjectType: "delegation", SubjectID: uuid.NewString(), EventType: "delegation_revoked",
 		ActorType: "human", ActorID: "owner-1", Summary: "professional delegation revoked",
 		Data: map[string]any{"revision": float64(2), "snapshot_hash": "abc"}, CreatedAt: time.Now().UTC(),
@@ -246,7 +246,7 @@ func TestSameAuditAppendRequestIgnoresDeliveryTimeButRejectsChangedPayload(t *te
 func TestAppendBuildsScopeAndDefaultsActor(t *testing.T) {
 	repo := &fakeRepo{}
 	uc := NewUseCases(repo)
-	_, err := uc.Append(context.Background(), "tenant-1", auditdomain.AppendInput{
+	_, err := uc.Append(context.Background(), "organization-1", auditdomain.AppendInput{
 		VirployeeID: "vp-1", EventType: auditdomain.EventAssistCompleted,
 	})
 	if err != nil {
@@ -256,7 +256,7 @@ func TestAppendBuildsScopeAndDefaultsActor(t *testing.T) {
 		t.Fatalf("expected one appended event, got %d", len(repo.appended))
 	}
 	got := repo.appended[0]
-	if got.ChainScope != "tenant-1/vp-1" {
+	if got.ChainScope != "organization-1/vp-1" {
 		t.Fatalf("expected per-virployee scope, got %q", got.ChainScope)
 	}
 	if got.ActorType != "service" {
@@ -267,7 +267,7 @@ func TestAppendBuildsScopeAndDefaultsActor(t *testing.T) {
 func TestReplayReturnsTimelineAndIntegrity(t *testing.T) {
 	sealed := sealChain(t, NewRepository(nil), sampleEvents())
 	uc := NewUseCases(&fakeRepo{list: sealed})
-	out, err := uc.Replay(context.Background(), "tenant-1", "vp-1")
+	out, err := uc.Replay(context.Background(), "organization-1", "vp-1")
 	if err != nil {
 		t.Fatalf("replay: %v", err)
 	}
@@ -277,7 +277,7 @@ func TestReplayReturnsTimelineAndIntegrity(t *testing.T) {
 	if out.Integrity == nil || out.Integrity.Status != "ok" {
 		t.Fatalf("expected ok integrity, got %+v", out.Integrity)
 	}
-	if out.Scope != "tenant-1/vp-1" {
-		t.Fatalf("expected scope tenant-1/vp-1, got %q", out.Scope)
+	if out.Scope != "organization-1/vp-1" {
+		t.Fatalf("expected scope organization-1/vp-1, got %q", out.Scope)
 	}
 }

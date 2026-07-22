@@ -18,7 +18,7 @@ func TestCapabilityManifestConformAndActivateRoutes(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	id := uuid.New()
 	repo := &fakeCapabilityRepo{rows: map[uuid.UUID]domain.Capability{id: {
-		ID: id, TenantID: "tenant-1", CapabilityKey: "diagnosis.reports.create", Name: "Create diagnosis",
+		ID: id, OrgID: "organization-1", CapabilityKey: "diagnosis.reports.create", Name: "Create diagnosis",
 		RequiredAutonomy: virployeedomain.AutonomyA3, RiskClass: "high", SideEffectClass: "write",
 		RequiresNexusApproval: true, EvidenceRequired: true, PromotionState: domain.PromotionDraft,
 	}}}
@@ -31,7 +31,7 @@ func TestCapabilityManifestConformAndActivateRoutes(t *testing.T) {
 	NewHandler(ucs).Routes(router.Group("/v1"))
 
 	manifest := map[string]any{
-		"version": "1.0.0", "product_surface": "medmory",
+		"version": "1.0.0", "product_surface": "producta",
 		"input_schema": map[string]any{"type": "object"}, "output_schema": map[string]any{"type": "object"},
 		"required_scopes": []string{"diagnosis:write"},
 		"idempotency":     map[string]any{"mode": "required", "key_fields": []string{"subject_id"}},
@@ -64,7 +64,7 @@ func capabilityRequest(t *testing.T, router http.Handler, method, path string, b
 	}
 	req := httptest.NewRequest(method, path, bytes.NewReader(raw))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Tenant-ID", "tenant-1")
+	req.Header.Set("X-Org-ID", "organization-1")
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 	if rec.Code != wantStatus {

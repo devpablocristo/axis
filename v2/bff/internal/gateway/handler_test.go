@@ -11,13 +11,13 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	tenantdomain "github.com/devpablocristo/bff-v2/internal/tenancy/usecases/domain"
+	productdomain "github.com/devpablocristo/bff-v2/internal/products/usecases/domain"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
 	"github.com/google/uuid"
 )
 
-func TestGatewayRequiresTenant(t *testing.T) {
-	router := gatewayTestRouter(t, &fakeGatewayTenancy{}, "http://127.0.0.1:1")
+func TestGatewayRequiresProduct(t *testing.T) {
+	router := gatewayTestRouter(t, &fakeGatewayOrganizationAccess{}, "http://127.0.0.1:1")
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/virployees", nil)
 
@@ -28,12 +28,13 @@ func TestGatewayRequiresTenant(t *testing.T) {
 	}
 }
 
-func TestGatewayRejectsTenantWithoutMembership(t *testing.T) {
-	tenantID := uuid.New()
-	router := gatewayTestRouter(t, &fakeGatewayTenancy{err: domainerr.Forbidden("principal is not a member of the requested tenant")}, "http://127.0.0.1:1")
+func TestGatewayRejectsProductWithoutMembership(t *testing.T) {
+	productID := uuid.New()
+	router := gatewayTestRouter(t, &fakeGatewayOrganizationAccess{err: domainerr.Forbidden("principal is not a member of the requested product")}, "http://127.0.0.1:1")
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/virployees", nil)
-	req.Header.Set("X-Tenant-ID", tenantID.String())
+	req.Header.Set("X-Org-ID", productID.String())
+	req.Header.Set("X-Product-Surface", "axis")
 	req.Header.Set("X-Actor-ID", "user-a")
 
 	router.ServeHTTP(rec, req)
@@ -43,10 +44,9 @@ func TestGatewayRejectsTenantWithoutMembership(t *testing.T) {
 	}
 }
 
-func TestGatewayForwardsVirployeesWithResolvedTenantHeaders(t *testing.T) {
-	tenantID := uuid.New()
+func TestGatewayForwardsVirployeesWithResolvedProductHeaders(t *testing.T) {
+	productID := uuid.New()
 	var gotPath string
-	var gotTenant string
 	var gotOrg string
 	var gotProduct string
 	var gotActor string
@@ -54,11 +54,10 @@ func TestGatewayForwardsVirployeesWithResolvedTenantHeaders(t *testing.T) {
 	var gotInternalToken string
 	downstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
-		gotTenant = r.Header.Get("X-Tenant-ID")
-		gotOrg = r.Header.Get("X-Axis-Org-ID")
+		gotOrg = r.Header.Get("X-Org-ID")
 		gotProduct = r.Header.Get("X-Product-Surface")
 		gotActor = r.Header.Get("X-Actor-ID")
-		gotRole = r.Header.Get("X-Axis-Tenant-Role")
+		gotRole = r.Header.Get("X-Axis-Org-Role")
 		gotInternalToken = r.Header.Get("X-Axis-Internal-Token")
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
@@ -66,28 +65,29 @@ func TestGatewayForwardsVirployeesWithResolvedTenantHeaders(t *testing.T) {
 	}))
 	defer downstream.Close()
 
-	router := gatewayTestRouter(t, &fakeGatewayTenancy{
-		tenant: tenantdomain.Tenant{
-			ID:             tenantID,
+	router := gatewayTestRouter(t, &fakeGatewayOrganizationAccess{
+		product: productdomain.Product{
+			ID:             productID,
 			OrgID:          "org-a",
 			ProductSurface: "axis",
-			Status:         tenantdomain.StatusActive,
+			Status:         productdomain.StatusActive,
 			CreatedAt:      time.Now().UTC(),
 			UpdatedAt:      time.Now().UTC(),
 		},
-		member: tenantdomain.TenantMember{
-			TenantID: tenantID,
-			UserID:   "user-a",
-			Role:     tenantdomain.RoleAdmin,
-			Status:   tenantdomain.StatusActive,
+		member: productdomain.OrgMember{
+			OrgID:  productID,
+			UserID: "user-a",
+			Role:   productdomain.RoleAdmin,
+			Status: productdomain.StatusActive,
 		},
 	}, downstream.URL)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/virployees?view=active", nil)
-	req.Header.Set("X-Tenant-ID", tenantID.String())
+	req.Header.Set("X-Org-ID", productID.String())
+	req.Header.Set("X-Product-Surface", "axis")
 	req.Header.Set("X-Actor-ID", "user-a")
-	req.Header.Set("X-Axis-Tenant-Role", "owner")
+	req.Header.Set("X-Axis-Org-Role", "owner")
 	req.Header.Set("X-Axis-Internal-Token", "spoofed")
 
 	router.ServeHTTP(rec, req)
@@ -98,10 +98,10 @@ func TestGatewayForwardsVirployeesWithResolvedTenantHeaders(t *testing.T) {
 	if gotPath != "/v1/virployees" {
 		t.Fatalf("expected /v1/virployees, got %q", gotPath)
 	}
-	if gotTenant != tenantID.String() || gotOrg != "org-a" || gotProduct != "axis" || gotActor != "user-a" {
-		t.Fatalf("unexpected forwarded headers tenant=%q org=%q product=%q actor=%q", gotTenant, gotOrg, gotProduct, gotActor)
+	if gotOrg != "org-a" || gotProduct != "axis" || gotActor != "user-a" {
+		t.Fatalf("unexpected forwarded headers product=%q org=%q product=%q actor=%q", gotProduct, gotOrg, gotProduct, gotActor)
 	}
-	if gotRole != string(tenantdomain.RoleAdmin) {
+	if gotRole != string(productdomain.RoleAdmin) {
 		t.Fatalf("expected resolved role to replace spoofed role, got %q", gotRole)
 	}
 	if gotInternalToken != "test-internal-secret" {
@@ -110,7 +110,7 @@ func TestGatewayForwardsVirployeesWithResolvedTenantHeaders(t *testing.T) {
 }
 
 func TestGatewayValidatesVirployeeSupervisorBeforeForwarding(t *testing.T) {
-	tenantID := uuid.New()
+	productID := uuid.New()
 	calls := 0
 	downstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		calls++
@@ -118,27 +118,28 @@ func TestGatewayValidatesVirployeeSupervisorBeforeForwarding(t *testing.T) {
 	}))
 	defer downstream.Close()
 
-	validator := &fakeSupervisorValidator{err: domainerr.Validation("supervisor_user_id must reference an active tenant user")}
-	router := gatewayTestRouterWithSupervisor(t, &fakeGatewayTenancy{
-		tenant: tenantdomain.Tenant{
-			ID:             tenantID,
+	validator := &fakeSupervisorValidator{err: domainerr.Validation("supervisor_user_id must reference an active product user")}
+	router := gatewayTestRouterWithSupervisor(t, &fakeGatewayOrganizationAccess{
+		product: productdomain.Product{
+			ID:             productID,
 			OrgID:          "org-a",
 			ProductSurface: "axis",
-			Status:         tenantdomain.StatusActive,
+			Status:         productdomain.StatusActive,
 			CreatedAt:      time.Now().UTC(),
 			UpdatedAt:      time.Now().UTC(),
 		},
-		member: tenantdomain.TenantMember{
-			TenantID: tenantID,
-			UserID:   "user-a",
-			Role:     tenantdomain.RoleAdmin,
-			Status:   tenantdomain.StatusActive,
+		member: productdomain.OrgMember{
+			OrgID:  productID,
+			UserID: "user-a",
+			Role:   productdomain.RoleAdmin,
+			Status: productdomain.StatusActive,
 		},
 	}, downstream.URL, validator)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/virployees", strings.NewReader(`{"name":"Ops","supervisor_user_id":"missing-user"}`))
-	req.Header.Set("X-Tenant-ID", tenantID.String())
+	req.Header.Set("X-Org-ID", productID.String())
+	req.Header.Set("X-Product-Surface", "axis")
 	req.Header.Set("X-Actor-ID", "user-a")
 
 	router.ServeHTTP(rec, req)
@@ -149,46 +150,47 @@ func TestGatewayValidatesVirployeeSupervisorBeforeForwarding(t *testing.T) {
 	if calls != 0 {
 		t.Fatalf("expected downstream not to be called, got %d calls", calls)
 	}
-	if validator.lastTenantID != tenantID.String() || validator.lastUserID != "missing-user" {
-		t.Fatalf("unexpected supervisor validation tenant=%q user=%q", validator.lastTenantID, validator.lastUserID)
+	if validator.lastProductID != "org-a" || validator.lastUserID != "missing-user" {
+		t.Fatalf("unexpected supervisor validation product=%q user=%q", validator.lastProductID, validator.lastUserID)
 	}
 }
 
 func TestGatewayForwardsVirployeeAutonomyLevels(t *testing.T) {
-	tenantID := uuid.New()
+	productID := uuid.New()
 	var gotPath string
 	var gotQuery string
-	var gotTenant string
+	var gotProduct string
 	downstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		gotQuery = r.URL.RawQuery
-		gotTenant = r.Header.Get("X-Tenant-ID")
+		gotProduct = r.Header.Get("X-Org-ID")
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"data":[]}`))
 	}))
 	defer downstream.Close()
 
-	router := gatewayTestRouter(t, &fakeGatewayTenancy{
-		tenant: tenantdomain.Tenant{
-			ID:             tenantID,
+	router := gatewayTestRouter(t, &fakeGatewayOrganizationAccess{
+		product: productdomain.Product{
+			ID:             productID,
 			OrgID:          "org-a",
 			ProductSurface: "axis",
-			Status:         tenantdomain.StatusActive,
+			Status:         productdomain.StatusActive,
 			CreatedAt:      time.Now().UTC(),
 			UpdatedAt:      time.Now().UTC(),
 		},
-		member: tenantdomain.TenantMember{
-			TenantID: tenantID,
-			UserID:   "user-a",
-			Role:     tenantdomain.RoleAdmin,
-			Status:   tenantdomain.StatusActive,
+		member: productdomain.OrgMember{
+			OrgID:  productID,
+			UserID: "user-a",
+			Role:   productdomain.RoleAdmin,
+			Status: productdomain.StatusActive,
 		},
 	}, downstream.URL)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/virployees/autonomy-levels?scope=all", nil)
-	req.Header.Set("X-Tenant-ID", tenantID.String())
+	req.Header.Set("X-Org-ID", productID.String())
+	req.Header.Set("X-Product-Surface", "axis")
 	req.Header.Set("X-Actor-ID", "user-a")
 
 	router.ServeHTTP(rec, req)
@@ -202,23 +204,21 @@ func TestGatewayForwardsVirployeeAutonomyLevels(t *testing.T) {
 	if gotQuery != "scope=all" {
 		t.Fatalf("expected query to be forwarded, got %q", gotQuery)
 	}
-	if gotTenant != tenantID.String() {
-		t.Fatalf("expected resolved tenant header, got %q", gotTenant)
+	if gotProduct != "org-a" {
+		t.Fatalf("expected resolved product header, got %q", gotProduct)
 	}
 }
 
 func TestGatewayForwardsVirployeeRuntimeContext(t *testing.T) {
-	tenantID := uuid.New()
+	productID := uuid.New()
 	virployeeID := uuid.New()
 	var gotPath string
-	var gotTenant string
 	var gotOrg string
 	var gotProduct string
 	var gotActor string
 	downstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
-		gotTenant = r.Header.Get("X-Tenant-ID")
-		gotOrg = r.Header.Get("X-Axis-Org-ID")
+		gotOrg = r.Header.Get("X-Org-ID")
 		gotProduct = r.Header.Get("X-Product-Surface")
 		gotActor = r.Header.Get("X-Actor-ID")
 		w.Header().Set("Content-Type", "application/json")
@@ -227,26 +227,27 @@ func TestGatewayForwardsVirployeeRuntimeContext(t *testing.T) {
 	}))
 	defer downstream.Close()
 
-	router := gatewayTestRouter(t, &fakeGatewayTenancy{
-		tenant: tenantdomain.Tenant{
-			ID:             tenantID,
+	router := gatewayTestRouter(t, &fakeGatewayOrganizationAccess{
+		product: productdomain.Product{
+			ID:             productID,
 			OrgID:          "org-a",
 			ProductSurface: "axis",
-			Status:         tenantdomain.StatusActive,
+			Status:         productdomain.StatusActive,
 			CreatedAt:      time.Now().UTC(),
 			UpdatedAt:      time.Now().UTC(),
 		},
-		member: tenantdomain.TenantMember{
-			TenantID: tenantID,
-			UserID:   "user-a",
-			Role:     tenantdomain.RoleAdmin,
-			Status:   tenantdomain.StatusActive,
+		member: productdomain.OrgMember{
+			OrgID:  productID,
+			UserID: "user-a",
+			Role:   productdomain.RoleAdmin,
+			Status: productdomain.StatusActive,
 		},
 	}, downstream.URL)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/virployees/"+virployeeID.String()+"/runtime-context", nil)
-	req.Header.Set("X-Tenant-ID", tenantID.String())
+	req.Header.Set("X-Org-ID", productID.String())
+	req.Header.Set("X-Product-Surface", "axis")
 	req.Header.Set("X-Actor-ID", "user-a")
 
 	router.ServeHTTP(rec, req)
@@ -257,24 +258,22 @@ func TestGatewayForwardsVirployeeRuntimeContext(t *testing.T) {
 	if gotPath != "/v1/virployees/"+virployeeID.String()+"/runtime-context" {
 		t.Fatalf("expected runtime context path, got %q", gotPath)
 	}
-	if gotTenant != tenantID.String() || gotOrg != "org-a" || gotProduct != "axis" || gotActor != "user-a" {
-		t.Fatalf("unexpected forwarded headers tenant=%q org=%q product=%q actor=%q", gotTenant, gotOrg, gotProduct, gotActor)
+	if gotOrg != "org-a" || gotProduct != "axis" || gotActor != "user-a" {
+		t.Fatalf("unexpected forwarded headers product=%q org=%q product=%q actor=%q", gotProduct, gotOrg, gotProduct, gotActor)
 	}
 }
 
 func TestGatewayForwardsVirployeeDryRun(t *testing.T) {
-	tenantID := uuid.New()
+	productID := uuid.New()
 	virployeeID := uuid.New()
 	var gotPath string
-	var gotTenant string
 	var gotOrg string
 	var gotProduct string
 	var gotActor string
 	var gotBody string
 	downstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
-		gotTenant = r.Header.Get("X-Tenant-ID")
-		gotOrg = r.Header.Get("X-Axis-Org-ID")
+		gotOrg = r.Header.Get("X-Org-ID")
 		gotProduct = r.Header.Get("X-Product-Surface")
 		gotActor = r.Header.Get("X-Actor-ID")
 		body, _ := io.ReadAll(r.Body)
@@ -285,27 +284,28 @@ func TestGatewayForwardsVirployeeDryRun(t *testing.T) {
 	}))
 	defer downstream.Close()
 
-	router := gatewayTestRouter(t, &fakeGatewayTenancy{
-		tenant: tenantdomain.Tenant{
-			ID:             tenantID,
+	router := gatewayTestRouter(t, &fakeGatewayOrganizationAccess{
+		product: productdomain.Product{
+			ID:             productID,
 			OrgID:          "org-a",
 			ProductSurface: "axis",
-			Status:         tenantdomain.StatusActive,
+			Status:         productdomain.StatusActive,
 			CreatedAt:      time.Now().UTC(),
 			UpdatedAt:      time.Now().UTC(),
 		},
-		member: tenantdomain.TenantMember{
-			TenantID: tenantID,
-			UserID:   "user-a",
-			Role:     tenantdomain.RoleAdmin,
-			Status:   tenantdomain.StatusActive,
+		member: productdomain.OrgMember{
+			OrgID:  productID,
+			UserID: "user-a",
+			Role:   productdomain.RoleAdmin,
+			Status: productdomain.StatusActive,
 		},
 	}, downstream.URL)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/virployees/"+virployeeID.String()+"/dry-run", strings.NewReader(`{"input":"Agendá una reunión"}`))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Tenant-ID", tenantID.String())
+	req.Header.Set("X-Org-ID", productID.String())
+	req.Header.Set("X-Product-Surface", "axis")
 	req.Header.Set("X-Actor-ID", "user-a")
 
 	router.ServeHTTP(rec, req)
@@ -319,25 +319,23 @@ func TestGatewayForwardsVirployeeDryRun(t *testing.T) {
 	if gotBody != `{"input":"Agendá una reunión"}` {
 		t.Fatalf("expected body to be forwarded, got %q", gotBody)
 	}
-	if gotTenant != tenantID.String() || gotOrg != "org-a" || gotProduct != "axis" || gotActor != "user-a" {
-		t.Fatalf("unexpected forwarded headers tenant=%q org=%q product=%q actor=%q", gotTenant, gotOrg, gotProduct, gotActor)
+	if gotOrg != "org-a" || gotProduct != "axis" || gotActor != "user-a" {
+		t.Fatalf("unexpected forwarded headers product=%q org=%q product=%q actor=%q", gotProduct, gotOrg, gotProduct, gotActor)
 	}
 }
 
 func TestGatewayForwardsVirployeeRuns(t *testing.T) {
-	tenantID := uuid.New()
+	productID := uuid.New()
 	virployeeID := uuid.New()
 	var gotPath string
 	var gotQuery string
-	var gotTenant string
 	var gotOrg string
 	var gotProduct string
 	var gotActor string
 	downstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		gotQuery = r.URL.RawQuery
-		gotTenant = r.Header.Get("X-Tenant-ID")
-		gotOrg = r.Header.Get("X-Axis-Org-ID")
+		gotOrg = r.Header.Get("X-Org-ID")
 		gotProduct = r.Header.Get("X-Product-Surface")
 		gotActor = r.Header.Get("X-Actor-ID")
 		w.Header().Set("Content-Type", "application/json")
@@ -346,26 +344,27 @@ func TestGatewayForwardsVirployeeRuns(t *testing.T) {
 	}))
 	defer downstream.Close()
 
-	router := gatewayTestRouter(t, &fakeGatewayTenancy{
-		tenant: tenantdomain.Tenant{
-			ID:             tenantID,
+	router := gatewayTestRouter(t, &fakeGatewayOrganizationAccess{
+		product: productdomain.Product{
+			ID:             productID,
 			OrgID:          "org-a",
 			ProductSurface: "axis",
-			Status:         tenantdomain.StatusActive,
+			Status:         productdomain.StatusActive,
 			CreatedAt:      time.Now().UTC(),
 			UpdatedAt:      time.Now().UTC(),
 		},
-		member: tenantdomain.TenantMember{
-			TenantID: tenantID,
-			UserID:   "user-a",
-			Role:     tenantdomain.RoleAdmin,
-			Status:   tenantdomain.StatusActive,
+		member: productdomain.OrgMember{
+			OrgID:  productID,
+			UserID: "user-a",
+			Role:   productdomain.RoleAdmin,
+			Status: productdomain.StatusActive,
 		},
 	}, downstream.URL)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/virployees/"+virployeeID.String()+"/runs?limit=10", nil)
-	req.Header.Set("X-Tenant-ID", tenantID.String())
+	req.Header.Set("X-Org-ID", productID.String())
+	req.Header.Set("X-Product-Surface", "axis")
 	req.Header.Set("X-Actor-ID", "user-a")
 
 	router.ServeHTTP(rec, req)
@@ -376,17 +375,16 @@ func TestGatewayForwardsVirployeeRuns(t *testing.T) {
 	if gotPath != "/v1/virployees/"+virployeeID.String()+"/runs" || gotQuery != "limit=10" {
 		t.Fatalf("expected runs path/query, got %q?%s", gotPath, gotQuery)
 	}
-	if gotTenant != tenantID.String() || gotOrg != "org-a" || gotProduct != "axis" || gotActor != "user-a" {
-		t.Fatalf("unexpected forwarded headers tenant=%q org=%q product=%q actor=%q", gotTenant, gotOrg, gotProduct, gotActor)
+	if gotOrg != "org-a" || gotProduct != "axis" || gotActor != "user-a" {
+		t.Fatalf("unexpected forwarded headers product=%q org=%q product=%q actor=%q", gotProduct, gotOrg, gotProduct, gotActor)
 	}
 }
 
 func TestGatewayForwardsApprovalsToNexus(t *testing.T) {
-	tenantID := uuid.New()
+	productID := uuid.New()
 	approvalID := uuid.New()
 	var gotPath string
 	var gotQuery string
-	var gotTenant string
 	var gotOrg string
 	var gotProduct string
 	var gotActor string
@@ -394,8 +392,7 @@ func TestGatewayForwardsApprovalsToNexus(t *testing.T) {
 	nexus := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		gotQuery = r.URL.RawQuery
-		gotTenant = r.Header.Get("X-Tenant-ID")
-		gotOrg = r.Header.Get("X-Axis-Org-ID")
+		gotOrg = r.Header.Get("X-Org-ID")
 		gotProduct = r.Header.Get("X-Product-Surface")
 		gotActor = r.Header.Get("X-Actor-ID")
 		body, _ := io.ReadAll(r.Body)
@@ -406,27 +403,28 @@ func TestGatewayForwardsApprovalsToNexus(t *testing.T) {
 	}))
 	defer nexus.Close()
 
-	router := gatewayTestRouterWithTargets(t, &fakeGatewayTenancy{
-		tenant: tenantdomain.Tenant{
-			ID:             tenantID,
+	router := gatewayTestRouterWithTargets(t, &fakeGatewayOrganizationAccess{
+		product: productdomain.Product{
+			ID:             productID,
 			OrgID:          "org-a",
 			ProductSurface: "axis",
-			Status:         tenantdomain.StatusActive,
+			Status:         productdomain.StatusActive,
 			CreatedAt:      time.Now().UTC(),
 			UpdatedAt:      time.Now().UTC(),
 		},
-		member: tenantdomain.TenantMember{
-			TenantID: tenantID,
-			UserID:   "user-a",
-			Role:     tenantdomain.RoleAdmin,
-			Status:   tenantdomain.StatusActive,
+		member: productdomain.OrgMember{
+			OrgID:  productID,
+			UserID: "user-a",
+			Role:   productdomain.RoleAdmin,
+			Status: productdomain.StatusActive,
 		},
 	}, "http://127.0.0.1:1", nexus.URL)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/approvals/"+approvalID.String()+"/approve?view=pending", strings.NewReader(`{"note":"ok"}`))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Tenant-ID", tenantID.String())
+	req.Header.Set("X-Org-ID", productID.String())
+	req.Header.Set("X-Product-Surface", "axis")
 	req.Header.Set("X-Actor-ID", "user-a")
 
 	router.ServeHTTP(rec, req)
@@ -440,29 +438,30 @@ func TestGatewayForwardsApprovalsToNexus(t *testing.T) {
 	if gotBody != `{"note":"ok"}` {
 		t.Fatalf("expected body forwarded, got %q", gotBody)
 	}
-	if gotTenant != tenantID.String() || gotOrg != "org-a" || gotProduct != "axis" || gotActor != "user-a" {
-		t.Fatalf("unexpected forwarded headers tenant=%q org=%q product=%q actor=%q", gotTenant, gotOrg, gotProduct, gotActor)
+	if gotOrg != "org-a" || gotProduct != "axis" || gotActor != "user-a" {
+		t.Fatalf("unexpected forwarded headers product=%q org=%q product=%q actor=%q", gotProduct, gotOrg, gotProduct, gotActor)
 	}
 }
 
 func TestGatewayForwardsAdvancedGovernanceAndStripsForgedPermissions(t *testing.T) {
-	tenantID := uuid.New()
+	productID := uuid.New()
 	var gotPath, gotRole, gotPermissions, gotGrants string
 	nexus := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
-		gotRole = r.Header.Get("X-Axis-Tenant-Role")
+		gotRole = r.Header.Get("X-Axis-Org-Role")
 		gotPermissions = r.Header.Get("X-Axis-Permissions")
 		gotGrants = r.Header.Get("X-Axis-Role-Grants")
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer nexus.Close()
-	router := gatewayTestRouterWithTargets(t, &fakeGatewayTenancy{tenant: tenantdomain.Tenant{ID: tenantID, OrgID: "org-a", ProductSurface: "axis", Status: tenantdomain.StatusActive},
-		member: tenantdomain.TenantMember{TenantID: tenantID, UserID: "user-a", Role: tenantdomain.RoleMember, Status: tenantdomain.StatusActive}}, "http://127.0.0.1:1", nexus.URL)
+	router := gatewayTestRouterWithTargets(t, &fakeGatewayOrganizationAccess{product: productdomain.Product{ID: productID, OrgID: "org-a", ProductSurface: "axis", Status: productdomain.StatusActive},
+		member: productdomain.OrgMember{OrgID: productID, UserID: "user-a", Role: productdomain.RoleMember, Status: productdomain.StatusActive}}, "http://127.0.0.1:1", nexus.URL)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/governance-policy-versions/version-a/simulate", nil)
-	req.Header.Set("X-Tenant-ID", tenantID.String())
+	req.Header.Set("X-Org-ID", productID.String())
+	req.Header.Set("X-Product-Surface", "axis")
 	req.Header.Set("X-Actor-ID", "user-a")
-	req.Header.Set("X-Axis-Tenant-Role", "owner")
+	req.Header.Set("X-Axis-Org-Role", "owner")
 	req.Header.Set("X-Axis-Permissions", "*")
 	req.Header.Set("X-Axis-Role-Grants", "policy_admin")
 	router.ServeHTTP(rec, req)
@@ -475,42 +474,43 @@ func TestGatewayForwardsAdvancedGovernanceAndStripsForgedPermissions(t *testing.
 }
 
 func TestGatewayValidatesRoleGrantUserBeforeForwarding(t *testing.T) {
-	tenantID := uuid.New()
+	productID := uuid.New()
 	calls := 0
 	nexus := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		calls++
 		w.WriteHeader(http.StatusCreated)
 	}))
 	defer nexus.Close()
-	validator := &fakeSupervisorValidator{err: domainerr.Validation("user_id must reference an active tenant user")}
-	router := gatewayTestRouterWithSupervisorAndTargets(t, &fakeGatewayTenancy{
-		tenant: tenantdomain.Tenant{ID: tenantID, OrgID: "org-a", ProductSurface: "axis", Status: tenantdomain.StatusActive},
-		member: tenantdomain.TenantMember{TenantID: tenantID, UserID: "owner-a", Role: tenantdomain.RoleOwner, Status: tenantdomain.StatusActive},
+	validator := &fakeSupervisorValidator{err: domainerr.Validation("user_id must reference an active product user")}
+	router := gatewayTestRouterWithSupervisorAndTargets(t, &fakeGatewayOrganizationAccess{
+		product: productdomain.Product{ID: productID, OrgID: "org-a", ProductSurface: "axis", Status: productdomain.StatusActive},
+		member:  productdomain.OrgMember{OrgID: productID, UserID: "owner-a", Role: productdomain.RoleOwner, Status: productdomain.StatusActive},
 	}, "http://127.0.0.1:1", nexus.URL, validator)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/role-grants", strings.NewReader(`{"user_id":"inactive-user","role":"auditor"}`))
-	req.Header.Set("X-Tenant-ID", tenantID.String())
+	req.Header.Set("X-Org-ID", productID.String())
+	req.Header.Set("X-Product-Surface", "axis")
 	req.Header.Set("X-Actor-ID", "owner-a")
 	router.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusBadRequest || calls != 0 {
 		t.Fatalf("expected inactive user to be rejected before forwarding, status=%d calls=%d body=%s", rec.Code, calls, rec.Body.String())
 	}
-	if validator.lastTenantID != tenantID.String() || validator.lastUserID != "inactive-user" {
-		t.Fatalf("unexpected user validation tenant=%q user=%q", validator.lastTenantID, validator.lastUserID)
+	if validator.lastProductID != "org-a" || validator.lastUserID != "inactive-user" {
+		t.Fatalf("unexpected user validation product=%q user=%q", validator.lastProductID, validator.lastUserID)
 	}
 }
 
 func TestGatewayForwardsApprovalGetToNexus(t *testing.T) {
-	tenantID := uuid.New()
+	productID := uuid.New()
 	approvalID := uuid.New()
 	var gotPath string
-	var gotTenant string
+	var gotProduct string
 	var gotActor string
 	nexus := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
-		gotTenant = r.Header.Get("X-Tenant-ID")
+		gotProduct = r.Header.Get("X-Org-ID")
 		gotActor = r.Header.Get("X-Actor-ID")
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -518,26 +518,27 @@ func TestGatewayForwardsApprovalGetToNexus(t *testing.T) {
 	}))
 	defer nexus.Close()
 
-	router := gatewayTestRouterWithTargets(t, &fakeGatewayTenancy{
-		tenant: tenantdomain.Tenant{
-			ID:             tenantID,
+	router := gatewayTestRouterWithTargets(t, &fakeGatewayOrganizationAccess{
+		product: productdomain.Product{
+			ID:             productID,
 			OrgID:          "org-a",
 			ProductSurface: "axis",
-			Status:         tenantdomain.StatusActive,
+			Status:         productdomain.StatusActive,
 			CreatedAt:      time.Now().UTC(),
 			UpdatedAt:      time.Now().UTC(),
 		},
-		member: tenantdomain.TenantMember{
-			TenantID: tenantID,
-			UserID:   "user-a",
-			Role:     tenantdomain.RoleAdmin,
-			Status:   tenantdomain.StatusActive,
+		member: productdomain.OrgMember{
+			OrgID:  productID,
+			UserID: "user-a",
+			Role:   productdomain.RoleAdmin,
+			Status: productdomain.StatusActive,
 		},
 	}, "http://127.0.0.1:1", nexus.URL)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/approvals/"+approvalID.String(), nil)
-	req.Header.Set("X-Tenant-ID", tenantID.String())
+	req.Header.Set("X-Org-ID", productID.String())
+	req.Header.Set("X-Product-Surface", "axis")
 	req.Header.Set("X-Actor-ID", "user-a")
 
 	router.ServeHTTP(rec, req)
@@ -548,24 +549,22 @@ func TestGatewayForwardsApprovalGetToNexus(t *testing.T) {
 	if gotPath != "/v1/approvals/"+approvalID.String() {
 		t.Fatalf("expected approval path, got %q", gotPath)
 	}
-	if gotTenant != tenantID.String() || gotActor != "user-a" {
-		t.Fatalf("unexpected forwarded headers tenant=%q actor=%q", gotTenant, gotActor)
+	if gotProduct != "org-a" || gotActor != "user-a" {
+		t.Fatalf("unexpected forwarded headers product=%q actor=%q", gotProduct, gotActor)
 	}
 }
 
 func TestGatewayForwardsVirployeeExecutionGate(t *testing.T) {
-	tenantID := uuid.New()
+	productID := uuid.New()
 	virployeeID := uuid.New()
 	var gotPath string
-	var gotTenant string
 	var gotOrg string
 	var gotProduct string
 	var gotActor string
 	var gotBody string
 	downstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
-		gotTenant = r.Header.Get("X-Tenant-ID")
-		gotOrg = r.Header.Get("X-Axis-Org-ID")
+		gotOrg = r.Header.Get("X-Org-ID")
 		gotProduct = r.Header.Get("X-Product-Surface")
 		gotActor = r.Header.Get("X-Actor-ID")
 		body, _ := io.ReadAll(r.Body)
@@ -577,27 +576,28 @@ func TestGatewayForwardsVirployeeExecutionGate(t *testing.T) {
 	defer downstream.Close()
 
 	requestBody := `{"input":"Agendá una reunión","confirmed_draft":{"action":"calendar.events.create","kind":"calendar_event","fields":[{"key":"title","value":"Reunión"}]}}`
-	router := gatewayTestRouter(t, &fakeGatewayTenancy{
-		tenant: tenantdomain.Tenant{
-			ID:             tenantID,
+	router := gatewayTestRouter(t, &fakeGatewayOrganizationAccess{
+		product: productdomain.Product{
+			ID:             productID,
 			OrgID:          "org-a",
 			ProductSurface: "axis",
-			Status:         tenantdomain.StatusActive,
+			Status:         productdomain.StatusActive,
 			CreatedAt:      time.Now().UTC(),
 			UpdatedAt:      time.Now().UTC(),
 		},
-		member: tenantdomain.TenantMember{
-			TenantID: tenantID,
-			UserID:   "user-a",
-			Role:     tenantdomain.RoleAdmin,
-			Status:   tenantdomain.StatusActive,
+		member: productdomain.OrgMember{
+			OrgID:  productID,
+			UserID: "user-a",
+			Role:   productdomain.RoleAdmin,
+			Status: productdomain.StatusActive,
 		},
 	}, downstream.URL)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/virployees/"+virployeeID.String()+"/execution-gate", strings.NewReader(requestBody))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Tenant-ID", tenantID.String())
+	req.Header.Set("X-Org-ID", productID.String())
+	req.Header.Set("X-Product-Surface", "axis")
 	req.Header.Set("X-Actor-ID", "user-a")
 
 	router.ServeHTTP(rec, req)
@@ -611,23 +611,21 @@ func TestGatewayForwardsVirployeeExecutionGate(t *testing.T) {
 	if gotBody != requestBody {
 		t.Fatalf("expected body to be forwarded, got %q", gotBody)
 	}
-	if gotTenant != tenantID.String() || gotOrg != "org-a" || gotProduct != "axis" || gotActor != "user-a" {
-		t.Fatalf("unexpected forwarded headers tenant=%q org=%q product=%q actor=%q", gotTenant, gotOrg, gotProduct, gotActor)
+	if gotOrg != "org-a" || gotProduct != "axis" || gotActor != "user-a" {
+		t.Fatalf("unexpected forwarded headers product=%q org=%q product=%q actor=%q", gotProduct, gotOrg, gotProduct, gotActor)
 	}
 }
 
-func TestGatewayForwardsJobRolesWithResolvedTenantHeaders(t *testing.T) {
-	tenantID := uuid.New()
+func TestGatewayForwardsJobRolesWithResolvedProductHeaders(t *testing.T) {
+	productID := uuid.New()
 	var gotPath string
-	var gotTenant string
 	var gotOrg string
 	var gotProduct string
 	var gotActor string
 	var gotForwardedBy string
 	downstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
-		gotTenant = r.Header.Get("X-Tenant-ID")
-		gotOrg = r.Header.Get("X-Axis-Org-ID")
+		gotOrg = r.Header.Get("X-Org-ID")
 		gotProduct = r.Header.Get("X-Product-Surface")
 		gotActor = r.Header.Get("X-Actor-ID")
 		gotForwardedBy = r.Header.Get("X-Axis-Forwarded-By")
@@ -637,26 +635,27 @@ func TestGatewayForwardsJobRolesWithResolvedTenantHeaders(t *testing.T) {
 	}))
 	defer downstream.Close()
 
-	router := gatewayTestRouter(t, &fakeGatewayTenancy{
-		tenant: tenantdomain.Tenant{
-			ID:             tenantID,
+	router := gatewayTestRouter(t, &fakeGatewayOrganizationAccess{
+		product: productdomain.Product{
+			ID:             productID,
 			OrgID:          "org-a",
 			ProductSurface: "axis",
-			Status:         tenantdomain.StatusActive,
+			Status:         productdomain.StatusActive,
 			CreatedAt:      time.Now().UTC(),
 			UpdatedAt:      time.Now().UTC(),
 		},
-		member: tenantdomain.TenantMember{
-			TenantID: tenantID,
-			UserID:   "user-a",
-			Role:     tenantdomain.RoleAdmin,
-			Status:   tenantdomain.StatusActive,
+		member: productdomain.OrgMember{
+			OrgID:  productID,
+			UserID: "user-a",
+			Role:   productdomain.RoleAdmin,
+			Status: productdomain.StatusActive,
 		},
 	}, downstream.URL)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/job-roles?lifecycle=active", nil)
-	req.Header.Set("X-Tenant-ID", tenantID.String())
+	req.Header.Set("X-Org-ID", productID.String())
+	req.Header.Set("X-Product-Surface", "axis")
 	req.Header.Set("X-Actor-ID", "user-a")
 
 	router.ServeHTTP(rec, req)
@@ -667,22 +666,20 @@ func TestGatewayForwardsJobRolesWithResolvedTenantHeaders(t *testing.T) {
 	if gotPath != "/v1/job-roles" {
 		t.Fatalf("expected /v1/job-roles, got %q", gotPath)
 	}
-	if gotTenant != tenantID.String() || gotOrg != "org-a" || gotProduct != "axis" || gotActor != "user-a" || gotForwardedBy != "bff-v2" {
-		t.Fatalf("unexpected forwarded headers tenant=%q org=%q product=%q actor=%q forwarded_by=%q", gotTenant, gotOrg, gotProduct, gotActor, gotForwardedBy)
+	if gotOrg != "org-a" || gotProduct != "axis" || gotActor != "user-a" || gotForwardedBy != "bff-v2" {
+		t.Fatalf("unexpected forwarded headers product=%q org=%q product=%q actor=%q forwarded_by=%q", gotProduct, gotOrg, gotProduct, gotActor, gotForwardedBy)
 	}
 }
 
-func TestGatewayForwardsCapabilitiesWithResolvedTenantHeaders(t *testing.T) {
-	tenantID := uuid.New()
+func TestGatewayForwardsCapabilitiesWithResolvedProductHeaders(t *testing.T) {
+	productID := uuid.New()
 	var gotPath string
-	var gotTenant string
 	var gotOrg string
 	var gotProduct string
 	var gotActor string
 	downstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
-		gotTenant = r.Header.Get("X-Tenant-ID")
-		gotOrg = r.Header.Get("X-Axis-Org-ID")
+		gotOrg = r.Header.Get("X-Org-ID")
 		gotProduct = r.Header.Get("X-Product-Surface")
 		gotActor = r.Header.Get("X-Actor-ID")
 		w.Header().Set("Content-Type", "application/json")
@@ -691,26 +688,27 @@ func TestGatewayForwardsCapabilitiesWithResolvedTenantHeaders(t *testing.T) {
 	}))
 	defer downstream.Close()
 
-	router := gatewayTestRouter(t, &fakeGatewayTenancy{
-		tenant: tenantdomain.Tenant{
-			ID:             tenantID,
+	router := gatewayTestRouter(t, &fakeGatewayOrganizationAccess{
+		product: productdomain.Product{
+			ID:             productID,
 			OrgID:          "org-a",
 			ProductSurface: "axis",
-			Status:         tenantdomain.StatusActive,
+			Status:         productdomain.StatusActive,
 			CreatedAt:      time.Now().UTC(),
 			UpdatedAt:      time.Now().UTC(),
 		},
-		member: tenantdomain.TenantMember{
-			TenantID: tenantID,
-			UserID:   "user-a",
-			Role:     tenantdomain.RoleAdmin,
-			Status:   tenantdomain.StatusActive,
+		member: productdomain.OrgMember{
+			OrgID:  productID,
+			UserID: "user-a",
+			Role:   productdomain.RoleAdmin,
+			Status: productdomain.StatusActive,
 		},
 	}, downstream.URL)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/capabilities?lifecycle=active", nil)
-	req.Header.Set("X-Tenant-ID", tenantID.String())
+	req.Header.Set("X-Org-ID", productID.String())
+	req.Header.Set("X-Product-Surface", "axis")
 	req.Header.Set("X-Actor-ID", "user-a")
 
 	router.ServeHTTP(rec, req)
@@ -721,22 +719,20 @@ func TestGatewayForwardsCapabilitiesWithResolvedTenantHeaders(t *testing.T) {
 	if gotPath != "/v1/capabilities" {
 		t.Fatalf("expected /v1/capabilities, got %q", gotPath)
 	}
-	if gotTenant != tenantID.String() || gotOrg != "org-a" || gotProduct != "axis" || gotActor != "user-a" {
-		t.Fatalf("unexpected forwarded headers tenant=%q org=%q product=%q actor=%q", gotTenant, gotOrg, gotProduct, gotActor)
+	if gotOrg != "org-a" || gotProduct != "axis" || gotActor != "user-a" {
+		t.Fatalf("unexpected forwarded headers product=%q org=%q product=%q actor=%q", gotProduct, gotOrg, gotProduct, gotActor)
 	}
 }
 
-func TestGatewayForwardsProfileTemplatesWithResolvedTenantHeaders(t *testing.T) {
-	tenantID := uuid.New()
+func TestGatewayForwardsProfileTemplatesWithResolvedProductHeaders(t *testing.T) {
+	productID := uuid.New()
 	var gotPath string
-	var gotTenant string
 	var gotOrg string
 	var gotProduct string
 	var gotActor string
 	downstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
-		gotTenant = r.Header.Get("X-Tenant-ID")
-		gotOrg = r.Header.Get("X-Axis-Org-ID")
+		gotOrg = r.Header.Get("X-Org-ID")
 		gotProduct = r.Header.Get("X-Product-Surface")
 		gotActor = r.Header.Get("X-Actor-ID")
 		w.Header().Set("Content-Type", "application/json")
@@ -745,26 +741,27 @@ func TestGatewayForwardsProfileTemplatesWithResolvedTenantHeaders(t *testing.T) 
 	}))
 	defer downstream.Close()
 
-	router := gatewayTestRouter(t, &fakeGatewayTenancy{
-		tenant: tenantdomain.Tenant{
-			ID:             tenantID,
+	router := gatewayTestRouter(t, &fakeGatewayOrganizationAccess{
+		product: productdomain.Product{
+			ID:             productID,
 			OrgID:          "org-a",
 			ProductSurface: "axis",
-			Status:         tenantdomain.StatusActive,
+			Status:         productdomain.StatusActive,
 			CreatedAt:      time.Now().UTC(),
 			UpdatedAt:      time.Now().UTC(),
 		},
-		member: tenantdomain.TenantMember{
-			TenantID: tenantID,
-			UserID:   "user-a",
-			Role:     tenantdomain.RoleAdmin,
-			Status:   tenantdomain.StatusActive,
+		member: productdomain.OrgMember{
+			OrgID:  productID,
+			UserID: "user-a",
+			Role:   productdomain.RoleAdmin,
+			Status: productdomain.StatusActive,
 		},
 	}, downstream.URL)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/profile-templates?lifecycle=active", nil)
-	req.Header.Set("X-Tenant-ID", tenantID.String())
+	req.Header.Set("X-Org-ID", productID.String())
+	req.Header.Set("X-Product-Surface", "axis")
 	req.Header.Set("X-Actor-ID", "user-a")
 
 	router.ServeHTTP(rec, req)
@@ -775,16 +772,15 @@ func TestGatewayForwardsProfileTemplatesWithResolvedTenantHeaders(t *testing.T) 
 	if gotPath != "/v1/profile-templates" {
 		t.Fatalf("expected /v1/profile-templates, got %q", gotPath)
 	}
-	if gotTenant != tenantID.String() || gotOrg != "org-a" || gotProduct != "axis" || gotActor != "user-a" {
-		t.Fatalf("unexpected forwarded headers tenant=%q org=%q product=%q actor=%q", gotTenant, gotOrg, gotProduct, gotActor)
+	if gotOrg != "org-a" || gotProduct != "axis" || gotActor != "user-a" {
+		t.Fatalf("unexpected forwarded headers product=%q org=%q product=%q actor=%q", gotProduct, gotOrg, gotProduct, gotActor)
 	}
 }
 
-func TestGatewayForwardsGovernanceCheckToNexusWithResolvedTenantHeaders(t *testing.T) {
-	tenantID := uuid.New()
+func TestGatewayForwardsGovernanceCheckToNexusWithResolvedProductHeaders(t *testing.T) {
+	productID := uuid.New()
 	var gotPath string
 	var gotQuery string
-	var gotTenant string
 	var gotOrg string
 	var gotProduct string
 	var gotActor string
@@ -793,8 +789,7 @@ func TestGatewayForwardsGovernanceCheckToNexusWithResolvedTenantHeaders(t *testi
 	nexus := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		gotQuery = r.URL.RawQuery
-		gotTenant = r.Header.Get("X-Tenant-ID")
-		gotOrg = r.Header.Get("X-Axis-Org-ID")
+		gotOrg = r.Header.Get("X-Org-ID")
 		gotProduct = r.Header.Get("X-Product-Surface")
 		gotActor = r.Header.Get("X-Actor-ID")
 		gotForwardedBy = r.Header.Get("X-Axis-Forwarded-By")
@@ -806,20 +801,20 @@ func TestGatewayForwardsGovernanceCheckToNexusWithResolvedTenantHeaders(t *testi
 	}))
 	defer nexus.Close()
 
-	router := gatewayTestRouterWithTargets(t, &fakeGatewayTenancy{
-		tenant: tenantdomain.Tenant{
-			ID:             tenantID,
+	router := gatewayTestRouterWithTargets(t, &fakeGatewayOrganizationAccess{
+		product: productdomain.Product{
+			ID:             productID,
 			OrgID:          "org-a",
 			ProductSurface: "axis",
-			Status:         tenantdomain.StatusActive,
+			Status:         productdomain.StatusActive,
 			CreatedAt:      time.Now().UTC(),
 			UpdatedAt:      time.Now().UTC(),
 		},
-		member: tenantdomain.TenantMember{
-			TenantID: tenantID,
-			UserID:   "user-a",
-			Role:     tenantdomain.RoleAdmin,
-			Status:   tenantdomain.StatusActive,
+		member: productdomain.OrgMember{
+			OrgID:  productID,
+			UserID: "user-a",
+			Role:   productdomain.RoleAdmin,
+			Status: productdomain.StatusActive,
 		},
 	}, "http://127.0.0.1:1", nexus.URL)
 
@@ -827,7 +822,8 @@ func TestGatewayForwardsGovernanceCheckToNexusWithResolvedTenantHeaders(t *testi
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/governance/check?mode=simulation", strings.NewReader(requestBody))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Tenant-ID", tenantID.String())
+	req.Header.Set("X-Org-ID", productID.String())
+	req.Header.Set("X-Product-Surface", "axis")
 	req.Header.Set("X-Actor-ID", "user-a")
 
 	router.ServeHTTP(rec, req)
@@ -844,18 +840,18 @@ func TestGatewayForwardsGovernanceCheckToNexusWithResolvedTenantHeaders(t *testi
 	if gotBody != requestBody {
 		t.Fatalf("expected body to be forwarded, got %q", gotBody)
 	}
-	if gotTenant != tenantID.String() || gotOrg != "org-a" || gotProduct != "axis" || gotActor != "user-a" || gotForwardedBy != "bff-v2" {
-		t.Fatalf("unexpected forwarded headers tenant=%q org=%q product=%q actor=%q forwarded_by=%q", gotTenant, gotOrg, gotProduct, gotActor, gotForwardedBy)
+	if gotOrg != "org-a" || gotProduct != "axis" || gotActor != "user-a" || gotForwardedBy != "bff-v2" {
+		t.Fatalf("unexpected forwarded headers product=%q org=%q product=%q actor=%q forwarded_by=%q", gotProduct, gotOrg, gotProduct, gotActor, gotForwardedBy)
 	}
 }
 
 func TestGatewayRoutesOperationalJobByServiceAndStripsForgedAuthority(t *testing.T) {
-	tenantID := uuid.New()
+	productID := uuid.New()
 	var gotPath, gotActor, gotRole, gotPermissions string
 	nexus := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		gotActor = r.Header.Get("X-Actor-ID")
-		gotRole = r.Header.Get("X-Axis-Tenant-Role")
+		gotRole = r.Header.Get("X-Axis-Org-Role")
 		gotPermissions = r.Header.Get("X-Permissions")
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"status":"queued"}`))
@@ -863,12 +859,13 @@ func TestGatewayRoutesOperationalJobByServiceAndStripsForgedAuthority(t *testing
 	defer nexus.Close()
 	companion := httptest.NewServer(http.NotFoundHandler())
 	defer companion.Close()
-	router := gatewayTestRouterWithTargets(t, &fakeGatewayTenancy{tenant: tenantdomain.Tenant{ID: tenantID, OrgID: "org-a", ProductSurface: "axis", Status: tenantdomain.StatusActive, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}, member: tenantdomain.TenantMember{TenantID: tenantID, UserID: "operator-a", Role: tenantdomain.RoleMember, Status: tenantdomain.StatusActive}}, companion.URL, nexus.URL)
+	router := gatewayTestRouterWithTargets(t, &fakeGatewayOrganizationAccess{product: productdomain.Product{ID: productID, OrgID: "org-a", ProductSurface: "axis", Status: productdomain.StatusActive, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}, member: productdomain.OrgMember{OrgID: productID, UserID: "operator-a", Role: productdomain.RoleMember, Status: productdomain.StatusActive}}, companion.URL, nexus.URL)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/operations/jobs/nexus/11111111-1111-1111-1111-111111111111/replay", strings.NewReader(`{}`))
-	req.Header.Set("X-Tenant-ID", tenantID.String())
+	req.Header.Set("X-Org-ID", productID.String())
+	req.Header.Set("X-Product-Surface", "axis")
 	req.Header.Set("X-Actor-ID", "operator-a")
-	req.Header.Set("X-Axis-Tenant-Role", "owner")
+	req.Header.Set("X-Axis-Org-Role", "owner")
 	req.Header.Set("X-Permissions", "*")
 	router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -877,13 +874,13 @@ func TestGatewayRoutesOperationalJobByServiceAndStripsForgedAuthority(t *testing
 	if gotPath != "/v1/operations/jobs/11111111-1111-1111-1111-111111111111/replay" {
 		t.Fatalf("unexpected downstream path %q", gotPath)
 	}
-	if gotActor != "operator-a" || gotRole != string(tenantdomain.RoleMember) || gotPermissions != "" {
+	if gotActor != "operator-a" || gotRole != string(productdomain.RoleMember) || gotPermissions != "" {
 		t.Fatalf("authority headers were not derived safely actor=%q role=%q permissions=%q", gotActor, gotRole, gotPermissions)
 	}
 }
 
 func TestOperationsOverviewReportsPartialWhenOneServiceIsDown(t *testing.T) {
-	tenantID := uuid.New()
+	productID := uuid.New()
 	companion := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"status":"healthy","fleet":{"ready":2}}`))
@@ -893,10 +890,11 @@ func TestOperationsOverviewReportsPartialWhenOneServiceIsDown(t *testing.T) {
 		http.Error(w, "unavailable", http.StatusServiceUnavailable)
 	}))
 	defer nexus.Close()
-	router := gatewayTestRouterWithTargets(t, &fakeGatewayTenancy{tenant: tenantdomain.Tenant{ID: tenantID, OrgID: "org-a", ProductSurface: "axis", Status: tenantdomain.StatusActive, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}, member: tenantdomain.TenantMember{TenantID: tenantID, UserID: "auditor-a", Role: tenantdomain.RoleAdmin, Status: tenantdomain.StatusActive}}, companion.URL, nexus.URL)
+	router := gatewayTestRouterWithTargets(t, &fakeGatewayOrganizationAccess{product: productdomain.Product{ID: productID, OrgID: "org-a", ProductSurface: "axis", Status: productdomain.StatusActive, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}, member: productdomain.OrgMember{OrgID: productID, UserID: "auditor-a", Role: productdomain.RoleAdmin, Status: productdomain.StatusActive}}, companion.URL, nexus.URL)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/operations/overview", nil)
-	req.Header.Set("X-Tenant-ID", tenantID.String())
+	req.Header.Set("X-Org-ID", productID.String())
+	req.Header.Set("X-Product-Surface", "axis")
 	req.Header.Set("X-Actor-ID", "auditor-a")
 	router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"status":"partial"`) || !strings.Contains(rec.Body.String(), `"nexus":{"status":"unavailable"}`) {
@@ -904,21 +902,21 @@ func TestOperationsOverviewReportsPartialWhenOneServiceIsDown(t *testing.T) {
 	}
 }
 
-func gatewayTestRouter(t *testing.T, tenancy TenancyPort, companionURL string) *gin.Engine {
-	return gatewayTestRouterWithSupervisor(t, tenancy, companionURL, nil)
+func gatewayTestRouter(t *testing.T, products OrganizationAccessPort, companionURL string) *gin.Engine {
+	return gatewayTestRouterWithSupervisor(t, products, companionURL, nil)
 }
 
-func gatewayTestRouterWithSupervisor(t *testing.T, tenancy TenancyPort, companionURL string, supervisor SupervisorValidatorPort) *gin.Engine {
-	return gatewayTestRouterWithSupervisorAndTargets(t, tenancy, companionURL, companionURL, supervisor)
+func gatewayTestRouterWithSupervisor(t *testing.T, products OrganizationAccessPort, companionURL string, supervisor SupervisorValidatorPort) *gin.Engine {
+	return gatewayTestRouterWithSupervisorAndTargets(t, products, companionURL, companionURL, supervisor)
 }
 
-func gatewayTestRouterWithTargets(t *testing.T, tenancy TenancyPort, companionURL string, nexusURL string) *gin.Engine {
-	return gatewayTestRouterWithSupervisorAndTargets(t, tenancy, companionURL, nexusURL, nil)
+func gatewayTestRouterWithTargets(t *testing.T, products OrganizationAccessPort, companionURL string, nexusURL string) *gin.Engine {
+	return gatewayTestRouterWithSupervisorAndTargets(t, products, companionURL, nexusURL, nil)
 }
 
-func gatewayTestRouterWithSupervisorAndTargets(t *testing.T, tenancy TenancyPort, companionURL string, nexusURL string, supervisor SupervisorValidatorPort) *gin.Engine {
+func gatewayTestRouterWithSupervisorAndTargets(t *testing.T, products OrganizationAccessPort, companionURL string, nexusURL string, supervisor SupervisorValidatorPort) *gin.Engine {
 	t.Helper()
-	uc, err := NewUseCases(tenancy, companionURL, nexusURL)
+	uc, err := NewUseCases(products, companionURL, nexusURL)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -928,27 +926,27 @@ func gatewayTestRouterWithSupervisorAndTargets(t *testing.T, tenancy TenancyPort
 	return router
 }
 
-type fakeGatewayTenancy struct {
-	tenant tenantdomain.Tenant
-	member tenantdomain.TenantMember
-	err    error
+type fakeGatewayOrganizationAccess struct {
+	product productdomain.Product
+	member  productdomain.OrgMember
+	err     error
 }
 
-func (f *fakeGatewayTenancy) ResolveAccess(context.Context, string, string) (tenantdomain.Tenant, tenantdomain.TenantMember, error) {
+func (f *fakeGatewayOrganizationAccess) ResolveOrgAccess(context.Context, string, string, string) (productdomain.Product, productdomain.OrgMember, error) {
 	if f.err != nil {
-		return tenantdomain.Tenant{}, tenantdomain.TenantMember{}, f.err
+		return productdomain.Product{}, productdomain.OrgMember{}, f.err
 	}
-	return f.tenant, f.member, nil
+	return f.product, f.member, nil
 }
 
 type fakeSupervisorValidator struct {
-	lastTenantID string
-	lastUserID   string
-	err          error
+	lastProductID string
+	lastUserID    string
+	err           error
 }
 
-func (f *fakeSupervisorValidator) EnsureActive(_ context.Context, tenantID, userID string) error {
-	f.lastTenantID = tenantID
+func (f *fakeSupervisorValidator) EnsureActive(_ context.Context, productID, userID string) error {
+	f.lastProductID = productID
 	f.lastUserID = userID
 	return f.err
 }

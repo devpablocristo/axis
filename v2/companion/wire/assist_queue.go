@@ -26,7 +26,7 @@ func (a assistQueueAdapter) EnqueueAssist(ctx context.Context, run virployees.As
 		return err
 	}
 	job, _, err := a.repository.Enqueue(ctx, jobs.EnqueueInput{
-		TenantID: run.TenantID, ProductSurface: "companion", Kind: assistProcessJobKind,
+		OrgID: run.OrgID, ProductSurface: "companion", Kind: assistProcessJobKind,
 		ShardKey: run.VirployeeID.String(), DedupeKey: run.ID.String(), Payload: payload,
 		MaxAttempts: 10, Timeout: 2 * time.Minute,
 	})
@@ -34,7 +34,7 @@ func (a assistQueueAdapter) EnqueueAssist(ctx context.Context, run virployees.As
 		return err
 	}
 	if job.Status == jobs.StatusDeadLetter {
-		_, err = a.repository.ReplayDeadLetter(ctx, run.TenantID, job.ID, time.Now().UTC())
+		_, err = a.repository.ReplayDeadLetter(ctx, run.OrgID, job.ID, time.Now().UTC())
 	}
 	return err
 }

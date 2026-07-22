@@ -15,7 +15,7 @@ var (
 )
 
 type Scope struct {
-	TenantID             string
+	OrgID                string
 	VirployeeID          string
 	ProductSurface       string
 	SubjectID            string

@@ -21,8 +21,8 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 	return &Repository{pool: pool}
 }
 
-func (r *Repository) List(ctx context.Context, tenantID string, status domain.Status, limit int, after *domain.ListCursor) ([]domain.Approval, error) {
-	args := []any{tenantID, string(status), limit}
+func (r *Repository) List(ctx context.Context, orgID string, status domain.Status, limit int, after *domain.ListCursor) ([]domain.Approval, error) {
+	args := []any{orgID, string(status), limit}
 	cursorClause := ""
 	if after != nil {
 		cursorClause = " AND (created_at, id) < ($4, $5::uuid)"
@@ -31,7 +31,7 @@ func (r *Repository) List(ctx context.Context, tenantID string, status domain.St
 	rows, err := r.pool.Query(ctx, `
 		SELECT `+approvalColumns("a")+`
 		FROM approvals a
-		WHERE a.tenant_id = $1
+		WHERE a.org_id = $1
 			AND a.status = $2
 			`+cursorClause+`
 		ORDER BY a.created_at DESC, a.id DESC
@@ -53,18 +53,18 @@ func (r *Repository) List(ctx context.Context, tenantID string, status domain.St
 	return out, rows.Err()
 }
 
-func (r *Repository) Get(ctx context.Context, tenantID string, id uuid.UUID) (domain.Approval, error) {
-	return r.get(ctx, tenantID, id)
+func (r *Repository) Get(ctx context.Context, orgID string, id uuid.UUID) (domain.Approval, error) {
+	return r.get(ctx, orgID, id)
 }
 
-func (r *Repository) Decide(ctx context.Context, tenantID string, id uuid.UUID, status domain.Status, actorID, actorRole, note string) (domain.Approval, error) {
+func (r *Repository) Decide(ctx context.Context, orgID string, id uuid.UUID, status domain.Status, actorID, actorRole, note string) (domain.Approval, error) {
 	now := time.Now().UTC()
 	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return domain.Approval{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	existing, err := scanApproval(tx.QueryRow(ctx, `SELECT `+approvalColumns("a")+` FROM approvals a WHERE a.tenant_id=$1 AND a.id=$2 FOR UPDATE`, tenantID, id))
+	existing, err := scanApproval(tx.QueryRow(ctx, `SELECT `+approvalColumns("a")+` FROM approvals a WHERE a.org_id=$1 AND a.id=$2 FOR UPDATE`, orgID, id))
 	if err != nil {
 		return domain.Approval{}, err
 	}
@@ -79,8 +79,8 @@ func (r *Repository) Decide(ctx context.Context, tenantID string, id uuid.UUID, 
 		decision = "reject"
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO approval_decisions
-		(id,tenant_id,approval_id,actor_id,actor_role,decision,note,decided_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, uuid.New(), tenantID, id, actorID, actorRole, decision, note, now); err != nil {
+		(id,org_id,approval_id,actor_id,actor_role,decision,note,decided_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, uuid.New(), orgID, id, actorID, actorRole, decision, note, now); err != nil {
 		if isUniqueViolation(err) {
 			return domain.Approval{}, domainerr.Conflict("actor already decided this approval")
 		}
@@ -91,7 +91,7 @@ func (r *Repository) Decide(ctx context.Context, tenantID string, id uuid.UUID, 
 		terminalStatus = domain.StatusRejected
 	} else {
 		var approvals int
-		if err := tx.QueryRow(ctx, `SELECT count(*) FROM approval_decisions WHERE tenant_id=$1 AND approval_id=$2 AND decision='approve'`, tenantID, id).Scan(&approvals); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM approval_decisions WHERE org_id=$1 AND approval_id=$2 AND decision='approve'`, orgID, id).Scan(&approvals); err != nil {
 			return domain.Approval{}, err
 		}
 		if approvals >= existing.QuorumRequired {
@@ -99,9 +99,9 @@ func (r *Repository) Decide(ctx context.Context, tenantID string, id uuid.UUID, 
 		}
 	}
 	if terminalStatus == domain.StatusPending {
-		_, err = tx.Exec(ctx, `UPDATE approvals SET updated_at=$3 WHERE tenant_id=$1 AND id=$2`, tenantID, id, now)
+		_, err = tx.Exec(ctx, `UPDATE approvals SET updated_at=$3 WHERE org_id=$1 AND id=$2`, orgID, id, now)
 	} else {
-		_, err = tx.Exec(ctx, `UPDATE approvals SET status=$3,decided_by=$4,decision_note=$5,decided_at=$6,updated_at=$6 WHERE tenant_id=$1 AND id=$2`, tenantID, id, string(terminalStatus), actorID, note, now)
+		_, err = tx.Exec(ctx, `UPDATE approvals SET status=$3,decided_by=$4,decision_note=$5,decided_at=$6,updated_at=$6 WHERE org_id=$1 AND id=$2`, orgID, id, string(terminalStatus), actorID, note, now)
 	}
 	if err != nil {
 		return domain.Approval{}, err
@@ -109,30 +109,30 @@ func (r *Repository) Decide(ctx context.Context, tenantID string, id uuid.UUID, 
 	if err := tx.Commit(ctx); err != nil {
 		return domain.Approval{}, err
 	}
-	return r.Get(ctx, tenantID, id)
+	return r.Get(ctx, orgID, id)
 }
 
-func (r *Repository) Review(ctx context.Context, tenantID string, id uuid.UUID, actorID, note string) (domain.Approval, error) {
+func (r *Repository) Review(ctx context.Context, orgID string, id uuid.UUID, actorID, note string) (domain.Approval, error) {
 	now := time.Now().UTC()
 	tag, err := r.pool.Exec(ctx, `UPDATE approvals SET reviewed_by=$3,review_note=$4,reviewed_at=$5,updated_at=$5
-		WHERE tenant_id=$1 AND id=$2 AND approval_kind='break_glass' AND status='approved'
+		WHERE org_id=$1 AND id=$2 AND approval_kind='break_glass' AND status='approved'
 		AND post_review_required AND reviewed_at IS NULL
-		AND NOT EXISTS (SELECT 1 FROM approval_decisions d WHERE d.tenant_id=$1 AND d.approval_id=$2 AND d.actor_id=$3)`, tenantID, id, actorID, note, now)
+		AND NOT EXISTS (SELECT 1 FROM approval_decisions d WHERE d.org_id=$1 AND d.approval_id=$2 AND d.actor_id=$3)`, orgID, id, actorID, note, now)
 	if err != nil {
 		return domain.Approval{}, err
 	}
 	if tag.RowsAffected() == 0 {
 		return domain.Approval{}, domainerr.Conflict("break-glass approval is not reviewable by this actor")
 	}
-	return r.Get(ctx, tenantID, id)
+	return r.Get(ctx, orgID, id)
 }
 
-func (r *Repository) get(ctx context.Context, tenantID string, id uuid.UUID) (domain.Approval, error) {
-	item, err := scanApproval(r.pool.QueryRow(ctx, `SELECT `+approvalColumns("a")+` FROM approvals a WHERE a.tenant_id=$1 AND a.id=$2`, tenantID, id))
+func (r *Repository) get(ctx context.Context, orgID string, id uuid.UUID) (domain.Approval, error) {
+	item, err := scanApproval(r.pool.QueryRow(ctx, `SELECT `+approvalColumns("a")+` FROM approvals a WHERE a.org_id=$1 AND a.id=$2`, orgID, id))
 	if err != nil {
 		return domain.Approval{}, err
 	}
-	rows, err := r.pool.Query(ctx, `SELECT id,actor_id,actor_role,decision,note,decided_at FROM approval_decisions WHERE tenant_id=$1 AND approval_id=$2 ORDER BY decided_at,id`, tenantID, id)
+	rows, err := r.pool.Query(ctx, `SELECT id,actor_id,actor_role,decision,note,decided_at FROM approval_decisions WHERE org_id=$1 AND approval_id=$2 ORDER BY decided_at,id`, orgID, id)
 	if err != nil {
 		return domain.Approval{}, err
 	}
@@ -149,7 +149,7 @@ func (r *Repository) get(ctx context.Context, tenantID string, id uuid.UUID) (do
 
 func approvalColumns(alias string) string {
 	p := alias + "."
-	return p + `id::text,` + p + `tenant_id,` + p + `governance_check_id::text,` + p + `requester_id,` + p + `product_surface,` + p + `action_type,` + p + `target_system,` + p + `target_resource,` + p + `resource_type,` + p + `risk_level,` + p + `reason,` + p + `binding_hash,` + p + `governance_policy_snapshot_hash,` + p + `status,` + p + `approval_kind,` + p + `supervisor_user_id,` + p + `quorum_required,(SELECT count(*) FROM approval_decisions dc WHERE dc.tenant_id=` + p + `tenant_id AND dc.approval_id=` + p + `id AND dc.decision='approve'),` + p + `post_review_required,` + p + `reviewed_by,` + p + `review_note,` + p + `reviewed_at,` + p + `decided_by,` + p + `decision_note,` + p + `decided_at,` + p + `expires_at,` + p + `created_at,` + p + `updated_at`
+	return p + `id::text,` + p + `org_id,` + p + `governance_check_id::text,` + p + `requester_id,` + p + `product_surface,` + p + `action_type,` + p + `target_system,` + p + `target_resource,` + p + `resource_type,` + p + `risk_level,` + p + `reason,` + p + `binding_hash,` + p + `governance_policy_snapshot_hash,` + p + `status,` + p + `approval_kind,` + p + `supervisor_user_id,` + p + `quorum_required,(SELECT count(*) FROM approval_decisions dc WHERE dc.org_id=` + p + `org_id AND dc.approval_id=` + p + `id AND dc.decision='approve'),` + p + `post_review_required,` + p + `reviewed_by,` + p + `review_note,` + p + `reviewed_at,` + p + `decided_by,` + p + `decision_note,` + p + `decided_at,` + p + `expires_at,` + p + `created_at,` + p + `updated_at`
 }
 
 type scanner interface {
@@ -165,7 +165,7 @@ func scanApproval(row scanner) (domain.Approval, error) {
 	var item domain.Approval
 	err := row.Scan(
 		&idText,
-		&item.TenantID,
+		&item.OrgID,
 		&governanceCheckIDText,
 		&item.RequesterID,
 		&item.ProductSurface,

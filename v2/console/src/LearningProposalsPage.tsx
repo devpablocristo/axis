@@ -19,8 +19,8 @@ type ColumnState = Record<LearningProposalStatus, LearningProposal[]>
 
 const EMPTY_COLUMNS: ColumnState = { pending: [], accepted: [], dismissed: [] }
 
-export function LearningProposalsPage(props: { tenantId: string; principalId: string }) {
-  const { tenantId, principalId } = props
+export function LearningProposalsPage(props: { orgId: string; principalId: string }) {
+  const { orgId, principalId } = props
   const [columns, setColumns] = useState<ColumnState>(EMPTY_COLUMNS)
   const [loading, setLoading] = useState(true)
   const [scanning, setScanning] = useState(false)
@@ -28,7 +28,7 @@ export function LearningProposalsPage(props: { tenantId: string; principalId: st
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   // Monotonic request id: only the newest load() may apply its result, so a
-  // slow response from a previous tenant can never overwrite the current one.
+  // slow response from a previous organization can never overwrite the current one.
   const loadSeq = useRef(0)
 
   const load = useCallback(async () => {
@@ -36,16 +36,16 @@ export function LearningProposalsPage(props: { tenantId: string; principalId: st
     setLoading(true)
     setError('')
     setNotice('')
-    if (!tenantId || !principalId) {
+    if (!orgId || !principalId) {
       setColumns(EMPTY_COLUMNS)
       setLoading(false)
       return
     }
     try {
       const [pending, accepted, dismissed] = await Promise.all([
-        listLearningProposals(tenantId, principalId, 'pending'),
-        listLearningProposals(tenantId, principalId, 'accepted'),
-        listLearningProposals(tenantId, principalId, 'dismissed'),
+        listLearningProposals(orgId, principalId, 'pending'),
+        listLearningProposals(orgId, principalId, 'accepted'),
+        listLearningProposals(orgId, principalId, 'dismissed'),
       ])
       if (seq !== loadSeq.current) return // a newer load superseded this one
       setColumns({ pending, accepted, dismissed })
@@ -55,7 +55,7 @@ export function LearningProposalsPage(props: { tenantId: string; principalId: st
     } finally {
       if (seq === loadSeq.current) setLoading(false)
     }
-  }, [tenantId, principalId])
+  }, [orgId, principalId])
 
   useEffect(() => {
     void load()
@@ -71,10 +71,10 @@ export function LearningProposalsPage(props: { tenantId: string; principalId: st
     let message = ''
     try {
       if (decision === 'accept') {
-        const result = await acceptLearningProposal(id, tenantId, principalId)
+        const result = await acceptLearningProposal(id, orgId, principalId)
         message = `Accepted — installed as a procedure memory for the virployee (${result.proposal.capability_key}).`
       } else {
-        await dismissLearningProposal(id, tenantId, principalId)
+        await dismissLearningProposal(id, orgId, principalId)
       }
       // Refresh first (load clears the notice), then surface the outcome.
       await load()
@@ -93,7 +93,7 @@ export function LearningProposalsPage(props: { tenantId: string; principalId: st
     setNotice('')
     let message = ''
     try {
-      const result = await scanLearning(tenantId, principalId)
+      const result = await scanLearning(orgId, principalId)
       message =
         result.proposed > 0
           ? `Scan proposed ${result.proposed} new procedure${result.proposed === 1 ? '' : 's'} (threshold ${result.threshold}).`

@@ -9,7 +9,7 @@ import (
 // Repository aggregates stats on read from the tables Companion already
 // writes (run traces and execution attempts). No counters table: the source
 // of truth cannot drift, and volumes are small at this stage. Every query is
-// tenant-scoped — stats never cross tenants.
+// organization-scoped — stats never cross organizations.
 type Repository struct {
 	pool *pgxpool.Pool
 }
@@ -18,13 +18,13 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 	return &Repository{pool: pool}
 }
 
-func (r *Repository) TraceRows(ctx context.Context, tenantID string) ([]TraceRow, error) {
+func (r *Repository) TraceRows(ctx context.Context, orgID string) ([]TraceRow, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT capability_key, operation, dry_run_decision, COALESCE(gate_decision, ''), count(*)
 		FROM companion_run_traces
-		WHERE tenant_id = $1 AND capability_key <> ''
+		WHERE org_id = $1 AND capability_key <> ''
 		GROUP BY 1, 2, 3, 4
-	`, tenantID)
+	`, orgID)
 	if err != nil {
 		return nil, err
 	}
@@ -44,15 +44,15 @@ func (r *Repository) TraceRows(ctx context.Context, tenantID string) ([]TraceRow
 // KEEP IN SYNC: learning.Repository.Candidates counts successful executions
 // with this same predicate (attempts JOIN prepared_actions, status
 // 'succeeded'); change both together.
-func (r *Repository) ExecutionRows(ctx context.Context, tenantID string) ([]ExecutionRow, error) {
+func (r *Repository) ExecutionRows(ctx context.Context, orgID string) ([]ExecutionRow, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT pa.capability_key, ea.status, count(*)
 		FROM companion_execution_attempts ea
 		JOIN companion_prepared_actions pa
-			ON pa.id = ea.prepared_action_id AND pa.tenant_id = ea.tenant_id
-		WHERE ea.tenant_id = $1
+			ON pa.id = ea.prepared_action_id AND pa.org_id = ea.org_id
+		WHERE ea.org_id = $1
 		GROUP BY 1, 2
-	`, tenantID)
+	`, orgID)
 	if err != nil {
 		return nil, err
 	}

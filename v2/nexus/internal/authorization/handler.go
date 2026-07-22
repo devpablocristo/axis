@@ -20,7 +20,7 @@ func (h *Handler) Routes(r gin.IRouter) {
 }
 func (h *Handler) definitions(c *gin.Context) { ginmw.WriteJSON(c, http.StatusOK, h.ucs.Definitions()) }
 func (h *Handler) list(c *gin.Context) {
-	out, err := h.ucs.List(c, c.GetHeader("X-Tenant-ID"), c.GetHeader("X-Actor-ID"), c.GetHeader("X-Axis-Tenant-Role"), c.Query("user_id"))
+	out, err := h.ucs.List(c, c.GetHeader("X-Org-ID"), c.GetHeader("X-Actor-ID"), c.GetHeader("X-Axis-Org-Role"), c.Query("user_id"))
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -32,7 +32,7 @@ func (h *Handler) create(c *gin.Context) {
 	if err := ginmw.BindJSON(c, &in); err != nil {
 		return
 	}
-	out, err := h.ucs.Create(c, c.GetHeader("X-Tenant-ID"), c.GetHeader("X-Actor-ID"), c.GetHeader("X-Axis-Tenant-Role"), in)
+	out, err := h.ucs.Create(c, c.GetHeader("X-Org-ID"), c.GetHeader("X-Actor-ID"), c.GetHeader("X-Axis-Org-Role"), in)
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -48,7 +48,7 @@ func (h *Handler) revoke(c *gin.Context) {
 	if err := ginmw.BindJSON(c, &in); err != nil {
 		return
 	}
-	out, err := h.ucs.Revoke(c, c.GetHeader("X-Tenant-ID"), c.GetHeader("X-Actor-ID"), c.GetHeader("X-Axis-Tenant-Role"), id, in)
+	out, err := h.ucs.Revoke(c, c.GetHeader("X-Org-ID"), c.GetHeader("X-Actor-ID"), c.GetHeader("X-Axis-Org-Role"), id, in)
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -60,12 +60,12 @@ func (h *Handler) check(c *gin.Context) {
 	if err := ginmw.BindJSON(c, &in); err != nil {
 		return
 	}
-	in.TenantID = strings.TrimSpace(c.GetHeader("X-Tenant-ID"))
+	in.OrgID = strings.TrimSpace(c.GetHeader("X-Org-ID"))
 	if in.ActorID == "" {
 		in.ActorID = strings.TrimSpace(c.GetHeader("X-Actor-ID"))
 	}
 	if in.ActorRole == "" {
-		in.ActorRole = strings.TrimSpace(c.GetHeader("X-Axis-Tenant-Role"))
+		in.ActorRole = strings.TrimSpace(c.GetHeader("X-Axis-Org-Role"))
 	}
 	out, err := h.ucs.Check(c, in)
 	if err != nil {

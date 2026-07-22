@@ -13,8 +13,8 @@ import (
 
 // verifyCurrentExecutionEligibility closes the time-of-approval/time-of-use
 // gap for lifecycle, capability assignment/promotion, and autonomy.
-func (u *UseCases) verifyCurrentExecutionEligibility(ctx context.Context, tenantID string, virployeeID uuid.UUID, capabilityKey string, action preparedactions.Action) (virployeedomain.Virployee, capabilitydomain.Capability, error) {
-	virployee, err := u.repo.Get(ctx, tenantID, virployeeID)
+func (u *UseCases) verifyCurrentExecutionEligibility(ctx context.Context, orgID string, virployeeID uuid.UUID, capabilityKey string, action preparedactions.Action) (virployeedomain.Virployee, capabilitydomain.Capability, error) {
+	virployee, err := u.repo.Get(ctx, orgID, virployeeID)
 	if err != nil {
 		return virployeedomain.Virployee{}, capabilitydomain.Capability{}, err
 	}
@@ -24,7 +24,7 @@ func (u *UseCases) verifyCurrentExecutionEligibility(ctx context.Context, tenant
 	capabilityKey = strings.TrimSpace(capabilityKey)
 	var matched *capabilitydomain.Capability
 	for _, capabilityID := range virployee.CapabilityIDs {
-		capability, getErr := u.capabilities.Get(ctx, tenantID, capabilityID)
+		capability, getErr := u.capabilities.Get(ctx, orgID, capabilityID)
 		if getErr != nil {
 			return virployeedomain.Virployee{}, capabilitydomain.Capability{}, domainerr.Conflict("an assigned capability could not be revalidated")
 		}

@@ -19,7 +19,7 @@ const (
 
 type ProfileTemplate struct {
 	ID           uuid.UUID
-	TenantID     string
+	OrgID        string
 	Name         string
 	Description  string
 	SystemPrompt string

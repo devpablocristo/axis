@@ -39,8 +39,8 @@ func TestConnectorIngestionRequiresOwnerOrAdminAndFailsClosed(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "/v1/knowledge-bases/"+baseID+"/ingestions/connector", strings.NewReader(tc.body))
 			req.Header.Set("Content-Type", "application/json")
-			req.Header.Set("X-Tenant-ID", "tenant-a")
-			req.Header.Set("X-Axis-Tenant-Role", tc.role)
+			req.Header.Set("X-Org-ID", "organization-a")
+			req.Header.Set("X-Axis-Org-Role", tc.role)
 			rec := httptest.NewRecorder()
 			knowledgeIngestionRouter().ServeHTTP(rec, req)
 			if rec.Code != tc.wantStatus {
@@ -67,8 +67,8 @@ func TestUploadIngestionUsesMultipartContractAndFailsClosed(t *testing.T) {
 	}
 	req := httptest.NewRequest(http.MethodPost, "/v1/knowledge-bases/"+uuid.NewString()+"/ingestions/upload", &body)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
-	req.Header.Set("X-Tenant-ID", "tenant-a")
-	req.Header.Set("X-Axis-Tenant-Role", "owner")
+	req.Header.Set("X-Org-ID", "organization-a")
+	req.Header.Set("X-Axis-Org-Role", "owner")
 	rec := httptest.NewRecorder()
 	knowledgeIngestionRouter().ServeHTTP(rec, req)
 	if rec.Code != http.StatusServiceUnavailable {
@@ -79,8 +79,8 @@ func TestUploadIngestionUsesMultipartContractAndFailsClosed(t *testing.T) {
 func TestUploadIngestionRejectsUnauthorizedCallerBeforeParsingBody(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/v1/knowledge-bases/"+uuid.NewString()+"/ingestions/upload", strings.NewReader("not multipart"))
 	req.Header.Set("Content-Type", "text/plain")
-	req.Header.Set("X-Tenant-ID", "tenant-a")
-	req.Header.Set("X-Axis-Tenant-Role", "member")
+	req.Header.Set("X-Org-ID", "organization-a")
+	req.Header.Set("X-Axis-Org-Role", "member")
 	rec := httptest.NewRecorder()
 	knowledgeIngestionRouter().ServeHTTP(rec, req)
 	if rec.Code != http.StatusForbidden {
@@ -108,8 +108,8 @@ func TestUploadIngestionPreflightsBeforeConsumingFileBytes(t *testing.T) {
 	body := &countingReader{reader: io.MultiReader(strings.NewReader(prefix), strings.NewReader(strings.Repeat("x", fileSize)))}
 	req := httptest.NewRequest(http.MethodPost, "/v1/knowledge-bases/"+uuid.NewString()+"/ingestions/upload", body)
 	req.Header.Set("Content-Type", "multipart/form-data; boundary="+boundary)
-	req.Header.Set("X-Tenant-ID", "tenant-a")
-	req.Header.Set("X-Axis-Tenant-Role", "owner")
+	req.Header.Set("X-Org-ID", "organization-a")
+	req.Header.Set("X-Axis-Org-Role", "owner")
 	rec := httptest.NewRecorder()
 	knowledgeIngestionRouter().ServeHTTP(rec, req)
 	if rec.Code != http.StatusServiceUnavailable {

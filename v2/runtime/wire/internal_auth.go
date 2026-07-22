@@ -16,7 +16,7 @@ func internalAuthMiddleware(secret string) gin.HandlerFunc {
 	secret = strings.TrimSpace(secret)
 	return func(c *gin.Context) {
 		// The runtime is a stateless classifier: it receives everything it needs
-		// (input + capabilities) in the request body and holds no per-tenant
+		// (input + capabilities) in the request body and holds no per-organization
 		// data, so the shared internal token is the only trust boundary.
 		provided := strings.TrimSpace(c.GetHeader(internalAuthHeader))
 		if secret == "" || subtle.ConstantTimeCompare([]byte(provided), []byte(secret)) != 1 {

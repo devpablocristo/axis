@@ -103,11 +103,11 @@ func (u *UseCases) HasReadExecutor(capabilityKey string) bool {
 	return u.readers[strings.ToLower(strings.TrimSpace(capabilityKey))] != nil
 }
 
-func (u *UseCases) GetPolicy(ctx context.Context, tenantID string) (Policy, error) {
-	return u.repo.GetPolicy(ctx, strings.TrimSpace(tenantID))
+func (u *UseCases) GetPolicy(ctx context.Context, orgID string) (Policy, error) {
+	return u.repo.GetPolicy(ctx, strings.TrimSpace(orgID))
 }
 
-func (u *UseCases) PutPolicy(ctx context.Context, tenantID, actorID, actorRole string, input PutPolicyInput) (Policy, error) {
+func (u *UseCases) PutPolicy(ctx context.Context, orgID, actorID, actorRole string, input PutPolicyInput) (Policy, error) {
 	if !ownerOrAdmin(actorRole) {
 		return Policy{}, domainerr.Forbidden("MCP policy changes require an owner or admin")
 	}
@@ -115,26 +115,26 @@ func (u *UseCases) PutPolicy(ctx context.Context, tenantID, actorID, actorRole s
 	if err != nil {
 		return Policy{}, err
 	}
-	return u.repo.PutPolicy(ctx, strings.TrimSpace(tenantID), strings.TrimSpace(actorID), normalized)
+	return u.repo.PutPolicy(ctx, strings.TrimSpace(orgID), strings.TrimSpace(actorID), normalized)
 }
 
-func (u *UseCases) ListPolicyAudit(ctx context.Context, tenantID, actorRole string, limit int) ([]PolicyAudit, error) {
+func (u *UseCases) ListPolicyAudit(ctx context.Context, orgID, actorRole string, limit int) ([]PolicyAudit, error) {
 	if !ownerOrAdmin(actorRole) {
 		return nil, domainerr.Forbidden("MCP policy audit requires an owner or admin")
 	}
-	return u.repo.ListPolicyAudit(ctx, strings.TrimSpace(tenantID), limit)
+	return u.repo.ListPolicyAudit(ctx, strings.TrimSpace(orgID), limit)
 }
 
-func (u *UseCases) ListInvocations(ctx context.Context, tenantID, actorRole string, virployeeID uuid.UUID, limit int) ([]InvocationAudit, error) {
+func (u *UseCases) ListInvocations(ctx context.Context, orgID, actorRole string, virployeeID uuid.UUID, limit int) ([]InvocationAudit, error) {
 	if !ownerOrAdmin(actorRole) {
 		return nil, domainerr.Forbidden("MCP invocation audit requires an owner or admin")
 	}
-	return u.repo.ListInvocations(ctx, strings.TrimSpace(tenantID), virployeeID, limit)
+	return u.repo.ListInvocations(ctx, strings.TrimSpace(orgID), virployeeID, limit)
 }
 
 func (u *UseCases) ResolveContext(ctx context.Context, request ContextRequest) (InvocationContext, error) {
-	if strings.TrimSpace(request.TenantID) == "" || strings.TrimSpace(request.ActorID) == "" || request.VirployeeID == uuid.Nil || request.SubjectID == uuid.Nil {
-		return InvocationContext{}, domainerr.Validation("tenant, actor, virployee_id and subject_id are required")
+	if strings.TrimSpace(request.OrgID) == "" || strings.TrimSpace(request.ActorID) == "" || request.VirployeeID == uuid.Nil || request.SubjectID == uuid.Nil {
+		return InvocationContext{}, domainerr.Validation("organization, actor, virployee_id and subject_id are required")
 	}
 	return u.repo.ResolveContext(ctx, request)
 }
@@ -164,16 +164,16 @@ func (u *UseCases) ValidateMCPExecutionContext(ctx context.Context, binding prep
 		}
 	}
 	resolved, err := u.repo.ResolveContext(ctx, ContextRequest{
-		TenantID: binding.TenantID, ActorID: binding.ActorID, VirployeeID: virployeeID, SubjectID: subjectID, CaseID: caseID,
+		OrgID: binding.OrgID, ActorID: binding.ActorID, VirployeeID: virployeeID, SubjectID: subjectID, CaseID: caseID,
 	})
 	if err != nil || resolved.AssignmentID != assignmentID || resolved.AssignmentVersion != binding.AssignmentVersion {
 		return domainerr.Conflict("prepared MCP assignment changed after approval")
 	}
-	policy, err := u.repo.GetPolicy(ctx, binding.TenantID)
+	policy, err := u.repo.GetPolicy(ctx, binding.OrgID)
 	if err != nil || policy.Version != binding.PolicyVersion {
 		return domainerr.Conflict("MCP policy changed after approval")
 	}
-	virployee, err := u.virployees.Get(ctx, binding.TenantID, virployeeID)
+	virployee, err := u.virployees.Get(ctx, binding.OrgID, virployeeID)
 	if err != nil {
 		return domainerr.Conflict("MCP Virployee could not be revalidated")
 	}
@@ -197,11 +197,11 @@ func (u *UseCases) ListTools(ctx context.Context, request ContextRequest) ([]Too
 	if err != nil {
 		return nil, err
 	}
-	policy, err := u.repo.GetPolicy(ctx, request.TenantID)
+	policy, err := u.repo.GetPolicy(ctx, request.OrgID)
 	if err != nil {
 		return nil, err
 	}
-	virployee, err := u.virployees.Get(ctx, request.TenantID, request.VirployeeID)
+	virployee, err := u.virployees.Get(ctx, request.OrgID, request.VirployeeID)
 	if err != nil {
 		return nil, err
 	}
@@ -218,7 +218,7 @@ func (u *UseCases) ListTools(ctx context.Context, request ContextRequest) ([]Too
 		return nil, err
 	}
 	resultHash, _ := Hash(toolNames(tools))
-	if err := u.repo.CompleteInvocation(ctx, request.TenantID, audit.ID, "succeeded", "", "", resultHash, time.Since(started).Milliseconds()); err != nil {
+	if err := u.repo.CompleteInvocation(ctx, request.OrgID, audit.ID, "succeeded", "", "", resultHash, time.Since(started).Milliseconds()); err != nil {
 		return nil, err
 	}
 	return tools, nil
@@ -226,11 +226,11 @@ func (u *UseCases) ListTools(ctx context.Context, request ContextRequest) ([]Too
 
 func (u *UseCases) CallTool(ctx context.Context, invocation Invocation) (out InvocationResult, err error) {
 	started := u.now()
-	policy, err := u.repo.GetPolicy(ctx, invocation.Context.TenantID)
+	policy, err := u.repo.GetPolicy(ctx, invocation.Context.OrgID)
 	if err != nil {
 		return InvocationResult{}, err
 	}
-	virployee, err := u.virployees.Get(ctx, invocation.Context.TenantID, invocation.Context.VirployeeID)
+	virployee, err := u.virployees.Get(ctx, invocation.Context.OrgID, invocation.Context.VirployeeID)
 	if err != nil {
 		return InvocationResult{}, err
 	}
@@ -281,7 +281,7 @@ func (u *UseCases) CallTool(ctx context.Context, invocation Invocation) (out Inv
 		if err != nil && blockedBy != "" {
 			status, code = "blocked", "governance_blocked"
 		}
-		_ = u.repo.CompleteInvocation(context.WithoutCancel(ctx), invocation.Context.TenantID, audit.ID, status, blockedBy, code, "", time.Since(started).Milliseconds())
+		_ = u.repo.CompleteInvocation(context.WithoutCancel(ctx), invocation.Context.OrgID, audit.ID, status, blockedBy, code, "", time.Since(started).Milliseconds())
 	}()
 	if blockedBy != "" {
 		return InvocationResult{}, domainerr.Forbidden("tool is blocked by " + blockedBy)
@@ -311,7 +311,7 @@ func (u *UseCases) CallTool(ctx context.Context, invocation Invocation) (out Inv
 		}
 		out = InvocationResult{Status: gate.Status, ApprovalID: gate.ApprovalID, BindingHash: gate.BindingHash, DecisionReason: gate.DecisionReason}
 		if outcomes, ok := u.repo.(InvocationOutcomeRepositoryPort); ok {
-			if err := outcomes.SaveInvocationOutcome(ctx, invocation.Context.TenantID, audit.ID, out.ApprovalID, out.BindingHash, out.DecisionReason); err != nil {
+			if err := outcomes.SaveInvocationOutcome(ctx, invocation.Context.OrgID, audit.ID, out.ApprovalID, out.BindingHash, out.DecisionReason); err != nil {
 				return InvocationResult{}, err
 			}
 		}
@@ -320,7 +320,7 @@ func (u *UseCases) CallTool(ctx context.Context, invocation Invocation) (out Inv
 			status = "pending_approval"
 		}
 		resultHash, _ := Hash(out)
-		if err := u.repo.CompleteInvocation(ctx, invocation.Context.TenantID, audit.ID, status, "execution_gate", "", resultHash, time.Since(started).Milliseconds()); err != nil {
+		if err := u.repo.CompleteInvocation(ctx, invocation.Context.OrgID, audit.ID, status, "execution_gate", "", resultHash, time.Since(started).Milliseconds()); err != nil {
 			return InvocationResult{}, err
 		}
 		completed = true
@@ -335,7 +335,7 @@ func (u *UseCases) CallTool(ctx context.Context, invocation Invocation) (out Inv
 	// Re-resolve immediately before execution so policy, assignment, capability
 	// promotion and delegation changes invalidate the earlier decision.
 	currentContext, err := u.repo.ResolveContext(ctx, ContextRequest{
-		TenantID: invocation.Context.TenantID, ActorID: invocation.Context.ActorID, ActorRole: invocation.Context.ActorRole,
+		OrgID: invocation.Context.OrgID, ActorID: invocation.Context.ActorID, ActorRole: invocation.Context.ActorRole,
 		VirployeeID: invocation.Context.VirployeeID, SubjectID: invocation.Context.SubjectID, CaseID: invocation.Context.CaseID,
 		ProductSurface: invocation.Context.ProductSurface, RepositoryGeneration: invocation.Context.RepositoryGeneration,
 	})
@@ -343,7 +343,7 @@ func (u *UseCases) CallTool(ctx context.Context, invocation Invocation) (out Inv
 		blockedBy = "context_revalidation"
 		return InvocationResult{}, err
 	}
-	currentPolicy, err := u.repo.GetPolicy(ctx, invocation.Context.TenantID)
+	currentPolicy, err := u.repo.GetPolicy(ctx, invocation.Context.OrgID)
 	if err != nil {
 		blockedBy = "policy_revalidation"
 		return InvocationResult{}, err
@@ -372,7 +372,7 @@ func (u *UseCases) CallTool(ctx context.Context, invocation Invocation) (out Inv
 	}
 	out = InvocationResult{Status: "succeeded", Result: result}
 	resultHash, _ := Hash(result)
-	if err := u.repo.CompleteInvocation(ctx, invocation.Context.TenantID, audit.ID, "succeeded", "", "", resultHash, time.Since(started).Milliseconds()); err != nil {
+	if err := u.repo.CompleteInvocation(ctx, invocation.Context.OrgID, audit.ID, "succeeded", "", "", resultHash, time.Since(started).Milliseconds()); err != nil {
 		return InvocationResult{}, err
 	}
 	completed = true
@@ -386,7 +386,7 @@ func (u *UseCases) resolveTools(ctx context.Context, policy Policy, invocation I
 	if virployee.State() != virployeedomain.StateActive {
 		return []Tool{}, nil
 	}
-	capabilities, err := u.catalog.ListActive(ctx, invocation.TenantID)
+	capabilities, err := u.catalog.ListActive(ctx, invocation.OrgID)
 	if err != nil {
 		return nil, err
 	}
@@ -419,7 +419,7 @@ func (u *UseCases) resolveTools(ctx context.Context, policy Policy, invocation I
 			continue
 		}
 		authority, err := u.authority.EvaluateAuthority(ctx, executiongate.AuthorityCheckInput{
-			TenantID: invocation.TenantID, VirployeeID: virployee.ID, JobRoleID: virployee.JobRoleID,
+			OrgID: invocation.OrgID, VirployeeID: virployee.ID, JobRoleID: virployee.JobRoleID,
 			CapabilityKey: capability.CapabilityKey, PrincipalType: invocation.PrincipalType,
 			PrincipalID: invocation.PrincipalID, ProductSurface: capability.Manifest.ProductSurface,
 			ResourceType: mcpResourceType(invocation), ResourceID: mcpResourceID(invocation),
@@ -482,7 +482,7 @@ func toolFromCapability(capability capabilitydomain.Capability, authorityHash st
 
 func toolContextHash(context InvocationContext, virployee virployeedomain.Virployee, policy Policy, tool Tool) (string, error) {
 	return Hash(map[string]any{
-		"schema_version": "axis.mcp.context.v1", "tenant_id": context.TenantID,
+		"schema_version": "axis.mcp.context.v1", "org_id": context.OrgID,
 		"actor_id": context.ActorID, "virployee_id": context.VirployeeID.String(), "job_role_id": virployee.JobRoleID.String(),
 		"subject_id": context.SubjectID.String(), "case_id": optionalUUID(context.CaseID),
 		"assignment_id": context.AssignmentID.String(), "assignment_version": context.AssignmentVersion,
@@ -499,7 +499,7 @@ func listContextHash(context InvocationContext, virployee virployeedomain.Virplo
 		items = append(items, map[string]string{"key": tool.Name, "manifest_hash": tool.Meta.ManifestHash, "authority_hash": tool.AuthorityHash})
 	}
 	return Hash(map[string]any{
-		"schema_version": "axis.mcp.list-context.v1", "tenant_id": context.TenantID,
+		"schema_version": "axis.mcp.list-context.v1", "org_id": context.OrgID,
 		"virployee_id": context.VirployeeID.String(), "job_role_id": virployee.JobRoleID.String(),
 		"subject_id": context.SubjectID.String(), "case_id": optionalUUID(context.CaseID),
 		"assignment_id": context.AssignmentID.String(), "assignment_version": context.AssignmentVersion,

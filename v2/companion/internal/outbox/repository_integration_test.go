@@ -66,13 +66,13 @@ func TestPostgresOutboxTransactionalClaimDeadLetterReplayAndProjection(t *testin
 	}
 	defer pool.Close()
 	repository := NewRepository(pool)
-	tenantID := "outbox-test-" + uuid.NewString()
+	orgID := "outbox-test-" + uuid.NewString()
 	messageID := uuid.New()
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM companion_nexus_outbox WHERE tenant_id=$1`, tenantID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM companion_nexus_outbox WHERE org_id=$1`, orgID)
 	})
 	input := EnqueueInput{
-		ID: messageID, TenantID: tenantID, AggregateType: "execution_attempt",
+		ID: messageID, OrgID: orgID, AggregateType: "execution_attempt",
 		AggregateID: uuid.New(), Kind: "execution_result", DedupeKey: "execution-1",
 		Payload: json.RawMessage(`{"binding_hash":"sha256:test"}`),
 	}
@@ -87,7 +87,7 @@ func TestPostgresOutboxTransactionalClaimDeadLetterReplayAndProjection(t *testin
 	if err := tx.Rollback(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repository.Get(ctx, tenantID, messageID); !errors.Is(err, ErrMessageNotFound) {
+	if _, err := repository.Get(ctx, orgID, messageID); !errors.Is(err, ErrMessageNotFound) {
 		t.Fatalf("rolled-back message must not exist: %v", err)
 	}
 
@@ -135,7 +135,7 @@ func TestPostgresOutboxTransactionalClaimDeadLetterReplayAndProjection(t *testin
 		t.Fatalf("first failure=%+v err=%v", message, err)
 	}
 	for expectedAttempt := 2; expectedAttempt <= MaxDeliveryAttempts; expectedAttempt++ {
-		if _, err := pool.Exec(ctx, `UPDATE companion_nexus_outbox SET available_at=now() WHERE tenant_id=$1 AND id=$2`, tenantID, messageID); err != nil {
+		if _, err := pool.Exec(ctx, `UPDATE companion_nexus_outbox SET available_at=now() WHERE org_id=$1 AND id=$2`, orgID, messageID); err != nil {
 			t.Fatal(err)
 		}
 		claimed, err = repository.Claim(ctx, ClaimOptions{WorkerID: "replica-a", Batch: 1, Lease: time.Minute})
@@ -150,7 +150,7 @@ func TestPostgresOutboxTransactionalClaimDeadLetterReplayAndProjection(t *testin
 	if message.Status != StatusDead || message.LastErrorCode != "nexus_unavailable" {
 		t.Fatalf("expected dead-letter after ten attempts, got %+v", message)
 	}
-	replayed, err := repository.Replay(ctx, tenantID, messageID, time.Now().UTC())
+	replayed, err := repository.Replay(ctx, orgID, messageID, time.Now().UTC())
 	if err != nil || replayed.Status != StatusPending || replayed.Attempts != 0 {
 		t.Fatalf("replayed=%+v err=%v", replayed, err)
 	}
@@ -161,7 +161,7 @@ func TestPostgresOutboxTransactionalClaimDeadLetterReplayAndProjection(t *testin
 	if err := repository.MarkDelivered(ctx, messageID, "replica-c"); err != nil {
 		t.Fatal(err)
 	}
-	delivered, err := repository.Get(ctx, tenantID, messageID)
+	delivered, err := repository.Get(ctx, orgID, messageID)
 	if err != nil || delivered.Status != StatusDelivered || delivered.DeliveredAt == nil {
 		t.Fatalf("delivered=%+v err=%v", delivered, err)
 	}
@@ -179,17 +179,17 @@ func TestDispatcherPersistsOnlySafeErrorCode(t *testing.T) {
 	}
 	defer pool.Close()
 	repository := NewRepository(pool)
-	tenantID := "outbox-dispatcher-test-" + uuid.NewString()
+	orgID := "outbox-dispatcher-test-" + uuid.NewString()
 	messageID := uuid.New()
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM companion_nexus_outbox WHERE tenant_id=$1`, tenantID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM companion_nexus_outbox WHERE org_id=$1`, orgID)
 	})
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := repository.EnqueueTx(ctx, tx, EnqueueInput{
-		ID: messageID, TenantID: tenantID, AggregateType: "execution_attempt",
+		ID: messageID, OrgID: orgID, AggregateType: "execution_attempt",
 		AggregateID: uuid.New(), Kind: "execution_result", DedupeKey: "execution-sensitive",
 		Payload: json.RawMessage(`{}`),
 	}); err != nil {
@@ -204,7 +204,7 @@ func TestDispatcherPersistsOnlySafeErrorCode(t *testing.T) {
 	if count, err := dispatcher.RunOnce(ctx); err != nil || count != 1 {
 		t.Fatalf("dispatch count=%d err=%v", count, err)
 	}
-	message, err := repository.Get(ctx, tenantID, messageID)
+	message, err := repository.Get(ctx, orgID, messageID)
 	if err != nil || message.Status != StatusPending || message.LastErrorCode != "delivery_failed" {
 		t.Fatalf("message=%+v err=%v", message, err)
 	}

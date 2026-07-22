@@ -40,7 +40,7 @@ func (e *Evaluator) Validate(expression string) error {
 	return err
 }
 
-func (e *Evaluator) Evaluate(ctx context.Context, tenantID string, versions []Version, in SafeInput) (EvaluationResult, error) {
+func (e *Evaluator) Evaluate(ctx context.Context, orgID string, versions []Version, in SafeInput) (EvaluationResult, error) {
 	if in.Now.IsZero() {
 		return EvaluationResult{}, fmt.Errorf("policy evaluation requires a trusted time")
 	}
@@ -71,7 +71,7 @@ func (e *Evaluator) Evaluate(ctx context.Context, tenantID string, versions []Ve
 		if version.State == StateShadow {
 			mode = "shadow"
 		}
-		evaluation := Evaluation{TenantID: tenantID, PolicyVersionID: version.ID, Mode: mode, Matched: matched, Effect: version.Effect, InputHash: result.InputHash, ErrorCode: errorCode(err)}
+		evaluation := Evaluation{OrgID: orgID, PolicyVersionID: version.ID, Mode: mode, Matched: matched, Effect: version.Effect, InputHash: result.InputHash, ErrorCode: errorCode(err)}
 		if err != nil {
 			if mode == "shadow" {
 				e.recordBestEffort(ctx, evaluation)

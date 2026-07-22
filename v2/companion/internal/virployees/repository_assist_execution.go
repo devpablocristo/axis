@@ -18,7 +18,7 @@ import (
 // authorized every source supplied to Runtime. Source bytes alone are not
 // enough: archive/activate and binding remove/re-add cycles must revoke an old
 // answer even when the indexed chunk is byte-identical.
-func (r *Repository) AssistSourceAuthorizationHash(ctx context.Context, tenantID string, virployeeID, jobRoleID uuid.UUID, run AssistRun, citations []knowledgebases.Citation) (string, error) {
+func (r *Repository) AssistSourceAuthorizationHash(ctx context.Context, orgID string, virployeeID, jobRoleID uuid.UUID, run AssistRun, citations []knowledgebases.Citation) (string, error) {
 	records := make([]string, 0, len(citations))
 	for _, citation := range citations {
 		locator := citation.Locator
@@ -27,16 +27,16 @@ func (r *Repository) AssistSourceAuthorizationHash(ctx context.Context, tenantID
 		}
 		// Clinical capability responses intentionally expose only the canonical
 		// document reference. Recover the internal knowledge-base identity from
-		// the tenant-scoped catalog before recomputing authorization.
+		// the organization-scoped catalog before recomputing authorization.
 		if citation.KnowledgeBaseID == nil {
 			if documentID, parseErr := uuid.Parse(strings.TrimSpace(citation.DocumentID)); parseErr == nil && documentID != uuid.Nil {
 				var knowledgeBaseID uuid.UUID
 				lookupErr := r.pool.QueryRow(ctx, `SELECT knowledge_base_id
 					FROM companion_knowledge_documents
-					WHERE tenant_id=$1 AND id=$2 AND lifecycle_state='active'
+					WHERE org_id=$1 AND id=$2 AND lifecycle_state='active'
 					  AND artifact_virployee_id=$3 AND artifact_product_surface=$4
 					  AND artifact_subject_id=$5 AND artifact_repository_generation=$6
-					  AND source_version=$7 AND source_sha256=$8`, tenantID, documentID, virployeeID,
+					  AND source_version=$7 AND source_sha256=$8`, orgID, documentID, virployeeID,
 					run.ProductSurface, strings.TrimSpace(run.SubjectID), run.RepositoryGeneration,
 					strings.TrimSpace(citation.SourceVersion), strings.TrimSpace(citation.SHA256)).Scan(&knowledgeBaseID)
 				if lookupErr == nil && knowledgeBaseID != uuid.Nil {
@@ -52,14 +52,14 @@ func (r *Repository) AssistSourceAuthorizationHash(ctx context.Context, tenantID
 			err := r.pool.QueryRow(ctx, `SELECT a.id
 				FROM companion_artifacts a
 				JOIN companion_artifact_chunks c
-				  ON c.tenant_id=a.tenant_id AND c.virployee_id=a.virployee_id
+				  ON c.org_id=a.org_id AND c.virployee_id=a.virployee_id
 				 AND c.product_surface=a.product_surface AND c.subject_id=a.subject_id
 				 AND c.repository_generation=a.repository_generation AND c.document_id=a.document_id
-				WHERE a.tenant_id=$1 AND a.virployee_id=$2 AND a.product_surface=$3
+				WHERE a.org_id=$1 AND a.virployee_id=$2 AND a.product_surface=$3
 				  AND a.subject_id=$4 AND a.repository_generation=$5 AND a.document_id=$6
 				  AND a.status='indexed' AND a.sha256=$7 AND c.source_sha256=$7
 				  AND c.locator=$8::jsonb
-				ORDER BY c.id LIMIT 1`, tenantID, run.VirployeeID, run.ProductSurface,
+				ORDER BY c.id LIMIT 1`, orgID, run.VirployeeID, run.ProductSurface,
 				strings.TrimSpace(run.SubjectID), caseScopedRepositoryGeneration(run.RepositoryGeneration, run.CaseID),
 				strings.TrimSpace(citation.DocumentID), strings.TrimSpace(citation.SHA256), locator).Scan(&artifactID)
 			if err != nil {
@@ -79,18 +79,18 @@ func (r *Repository) AssistSourceAuthorizationHash(ctx context.Context, tenantID
 		rows, err := r.pool.Query(ctx, `SELECT DISTINCT kb.version,d.version,b.id,b.version
 			FROM companion_knowledge_documents d
 			JOIN companion_knowledge_bases kb
-			  ON kb.tenant_id=d.tenant_id AND kb.id=d.knowledge_base_id
+			  ON kb.org_id=d.org_id AND kb.id=d.knowledge_base_id
 			JOIN companion_knowledge_bindings b
-			  ON b.tenant_id=kb.tenant_id AND b.knowledge_base_id=kb.id
+			  ON b.org_id=kb.org_id AND b.knowledge_base_id=kb.id
 			JOIN companion_artifacts a
-			  ON a.tenant_id=d.tenant_id AND a.virployee_id=d.artifact_virployee_id
+			  ON a.org_id=d.org_id AND a.virployee_id=d.artifact_virployee_id
 			 AND a.product_surface=d.artifact_product_surface AND a.subject_id=d.artifact_subject_id
 			 AND a.repository_generation=d.artifact_repository_generation AND a.document_id=d.artifact_document_id
 			JOIN companion_artifact_chunks c
-			  ON c.tenant_id=a.tenant_id AND c.virployee_id=a.virployee_id
+			  ON c.org_id=a.org_id AND c.virployee_id=a.virployee_id
 			 AND c.product_surface=a.product_surface AND c.subject_id=a.subject_id
 			 AND c.repository_generation=a.repository_generation AND c.document_id=a.document_id
-			WHERE d.tenant_id=$1 AND d.id=$2 AND d.knowledge_base_id=$3
+			WHERE d.org_id=$1 AND d.id=$2 AND d.knowledge_base_id=$3
 			  AND kb.lifecycle_state='active' AND d.lifecycle_state='active' AND a.status='indexed'
 			  AND d.source_version=$4 AND d.source_sha256=$5
 			  AND a.sha256=$5 AND c.source_sha256=$5 AND c.source_version=$4 AND c.locator=$6::jsonb
@@ -104,7 +104,7 @@ func (r *Repository) AssistSourceAuthorizationHash(ctx context.Context, tenantID
 				  (b.scope_type='case' AND b.virployee_id=$8 AND $9<>'' AND b.subject_id=$9 AND b.case_id=$10)
 				))
 			  )
-			ORDER BY b.id`, tenantID, documentID, *citation.KnowledgeBaseID,
+			ORDER BY b.id`, orgID, documentID, *citation.KnowledgeBaseID,
 			strings.TrimSpace(citation.SourceVersion), strings.TrimSpace(citation.SHA256), locator,
 			jobRoleID, virployeeID, strings.TrimSpace(run.SubjectID), nullableAssistUUID(run.CaseID))
 		if err != nil {
@@ -143,16 +143,16 @@ func (r *Repository) AssistSourceAuthorizationHash(ctx context.Context, tenantID
 }
 
 // ValidateAssistExecutionContext checks the mutable rows referenced by a
-// completed Assist. Every predicate is tenant-scoped and exact; a sibling
+// completed Assist. Every predicate is organization-scoped and exact; a sibling
 // subject, archived source, replaced chunk, or changed memory cannot satisfy it.
-func (r *Repository) ValidateAssistExecutionContext(ctx context.Context, tenantID string, virployeeID, jobRoleID uuid.UUID, run AssistRun) error {
+func (r *Repository) ValidateAssistExecutionContext(ctx context.Context, orgID string, virployeeID, jobRoleID uuid.UUID, run AssistRun) error {
 	if run.CaseID != uuid.Nil {
 		var valid bool
 		if err := r.pool.QueryRow(ctx, `SELECT EXISTS(
 			SELECT 1 FROM companion_assist_cases
-			WHERE tenant_id=$1 AND id=$2 AND subject_id=$3 AND status='open'
+			WHERE org_id=$1 AND id=$2 AND subject_id=$3 AND status='open'
 			  AND owner_virployee_id=$4
-		)`, tenantID, run.CaseID, strings.TrimSpace(run.SubjectID), virployeeID).Scan(&valid); err != nil {
+		)`, orgID, run.CaseID, strings.TrimSpace(run.SubjectID), virployeeID).Scan(&valid); err != nil {
 			return err
 		}
 		if !valid {
@@ -161,7 +161,7 @@ func (r *Repository) ValidateAssistExecutionContext(ctx context.Context, tenantI
 	}
 
 	for _, citation := range run.SourceContext {
-		if err := r.validateAssistCitation(ctx, tenantID, virployeeID, jobRoleID, run, citation); err != nil {
+		if err := r.validateAssistCitation(ctx, orgID, virployeeID, jobRoleID, run, citation); err != nil {
 			return err
 		}
 	}
@@ -169,14 +169,14 @@ func (r *Repository) ValidateAssistExecutionContext(ctx context.Context, tenantI
 		return domainerr.Conflict("source-only Assist has no durable citations")
 	}
 	for _, reference := range run.MemoryReferences {
-		if err := r.validateAssistMemoryReference(ctx, tenantID, virployeeID, reference); err != nil {
+		if err := r.validateAssistMemoryReference(ctx, orgID, virployeeID, reference); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (r *Repository) validateAssistCitation(ctx context.Context, tenantID string, virployeeID, jobRoleID uuid.UUID, run AssistRun, citation knowledgebases.Citation) error {
+func (r *Repository) validateAssistCitation(ctx context.Context, orgID string, virployeeID, jobRoleID uuid.UUID, run AssistRun, citation knowledgebases.Citation) error {
 	locator := citation.Locator
 	if len(locator) == 0 || !json.Valid(locator) {
 		locator = json.RawMessage(`null`)
@@ -191,14 +191,14 @@ func (r *Repository) validateAssistCitation(ctx context.Context, tenantID string
 			SELECT 1
 			FROM companion_artifacts a
 			JOIN companion_artifact_chunks c
-			  ON c.tenant_id=a.tenant_id AND c.virployee_id=a.virployee_id
+			  ON c.org_id=a.org_id AND c.virployee_id=a.virployee_id
 			 AND c.product_surface=a.product_surface AND c.subject_id=a.subject_id
 			 AND c.repository_generation=a.repository_generation AND c.document_id=a.document_id
-			WHERE a.tenant_id=$1 AND a.virployee_id=$2 AND a.product_surface=$3
+			WHERE a.org_id=$1 AND a.virployee_id=$2 AND a.product_surface=$3
 			  AND a.subject_id=$4 AND a.repository_generation=$5 AND a.document_id=$6
 			  AND a.status='indexed' AND a.sha256=$7 AND c.source_sha256=$7
 			  AND c.locator=$8::jsonb
-		)`, tenantID, run.VirployeeID, run.ProductSurface, strings.TrimSpace(run.SubjectID),
+		)`, orgID, run.VirployeeID, run.ProductSurface, strings.TrimSpace(run.SubjectID),
 			scopedGeneration, strings.TrimSpace(citation.DocumentID), strings.TrimSpace(citation.SHA256), locator).Scan(&valid)
 		if err != nil {
 			return err
@@ -212,18 +212,18 @@ func (r *Repository) validateAssistCitation(ctx context.Context, tenantID string
 			SELECT 1
 			FROM companion_knowledge_documents d
 			JOIN companion_knowledge_bases kb
-			  ON kb.tenant_id=d.tenant_id AND kb.id=d.knowledge_base_id
+			  ON kb.org_id=d.org_id AND kb.id=d.knowledge_base_id
 			JOIN companion_knowledge_bindings b
-			  ON b.tenant_id=kb.tenant_id AND b.knowledge_base_id=kb.id
+			  ON b.org_id=kb.org_id AND b.knowledge_base_id=kb.id
 			JOIN companion_artifacts a
-			  ON a.tenant_id=d.tenant_id AND a.virployee_id=d.artifact_virployee_id
+			  ON a.org_id=d.org_id AND a.virployee_id=d.artifact_virployee_id
 			 AND a.product_surface=d.artifact_product_surface AND a.subject_id=d.artifact_subject_id
 			 AND a.repository_generation=d.artifact_repository_generation AND a.document_id=d.artifact_document_id
 			JOIN companion_artifact_chunks c
-			  ON c.tenant_id=a.tenant_id AND c.virployee_id=a.virployee_id
+			  ON c.org_id=a.org_id AND c.virployee_id=a.virployee_id
 			 AND c.product_surface=a.product_surface AND c.subject_id=a.subject_id
 			 AND c.repository_generation=a.repository_generation AND c.document_id=a.document_id
-			WHERE d.tenant_id=$1 AND d.id=$2 AND d.knowledge_base_id=$3
+			WHERE d.org_id=$1 AND d.id=$2 AND d.knowledge_base_id=$3
 			  AND kb.lifecycle_state='active' AND d.lifecycle_state='active' AND a.status='indexed'
 			  AND d.source_version=$4 AND d.source_sha256=$5
 			  AND a.sha256=$5 AND c.source_sha256=$5 AND c.source_version=$4 AND c.locator=$6::jsonb
@@ -237,7 +237,7 @@ func (r *Repository) validateAssistCitation(ctx context.Context, tenantID string
 				  (b.scope_type='case' AND b.virployee_id=$8 AND $9<>'' AND b.subject_id=$9 AND b.case_id=$10)
 				))
 			  )
-		)`, tenantID, documentID, *citation.KnowledgeBaseID, strings.TrimSpace(citation.SourceVersion),
+		)`, orgID, documentID, *citation.KnowledgeBaseID, strings.TrimSpace(citation.SourceVersion),
 			strings.TrimSpace(citation.SHA256), locator, jobRoleID, virployeeID,
 			strings.TrimSpace(run.SubjectID), nullableAssistUUID(run.CaseID)).Scan(&valid)
 		if err != nil {
@@ -250,11 +250,11 @@ func (r *Repository) validateAssistCitation(ctx context.Context, tenantID string
 	return nil
 }
 
-func (r *Repository) validateAssistMemoryReference(ctx context.Context, tenantID string, virployeeID uuid.UUID, reference memories.Reference) error {
+func (r *Repository) validateAssistMemoryReference(ctx context.Context, orgID string, virployeeID uuid.UUID, reference memories.Reference) error {
 	var valid bool
 	err := r.pool.QueryRow(ctx, `SELECT EXISTS(
 		SELECT 1 FROM companion_memories
-		WHERE tenant_id=$1 AND virployee_id=$2 AND id=$3
+		WHERE org_id=$1 AND virployee_id=$2 AND id=$3
 		  AND version=$4 AND content_hash=$5 AND title=$6 AND memory_type=$7 AND sensitivity=$8
 		  AND scope_type=$9 AND subject_id=$10 AND case_id IS NOT DISTINCT FROM $11::uuid
 		  AND lifecycle_state='active' AND review_state='approved' AND trust_score >= $12
@@ -262,7 +262,7 @@ func (r *Repository) validateAssistMemoryReference(ctx context.Context, tenantID
 		  AND review_reason<>'conflicting_memory_requires_review'
 		  AND (scope_type<>'virployee' OR memory_type='procedure')
 		  AND (expires_at IS NULL OR expires_at>now())
-	)`, tenantID, virployeeID, reference.ID, reference.Version, reference.Hash,
+	)`, orgID, virployeeID, reference.ID, reference.Version, reference.Hash,
 		reference.Title, reference.Type, reference.Sensitivity, reference.ScopeType,
 		reference.SubjectID, nullableMemoryCase(reference.CaseID), memories.RecallTrustFloor).Scan(&valid)
 	if err != nil {

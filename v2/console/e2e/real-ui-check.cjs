@@ -45,8 +45,8 @@ async function main() {
 
   await nav.getByRole('button', { name: 'Admin' }).click()
   await page.waitForTimeout(300)
-  const tabs = page.locator('.tenancy-section__tabs')
-  for (const tab of ['Users', 'Tenants', 'Orgs', 'Products']) {
+  const tabs = page.locator('.organization-admin-section__tabs')
+  for (const tab of ['Users', 'Organizations', 'Orgs', 'Products']) {
     await tabs.getByRole('tab', { name: tab }).click()
     await page.waitForTimeout(300)
     await auditCurrentTable(page, `Admin/${tab}`, lines, failures)

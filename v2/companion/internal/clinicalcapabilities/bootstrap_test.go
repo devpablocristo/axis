@@ -7,7 +7,7 @@ import (
 )
 
 func TestBootstrapDefinitionsMatchP1GovernanceAndAssignments(t *testing.T) {
-	definitions := Definitions()
+	definitions := Definitions(" Product-A ")
 	if len(definitions) != 2 {
 		t.Fatalf("expected two canonical definitions, got %d", len(definitions))
 	}
@@ -15,7 +15,7 @@ func TestBootstrapDefinitionsMatchP1GovernanceAndAssignments(t *testing.T) {
 		if definition.RiskClass != "medium" || definition.SideEffectClass != "read" || definition.RequiresNexusApproval || !definition.EvidenceRequired {
 			t.Fatalf("unsafe clinical definition: %+v", definition)
 		}
-		if definition.Manifest.RollbackMode != "none" || definition.Manifest.Retry.MaxAttempts != 1 || definition.Manifest.ProductSurface != "medmory" {
+		if definition.Manifest.RollbackMode != "none" || definition.Manifest.Retry.MaxAttempts != 1 || definition.Manifest.ProductSurface != "product-a" {
 			t.Fatalf("unexpected manifest controls: %+v", definition.Manifest)
 		}
 		if _, err := domain.HashManifest(definition.Manifest); err != nil {

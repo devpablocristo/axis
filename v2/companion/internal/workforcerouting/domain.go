@@ -44,7 +44,7 @@ const (
 
 type WorkSubject struct {
 	ID          uuid.UUID
-	TenantID    string
+	OrgID       string
 	Kind        SubjectKind
 	DisplayName string
 	ExternalRef string
@@ -62,7 +62,7 @@ func (s WorkSubject) State() ResourceState {
 
 type RoutingPool struct {
 	ID         uuid.UUID
-	TenantID   string
+	OrgID      string
 	JobRoleID  uuid.UUID
 	Name       string
 	CreatedAt  time.Time
@@ -78,7 +78,7 @@ func (p RoutingPool) State() ResourceState {
 }
 
 type PoolMember struct {
-	TenantID          string
+	OrgID             string
 	PoolID            uuid.UUID
 	VirployeeID       uuid.UUID
 	MaxActiveSubjects int
@@ -90,7 +90,7 @@ type PoolMember struct {
 
 type VirployeeRelationship struct {
 	ID               uuid.UUID
-	TenantID         string
+	OrgID            string
 	VirployeeID      uuid.UUID
 	SubjectID        uuid.UUID
 	RelationshipType RelationshipType
@@ -101,7 +101,7 @@ type VirployeeRelationship struct {
 
 type ContinuityAssignment struct {
 	ID          uuid.UUID
-	TenantID    string
+	OrgID       string
 	PoolID      uuid.UUID
 	SubjectID   uuid.UUID
 	VirployeeID uuid.UUID
@@ -271,12 +271,6 @@ func NormalizeResolveInput(in ResolveInput) (NormalizedResolveInput, error) {
 		actorID = "system"
 	}
 	capabilityKey := strings.ToLower(strings.TrimSpace(in.CapabilityKey))
-	switch capabilityKey {
-	case "medmory.search.query":
-		capabilityKey = "clinical.records.search"
-	case "medmory.timeline.read", "medmory.timeline.build":
-		capabilityKey = "clinical.timeline.build"
-	}
 	if capabilityKey != "" && !regexp.MustCompile(`^[a-z0-9_-]+\.[a-z0-9_-]+\.[a-z0-9_-]+$`).MatchString(capabilityKey) {
 		return NormalizedResolveInput{}, domainerr.Validation("capability_key must use domain.resource.action")
 	}

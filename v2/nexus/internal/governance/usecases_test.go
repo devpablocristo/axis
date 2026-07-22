@@ -29,7 +29,7 @@ func TestCheckAllowsLowAndMediumRisk(t *testing.T) {
 	}, recorder)
 
 	for _, actionType := range []string{"low.action", "medium.action"} {
-		out, err := uc.Check(context.Background(), "tenant-1", domain.CheckInput{
+		out, err := uc.Check(context.Background(), "organization-1", domain.CheckInput{
 			RequesterID: "virployee-1",
 			ActionType:  actionType,
 			BindingHash: "binding-" + actionType,
@@ -62,7 +62,7 @@ func TestCheckRequiresApprovalForHighRisk(t *testing.T) {
 		},
 	}, recorder)
 
-	out, err := uc.Check(context.Background(), "tenant-1", domain.CheckInput{
+	out, err := uc.Check(context.Background(), "organization-1", domain.CheckInput{
 		RequesterID: "virployee-1",
 		ActionType:  "high.action",
 		BindingHash: "binding-high",
@@ -89,7 +89,7 @@ func TestCheckPreservesProfessionalAuthorityBinding(t *testing.T) {
 	uc := NewUseCases(fakeActionTypeReader{
 		"medium.action": {ActionTypeKey: "medium.action", RiskClass: actiondomain.RiskClassMedium, Enabled: true},
 	}, recorder)
-	_, err := uc.Check(context.Background(), "tenant-1", domain.CheckInput{
+	_, err := uc.Check(context.Background(), "organization-1", domain.CheckInput{
 		RequesterID: "virployee-1", ActionType: "medium.action", BindingHash: "binding-1",
 		AuthorityBindingHash: "authority-1", ScopeRevision: 2, PolicyRevisionHash: "policies-1",
 		DelegationRequired: true, DelegationID: "delegation-1", DelegationRevision: 4,
@@ -116,7 +116,7 @@ func TestCheckDerivesFunctionalRolesFromActiveGrants(t *testing.T) {
 		ID: grantID, RoleKey: authorization.RoleAuditor, ActionTypePattern: "*", MaxRiskClass: "critical", Revision: 3,
 	}}})
 
-	out, err := uc.Check(context.Background(), "tenant-1", domain.CheckInput{
+	out, err := uc.Check(context.Background(), "organization-1", domain.CheckInput{
 		RequesterType: "human", RequesterID: "user-1", ActionType: "low.action",
 		FunctionalRoles: []string{authorization.RolePolicyAdmin}, FunctionalScopes: []string{"forged"},
 	})
@@ -134,7 +134,7 @@ func TestCheckRejectsUnknownActionTypes(t *testing.T) {
 	recorder := &fakeCheckRecorder{}
 	uc := NewUseCases(fakeActionTypeReader{}, recorder)
 
-	_, err := uc.Check(context.Background(), "tenant-1", domain.CheckInput{
+	_, err := uc.Check(context.Background(), "organization-1", domain.CheckInput{
 		RequesterID: "virployee-1",
 		ActionType:  "missing.action",
 	})
@@ -156,7 +156,7 @@ func TestCheckDeniesDisabledActionTypes(t *testing.T) {
 		},
 	}, recorder)
 
-	out, err := uc.Check(context.Background(), "tenant-1", domain.CheckInput{
+	out, err := uc.Check(context.Background(), "organization-1", domain.CheckInput{
 		RequesterID: "virployee-1",
 		ActionType:  "disabled.action",
 		BindingHash: "binding-disabled",
@@ -195,7 +195,7 @@ func TestRevalidateRejectsChangedActivePolicySnapshot(t *testing.T) {
 		PolicySnapshotHash: "snapshot-b", InputHash: "input-b",
 	}})
 
-	out, err := uc.Revalidate(context.Background(), "tenant-1", uuid.NewString(), domain.RevalidationInput{
+	out, err := uc.Revalidate(context.Background(), "organization-1", uuid.NewString(), domain.RevalidationInput{
 		BindingHash: "binding-1", PolicySnapshotHash: "snapshot-a", AuthorityBindingHash: "authority-1",
 		ScopeRevision: 2, PolicyRevisionHash: "professional-1", DelegationID: "delegation-1", DelegationRevision: 4,
 	})
@@ -221,7 +221,7 @@ func TestRevalidateRejectsExpiredOrRevokedFunctionalGrantSnapshot(t *testing.T) 
 		EffectiveRisk: "low", PolicySnapshotHash: "snapshot-a",
 	}})
 
-	out, err := uc.Revalidate(context.Background(), "tenant-1", uuid.NewString(), domain.RevalidationInput{BindingHash: "binding-1", PolicySnapshotHash: "snapshot-a"})
+	out, err := uc.Revalidate(context.Background(), "organization-1", uuid.NewString(), domain.RevalidationInput{BindingHash: "binding-1", PolicySnapshotHash: "snapshot-a"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,20 +232,20 @@ func TestRevalidateRejectsExpiredOrRevokedFunctionalGrantSnapshot(t *testing.T) 
 
 type fakeActionTypeReader map[string]actiondomain.ActionType
 
-func (r fakeActionTypeReader) GetByKey(_ context.Context, tenantID string, key string) (actiondomain.ActionType, error) {
+func (r fakeActionTypeReader) GetByKey(_ context.Context, orgID string, key string) (actiondomain.ActionType, error) {
 	row, ok := r[key]
 	if !ok {
 		return actiondomain.ActionType{}, domainerr.NotFound("action type not found")
 	}
 	row.ID = uuid.New()
-	row.TenantID = tenantID
+	row.OrgID = orgID
 	return row, nil
 }
 
 type recordedCheck struct {
-	tenantID string
-	input    domain.NormalizedCheckInput
-	result   domain.CheckResult
+	orgID  string
+	input  domain.NormalizedCheckInput
+	result domain.CheckResult
 }
 
 type fakeCheckRecorder struct {
@@ -276,8 +276,8 @@ func (f fakeFunctionalRoleResolver) EffectiveGrants(context.Context, string, str
 	return f.grants, f.err
 }
 
-func (r *fakeCheckRecorder) RecordCheck(_ context.Context, tenantID string, input domain.NormalizedCheckInput, result domain.CheckResult) (domain.RecordedCheck, error) {
-	r.rows = append(r.rows, recordedCheck{tenantID: tenantID, input: input, result: result})
+func (r *fakeCheckRecorder) RecordCheck(_ context.Context, orgID string, input domain.NormalizedCheckInput, result domain.CheckResult) (domain.RecordedCheck, error) {
+	r.rows = append(r.rows, recordedCheck{orgID: orgID, input: input, result: result})
 	if result.Decision == domain.DecisionRequireApproval && r.approvalID != "" {
 		return domain.RecordedCheck{ApprovalID: r.approvalID, ApprovalStatus: "pending"}, nil
 	}

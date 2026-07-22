@@ -31,7 +31,7 @@ const EMPTY_FORM: MemoryInput = {
 
 export function VirployeeMemoryPanel(props: {
   row: Virployee
-  tenantId: string
+  orgId: string
   principalId: string
   onClose: () => void
 }) {
@@ -68,7 +68,7 @@ export function VirployeeMemoryPanel(props: {
         search,
         cursor,
         scope,
-        props.tenantId,
+        props.orgId,
         props.principalId,
       )
       setItems((current) => append ? [...current, ...result.items] : result.items)
@@ -78,14 +78,14 @@ export function VirployeeMemoryPanel(props: {
     } finally {
       setLoading(false)
     }
-  }, [appliedQuery, props.principalId, props.row.id, props.tenantId, scope, view])
+  }, [appliedQuery, props.principalId, props.row.id, props.orgId, scope, view])
 
   useEffect(() => {
     void Promise.all([
-      listWorkSubjects(props.tenantId, props.principalId),
-      listAssistCases(props.tenantId, props.principalId),
-      listVirployeeAssignments(props.row.id, props.tenantId, props.principalId),
-      getVirployeeRelationships(props.row.id, props.tenantId, props.principalId),
+      listWorkSubjects(props.orgId, props.principalId),
+      listAssistCases(props.orgId, props.principalId),
+      listVirployeeAssignments(props.row.id, props.orgId, props.principalId),
+      getVirployeeRelationships(props.row.id, props.orgId, props.principalId),
     ]).then(([nextSubjects, nextCases, assignments, relationships]) => {
       const accessibleSubjectIDs = new Set([
         ...assignments.filter((item) => item.status === 'active').map((item) => item.subject_id),
@@ -96,7 +96,7 @@ export function VirployeeMemoryPanel(props: {
       setSubjects(nextSubjects.filter((item) => accessibleSubjectIDs.has(item.id)))
       setCases(nextCases.filter((item) => item.owner_virployee_id === props.row.id && accessibleSubjectIDs.has(item.subject_id)))
     }).catch((cause) => setError(errorMessage(cause)))
-  }, [props.principalId, props.row.id, props.tenantId])
+  }, [props.principalId, props.row.id, props.orgId])
 
   useEffect(() => {
     setItems([])
@@ -112,7 +112,7 @@ export function VirployeeMemoryPanel(props: {
     setSaving(true)
     setError('')
     try {
-      await createVirployeeMemory(props.row.id, { ...form, scope }, props.tenantId, props.principalId)
+      await createVirployeeMemory(props.row.id, { ...form, scope }, props.orgId, props.principalId)
       setForm({ ...EMPTY_FORM, scope })
       if (view !== 'active') setView('active')
       else await load('', false)
@@ -140,7 +140,7 @@ export function VirployeeMemoryPanel(props: {
         props.row.id,
         normalized,
         scope,
-        props.tenantId,
+        props.orgId,
         props.principalId,
       )
       setRecallItems(result.items)
@@ -160,7 +160,7 @@ export function VirployeeMemoryPanel(props: {
         props.row.id,
         item.id,
         action,
-        props.tenantId,
+        props.orgId,
         props.principalId,
       )
       await load('', false)

@@ -95,7 +95,7 @@ type fakeStore struct {
 func (s *fakeStore) PutOriginal(_ context.Context, _ Scope, manifest Manifest, _ Blob) (StoredArtifact, error) {
 	s.puts++
 	return StoredArtifact{
-		URI: "gs://stage/tenant/generation/" + manifest.DocumentID, MIMEType: manifest.MIMEType,
+		URI: "gs://stage/organization/generation/" + manifest.DocumentID, MIMEType: manifest.MIMEType,
 		SHA256: manifest.SHA256, SizeBytes: manifest.SizeBytes, ExpiresAt: time.Now().Add(StagingTTL),
 	}, nil
 }
@@ -134,7 +134,7 @@ func TestPipelineResumesFromStagedOriginalAfterProductURLExpires(t *testing.T) {
 
 func testScope() Scope {
 	return Scope{
-		TenantID: "tenant-a", VirployeeID: uuid.New(), ProductSurface: "medmory",
+		OrgID: "organization-a", VirployeeID: uuid.New(), ProductSurface: "producta",
 		SubjectID: "patient-a", RepositoryGeneration: "generation-a",
 	}
 }
@@ -366,7 +366,7 @@ func TestNativeMediaAdapterUsesStagedURIWithoutConvertingBinaryToText(t *testing
 	adapter := NativeMediaAdapter{}
 	parts, err := adapter.Adapt(context.Background(), AdaptInput{
 		Manifest: Manifest{DocumentID: "image-1", Name: "scan.png", MIMEType: "image/png", SHA256: "abc"},
-		Stored:   StoredArtifact{URI: "gs://stage/tenant/image-1"},
+		Stored:   StoredArtifact{URI: "gs://stage/organization/image-1"},
 	})
 	if err != nil {
 		t.Fatalf("Adapt: %v", err)

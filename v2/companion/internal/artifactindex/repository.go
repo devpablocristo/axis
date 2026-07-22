@@ -55,18 +55,18 @@ func (r *Repository) Upsert(ctx context.Context, scope artifacts.Scope, chunks [
 		}
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO companion_artifact_chunks (
-				tenant_id, virployee_id, product_surface, subject_id, repository_generation,
+				org_id, virployee_id, product_surface, subject_id, repository_generation,
 				document_id, chunk_id, content, mime_type, source_sha256, locator,
 				source_version, extractor_version, chunker_version,
 				embedding_model, embedding_dimensions, embedding, updated_at
 			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13,$14,$15,$16,$17::vector,now())
-			ON CONFLICT (tenant_id,virployee_id,product_surface,subject_id,repository_generation,embedding_model,chunk_id)
+			ON CONFLICT (org_id,virployee_id,product_surface,subject_id,repository_generation,embedding_model,chunk_id)
 			DO UPDATE SET content=EXCLUDED.content, mime_type=EXCLUDED.mime_type,
 				source_sha256=EXCLUDED.source_sha256, locator=EXCLUDED.locator,
 				source_version=EXCLUDED.source_version, extractor_version=EXCLUDED.extractor_version,
 				chunker_version=EXCLUDED.chunker_version, embedding_dimensions=EXCLUDED.embedding_dimensions,
 				embedding=EXCLUDED.embedding, updated_at=now()
-		`, scope.TenantID, scope.VirployeeID, scope.ProductSurface, scope.SubjectID, scope.RepositoryGeneration,
+		`, scope.OrgID, scope.VirployeeID, scope.ProductSurface, scope.SubjectID, scope.RepositoryGeneration,
 			chunk.DocumentID, chunk.ID, chunk.Text, chunk.MIMEType, chunk.SHA256, locator,
 			chunk.SourceVersion, chunk.ExtractorVersion, chunk.ChunkerVersion,
 			model, Dimensions, vectorLiteral(embedding.Values)); err != nil {
@@ -76,9 +76,9 @@ func (r *Repository) Upsert(ctx context.Context, scope artifacts.Scope, chunks [
 	}
 	if _, err := tx.Exec(ctx, `
 		DELETE FROM companion_artifact_chunks
-		WHERE tenant_id=$1 AND virployee_id=$2 AND product_surface=$3 AND subject_id=$4
+		WHERE org_id=$1 AND virployee_id=$2 AND product_surface=$3 AND subject_id=$4
 		  AND repository_generation=$5 AND embedding_model=$6 AND NOT (chunk_id = ANY($7))
-	`, scope.TenantID, scope.VirployeeID, scope.ProductSurface, scope.SubjectID, scope.RepositoryGeneration, model, chunkIDs); err != nil {
+	`, scope.OrgID, scope.VirployeeID, scope.ProductSurface, scope.SubjectID, scope.RepositoryGeneration, model, chunkIDs); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -89,8 +89,8 @@ func (r *Repository) DeleteGeneration(ctx context.Context, scope artifacts.Scope
 		return err
 	}
 	_, err := r.pool.Exec(ctx, `DELETE FROM companion_artifact_chunks
-		WHERE tenant_id=$1 AND virployee_id=$2 AND product_surface=$3 AND subject_id=$4 AND repository_generation=$5`,
-		scope.TenantID, scope.VirployeeID, scope.ProductSurface, scope.SubjectID, scope.RepositoryGeneration)
+		WHERE org_id=$1 AND virployee_id=$2 AND product_surface=$3 AND subject_id=$4 AND repository_generation=$5`,
+		scope.OrgID, scope.VirployeeID, scope.ProductSurface, scope.SubjectID, scope.RepositoryGeneration)
 	return err
 }
 
@@ -112,7 +112,7 @@ func (r *Repository) Search(ctx context.Context, query artifacts.RetrievalQuery,
 			       embedding <=> $8::vector AS vector_distance,
 			       ts_rank_cd(search_vector, websearch_to_tsquery('simple', $7)) AS text_rank
 			FROM companion_artifact_chunks
-			WHERE tenant_id=$1 AND virployee_id=$2 AND product_surface=$3 AND subject_id=$4
+			WHERE org_id=$1 AND virployee_id=$2 AND product_surface=$3 AND subject_id=$4
 			  AND repository_generation=$5 AND embedding_model=$6
 		)
 		SELECT chunk_id, content, mime_type, source_sha256, document_id, locator,
@@ -121,7 +121,7 @@ func (r *Repository) Search(ctx context.Context, query artifacts.RetrievalQuery,
 		FROM scoped
 		ORDER BY score DESC, chunk_id
 		LIMIT $9
-	`, query.Scope.TenantID, query.Scope.VirployeeID, query.Scope.ProductSurface, query.Scope.SubjectID,
+	`, query.Scope.OrgID, query.Scope.VirployeeID, query.Scope.ProductSurface, query.Scope.SubjectID,
 		query.Scope.RepositoryGeneration, model, query.Text, vectorLiteral(vector), limit)
 	if err != nil {
 		return nil, err
@@ -147,7 +147,7 @@ func (r *Repository) Search(ctx context.Context, query artifacts.RetrievalQuery,
 }
 
 func validateScope(scope artifacts.Scope) error {
-	if strings.TrimSpace(scope.TenantID) == "" || scope.VirployeeID.String() == "" ||
+	if strings.TrimSpace(scope.OrgID) == "" || scope.VirployeeID.String() == "" ||
 		strings.TrimSpace(scope.ProductSurface) == "" || strings.TrimSpace(scope.SubjectID) == "" ||
 		strings.TrimSpace(scope.RepositoryGeneration) == "" {
 		return errors.New("artifact index scope is incomplete")

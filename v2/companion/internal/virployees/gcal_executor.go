@@ -52,7 +52,7 @@ func NewGoogleCalendarExecutor(api CalendarAPI, calendarID string) *GoogleCalend
 	return &GoogleCalendarExecutor{api: api, calendarID: calendarID}
 }
 
-func (e *GoogleCalendarExecutor) Execute(ctx context.Context, tenantID string, virployeeID uuid.UUID, attempt ExecutionAttempt, action preparedactions.Action) (ExecutionOutcome, error) {
+func (e *GoogleCalendarExecutor) Execute(ctx context.Context, orgID string, virployeeID uuid.UUID, attempt ExecutionAttempt, action preparedactions.Action) (ExecutionOutcome, error) {
 	// Mode is set even on the error paths so a failed attempt still records which
 	// executor was responsible (never left as an empty mode).
 	outcome := ExecutionOutcome{Mode: "google_calendar", ExternalEffects: true}
