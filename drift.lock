@@ -83,7 +83,7 @@ sig = "1437e4ed679dd703"
 [[bindings]]
 doc = "v2/companion/docs/specs/grounded-knowledge-and-authority.md"
 target = "v2/nexus/migrations/0012_professional_authority_binding.sql"
-sig = "4a61902d0e18bcd0"
+sig = "50affb18babc20a3"
 
 [[bindings]]
 doc = "v2/companion/docs/specs/job-roles.md"

@@ -18,4 +18,3 @@ ALTER TABLE approvals
 CREATE INDEX IF NOT EXISTS idx_governance_checks_authority_binding
     ON governance_checks (tenant_id, authority_binding_hash)
     WHERE authority_binding_hash <> '';
-
