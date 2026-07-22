@@ -168,6 +168,30 @@ func (r *Repository) ListByScope(ctx context.Context, chainScope string) ([]audi
 	return out, rows.Err()
 }
 
+// ListVirployeeIDsBySubject locates every independent ledger chain that
+// contributed to one subject. It returns identifiers only; callers still use
+// Replay so each chain is independently hash/signature verified.
+func (r *Repository) ListVirployeeIDsBySubject(ctx context.Context, tenantID, subjectID string) ([]string, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT DISTINCT virployee_id
+		FROM audit_events
+		WHERE tenant_id=$1 AND subject_id=$2
+		ORDER BY virployee_id`, strings.TrimSpace(tenantID), strings.TrimSpace(subjectID))
+	if err != nil {
+		return nil, fmt.Errorf("list audit subject chains: %w", err)
+	}
+	defer rows.Close()
+	out := make([]string, 0)
+	for rows.Next() {
+		var virployeeID string
+		if err := rows.Scan(&virployeeID); err != nil {
+			return nil, fmt.Errorf("scan audit subject chain: %w", err)
+		}
+		out = append(out, virployeeID)
+	}
+	return out, rows.Err()
+}
+
 // VerifySignatures checks the HMAC signature of every event. A no-op when no
 // signing key is configured; when it is, a missing or mismatched signature fails.
 func (r *Repository) VerifySignatures(events []auditdomain.AuditEvent) error {

@@ -77,8 +77,9 @@ channel for governance calls to Nexus. Health endpoints remain public.
 - Execution Gate fails closed when Nexus is unavailable or not configured.
 - A virployee can also "process and respond" to input without external effects or
   approval (read/explain): the Assist usecase durably reserves an idempotent run
-  in `received`, queues identifier-only work, claims it as `answering`, asks the
-  runtime under the virployee's system prompt, and records `done|failed`
+  in `received`, queues identifier-only work, advances it through persisted
+  processing states, asks the runtime under the virployee's system prompt, and
+  records `done|failed|needs_human`
   (degraded when no model answered). Raw input stays in the scoped assist row;
   jobs, logs and evidence contain only identifiers, hashes and status metadata.
   This is not the action path — anything with external effects still routes
@@ -131,8 +132,62 @@ channel for governance calls to Nexus. Health endpoints remain public.
   enter hybrid pgvector+FTS recall. Transactional `memory.index` jobs and a
   durable `memory.decay` schedule survive restarts; Runtime receives the
   approved content while traces retain safe references and hashes only.
-- Policy engines, callbacks, break-glass, external providers, and tasks are
-  future modules.
+- Additional external providers and a general-purpose task engine remain future
+  modules; approval SoD, break-glass and specialist orchestration are already
+  enforced by Nexus and Companion.
+
+## Governed specialist orchestration
+
+Companion models a product interaction as a durable assist case. The case key is
+tenant + product + assist type + subject + entrypoint Virployee, and exactly one
+Virployee owns the final response at a time. An assist run snapshots that owner
+and an optimistic `ownership_version`; synthesis and completion use that version
+as a compare-and-swap guard so a stale worker cannot publish after a handoff.
+
+An orchestration policy is scoped to the same product, assist type and entrypoint
+and rolls out as `disabled → shadow → active`. Its selector and synthesis
+capabilities must be active and assigned. The selector receives only allowlisted,
+namespaced specialty codes from `companion_specialist_routes`; model output can
+never choose a Virployee or capability ID. Go resolves each code and enforces a
+maximum fan-out of three, depth one, no self/cycle, one bounded schema repair and
+the policy deadlines. A decision is one of `direct`, `consult` or `needs_human`.
+The durable plan snapshots the policy version and output schema, so an admin
+change cannot alter an in-flight synthesis.
+
+Specialist consultations are advisory child records of the root run. They reuse
+the already staged and indexed corpus through the artifact ports, never re-fetch
+a product signed URL or create a second corpus. PostgreSQL creates the plan,
+consultation rows and initial `assist.specialist.consult` jobs in one transaction.
+Durable workers claim them with leases and retries; reconciliation recreates any
+missing consultation, synthesis or timeout work. Required consultation failure
+fails the orchestration, while advisory failure is retained as a limitation for
+the single owner to synthesize. Known failures return to the queue for bounded
+retry; an ambiguous lease loss never replays the model call and instead fails
+safely for reconciliation. `planning`, `consulting`, `synthesizing` and
+`needs_human` are first-class persisted assist states.
+
+Ownership transfer is explicit rather than an LLM tool call. The current owner's
+human supervisor, a tenant admin or owner creates a one-hour handoff request; the requester,
+Virployees and service principals cannot decide it, and a target-side authorized
+human accepts or rejects using the current version. Acceptance atomically changes
+the case owner and every non-terminal run's responsible Virployee/version. A
+durable expiry job closes abandoned requests. `needs_human` creates a claimable
+review item which an authorized human resolves with a coded outcome; free-text
+notes stay in Companion and only their hashes enter audit.
+
+The BFF forwards the human control plane at `/api/assist-cases`,
+`/api/orchestration-policies`, `/api/specialist-routes`, `/api/handoffs` and
+`/api/human-reviews`; the Console `Coordination` page exposes those operations.
+Product callers keep the compatible `/v1/assist-runs` contract and receive
+`case_id`, `responsible_virployee_id` and an orchestration summary. A terminal
+`needs_human` is a traceable `200`, not infrastructure unavailability.
+
+Selector, each specialist call and synthesis reserve/report LLM quota under
+separate idempotency keys. Coordination events contain IDs, codes, hashes,
+versions, model metadata and status only. Each participating Virployee retains
+its independent Nexus hash chain for the root-run subject; a focused evidence
+pack verifies the requested chain and includes other verified chains as
+`linked_chains` instead of flattening or re-hashing them.
 
 ## Multimodal artifact ingestion boundary
 
@@ -221,5 +276,6 @@ corrupt, unsupported or required unreadable artifact. A binary is never
 represented as empty text. Staged objects are tenant/virployee/subject scoped,
 carry a 24-hour expiry contract and, in production, require a dedicated GCS
 bucket with CMEK. Assist states progress through `received`, `staging`,
-`extracting`, `indexing`, `answering` and `completed|failed`; PostgreSQL and the
-durable job lease, rather than a process-local goroutine, own the work.
+`extracting`, `indexing`, optional `planning|consulting|synthesizing`, `answering`
+and `done|failed|needs_human`; PostgreSQL and the durable job lease, rather than
+a process-local goroutine, own the work.

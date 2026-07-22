@@ -89,7 +89,7 @@ func (u *UseCases) SubmitAssistAsync(ctx context.Context, tenantID string, id uu
 	if err != nil {
 		return AssistRun{}, err
 	}
-	if run.Status == "done" || run.Status == "failed" {
+	if run.Status == "done" || run.Status == "failed" || run.Status == AssistStatusNeedsHuman {
 		return run, nil
 	}
 	if reserved || run.Status == "received" {
@@ -113,6 +113,8 @@ func (u *UseCases) Assist(ctx context.Context, tenantID string, id uuid.UUID, in
 			return run, nil
 		case "failed":
 			return AssistRun{}, domainerr.Unavailable("assist run failed")
+		case AssistStatusNeedsHuman:
+			return run, nil
 		default:
 			return AssistRun{}, domainerr.Conflict("assist run already in progress")
 		}
@@ -133,11 +135,15 @@ func (u *UseCases) ProcessAssistRun(ctx context.Context, tenantID string, runID 
 			return run, nil
 		case "failed":
 			return run, domainerr.Unavailable("assist run failed")
+		case AssistStatusNeedsHuman:
+			return run, nil
 		default:
 			return run, domainerr.Conflict("assist run is already being processed")
 		}
 	}
-	runtimeContext, err := u.RuntimeContext(ctx, tenantID, run.VirployeeID)
+	responsibleID := responsibleVirployeeID(run)
+	run.ResponsibleVirployeeID = responsibleID
+	runtimeContext, err := u.RuntimeContext(ctx, tenantID, responsibleID)
 	if err != nil {
 		failed, _ := u.assistRepo.CompleteAssistRun(ctx, tenantID, run.ID, "failed", nil, "", false, false, "", "", "runtime_context_unavailable", 0)
 		return failed, err
@@ -162,6 +168,9 @@ func (u *UseCases) ProcessAssistRun(ctx context.Context, tenantID string, runID 
 	} else {
 		answerInputJSON = u.resolveDocuments(ctx, run.InputJSON)
 	}
+	if orchestrated, handled, orchestrationErr := u.processOrchestratedAssist(ctx, run, answerInputJSON, contentParts); handled {
+		return orchestrated, orchestrationErr
+	}
 	if err := u.consumeQuota(ctx, quotaKey(tenantID, run.ProductSurface, quotas.AreaLLM), run.ID.String(), "assist_run", run.ID.String(), estimatedAnswerTokens(answerInputJSON, contentParts)); err != nil {
 		return run, err
 	}
@@ -183,14 +192,21 @@ func (u *UseCases) ProcessAssistRun(ctx context.Context, tenantID string, runID 
 		u.emitAssistAudit(ctx, tenantID, run.VirployeeID, failed, run.InputHash)
 		return failed, domainerr.Unavailable("assist runtime failed")
 	}
-	u.recordLLMUsage(ctx, run, out)
+	u.recordLLMUsage(ctx, run, "answer", out)
 
 	done, err := u.assistRepo.CompleteAssistRun(ctx, tenantID, run.ID, "done", out.OutputJSON, out.OutputText, out.Answered, !out.Answered, out.ModelID, out.PromptVersion, "", durationMS)
 	if err != nil {
 		return AssistRun{}, err
 	}
-	u.emitAssistAudit(ctx, tenantID, run.VirployeeID, done, run.InputHash)
+	u.emitAssistAudit(ctx, tenantID, responsibleID, done, run.InputHash)
 	return done, nil
+}
+
+func responsibleVirployeeID(run AssistRun) uuid.UUID {
+	if run.ResponsibleVirployeeID != uuid.Nil {
+		return run.ResponsibleVirployeeID
+	}
+	return run.VirployeeID
 }
 
 func (u *UseCases) ingestArtifacts(ctx context.Context, run AssistRun) ([]artifacts.ContentPart, bool, error) {
@@ -256,6 +272,9 @@ func (u *UseCases) GetAssistRun(ctx context.Context, tenantID string, virployeeI
 	}
 	if run.VirployeeID != virployeeID {
 		return AssistRun{}, domainerr.NotFound("assist run not found")
+	}
+	if summary, summaryErr := u.LoadOrchestrationSummary(ctx, run); summaryErr == nil {
+		run.Orchestration = summary
 	}
 	return run, nil
 }

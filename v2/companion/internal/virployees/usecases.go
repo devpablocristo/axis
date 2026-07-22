@@ -182,28 +182,35 @@ type AssistQueuePort interface {
 }
 
 type UseCases struct {
-	repo             RepositoryPort
-	executionRepo    ExecutionRepositoryPort
-	jobRoles         JobRoleReaderPort
-	capabilities     CapabilityValidatorPort
-	profileTemplates ProfileTemplateReaderPort
-	governance       GovernanceCheckerPort
-	approvals        ApprovalReaderPort
-	executors        map[string]ActionExecutorPort
-	memories         MemoryReaderPort
-	runtime          RuntimePlannerPort
-	answerer         RuntimeAnswererPort
-	assistRepo       AssistRepositoryPort
-	assistQueue      AssistQueuePort
-	docFetcher       DocumentFetcherPort
-	artifactIngestor ArtifactIngestorPort
-	auditEmitter     AuditEmitterPort
-	quota            quotas.QuotaPort
-	usageLedger      quotas.UsageLedgerPort
-	lifecycle        *lifecycle.Service
+	repo              RepositoryPort
+	executionRepo     ExecutionRepositoryPort
+	jobRoles          JobRoleReaderPort
+	capabilities      CapabilityValidatorPort
+	profileTemplates  ProfileTemplateReaderPort
+	governance        GovernanceCheckerPort
+	approvals         ApprovalReaderPort
+	executors         map[string]ActionExecutorPort
+	memories          MemoryReaderPort
+	runtime           RuntimePlannerPort
+	answerer          RuntimeAnswererPort
+	assistRepo        AssistRepositoryPort
+	assistQueue       AssistQueuePort
+	coordinationRepo  CoordinationRepositoryPort
+	coordinationQueue CoordinationQueuePort
+	corpusReader      ArtifactCorpusReaderPort
+	docFetcher        DocumentFetcherPort
+	artifactIngestor  ArtifactIngestorPort
+	auditEmitter      AuditEmitterPort
+	quota             quotas.QuotaPort
+	usageLedger       quotas.UsageLedgerPort
+	lifecycle         *lifecycle.Service
 }
 
 func (u *UseCases) SetAssistQueue(queue AssistQueuePort) { u.assistQueue = queue }
+
+func (u *UseCases) SetCoordinationQueue(queue CoordinationQueuePort) { u.coordinationQueue = queue }
+
+func (u *UseCases) SetArtifactCorpusReader(reader ArtifactCorpusReaderPort) { u.corpusReader = reader }
 
 func NewUseCases(repo RepositoryPort, jobRoles ...JobRoleReaderPort) (*UseCases, error) {
 	policy := &lifecycle.LifecyclePolicy{
@@ -239,6 +246,9 @@ func NewUseCases(repo RepositoryPort, jobRoles ...JobRoleReaderPort) (*UseCases,
 	}
 	if assistRepo, ok := repo.(AssistRepositoryPort); ok {
 		uc.assistRepo = assistRepo
+	}
+	if coordinationRepo, ok := repo.(CoordinationRepositoryPort); ok {
+		uc.coordinationRepo = coordinationRepo
 	}
 	return uc, nil
 }

@@ -53,7 +53,7 @@ sig = "00dd0bdc0dc071de"
 [[bindings]]
 doc = "v2/companion/docs/specs/memories.md"
 target = "v2/companion/internal/virployees/usecases.go"
-sig = "546ae27710746973"
+sig = "ce4a8364796e1389"
 
 [[bindings]]
 doc = "v2/companion/docs/specs/memories.md"
@@ -93,7 +93,7 @@ sig = "11f5068b4246d1de"
 [[bindings]]
 doc = "v2/docs/axis-os.md"
 target = "v2/companion/wire/wire.go"
-sig = "30ae4ce44d3b5a22"
+sig = "057ecaac094ee495"
 
 [[bindings]]
 doc = "v2/docs/axis-os.md"

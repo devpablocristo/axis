@@ -56,18 +56,24 @@ type assistRunEnvelope struct {
 }
 
 type assistRunResult struct {
-	ID           string          `json:"id"`
-	Status       string          `json:"status"`
-	StatusURL    string          `json:"status_url,omitempty"`
-	Output       json.RawMessage `json:"output,omitempty"`
-	ErrorMessage string          `json:"error_message,omitempty"`
+	ID                     string          `json:"id"`
+	CaseID                 string          `json:"case_id,omitempty"`
+	ResponsibleVirployeeID string          `json:"responsible_virployee_id,omitempty"`
+	Status                 string          `json:"status"`
+	StatusURL              string          `json:"status_url,omitempty"`
+	Output                 json.RawMessage `json:"output,omitempty"`
+	Orchestration          json.RawMessage `json:"orchestration,omitempty"`
+	ErrorMessage           string          `json:"error_message,omitempty"`
 }
 
 type companionAssistResponse struct {
-	ID     string          `json:"id"`
-	Status string          `json:"status"`
-	Output json.RawMessage `json:"output"`
-	Error  string          `json:"error_message"`
+	ID                     string          `json:"id"`
+	CaseID                 string          `json:"case_id"`
+	ResponsibleVirployeeID string          `json:"responsible_virployee_id"`
+	Status                 string          `json:"status"`
+	Output                 json.RawMessage `json:"output"`
+	Orchestration          json.RawMessage `json:"orchestration"`
+	Error                  string          `json:"error_message"`
 }
 
 func (h *Handler) AssistRun(c *gin.Context) {
@@ -168,7 +174,18 @@ func (h *Handler) AssistCapabilities(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"schema_version": "axis.assist_capabilities.v1",
-		"states":         []string{"received", "staging", "extracting", "indexing", "answering", "completed", "failed"},
+		"states": []string{
+			"received", "staging", "extracting", "indexing", "planning", "consulting",
+			"synthesizing", "answering", "completed", "failed", "needs_human",
+		},
+		"orchestration": gin.H{
+			"schema_version":  "axis.orchestration_summary.v1",
+			"modes":           []string{"disabled", "shadow", "active"},
+			"max_specialists": 3,
+			"max_depth":       1,
+			"handoffs":        true,
+			"human_review":    true,
+		},
 		"formats": gin.H{
 			"native": []string{
 				"text/*", "application/json", "application/xml", "application/pdf",
@@ -263,11 +280,16 @@ func productResult(run companionAssistResponse) assistRunResult {
 	case "":
 		status = "received"
 	}
-	return assistRunResult{ID: run.ID, Status: status, Output: run.Output, ErrorMessage: run.Error}
+	return assistRunResult{
+		ID: run.ID, CaseID: run.CaseID, ResponsibleVirployeeID: run.ResponsibleVirployeeID,
+		Status: status, Output: run.Output, Orchestration: run.Orchestration, ErrorMessage: run.Error,
+	}
 }
 
-func isTerminal(status string) bool { return status == "completed" || status == "failed" }
-func statusURL(id string) string    { return "/v1/assist-runs/" + url.PathEscape(id) }
+func isTerminal(status string) bool {
+	return status == "completed" || status == "failed" || status == "needs_human"
+}
+func statusURL(id string) string { return "/v1/assist-runs/" + url.PathEscape(id) }
 
 func preferredWait(header string) time.Duration {
 	for _, part := range strings.Split(header, ",") {

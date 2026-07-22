@@ -106,6 +106,89 @@ export type Approval = {
 	updated_at: string
 }
 
+export type AssistCase = {
+	id: string
+	tenant_id: string
+	product_surface: string
+	assist_type: string
+	subject_id: string
+	entrypoint_virployee_id: string
+	owner_virployee_id: string
+	status: 'open' | 'needs_human' | 'closed'
+	version: number
+	created_at: string
+	updated_at: string
+}
+
+export type Handoff = {
+	id: string
+	tenant_id: string
+	case_id: string
+	source_run_id?: string
+	from_virployee_id: string
+	to_virployee_id: string
+	reason_code: string
+	note_hash?: string
+	status: 'pending' | 'accepted' | 'rejected' | 'cancelled' | 'expired'
+	requested_by: string
+	decided_by?: string
+	version: number
+	expires_at: string
+	created_at: string
+	updated_at: string
+}
+
+export type HumanReview = {
+	id: string
+	tenant_id: string
+	case_id: string
+	root_run_id: string
+	handoff_id?: string
+	reason_code: string
+	urgency: 'routine' | 'urgent'
+	status: 'pending' | 'claimed' | 'resolved'
+	reviewer_user_id?: string
+	outcome?: 'handled_externally' | 'handoff_requested' | 'dismissed'
+	note_hash?: string
+	created_at: string
+	updated_at: string
+}
+
+export type OrchestrationPolicy = {
+	id: string
+	tenant_id: string
+	product_surface: string
+	assist_type: string
+	entrypoint_virployee_id: string
+	mode: 'disabled' | 'shadow' | 'active'
+	selector_capability_id: string
+	synthesis_capability_id: string
+	output_schema: Record<string, unknown>
+	max_specialists: number
+	max_depth: number
+	consultation_timeout_seconds: number
+	orchestration_timeout_seconds: number
+	version: number
+	created_at: string
+	updated_at: string
+}
+
+export type SpecialistRoute = {
+	id: string
+	tenant_id: string
+	product_surface: string
+	assist_type: string
+	entrypoint_virployee_id: string
+	specialty_code: string
+	target_virployee_id: string
+	capability_id: string
+	requirement_mode: 'advisory_only' | 'selector_allowed' | 'required'
+	enabled: boolean
+	version: number
+	created_at: string
+	updated_at: string
+}
+
 export type TenantInput = {
 	org_id?: string
 	org_name?: string
@@ -567,6 +650,86 @@ export async function axisFetch<T>(path: string, init: AxisFetchInit = {}): Prom
 
 export function getSession(): Promise<Session> {
   return axisFetch<Session>('/api/session')
+}
+
+export function listAssistCases(tenantId: string, principalId: string): Promise<AssistCase[]> {
+	return axisFetch<AssistCase[]>('/api/assist-cases?limit=200', { tenantId, principalId })
+}
+
+export function listHandoffs(tenantId: string, principalId: string): Promise<Handoff[]> {
+	return axisFetch<Handoff[]>('/api/handoffs?limit=200', { tenantId, principalId })
+}
+
+export function createHandoff(
+	input: { case_id: string; source_run_id?: string; to_virployee_id: string; reason_code: string; note?: string },
+	tenantId: string,
+	principalId: string,
+): Promise<Handoff> {
+	return axisFetch<Handoff>('/api/handoffs', { method: 'POST', tenantId, principalId, body: input })
+}
+
+export function decideHandoff(
+	id: string,
+	decision: 'accept' | 'reject' | 'cancel',
+	version: number,
+	tenantId: string,
+	principalId: string,
+	note = '',
+): Promise<Handoff> {
+	return axisFetch<Handoff>(`/api/handoffs/${encodeURIComponent(id)}/${decision}`, {
+		method: 'POST', tenantId, principalId, body: { version, note },
+	})
+}
+
+export function listHumanReviews(tenantId: string, principalId: string): Promise<HumanReview[]> {
+	return axisFetch<HumanReview[]>('/api/human-reviews', { tenantId, principalId })
+}
+
+export function claimHumanReview(id: string, tenantId: string, principalId: string): Promise<HumanReview> {
+	return axisFetch<HumanReview>(`/api/human-reviews/${encodeURIComponent(id)}/claim`, {
+		method: 'POST', tenantId, principalId, body: {},
+	})
+}
+
+export function resolveHumanReview(
+	id: string,
+	outcome: 'handled_externally' | 'handoff_requested' | 'dismissed',
+	tenantId: string,
+	principalId: string,
+	note = '',
+	handoffId = '',
+): Promise<HumanReview> {
+	return axisFetch<HumanReview>(`/api/human-reviews/${encodeURIComponent(id)}/resolve`, {
+		method: 'POST', tenantId, principalId, body: { outcome, note, handoff_id: handoffId },
+	})
+}
+
+export function listOrchestrationPolicies(tenantId: string, principalId: string): Promise<OrchestrationPolicy[]> {
+	return axisFetch<OrchestrationPolicy[]>('/api/orchestration-policies', { tenantId, principalId })
+}
+
+export function upsertOrchestrationPolicy(
+	input: Omit<OrchestrationPolicy, 'id' | 'tenant_id' | 'version' | 'created_at' | 'updated_at' | 'max_depth'>,
+	tenantId: string,
+	principalId: string,
+): Promise<OrchestrationPolicy> {
+	return axisFetch<OrchestrationPolicy>('/api/orchestration-policies', {
+		method: 'PUT', tenantId, principalId, body: input,
+	})
+}
+
+export function listSpecialistRoutes(tenantId: string, principalId: string): Promise<SpecialistRoute[]> {
+	return axisFetch<SpecialistRoute[]>('/api/specialist-routes', { tenantId, principalId })
+}
+
+export function upsertSpecialistRoute(
+	input: Omit<SpecialistRoute, 'id' | 'tenant_id' | 'version' | 'created_at' | 'updated_at'>,
+	tenantId: string,
+	principalId: string,
+): Promise<SpecialistRoute> {
+	return axisFetch<SpecialistRoute>('/api/specialist-routes', {
+		method: 'PUT', tenantId, principalId, body: input,
+	})
 }
 
 export function listTenants(

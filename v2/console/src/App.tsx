@@ -1,7 +1,8 @@
-import { Bot, BriefcaseBusiness, ClipboardCheck, GraduationCap, RefreshCw, Settings, ShieldCheck, SlidersHorizontal, Wrench } from 'lucide-react'
+import { Bot, BriefcaseBusiness, ClipboardCheck, GraduationCap, Network, RefreshCw, Settings, ShieldCheck, SlidersHorizontal, Wrench } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { ApprovalsPage } from './ApprovalsPage'
 import { CapabilitiesPage } from './CapabilitiesPage'
+import { CoordinationPage } from './CoordinationPage'
 import { LearningProposalsPage } from './LearningProposalsPage'
 import { JobRolesPage } from './JobRolesPage'
 import { ProfileTemplatesPage } from './ProfileTemplatesPage'
@@ -134,6 +135,14 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
           </button>
           <button
             type="button"
+            className={activePage === 'coordination' ? 'active' : ''}
+            onClick={() => setActivePage('coordination')}
+          >
+            <Network aria-hidden="true" />
+            Coordination
+          </button>
+          <button
+            type="button"
             className={activePage === 'learning-proposals' ? 'active' : ''}
             onClick={() => setActivePage('learning-proposals')}
           >
@@ -254,6 +263,12 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
                 }
               : undefined}
           />
+        ) : activePage === 'coordination' ? (
+          <CoordinationPage
+            tenantId={selectedTenant.id}
+            principalId={principalId}
+            productSurface={selectedTenant.product_surface}
+          />
         ) : (
           <VirployeesPage
             tenantId={selectedTenant.id}
@@ -275,7 +290,7 @@ function unique(values: string[]): string[] {
   return Array.from(new Set(values.filter(Boolean))).sort((left, right) => left.localeCompare(right))
 }
 
-type Page = 'virployees' | 'job-roles' | 'capabilities' | 'learning-proposals' | 'profile-templates' | 'approvals' | 'admin'
+type Page = 'virployees' | 'job-roles' | 'capabilities' | 'learning-proposals' | 'profile-templates' | 'approvals' | 'coordination' | 'admin'
 
 type ApprovalReviewContext = {
   approvalId: string
@@ -288,6 +303,7 @@ function pageTitle(page: Page): string {
   if (page === 'learning-proposals') return 'Learning'
   if (page === 'profile-templates') return 'Profile Templates'
   if (page === 'approvals') return 'Approvals'
+  if (page === 'coordination') return 'Specialist coordination'
   if (page === 'admin') return 'Admin'
   return 'Virployees'
 }

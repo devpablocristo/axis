@@ -269,8 +269,9 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 				return nil, err
 			}
 		}
+		artifactRepository := artifacts.NewRepository(db.Pool())
 		artifactPipeline := artifacts.NewPipeline(
-			artifacts.NewRepository(db.Pool()),
+			artifactRepository,
 			fetcher,
 			scanner,
 			store,
@@ -293,6 +294,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		}
 		artifactPipeline.SetIndexer(indexService)
 		virployeesUsecases.SetArtifactIngestor(artifactPipeline)
+		virployeesUsecases.SetArtifactCorpusReader(artifacts.NewCorpusReader(artifactRepository, indexService))
 	}
 	// Executors are wired per enabled mode (COMPANION_V2_EXECUTION_MODE is a set).
 	// The local simulator and a real external executor can coexist on different
@@ -328,6 +330,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	}
 	virployeesUsecases.SetMemoryReader(memoriesUsecases)
 	virployeesHandler := virployees.NewHandler(virployeesUsecases)
+	coordinationHandler := virployees.NewCoordinationHandler(virployeesUsecases)
 	memoriesHandler := memories.NewHandler(memoriesUsecases)
 	executionStatsHandler := executionstats.NewHandler(executionstats.NewUseCases(executionstats.NewRepository(db.Pool())))
 	learningUsecases := learning.NewUseCases(learning.NewRepository(db.Pool()))
@@ -361,6 +364,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	quotaHandler.Routes(api)
 	profileTemplatesHandler.Routes(api)
 	virployeesHandler.Routes(api)
+	coordinationHandler.Routes(api)
 	memoriesHandler.Routes(api)
 	executionStatsHandler.Routes(api)
 	learningHandler.Routes(api)
@@ -372,6 +376,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	backgroundCtx, backgroundCancel := context.WithCancel(ctx)
 	jobsRepository := jobs.NewPostgresRepository(db.Pool())
 	virployeesUsecases.SetAssistQueue(assistQueueAdapter{repository: jobsRepository})
+	virployeesUsecases.SetCoordinationQueue(coordinationQueueAdapter{repository: jobsRepository})
 	jobsWorker := jobs.NewWorker(jobsRepository, jobs.WorkerConfig{
 		WorkerID: "companion-jobs-" + uuid.NewString(), Concurrency: config.JobWorkerConcurrency,
 		PollInterval: config.JobPollInterval, LeaseDuration: config.WatcherLease,
@@ -391,7 +396,11 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		if err != nil {
 			return nil, jobs.Retryable("assist_reconcile_failed", err)
 		}
-		evidence, _ := json.Marshal(map[string]any{"reconciled": true, "assist_runs_requeued": requeued})
+		coordination, err := virployeesUsecases.RequeueCoordinationWork(jobCtx, watcherConfig.BatchSize)
+		if err != nil {
+			return nil, jobs.Retryable("coordination_reconcile_failed", err)
+		}
+		evidence, _ := json.Marshal(map[string]any{"reconciled": true, "assist_runs_requeued": requeued, "coordination": coordination})
 		return evidence, nil
 	})
 	jobsWorker.Register(assistProcessJobKind, func(jobCtx context.Context, job jobs.Job) (json.RawMessage, error) {
@@ -411,6 +420,68 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 			}
 			return evidence, jobs.Retryable("assist_processing_failed", processErr)
 		}
+		return evidence, nil
+	})
+	jobsWorker.Register(virployees.JobKindSpecialistConsult, func(jobCtx context.Context, job jobs.Job) (json.RawMessage, error) {
+		var payload struct {
+			ConsultationID string `json:"consultation_id"`
+		}
+		if err := json.Unmarshal(job.Payload, &payload); err != nil {
+			return nil, jobs.Permanent("invalid_specialist_consult_job", err)
+		}
+		id, err := uuid.Parse(payload.ConsultationID)
+		if err != nil {
+			return nil, jobs.Permanent("invalid_specialist_consult_job", err)
+		}
+		item, processErr := virployeesUsecases.ProcessSpecialistConsultation(jobCtx, job.TenantID, id, job.Attempts)
+		evidence, _ := json.Marshal(map[string]any{"consultation_id": id.String(), "status": item.Status, "output_hash": item.OutputHash})
+		if processErr != nil {
+			return evidence, jobs.Retryable("specialist_consult_failed", processErr)
+		}
+		return evidence, nil
+	})
+	jobsWorker.Register(virployees.JobKindOrchestrationReconcile, func(jobCtx context.Context, job jobs.Job) (json.RawMessage, error) {
+		var payload struct {
+			PlanID string `json:"plan_id"`
+		}
+		if err := json.Unmarshal(job.Payload, &payload); err != nil {
+			return nil, jobs.Permanent("invalid_orchestration_reconcile_job", err)
+		}
+		id, err := uuid.Parse(payload.PlanID)
+		if err != nil {
+			return nil, jobs.Permanent("invalid_orchestration_reconcile_job", err)
+		}
+		plan, reconcileErr := virployeesUsecases.ReconcileOrchestration(jobCtx, job.TenantID, id)
+		evidence, _ := json.Marshal(map[string]any{"plan_id": id.String(), "status": plan.Status, "completed": plan.CompletedCount, "failed": plan.FailedCount})
+		if reconcileErr != nil {
+			return evidence, jobs.Retryable("orchestration_reconcile_failed", reconcileErr)
+		}
+		return evidence, nil
+	})
+	jobsWorker.Register(virployees.JobKindOrchestrationSynthesis, func(jobCtx context.Context, job jobs.Job) (json.RawMessage, error) {
+		var payload struct {
+			PlanID string `json:"plan_id"`
+		}
+		if err := json.Unmarshal(job.Payload, &payload); err != nil {
+			return nil, jobs.Permanent("invalid_orchestration_synthesis_job", err)
+		}
+		id, err := uuid.Parse(payload.PlanID)
+		if err != nil {
+			return nil, jobs.Permanent("invalid_orchestration_synthesis_job", err)
+		}
+		run, synthesisErr := virployeesUsecases.SynthesizeOrchestration(jobCtx, job.TenantID, id, job.Attempts)
+		evidence, _ := json.Marshal(map[string]any{"plan_id": id.String(), "run_id": run.ID.String(), "status": run.Status})
+		if synthesisErr != nil {
+			return evidence, jobs.Retryable("orchestration_synthesis_failed", synthesisErr)
+		}
+		return evidence, nil
+	})
+	jobsWorker.Register("handoff.expire", func(jobCtx context.Context, _ jobs.Job) (json.RawMessage, error) {
+		count, err := virployeesUsecases.ExpireHandoffs(jobCtx, config.WatcherBatchSize)
+		if err != nil {
+			return nil, jobs.Retryable("handoff_expire_failed", err)
+		}
+		evidence, _ := json.Marshal(map[string]any{"expired": count})
 		return evidence, nil
 	})
 	jobsWorker.Register("memory.index", func(jobCtx context.Context, job jobs.Job) (json.RawMessage, error) {
@@ -474,10 +545,18 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		tracerShutdown: tracerShutdown,
 		watcherCancel:  backgroundCancel,
 	}
-	deps.watcherWG.Add(3)
+	deps.watcherWG.Add(4)
 	go func() {
 		defer deps.watcherWG.Done()
 		jobsWorker.Run(backgroundCtx)
+	}()
+	go func() {
+		defer deps.watcherWG.Done()
+		jobs.RunRecurringScheduler(backgroundCtx, jobsRepository, jobs.RecurringConfig{
+			TenantID: "system", ProductSurface: "companion", Kind: "handoff.expire",
+			Interval: config.WatcherInterval, Timeout: config.JobTimeout,
+			MaxAttempts: config.WatcherMaxRecoveries,
+		})
 	}()
 	if nexusOutbox != nil {
 		deps.watcherWG.Add(1)

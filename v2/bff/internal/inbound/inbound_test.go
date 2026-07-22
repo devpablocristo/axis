@@ -83,6 +83,33 @@ func TestAssistRunProxiesAndMapsResponse(t *testing.T) {
 	}
 }
 
+func TestAssistRunMapsNeedsHumanAsATraceableTerminalResult(t *testing.T) {
+	companion := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"id":"run-human","case_id":"case-human","responsible_virployee_id":"vp-owner","status":"needs_human","output":{"needs_human":true},"orchestration":{"state":"needs_human","pending_human_review":true}}`))
+	}))
+	defer companion.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/assist-runs", strings.NewReader(`{"product_surface":"medmory","input":{"documents":[]}}`))
+	req.Header.Set("X-API-Key", "secret-key")
+	req.Header.Set("Idempotency-Key", "manifest-needs-human")
+	rec := httptest.NewRecorder()
+	newTestEngine(companion.URL).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected a terminal 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var out assistRunResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Status != "needs_human" || out.CaseID != "case-human" || out.ResponsibleVirployeeID != "vp-owner" {
+		t.Fatalf("coordination trace was not preserved: %+v", out)
+	}
+	if !strings.Contains(string(out.Orchestration), "pending_human_review") {
+		t.Fatalf("orchestration summary was not preserved: %s", out.Orchestration)
+	}
+}
+
 func TestAssistRunReturns202AndStatusURLWhileDurableWorkContinues(t *testing.T) {
 	companion := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusAccepted)
@@ -161,7 +188,7 @@ func TestAssistCapabilitiesAreMachineAuthenticatedAndConservative(t *testing.T) 
 	req.Header.Set("X-API-Key", "secret-key")
 	rec := httptest.NewRecorder()
 	newTestEngine("http://unused").ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "application/pdf") || !strings.Contains(rec.Body.String(), "application/dicom") || strings.Contains(rec.Body.String(), "pending") {
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "application/pdf") || !strings.Contains(rec.Body.String(), "application/dicom") || !strings.Contains(rec.Body.String(), "needs_human") || !strings.Contains(rec.Body.String(), "orchestration") || strings.Contains(rec.Body.String(), `"status":"pending"`) {
 		t.Fatalf("unexpected capabilities: code=%d body=%s", rec.Code, rec.Body.String())
 	}
 }

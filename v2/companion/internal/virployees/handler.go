@@ -197,17 +197,27 @@ func respondQuotaError(c *gin.Context, err error) bool {
 
 func assistRunToDTO(run AssistRun) dto.AssistRunResponse {
 	return dto.AssistRunResponse{
-		ID:            run.ID.String(),
-		Status:        run.Status,
-		Output:        run.Output,
-		OutputText:    run.OutputText,
-		Answered:      run.Answered,
-		Degraded:      run.Degraded,
-		Model:         run.Model,
-		PromptVersion: run.PromptVersion,
-		Error:         run.Error,
-		DurationMS:    run.DurationMS,
+		ID:                     run.ID.String(),
+		CaseID:                 coordinationResponseUUID(run.CaseID),
+		ResponsibleVirployeeID: coordinationResponseUUID(responsibleVirployeeID(run)),
+		Status:                 run.Status,
+		Output:                 run.Output,
+		OutputText:             run.OutputText,
+		Answered:               run.Answered,
+		Degraded:               run.Degraded,
+		Model:                  run.Model,
+		PromptVersion:          run.PromptVersion,
+		Error:                  run.Error,
+		DurationMS:             run.DurationMS,
+		Orchestration:          run.Orchestration,
 	}
+}
+
+func coordinationResponseUUID(id uuid.UUID) string {
+	if id == uuid.Nil {
+		return ""
+	}
+	return id.String()
 }
 
 func (h *Handler) ListRuns(c *gin.Context) {

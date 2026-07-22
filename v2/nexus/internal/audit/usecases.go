@@ -20,6 +20,10 @@ type UseCases struct {
 	repo RepositoryPort
 }
 
+type subjectChainRepository interface {
+	ListVirployeeIDsBySubject(context.Context, string, string) ([]string, error)
+}
+
 func NewUseCases(repo RepositoryPort) *UseCases {
 	return &UseCases{repo: repo}
 }
@@ -133,6 +137,33 @@ func (u *UseCases) Verify(ctx context.Context, tenantID, virployeeID string) (In
 	out := verifyEvents(events)
 	if out.Status == "ok" {
 		out = u.verifySignatures(events, out)
+	}
+	return out, nil
+}
+
+// ReplaySubject returns every independently verified virployee chain linked by
+// one subject (for example, an entrypoint run plus specialist consultations).
+func (u *UseCases) ReplaySubject(ctx context.Context, tenantID, subjectID string) ([]ReplayOutput, error) {
+	tenantID = strings.TrimSpace(tenantID)
+	subjectID = strings.TrimSpace(subjectID)
+	if tenantID == "" || subjectID == "" {
+		return nil, domainerr.Validation("tenant and subject are required")
+	}
+	lister, ok := u.repo.(subjectChainRepository)
+	if !ok {
+		return []ReplayOutput{}, nil
+	}
+	virployeeIDs, err := lister.ListVirployeeIDsBySubject(ctx, tenantID, subjectID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ReplayOutput, 0, len(virployeeIDs))
+	for _, virployeeID := range virployeeIDs {
+		replay, replayErr := u.Replay(ctx, tenantID, virployeeID)
+		if replayErr != nil {
+			return nil, replayErr
+		}
+		out = append(out, replay)
 	}
 	return out, nil
 }

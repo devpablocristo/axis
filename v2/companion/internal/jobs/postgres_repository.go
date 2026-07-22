@@ -28,15 +28,29 @@ func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
 }
 
 func (r *PostgresRepository) Enqueue(ctx context.Context, input EnqueueInput) (Job, bool, error) {
-	input, err := NormalizeEnqueueInput(input)
-	if err != nil {
-		return Job{}, false, err
-	}
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return Job{}, false, fmt.Errorf("begin enqueue job: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	job, inserted, err := r.EnqueueTx(ctx, tx, input)
+	if err != nil {
+		return Job{}, false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Job{}, false, fmt.Errorf("commit enqueue job: %w", err)
+	}
+	return job, inserted, nil
+}
+
+// EnqueueTx persists a job inside the caller's transaction. It is used when a
+// domain record and the durable work needed to advance it must become visible
+// atomically. The caller owns commit/rollback.
+func (r *PostgresRepository) EnqueueTx(ctx context.Context, tx pgx.Tx, input EnqueueInput) (Job, bool, error) {
+	input, err := NormalizeEnqueueInput(input)
+	if err != nil {
+		return Job{}, false, err
+	}
 
 	row := tx.QueryRow(ctx, `
         INSERT INTO companion_jobs
@@ -52,9 +66,6 @@ func (r *PostgresRepository) Enqueue(ctx context.Context, input EnqueueInput) (J
 	if scanErr == nil {
 		if err := recordEvent(ctx, tx, job.ID, "queued", json.RawMessage(`{"source":"enqueue"}`)); err != nil {
 			return Job{}, false, err
-		}
-		if err := tx.Commit(ctx); err != nil {
-			return Job{}, false, fmt.Errorf("commit enqueue job: %w", err)
 		}
 		return job, true, nil
 	}
@@ -82,9 +93,6 @@ func (r *PostgresRepository) Enqueue(ctx context.Context, input EnqueueInput) (J
 		if err := recordEvent(ctx, tx, existing.ID, "payload_replaced", json.RawMessage(`{}`)); err != nil {
 			return Job{}, false, err
 		}
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return Job{}, false, fmt.Errorf("commit deduplicated job: %w", err)
 	}
 	return existing, false, nil
 }

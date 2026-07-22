@@ -10,12 +10,16 @@ import (
 )
 
 // EvidenceVersion is the pack format version.
-const EvidenceVersion = "1.0"
+const EvidenceVersion = "1.1"
 
 // AuditReader is the read side of the audit ledger the evidence pack is built
 // from. The audit UseCases satisfy it.
 type AuditReader interface {
 	Replay(ctx context.Context, tenantID, virployeeID string) (audit.ReplayOutput, error)
+}
+
+type subjectAuditReader interface {
+	ReplaySubject(context.Context, string, string) ([]audit.ReplayOutput, error)
 }
 
 type UseCases struct {
@@ -78,6 +82,31 @@ func (u *UseCases) Generate(ctx context.Context, tenantID, virployeeID, subject 
 	pack.EventCount = len(timeline)
 	if subject != "" {
 		pack.Subject = &evidencedomain.SubjectRef{ID: subject, ChainEventCount: len(replay.Timeline)}
+		if reader, ok := u.audit.(subjectAuditReader); ok {
+			chains, chainErr := reader.ReplaySubject(ctx, tenantID, subject)
+			if chainErr != nil {
+				return evidencedomain.EvidencePack{}, chainErr
+			}
+			for _, chain := range chains {
+				if chain.VirployeeID == replay.VirployeeID {
+					continue
+				}
+				linkedTimeline := evidenceTimelineForSubject(chain.Timeline, subject)
+				if len(linkedTimeline) == 0 {
+					continue
+				}
+				linked := evidencedomain.LinkedChain{
+					Scope: chain.Scope, VirployeeID: chain.VirployeeID,
+					EventCount: len(linkedTimeline), Timeline: linkedTimeline,
+				}
+				if chain.Integrity != nil {
+					linked.Integrity = evidenceIntegrity(chain.Integrity)
+				}
+				pack.LinkedChains = append(pack.LinkedChains, linked)
+				pack.Subject.ChainEventCount += chain.EventCount
+				pack.EventCount += len(linkedTimeline)
+			}
+		}
 	}
 
 	if u.signer != nil {
@@ -88,4 +117,25 @@ func (u *UseCases) Generate(ctx context.Context, tenantID, virployeeID, subject 
 		pack.Signature = evidencedomain.Signature{Algorithm: "none"}
 	}
 	return pack, nil
+}
+
+func evidenceTimelineForSubject(timeline []audit.TimelineEntry, subject string) []evidencedomain.TimelineEvent {
+	out := make([]evidencedomain.TimelineEvent, 0)
+	for _, event := range timeline {
+		if event.SubjectID != subject {
+			continue
+		}
+		out = append(out, evidencedomain.TimelineEvent{
+			Event: event.Event, Actor: event.Actor, Subject: event.Subject, At: event.At,
+			Summary: event.Summary, Data: event.Data, EventHash: event.EventHash,
+		})
+	}
+	return out
+}
+
+func evidenceIntegrity(in *audit.IntegrityOutput) evidencedomain.Integrity {
+	return evidencedomain.Integrity{
+		Status: in.Status, CheckedEvents: in.CheckedEvents, FirstHash: in.FirstHash,
+		LastHash: in.LastHash, Signed: in.Signed, Error: in.Error,
+	}
 }

@@ -109,6 +109,163 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+.coordination-page {
+  display: grid;
+  gap: var(--axis-space-250);
+}
+
+.coordination-toolbar,
+.coordination-card > div:first-child,
+.coordination-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--axis-space-100);
+}
+
+.coordination-toolbar p,
+.coordination-card p {
+  margin: 0;
+}
+
+.coordination-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--axis-space-150);
+}
+
+.coordination-metrics > div,
+.coordination-section,
+.coordination-builder {
+  border: 1px solid var(--axis-border);
+  border-radius: var(--axis-radius);
+  background: var(--axis-surface);
+  box-shadow: var(--axis-shadow);
+}
+
+.coordination-metrics > div {
+  padding: var(--axis-space-200);
+}
+
+.coordination-metrics strong,
+.coordination-metrics span {
+  display: block;
+}
+
+.coordination-metrics strong {
+  color: var(--axis-color-heading);
+  font-size: 24px;
+}
+
+.coordination-metrics span,
+.coordination-card small {
+  color: var(--axis-muted);
+}
+
+.coordination-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--axis-space-150);
+  align-items: start;
+}
+
+.coordination-section,
+.coordination-builder {
+  padding: var(--axis-space-200);
+}
+
+.coordination-section h2,
+.coordination-builder h2 {
+  margin: 0 0 var(--axis-space-150);
+  font-size: 16px;
+}
+
+.coordination-card {
+  display: grid;
+  gap: var(--axis-space-100);
+  padding: var(--axis-space-150) 0;
+  border-top: 1px solid var(--axis-border);
+}
+
+.coordination-card:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.coordination-card button {
+  justify-self: start;
+}
+
+.coordination-status {
+  padding: 3px 8px;
+  border-radius: var(--axis-radius-pill);
+  background: var(--axis-color-surface-muted);
+  color: var(--axis-muted);
+  font-size: var(--axis-font-size-xs);
+  font-weight: var(--axis-font-weight-semibold);
+}
+
+.coordination-status--open,
+.coordination-status--accepted {
+  background: var(--axis-color-success-soft);
+  color: var(--axis-color-success);
+}
+
+.coordination-status--pending,
+.coordination-status--needs_human,
+.coordination-status--urgent {
+  background: var(--axis-color-warning-soft);
+  color: var(--axis-color-warning);
+}
+
+.coordination-form {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--axis-space-150);
+  align-items: end;
+}
+
+.coordination-form label {
+  display: grid;
+  gap: var(--axis-space-050);
+  color: var(--axis-muted);
+  font-size: var(--axis-font-size-sm);
+}
+
+.coordination-form input,
+.coordination-form select,
+.coordination-form textarea {
+  width: 100%;
+  min-height: var(--axis-control-height);
+  padding: var(--axis-space-100);
+  border: 1px solid var(--axis-border-strong);
+  border-radius: var(--axis-radius-md);
+  background: var(--axis-surface);
+  color: var(--axis-text);
+}
+
+.coordination-form textarea {
+  resize: vertical;
+}
+
+.coordination-records {
+  display: grid;
+  gap: var(--axis-space-075);
+  margin-top: var(--axis-space-150);
+  color: var(--axis-muted);
+  font-size: var(--axis-font-size-sm);
+}
+
+@media (max-width: 1100px) {
+  .coordination-grid,
+  .coordination-form {
+    grid-template-columns: 1fr;
+  }
+  .coordination-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 button,
 input,
 select,

@@ -17,16 +17,19 @@ import (
 // true when no real model answered (Echo / no credentials). The product-facing
 // edge (BFF) maps this to the product's own contract.
 type AssistRunResponse struct {
-	ID            string          `json:"id"`
-	Status        string          `json:"status"`
-	Output        json.RawMessage `json:"output,omitempty"`
-	OutputText    string          `json:"output_text,omitempty"`
-	Answered      bool            `json:"answered"`
-	Degraded      bool            `json:"degraded"`
-	Model         string          `json:"model,omitempty"`
-	PromptVersion string          `json:"prompt_version,omitempty"`
-	Error         string          `json:"error_message,omitempty"`
-	DurationMS    int64           `json:"duration_ms"`
+	ID                     string          `json:"id"`
+	CaseID                 string          `json:"case_id,omitempty"`
+	ResponsibleVirployeeID string          `json:"responsible_virployee_id,omitempty"`
+	Status                 string          `json:"status"`
+	Output                 json.RawMessage `json:"output,omitempty"`
+	OutputText             string          `json:"output_text,omitempty"`
+	Answered               bool            `json:"answered"`
+	Degraded               bool            `json:"degraded"`
+	Model                  string          `json:"model,omitempty"`
+	PromptVersion          string          `json:"prompt_version,omitempty"`
+	Error                  string          `json:"error_message,omitempty"`
+	DurationMS             int64           `json:"duration_ms"`
+	Orchestration          any             `json:"orchestration,omitempty"`
 }
 
 type VirployeeResponse struct {

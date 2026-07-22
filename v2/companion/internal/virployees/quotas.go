@@ -40,13 +40,13 @@ func estimatedAnswerTokens(input json.RawMessage, parts []artifacts.ContentPart)
 	return (bytes+3)/4 + 4096
 }
 
-func (u *UseCases) recordLLMUsage(ctx context.Context, run AssistRun, output AnswerOutput) {
+func (u *UseCases) recordLLMUsage(ctx context.Context, run AssistRun, stage string, output AnswerOutput) {
 	if u.usageLedger == nil {
 		return
 	}
 	_ = u.usageLedger.RecordUsage(ctx, quotas.Usage{
 		Key:            quotaKey(run.TenantID, run.ProductSurface, quotas.AreaLLM),
-		IdempotencyKey: run.ID.String() + ":actual", SubjectType: "assist_run", SubjectID: run.ID.String(),
+		IdempotencyKey: run.ID.String() + ":actual:" + stage, SubjectType: "assist_run", SubjectID: run.ID.String(),
 		Units: output.InputTokens + output.OutputTokens, Model: output.ModelID,
 		EstimatedCostMicroUSD: output.EstimatedCostMicroUSD,
 		Metadata:              map[string]any{"input_tokens": output.InputTokens, "output_tokens": output.OutputTokens, "estimated": true},

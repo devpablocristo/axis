@@ -14,28 +14,34 @@ import (
 // raw input is persisted for the worker, but never returned by HTTP or emitted
 // to logs/evidence.
 type AssistRun struct {
-	ID                   uuid.UUID
-	TenantID             string
-	VirployeeID          uuid.UUID
-	AssistType           string
-	ProductSurface       string
-	SubjectID            string
-	RepositoryGeneration string
-	IdempotencyKey       string
-	Status               string // received | answering | done | failed
-	InputHash            string
-	InputPreview         string
-	InputJSON            json.RawMessage
-	Output               json.RawMessage
-	OutputText           string
-	Answered             bool
-	Degraded             bool
-	Model                string
-	PromptVersion        string
-	Error                string
-	DurationMS           int64
-	StartedAt            time.Time
-	CompletedAt          *time.Time
+	ID                      uuid.UUID
+	TenantID                string
+	VirployeeID             uuid.UUID
+	CaseID                  uuid.UUID
+	ResponsibleVirployeeID  uuid.UUID
+	OrchestrationPlanID     uuid.UUID
+	OrchestrationDeadlineAt *time.Time
+	OwnershipVersion        int64
+	AssistType              string
+	ProductSurface          string
+	SubjectID               string
+	RepositoryGeneration    string
+	IdempotencyKey          string
+	Status                  string // received ... planning | consulting | synthesizing | done | failed | needs_human
+	InputHash               string
+	InputPreview            string
+	InputJSON               json.RawMessage
+	Output                  json.RawMessage
+	OutputText              string
+	Answered                bool
+	Degraded                bool
+	Model                   string
+	PromptVersion           string
+	Error                   string
+	DurationMS              int64
+	StartedAt               time.Time
+	CompletedAt             *time.Time
+	Orchestration           *OrchestrationSummary
 }
 
 // BeginAssistRun stores the full input before a durable job is enqueued. A
@@ -46,14 +52,25 @@ func (r *Repository) BeginAssistRun(ctx context.Context, tenantID string, virplo
 		inputJSON = json.RawMessage(`{}`)
 	}
 	id := uuid.New()
+	var caseID any
+	responsibleID := virployeeID
+	if metadata.SubjectID != "" && metadata.ProductSurface != "" && metadata.AssistType != "" {
+		assistCase, caseErr := r.EnsureAssistCase(ctx, tenantID, virployeeID, metadata)
+		if caseErr != nil {
+			return AssistRun{}, false, caseErr
+		}
+		caseID = assistCase.ID
+		responsibleID = assistCase.OwnerVirployeeID
+	}
 	tag, err := r.pool.Exec(ctx, `
 		INSERT INTO companion_assist_runs (
 			id, tenant_id, virployee_id, assist_type, product_surface, subject_id, repository_generation,
-			idempotency_key, status, input_hash, input_preview, input_json, started_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'received', $9, $10, $11::jsonb, now(), now())
+			idempotency_key, status, input_hash, input_preview, input_json, case_id, responsible_virployee_id,
+			started_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'received', $9, $10, $11::jsonb, $12, $13, now(), now())
 		ON CONFLICT (tenant_id, virployee_id, idempotency_key) DO NOTHING
 	`, id, tenantID, virployeeID, metadata.AssistType, metadata.ProductSurface, metadata.SubjectID, metadata.RepositoryGeneration,
-		idempotencyKey, inputHash, inputPreview, []byte(inputJSON))
+		idempotencyKey, inputHash, inputPreview, []byte(inputJSON), caseID, responsibleID)
 	if err != nil {
 		return AssistRun{}, false, err
 	}
@@ -69,7 +86,7 @@ func (r *Repository) ClaimAssistRun(ctx context.Context, tenantID string, id uui
 		UPDATE companion_assist_runs
 		SET status = 'staging', updated_at = now()
 		WHERE tenant_id = $1 AND id = $2
-		  AND (status = 'received' OR ($3 AND status IN ('staging','extracting','indexing')))
+		  AND (status = 'received' OR ($3 AND status IN ('staging','extracting','indexing','planning')))
 	`, tenantID, id, recoverPreAnswer)
 	if err != nil {
 		return AssistRun{}, false, err
@@ -81,10 +98,28 @@ func (r *Repository) ClaimAssistRun(ctx context.Context, tenantID string, id uui
 func (r *Repository) SetAssistRunStatus(ctx context.Context, tenantID string, id uuid.UUID, status string) (AssistRun, error) {
 	_, err := r.pool.Exec(ctx, `
 		UPDATE companion_assist_runs SET status=$3, updated_at=now()
-		WHERE tenant_id=$1 AND id=$2 AND status NOT IN ('done','failed')
+		WHERE tenant_id=$1 AND id=$2 AND status NOT IN ('done','failed','needs_human')
 	`, tenantID, id, status)
 	if err != nil {
 		return AssistRun{}, err
+	}
+	return r.GetAssistRunByID(ctx, tenantID, id)
+}
+
+func (r *Repository) CompleteAssistRunForOwner(ctx context.Context, tenantID string, id uuid.UUID, ownershipVersion int64, status string, output json.RawMessage, outputText string, answered, degraded bool, model, promptVersion, runErr string, durationMS int64) (AssistRun, error) {
+	if len(output) == 0 {
+		output = json.RawMessage(`{}`)
+	}
+	tag, err := r.pool.Exec(ctx, `UPDATE companion_assist_runs SET status=$4,output=$5::jsonb,output_text=$6,
+		answered=$7,degraded=$8,model=$9,prompt_version=$10,error=$11,duration_ms=$12,
+		completed_at=now(),updated_at=now() WHERE tenant_id=$1 AND id=$2 AND ownership_version=$3
+		AND status NOT IN ('done','failed','needs_human')`, tenantID, id, ownershipVersion, status, []byte(output), outputText,
+		answered, degraded, model, promptVersion, runErr, durationMS)
+	if err != nil {
+		return AssistRun{}, err
+	}
+	if tag.RowsAffected() != 1 {
+		return AssistRun{}, domainerr.Conflict("assist ownership changed while the answer was being produced")
 	}
 	return r.GetAssistRunByID(ctx, tenantID, id)
 }
@@ -142,7 +177,12 @@ func (r *Repository) ListReceivedAssistRuns(ctx context.Context, limit int) ([]A
 }
 
 const assistRunSelect = `
-	SELECT id, tenant_id, virployee_id, assist_type, product_surface, subject_id, repository_generation,
+	SELECT id, tenant_id, virployee_id,
+	       COALESCE(case_id,'00000000-0000-0000-0000-000000000000'::uuid),
+	       COALESCE(responsible_virployee_id,virployee_id),
+	       COALESCE(orchestration_plan_id,'00000000-0000-0000-0000-000000000000'::uuid),
+	       orchestration_deadline_at,ownership_version,
+	       assist_type, product_surface, subject_id, repository_generation,
 	       idempotency_key, status, input_hash, input_preview,
 	       input_json, output, output_text, answered, degraded, model, prompt_version, error, duration_ms,
 	       started_at, completed_at
@@ -155,7 +195,9 @@ func (r *Repository) scanAssistRun(row rowScanner) (AssistRun, error) {
 	var out AssistRun
 	var input, output []byte
 	err := row.Scan(
-		&out.ID, &out.TenantID, &out.VirployeeID, &out.AssistType, &out.ProductSurface, &out.SubjectID,
+		&out.ID, &out.TenantID, &out.VirployeeID, &out.CaseID, &out.ResponsibleVirployeeID,
+		&out.OrchestrationPlanID, &out.OrchestrationDeadlineAt, &out.OwnershipVersion,
+		&out.AssistType, &out.ProductSurface, &out.SubjectID,
 		&out.RepositoryGeneration, &out.IdempotencyKey, &out.Status,
 		&out.InputHash, &out.InputPreview, &input, &output, &out.OutputText, &out.Answered, &out.Degraded,
 		&out.Model, &out.PromptVersion, &out.Error, &out.DurationMS, &out.StartedAt, &out.CompletedAt,
