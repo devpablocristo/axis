@@ -20,9 +20,9 @@ Public representation:
 {
   "id": "uuid",
   "tenant_id": "tenant-id",
-  "capability_key": "billing.invoice.read",
-  "name": "Read invoices",
-  "description": "Read invoice details for the tenant.",
+  "capability_key": "analizar.estudios.medicos",
+  "name": "Analizar estudios médicos",
+  "description": "Analiza estudios médicos y comunica sus hallazgos.",
   "required_autonomy": "A1",
   "state": "active",
   "created_at": "2026-07-03T12:00:00Z",
@@ -37,8 +37,8 @@ Fields:
 
 - `id`: server-generated UUID and the relationship identity.
 - `tenant_id`: request context tenant; Capabilities are tenant-scoped in v2.
-- `capability_key`: stable human/developer key, unique per tenant.
-- `name`: required human label.
+- `capability_key`: stable internal compatibility key, unique per tenant. The Console generates it and does not expose it as the Capability's user-facing identity.
+- `name`: required, clear description of the ability, for example `Analizar estudios médicos`.
 - `description`: optional human explanation.
 - `required_autonomy`: required minimum Virployee autonomy for assignment.
 - lifecycle fields: same active, archived, trash and purge semantics used by
@@ -57,7 +57,14 @@ A5 Broad autonomy
 
 There is no default for `required_autonomy`; the creator must choose it.
 
-## Capability Key
+## User-facing Capability and internal key
+
+People create, find and assign a Capability by its clear ability phrase in
+`name`. The Console must not ask them to invent or understand a technical key.
+It generates `capability_key` from the phrase for API and runtime compatibility.
+
+The direct API contract still accepts and returns `capability_key`. Its internal
+rules are:
 
 `capability_key` rules:
 
@@ -159,7 +166,8 @@ Capabilities for the current tenant.
 
 - Capability is a minimal Companion domain entity.
 - Capability is tenant-scoped and identified by UUID.
-- `capability_key` is a unique tenant-local key, not the primary identity.
+- `name` is the primary user-facing representation and describes the ability in a clear phrase.
+- `capability_key` is a generated, unique tenant-local compatibility key, not a user-facing identity.
 - Capability has one `required_autonomy`.
 - Virployees reference capabilities by UUID.
 - Assignment validates tenant, lifecycle and autonomy compatibility.

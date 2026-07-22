@@ -73,10 +73,10 @@ Virployee.autonomy >= Capability.required_autonomy
 
 Examples:
 
-| Capability key | Required autonomy | Reason |
+| User-facing capability | Required autonomy | Reason |
 |---|---|---|
-| `calendar.events.read` | `A0` | Read/observe only. |
-| `messages.replies.draft` | `A2` | Prepares a draft, no external effect. |
+| `Leer eventos del calendario` | `A0` | Read/observe only. |
+| `Redactar respuestas a mensajes` | `A2` | Prepares a draft, no external effect. |
 | `calendar.events.create` | `A3` | Creates a low-risk, scoped record. |
 | `billing.invoice.approve` | Later phase | Needs risk, policy and approval design before modeling. |
 
@@ -84,7 +84,7 @@ Examples:
 
 | Reference | Useful idea | Design consequence for v2 |
 |---|---|---|
-| Google IAM | Permissions use `SERVICE.RESOURCE.VERB`; roles collect permissions. | Keep `capability_key = domain.resource.action`; do not overload it with autonomy. |
+| Google IAM | Permissions use `SERVICE.RESOURCE.VERB`; roles collect permissions. | Keep `capability_key = domain.resource.action` internally; show a clear ability phrase to people and do not overload either with autonomy. |
 | Kubernetes RBAC | Rules separate resource and verb. | Keep the action in the key/action vocabulary, not in a second autonomy-like scale. |
 | NIST ABAC | Decisions use subject, resource/object, action, environment and policy. | `required_autonomy` is only one attribute; policy/risk should stay separate later. |
 | OAuth RAR | Rich authorization uses structured `type`, `actions`, resources and API-specific fields. | If capabilities become executable, add structured manifest fields later instead of stretching `required_autonomy`. |
@@ -173,7 +173,7 @@ npm run build        # v2/console
 - Do not add manifests.
 - Do not add `mode`, `risk_class`, `side_effect_type`, scopes or approvals yet.
 - Do not connect Nexus in this step.
-- Do not change `capability_key = domain.resource.action`.
+- Keep `capability_key = domain.resource.action` as generated internal compatibility data; do not expose it as the user-facing Capability.
 
 ## Sources
 

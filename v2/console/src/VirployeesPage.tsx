@@ -1216,7 +1216,6 @@ function VirployeePreviewInline(props: {
               {capabilities.map((capability) => (
                 <div key={capability.id} className="virployee-preview__capability">
                   <strong>{capability.name}</strong>
-                  <span>{capability.capability_key}</span>
                   <span>Requires {formatAutonomy(capability.required_autonomy, props.autonomyByLevel)}</span>
                 </div>
               ))}
@@ -1485,7 +1484,6 @@ function VirployeeDryRunInline(props: {
                   {capabilities.map((capability) => (
                     <div key={capability.id} className="virployee-preview__capability">
                       <strong>{capability.name}</strong>
-                      <span>{capability.capability_key}</span>
                       <span>Requires {formatAutonomy(capability.required_autonomy, props.autonomyByLevel)}</span>
                     </div>
                   ))}
@@ -2275,7 +2273,8 @@ function isValidEditValues(values: VirployeeEditValues): boolean {
 }
 
 function capabilityOptionLabel(capability: Capability): string {
-  return `${capability.name} - ${capability.capability_key} - Requires ${capability.required_autonomy}`
+  const description = capability.description ? ` — ${capability.description}` : ''
+  return `${capability.name}${description} — Requires ${capability.required_autonomy}`
 }
 
 function isValidVirployeeForm(values: CrudFormValues): boolean {

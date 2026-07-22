@@ -141,7 +141,6 @@ export function CapabilitiesPage({ tenantId, principalId }: CapabilitiesPageProp
     let visibleHelpField = ''
 
     const syncFieldHelp = () => {
-      ensureFieldHelpTrigger(root, 'capability_key', 'Capability key help')
       ensureFieldHelpTrigger(root, 'required_autonomy', 'Required autonomy help')
       if (visibleHelpField) {
         renderFieldHelp(root, visibleHelpField)
@@ -419,21 +418,9 @@ function renderFieldHelp(root: HTMLElement, fieldKey: string) {
   const trigger = root.querySelector<HTMLElement>(`.axis-field-help-trigger[data-help-field="${fieldKey}"]`)
   if (!trigger) return
   const host = ensureHelpHost('capability-field-help-host')
-  host.innerHTML = fieldKey === 'required_autonomy' ? requiredAutonomyBubbleMarkup(root) : capabilityKeyBubbleMarkup()
+  host.innerHTML = requiredAutonomyBubbleMarkup(root)
   positionHelpBubble(trigger, host)
   host.style.display = 'block'
-}
-
-function capabilityKeyBubbleMarkup(): string {
-  return `
-    <div class="axis-field-help-bubble">
-      <strong>Capability key</strong>
-      <p><span>Status</span>Required on create. It cannot be edited later.</p>
-      <p><span>Format</span><code>domain.resource.action</code></p>
-      <p><span>Example</span><code>calendar.events.read</code></p>
-      <p><span>Rules</span>Lowercase letters and ñ only. No spaces, numbers, underscores or hyphens.</p>
-    </div>
-  `
 }
 
 function requiredAutonomyBubbleMarkup(root: HTMLElement): string {
@@ -511,9 +498,9 @@ function capabilityColumns(
 ): CrudPageProps<CapabilityRow>['columns'] {
   return [
     selectionColumn<CapabilityRow>(selectedIds, onToggle),
-    { key: 'capability_key', header: 'Key', className: 'iam-control__primary-col', ...crudPrimaryStickyColumn },
+    { key: 'name', header: 'Capability', className: 'iam-control__primary-col', ...crudPrimaryStickyColumn },
+    { key: 'description', header: 'Description' },
     { key: 'created_at', header: 'Created', className: 'iam-control__created-col', render: (value) => formatDateTime24(String(value ?? '')) },
-    { key: 'name', header: 'Name' },
     { key: 'required_autonomy', header: 'Required autonomy', render: (value) => formatRequiredAutonomy(String(value ?? '')) },
     { key: 'stats_activity', header: 'Activity' },
     { key: 'stats_executions', header: 'Executions' },
@@ -525,13 +512,11 @@ function capabilityColumns(
 function capabilityFormFields(): CrudPageProps<Capability>['formFields'] {
   return [
     {
-      key: 'capability_key',
-      label: 'Capability key',
-      placeholder: 'calendar.events.read',
-      createOnly: true,
+      key: 'name',
+      label: 'Capability',
+      placeholder: 'Analizar estudios médicos',
       fullWidth: true,
     },
-    { key: 'name', label: 'Name' },
     {
       key: 'required_autonomy',
       label: 'Required autonomy',
@@ -567,12 +552,6 @@ function capabilityFormFields(): CrudPageProps<Capability>['formFields'] {
       placeholder: 'Not required (default)',
       options: EVIDENCE_OPTIONS,
     },
-    {
-      key: 'rollback_capability_key',
-      label: 'Rollback capability key (optional)',
-      placeholder: 'calendar.events.delete',
-      fullWidth: true,
-    },
     { key: 'description', label: 'Description (optional)', type: 'textarea' as const, rows: 3, fullWidth: true },
   ]
 }
@@ -592,9 +571,10 @@ function capabilityToFormValues(row: Capability): CrudFormValues {
 }
 
 function capabilityPayload(values: CrudFormValues): CapabilityInput {
+  const name = stringValue(values.name)
   return {
-    capability_key: capabilityKeyValue(values.capability_key) || undefined,
-    name: stringValue(values.name),
+    capability_key: capabilityKeyValue(values.capability_key) || capabilityKeyFromPhrase(name),
+    name,
     description: stringValue(values.description),
     required_autonomy: requiredAutonomyValue(values.required_autonomy),
     risk_class: riskClassValue(values.risk_class),
@@ -625,9 +605,7 @@ function booleanSelectValue(value: CrudFormValues[string]): boolean | undefined 
 }
 
 function isValidCapabilityForm(values: CrudFormValues): boolean {
-  const capabilityKey = capabilityKeyValue(values.capability_key)
   return (
-    validCapabilityKey(capabilityKey) &&
     stringValue(values.name).length > 0 &&
     requiredAutonomyValue(values.required_autonomy).length > 0
   )
@@ -709,8 +687,16 @@ function capabilityKeyValue(value: CrudFormValues[string]): string {
   return stringValue(value).toLowerCase()
 }
 
-function validCapabilityKey(value: string): boolean {
-  return /^[a-zñ]+\.[a-zñ]+\.[a-zñ]+$/.test(value)
+function capabilityKeyFromPhrase(value: string): string {
+  const words = value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .match(/[a-zñ]+/g) ?? []
+  if (words.length === 0) return 'capacidad.general.interna'
+  if (words.length === 1) return `${words[0]}.capacidad.general`
+  if (words.length === 2) return `${words[0]}.${words[1]}.capacidad`
+  return `${words[0]}.${words[1]}.${words.slice(2).join('')}`
 }
 
 function requiredAutonomyValue(value: CrudFormValues[string]): VirployeeAutonomy | '' {
