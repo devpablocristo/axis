@@ -142,14 +142,13 @@ func (p *Planner) Answer(ctx context.Context, req AnswerRequest) (AnswerResponse
 
 	text := stripCodeFences(resp.Text)
 	base.OutputText = text
-	if len(req.ResponseSchema) > 0 {
-		if raw, ok := asJSONObject(text); ok {
-			base.OutputJSON = raw
-			base.Answered = true
-		}
-		return base, nil
+	// A usable answer is a non-empty JSON object/array. Echo (no model) returns
+	// canned prose that does not parse, so it stays Answered=false (degraded) — the
+	// caller then marks the run degraded instead of treating prose as an answer.
+	if raw, ok := asJSONObject(text); ok {
+		base.OutputJSON = raw
+		base.Answered = true
 	}
-	base.Answered = text != ""
 	return base, nil
 }
 
@@ -157,10 +156,14 @@ func (p *Planner) Answer(ctx context.Context, req AnswerRequest) (AnswerResponse
 // JSON; a bare echo string (Echo provider) is not, so it degrades to (nil,false).
 func asJSONObject(text string) (json.RawMessage, bool) {
 	t := strings.TrimSpace(text)
-	if t == "" || (t[0] != '{' && t[0] != '[') {
+	if len(t) < 2 || (t[0] != '{' && t[0] != '[') {
 		return nil, false
 	}
 	if !json.Valid([]byte(t)) {
+		return nil, false
+	}
+	// Reject an empty object/array — it is not a usable answer.
+	if compact := strings.Join(strings.Fields(t), ""); compact == "{}" || compact == "[]" {
 		return nil, false
 	}
 	return json.RawMessage(t), true
@@ -178,11 +181,7 @@ func buildAnswerSystemPrompt(req AnswerRequest) string {
 		b.WriteString("\n\n")
 	}
 	b.WriteString("Read the input JSON and produce your answer based ONLY on what it contains; do not invent facts. ")
-	if len(req.ResponseSchema) > 0 {
-		b.WriteString("Respond with a SINGLE JSON object that conforms to the required schema, and nothing outside the JSON.")
-	} else {
-		b.WriteString("Respond concisely.")
-	}
+	b.WriteString("Respond with a SINGLE JSON object and nothing outside it — no prose, no code fences.")
 	return b.String()
 }
 

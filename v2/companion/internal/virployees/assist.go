@@ -42,11 +42,6 @@ func (u *UseCases) resolveDocuments(ctx context.Context, inputJSON json.RawMessa
 	return enriched
 }
 
-// assistObjectSchema is a minimal "return a JSON object" schema. It triggers the
-// runtime's structured-output path (so Echo/no-model degrades to Answered=false);
-// the exact field shape is driven by the virployee's system prompt, not here.
-var assistObjectSchema = map[string]any{"type": "object"}
-
 // Assist runs the "process and respond" path: the virployee interprets the input
 // and answers, with NO external effects and NO governance approval (read/explain).
 // It reserves the run before calling the model (idempotent) and fails closed.
@@ -102,10 +97,11 @@ func (u *UseCases) Assist(ctx context.Context, tenantID string, id uuid.UUID, in
 
 	started := time.Now()
 	out, answerErr := u.answerer.Answer(ctx, AnswerInput{
-		SystemPrompt:   rc.ProfileTemplate.SystemPrompt,
-		JobRole:        rc.JobRole.Name,
-		InputJSON:      answerInputJSON,
-		ResponseSchema: assistObjectSchema,
+		SystemPrompt: rc.ProfileTemplate.SystemPrompt,
+		JobRole:      rc.JobRole.Name,
+		InputJSON:    answerInputJSON,
+		// No response schema: the médico's system prompt dictates the exact JSON
+		// shape. A loose {"type":"object"} schema makes Gemini return an empty {}.
 	})
 	durationMS := time.Since(started).Milliseconds()
 
