@@ -49,6 +49,10 @@ type VectorStorePort interface {
 	DeleteGeneration(context.Context, Scope) error
 }
 
+type ArtifactIndexerPort interface {
+	Index(context.Context, Scope, []ContentPart) error
+}
+
 type ArtifactRetrieverPort interface {
 	Retrieve(context.Context, RetrievalQuery) ([]RetrievalHit, error)
 }

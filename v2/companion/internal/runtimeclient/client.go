@@ -169,6 +169,57 @@ type AnswerResult struct {
 	PromptVersion string
 }
 
+const (
+	EmbeddingTaskDocument = "RETRIEVAL_DOCUMENT"
+	EmbeddingTaskQuery    = "RETRIEVAL_QUERY"
+)
+
+type EmbedRequest struct {
+	Texts    []string
+	TaskType string
+}
+
+type EmbedResult struct {
+	Model      string
+	Dimensions int
+	Embeddings [][]float32
+}
+
+func (c *Client) Embed(ctx context.Context, in EmbedRequest) (EmbedResult, error) {
+	raw, err := json.Marshal(struct {
+		Texts    []string `json:"texts"`
+		TaskType string   `json:"task_type"`
+	}{Texts: in.Texts, TaskType: in.TaskType})
+	if err != nil {
+		return EmbedResult{}, fmt.Errorf("encode embedding request: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/embeddings", bytes.NewReader(raw))
+	if err != nil {
+		return EmbedResult{}, fmt.Errorf("build embedding request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if c.internalAuthSecret != "" {
+		req.Header.Set("X-Axis-Internal-Token", c.internalAuthSecret)
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return EmbedResult{}, fmt.Errorf("embeddings: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return EmbedResult{}, fmt.Errorf("embeddings: status %d", resp.StatusCode)
+	}
+	var out struct {
+		Model      string      `json:"model"`
+		Dimensions int         `json:"dimensions"`
+		Embeddings [][]float32 `json:"embeddings"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return EmbedResult{}, fmt.Errorf("decode embedding response: %w", err)
+	}
+	return EmbedResult(out), nil
+}
+
 // Answer asks the runtime to process the input JSON and respond. A transport or
 // non-200 error is returned to the caller (fail-closed: no silent success).
 func (c *Client) Answer(ctx context.Context, in AnswerRequest) (AnswerResult, error) {

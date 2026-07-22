@@ -158,3 +158,29 @@ func TestAnswerErrorsOnNonOKStatus(t *testing.T) {
 		t.Fatal("expected an error on a non-200 status")
 	}
 }
+
+func TestEmbedMapsResponseAndUsesInternalAuth(t *testing.T) {
+	var gotToken, gotTask string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotToken = r.Header.Get("X-Axis-Internal-Token")
+		var request struct {
+			Texts []string `json:"texts"`
+			Task  string   `json:"task_type"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&request)
+		gotTask = request.Task
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"model": "gemini-embedding-001", "dimensions": 768,
+			"embeddings": [][]float32{make([]float32, 768)},
+		})
+	}))
+	defer srv.Close()
+	client := New(srv.URL, srv.Client(), "secret-token")
+	result, err := client.Embed(context.Background(), EmbedRequest{Texts: []string{"clinical"}, TaskType: EmbeddingTaskDocument})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotToken != "secret-token" || gotTask != EmbeddingTaskDocument || result.Model != "gemini-embedding-001" || len(result.Embeddings[0]) != 768 {
+		t.Fatalf("token=%q task=%q result=%#v", gotToken, gotTask, result)
+	}
+}

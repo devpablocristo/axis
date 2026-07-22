@@ -22,6 +22,8 @@ type Config struct {
 	LLMModel       string
 	VertexProject  string
 	VertexLocation string
+	EmbeddingModel string
+	EmbeddingDim   int
 
 	ServiceVersion string
 	OTelExporter   string
@@ -41,6 +43,8 @@ func Load() Config {
 		LLMModel:           strings.TrimSpace(envconfig.Get("RUNTIME_V2_LLM_MODEL", "gemini-2.5-flash-lite")),
 		VertexProject:      strings.TrimSpace(envconfig.Get("RUNTIME_V2_VERTEX_PROJECT", "")),
 		VertexLocation:     strings.TrimSpace(envconfig.Get("RUNTIME_V2_VERTEX_LOCATION", "us-central1")),
+		EmbeddingModel:     strings.TrimSpace(envconfig.Get("RUNTIME_V2_EMBEDDING_MODEL", "gemini-embedding-001")),
+		EmbeddingDim:       envconfig.Int("RUNTIME_V2_EMBEDDING_DIMENSIONS", 768),
 		ServiceVersion:     envconfig.Get("RUNTIME_V2_SERVICE_VERSION", ""),
 		OTelExporter:       strings.ToLower(strings.TrimSpace(envconfig.Get("RUNTIME_V2_OTEL_EXPORTER", "none"))),
 		OTelEndpoint:       strings.TrimSpace(envconfig.Get("RUNTIME_V2_OTEL_OTLP_ENDPOINT", "")),

@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	cfg "github.com/devpablocristo/companion-v2/cmd/config"
+	"github.com/devpablocristo/companion-v2/internal/artifactindex"
 	"github.com/devpablocristo/companion-v2/internal/artifacts"
 	"github.com/devpablocristo/companion-v2/internal/capabilities"
 	"github.com/devpablocristo/companion-v2/internal/executionstats"
@@ -172,13 +173,18 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		// Nexus ledger. Best-effort: emission failures never fail the work.
 		virployeesUsecases.SetAuditEmitter(auditEmitterAdapter{client: nexusClient})
 	}
+	var runtimePlanner *runtimeclient.Client
 	if config.RuntimeBaseURL != "" {
-		runtimePlanner := runtimeclient.New(config.RuntimeBaseURL, &http.Client{Timeout: 30 * time.Second, Transport: otelhttp.NewTransport(http.DefaultTransport)}, config.InternalAuthSecret)
+		runtimePlanner = runtimeclient.New(config.RuntimeBaseURL, &http.Client{Timeout: 30 * time.Second, Transport: otelhttp.NewTransport(http.DefaultTransport)}, config.InternalAuthSecret)
 		virployeesUsecases.SetRuntimePlanner(runtimePlanner)
 		virployeesUsecases.SetRuntimeAnswerer(runtimeAnswererAdapter{client: runtimePlanner})
 		virployeesUsecases.SetDocumentFetcher(virployees.NewHTTPDocumentFetcher(&http.Client{Timeout: 15 * time.Second, Transport: otelhttp.NewTransport(http.DefaultTransport)}))
 	}
 	if config.ArtifactStagingBucket != "" {
+		if runtimePlanner == nil {
+			db.Close()
+			return nil, fmt.Errorf("artifact ingestion requires COMPANION_V2_RUNTIME_BASE_URL")
+		}
 		tokens, err := google.DefaultTokenSource(ctx, "https://www.googleapis.com/auth/devstorage.read_write")
 		if err != nil {
 			db.Close()
@@ -214,6 +220,14 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 			store,
 			artifacts.TextFormatAdapter{}, artifacts.PDFFormatAdapter{}, artifacts.NativeMediaAdapter{},
 		)
+		indexService, err := artifactindex.NewService(
+			artifactindex.NewChunker(), artifactindex.NewRuntimeEmbedder(runtimePlanner), artifactindex.NewRepository(db.Pool()),
+		)
+		if err != nil {
+			db.Close()
+			return nil, err
+		}
+		artifactPipeline.SetIndexer(indexService)
 		virployeesUsecases.SetArtifactIngestor(artifactPipeline)
 	}
 	// Executors are wired per enabled mode (COMPANION_V2_EXECUTION_MODE is a set).

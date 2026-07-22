@@ -16,7 +16,10 @@ type Pipeline struct {
 	scanner MalwareScannerPort
 	store   ArtifactStorePort
 	formats []FormatAdapter
+	indexer ArtifactIndexerPort
 }
+
+func (p *Pipeline) SetIndexer(indexer ArtifactIndexerPort) { p.indexer = indexer }
 
 func NewPipeline(catalog ArtifactCatalogPort, fetcher ArtifactFetcherPort, scanner MalwareScannerPort, store ArtifactStorePort, formats ...FormatAdapter) *Pipeline {
 	return &Pipeline{catalog: catalog, fetcher: fetcher, scanner: scanner, store: store, formats: formats}
@@ -31,6 +34,11 @@ func (p *Pipeline) Ingest(ctx context.Context, req IngestRequest) (IngestResult,
 	}
 
 	result := IngestResult{Records: make([]Record, 0, len(req.Artifacts))}
+	if req.Progress != nil {
+		if err := req.Progress(ctx, StatusExtracting); err != nil {
+			return IngestResult{}, err
+		}
+	}
 	for _, manifest := range req.Artifacts {
 		record, err := p.catalog.UpsertManifest(ctx, req.Scope, manifest)
 		if err != nil {
@@ -55,6 +63,31 @@ func (p *Pipeline) Ingest(ctx context.Context, req IngestRequest) (IngestResult,
 	}
 	if len(result.Parts) == 0 {
 		return IngestResult{}, ErrEmptyDerivative
+	}
+	if p.indexer != nil {
+		if req.Progress != nil {
+			if err := req.Progress(ctx, StatusIndexing); err != nil {
+				return IngestResult{}, err
+			}
+		}
+		for i, record := range result.Records {
+			if record.Status == StatusExtracted {
+				result.Records[i], _ = p.catalog.SetStatus(ctx, req.Scope.TenantID, record.ID, StatusIndexing, record.StagedURI, record.ActualMIME, "")
+			}
+		}
+		if err := p.indexer.Index(ctx, req.Scope, result.Parts); err != nil {
+			for i, record := range result.Records {
+				if record.Status == StatusIndexing {
+					result.Records[i], _ = p.catalog.SetStatus(ctx, req.Scope.TenantID, record.ID, StatusFailed, record.StagedURI, record.ActualMIME, "artifact_indexing_failed")
+				}
+			}
+			return IngestResult{}, fmt.Errorf("%w: %v", ErrIndexingFailed, err)
+		}
+		for i, record := range result.Records {
+			if record.Status == StatusIndexing {
+				result.Records[i], _ = p.catalog.SetStatus(ctx, req.Scope.TenantID, record.ID, StatusIndexed, record.StagedURI, record.ActualMIME, "")
+			}
+		}
 	}
 	return result, nil
 }
@@ -233,6 +266,8 @@ func stableErrorCode(err error) string {
 		return "unsupported_format"
 	case errors.Is(err, ErrEmptyDerivative):
 		return "empty_derivative"
+	case errors.Is(err, ErrIndexingFailed):
+		return "artifact_indexing_failed"
 	default:
 		return "artifact_processing_failed"
 	}

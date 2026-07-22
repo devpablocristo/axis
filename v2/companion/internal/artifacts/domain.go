@@ -1,6 +1,7 @@
 package artifacts
 
 import (
+	"context"
 	"errors"
 	"io"
 	"time"
@@ -23,6 +24,7 @@ var (
 	ErrMIMEMismatch      = errors.New("artifact MIME does not match content")
 	ErrUnsupportedFormat = errors.New("artifact format is not supported")
 	ErrEmptyDerivative   = errors.New("artifact adapter returned no usable content")
+	ErrIndexingFailed    = errors.New("artifact indexing failed")
 )
 
 type Scope struct {
@@ -125,6 +127,7 @@ type AdaptInput struct {
 type IngestRequest struct {
 	Scope     Scope
 	Artifacts []Manifest
+	Progress  func(context.Context, Status) error
 }
 
 type IngestResult struct {
@@ -141,12 +144,15 @@ type ExtractRequest struct {
 }
 
 type Chunk struct {
-	ID         string
-	Text       string
-	MIMEType   string
-	SHA256     string
-	DocumentID string
-	Locator    *Locator
+	ID               string
+	Text             string
+	MIMEType         string
+	SHA256           string
+	DocumentID       string
+	Locator          *Locator
+	SourceVersion    string
+	ExtractorVersion string
+	ChunkerVersion   string
 }
 
 type Embedding struct {

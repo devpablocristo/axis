@@ -149,6 +149,17 @@ derived chunks. The original remains authoritative; text, OCR, captions,
 transcripts, tables and keyframes are versioned derivatives and never replace
 it.
 
+`artifactindex` is a separate Companion bounded context, not an extension of
+Virployee memory. It chunks only verified derivatives and stores 768-dimensional
+`gemini-embedding-001` vectors in pgvector together with FTS text and source
+provenance. Tenant, virployee, product, subject, repository generation and model
+are applied as SQL predicates before ranking; retrieval combines cosine and FTS
+scores. Extractor, chunker and embedding versions are part of the stored index
+contract, so changing one replaces affected chunks rather than mixing versions.
+Runtime owns the Vertex embedding adapter and exposes it only on the internal
+authenticated surface. Document and query task types stay distinct and input
+truncation is disabled so incomplete clinical evidence fails visibly.
+
 Each artifact is capped at 250 MiB, one diagnosis at 500 MiB and a product
 repository at 5 GiB. Fetching is streamed through a bounded spool, verifies the
 declared byte count and SHA-256, sniffs the actual MIME, and fails closed on a

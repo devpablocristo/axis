@@ -11,6 +11,7 @@ import (
 	ginmw "github.com/devpablocristo/platform/http/gin/go"
 	observability "github.com/devpablocristo/platform/observability/go"
 	cfg "github.com/devpablocristo/runtime-v2/cmd/config"
+	"github.com/devpablocristo/runtime-v2/internal/embeddings"
 	"github.com/devpablocristo/runtime-v2/internal/planner"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
@@ -43,6 +44,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 
 	provider := buildProvider(ctx, config)
 	plannerHandler := planner.NewHandler(planner.New(provider, config.LLMModel))
+	embeddingHandler := embeddings.NewHandler(buildEmbeddingProvider(ctx, config))
 
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
@@ -57,6 +59,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	api := router.Group("/v1")
 	api.Use(internalAuthMiddleware(config.InternalAuthSecret))
 	plannerHandler.Routes(api)
+	embeddingHandler.Routes(api)
 
 	server := &http.Server{
 		Addr:    config.Addr(),

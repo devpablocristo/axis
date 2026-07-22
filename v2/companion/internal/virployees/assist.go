@@ -145,7 +145,7 @@ func (u *UseCases) ProcessAssistRun(ctx context.Context, tenantID string, runID 
 		u.emitAssistAudit(ctx, tenantID, run.VirployeeID, failed, run.InputHash)
 		return failed, domainerr.Unavailable("required artifact processing failed")
 	}
-	answerInputJSON := run.InputJSON
+	var answerInputJSON json.RawMessage
 	if ingested {
 		enriched, err := json.Marshal(map[string]any{"content_parts": contentParts})
 		if err != nil {
@@ -212,6 +212,20 @@ func (u *UseCases) ingestArtifacts(ctx context.Context, run AssistRun) ([]artifa
 			SubjectID: run.SubjectID, RepositoryGeneration: run.RepositoryGeneration,
 		},
 		Artifacts: manifests,
+		Progress: func(progressCtx context.Context, status artifacts.Status) error {
+			assistStatus := ""
+			switch status {
+			case artifacts.StatusExtracting:
+				assistStatus = "extracting"
+			case artifacts.StatusIndexing:
+				assistStatus = "indexing"
+			}
+			if assistStatus == "" {
+				return nil
+			}
+			_, progressErr := u.assistRepo.SetAssistRunStatus(progressCtx, run.TenantID, run.ID, assistStatus)
+			return progressErr
+		},
 	})
 	if err != nil {
 		return nil, true, err

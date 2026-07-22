@@ -1,6 +1,6 @@
 services:
   companion-v2-postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${COMPANION_V2_POSTGRES_DB:-companion_v2}
@@ -171,6 +171,8 @@ services:
       RUNTIME_V2_LLM_MODEL: ${RUNTIME_V2_LLM_MODEL:-gemini-2.5-flash-lite}
       RUNTIME_V2_VERTEX_PROJECT: ${RUNTIME_V2_VERTEX_PROJECT:-}
       RUNTIME_V2_VERTEX_LOCATION: ${RUNTIME_V2_VERTEX_LOCATION:-us-central1}
+      RUNTIME_V2_EMBEDDING_MODEL: ${RUNTIME_V2_EMBEDDING_MODEL:-gemini-embedding-001}
+      RUNTIME_V2_EMBEDDING_DIMENSIONS: ${RUNTIME_V2_EMBEDDING_DIMENSIONS:-768}
       RUNTIME_V2_OTEL_EXPORTER: ${RUNTIME_V2_OTEL_EXPORTER:-otlp}
       RUNTIME_V2_OTEL_OTLP_ENDPOINT: ${RUNTIME_V2_OTEL_OTLP_ENDPOINT:-jaeger:4318}
       RUNTIME_V2_OTEL_OTLP_INSECURE: ${RUNTIME_V2_OTEL_OTLP_INSECURE:-true}

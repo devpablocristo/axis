@@ -18,6 +18,16 @@ type fakeCatalog struct {
 	existing *Record
 }
 
+type fakeIndexer struct {
+	called bool
+	err    error
+}
+
+func (i *fakeIndexer) Index(_ context.Context, _ Scope, _ []ContentPart) error {
+	i.called = true
+	return i.err
+}
+
 func (c *fakeCatalog) UpsertManifest(_ context.Context, scope Scope, manifest Manifest) (Record, error) {
 	if c.records == nil {
 		c.records = map[uuid.UUID]Record{}
@@ -155,6 +165,48 @@ func TestPipelineIngestsVerifiedTextAndPreservesProvenance(t *testing.T) {
 	}
 	if len(result.Parts) != 1 || result.Parts[0].Text != string(data) || result.Parts[0].DocumentID != "doc-1" || result.Parts[0].SHA256 != checksum(data) {
 		t.Fatalf("unexpected content parts: %+v", result.Parts)
+	}
+}
+
+func TestPipelineIndexesVerifiedDerivativesAndReportsProgress(t *testing.T) {
+	data := []byte("Glucosa en ayunas 126 mg/dL")
+	indexer := &fakeIndexer{}
+	pipeline := NewPipeline(&fakeCatalog{}, fakeFetcher{
+		content: map[string][]byte{"doc-1": data}, contentType: map[string]string{"doc-1": "text/plain"},
+	}, &fakeScanner{}, &fakeStore{}, TextFormatAdapter{})
+	pipeline.SetIndexer(indexer)
+	var progress []Status
+	result, err := pipeline.Ingest(context.Background(), IngestRequest{Scope: testScope(), Artifacts: []Manifest{{
+		DocumentID: "doc-1", Name: "lab.txt", ReadURL: "https://product/doc-1", SHA256: checksum(data),
+		MIMEType: "text/plain", SizeBytes: int64(len(data)), Required: true,
+	}}, Progress: func(_ context.Context, status Status) error {
+		progress = append(progress, status)
+		return nil
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !indexer.called || len(result.Records) != 1 || result.Records[0].Status != StatusIndexed {
+		t.Fatalf("indexer=%v records=%+v", indexer.called, result.Records)
+	}
+	if len(progress) != 2 || progress[0] != StatusExtracting || progress[1] != StatusIndexing {
+		t.Fatalf("progress=%v", progress)
+	}
+}
+
+func TestPipelineFailsClosedWhenIndexingFails(t *testing.T) {
+	data := []byte("clinical")
+	indexer := &fakeIndexer{err: errors.New("provider unavailable")}
+	pipeline := NewPipeline(&fakeCatalog{}, fakeFetcher{
+		content: map[string][]byte{"doc-1": data}, contentType: map[string]string{"doc-1": "text/plain"},
+	}, &fakeScanner{}, &fakeStore{}, TextFormatAdapter{})
+	pipeline.SetIndexer(indexer)
+	_, err := pipeline.Ingest(context.Background(), IngestRequest{Scope: testScope(), Artifacts: []Manifest{{
+		DocumentID: "doc-1", Name: "lab.txt", ReadURL: "https://product/doc-1", SHA256: checksum(data),
+		MIMEType: "text/plain", SizeBytes: int64(len(data)), Required: true,
+	}}})
+	if !errors.Is(err, ErrIndexingFailed) || StableErrorCode(err) != "artifact_indexing_failed" {
+		t.Fatalf("expected stable indexing failure, got %v (%s)", err, StableErrorCode(err))
 	}
 }
 
