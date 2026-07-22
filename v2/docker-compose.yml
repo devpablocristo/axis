@@ -151,6 +151,7 @@ services:
       interval: 2s
       timeout: 3s
       retries: 30
+      start_period: 90s
 
   nexus-v2:
     build:
@@ -189,6 +190,7 @@ services:
       interval: 2s
       timeout: 3s
       retries: 30
+      start_period: 90s
 
   runtime-v2:
     build:
@@ -227,6 +229,7 @@ services:
       interval: 2s
       timeout: 3s
       retries: 30
+      start_period: 90s
 
   bff-v2:
     build:
@@ -282,6 +285,7 @@ services:
       interval: 2s
       timeout: 3s
       retries: 30
+      start_period: 90s
 
   console-v2:
     build:
