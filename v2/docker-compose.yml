@@ -103,6 +103,9 @@ services:
     depends_on:
       companion-v2-postgres:
         condition: service_healthy
+    networks:
+      - default
+      - axis-medmory
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/readyz >/dev/null 2>&1 || exit 1"]
       interval: 2s
@@ -327,3 +330,8 @@ volumes:
   runtime-v2-go-mod-cache:
   runtime-v2-go-build-cache:
   console-v2-node-modules:
+
+networks:
+  axis-medmory:
+    name: axis-medmory
+    external: true
