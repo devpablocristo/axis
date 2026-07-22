@@ -168,7 +168,7 @@ sig = "979513949b1de64b"
 [[bindings]]
 doc = "v2/companion/docs/specs/memories.md"
 target = "v2/companion/migrations/0017_companion_memories.sql"
-sig = "a46f0ca4e66f7eb4"
+sig = "ccb30f9270e3a10d"
 
 [[bindings]]
 doc = "v2/companion/docs/specs/memories.md"
