@@ -14,6 +14,7 @@ const (
 	StatusPending  Status = "pending"
 	StatusApproved Status = "approved"
 	StatusRejected Status = "rejected"
+	StatusExpired  Status = "expired"
 )
 
 type Approval struct {
@@ -31,6 +32,7 @@ type Approval struct {
 	DecidedBy         string
 	DecisionNote      string
 	DecidedAt         *time.Time
+	ExpiresAt         time.Time
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 }
@@ -61,7 +63,7 @@ func NormalizeListStatus(value string) (Status, error) {
 	if status == "" {
 		return StatusPending, nil
 	}
-	if status != StatusPending && status != StatusApproved && status != StatusRejected {
+	if status != StatusPending && status != StatusApproved && status != StatusRejected && status != StatusExpired {
 		return "", domainerr.Validation("invalid approval status")
 	}
 	return status, nil

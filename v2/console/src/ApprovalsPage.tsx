@@ -24,11 +24,12 @@ type ApprovalColumnState = {
 }
 type ApprovalsByStatus = Record<ApprovalStatus, ApprovalColumnState>
 
-const APPROVAL_STATUSES: ApprovalStatus[] = ['pending', 'approved', 'rejected']
+const APPROVAL_STATUSES: ApprovalStatus[] = ['pending', 'approved', 'rejected', 'expired']
 const APPROVAL_PAGE_LIMITS: Record<ApprovalStatus, number> = {
 	pending: 25,
 	approved: 10,
 	rejected: 10,
+	expired: 10,
 }
 
 export function ApprovalsPage({ tenantId, principalId, focusApprovalId = '', onReturnToVirployee }: ApprovalsPageProps) {
@@ -339,6 +340,7 @@ function ApprovalCard(props: {
         <MetaValue label="Risk" value={approval.risk_level || 'unknown'} />
         <MetaValue label="Resource" value={`${approval.target_system || '-'} / ${approval.target_resource || '-'}`} />
         <MetaValue label="Created" value={formatDate(approval.created_at)} />
+        <MetaValue label="Expires" value={formatDate(approval.expires_at)} />
         <MetaValue label="Approval" value={shortHash(approval.id)} />
         <MetaValue label="Binding" value={shortHash(approval.binding_hash)} />
         {approval.decided_by ? (
@@ -388,18 +390,21 @@ function MetaValue(props: { label: string; value: string }) {
 }
 
 function approvalColumnTitle(status: ApprovalStatus): string {
+	if (status === 'expired') return 'Expired'
   if (status === 'approved') return 'Approved'
   if (status === 'rejected') return 'Rejected'
   return 'Pending'
 }
 
 function approvalColumnCopy(status: ApprovalStatus): string {
+	if (status === 'expired') return 'Closed after its decision window elapsed'
   if (status === 'approved') return 'Resolved and allowed'
   if (status === 'rejected') return 'Resolved and denied'
   return 'Waiting for a human decision'
 }
 
 function approvalStatusLabel(status: ApprovalStatus): string {
+	if (status === 'expired') return 'Expired'
   if (status === 'approved') return 'Approved'
   if (status === 'rejected') return 'Rejected'
   return 'Pending'
@@ -407,14 +412,16 @@ function approvalStatusLabel(status: ApprovalStatus): string {
 
 function approvalStatusTone(status: ApprovalStatus): 'success' | 'danger' | 'warning' {
   if (status === 'approved') return 'success'
-  if (status === 'rejected') return 'danger'
+	if (status === 'rejected') return 'danger'
+	if (status === 'expired') return 'danger'
   return 'warning'
 }
 
 function emptyStateFor(status: ApprovalStatus, searchActive = false): string {
   if (searchActive) return 'No matching approvals loaded'
   if (status === 'approved') return 'No approved approvals'
-  if (status === 'rejected') return 'No rejected approvals'
+	if (status === 'rejected') return 'No rejected approvals'
+	if (status === 'expired') return 'No expired approvals'
   return 'No pending approvals'
 }
 
@@ -439,6 +446,7 @@ function filterApprovalsByStatus(columns: ApprovalsByStatus, query: string): App
     pending: { ...columns.pending, items: columns.pending.items.filter((approval) => approvalMatchesQuery(approval, query)) },
     approved: { ...columns.approved, items: columns.approved.items.filter((approval) => approvalMatchesQuery(approval, query)) },
     rejected: { ...columns.rejected, items: columns.rejected.items.filter((approval) => approvalMatchesQuery(approval, query)) },
+		expired: { ...columns.expired, items: columns.expired.items.filter((approval) => approvalMatchesQuery(approval, query)) },
   }
 }
 
@@ -457,6 +465,7 @@ function approvalMatchesQuery(approval: Approval, query: string): boolean {
     approval.decision_note,
     approval.created_at,
     approval.decided_at,
+		approval.expires_at,
   ].some((value) => String(value ?? '').toLowerCase().includes(query))
 }
 
@@ -480,6 +489,7 @@ function emptyApprovalColumns(): ApprovalsByStatus {
     pending: emptyApprovalColumn(),
     approved: emptyApprovalColumn(),
     rejected: emptyApprovalColumn(),
+		expired: emptyApprovalColumn(),
   }
 }
 

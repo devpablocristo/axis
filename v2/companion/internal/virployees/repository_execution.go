@@ -27,6 +27,8 @@ type PreparedActionRecord struct {
 
 type ExecutionAttempt struct {
 	ID                uuid.UUID
+	TenantID          string
+	VirployeeID       uuid.UUID
 	PreparedActionID  uuid.UUID
 	IdempotencyKey    string
 	Status            string
@@ -37,6 +39,8 @@ type ExecutionAttempt struct {
 	NexusReportStatus string
 	StartedAt         time.Time
 	CompletedAt       *time.Time
+	RecoveryAttempts  int
+	ReportAttempts    int
 }
 
 func (r *Repository) SavePreparedAction(ctx context.Context, tenantID string, virployeeID uuid.UUID, checkID, approvalID string, capabilityKey, payloadHash, bindingHash string, action preparedactions.Action) (PreparedActionRecord, error) {
@@ -138,7 +142,8 @@ func (r *Repository) CompleteExecution(ctx context.Context, tenantID string, id 
 	_, err = r.pool.Exec(ctx, `
 		UPDATE companion_execution_attempts
 		SET status = $3, resource_id = $4, result = $5::jsonb, error = $6,
-		    duration_ms = $7, completed_at = now(), updated_at = now()
+		    duration_ms = $7, completed_at = now(), updated_at = now(),
+		    recovery_lease_owner = '', recovery_lease_until = NULL, last_watcher_error = ''
 		WHERE tenant_id = $1 AND id = $2
 	`, tenantID, id, status, resourceID, raw, executionError, durationMS)
 	if err != nil {

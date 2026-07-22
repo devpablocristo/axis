@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -15,6 +16,7 @@ import (
 	"github.com/devpablocristo/nexus-v2/internal/evidence"
 	"github.com/devpablocristo/nexus-v2/internal/governance"
 	"github.com/devpablocristo/nexus-v2/internal/infra/migrations"
+	"github.com/devpablocristo/nexus-v2/internal/watchers"
 	postgres "github.com/devpablocristo/platform/databases/postgres/go"
 	ginmw "github.com/devpablocristo/platform/http/gin/go"
 	observability "github.com/devpablocristo/platform/observability/go"
@@ -27,6 +29,8 @@ type Dependencies struct {
 	Router         *gin.Engine
 	Server         *http.Server
 	tracerShutdown func(context.Context) error
+	watcherCancel  context.CancelFunc
+	watcherWG      sync.WaitGroup
 }
 
 func Initialize(ctx context.Context) (*Dependencies, error) {
@@ -72,7 +76,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	actionTypeUseCases := actiontypes.NewUseCases(actionTypeRepo)
 	actionTypeHandler := actiontypes.NewHandler(actionTypeUseCases)
 
-	governanceRepo := governance.NewRepository(db.Pool())
+	governanceRepo := governance.NewRepository(db.Pool(), config.ApprovalTTL)
 	governanceUseCases := governance.NewUseCases(actionTypeUseCases, governanceRepo)
 	governanceHandler := governance.NewHandler(governanceUseCases)
 
@@ -91,6 +95,9 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	// same signing key; nil signer (no key) emits packs with algorithm "none".
 	evidenceUseCases := evidence.NewUseCases(auditUseCases, evidence.NewSigner(config.SigningKey, ""))
 	evidenceHandler := evidence.NewHandler(evidenceUseCases)
+
+	watcherCtx, watcherCancel := context.WithCancel(ctx)
+	approvalWatcher := watchers.New(watchers.NewRepository(db.Pool()), auditUseCases)
 
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
@@ -120,13 +127,20 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		Handler: tracedServerHandler("nexus-v2", observability.Middleware(logger, router)),
 	}
 
-	return &Dependencies{
+	deps := &Dependencies{
 		Config:         config,
 		DB:             db,
 		Router:         router,
 		Server:         server,
 		tracerShutdown: tracerShutdown,
-	}, nil
+		watcherCancel:  watcherCancel,
+	}
+	deps.watcherWG.Add(1)
+	go func() {
+		defer deps.watcherWG.Done()
+		approvalWatcher.Run(watcherCtx, config.WatcherInterval, config.WatcherBatchSize)
+	}()
+	return deps, nil
 }
 
 // tracedServerHandler wraps an HTTP handler with an OTel server span per
@@ -147,6 +161,10 @@ func tracedServerHandler(service string, h http.Handler) http.Handler {
 func (d *Dependencies) Close() {
 	if d == nil {
 		return
+	}
+	if d.watcherCancel != nil {
+		d.watcherCancel()
+		d.watcherWG.Wait()
 	}
 	if d.tracerShutdown != nil {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

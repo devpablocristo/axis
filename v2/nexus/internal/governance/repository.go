@@ -11,11 +11,16 @@ import (
 )
 
 type Repository struct {
-	pool *pgxpool.Pool
+	pool        *pgxpool.Pool
+	approvalTTL time.Duration
 }
 
-func NewRepository(pool *pgxpool.Pool) *Repository {
-	return &Repository{pool: pool}
+func NewRepository(pool *pgxpool.Pool, approvalTTL ...time.Duration) *Repository {
+	ttl := time.Hour
+	if len(approvalTTL) > 0 && approvalTTL[0] > 0 {
+		ttl = approvalTTL[0]
+	}
+	return &Repository{pool: pool, approvalTTL: ttl}
 }
 
 func (r *Repository) RecordCheck(ctx context.Context, tenantID string, input domain.NormalizedCheckInput, result domain.CheckResult) (domain.RecordedCheck, error) {
@@ -50,6 +55,7 @@ func (r *Repository) RecordCheck(ctx context.Context, tenantID string, input dom
 	recorded := domain.RecordedCheck{CheckID: checkID.String()}
 	if result.Decision == domain.DecisionRequireApproval {
 		approvalID := uuid.New()
+		expiresAt := now.Add(r.approvalTTL)
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO approvals (
 				id,
@@ -63,11 +69,12 @@ func (r *Repository) RecordCheck(ctx context.Context, tenantID string, input dom
 				reason,
 				binding_hash,
 				status,
+				expires_at,
 				created_at,
 				updated_at
 			)
-			VALUES ($1::uuid, $2, $3::uuid, $4, $5, $6, $7, $8, $9, $10, 'pending', $11, $11)
-		`, approvalID.String(), tenantID, checkID.String(), input.RequesterID, input.ActionType, input.TargetSystem, input.TargetResource, result.RiskLevel, input.Reason, result.BindingHash, now); err != nil {
+			VALUES ($1::uuid, $2, $3::uuid, $4, $5, $6, $7, $8, $9, $10, 'pending', $11, $12, $12)
+		`, approvalID.String(), tenantID, checkID.String(), input.RequesterID, input.ActionType, input.TargetSystem, input.TargetResource, result.RiskLevel, input.Reason, result.BindingHash, expiresAt, now); err != nil {
 			return domain.RecordedCheck{}, fmt.Errorf("create approval: %w", err)
 		}
 		recorded.ApprovalID = approvalID.String()

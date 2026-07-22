@@ -20,6 +20,7 @@ type ApprovalResponse struct {
 	DecidedBy         string     `json:"decided_by"`
 	DecisionNote      string     `json:"decision_note"`
 	DecidedAt         *time.Time `json:"decided_at"`
+	ExpiresAt         time.Time  `json:"expires_at"`
 	CreatedAt         time.Time  `json:"created_at"`
 	UpdatedAt         time.Time  `json:"updated_at"`
 }
@@ -45,6 +46,7 @@ func ApprovalFromDomain(item domain.Approval) ApprovalResponse {
 		DecidedBy:         item.DecidedBy,
 		DecisionNote:      item.DecisionNote,
 		DecidedAt:         item.DecidedAt,
+		ExpiresAt:         item.ExpiresAt,
 		CreatedAt:         item.CreatedAt,
 		UpdatedAt:         item.UpdatedAt,
 	}

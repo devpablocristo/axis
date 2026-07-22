@@ -2,6 +2,7 @@ package config
 
 import (
 	"strings"
+	"time"
 
 	"github.com/devpablocristo/platform/config/go/envconfig"
 )
@@ -15,6 +16,9 @@ type Config struct {
 	CORSOrigins        []string
 	InternalAuthSecret string
 	SigningKey         string
+	ApprovalTTL        time.Duration
+	WatcherInterval    time.Duration
+	WatcherBatchSize   int
 
 	ServiceVersion string
 	OTelExporter   string
@@ -32,6 +36,9 @@ func Load() Config {
 		CORSOrigins:        splitCSV(envconfig.Get("NEXUS_V2_CORS_ORIGINS", "")),
 		InternalAuthSecret: strings.TrimSpace(envconfig.Get("NEXUS_V2_INTERNAL_AUTH_SECRET", envconfig.Get("AXIS_V2_INTERNAL_AUTH_SECRET", ""))),
 		SigningKey:         strings.TrimSpace(envconfig.Get("NEXUS_V2_SIGNING_KEY", "")),
+		ApprovalTTL:        time.Duration(envconfig.Int("NEXUS_V2_APPROVAL_TTL_SEC", 3600)) * time.Second,
+		WatcherInterval:    time.Duration(envconfig.Int("NEXUS_V2_WATCHER_INTERVAL_SEC", 30)) * time.Second,
+		WatcherBatchSize:   envconfig.Int("NEXUS_V2_WATCHER_BATCH_SIZE", 100),
 		ServiceVersion:     envconfig.Get("NEXUS_V2_SERVICE_VERSION", ""),
 		OTelExporter:       strings.ToLower(strings.TrimSpace(envconfig.Get("NEXUS_V2_OTEL_EXPORTER", "none"))),
 		OTelEndpoint:       strings.TrimSpace(envconfig.Get("NEXUS_V2_OTEL_OTLP_ENDPOINT", "")),

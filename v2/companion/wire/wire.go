@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -22,6 +23,7 @@ import (
 	postgres "github.com/devpablocristo/platform/databases/postgres/go"
 	ginmw "github.com/devpablocristo/platform/http/gin/go"
 	observability "github.com/devpablocristo/platform/observability/go"
+	"github.com/google/uuid"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
@@ -31,6 +33,8 @@ type Dependencies struct {
 	Router         *gin.Engine
 	Server         *http.Server
 	tracerShutdown func(context.Context) error
+	watcherCancel  context.CancelFunc
+	watcherWG      sync.WaitGroup
 }
 
 // runtimeAnswererAdapter adapts the runtime client's Answer to the virployees
@@ -228,14 +232,28 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		Addr:    config.Addr(),
 		Handler: tracedServerHandler("companion-v2", observability.Middleware(logger, router)),
 	}
+	watcherCtx, watcherCancel := context.WithCancel(ctx)
 
-	return &Dependencies{
+	deps := &Dependencies{
 		Config:         config,
 		DB:             db,
 		Router:         router,
 		Server:         server,
 		tracerShutdown: tracerShutdown,
-	}, nil
+		watcherCancel:  watcherCancel,
+	}
+	deps.watcherWG.Add(1)
+	go func() {
+		defer deps.watcherWG.Done()
+		virployeesUsecases.RunOperationalWatchers(watcherCtx, virployees.WatcherConfig{
+			Interval: config.WatcherInterval, StaleAssistAfter: config.StaleAssistAfter,
+			StaleExecutionAfter: config.StaleExecutionAfter, Lease: config.WatcherLease,
+			ReportBackoff: config.WatcherReportBackoff, BatchSize: config.WatcherBatchSize,
+			MaxRecoveryAttempts: config.WatcherMaxRecoveries, MaxReportAttempts: config.WatcherMaxReports,
+			WorkerID: "companion-" + uuid.NewString(),
+		})
+	}()
+	return deps, nil
 }
 
 // tracedServerHandler wraps an HTTP handler with an OTel server span per
@@ -256,6 +274,10 @@ func tracedServerHandler(service string, h http.Handler) http.Handler {
 func (d *Dependencies) Close() {
 	if d == nil {
 		return
+	}
+	if d.watcherCancel != nil {
+		d.watcherCancel()
+		d.watcherWG.Wait()
 	}
 	if d.tracerShutdown != nil {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

@@ -2,6 +2,7 @@ package config
 
 import (
 	"strings"
+	"time"
 
 	"github.com/devpablocristo/platform/config/go/envconfig"
 )
@@ -20,8 +21,16 @@ type Config struct {
 	// ExecutionModes is the parsed set of enabled executor modes. The variable is a
 	// comma-separated list (e.g. "local", "local,google_calendar"); "disabled" and
 	// empty entries yield an empty set (no executor wired = simulation only).
-	ExecutionModes     []string
-	InternalAuthSecret string
+	ExecutionModes       []string
+	InternalAuthSecret   string
+	WatcherInterval      time.Duration
+	StaleAssistAfter     time.Duration
+	StaleExecutionAfter  time.Duration
+	WatcherLease         time.Duration
+	WatcherReportBackoff time.Duration
+	WatcherBatchSize     int
+	WatcherMaxRecoveries int
+	WatcherMaxReports    int
 
 	// GoogleCalendarID is the calendar the google_calendar executor writes to
 	// (a calendar shared with the workload's service account). Required when
@@ -55,6 +64,14 @@ func Load() Config {
 		ExecutionModes:          parseExecutionModes(envconfig.Get("COMPANION_V2_EXECUTION_MODE", "disabled")),
 		GoogleCalendarID:        strings.TrimSpace(envconfig.Get("COMPANION_V2_GOOGLE_CALENDAR_ID", "")),
 		InternalAuthSecret:      strings.TrimSpace(envconfig.Get("COMPANION_V2_INTERNAL_AUTH_SECRET", envconfig.Get("AXIS_V2_INTERNAL_AUTH_SECRET", ""))),
+		WatcherInterval:         time.Duration(envconfig.Int("COMPANION_V2_WATCHER_INTERVAL_SEC", 30)) * time.Second,
+		StaleAssistAfter:        time.Duration(envconfig.Int("COMPANION_V2_STALE_ASSIST_SEC", 300)) * time.Second,
+		StaleExecutionAfter:     time.Duration(envconfig.Int("COMPANION_V2_STALE_EXECUTION_SEC", 300)) * time.Second,
+		WatcherLease:            time.Duration(envconfig.Int("COMPANION_V2_WATCHER_LEASE_SEC", 30)) * time.Second,
+		WatcherReportBackoff:    time.Duration(envconfig.Int("COMPANION_V2_REPORT_BACKOFF_SEC", 5)) * time.Second,
+		WatcherBatchSize:        envconfig.Int("COMPANION_V2_WATCHER_BATCH_SIZE", 50),
+		WatcherMaxRecoveries:    envconfig.Int("COMPANION_V2_RECOVERY_MAX_ATTEMPTS", 3),
+		WatcherMaxReports:       envconfig.Int("COMPANION_V2_REPORT_MAX_ATTEMPTS", 3),
 		LearningMinExecutions:   envconfig.Int("COMPANION_V2_LEARNING_MIN_EXECUTIONS", 3),
 		LearningEnricherEnabled: envconfig.Bool("COMPANION_V2_LEARNING_ENRICHER_ENABLED", false),
 		ServiceVersion:          envconfig.Get("COMPANION_V2_SERVICE_VERSION", ""),

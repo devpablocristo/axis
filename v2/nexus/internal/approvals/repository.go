@@ -44,6 +44,7 @@ func (r *Repository) List(ctx context.Context, tenantID string, status domain.St
 			decided_by,
 			decision_note,
 			decided_at,
+			expires_at,
 			created_at,
 			updated_at
 		FROM approvals
@@ -85,6 +86,7 @@ func (r *Repository) Decide(ctx context.Context, tenantID string, id uuid.UUID, 
 		WHERE tenant_id = $1
 			AND id = $2::uuid
 			AND status = 'pending'
+			AND expires_at > $6
 		RETURNING
 			id::text,
 			tenant_id,
@@ -100,6 +102,7 @@ func (r *Repository) Decide(ctx context.Context, tenantID string, id uuid.UUID, 
 			decided_by,
 			decision_note,
 			decided_at,
+			expires_at,
 			created_at,
 			updated_at
 	`, tenantID, id.String(), string(status), actorID, note, now)
@@ -116,6 +119,9 @@ func (r *Repository) Decide(ctx context.Context, tenantID string, id uuid.UUID, 
 	}
 	if existing.Status != domain.StatusPending {
 		return domain.Approval{}, domainerr.Conflict("approval is already decided")
+	}
+	if !existing.ExpiresAt.After(now) {
+		return domain.Approval{}, domainerr.Conflict("approval has expired")
 	}
 	return domain.Approval{}, err
 }
@@ -137,6 +143,7 @@ func (r *Repository) get(ctx context.Context, tenantID string, id uuid.UUID) (do
 			decided_by,
 			decision_note,
 			decided_at,
+			expires_at,
 			created_at,
 			updated_at
 		FROM approvals
@@ -171,6 +178,7 @@ func scanApproval(row scanner) (domain.Approval, error) {
 		&item.DecidedBy,
 		&item.DecisionNote,
 		&decidedAt,
+		&item.ExpiresAt,
 		&item.CreatedAt,
 		&item.UpdatedAt,
 	)

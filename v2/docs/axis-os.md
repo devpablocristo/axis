@@ -94,6 +94,14 @@ channel for governance calls to Nexus. Health endpoints remain public.
   (`?subject=` focuses it on one run). Events carry only hashes + metadata — an
   `output_hash` binds a diagnosis to its exact content, never PHI. Signing is on
   when `NEXUS_V2_SIGNING_KEY` is set; Companion emission is best-effort.
+- Nexus and Companion run context-cancellable operational watchers. Nexus expires
+  approvals after their configured TTL and closes the corresponding governance
+  check. Companion finalizes stale assist runs, recovers stale governed
+  executions with the original idempotency key, and retries failed execution
+  result reports to Nexus with leases and exponential backoff. Database claims
+  use `FOR UPDATE SKIP LOCKED`, so multiple replicas cannot reconcile the same
+  row concurrently. Every reconciliation appends hash-only metadata to the
+  virployee ledger; watcher goroutines stop before their service closes its DB.
 - Virployees remain the first workforce primitive.
 - Virployee-owned lexical memory supports controlled CRUD, recall, lifecycle,
   audit hashes, and safe references in runtime traces.

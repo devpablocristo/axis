@@ -1,0 +1,155 @@
+package virployees
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"time"
+
+	"github.com/google/uuid"
+)
+
+type TimedOutAssist struct {
+	ID          uuid.UUID
+	TenantID    string
+	VirployeeID uuid.UUID
+	InputHash   string
+	StartedAt   time.Time
+}
+
+type ExecutionWork struct {
+	Attempt ExecutionAttempt
+	Action  PreparedActionRecord
+}
+
+type OperationalRepositoryPort interface {
+	FailStaleAssistRuns(context.Context, time.Time, int) ([]TimedOutAssist, error)
+	ClaimStaleExecutions(context.Context, time.Time, int, string, time.Duration, int) ([]ExecutionWork, error)
+	ClaimDueNexusReports(context.Context, time.Time, int, string, time.Duration, int) ([]ExecutionWork, error)
+	ReleaseExecutionRecovery(context.Context, string, uuid.UUID, string) error
+	RecordNexusReportAttempt(context.Context, string, uuid.UUID, string, time.Time, string) error
+}
+
+func (r *Repository) FailStaleAssistRuns(ctx context.Context, cutoff time.Time, limit int) ([]TimedOutAssist, error) {
+	rows, err := r.pool.Query(ctx, `
+		WITH stale AS (
+			SELECT id FROM companion_assist_runs
+			WHERE status = 'running' AND updated_at <= $1
+			ORDER BY updated_at, id LIMIT $2 FOR UPDATE SKIP LOCKED
+		)
+		UPDATE companion_assist_runs a
+		SET status = 'failed', error = 'assist run exceeded watchdog timeout',
+			completed_at = now(), updated_at = now(), duration_ms = GREATEST(0, EXTRACT(EPOCH FROM (now() - started_at)) * 1000)::bigint
+		FROM stale WHERE a.id = stale.id
+		RETURNING a.id, a.tenant_id, a.virployee_id, a.input_hash, a.started_at
+	`, cutoff.UTC(), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []TimedOutAssist
+	for rows.Next() {
+		var item TimedOutAssist
+		if err := rows.Scan(&item.ID, &item.TenantID, &item.VirployeeID, &item.InputHash, &item.StartedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func (r *Repository) ClaimStaleExecutions(ctx context.Context, cutoff time.Time, limit int, owner string, lease time.Duration, maxAttempts int) ([]ExecutionWork, error) {
+	return r.claimExecutionWork(ctx, `
+		e.status = 'running' AND e.updated_at <= $1
+		AND e.recovery_attempts < $4
+		AND (e.recovery_lease_until IS NULL OR e.recovery_lease_until <= $2)
+	`, "recovery", cutoff, limit, owner, lease, maxAttempts)
+}
+
+func (r *Repository) ClaimDueNexusReports(ctx context.Context, pendingCutoff time.Time, limit int, owner string, lease time.Duration, maxAttempts int) ([]ExecutionWork, error) {
+	return r.claimExecutionWork(ctx, `
+		e.status IN ('succeeded','failed') AND e.nexus_report_status IN ('pending','failed')
+		AND ((e.nexus_report_status = 'failed' AND e.nexus_report_next_at <= $2)
+			OR (e.nexus_report_status = 'pending' AND e.updated_at <= $1))
+		AND e.nexus_report_attempts < $4
+		AND (e.report_lease_until IS NULL OR e.report_lease_until <= $2)
+	`, "report", pendingCutoff, limit, owner, lease, maxAttempts)
+}
+
+func (r *Repository) claimExecutionWork(ctx context.Context, predicate, kind string, cutoff time.Time, limit int, owner string, lease time.Duration, maxAttempts int) ([]ExecutionWork, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	now := time.Now().UTC()
+	rows, err := tx.Query(ctx, `
+		SELECT e.id, e.tenant_id, e.virployee_id, e.prepared_action_id, e.idempotency_key,
+			e.status, e.resource_id, e.result, e.error, e.duration_ms, e.nexus_report_status,
+			e.started_at, e.completed_at, e.recovery_attempts, e.nexus_report_attempts,
+			p.governance_check_id, p.approval_id, p.capability_key, p.payload,
+			p.payload_hash, p.binding_hash
+		FROM companion_execution_attempts e
+		JOIN companion_prepared_actions p ON p.id = e.prepared_action_id
+		WHERE `+predicate+`
+		ORDER BY e.updated_at, e.id LIMIT $3 FOR UPDATE OF e SKIP LOCKED
+	`, cutoff.UTC(), now, limit, maxAttempts)
+	if err != nil {
+		return nil, err
+	}
+	var out []ExecutionWork
+	var ids []uuid.UUID
+	for rows.Next() {
+		var work ExecutionWork
+		var payload, result []byte
+		if err := rows.Scan(&work.Attempt.ID, &work.Attempt.TenantID, &work.Attempt.VirployeeID,
+			&work.Attempt.PreparedActionID, &work.Attempt.IdempotencyKey, &work.Attempt.Status,
+			&work.Attempt.ResourceID, &result, &work.Attempt.Error, &work.Attempt.DurationMS,
+			&work.Attempt.NexusReportStatus, &work.Attempt.StartedAt, &work.Attempt.CompletedAt,
+			&work.Attempt.RecoveryAttempts, &work.Attempt.ReportAttempts,
+			&work.Action.GovernanceCheckID, &work.Action.ApprovalID, &work.Action.CapabilityKey,
+			&payload, &work.Action.PayloadHash, &work.Action.BindingHash); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		work.Action.ID, work.Action.TenantID, work.Action.VirployeeID = work.Attempt.PreparedActionID, work.Attempt.TenantID, work.Attempt.VirployeeID
+		if err := json.Unmarshal(payload, &work.Action.Action); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("decode watcher prepared action: %w", err)
+		}
+		if len(result) > 0 {
+			_ = json.Unmarshal(result, &work.Attempt.Result)
+		}
+		out, ids = append(out, work), append(ids, work.Attempt.ID)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(ids) > 0 {
+		if kind == "recovery" {
+			_, err = tx.Exec(ctx, `UPDATE companion_execution_attempts SET recovery_lease_owner=$2, recovery_lease_until=$3 WHERE id=ANY($1)`, ids, owner, now.Add(lease))
+		} else {
+			_, err = tx.Exec(ctx, `UPDATE companion_execution_attempts SET report_lease_owner=$2, report_lease_until=$3 WHERE id=ANY($1)`, ids, owner, now.Add(lease))
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (r *Repository) ReleaseExecutionRecovery(ctx context.Context, tenantID string, id uuid.UUID, watcherError string) error {
+	_, err := r.pool.Exec(ctx, `UPDATE companion_execution_attempts SET recovery_attempts=recovery_attempts+1, recovery_lease_owner='', recovery_lease_until=NULL, last_watcher_error=$3 WHERE tenant_id=$1 AND id=$2`, tenantID, id, watcherError)
+	return err
+}
+
+func (r *Repository) RecordNexusReportAttempt(ctx context.Context, tenantID string, id uuid.UUID, status string, next time.Time, watcherError string) error {
+	_, err := r.pool.Exec(ctx, `UPDATE companion_execution_attempts SET nexus_report_status=$3, nexus_report_attempts=nexus_report_attempts+1, nexus_report_next_at=$4, report_lease_owner='', report_lease_until=NULL, last_watcher_error=$5, updated_at=now() WHERE tenant_id=$1 AND id=$2`, tenantID, id, status, next.UTC(), watcherError)
+	return err
+}
+
+var _ OperationalRepositoryPort = (*Repository)(nil)

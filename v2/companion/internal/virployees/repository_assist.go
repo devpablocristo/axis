@@ -43,8 +43,8 @@ func (r *Repository) BeginAssistRun(ctx context.Context, tenantID string, virplo
 	tag, err := r.pool.Exec(ctx, `
 		INSERT INTO companion_assist_runs (
 			id, tenant_id, virployee_id, assist_type, idempotency_key,
-			status, input_hash, input_preview, started_at
-		) VALUES ($1, $2, $3, $4, $5, 'running', $6, $7, now())
+			status, input_hash, input_preview, started_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, 'running', $6, $7, now(), now())
 		ON CONFLICT (tenant_id, virployee_id, idempotency_key) DO NOTHING
 	`, id, tenantID, virployeeID, assistType, idempotencyKey, inputHash, inputPreview)
 	if err != nil {
@@ -62,7 +62,7 @@ func (r *Repository) CompleteAssistRun(ctx context.Context, tenantID string, id 
 	_, err := r.pool.Exec(ctx, `
 		UPDATE companion_assist_runs
 		SET status = $3, output = $4::jsonb, output_text = $5, answered = $6, degraded = $7,
-		    model = $8, prompt_version = $9, error = $10, duration_ms = $11, completed_at = now()
+		    model = $8, prompt_version = $9, error = $10, duration_ms = $11, completed_at = now(), updated_at = now()
 		WHERE tenant_id = $1 AND id = $2
 	`, tenantID, id, status, []byte(output), outputText, answered, degraded, model, promptVersion, runErr, durationMS)
 	if err != nil {

@@ -80,10 +80,11 @@ export type Approval = {
 	risk_level: string
 	reason: string
 	binding_hash: string
-	status: 'pending' | 'approved' | 'rejected'
+	status: 'pending' | 'approved' | 'rejected' | 'expired'
 	decided_by: string
 	decision_note: string
 	decided_at: string | null
+	expires_at: string
 	created_at: string
 	updated_at: string
 }
