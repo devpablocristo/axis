@@ -14,5 +14,6 @@ type Context struct {
 	ProfileTemplate   profiletemplatedomain.ProfileTemplate
 	Capabilities      []capabilitydomain.Capability
 	MemoryReferences  []memories.Reference
+	MemoryContext     []memories.ContextItem
 	MemoryContextHash string
 }

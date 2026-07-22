@@ -4,7 +4,8 @@ import "encoding/json"
 
 // ProposeRequest is what Companion sends: the natural-language input plus the
 // runtime context needed to classify it — the assigned capabilities, the
-// system prompt/job role, and safe memory references (no content).
+// system prompt/job role, and content that Companion has curated, approved,
+// scoped to the virployee, and selected for this request.
 type ProposeRequest struct {
 	Input        string           `json:"input"`
 	SystemPrompt string           `json:"system_prompt,omitempty"`
@@ -23,8 +24,9 @@ type CapabilityInfo struct {
 }
 
 type MemoryRef struct {
-	Title string `json:"title,omitempty"`
-	Type  string `json:"type,omitempty"`
+	Title   string `json:"title,omitempty"`
+	Type    string `json:"type,omitempty"`
+	Content string `json:"content,omitempty"`
 }
 
 // ProposeResponse is the proposal: which capability the input maps to (if any).

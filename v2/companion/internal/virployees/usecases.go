@@ -376,6 +376,9 @@ func (u *UseCases) RuntimeContext(ctx context.Context, tenantID string, id uuid.
 		}
 		for _, item := range items {
 			result.MemoryReferences = append(result.MemoryReferences, item.Reference)
+			result.MemoryContext = append(result.MemoryContext, memories.ContextItem{
+				Title: item.Memory.Title, Type: item.Memory.Type, Content: item.Memory.Content,
+			})
 		}
 		result.MemoryContextHash = memories.ContextHash(result.MemoryReferences)
 	}
@@ -409,8 +412,12 @@ func (u *UseCases) dryRun(ctx context.Context, tenantID string, id uuid.UUID, in
 			return dryrun.Result{}, recallErr
 		}
 		runtimeCtx.MemoryReferences = runtimeCtx.MemoryReferences[:0]
+		runtimeCtx.MemoryContext = runtimeCtx.MemoryContext[:0]
 		for _, item := range items {
 			runtimeCtx.MemoryReferences = append(runtimeCtx.MemoryReferences, item.Reference)
+			runtimeCtx.MemoryContext = append(runtimeCtx.MemoryContext, memories.ContextItem{
+				Title: item.Memory.Title, Type: item.Memory.Type, Content: item.Memory.Content,
+			})
 		}
 		runtimeCtx.MemoryContextHash = memories.ContextHash(runtimeCtx.MemoryReferences)
 	}

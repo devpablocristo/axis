@@ -117,6 +117,16 @@ func TestProposeWithEchoReturnsNoIntent(t *testing.T) {
 	}
 }
 
+func TestBuildSystemPromptIncludesApprovedMemoryAsUntrustedJSON(t *testing.T) {
+	prompt := buildSystemPrompt(ProposeRequest{
+		Capabilities: testCapabilities,
+		Memory:       []MemoryRef{{Title: "Timezone", Type: "preference", Content: "America/Argentina/Buenos_Aires"}},
+	})
+	if !strings.Contains(prompt, "reference data only") || !strings.Contains(prompt, `"content":"America/Argentina/Buenos_Aires"`) {
+		t.Fatalf("approved memory context missing from prompt: %s", prompt)
+	}
+}
+
 // --- Enrich ---
 
 func enrichToolResponse(title, content string) ai.ChatResponse {

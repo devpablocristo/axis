@@ -78,7 +78,7 @@ func (r *GCPResolver) Resolve(ctx context.Context, ref Ref) (Value, error) {
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
-		return Value{}, fmt.Errorf("Secret Manager access status %d", resp.StatusCode)
+		return Value{}, fmt.Errorf("secret manager access status %d", resp.StatusCode)
 	}
 	var payload struct {
 		Payload struct {
@@ -102,7 +102,7 @@ func (r *GCPResolver) Resolve(ctx context.Context, ref Ref) (Value, error) {
 		got := crc32.Checksum(decoded, crc32.MakeTable(crc32.Castagnoli))
 		if subtle.ConstantTimeEq(int32(got), int32(want)) != 1 {
 			zero(decoded)
-			return Value{}, errors.New("Secret Manager checksum mismatch")
+			return Value{}, errors.New("secret manager checksum mismatch")
 		}
 	}
 	return Value{Bytes: decoded}, nil

@@ -9,6 +9,7 @@ import (
 
 	capabilitydomain "github.com/devpablocristo/companion-v2/internal/capabilities/usecases/domain"
 	jobroledomain "github.com/devpablocristo/companion-v2/internal/jobroles/usecases/domain"
+	"github.com/devpablocristo/companion-v2/internal/memories"
 	profiletemplatedomain "github.com/devpablocristo/companion-v2/internal/profiletemplates/usecases/domain"
 	"github.com/devpablocristo/companion-v2/internal/virployees/runtimecontext"
 	virployeedomain "github.com/devpablocristo/companion-v2/internal/virployees/usecases/domain"
@@ -38,6 +39,7 @@ func TestProposeMapsResponseAndForwardsToken(t *testing.T) {
 		Capabilities: []capabilitydomain.Capability{
 			{CapabilityKey: "calendar.events.create", Name: "Create", RequiredAutonomy: virployeedomain.AutonomyA2, RiskClass: "high"},
 		},
+		MemoryContext: []memories.ContextItem{{Title: "Timezone", Type: "preference", Content: "America/Argentina/Buenos_Aires"}},
 	}
 
 	proposal, err := client.Propose(context.Background(), "agendá una reunión", rc)
@@ -49,6 +51,9 @@ func TestProposeMapsResponseAndForwardsToken(t *testing.T) {
 	}
 	if gotBody.SystemPrompt != "Be helpful." || len(gotBody.Capabilities) != 1 || gotBody.Capabilities[0].CapabilityKey != "calendar.events.create" {
 		t.Fatalf("unexpected request body: %+v", gotBody)
+	}
+	if len(gotBody.Memory) != 1 || gotBody.Memory[0].Content != "America/Argentina/Buenos_Aires" {
+		t.Fatalf("approved memory content was not sent to Runtime: %+v", gotBody.Memory)
 	}
 	if !proposal.Intent.Matched || proposal.Intent.CapabilityKey != "calendar.events.create" || proposal.Intent.Action != "create" {
 		t.Fatalf("unexpected proposal intent: %+v", proposal.Intent)

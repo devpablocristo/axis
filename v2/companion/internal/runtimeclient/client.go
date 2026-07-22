@@ -44,7 +44,7 @@ func (c *Client) Propose(ctx context.Context, input string, rc runtimecontext.Co
 		SystemPrompt: rc.ProfileTemplate.SystemPrompt,
 		JobRole:      rc.JobRole.Name,
 		Capabilities: capabilitiesFrom(rc.Capabilities),
-		Memory:       memoryFrom(rc.MemoryReferences),
+		Memory:       memoryFrom(rc.MemoryContext),
 	}
 	raw, err := json.Marshal(body)
 	if err != nil {
@@ -269,10 +269,10 @@ func capabilitiesFrom(items []capabilitydomain.Capability) []capabilityInfo {
 	return out
 }
 
-func memoryFrom(refs []memories.Reference) []memoryRef {
-	out := make([]memoryRef, 0, len(refs))
-	for _, ref := range refs {
-		out = append(out, memoryRef{Title: ref.Title, Type: ref.Type})
+func memoryFrom(items []memories.ContextItem) []memoryRef {
+	out := make([]memoryRef, 0, len(items))
+	for _, item := range items {
+		out = append(out, memoryRef{Title: item.Title, Type: item.Type, Content: item.Content})
 	}
 	return out
 }
@@ -321,8 +321,9 @@ type capabilityInfo struct {
 }
 
 type memoryRef struct {
-	Title string `json:"title,omitempty"`
-	Type  string `json:"type,omitempty"`
+	Title   string `json:"title,omitempty"`
+	Type    string `json:"type,omitempty"`
+	Content string `json:"content,omitempty"`
 }
 
 type proposeResponse struct {

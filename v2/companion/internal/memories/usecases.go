@@ -5,14 +5,35 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"log/slog"
 	"strings"
 
+	"github.com/devpablocristo/platform/errors/go/domainerr"
 	"github.com/google/uuid"
 )
 
-type UseCases struct{ repo *Repository }
+type EmbeddingPort interface {
+	EmbedDocument(context.Context, string) ([]float32, string, error)
+	EmbedQuery(context.Context, string) ([]float32, string, error)
+}
 
-func NewUseCases(repo *Repository) *UseCases { return &UseCases{repo: repo} }
+type UseCases struct {
+	repo     *Repository
+	curator  MemoryCuratorPort
+	embedder EmbeddingPort
+}
+
+func NewUseCases(repo *Repository) *UseCases {
+	return &UseCases{repo: repo, curator: NewDefaultCurator(repo)}
+}
+
+func (u *UseCases) SetCurator(curator MemoryCuratorPort) {
+	if curator != nil {
+		u.curator = curator
+	}
+}
+
+func (u *UseCases) SetEmbedder(embedder EmbeddingPort) { u.embedder = embedder }
 func (u *UseCases) authorize(ctx context.Context, tenant string, virployee uuid.UUID, actor, role string) error {
 	return u.repo.Authorized(ctx, strings.TrimSpace(tenant), virployee, strings.TrimSpace(actor), strings.ToLower(strings.TrimSpace(role)))
 }
@@ -24,18 +45,28 @@ func (u *UseCases) Authorize(ctx context.Context, tenant string, virployee uuid.
 	return u.authorize(ctx, tenant, virployee, actor, role)
 }
 func (u *UseCases) Create(ctx context.Context, tenant string, virployee uuid.UUID, actor, role string, in CreateInput) (Memory, error) {
+	tenant = strings.TrimSpace(tenant)
 	if err := u.authorize(ctx, tenant, virployee, actor, role); err != nil {
 		return Memory{}, err
 	}
 	in.Provenance, in.ActorID = "human", actor
-	m, err := u.repo.Create(ctx, tenant, virployee, in)
+	curated, err := u.curator.Curate(ctx, tenant, virployee, uuid.Nil, in)
+	if err != nil {
+		return Memory{}, err
+	}
+	m, err := u.repo.Create(ctx, tenant, virployee, curated)
 	return redact(m, false), err
 }
 
 // CreateSystem is the internal-only write port. It is deliberately not exposed by Handler.
 func (u *UseCases) CreateSystem(ctx context.Context, tenant string, virployee uuid.UUID, actor, source string, in CreateInput) (Memory, error) {
+	tenant = strings.TrimSpace(tenant)
 	in.Provenance, in.ActorID, in.SourceReference = "system", actor, source
-	return u.repo.Create(ctx, tenant, virployee, in)
+	curated, err := u.curator.Curate(ctx, tenant, virployee, uuid.Nil, in)
+	if err != nil {
+		return Memory{}, err
+	}
+	return u.repo.Create(ctx, tenant, virployee, curated)
 }
 func (u *UseCases) Get(ctx context.Context, tenant string, virployee, id uuid.UUID, actor, role string) (Memory, error) {
 	if err := u.authorize(ctx, tenant, virployee, actor, role); err != nil {
@@ -58,18 +89,26 @@ func (u *UseCases) List(ctx context.Context, tenant string, virployee uuid.UUID,
 	return p, nil
 }
 func (u *UseCases) Update(ctx context.Context, tenant string, virployee, id uuid.UUID, actor, role string, in UpdateInput) (Memory, error) {
+	tenant = strings.TrimSpace(tenant)
 	if err := u.authorize(ctx, tenant, virployee, actor, role); err != nil {
 		return Memory{}, err
 	}
 	in.ActorID = actor
-	m, err := u.repo.Update(ctx, tenant, virployee, id, in)
+	curated, err := u.curator.Curate(ctx, tenant, virployee, id, CreateInput{
+		Title: in.Title, Type: in.Type, Content: in.Content, Sensitivity: in.Sensitivity,
+		Provenance: "human", ActorID: actor,
+	})
+	if err != nil {
+		return Memory{}, err
+	}
+	m, err := u.repo.Update(ctx, tenant, virployee, id, curated, in.ExpectedVersion)
 	return redact(m, false), err
 }
 func (u *UseCases) Recall(ctx context.Context, tenant string, virployee uuid.UUID, actor, role, query string, limit int) ([]Reference, error) {
 	if err := u.authorize(ctx, tenant, virployee, actor, role); err != nil {
 		return nil, err
 	}
-	items, err := u.repo.Recall(ctx, tenant, virployee, query, limit)
+	items, err := u.recall(ctx, tenant, virployee, query, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -80,7 +119,64 @@ func (u *UseCases) Recall(ctx context.Context, tenant string, virployee uuid.UUI
 	return refs, nil
 }
 func (u *UseCases) RecallInternal(ctx context.Context, tenant string, virployee uuid.UUID, query string, limit int) ([]Recalled, error) {
-	return u.repo.Recall(ctx, tenant, virployee, query, limit)
+	return u.recall(ctx, tenant, virployee, query, limit)
+}
+
+func (u *UseCases) recall(ctx context.Context, tenant string, virployee uuid.UUID, query string, limit int) ([]Recalled, error) {
+	if u.embedder == nil {
+		return u.repo.Recall(ctx, strings.TrimSpace(tenant), virployee, query, limit, nil, "")
+	}
+	vector, model, err := u.embedder.EmbedQuery(ctx, query)
+	if err != nil {
+		// Recall degrades to tenant-scoped FTS; unsafe/unapproved memories remain
+		// excluded by the repository in both paths.
+		slog.WarnContext(ctx, "memory_query_embedding_failed_fallback_fts")
+		return u.repo.Recall(ctx, strings.TrimSpace(tenant), virployee, query, limit, nil, "")
+	}
+	return u.repo.Recall(ctx, strings.TrimSpace(tenant), virployee, query, limit, vector, model)
+}
+
+func (u *UseCases) Review(ctx context.Context, tenant string, virployee, id uuid.UUID, actor, role, decision, note string) (Memory, error) {
+	tenant = strings.TrimSpace(tenant)
+	actor = strings.TrimSpace(actor)
+	if actor == "" || strings.HasPrefix(strings.ToLower(actor), "service:") {
+		return Memory{}, domainerr.Forbidden("memory review requires a human actor")
+	}
+	if err := u.authorize(ctx, tenant, virployee, actor, role); err != nil {
+		return Memory{}, err
+	}
+	current, err := u.repo.Get(ctx, tenant, virployee, id)
+	if err != nil {
+		return Memory{}, err
+	}
+	if current.ReviewState == ReviewQuarantined && strings.TrimSpace(note) == "" {
+		return Memory{}, domainerr.Validation("review note is required for quarantined memory")
+	}
+	memory, err := u.repo.Review(ctx, tenant, virployee, id, strings.TrimSpace(actor), strings.ToLower(strings.TrimSpace(decision)))
+	return redact(memory, false), err
+}
+
+func (u *UseCases) IndexMemory(ctx context.Context, tenant string, id uuid.UUID, version int) (Memory, error) {
+	if u.embedder == nil {
+		return Memory{}, domainerr.Validation("memory embedder is not configured")
+	}
+	memory, err := u.repo.IndexCandidate(ctx, strings.TrimSpace(tenant), id, version)
+	if err != nil {
+		return Memory{}, err
+	}
+	vector, model, err := u.embedder.EmbedDocument(ctx, memory.Title+"\n"+memory.Content)
+	if err != nil {
+		return Memory{}, err
+	}
+	if err := u.repo.StoreEmbedding(ctx, strings.TrimSpace(tenant), memory, vector, model); err != nil {
+		return Memory{}, err
+	}
+	memory.EmbeddingModel, memory.EmbeddingVersion = model, EmbeddingVersion
+	return memory, nil
+}
+
+func (u *UseCases) DecayDue(ctx context.Context, limit int) (int64, error) {
+	return u.repo.DecayDue(ctx, limit)
 }
 func (u *UseCases) Lifecycle(ctx context.Context, tenant string, virployee, id uuid.UUID, actor, role, action string) error {
 	if err := u.authorize(ctx, tenant, virployee, actor, role); err != nil {

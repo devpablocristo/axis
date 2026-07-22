@@ -27,6 +27,7 @@ import (
 	"github.com/devpablocristo/companion-v2/internal/runtimeclient"
 	"github.com/devpablocristo/companion-v2/internal/virployees"
 	postgres "github.com/devpablocristo/platform/databases/postgres/go"
+	"github.com/devpablocristo/platform/errors/go/domainerr"
 	ginmw "github.com/devpablocristo/platform/http/gin/go"
 	observability "github.com/devpablocristo/platform/observability/go"
 	"github.com/google/uuid"
@@ -47,6 +48,27 @@ type Dependencies struct {
 // runtimeAnswererAdapter adapts the runtime client's Answer to the virployees
 // RuntimeAnswererPort, keeping the virployees package free of runtimeclient.
 type runtimeAnswererAdapter struct{ client *runtimeclient.Client }
+
+type memoryEmbeddingAdapter struct{ client *runtimeclient.Client }
+
+func (a memoryEmbeddingAdapter) EmbedDocument(ctx context.Context, text string) ([]float32, string, error) {
+	return a.embed(ctx, text, runtimeclient.EmbeddingTaskDocument)
+}
+
+func (a memoryEmbeddingAdapter) EmbedQuery(ctx context.Context, text string) ([]float32, string, error) {
+	return a.embed(ctx, text, runtimeclient.EmbeddingTaskQuery)
+}
+
+func (a memoryEmbeddingAdapter) embed(ctx context.Context, input, task string) ([]float32, string, error) {
+	result, err := a.client.Embed(ctx, runtimeclient.EmbedRequest{Texts: []string{input}, TaskType: task})
+	if err != nil {
+		return nil, "", err
+	}
+	if result.Dimensions != memories.EmbeddingDimensions || len(result.Embeddings) != 1 || len(result.Embeddings[0]) != memories.EmbeddingDimensions {
+		return nil, "", fmt.Errorf("runtime returned invalid memory embedding shape")
+	}
+	return result.Embeddings[0], result.Model, nil
+}
 
 func (a runtimeAnswererAdapter) Answer(ctx context.Context, in virployees.AnswerInput) (virployees.AnswerOutput, error) {
 	parts := make([]runtimeclient.ContentPart, 0, len(in.ContentParts))
@@ -273,6 +295,9 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		virployeesUsecases.RegisterExecutor("calendar.events.delete", googleExecutor)
 	}
 	memoriesUsecases := memories.NewUseCases(memories.NewRepository(db.Pool()))
+	if runtimePlanner != nil {
+		memoriesUsecases.SetEmbedder(memoryEmbeddingAdapter{client: runtimePlanner})
+	}
 	virployeesUsecases.SetMemoryReader(memoriesUsecases)
 	virployeesHandler := virployees.NewHandler(virployeesUsecases)
 	memoriesHandler := memories.NewHandler(memoriesUsecases)
@@ -358,6 +383,37 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		}
 		return evidence, nil
 	})
+	jobsWorker.Register("memory.index", func(jobCtx context.Context, job jobs.Job) (json.RawMessage, error) {
+		var payload memories.IndexJobPayload
+		if err := json.Unmarshal(job.Payload, &payload); err != nil {
+			return nil, jobs.Permanent("invalid_memory_index_job", err)
+		}
+		memoryID, err := uuid.Parse(payload.MemoryID)
+		if err != nil || payload.Version <= 0 {
+			return nil, jobs.Permanent("invalid_memory_index_job", err)
+		}
+		indexed, err := memoriesUsecases.IndexMemory(jobCtx, job.TenantID, memoryID, payload.Version)
+		if err != nil {
+			if domainerr.IsNotFound(err) || domainerr.IsConflict(err) {
+				return nil, jobs.Permanent("memory_version_stale", err)
+			}
+			return nil, jobs.Retryable("memory_index_failed", err)
+		}
+		evidence, _ := json.Marshal(map[string]any{
+			"memory_id": indexed.ID, "version": indexed.Version,
+			"content_hash": indexed.ContentHash, "embedding_model": indexed.EmbeddingModel,
+			"embedding_version": indexed.EmbeddingVersion,
+		})
+		return evidence, nil
+	})
+	jobsWorker.Register("memory.decay", func(jobCtx context.Context, _ jobs.Job) (json.RawMessage, error) {
+		count, err := memoriesUsecases.DecayDue(jobCtx, config.WatcherBatchSize)
+		if err != nil {
+			return nil, jobs.Retryable("memory_decay_failed", err)
+		}
+		evidence, _ := json.Marshal(map[string]any{"processed": count})
+		return evidence, nil
+	})
 	var nexusOutbox *outbox.Dispatcher
 	if nexusClient != nil {
 		nexusOutbox = outbox.NewDispatcher(outbox.NewRepository(db.Pool()), outbox.SenderFunc(func(deliveryCtx context.Context, message outbox.Message) error {
@@ -388,7 +444,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		tracerShutdown: tracerShutdown,
 		watcherCancel:  backgroundCancel,
 	}
-	deps.watcherWG.Add(2)
+	deps.watcherWG.Add(3)
 	go func() {
 		defer deps.watcherWG.Done()
 		jobsWorker.Run(backgroundCtx)
@@ -404,6 +460,14 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		defer deps.watcherWG.Done()
 		jobs.RunRecurringScheduler(backgroundCtx, jobsRepository, jobs.RecurringConfig{
 			TenantID: "system", ProductSurface: "companion", Kind: "operational.reconcile",
+			Interval: config.WatcherInterval, Timeout: config.JobTimeout,
+			MaxAttempts: config.WatcherMaxRecoveries,
+		})
+	}()
+	go func() {
+		defer deps.watcherWG.Done()
+		jobs.RunRecurringScheduler(backgroundCtx, jobsRepository, jobs.RecurringConfig{
+			TenantID: "system", ProductSurface: "companion", Kind: "memory.decay",
 			Interval: config.WatcherInterval, Timeout: config.JobTimeout,
 			MaxAttempts: config.WatcherMaxRecoveries,
 		})

@@ -125,8 +125,12 @@ channel for governance calls to Nexus. Health endpoints remain public.
   hash-only metadata to the virployee ledger. Scheduler and worker goroutines
   stop before each service closes its database.
 - Virployees remain the first workforce primitive.
-- Virployee-owned lexical memory supports controlled CRUD, recall, lifecycle,
-  audit hashes, and safe references in runtime traces.
+- Virployee-owned memory admits every human, system and accepted-learning write
+  through a curator that rejects secret material and quarantines poisoning or
+  conflicts. Only active, approved, non-expired memories above the trust floor
+  enter hybrid pgvector+FTS recall. Transactional `memory.index` jobs and a
+  durable `memory.decay` schedule survive restarts; Runtime receives the
+  approved content while traces retain safe references and hashes only.
 - Policy engines, callbacks, break-glass, external providers, and tasks are
   future modules.
 

@@ -64,7 +64,7 @@ func NewGoogleCalendarAPIFromJSON(ctx context.Context, credentialJSON []byte) (C
 	if envelope.Type != "service_account" || strings.TrimSpace(envelope.ClientEmail) == "" || strings.TrimSpace(envelope.PrivateKey) == "" {
 		return nil, fmt.Errorf("parse resolved google credentials: only complete service-account credentials are accepted")
 	}
-	creds, err := google.CredentialsFromJSONWithParams(ctx, credentialJSON, google.CredentialsParams{
+	creds, err := google.CredentialsFromJSONWithTypeAndParams(ctx, credentialJSON, google.ServiceAccount, google.CredentialsParams{
 		Scopes:         []string{calendarEventsScope},
 		TokenURL:       "https://oauth2.googleapis.com/token",
 		UniverseDomain: "googleapis.com",

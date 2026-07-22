@@ -21,11 +21,35 @@ func (h *Handler) Routes(r gin.IRouter) {
 	g.POST("/recall", h.Recall)
 	g.GET("/:memory_id", h.Get)
 	g.PUT("/:memory_id", h.Update)
+	g.POST("/:memory_id/review", h.Review)
 	for _, a := range []string{"archive", "unarchive", "trash", "restore"} {
 		action := a
 		g.POST("/:memory_id/"+a, func(c *gin.Context) { h.lifecycle(c, action) })
 	}
 	g.DELETE("/:memory_id/purge", h.Purge)
+}
+
+type reviewRequest struct {
+	Decision string `json:"decision"`
+	Note     string `json:"note"`
+}
+
+func (h *Handler) Review(c *gin.Context) {
+	virployeeID, memoryID, ok := ids(c)
+	if !ok {
+		return
+	}
+	var request reviewRequest
+	if err := ginmw.BindJSON(c, &request); err != nil {
+		return
+	}
+	tenant, actor, role := auth(c)
+	memory, err := h.u.Review(c, tenant, virployeeID, memoryID, actor, role, request.Decision, request.Note)
+	if err != nil {
+		ginmw.Respond(c, err)
+		return
+	}
+	ginmw.WriteJSON(c, http.StatusOK, memory)
 }
 func ids(c *gin.Context) (uuid.UUID, uuid.UUID, bool) {
 	v, e := uuid.Parse(c.Param("virployee_id"))

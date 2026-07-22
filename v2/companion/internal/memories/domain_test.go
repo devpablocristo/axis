@@ -72,3 +72,27 @@ func TestContextHashIsDeterministicAndVersionBound(t *testing.T) {
 		t.Fatal("context hash must bind the version")
 	}
 }
+
+func TestSafeForPromptRejectsSensitivePoisonedConflictingOrExpiredMemory(t *testing.T) {
+	base := Memory{State: "active", ReviewState: ReviewApproved, TrustScore: .9, Sensitivity: "normal"}
+	if !safeForPrompt(base) {
+		t.Fatal("expected approved normal memory to be prompt-safe")
+	}
+	cases := []Memory{
+		func() Memory { value := base; value.Sensitivity = "sensitive"; return value }(),
+		func() Memory { value := base; value.PoisoningFlags = []string{"instruction_override"}; return value }(),
+		func() Memory { value := base; value.ReviewReason = "conflicting_memory_requires_review"; return value }(),
+		func() Memory { value := base; value.ReviewState = ReviewPending; return value }(),
+		func() Memory {
+			value := base
+			expired := time.Now().Add(-time.Minute)
+			value.ExpiresAt = &expired
+			return value
+		}(),
+	}
+	for index, memory := range cases {
+		if safeForPrompt(memory) {
+			t.Fatalf("unsafe memory case %d passed the prompt gate: %+v", index, memory)
+		}
+	}
+}
