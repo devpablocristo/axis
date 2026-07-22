@@ -1,4 +1,4 @@
-CREATE TABLE companion_memories (
+CREATE TABLE IF NOT EXISTS companion_memories (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id text NOT NULL,
     virployee_id uuid NOT NULL REFERENCES virployees(id) ON DELETE CASCADE,
@@ -20,15 +20,15 @@ CREATE TABLE companion_memories (
     UNIQUE (tenant_id, virployee_id, id)
 );
 
-CREATE UNIQUE INDEX companion_memories_active_content_uq
+CREATE UNIQUE INDEX IF NOT EXISTS companion_memories_active_content_uq
     ON companion_memories (tenant_id, virployee_id, content_hash)
     WHERE lifecycle_state = 'active';
-CREATE INDEX companion_memories_list_idx
+CREATE INDEX IF NOT EXISTS companion_memories_list_idx
     ON companion_memories (tenant_id, virployee_id, lifecycle_state, updated_at DESC, id DESC);
-CREATE INDEX companion_memories_search_idx
+CREATE INDEX IF NOT EXISTS companion_memories_search_idx
     ON companion_memories USING gin (to_tsvector('simple', title || ' ' || content));
 
-CREATE TABLE companion_memory_audit (
+CREATE TABLE IF NOT EXISTS companion_memory_audit (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id text NOT NULL,
     virployee_id uuid NOT NULL,
@@ -42,9 +42,9 @@ CREATE TABLE companion_memory_audit (
     metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
     created_at timestamptz NOT NULL DEFAULT now()
 );
-CREATE INDEX companion_memory_audit_lookup_idx
+CREATE INDEX IF NOT EXISTS companion_memory_audit_lookup_idx
     ON companion_memory_audit (tenant_id, virployee_id, memory_id, created_at DESC);
 
 ALTER TABLE companion_run_traces
-    ADD COLUMN memory_references jsonb NOT NULL DEFAULT '[]'::jsonb,
-    ADD COLUMN memory_context_hash text NOT NULL DEFAULT '';
+    ADD COLUMN IF NOT EXISTS memory_references jsonb NOT NULL DEFAULT '[]'::jsonb,
+    ADD COLUMN IF NOT EXISTS memory_context_hash text NOT NULL DEFAULT '';
