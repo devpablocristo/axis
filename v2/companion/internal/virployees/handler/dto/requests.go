@@ -1,9 +1,19 @@
 package dto
 
 import (
+	"encoding/json"
+
 	"github.com/devpablocristo/companion-v2/internal/virployees/executiongate"
 	"github.com/devpablocristo/companion-v2/internal/virployees/usecases/domain"
 )
+
+// AssistRequest is the "process and respond" body: the product's opaque input
+// data and an optional idempotency key (also accepted via the Idempotency-Key
+// header). No prompt is sent by the caller — the virployee's profile holds it.
+type AssistRequest struct {
+	InputJSON      json.RawMessage `json:"input_json"`
+	IdempotencyKey string          `json:"idempotency_key,omitempty"`
+}
 
 type CreateVirployeeRequest struct {
 	Name              string   `json:"name" binding:"required"`

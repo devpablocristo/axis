@@ -33,6 +33,29 @@ type Dependencies struct {
 	tracerShutdown func(context.Context) error
 }
 
+// runtimeAnswererAdapter adapts the runtime client's Answer to the virployees
+// RuntimeAnswererPort, keeping the virployees package free of runtimeclient.
+type runtimeAnswererAdapter struct{ client *runtimeclient.Client }
+
+func (a runtimeAnswererAdapter) Answer(ctx context.Context, in virployees.AnswerInput) (virployees.AnswerOutput, error) {
+	res, err := a.client.Answer(ctx, runtimeclient.AnswerRequest{
+		SystemPrompt:   in.SystemPrompt,
+		JobRole:        in.JobRole,
+		InputJSON:      in.InputJSON,
+		ResponseSchema: in.ResponseSchema,
+	})
+	if err != nil {
+		return virployees.AnswerOutput{}, err
+	}
+	return virployees.AnswerOutput{
+		OutputText:    res.OutputText,
+		OutputJSON:    res.OutputJSON,
+		Answered:      res.Answered,
+		ModelID:       res.ModelID,
+		PromptVersion: res.PromptVersion,
+	}, nil
+}
+
 func Initialize(ctx context.Context) (*Dependencies, error) {
 	config := cfg.Load()
 	if config.DatabaseURL == "" {
@@ -113,6 +136,8 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	if config.RuntimeBaseURL != "" {
 		runtimePlanner := runtimeclient.New(config.RuntimeBaseURL, &http.Client{Timeout: 30 * time.Second, Transport: otelhttp.NewTransport(http.DefaultTransport)}, config.InternalAuthSecret)
 		virployeesUsecases.SetRuntimePlanner(runtimePlanner)
+		virployeesUsecases.SetRuntimeAnswerer(runtimeAnswererAdapter{client: runtimePlanner})
+		virployeesUsecases.SetDocumentFetcher(virployees.NewHTTPDocumentFetcher(&http.Client{Timeout: 15 * time.Second, Transport: otelhttp.NewTransport(http.DefaultTransport)}))
 	}
 	// Executors are wired per enabled mode (COMPANION_V2_EXECUTION_MODE is a set).
 	// The local simulator and a real external executor can coexist on different

@@ -113,3 +113,48 @@ func TestEnrichErrorsOnNonOKStatus(t *testing.T) {
 		t.Fatal("expected an error on a non-200 status")
 	}
 }
+
+func TestAnswerMapsResponseAndForwardsToken(t *testing.T) {
+	var gotToken, gotPath string
+	var gotBody answerRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotToken = r.Header.Get("X-Axis-Internal-Token")
+		gotPath = r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		_ = json.NewEncoder(w).Encode(answerResponse{
+			OutputJSON: json.RawMessage(`{"summary":"ok"}`), Answered: true,
+			Model: "gemini-x", PromptVersion: "answer.v1",
+		})
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, srv.Client(), "secret-token")
+	out, err := client.Answer(context.Background(), AnswerRequest{
+		SystemPrompt: "Sos un médico.", InputJSON: json.RawMessage(`{"labs":"x"}`),
+		ResponseSchema: map[string]any{"type": "object"},
+	})
+	if err != nil {
+		t.Fatalf("Answer: %v", err)
+	}
+	if gotToken != "secret-token" || gotPath != "/v1/answer" {
+		t.Fatalf("unexpected token/path: %q %q", gotToken, gotPath)
+	}
+	if string(gotBody.InputJSON) != `{"labs":"x"}` || len(gotBody.ResponseSchema) == 0 {
+		t.Fatalf("unexpected request body: %+v", gotBody)
+	}
+	if !out.Answered || string(out.OutputJSON) != `{"summary":"ok"}` || out.ModelID != "gemini-x" || out.PromptVersion != "answer.v1" {
+		t.Fatalf("unexpected answer result: %+v", out)
+	}
+}
+
+func TestAnswerErrorsOnNonOKStatus(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, srv.Client(), "")
+	if _, err := client.Answer(context.Background(), AnswerRequest{InputJSON: json.RawMessage(`{}`)}); err == nil {
+		t.Fatal("expected an error on a non-200 status")
+	}
+}

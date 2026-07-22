@@ -14,6 +14,7 @@ import (
 	"github.com/devpablocristo/bff-v2/internal/identity"
 	clerkprovider "github.com/devpablocristo/bff-v2/internal/identity/provider/clerk"
 	devprovider "github.com/devpablocristo/bff-v2/internal/identity/provider/dev"
+	"github.com/devpablocristo/bff-v2/internal/inbound"
 	"github.com/devpablocristo/bff-v2/internal/infra/migrations"
 	"github.com/devpablocristo/bff-v2/internal/orgs"
 	"github.com/devpablocristo/bff-v2/internal/products"
@@ -160,6 +161,13 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		DefaultPrincipalID: config.DevPrincipalID,
 	}).Routes(protected)
 	gatewayHandler.Routes(protected)
+
+	// Product-facing inbound edge (machine auth via API key), mounted at the root
+	// OUTSIDE the human-session middleware. A product (e.g. medmory) POSTs
+	// /v1/assist-runs with an API key that maps to a tenant + virployee.
+	if bindings := inbound.ParseBindings(config.ProductAPIKeys); len(bindings) > 0 {
+		inbound.NewHandler(bindings, config.CompanionBaseURL, config.InternalAuthSecret, nil).Routes(router)
+	}
 
 	server := &http.Server{
 		Addr:    config.Addr(),

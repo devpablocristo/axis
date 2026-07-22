@@ -17,6 +17,9 @@ type Config struct {
 	NexusBaseURL       string
 	IdentityProvider   string
 	InternalAuthSecret string
+	// ProductAPIKeys is the raw BFF_V2_PRODUCT_API_KEYS value: product machine
+	// credentials for the inbound /v1/assist-runs edge. Parsed by inbound.ParseBindings.
+	ProductAPIKeys string
 
 	ClerkSecretKey         string
 	ClerkAPIBaseURL        string
@@ -46,6 +49,7 @@ func Load() Config {
 		NexusBaseURL:       strings.TrimRight(envconfig.Get("BFF_V2_NEXUS_BASE_URL", "http://127.0.0.1:19087"), "/"),
 		IdentityProvider:   strings.TrimSpace(strings.ToLower(envconfig.Get("BFF_V2_IDENTITY_PROVIDER", "dev"))),
 		InternalAuthSecret: strings.TrimSpace(envconfig.Get("BFF_V2_INTERNAL_AUTH_SECRET", envconfig.Get("AXIS_V2_INTERNAL_AUTH_SECRET", ""))),
+		ProductAPIKeys:     envconfig.Get("BFF_V2_PRODUCT_API_KEYS", ""),
 		ClerkSecretKey:     envconfig.Get("BFF_V2_CLERK_SECRET_KEY", envconfig.Get("BFF_V2_CLERK_SECRET", envconfig.Get("CLERK_SECRET_KEY", ""))),
 		ClerkAPIBaseURL:    strings.TrimRight(envconfig.Get("BFF_V2_CLERK_API_BASE_URL", "https://api.clerk.com/v1"), "/"),
 		ClerkIssuerURL:     strings.TrimRight(envconfig.Get("BFF_V2_CLERK_ISSUER_URL", envconfig.Get("CLERK_ISSUER_URL", "")), "/"),

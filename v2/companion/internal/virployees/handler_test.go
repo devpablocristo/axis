@@ -566,6 +566,11 @@ func (f *handlerFakeUseCases) ExecuteApprovedAction(_ context.Context, tenantID 
 	}, nil
 }
 
+func (f *handlerFakeUseCases) Assist(_ context.Context, tenantID string, id uuid.UUID, _ json.RawMessage, _ string) (AssistRun, error) {
+	f.lastTenant = tenantID
+	return AssistRun{ID: uuid.New(), VirployeeID: id, Status: "done", Answered: true, Output: json.RawMessage(`{"summary":"ok"}`)}, nil
+}
+
 func (f *handlerFakeUseCases) ListRuns(_ context.Context, tenantID string, id uuid.UUID, _ int) ([]runtraces.Trace, error) {
 	f.lastTenant = tenantID
 	return []runtraces.Trace{

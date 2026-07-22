@@ -1,6 +1,7 @@
 package dto
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/devpablocristo/companion-v2/internal/virployees/dryrun"
@@ -10,6 +11,23 @@ import (
 	"github.com/devpablocristo/companion-v2/internal/virployees/usecases/domain"
 	"github.com/google/uuid"
 )
+
+// AssistRunResponse is the generic result of a process-and-respond run. Status is
+// running|done|failed; Output is the virployee's structured answer; Degraded is
+// true when no real model answered (Echo / no credentials). The product-facing
+// edge (BFF) maps this to the product's own contract.
+type AssistRunResponse struct {
+	ID            string          `json:"id"`
+	Status        string          `json:"status"`
+	Output        json.RawMessage `json:"output,omitempty"`
+	OutputText    string          `json:"output_text,omitempty"`
+	Answered      bool            `json:"answered"`
+	Degraded      bool            `json:"degraded"`
+	Model         string          `json:"model,omitempty"`
+	PromptVersion string          `json:"prompt_version,omitempty"`
+	Error         string          `json:"error_message,omitempty"`
+	DurationMS    int64           `json:"duration_ms"`
+}
 
 type VirployeeResponse struct {
 	ID                string     `json:"id"`

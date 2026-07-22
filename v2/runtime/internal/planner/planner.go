@@ -19,6 +19,8 @@ const (
 
 	enrichToolName      = "rewrite_procedure"
 	enrichPromptVersion = "enrich.v1"
+
+	answerPromptVersion = "answer.v1"
 )
 
 type Planner struct {
@@ -105,6 +107,82 @@ func (p *Planner) Enrich(ctx context.Context, req EnrichRequest) (EnrichResponse
 		Model:         p.model,
 		PromptVersion: enrichPromptVersion,
 	}, nil
+}
+
+// Answer processes the input data under the virployee's (system-prompt) role and
+// returns an answer. It does not classify or decide governance — it is the
+// "process and respond" path (read/explain, no external effects). When a
+// ResponseSchema is provided the model is asked for a single JSON object and
+// Answered is true only if the text parses as JSON; otherwise Answered reflects
+// non-empty text. With Echo (no model) the canned text is not JSON, so a
+// structured request returns Answered=false and Companion marks the run degraded.
+func (p *Planner) Answer(ctx context.Context, req AnswerRequest) (AnswerResponse, error) {
+	base := AnswerResponse{Answered: false, Model: p.model, PromptVersion: answerPromptVersion}
+	input := strings.TrimSpace(string(req.InputJSON))
+	if input == "" || input == "null" {
+		return base, nil
+	}
+	// Defense in depth: do not feed obviously adversarial input to the model.
+	if looksAdversarial(input) {
+		return base, nil
+	}
+
+	chatReq := ai.ChatRequest{
+		SystemPrompt: buildAnswerSystemPrompt(req),
+		Messages:     []ai.Message{{Role: "user", Content: "Input JSON:\n" + input}},
+		MaxTokens:    4096,
+	}
+	if len(req.ResponseSchema) > 0 {
+		chatReq.ResponseSchema = req.ResponseSchema
+	}
+	resp, err := p.provider.Chat(ctx, chatReq)
+	if err != nil {
+		return AnswerResponse{}, err
+	}
+
+	text := stripCodeFences(resp.Text)
+	base.OutputText = text
+	// A usable answer is a non-empty JSON object/array. Echo (no model) returns
+	// canned prose that does not parse, so it stays Answered=false (degraded) — the
+	// caller then marks the run degraded instead of treating prose as an answer.
+	if raw, ok := asJSONObject(text); ok {
+		base.OutputJSON = raw
+		base.Answered = true
+	}
+	return base, nil
+}
+
+// asJSONObject returns the text as a JSON object/array if it is valid structured
+// JSON; a bare echo string (Echo provider) is not, so it degrades to (nil,false).
+func asJSONObject(text string) (json.RawMessage, bool) {
+	t := strings.TrimSpace(text)
+	if len(t) < 2 || (t[0] != '{' && t[0] != '[') {
+		return nil, false
+	}
+	if !json.Valid([]byte(t)) {
+		return nil, false
+	}
+	// Reject an empty object/array — it is not a usable answer.
+	if compact := strings.Join(strings.Fields(t), ""); compact == "{}" || compact == "[]" {
+		return nil, false
+	}
+	return json.RawMessage(t), true
+}
+
+func buildAnswerSystemPrompt(req AnswerRequest) string {
+	var b strings.Builder
+	if s := strings.TrimSpace(req.SystemPrompt); s != "" {
+		b.WriteString(s)
+		b.WriteString("\n\n")
+	}
+	if r := strings.TrimSpace(req.JobRole); r != "" {
+		b.WriteString("Job role: ")
+		b.WriteString(r)
+		b.WriteString("\n\n")
+	}
+	b.WriteString("Read the input JSON and produce your answer based ONLY on what it contains; do not invent facts. ")
+	b.WriteString("Respond with a SINGLE JSON object and nothing outside it — no prose, no code fences.")
+	return b.String()
 }
 
 func enrichSchema() map[string]any {
