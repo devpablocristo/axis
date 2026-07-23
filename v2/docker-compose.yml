@@ -327,7 +327,9 @@ services:
       retries: 30
 
   console-e2e:
-    image: mcr.microsoft.com/playwright:v1.61.1-noble
+    build:
+      context: .
+      dockerfile: Dockerfile.console-e2e
     working_dir: /app
     environment:
       PLAYWRIGHT_BASE_URL: http://console-v2-e2e:19173
