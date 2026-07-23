@@ -263,6 +263,18 @@ test('all main sections render with coherent action buttons', async ({ page }) =
   }
 })
 
+test('admin users are scoped by organization rather than product', async ({ page }) => {
+  await page.goto('/')
+  await page.waitForLoadState('networkidle')
+
+  const usersRequest = page.waitForRequest((request) => new URL(request.url()).pathname === '/api/users')
+  await page.locator('.nav').getByRole('button', { name: 'Admin' }).click()
+
+  const request = await usersRequest
+  expect(request.headers()['x-org-id']).toBe('dev-org')
+  expect(request.headers()['x-org-id']).not.toBe(productID)
+})
+
 test('advanced governance renders policy precedence and metadata-only controls', async ({ page }) => {
   await page.goto('/')
   await page.locator('.nav').getByRole('button', { name: 'Governance', exact: true }).click()

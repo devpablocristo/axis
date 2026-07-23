@@ -38,6 +38,19 @@ func authorize(organization, role string) (string, error) {
 	}
 }
 
+func authorizeRead(organization, role string) (string, error) {
+	organization = strings.TrimSpace(organization)
+	if organization == "" {
+		return "", domainerr.Validation("organization context is required")
+	}
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case "owner", "admin", "member":
+		return organization, nil
+	default:
+		return "", domainerr.Forbidden("knowledge base access requires an organization member")
+	}
+}
+
 func (u *UseCases) Create(ctx context.Context, organization, role string, in CreateInput) (KnowledgeBase, error) {
 	organization, err := authorize(organization, role)
 	if err != nil {
@@ -51,7 +64,7 @@ func (u *UseCases) Create(ctx context.Context, organization, role string, in Cre
 }
 
 func (u *UseCases) Get(ctx context.Context, organization, role string, id uuid.UUID) (KnowledgeBase, error) {
-	organization, err := authorize(organization, role)
+	organization, err := authorizeRead(organization, role)
 	if err != nil {
 		return KnowledgeBase{}, err
 	}
@@ -59,7 +72,7 @@ func (u *UseCases) Get(ctx context.Context, organization, role string, id uuid.U
 }
 
 func (u *UseCases) List(ctx context.Context, organization, role, state string) ([]KnowledgeBase, error) {
-	organization, err := authorize(organization, role)
+	organization, err := authorizeRead(organization, role)
 	if err != nil {
 		return nil, err
 	}
@@ -219,7 +232,7 @@ func (u *UseCases) registerIngestedDocument(ctx context.Context, organization st
 }
 
 func (u *UseCases) ListDocuments(ctx context.Context, organization, role string, baseID uuid.UUID, state string) ([]Document, error) {
-	organization, err := authorize(organization, role)
+	organization, err := authorizeRead(organization, role)
 	if err != nil {
 		return nil, err
 	}
@@ -238,7 +251,7 @@ func (u *UseCases) ArchiveDocument(ctx context.Context, organization, role strin
 }
 
 func (u *UseCases) ListBindings(ctx context.Context, organization, role string, baseID uuid.UUID) ([]Binding, error) {
-	organization, err := authorize(organization, role)
+	organization, err := authorizeRead(organization, role)
 	if err != nil {
 		return nil, err
 	}
@@ -268,7 +281,7 @@ func (u *UseCases) ReplaceBindings(ctx context.Context, organization, role strin
 }
 
 func (u *UseCases) ListForVirployee(ctx context.Context, organization, role string, virployeeID uuid.UUID) ([]VirployeeKnowledgeBase, error) {
-	organization, err := authorize(organization, role)
+	organization, err := authorizeRead(organization, role)
 	if err != nil {
 		return nil, err
 	}
