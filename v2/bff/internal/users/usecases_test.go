@@ -31,6 +31,52 @@ func TestUsersListAllowsAnyActiveMember(t *testing.T) {
 	}
 }
 
+func TestUsersListReadsAndProjectsClerkOrganizationDirectory(t *testing.T) {
+	orgID := uuid.New()
+	repo := newFakeUsersRepo(orgID)
+	products := &fakeUsersOrganizationAccess{orgID: orgID, role: productdomain.RoleAdmin}
+	provider := &fakeUsersProvider{
+		userOrgMemberships: []identitydomain.ProviderOrgMembership{{
+			Org: identitydomain.ProviderOrg{
+				Provider: identitydomain.ProviderClerk, ProviderOrgID: "org_clerk",
+				Name: "Clerk Org", Status: identitydomain.StatusActive,
+			},
+			Role: userdomain.RoleAdmin,
+		}},
+		organizationMemberships: []identitydomain.ProviderOrgMembership{{
+			Org: identitydomain.ProviderOrg{
+				Provider: identitydomain.ProviderClerk, ProviderOrgID: "org_clerk",
+				Name: "Clerk Org", Status: identitydomain.StatusActive,
+			},
+			Role: userdomain.RoleMember,
+			User: identitydomain.ProviderUser{
+				Provider: identitydomain.ProviderClerk, ProviderUserID: "user_member",
+				Email: "member@example.com", Status: identitydomain.StatusActive,
+			},
+		}},
+	}
+	identityUC := &fakeUsersIdentity{users: map[string]identitydomain.User{
+		"principal": {
+			ID: "principal", Provider: identitydomain.ProviderClerk,
+			ProviderUserID: "user_principal", Status: identitydomain.StatusActive,
+		},
+	}}
+	uc := NewUseCases(repo, products, identityUC, provider, provider, provider, Options{})
+
+	out, err := uc.List(context.Background(), userdomain.ListInput{
+		OrgID: orgID.String(), PrincipalID: "principal",
+	})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(out) != 1 || out[0].Email != "member@example.com" || out[0].Role != userdomain.RoleMember {
+		t.Fatalf("expected Clerk directory user, got %+v", out)
+	}
+	if provider.listOrganizationID != "org_clerk" {
+		t.Fatalf("expected provider organization id, got %q", provider.listOrganizationID)
+	}
+}
+
 func TestUsersCreateRequiresAdminOrOwner(t *testing.T) {
 	orgID := uuid.New()
 	uc := newUsersUC(newFakeUsersRepo(orgID), &fakeUsersOrganizationAccess{orgID: orgID, role: productdomain.RoleMember})
@@ -208,6 +254,53 @@ func TestUsersPurgeDeletesClerkMembershipOnly(t *testing.T) {
 	}
 	if _, ok := repo.rows[userID]; ok {
 		t.Fatalf("expected organization user membership purged")
+	}
+}
+
+func TestUsersLifecycleSynchronizesClerkMembershipBeforeProjection(t *testing.T) {
+	orgID := uuid.New()
+	userID := uuid.NewString()
+	repo := newFakeUsersRepo(orgID)
+	repo.rows[userID] = userdomain.User{
+		ID: userID, Kind: userdomain.KindUser, Email: "member@example.com",
+		Role: userdomain.RoleMember, OrgID: orgID, State: userdomain.StateActive,
+	}
+	repo.active[userID] = true
+	provider := &fakeUsersProvider{}
+	identityUC := &fakeUsersIdentity{users: map[string]identitydomain.User{
+		userID: {
+			ID: userID, Provider: identitydomain.ProviderClerk,
+			ProviderUserID: "user_clerk_lifecycle", Status: identitydomain.StatusActive,
+		},
+	}}
+	uc := NewUseCases(
+		repo,
+		&fakeUsersOrganizationAccess{orgID: orgID, role: productdomain.RoleOwner},
+		identityUC, provider, provider, provider, Options{},
+	)
+
+	if err := uc.Archive(context.Background(), userdomain.LifecycleInput{
+		OrgID: orgID.String(), UserID: userID, PrincipalID: "principal",
+	}); err != nil {
+		t.Fatalf("Archive: %v", err)
+	}
+	if provider.deletedMembershipUserID != "user_clerk_lifecycle" {
+		t.Fatalf("expected Clerk membership deletion, provider=%+v", provider)
+	}
+	if repo.rows[userID].State != userdomain.StateArchived {
+		t.Fatalf("expected archived local projection, got %+v", repo.rows[userID])
+	}
+
+	if err := uc.Unarchive(context.Background(), userdomain.LifecycleInput{
+		OrgID: orgID.String(), UserID: userID, PrincipalID: "principal",
+	}); err != nil {
+		t.Fatalf("Unarchive: %v", err)
+	}
+	if !provider.ensureMembershipCalled || provider.ensuredMembershipUserID != "user_clerk_lifecycle" {
+		t.Fatalf("expected Clerk membership restoration, provider=%+v", provider)
+	}
+	if repo.rows[userID].State != userdomain.StateActive {
+		t.Fatalf("expected active local projection, got %+v", repo.rows[userID])
 	}
 }
 
@@ -416,6 +509,10 @@ type fakeUsersProvider struct {
 	updatedEmail            string
 	deletedMembershipUserID string
 	deletedProviderUserID   string
+	userOrgMemberships      []identitydomain.ProviderOrgMembership
+	organizationMemberships []identitydomain.ProviderOrgMembership
+	listOrganizationID      string
+	ensuredMembershipUserID string
 }
 
 func (f *fakeUsersProvider) FindUserByEmail(_ context.Context, email string) (identitydomain.ProviderUser, error) {
@@ -428,6 +525,13 @@ func (f *fakeUsersProvider) FindUserByEmail(_ context.Context, email string) (id
 		ProviderUserID: email,
 		Email:          email,
 		Status:         identitydomain.StatusActive,
+	}, nil
+}
+
+func (f *fakeUsersOrganizationAccess) EnsureOrg(_ context.Context, input productdomain.EnsureOrgInput) (productdomain.Org, error) {
+	return productdomain.Org{
+		ID: f.orgID.String(), Provider: input.Provider, ProviderOrgID: input.ProviderOrgID,
+		Name: input.Name, Slug: input.Slug, Status: input.Status, SyncedAt: input.SyncedAt,
 	}, nil
 }
 
@@ -462,7 +566,12 @@ func (f *fakeUsersProvider) GetUser(context.Context, string) (identitydomain.Pro
 }
 
 func (f *fakeUsersProvider) ListUserOrgMemberships(context.Context, string) ([]identitydomain.ProviderOrgMembership, error) {
-	return nil, nil
+	return f.userOrgMemberships, nil
+}
+
+func (f *fakeUsersProvider) ListOrganizationMemberships(_ context.Context, providerOrgID string) ([]identitydomain.ProviderOrgMembership, error) {
+	f.listOrganizationID = providerOrgID
+	return f.organizationMemberships, nil
 }
 
 func (f *fakeUsersProvider) CreateOrg(context.Context, string) (identitydomain.ProviderOrg, error) {
@@ -477,8 +586,9 @@ func (f *fakeUsersProvider) DeleteOrg(context.Context, string) error {
 	return errors.New("not implemented")
 }
 
-func (f *fakeUsersProvider) EnsureOrgMembership(context.Context, string, string, string) error {
+func (f *fakeUsersProvider) EnsureOrgMembership(_ context.Context, _, providerUserID, _ string) error {
 	f.ensureMembershipCalled = true
+	f.ensuredMembershipUserID = providerUserID
 	return nil
 }
 

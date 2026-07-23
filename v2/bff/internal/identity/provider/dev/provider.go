@@ -79,6 +79,10 @@ func (p *Provider) ListUserOrgMemberships(context.Context, string) ([]domain.Pro
 	return nil, nil
 }
 
+func (p *Provider) ListOrganizationMemberships(context.Context, string) ([]domain.ProviderOrgMembership, error) {
+	return nil, nil
+}
+
 func (p *Provider) CreateOrg(_ context.Context, name string) (domain.ProviderOrg, error) {
 	now := time.Now().UTC()
 	name = strings.TrimSpace(name)

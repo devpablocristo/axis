@@ -91,7 +91,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	productsRepo := products.NewRepository(db.Pool())
 	productsUC := products.NewUseCases(productsRepo, orgProvider)
 	orgsRepo := orgs.NewRepository(db.Pool())
-	orgsUC := orgs.NewUseCases(orgsRepo, productsUC, orgProvider)
+	orgsUC := orgs.NewUseCases(orgsRepo, productsUC, orgProvider, identityUC)
 
 	usersRepo := users.NewRepository(db.Pool())
 	usersUC := users.NewUseCases(

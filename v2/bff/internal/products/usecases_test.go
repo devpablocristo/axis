@@ -834,6 +834,10 @@ func (f *fakeOrgProvider) ListUserOrgMemberships(context.Context, string) ([]ide
 	return nil, nil
 }
 
+func (f *fakeOrgProvider) ListOrganizationMemberships(context.Context, string) ([]identitydomain.ProviderOrgMembership, error) {
+	return nil, nil
+}
+
 func (f *fakeOrgProvider) EnsureOrgMembership(context.Context, string, string, string) error {
 	return nil
 }

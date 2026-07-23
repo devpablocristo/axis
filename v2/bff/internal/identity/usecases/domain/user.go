@@ -62,6 +62,7 @@ type ProviderOrg struct {
 type ProviderOrgMembership struct {
 	Org  ProviderOrg
 	Role string
+	User ProviderUser
 }
 
 type ProviderInvitation struct {

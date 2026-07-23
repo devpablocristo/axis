@@ -362,10 +362,7 @@ func (r *Repository) upsertMembership(ctx context.Context, tx pgx.Tx, orgID uuid
 		ON CONFLICT (org_id, user_id) DO UPDATE SET
 			role = EXCLUDED.role,
 			status = 'active',
-			updated_at = EXCLUDED.updated_at,
-			archived_at = NULL,
-			trashed_at = NULL,
-			purge_after = NULL
+			updated_at = EXCLUDED.updated_at
 	`, orgID.String(), userID, role, now)
 	return err
 }

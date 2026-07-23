@@ -34,6 +34,7 @@ type OrgProviderPort interface {
 	UpdateOrg(ctx context.Context, providerOrgID, name string) (domain.ProviderOrg, error)
 	DeleteOrg(ctx context.Context, providerOrgID string) error
 	ListUserOrgMemberships(ctx context.Context, providerUserID string) ([]domain.ProviderOrgMembership, error)
+	ListOrganizationMemberships(ctx context.Context, providerOrgID string) ([]domain.ProviderOrgMembership, error)
 	EnsureOrgMembership(ctx context.Context, providerOrgID, providerUserID, role string) error
 	DeleteOrgMembership(ctx context.Context, providerOrgID, providerUserID string) error
 }

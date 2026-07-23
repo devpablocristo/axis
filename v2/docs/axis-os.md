@@ -64,6 +64,12 @@ channel for governance calls to Nexus. Health endpoints remain public.
 
 - Clerk sessions are verified at the BFF boundary; production cannot start in
   development identity mode or without its issuer configuration.
+- In Clerk mode, Clerk is the source of truth for organizations, users and
+  organization memberships. BFF application use cases depend on identity
+  provider ports; the Clerk adapter reads and mutates that directory before
+  synchronizing Axis's local organization/user projections. Those projections
+  keep stable internal IDs and product ownership, while product records remain
+  children of exactly one organization.
 - Nexus evaluates `allow`, `deny` and `require_approval` using immutable CEL
   policy versions plus the risk defaults, with shadow simulation, independent
   promotion and durable binding hashes. See

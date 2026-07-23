@@ -294,11 +294,14 @@ type fakeClerkE2E struct {
 
 	mu       sync.Mutex
 	requests []string
+	members  map[string]string
 }
 
 func newFakeClerkE2E(t *testing.T) *fakeClerkE2E {
 	t.Helper()
-	f := &fakeClerkE2E{}
+	f := &fakeClerkE2E{members: map[string]string{
+		"user_owner": "owner@cristo.tech",
+	}}
 	f.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
 		f.record(r.Method, r.URL.RequestURI(), string(raw))
@@ -307,9 +310,14 @@ func newFakeClerkE2E(t *testing.T) *fakeClerkE2E {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/users":
 			f.handleUsers(w, r)
+		case r.Method == http.MethodGet && r.URL.Path == "/users/user_owner/organization_memberships":
+			_, _ = w.Write([]byte(`{"data":[{"role":"org:admin","organization":{"id":"org_FAKE","name":"cristo.tech","slug":"cristo-tech"}}],"total_count":1}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/organization_memberships":
+			f.handleOrganizationMemberships(w)
 		case r.Method == http.MethodPost && r.URL.Path == "/users":
 			f.handleCreateUser(w, raw)
 		case r.Method == http.MethodPost && r.URL.Path == "/organizations/org_FAKE/memberships":
+			f.handleCreateMembership(raw)
 			_, _ = w.Write([]byte(`{"id":"membership_fake"}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/organizations/org_FAKE/invitations":
 			f.handleInvitation(w, raw)
@@ -320,6 +328,45 @@ func newFakeClerkE2E(t *testing.T) *fakeClerkE2E {
 	}))
 	t.Cleanup(f.server.Close)
 	return f
+}
+
+func (f *fakeClerkE2E) handleOrganizationMemberships(w http.ResponseWriter) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	items := make([]map[string]any, 0, len(f.members))
+	for userID, email := range f.members {
+		role := "org:member"
+		if userID == "user_owner" {
+			role = "org:admin"
+		}
+		items = append(items, map[string]any{
+			"role": role,
+			"organization": map[string]any{
+				"id": "org_FAKE", "name": "cristo.tech", "slug": "cristo-tech",
+			},
+			"public_user_data": map[string]any{
+				"user_id": userID, "identifier": email,
+			},
+		})
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{"data": items, "total_count": len(items)})
+}
+
+func (f *fakeClerkE2E) handleCreateMembership(raw []byte) {
+	var body struct {
+		UserID string `json:"user_id"`
+	}
+	_ = json.Unmarshal(raw, &body)
+	email := body.UserID
+	switch body.UserID {
+	case "user_existing":
+		email = "existing@cristo.tech"
+	case "user_created":
+		email = "created@cristo.tech"
+	}
+	f.mu.Lock()
+	f.members[body.UserID] = email
+	f.mu.Unlock()
 }
 
 func (f *fakeClerkE2E) handleUsers(w http.ResponseWriter, r *http.Request) {
