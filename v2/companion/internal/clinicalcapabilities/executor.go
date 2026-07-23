@@ -103,11 +103,14 @@ func (e *Executor) search(ctx context.Context, invocation mcpgovernance.Invocati
 		return nil, domainerr.Unavailable("clinical index retrieval failed")
 	}
 	matches := make([]any, 0, len(page.Matches))
+	citations := make([]any, 0, len(page.Matches))
 	for _, match := range page.Matches {
+		reference := referenceMap(match.Citation)
 		matches = append(matches, map[string]any{
 			"excerpt": boundedRunes(strings.TrimSpace(match.Part.Text), maxExcerptRunes),
-			"score":   match.Score, "reference": referenceMap(match.Citation),
+			"score":   match.Score, "reference": reference,
 		})
+		citations = append(citations, reference)
 	}
 	nextCursor := ""
 	if page.HasMore {
@@ -122,7 +125,7 @@ func (e *Executor) search(ctx context.Context, invocation mcpgovernance.Invocati
 	return map[string]any{
 		"schema_version": "clinical.records.search.v1", "status": status, "query": query,
 		"matches": matches, "next_cursor": nextCursor,
-		"truncated": page.Truncated || page.HasMore, "warnings": warnings,
+		"truncated": page.Truncated || page.HasMore, "warnings": warnings, "citations": citations,
 	}, nil
 }
 
@@ -345,7 +348,7 @@ func validateAndCanonicalizeTimeline(raw json.RawMessage, allowed map[string]kno
 		"events": outEvents, "coverage": map[string]any{
 			"sources_considered": float64(sourceCount(allowed)), "events_without_date": float64(eventsWithoutDate),
 			"corpus_truncated": corpusTruncated, "event_limit_truncated": eventLimitTruncated,
-		}, "warnings": warnings,
+		}, "warnings": warnings, "citations": eventReferences(outEvents),
 	}
 	if err := mcpgovernance.ValidateJSONSchema(TimelineOutputSchema(), result); err != nil {
 		return nil, false
@@ -389,8 +392,27 @@ func abstainedTimeline(scope map[string]any, corpusTruncated bool, reason string
 		"events": []any{}, "coverage": map[string]any{
 			"sources_considered": float64(sourcesConsidered), "events_without_date": float64(0),
 			"corpus_truncated": corpusTruncated, "event_limit_truncated": false,
-		}, "warnings": []any{reason},
+		}, "warnings": []any{reason}, "citations": []any{},
 	}
+}
+
+func eventReferences(events []any) []any {
+	out := []any{}
+	seen := map[string]struct{}{}
+	for _, value := range events {
+		event, _ := value.(map[string]any)
+		references, _ := event["references"].([]any)
+		for _, reference := range references {
+			raw, _ := json.Marshal(reference)
+			key := string(raw)
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			out = append(out, reference)
+		}
+	}
+	return out
 }
 
 func sourceCount(allowed map[string]knowledgebases.Citation) int {

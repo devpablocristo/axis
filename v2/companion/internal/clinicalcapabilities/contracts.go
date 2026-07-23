@@ -44,7 +44,7 @@ const searchInputSchemaJSON = `{
 
 const searchOutputSchemaJSON = `{
   "type":"object","additionalProperties":false,
-  "required":["schema_version","status","query","matches","next_cursor","truncated","warnings"],
+  "required":["schema_version","status","query","matches","next_cursor","truncated","warnings","citations"],
   "properties":{
     "schema_version":{"type":"string","enum":["clinical.records.search.v1"]},
     "status":{"type":"string","enum":["completed","partial"]},
@@ -59,7 +59,8 @@ const searchOutputSchemaJSON = `{
     }},
     "next_cursor":{"type":"string"},
     "truncated":{"type":"boolean"},
-    "warnings":{"type":"array","items":{"type":"string"}}
+    "warnings":{"type":"array","items":{"type":"string"}},
+    "citations":{"type":"array","items":` + canonicalReferenceSchemaJSON + `}
   }
 }`
 
@@ -76,7 +77,7 @@ const timelineInputSchemaJSON = `{
 
 const timelineOutputSchemaJSON = `{
   "type":"object","additionalProperties":false,
-  "required":["schema_version","status","scope","events","coverage","warnings"],
+  "required":["schema_version","status","scope","events","coverage","warnings","citations"],
   "properties":{
     "schema_version":{"type":"string","enum":["clinical.timeline.build.v1"]},
     "status":{"type":"string","enum":["completed","partial","abstained"]},
@@ -98,6 +99,7 @@ const timelineOutputSchemaJSON = `{
     "coverage":{"type":"object","additionalProperties":false,
       "required":["sources_considered","events_without_date","corpus_truncated","event_limit_truncated"],
       "properties":{"sources_considered":{"type":"integer"},"events_without_date":{"type":"integer"},"corpus_truncated":{"type":"boolean"},"event_limit_truncated":{"type":"boolean"}}},
-    "warnings":{"type":"array","items":{"type":"string"}}
+    "warnings":{"type":"array","items":{"type":"string"}},
+    "citations":{"type":"array","items":` + canonicalReferenceSchemaJSON + `}
   }
 }`

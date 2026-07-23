@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/devpablocristo/companion-v2/internal/artifacts"
+	capabilitydomain "github.com/devpablocristo/companion-v2/internal/capabilities/usecases/domain"
 	"github.com/devpablocristo/companion-v2/internal/knowledgebases"
 	"github.com/devpablocristo/companion-v2/internal/quotas"
 	"github.com/devpablocristo/companion-v2/internal/virployees/executiongate"
@@ -26,6 +27,13 @@ type fakeAssistRepo struct {
 	current       AssistRun
 }
 
+type fakeGovernedReadInvoker struct{ key string }
+
+func (f fakeGovernedReadInvoker) SupportsGovernedRead(key string) bool { return key == f.key }
+func (fakeGovernedReadInvoker) InvokeGovernedRead(context.Context, GovernedReadInvocation) (map[string]any, error) {
+	return map[string]any{}, nil
+}
+
 func (r *fakeAssistRepo) BeginAssistRun(_ context.Context, organization string, vid uuid.UUID, metadata AssistMetadata, idem, inputHash, _ string, input json.RawMessage) (AssistRun, bool, error) {
 	r.beginCalls++
 	if !r.reserved {
@@ -41,17 +49,8 @@ func (r *fakeAssistRepo) BeginAssistRun(_ context.Context, organization string, 
 	return r.current, true, nil
 }
 
-func TestClinicalAssistInputIsClosedBeforeArtifactProcessing(t *testing.T) {
-	if err := validateClinicalAssistInput(CapabilityClinicalRecordsSearch, json.RawMessage(`{"query":"labs","documents":[]}`)); err == nil {
-		t.Fatal("clinical search accepted a non-contract documents field")
-	}
-	if err := validateClinicalAssistInput(CapabilityClinicalTimelineBuild, json.RawMessage(`{"order":"desc","unknown":true}`)); err == nil {
-		t.Fatal("clinical timeline accepted an unknown field")
-	}
-}
-
-func TestAssistRunScopeIncludesCanonicalCapabilitySnapshot(t *testing.T) {
-	metadata := AssistMetadata{CapabilityKey: CapabilityClinicalTimelineBuild, CapabilityManifestHash: strings.Repeat("a", 64)}
+func TestAssistRunScopeIncludesCapabilitySnapshot(t *testing.T) {
+	metadata := AssistMetadata{CapabilityKey: "records.lookup.read", CapabilityManifestHash: strings.Repeat("a", 64)}
 	run := AssistRun{CapabilityKey: metadata.CapabilityKey, CapabilityManifestHash: metadata.CapabilityManifestHash}
 	if !assistRunScopeMatches(run, metadata) {
 		t.Fatal("matching capability snapshot was not considered the same idempotency scope")
@@ -59,6 +58,57 @@ func TestAssistRunScopeIncludesCanonicalCapabilitySnapshot(t *testing.T) {
 	metadata.CapabilityManifestHash = strings.Repeat("b", 64)
 	if assistRunScopeMatches(run, metadata) {
 		t.Fatal("changed capability manifest reused an idempotency scope")
+	}
+}
+
+func TestSubmitAssistUsesAssignedManifestSchemaForAnyReadCapability(t *testing.T) {
+	uc, created := setupExecutionGateUseCase(t, domain.AutonomyA3)
+	reader := uc.capabilities.(*fakeCapabilityReader)
+	const key = "records.lookup.read"
+	const manifestHash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	for id, capability := range reader.rows {
+		capability.CapabilityKey = key
+		capability.SideEffectClass = "read"
+		capability.RequiresNexusApproval = false
+		capability.PromotionState = capabilitydomain.PromotionActive
+		capability.ManifestHash = manifestHash
+		capability.ConformedHash = manifestHash
+		capability.Manifest.ProductSurface = "product-a"
+		capability.Manifest.InputSchema = map[string]any{
+			"type": "object", "additionalProperties": false,
+			"required":   []any{"query"},
+			"properties": map[string]any{"query": map[string]any{"type": "string"}},
+		}
+		reader.rows[id] = capability
+	}
+	uc.SetGovernedReadInvoker(fakeGovernedReadInvoker{key: key})
+	uc.assistRepo = &fakeAssistRepo{reserved: true}
+	metadata := AssistMetadata{CapabilityKey: key, ProductSurface: "product-a", SubjectID: uuid.NewString(), RepositoryGeneration: "generation-1"}
+
+	if _, _, err := uc.SubmitAssist(context.Background(), "organization-1", created.ID, json.RawMessage(`{"query":"labs","unknown":true}`), "idem-invalid", metadata); !domainerr.IsValidation(err) {
+		t.Fatalf("expected manifest schema validation, got %v", err)
+	}
+	run, reserved, err := uc.SubmitAssist(context.Background(), "organization-1", created.ID, json.RawMessage(`{"query":"labs"}`), "idem-valid", metadata)
+	if err != nil || !reserved {
+		t.Fatalf("SubmitAssist: reserved=%v err=%v", reserved, err)
+	}
+	if run.CapabilityKey != key || run.CapabilityManifestHash != manifestHash {
+		t.Fatalf("capability snapshot mismatch: %+v", run)
+	}
+}
+
+func TestCanonicalCapabilityCitationsReadsGenericEvidenceEnvelope(t *testing.T) {
+	sha := strings.Repeat("a", 64)
+	result := map[string]any{
+		"matches": []any{map[string]any{"reference": map[string]any{"document_id": "must-not-be-read"}}},
+		"citations": []any{map[string]any{
+			"document_id": "doc-1", "source_version": "v1", "sha256": sha,
+			"locator": map[string]any{"page": float64(2)},
+		}},
+	}
+	citations, err := canonicalCapabilityCitations(result)
+	if err != nil || len(citations) != 1 || citations[0].DocumentID != "doc-1" {
+		t.Fatalf("generic citations: %+v err=%v", citations, err)
 	}
 }
 

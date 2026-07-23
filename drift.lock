@@ -43,7 +43,7 @@ sig = "fbc40f095cd0ffe0"
 [[bindings]]
 doc = "v2/companion/docs/specs/grounded-knowledge-and-authority.md"
 target = "v2/companion/internal/virployees/assist.go"
-sig = "089acd55314c8fa9"
+sig = "bc8c4734b71a148e"
 
 [[bindings]]
 doc = "v2/companion/docs/specs/grounded-knowledge-and-authority.md"
@@ -203,7 +203,7 @@ sig = "1f63d883cec3f260"
 [[bindings]]
 doc = "v2/companion/docs/specs/workforce-routing.md"
 target = "v2/companion/internal/virployees/assist.go"
-sig = "089acd55314c8fa9"
+sig = "bc8c4734b71a148e"
 
 [[bindings]]
 doc = "v2/companion/docs/specs/workforce-routing.md"

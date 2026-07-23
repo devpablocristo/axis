@@ -11,6 +11,7 @@ import (
 
 	"github.com/devpablocristo/companion-v2/internal/artifacts"
 	"github.com/devpablocristo/companion-v2/internal/knowledgebases"
+	"github.com/devpablocristo/companion-v2/internal/mcpgovernance"
 	"github.com/devpablocristo/companion-v2/internal/memories"
 	"github.com/devpablocristo/companion-v2/internal/quotas"
 	"github.com/devpablocristo/companion-v2/internal/virployees/runtraces"
@@ -52,8 +53,8 @@ func (u *UseCases) resolveDocuments(ctx context.Context, inputJSON json.RawMessa
 // SubmitAssist durably stores an idempotent run without performing model work.
 func (u *UseCases) SubmitAssist(ctx context.Context, orgID string, id uuid.UUID, inputJSON json.RawMessage, idempotencyKey string, metadata AssistMetadata) (AssistRun, bool, error) {
 	orgID = normalizeOrgID(orgID)
-	metadata.CapabilityKey = NormalizeAssistCapabilityKey(metadata.CapabilityKey)
-	if u.answerer == nil && metadata.CapabilityKey != CapabilityClinicalRecordsSearch {
+	metadata.CapabilityKey = strings.ToLower(strings.TrimSpace(metadata.CapabilityKey))
+	if u.answerer == nil && metadata.CapabilityKey == "" {
 		return AssistRun{}, false, domainerr.Conflict("runtime answerer is not configured")
 	}
 	if u.assistRepo == nil {
@@ -66,21 +67,18 @@ func (u *UseCases) SubmitAssist(ctx context.Context, orgID string, id uuid.UUID,
 	metadata.ProductSurface = strings.ToLower(strings.TrimSpace(metadata.ProductSurface))
 	metadata.RepositoryGeneration = strings.TrimSpace(metadata.RepositoryGeneration)
 	idempotencyKey = strings.TrimSpace(idempotencyKey)
-	if isClinicalAssistCapability(metadata.CapabilityKey) {
-		if err := validateClinicalAssistInput(metadata.CapabilityKey, inputJSON); err != nil {
-			return AssistRun{}, false, err
-		}
+	if metadata.CapabilityKey != "" {
 		if metadata.SubjectID == "" {
-			return AssistRun{}, false, domainerr.Validation("subject_id is required for clinical capabilities")
+			return AssistRun{}, false, domainerr.Validation("subject_id is required for capability assists")
 		}
 		if metadata.RepositoryGeneration == "" {
-			return AssistRun{}, false, domainerr.Validation("repository_generation is required for clinical capabilities")
+			return AssistRun{}, false, domainerr.Validation("repository_generation is required for capability assists")
 		}
 		if idempotencyKey == "" {
-			return AssistRun{}, false, domainerr.Validation("Idempotency-Key is required for clinical capabilities")
+			return AssistRun{}, false, domainerr.Validation("Idempotency-Key is required for capability assists")
 		}
 		if metadata.ProductSurface == "" {
-			return AssistRun{}, false, domainerr.Validation("product_surface is required for clinical capabilities")
+			return AssistRun{}, false, domainerr.Validation("product_surface is required for capability assists")
 		}
 	}
 	if metadata.CaseID != uuid.Nil && metadata.SubjectID == "" {
@@ -90,8 +88,8 @@ func (u *UseCases) SubmitAssist(ctx context.Context, orgID string, id uuid.UUID,
 	if metadata.SubjectID != "" {
 		parsedSubjectID, _ = uuid.Parse(metadata.SubjectID)
 	}
-	if isClinicalAssistCapability(metadata.CapabilityKey) && parsedSubjectID == uuid.Nil {
-		return AssistRun{}, false, domainerr.Validation("subject_id must be a valid UUID for clinical capabilities")
+	if metadata.CapabilityKey != "" && parsedSubjectID == uuid.Nil {
+		return AssistRun{}, false, domainerr.Validation("subject_id must be a valid UUID for capability assists")
 	}
 	if metadata.AssignmentID == uuid.Nil && u.continuity != nil {
 		required, requirementErr := u.continuity.RequiresAssistAssignment(ctx, orgID, parsedSubjectID, id)
@@ -124,9 +122,6 @@ func (u *UseCases) SubmitAssist(ctx context.Context, orgID string, id uuid.UUID,
 		return AssistRun{}, false, err
 	}
 	if metadata.CapabilityKey != "" {
-		if !isClinicalAssistCapability(metadata.CapabilityKey) {
-			return AssistRun{}, false, domainerr.Validation("capability_key is not available through Assist")
-		}
 		if u.governedReads == nil || !u.governedReads.SupportsGovernedRead(metadata.CapabilityKey) {
 			return AssistRun{}, false, domainerr.Conflict("executor is not configured for Assist capability")
 		}
@@ -141,6 +136,13 @@ func (u *UseCases) SubmitAssist(ctx context.Context, orgID string, id uuid.UUID,
 			}
 			if capability.Manifest.ProductSurface != metadata.ProductSurface {
 				return AssistRun{}, false, domainerr.Forbidden("capability is not enabled for product_surface")
+			}
+			var arguments map[string]any
+			if err := json.Unmarshal(inputJSON, &arguments); err != nil || arguments == nil {
+				return AssistRun{}, false, domainerr.Validation("capability input must be a JSON object")
+			}
+			if err := mcpgovernance.ValidateJSONSchema(capability.Manifest.InputSchema, arguments); err != nil {
+				return AssistRun{}, false, domainerr.Validation(err.Error())
 			}
 			metadata.CapabilityManifestHash = capability.ManifestHash
 			found = true
@@ -283,7 +285,8 @@ func (u *UseCases) ProcessAssistRun(ctx context.Context, orgID string, runID uui
 		return failed, domainerr.Conflict("Job Role changed after the Assist run was accepted")
 	}
 	run.JobRoleSnapshotHash = currentJobRoleSnapshotHash
-	if snapshotErr := validateAssistCapabilitySnapshot(runtimeContext, run); snapshotErr != nil {
+	capabilityContract, snapshotErr := validateAssistCapabilitySnapshot(runtimeContext, run)
+	if snapshotErr != nil {
 		failed, _ := u.assistRepo.CompleteAssistRun(ctx, orgID, run.ID, "failed", nil, "", false, false, "", "", "capability_context_changed", 0)
 		return failed, snapshotErr
 	}
@@ -298,7 +301,7 @@ func (u *UseCases) ProcessAssistRun(ctx context.Context, orgID string, runID uui
 		return failed, domainerr.Unavailable("required artifact processing failed")
 	}
 	if run.CapabilityKey != "" {
-		return u.processGovernedCapabilityAssist(ctx, run, responsibleID, runtimeContext.Virployee.JobRoleID)
+		return u.processGovernedCapabilityAssist(ctx, run, responsibleID, runtimeContext.Virployee.JobRoleID, capabilityContract)
 	}
 	var answerInputJSON json.RawMessage
 	if ingested {

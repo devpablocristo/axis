@@ -152,12 +152,13 @@ repository generation, query and manifest hash. Timeline is a projection, not
 a persisted clinical entity. It returns ordered events, coverage and canonical
 references, with `completed|partial|abstained` status.
 
-Assist accepts a nullable `capability_key` for backward compatibility. When it
-is present, only these registered read executors are valid: write, unknown or
-executor-less capabilities fail closed. The accepted run snapshots the
-canonical key and manifest hash; both participate in context/idempotency and
-are checked again before execution. Axis does not translate product-owned
-aliases; a consumer adapter must send the canonical capability key.
+Assist accepts a nullable canonical `capability_key`. When it is present, any
+active, assigned, conformant read capability with a registered executor is
+eligible; write, unknown or executor-less capabilities fail closed. Input and
+output validation come from the active manifest, not from branches in Assist.
+The accepted run snapshots the key and manifest hash; both participate in
+context/idempotency and are checked again before execution. Product-owned
+aliases are never interpreted by Axis.
 
 `/v1/virployee-routing:resolve` includes the optional canonical capability key.
 Existing assignments become `reassignment_required` when their member no

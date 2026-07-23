@@ -14,12 +14,14 @@ import (
 	"github.com/google/uuid"
 )
 
-func validateAssistCapabilitySnapshot(rc runtimecontext.Context, run AssistRun) error {
+type assistCapabilityContract struct {
+	QuotaAreas       []string
+	EvidenceRequired bool
+}
+
+func validateAssistCapabilitySnapshot(rc runtimecontext.Context, run AssistRun) (assistCapabilityContract, error) {
 	if run.CapabilityKey == "" {
-		return nil
-	}
-	if !isClinicalAssistCapability(run.CapabilityKey) {
-		return domainerr.Conflict("Assist capability is no longer supported")
+		return assistCapabilityContract{}, nil
 	}
 	for _, capability := range rc.Capabilities {
 		if capability.CapabilityKey != run.CapabilityKey {
@@ -29,14 +31,14 @@ func validateAssistCapabilitySnapshot(rc runtimecontext.Context, run AssistRun) 
 			capability.ManifestHash == "" || capability.ManifestHash != capability.ConformedHash ||
 			capability.ManifestHash != run.CapabilityManifestHash ||
 			capability.Manifest.ProductSurface != run.ProductSurface {
-			return domainerr.Conflict("Assist capability manifest or promotion changed after acceptance")
+			return assistCapabilityContract{}, domainerr.Conflict("Assist capability manifest or promotion changed after acceptance")
 		}
-		return nil
+		return assistCapabilityContract{QuotaAreas: append([]string(nil), capability.Manifest.QuotaAreas...), EvidenceRequired: capability.EvidenceRequired}, nil
 	}
-	return domainerr.Conflict("Assist capability assignment changed after acceptance")
+	return assistCapabilityContract{}, domainerr.Conflict("Assist capability assignment changed after acceptance")
 }
 
-func (u *UseCases) processGovernedCapabilityAssist(ctx context.Context, run AssistRun, responsibleID, jobRoleID uuid.UUID) (AssistRun, error) {
+func (u *UseCases) processGovernedCapabilityAssist(ctx context.Context, run AssistRun, responsibleID, jobRoleID uuid.UUID, contract assistCapabilityContract) (AssistRun, error) {
 	if u.governedReads == nil || !u.governedReads.SupportsGovernedRead(run.CapabilityKey) {
 		failed, _ := u.assistRepo.CompleteAssistRun(ctx, run.OrgID, run.ID, "failed", nil, "", false, false, "", "", "capability_executor_unavailable", 0)
 		return failed, domainerr.Conflict("executor is not configured for Assist capability")
@@ -44,18 +46,25 @@ func (u *UseCases) processGovernedCapabilityAssist(ctx context.Context, run Assi
 	var arguments map[string]any
 	if err := json.Unmarshal(run.InputJSON, &arguments); err != nil || arguments == nil {
 		failed, _ := u.assistRepo.CompleteAssistRun(ctx, run.OrgID, run.ID, "failed", nil, "", false, false, "", "", "invalid_capability_input", 0)
-		return failed, domainerr.Validation("clinical capability input must be a JSON object")
+		return failed, domainerr.Validation("capability input must be a JSON object")
 	}
 	subjectID, err := uuid.Parse(strings.TrimSpace(run.SubjectID))
 	if err != nil || subjectID == uuid.Nil {
 		failed, _ := u.assistRepo.CompleteAssistRun(ctx, run.OrgID, run.ID, "failed", nil, "", false, false, "", "", "invalid_capability_subject", 0)
-		return failed, domainerr.Conflict("clinical capability subject is invalid")
+		return failed, domainerr.Conflict("capability subject is invalid")
 	}
 	if _, err := u.assistRepo.SetAssistRunStatus(ctx, run.OrgID, run.ID, "answering"); err != nil {
 		return AssistRun{}, err
 	}
-	if run.CapabilityKey == CapabilityClinicalTimelineBuild {
-		if err := u.consumeQuota(ctx, quotaKey(run.OrgID, run.ProductSurface, quotas.AreaLLM), run.ID.String(), "assist_run", run.ID.String(), estimatedAnswerTokens(run.InputJSON, nil)); err != nil {
+	for _, area := range contract.QuotaAreas {
+		if area == quotas.AreaInbound {
+			continue
+		}
+		units := int64(1)
+		if area == quotas.AreaLLM || area == quotas.AreaEmbeddings {
+			units = estimatedAnswerTokens(run.InputJSON, nil)
+		}
+		if err := u.consumeQuota(ctx, quotaKey(run.OrgID, run.ProductSurface, area), run.ID.String()+":"+area, "assist_run", run.ID.String(), units); err != nil {
 			return run, err
 		}
 	}
@@ -78,6 +87,10 @@ func (u *UseCases) processGovernedCapabilityAssist(ctx context.Context, run Assi
 	if err != nil {
 		failed, _ := u.assistRepo.CompleteAssistRun(ctx, run.OrgID, run.ID, "failed", nil, "", false, false, "", "", "invalid_capability_citations", durationMS)
 		return failed, err
+	}
+	if contract.EvidenceRequired && len(citations) == 0 {
+		failed, _ := u.assistRepo.CompleteAssistRun(ctx, run.OrgID, run.ID, "failed", nil, "", false, false, "", "", "capability_evidence_missing", durationMS)
+		return failed, domainerr.Conflict("evidence-required capability returned no citations")
 	}
 	sourceAuthorizationHash, err := u.resolveAssistSourceAuthorizationHash(ctx, run, responsibleID, jobRoleID, citations)
 	if err != nil {
@@ -112,23 +125,7 @@ func (u *UseCases) processGovernedCapabilityAssist(ctx context.Context, run Assi
 }
 
 func canonicalCapabilityCitations(result map[string]any) ([]knowledgebases.Citation, error) {
-	var raw []any
-	if matches, ok := result["matches"].([]any); ok {
-		for _, item := range matches {
-			match, _ := item.(map[string]any)
-			if reference := match["reference"]; reference != nil {
-				raw = append(raw, reference)
-			}
-		}
-	}
-	if events, ok := result["events"].([]any); ok {
-		for _, item := range events {
-			event, _ := item.(map[string]any)
-			if references, ok := event["references"].([]any); ok {
-				raw = append(raw, references...)
-			}
-		}
-	}
+	raw, _ := result["citations"].([]any)
 	out := make([]knowledgebases.Citation, 0, len(raw))
 	seen := map[string]struct{}{}
 	for _, value := range raw {

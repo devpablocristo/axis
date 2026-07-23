@@ -117,13 +117,13 @@ func (h *Handler) AssistRun(c *gin.Context) {
 		return
 	}
 	envelope.CapabilityKey = strings.ToLower(strings.TrimSpace(envelope.CapabilityKey))
-	if isClinicalCapability(envelope.CapabilityKey) {
+	if envelope.CapabilityKey != "" {
 		if subjectID, err := uuid.Parse(strings.TrimSpace(envelope.SubjectID)); err != nil || subjectID == uuid.Nil {
-			ginmw.WriteError(c, http.StatusBadRequest, "invalid_subject", "subject_id must be a UUID for clinical capabilities")
+			ginmw.WriteError(c, http.StatusBadRequest, "invalid_subject", "subject_id must be a UUID for capability assists")
 			return
 		}
 		if strings.TrimSpace(envelope.RepositoryGeneration) == "" {
-			ginmw.WriteError(c, http.StatusBadRequest, "repository_generation_required", "repository_generation is required for clinical capabilities")
+			ginmw.WriteError(c, http.StatusBadRequest, "repository_generation_required", "repository_generation is required for capability assists")
 			return
 		}
 	}
@@ -253,8 +253,10 @@ func (h *Handler) AssistCapabilities(c *gin.Context) {
 				"application/vnd.openxmlformats-officedocument.*", "application/vnd.oasis.opendocument.*",
 			},
 		},
-		"capabilities": []string{"clinical.records.search", "clinical.timeline.build"},
-		"limits":       gin.H{"max_artifact_bytes": 250 << 20, "max_diagnosis_bytes": 500 << 20, "max_repository_bytes": 5 << 30},
+		"capability_invocation": gin.H{
+			"catalog": "tenant", "side_effect_class": "read", "schema_source": "active_manifest",
+		},
+		"limits": gin.H{"max_artifact_bytes": 250 << 20, "max_diagnosis_bytes": 500 << 20, "max_repository_bytes": 5 << 30},
 	})
 }
 
@@ -398,10 +400,6 @@ func productResult(run companionAssistResponse) assistRunResult {
 		Status: status, AnswerStatus: run.AnswerStatus, Citations: run.Citations,
 		Output: run.Output, Orchestration: run.Orchestration, ErrorMessage: run.Error,
 	}
-}
-
-func isClinicalCapability(key string) bool {
-	return key == "clinical.records.search" || key == "clinical.timeline.build"
 }
 
 func isTerminal(status string) bool {

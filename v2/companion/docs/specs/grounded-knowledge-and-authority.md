@@ -73,7 +73,12 @@ source body or a signed URL. In `general` mode citations are optional and scoped
 memory may be supplied, but organization/subject/case retrieval constraints still
 apply.
 
-Clinical capability Assist always forces `sources_only`. Search retains the
+Capability Assist is generic: it resolves input/output schemas, quota areas,
+evidence requirements and the executor from the active tenant manifest and
+assignment. Assist contains no product aliases or clinical capability keys and
+forces governed reads to `sources_only`.
+
+The Axis-owned clinical executors then apply their domain behavior. Search retains the
 retriever score while bounding excerpts and paginating only within one immutable
 repository generation. Timeline supplies at most 200 authorized fragments and
 100.000 characters to the responsible Virployee with its active Job Role and

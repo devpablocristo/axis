@@ -153,16 +153,16 @@ func TestAssistRunProxiesAndMapsResponse(t *testing.T) {
 	}
 }
 
-func TestAssistRunForwardsCanonicalCapabilityWithoutProductTranslation(t *testing.T) {
+func TestAssistRunNormalizesGenericCapabilityKeyWithoutProductAliases(t *testing.T) {
 	var gotBody map[string]json.RawMessage
 	companion := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
 		_ = json.Unmarshal(raw, &gotBody)
-		_, _ = w.Write([]byte(`{"id":"run-canonical","status":"done","capability_key":"clinical.timeline.build","capability_manifest_hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","answer_status":"completed","citations":[],"output":{"status":"completed"}}`))
+		_, _ = w.Write([]byte(`{"id":"run-capability","status":"done","capability_key":"clinical.timeline.build","capability_manifest_hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","answer_status":"completed","citations":[],"output":{"status":"completed"}}`))
 	}))
 	defer companion.Close()
 
-	body := `{"product_surface":"producta","capability_key":"clinical.timeline.build","subject_id":"11111111-1111-4111-8111-111111111111","repository_generation":"g1","input":{"order":"desc"}}`
+	body := `{"product_surface":"producta","capability_key":"Clinical.Timeline.Build","subject_id":"11111111-1111-4111-8111-111111111111","repository_generation":"g1","input":{"order":"desc"}}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/assist-runs", strings.NewReader(body))
 	req.Header.Set("X-API-Key", "secret-key")
 	req.Header.Set("Idempotency-Key", "timeline-g1")
@@ -172,7 +172,7 @@ func TestAssistRunForwardsCanonicalCapabilityWithoutProductTranslation(t *testin
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 	if rec.Header().Get("Deprecation") != "" || string(gotBody["capability_key"]) != `"clinical.timeline.build"` {
-		t.Fatalf("canonical capability was translated: header=%q body=%+v", rec.Header().Get("Deprecation"), gotBody)
+		t.Fatalf("capability key was not generically normalized: header=%q body=%+v", rec.Header().Get("Deprecation"), gotBody)
 	}
 	if !strings.Contains(rec.Body.String(), `"capability_manifest_hash"`) || !strings.Contains(rec.Body.String(), `"answer_status":"completed"`) {
 		t.Fatalf("clinical response fields were not propagated: %s", rec.Body.String())
@@ -284,7 +284,7 @@ func TestAssistCapabilitiesAreMachineAuthenticatedAndConservative(t *testing.T) 
 	req.Header.Set("X-API-Key", "secret-key")
 	rec := httptest.NewRecorder()
 	newTestEngine("http://unused").ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "application/pdf") || !strings.Contains(rec.Body.String(), "application/dicom") || !strings.Contains(rec.Body.String(), "needs_human") || !strings.Contains(rec.Body.String(), "orchestration") || !strings.Contains(rec.Body.String(), "clinical.records.search") || strings.Contains(rec.Body.String(), `"status":"pending"`) {
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "application/pdf") || !strings.Contains(rec.Body.String(), "application/dicom") || !strings.Contains(rec.Body.String(), "needs_human") || !strings.Contains(rec.Body.String(), "orchestration") || !strings.Contains(rec.Body.String(), `"catalog":"tenant"`) || strings.Contains(rec.Body.String(), "clinical.records.search") || strings.Contains(rec.Body.String(), "medmory.timeline") || strings.Contains(rec.Body.String(), `"status":"pending"`) {
 		t.Fatalf("unexpected capabilities: code=%d body=%s", rec.Code, rec.Body.String())
 	}
 }
