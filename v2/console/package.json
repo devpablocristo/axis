@@ -21,7 +21,7 @@
     "@devpablocristo/platform-lifecycle": "^0.1.1",
     "@devpablocristo/platform-ui-data-display": "^0.1.0",
     "@vitejs/plugin-react": "^6.0.3",
-    "lucide-react": "^1.21.0",
+    "lucide-react": "^1.24.0",
     "openapi-fetch": "^0.15.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
