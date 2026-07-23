@@ -293,6 +293,31 @@ func TestEvaluateWithProposalBlocksUnassignedProposedCapability(t *testing.T) {
 	}
 }
 
+func TestEvaluateWithProposalRejectsCapabilityUUIDAliasMismatch(t *testing.T) {
+	capabilityID := uuid.New()
+	result := EvaluateWithProposal(
+		"execute the operation",
+		runtimecontext.Context{
+			Virployee: virployeedomain.Virployee{ID: uuid.New(), Autonomy: virployeedomain.AutonomyA3},
+			Capabilities: []capabilitydomain.Capability{{
+				ID: capabilityID, CapabilityKey: "records.search",
+				RequiredAutonomy: virployeedomain.AutonomyA2,
+			}},
+		},
+		Proposal{
+			Intent: Intent{
+				Matched: true, CapabilityID: capabilityID.String(),
+				CapabilityKey: "records.delete",
+			},
+			RequiredAutonomy: virployeedomain.AutonomyA2,
+		},
+	)
+	if result.Decision != DecisionBlocked || result.RequiredCapability == nil ||
+		result.RequiredCapability.Matched {
+		t.Fatalf("UUID/key mismatch must fail closed, got %+v", result)
+	}
+}
+
 func TestEvaluateWithProposalDropsLowConfidenceProposal(t *testing.T) {
 	// A matched proposal below the confidence threshold is treated as no intent,
 	// so it never reaches capability assignment, governance or execution.

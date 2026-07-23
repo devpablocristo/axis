@@ -1,0 +1,240 @@
+openapi: 3.1.0
+info:
+  title: Axis Connector Protocol
+  version: 1.0.0
+  description: >
+    Idempotent, schema-bound executor protocol. HTTPS is mandatory outside
+    development. Requests and responses are authenticated with HMAC-SHA256
+    using a secret resolved from the registered secret_ref.
+paths:
+  /v1/descriptor:
+    get:
+      operationId: getConnectorDescriptor
+      responses:
+        "200":
+          description: Connector descriptor
+          content:
+            application/json:
+              schema:
+                $ref: ../schemas/connector.v1.schema.json
+  /v1/invocations:
+    post:
+      operationId: invokeConnectorOperation
+      parameters:
+        - $ref: "#/components/parameters/Timestamp"
+        - $ref: "#/components/parameters/Signature"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Invocation"
+      responses:
+        "200":
+          description: Invocation completed synchronously
+          headers:
+            X-Axis-Response-Signature:
+              $ref: "#/components/headers/ResponseSignature"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvocationResult"
+        "202":
+          description: Invocation accepted; query its durable result
+          headers:
+            X-Axis-Response-Signature:
+              $ref: "#/components/headers/ResponseSignature"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvocationResult"
+        "400":
+          $ref: "#/components/responses/PermanentError"
+        "401":
+          $ref: "#/components/responses/PermanentError"
+        "403":
+          $ref: "#/components/responses/PermanentError"
+        "408":
+          $ref: "#/components/responses/RetryableError"
+        "409":
+          description: Idempotency key is bound to different bytes
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "413":
+          $ref: "#/components/responses/PermanentError"
+        "422":
+          $ref: "#/components/responses/PermanentError"
+        "429":
+          $ref: "#/components/responses/RetryableError"
+        "500":
+          $ref: "#/components/responses/RetryableError"
+        "502":
+          $ref: "#/components/responses/RetryableError"
+        "503":
+          $ref: "#/components/responses/RetryableError"
+  /v1/invocations/{invocation_id}:
+    get:
+      operationId: getConnectorInvocation
+      parameters:
+        - name: invocation_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/Timestamp"
+        - $ref: "#/components/parameters/Signature"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Durable invocation state
+          headers:
+            X-Axis-Response-Signature:
+              $ref: "#/components/headers/ResponseSignature"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvocationResult"
+        "404":
+          $ref: "#/components/responses/PermanentError"
+        "429":
+          $ref: "#/components/responses/RetryableError"
+        "500":
+          $ref: "#/components/responses/RetryableError"
+components:
+  parameters:
+    Timestamp:
+      name: X-Axis-Timestamp
+      in: header
+      required: true
+      schema:
+        type: string
+        pattern: "^[0-9]{10,13}$"
+    Signature:
+      name: X-Axis-Signature
+      in: header
+      required: true
+      description: v1 HMAC-SHA256 over method, request URI, Unix timestamp, idempotency key and body hash.
+      schema:
+        type: string
+        pattern: "^v1=[a-f0-9]{64}$"
+    IdempotencyKey:
+      name: X-Axis-Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 8
+        maxLength: 255
+  headers:
+    ResponseSignature:
+      description: v1 HMAC-SHA256 over status, idempotency key and response body hash.
+      schema:
+        type: string
+        pattern: "^v1=[a-f0-9]{64}$"
+  schemas:
+    Invocation:
+      type: object
+      additionalProperties: false
+      required:
+        - schema_version
+        - invocation_id
+        - org_id
+        - product_id
+        - capability_id
+        - operation
+        - arguments
+        - idempotency_key
+      properties:
+        schema_version:
+          const: axis.connector.v1
+        invocation_id:
+          type: string
+          format: uuid
+        org_id:
+          type: string
+          format: uuid
+        product_id:
+          type: string
+          format: uuid
+        capability_id:
+          type: string
+          format: uuid
+        operation:
+          type: string
+          pattern: "^[a-z0-9][a-z0-9._:-]{0,127}$"
+        arguments:
+          type: object
+        idempotency_key:
+          type: string
+          minLength: 8
+          maxLength: 255
+    InvocationResult:
+      type: object
+      additionalProperties: false
+      required:
+        - schema_version
+        - invocation_id
+        - product_id
+        - capability_id
+        - operation
+        - status
+      properties:
+        schema_version:
+          const: axis.connector.v1
+        invocation_id:
+          type: string
+          format: uuid
+        product_id:
+          type: string
+          format: uuid
+        capability_id:
+          type: string
+          format: uuid
+        operation:
+          type: string
+          pattern: "^[a-z0-9][a-z0-9._:-]{0,127}$"
+        status:
+          type: string
+          enum:
+            - pending
+            - succeeded
+            - failed
+        payload:
+          type: object
+        error_code:
+          type: string
+          pattern: "^[a-z0-9][a-z0-9._:-]{0,127}$"
+    Error:
+      type: object
+      additionalProperties: false
+      required:
+        - error
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required:
+            - code
+            - message
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+  responses:
+    PermanentError:
+      description: Permanent request failure; the same invocation must not be retried.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    RetryableError:
+      description: Transient failure; retry with the same invocation and idempotency key.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"

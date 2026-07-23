@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/devpablocristo/companion-v2/internal/artifacts"
+	"github.com/devpablocristo/companion-v2/internal/invocation"
 	"github.com/devpablocristo/companion-v2/internal/knowledgebases"
 	"github.com/devpablocristo/companion-v2/internal/mcpgovernance"
 	"github.com/devpablocristo/companion-v2/internal/memories"
@@ -54,7 +55,22 @@ func (u *UseCases) resolveDocuments(ctx context.Context, inputJSON json.RawMessa
 func (u *UseCases) SubmitAssist(ctx context.Context, orgID string, id uuid.UUID, inputJSON json.RawMessage, idempotencyKey string, metadata AssistMetadata) (AssistRun, bool, error) {
 	orgID = normalizeOrgID(orgID)
 	metadata.CapabilityKey = strings.ToLower(strings.TrimSpace(metadata.CapabilityKey))
-	if u.answerer == nil && metadata.CapabilityKey == "" {
+	metadata.Invocation.OrgID = orgID
+	if metadata.Invocation.ProductID == "" {
+		metadata.Invocation.ProductID = metadata.ProductID
+	}
+	if metadata.Invocation.ProductSurface == "" {
+		metadata.Invocation.ProductSurface = metadata.ProductSurface
+	}
+	normalizedInvocation, invocationErr := invocation.Normalize(metadata.Invocation)
+	if invocationErr != nil {
+		return AssistRun{}, false, domainerr.Validation(invocationErr.Error())
+	}
+	metadata.Invocation = normalizedInvocation
+	metadata.ProductID = normalizedInvocation.ProductID
+	metadata.ProductSurface = normalizedInvocation.ProductSurface
+	hasCapability := metadata.CapabilityID != uuid.Nil || metadata.CapabilityKey != ""
+	if u.answerer == nil && !hasCapability {
 		return AssistRun{}, false, domainerr.Conflict("runtime answerer is not configured")
 	}
 	if u.assistRepo == nil {
@@ -64,10 +80,9 @@ func (u *UseCases) SubmitAssist(ctx context.Context, orgID string, id uuid.UUID,
 		return AssistRun{}, false, domainerr.Validation("input_json must be valid JSON")
 	}
 	metadata.SubjectID = strings.TrimSpace(metadata.SubjectID)
-	metadata.ProductSurface = strings.ToLower(strings.TrimSpace(metadata.ProductSurface))
 	metadata.RepositoryGeneration = strings.TrimSpace(metadata.RepositoryGeneration)
 	idempotencyKey = strings.TrimSpace(idempotencyKey)
-	if metadata.CapabilityKey != "" {
+	if hasCapability {
 		if metadata.SubjectID == "" {
 			return AssistRun{}, false, domainerr.Validation("subject_id is required for capability assists")
 		}
@@ -88,7 +103,7 @@ func (u *UseCases) SubmitAssist(ctx context.Context, orgID string, id uuid.UUID,
 	if metadata.SubjectID != "" {
 		parsedSubjectID, _ = uuid.Parse(metadata.SubjectID)
 	}
-	if metadata.CapabilityKey != "" && parsedSubjectID == uuid.Nil {
+	if hasCapability && parsedSubjectID == uuid.Nil {
 		return AssistRun{}, false, domainerr.Validation("subject_id must be a valid UUID for capability assists")
 	}
 	if metadata.AssignmentID == uuid.Nil && u.continuity != nil {
@@ -121,16 +136,21 @@ func (u *UseCases) SubmitAssist(ctx context.Context, orgID string, id uuid.UUID,
 	if err != nil {
 		return AssistRun{}, false, err
 	}
-	if metadata.CapabilityKey != "" {
-		if u.governedReads == nil || !u.governedReads.SupportsGovernedRead(metadata.CapabilityKey) {
-			return AssistRun{}, false, domainerr.Conflict("executor is not configured for Assist capability")
-		}
+	if hasCapability {
 		found := false
 		for _, capability := range runtimeContext.Capabilities {
-			if capability.CapabilityKey != metadata.CapabilityKey {
+			if metadata.CapabilityID != uuid.Nil && capability.ID != metadata.CapabilityID {
 				continue
 			}
-			if capability.SideEffectClass != "read" || capability.RequiresNexusApproval ||
+			if metadata.CapabilityKey != "" && capability.CapabilityKey != metadata.CapabilityKey {
+				continue
+			}
+			metadata.CapabilityID = capability.ID
+			metadata.CapabilityKey = capability.CapabilityKey
+			if u.governedReads == nil || !u.governedReads.SupportsGovernedRead(metadata.CapabilityKey) {
+				return AssistRun{}, false, domainerr.Conflict("executor is not configured for Assist capability")
+			}
+			if capability.SideEffectClass != "read" || capability.RequiresGovernanceApproval ||
 				capability.ManifestHash == "" || capability.ConformedHash != capability.ManifestHash {
 				return AssistRun{}, false, domainerr.Conflict("Assist capability is not an active governed read")
 			}
@@ -154,7 +174,7 @@ func (u *UseCases) SubmitAssist(ctx context.Context, orgID string, id uuid.UUID,
 		metadata.GroundingMode = "sources_only"
 	}
 	metadata.GroundingMode = string(runtimeContext.Virployee.GroundingMode)
-	if metadata.CapabilityKey != "" {
+	if hasCapability {
 		metadata.GroundingMode = "sources_only"
 	} else if metadata.GroundingMode == "" {
 		metadata.GroundingMode = "general"
@@ -183,13 +203,26 @@ func (u *UseCases) SubmitAssist(ctx context.Context, orgID string, id uuid.UUID,
 
 func assistRunScopeMatches(run AssistRun, metadata AssistMetadata) bool {
 	if strings.TrimSpace(run.SubjectID) != strings.TrimSpace(metadata.SubjectID) ||
+		strings.TrimSpace(run.ProductID) != strings.TrimSpace(metadata.ProductID) ||
 		strings.TrimSpace(run.ProductSurface) != strings.TrimSpace(metadata.ProductSurface) ||
 		strings.TrimSpace(run.AssistType) != strings.TrimSpace(metadata.AssistType) ||
 		strings.TrimSpace(run.RepositoryGeneration) != strings.TrimSpace(metadata.RepositoryGeneration) ||
+		run.CapabilityID != metadata.CapabilityID ||
 		strings.TrimSpace(run.CapabilityKey) != strings.TrimSpace(metadata.CapabilityKey) ||
 		strings.TrimSpace(run.CapabilityManifestHash) != strings.TrimSpace(metadata.CapabilityManifestHash) ||
 		run.AssignmentID != metadata.AssignmentID || run.AssignmentVersion != metadata.AssignmentVersion {
 		return false
+	}
+	if run.Invocation.SchemaVersion == invocation.SchemaVersion {
+		if run.Invocation.IntegrationID != metadata.Invocation.IntegrationID ||
+			run.Invocation.IntegrationRevision != metadata.Invocation.IntegrationRevision ||
+			run.Invocation.IntegrationHash != metadata.Invocation.IntegrationHash ||
+			run.Invocation.PrincipalType != metadata.Invocation.PrincipalType ||
+			run.Invocation.PrincipalID != metadata.Invocation.PrincipalID ||
+			run.Invocation.AccessMode != metadata.Invocation.AccessMode ||
+			strings.Join(run.Invocation.Scopes, "\x00") != strings.Join(metadata.Invocation.Scopes, "\x00") {
+			return false
+		}
 	}
 	return metadata.CaseID == uuid.Nil || run.CaseID == metadata.CaseID
 }
@@ -285,6 +318,23 @@ func (u *UseCases) ProcessAssistRun(ctx context.Context, orgID string, runID uui
 		return failed, domainerr.Conflict("Job Role changed after the Assist run was accepted")
 	}
 	run.JobRoleSnapshotHash = currentJobRoleSnapshotHash
+	systemPrompt := runtimeContext.ProfileTemplate.SystemPrompt
+	if u.promptResolver != nil {
+		resolution, resolveErr := u.promptResolver.ResolvePrompt(ctx, orgID, run.ProductID, responsibleID, run.ProductSurface)
+		if resolveErr != nil {
+			failed, _ := u.assistRepo.CompleteAssistRun(ctx, orgID, run.ID, "failed", nil, "", false, false, "", "", "prompt_resolution_unavailable", 0)
+			return failed, resolveErr
+		}
+		systemPrompt = resolution.Content
+		run.PromptBundleHash = resolution.BundleHash
+		run.PromptVersions = resolution.Versions
+		if promptRepo, ok := u.assistRepo.(AssistPromptContextRepositoryPort); ok {
+			run, err = promptRepo.SetAssistPromptContext(ctx, orgID, run.ID, run.ProductID, resolution.BundleHash, resolution.Versions)
+			if err != nil {
+				return AssistRun{}, err
+			}
+		}
+	}
 	capabilityContract, snapshotErr := validateAssistCapabilitySnapshot(runtimeContext, run)
 	if snapshotErr != nil {
 		failed, _ := u.assistRepo.CompleteAssistRun(ctx, orgID, run.ID, "failed", nil, "", false, false, "", "", "capability_context_changed", 0)
@@ -372,7 +422,7 @@ func (u *UseCases) ProcessAssistRun(ctx context.Context, orgID string, runID uui
 	}
 	started := time.Now()
 	out, answerErr := u.answerer.Answer(ctx, AnswerInput{
-		SystemPrompt:        runtimeContext.ProfileTemplate.SystemPrompt,
+		SystemPrompt:        systemPrompt,
 		JobRole:             runtimeContext.JobRole.Name,
 		ProfessionalContext: professionalContextFromJobRole(runtimeContext.JobRole),
 		InputJSON:           answerInputJSON,
@@ -439,12 +489,12 @@ func responsibleVirployeeID(run AssistRun) uuid.UUID {
 
 func assistMetadataForRun(run AssistRun) AssistMetadata {
 	return AssistMetadata{
-		AssistType: run.AssistType, ProductSurface: run.ProductSurface, SubjectID: run.SubjectID,
-		CapabilityKey: run.CapabilityKey, CapabilityManifestHash: run.CapabilityManifestHash,
+		AssistType: run.AssistType, ProductID: run.ProductID, ProductSurface: run.ProductSurface, Invocation: run.Invocation, SubjectID: run.SubjectID,
+		CapabilityID: run.CapabilityID, CapabilityKey: run.CapabilityKey, CapabilityManifestHash: run.CapabilityManifestHash,
 		CaseID: run.CaseID, AssignmentID: run.AssignmentID, AssignmentVersion: run.AssignmentVersion,
 		RepositoryGeneration: run.RepositoryGeneration, GroundingMode: run.GroundingMode,
 		MemoryContextHash: run.MemoryContextHash, JobRoleSnapshotHash: run.JobRoleSnapshotHash,
-		SourceAuthorizationHash: run.SourceAuthorizationHash,
+		SourceAuthorizationHash: run.SourceAuthorizationHash, PromptBundleHash: run.PromptBundleHash,
 	}
 }
 
@@ -457,7 +507,24 @@ func assistContextHash(orgID string, virployeeID, jobRoleID uuid.UUID, metadata 
 		strings.TrimSpace(metadata.CapabilityKey), strings.TrimSpace(metadata.CapabilityManifestHash),
 		strings.ToLower(strings.TrimSpace(metadata.GroundingMode)), strings.TrimSpace(metadata.MemoryContextHash),
 		strings.TrimSpace(metadata.JobRoleSnapshotHash), strings.TrimSpace(metadata.SourceAuthorizationHash),
+		strings.TrimSpace(metadata.PromptBundleHash),
 		strings.TrimSpace(policySnapshotHash),
+	}
+	if metadata.Invocation.SchemaVersion == invocation.SchemaVersion {
+		parts = []string{
+			"assist-context.v2", strings.TrimSpace(orgID), virployeeID.String(), jobRoleID.String(),
+			strings.TrimSpace(metadata.SubjectID), metadata.CaseID.String(), metadata.AssignmentID.String(),
+			strconv.FormatInt(metadata.AssignmentVersion, 10), strings.TrimSpace(metadata.ProductID),
+			strings.TrimSpace(metadata.ProductSurface), strings.TrimSpace(metadata.Invocation.IntegrationID),
+			strconv.FormatInt(metadata.Invocation.IntegrationRevision, 10), strings.TrimSpace(metadata.Invocation.IntegrationHash),
+			strings.TrimSpace(metadata.Invocation.PrincipalType), strings.TrimSpace(metadata.Invocation.PrincipalID),
+			strings.Join(metadata.Invocation.Scopes, ","), strings.TrimSpace(metadata.Invocation.AccessMode),
+			strings.TrimSpace(metadata.AssistType), strings.TrimSpace(metadata.RepositoryGeneration),
+			metadata.CapabilityID.String(), strings.TrimSpace(metadata.CapabilityKey), strings.TrimSpace(metadata.CapabilityManifestHash),
+			strings.ToLower(strings.TrimSpace(metadata.GroundingMode)), strings.TrimSpace(metadata.MemoryContextHash),
+			strings.TrimSpace(metadata.JobRoleSnapshotHash), strings.TrimSpace(metadata.SourceAuthorizationHash),
+			strings.TrimSpace(metadata.PromptBundleHash), strings.TrimSpace(policySnapshotHash),
+		}
 	}
 	sources := make([]string, 0, len(citations))
 	for _, citation := range citations {

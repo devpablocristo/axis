@@ -40,9 +40,11 @@ func (r *fakeAssistRepo) BeginAssistRun(_ context.Context, organization string, 
 		return r.existing, false, nil
 	}
 	r.current = AssistRun{ID: uuid.New(), OrgID: organization, VirployeeID: vid, CaseID: metadata.CaseID, AssignmentID: metadata.AssignmentID,
-		AssignmentVersion: metadata.AssignmentVersion, AssistType: metadata.AssistType, ProductSurface: metadata.ProductSurface,
+		AssignmentVersion: metadata.AssignmentVersion, AssistType: metadata.AssistType, ProductID: metadata.ProductID,
+		ProductSurface: metadata.ProductSurface, Invocation: metadata.Invocation,
 		SubjectID: metadata.SubjectID, RepositoryGeneration: metadata.RepositoryGeneration,
-		CapabilityKey: metadata.CapabilityKey, CapabilityManifestHash: metadata.CapabilityManifestHash, GroundingMode: metadata.GroundingMode,
+		CapabilityID: metadata.CapabilityID, CapabilityKey: metadata.CapabilityKey,
+		CapabilityManifestHash: metadata.CapabilityManifestHash, GroundingMode: metadata.GroundingMode,
 		ContextHash: metadata.ContextHash, JobRoleSnapshotHash: metadata.JobRoleSnapshotHash,
 		SourceAuthorizationHash: metadata.SourceAuthorizationHash,
 		IdempotencyKey:          idem, Status: "received", InputHash: inputHash, InputJSON: input}
@@ -69,7 +71,7 @@ func TestSubmitAssistUsesAssignedManifestSchemaForAnyReadCapability(t *testing.T
 	for id, capability := range reader.rows {
 		capability.CapabilityKey = key
 		capability.SideEffectClass = "read"
-		capability.RequiresNexusApproval = false
+		capability.RequiresGovernanceApproval = false
 		capability.PromotionState = capabilitydomain.PromotionActive
 		capability.ManifestHash = manifestHash
 		capability.ConformedHash = manifestHash

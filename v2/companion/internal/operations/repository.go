@@ -75,11 +75,11 @@ func (r *Repository) Overview(ctx context.Context, t, p string) (Overview, error
 	if err = r.groupCounts(ctx, `SELECT status,count(*)::int FROM companion_runtime_jobs WHERE org_id=$1 AND ($2='' OR product_surface=$2) GROUP BY status`, []any{t, p}, out.Jobs); err != nil {
 		return out, err
 	}
-	if err = r.groupCounts(ctx, `SELECT status,count(*)::int FROM companion_nexus_outbox WHERE org_id=$1 GROUP BY status`, []any{t}, out.Outbox); err != nil {
+	if err = r.groupCounts(ctx, `SELECT status,count(*)::int FROM companion_outbox_messages WHERE org_id=$1 GROUP BY status`, []any{t}, out.Outbox); err != nil {
 		return out, err
 	}
 	_ = r.pool.QueryRow(ctx, `SELECT COALESCE(EXTRACT(epoch FROM now()-min(run_after))::bigint,0) FROM companion_runtime_jobs WHERE org_id=$1 AND status='queued'`, t).Scan(&out.OldestQueuedJobAge)
-	_ = r.pool.QueryRow(ctx, `SELECT COALESCE(EXTRACT(epoch FROM now()-min(available_at))::bigint,0) FROM companion_nexus_outbox WHERE org_id=$1 AND status='pending'`, t).Scan(&out.OldestOutboxAge)
+	_ = r.pool.QueryRow(ctx, `SELECT COALESCE(EXTRACT(epoch FROM now()-min(available_at))::bigint,0) FROM companion_outbox_messages WHERE org_id=$1 AND status='pending'`, t).Scan(&out.OldestOutboxAge)
 	if out.Fleet["blocked"] > 0 || out.Jobs["dead_letter"] > 0 || out.Outbox["dead"] > 0 {
 		out.Status = "degraded"
 	}
@@ -113,8 +113,8 @@ var reconChecks = []reconSpec{
 	{"execution.stalled", "critical", "execution_attempt", "manual", `SELECT id::text FROM companion_execution_attempts WHERE org_id=$1 AND status='running' AND started_at<now()-interval '15 minutes'`},
 	{"job.dead_letter", "high", "job", "manual", `SELECT id::text FROM companion_runtime_jobs WHERE org_id=$1 AND status='dead_letter'`},
 	{"job.expired_lease", "warning", "job", "automatic_safe", `SELECT id::text FROM companion_runtime_jobs WHERE org_id=$1 AND status='running' AND lease_until<now()`},
-	{"outbox.dead", "critical", "outbox", "manual", `SELECT id::text FROM companion_nexus_outbox WHERE org_id=$1 AND status='dead'`},
-	{"outbox.expired_lease", "warning", "outbox", "automatic_safe", `SELECT id::text FROM companion_nexus_outbox WHERE org_id=$1 AND status='processing' AND lease_until<now()`},
+	{"outbox.dead", "critical", "outbox", "manual", `SELECT id::text FROM companion_outbox_messages WHERE org_id=$1 AND status='dead'`},
+	{"outbox.expired_lease", "warning", "outbox", "automatic_safe", `SELECT id::text FROM companion_outbox_messages WHERE org_id=$1 AND status='processing' AND lease_until<now()`},
 	{"runtime.orphan_virployee_reference", "critical", "runtime_reference", "manual", `SELECT DISTINCT t.virployee_id::text FROM companion_run_traces t LEFT JOIN virployees v ON v.org_id=t.org_id AND v.id=t.virployee_id WHERE t.org_id=$1 AND v.id IS NULL`},
 }
 
@@ -194,7 +194,7 @@ func (r *Repository) detect(ctx context.Context, tx pgx.Tx, run ReconciliationRu
 				return nil, repaired, err
 			}
 			payload, _ := json.Marshal(map[string]any{"run_id": run.ID, "finding_type": f.FindingType, "severity": f.Severity, "resource_type": f.ResourceType, "resource_id": f.ResourceID, "fingerprint": f.Fingerprint, "state_based": true, "metadata": map[string]any{}})
-			_, err = tx.Exec(ctx, `INSERT INTO companion_nexus_outbox(id,org_id,aggregate_type,aggregate_id,kind,dedupe_key,payload_json) VALUES(gen_random_uuid(),$1,'operational_finding',$2,'operational_finding',$3,$4) ON CONFLICT(org_id,kind,dedupe_key) DO NOTHING`, run.OrgID, f.ID, run.ID.String()+":"+f.Fingerprint, payload)
+			_, err = tx.Exec(ctx, `INSERT INTO companion_outbox_messages(id,org_id,aggregate_type,aggregate_id,kind,dedupe_key,payload_json) VALUES(gen_random_uuid(),$1,'operational_finding',$2,'operational_finding',$3,$4) ON CONFLICT(org_id,kind,dedupe_key) DO NOTHING`, run.OrgID, f.ID, run.ID.String()+":"+f.Fingerprint, payload)
 			if err != nil {
 				return nil, repaired, err
 			}
@@ -213,7 +213,7 @@ func (r *Repository) safeRepair(ctx context.Context, tx pgx.Tx, f Finding) (bool
 	case "job.expired_lease":
 		tag, err = tx.Exec(ctx, `UPDATE companion_runtime_jobs SET status=CASE WHEN attempts<max_attempts THEN 'queued' ELSE 'dead_letter' END,run_after=now(),lease_owner='',lease_until=NULL,heartbeat_at=NULL,last_error_code='lease_expired',updated_at=now() WHERE org_id=$1 AND id=$2 AND status='running' AND lease_until<now()`, f.OrgID, id)
 	case "outbox.expired_lease":
-		tag, err = tx.Exec(ctx, `UPDATE companion_nexus_outbox SET status=CASE WHEN attempts<max_attempts THEN 'pending' ELSE 'dead' END,available_at=now(),lease_owner='',lease_until=NULL,heartbeat_at=NULL,last_error_code='lease_expired',updated_at=now() WHERE org_id=$1 AND id=$2 AND status='processing' AND lease_until<now()`, f.OrgID, id)
+		tag, err = tx.Exec(ctx, `UPDATE companion_outbox_messages SET status=CASE WHEN attempts<max_attempts THEN 'pending' ELSE 'dead' END,available_at=now(),lease_owner='',lease_until=NULL,heartbeat_at=NULL,last_error_code='lease_expired',updated_at=now() WHERE org_id=$1 AND id=$2 AND status='processing' AND lease_until<now()`, f.OrgID, id)
 	case "assist.stalled":
 		tag, err = tx.Exec(ctx, `UPDATE companion_assist_runs SET status='failed',error='recovery_required',completed_at=now() WHERE org_id=$1 AND id=$2 AND status='running' AND answered=false`, f.OrgID, id)
 	default:
@@ -414,7 +414,7 @@ func (r *Repository) ReplayJob(ctx context.Context, t, actor string, id uuid.UUI
 
 func (r *Repository) ListOutbox(ctx context.Context, t, status string, l, o int) ([]OutboxMessage, bool, error) {
 	l = normLimit(l)
-	rows, err := r.pool.Query(ctx, `SELECT id,aggregate_type,aggregate_id,kind,dedupe_key,status,attempts,max_attempts,available_at,lease_until,last_error_code,created_at,updated_at,delivered_at FROM companion_nexus_outbox WHERE org_id=$1 AND ($2='' OR status=$2) ORDER BY created_at DESC,id DESC LIMIT $3 OFFSET $4`, t, status, l+1, o)
+	rows, err := r.pool.Query(ctx, `SELECT id,aggregate_type,aggregate_id,kind,dedupe_key,status,attempts,max_attempts,available_at,lease_until,last_error_code,created_at,updated_at,delivered_at FROM companion_outbox_messages WHERE org_id=$1 AND ($2='' OR status=$2) ORDER BY created_at DESC,id DESC LIMIT $3 OFFSET $4`, t, status, l+1, o)
 	if err != nil {
 		return nil, false, err
 	}
@@ -445,7 +445,7 @@ func (r *Repository) ReplayOutbox(ctx context.Context, t, actor string, id uuid.
 	} else if found {
 		id = existing
 	} else {
-		tag, e := tx.Exec(ctx, `UPDATE companion_nexus_outbox SET status='pending',attempts=0,available_at=now(),lease_owner='',lease_until=NULL,heartbeat_at=NULL,last_error_code='',delivered_at=NULL,updated_at=now() WHERE org_id=$1 AND id=$2 AND status='dead'`, t, id)
+		tag, e := tx.Exec(ctx, `UPDATE companion_outbox_messages SET status='pending',attempts=0,available_at=now(),lease_owner='',lease_until=NULL,heartbeat_at=NULL,last_error_code='',delivered_at=NULL,updated_at=now() WHERE org_id=$1 AND id=$2 AND status='dead'`, t, id)
 		if e != nil {
 			return OutboxMessage{}, e
 		}
@@ -457,7 +457,7 @@ func (r *Repository) ReplayOutbox(ctx context.Context, t, actor string, id uuid.
 		}
 	}
 	var x OutboxMessage
-	err = tx.QueryRow(ctx, `SELECT id,aggregate_type,aggregate_id,kind,dedupe_key,status,attempts,max_attempts,available_at,lease_until,last_error_code,created_at,updated_at,delivered_at FROM companion_nexus_outbox WHERE org_id=$1 AND id=$2`, t, id).Scan(&x.ID, &x.AggregateType, &x.AggregateID, &x.Kind, &x.DedupeKey, &x.Status, &x.Attempts, &x.MaxAttempts, &x.AvailableAt, &x.LeaseUntil, &x.LastErrorCode, &x.CreatedAt, &x.UpdatedAt, &x.DeliveredAt)
+	err = tx.QueryRow(ctx, `SELECT id,aggregate_type,aggregate_id,kind,dedupe_key,status,attempts,max_attempts,available_at,lease_until,last_error_code,created_at,updated_at,delivered_at FROM companion_outbox_messages WHERE org_id=$1 AND id=$2`, t, id).Scan(&x.ID, &x.AggregateType, &x.AggregateID, &x.Kind, &x.DedupeKey, &x.Status, &x.Attempts, &x.MaxAttempts, &x.AvailableAt, &x.LeaseUntil, &x.LastErrorCode, &x.CreatedAt, &x.UpdatedAt, &x.DeliveredAt)
 	if err != nil {
 		return x, err
 	}

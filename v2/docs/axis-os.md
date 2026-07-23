@@ -8,20 +8,26 @@ when services collaborate.
 
 - `bff` is the HTTP shell and control plane for the OS. It owns human identity,
   session resolution, organizations, memberships, products, and the gateway into downstream
-  services.
+  services. It also owns the global product-integration envelope and persistent,
+  rotatable machine credentials.
 - `companion` is the workforce/runtime service. It owns Job Roles, Virployees,
   work subjects, stable routing, capabilities, autonomy, scoped memory,
   knowledge bindings, professional authority, execution orchestration and the
   operational view/reconciliation of its Virployee fleet and durable work.
+  Prompt content, business watchers, synthetic behavior evaluations and the
+  append-only FinOps ledger remain Companion-owned.
 - `nexus` is the governance service. It owns action types, additive functional
   role grants, versioned CEL policy evaluation, durable approvals and approval
   decisions, plus enterprise operations such as incidents, SLOs, legal holds
   and governed exports.
-- `runtime` proposes intents from natural language using an LLM (Gemini via
-  Vertex AI by default, authenticated with Application Default Credentials). It
-  only proposes which assigned capability an input maps to; Companion always
-  decides. Without credentials Runtime reports the Echo fallback explicitly
-  (no external calls), and Companion uses its scoped deterministic matcher.
+- `runtime` proposes an assigned capability UUID and schema-bound arguments.
+  Its application owns `ModelPort` and `EmbeddingPort`; Vertex/Gemini and the
+  deterministic development fallback are outbound adapters. Runtime never
+  decides authorization or executor selection.
+- `artifact-worker` runs the isolated extraction application. OCR,
+  transcription, media conversion and operating-system commands are outbound
+  adapters behind `ProfileExtractorPort`; the HTTP contract stays bounded and
+  authenticated.
 - Services communicate through HTTP. No service imports another service's
   internal packages.
 
@@ -41,20 +47,32 @@ when services collaborate.
 
 ## Axis Request Context
 
-Every request forwarded by BFF to Companion must be resolved into:
+Every product invocation is represented as `axis.invocation-context.v1`:
 
 - `principal_id`: who is acting.
+- `principal_type`: trusted human, service or Virployee classification.
 - `org_id`: the effective customer organization where the action happens.
 - `product_surface`: the selected product owned by that organization.
-- `membership_role`: principal role in the organization.
+- `product_id`: the stable product identity inside that organization.
+- integration ID, revision and contract hash when installed;
+- granted scopes; and
+- `direct` or `via_orchestrator` access mode.
 
 BFF forwards that context to Companion and Nexus with:
 
 - `X-Org-ID`
 - `X-Product-Surface`
+- `X-Product-ID` / `X-Axis-Product-ID`
 - `X-Actor-ID`
 - `X-Axis-Forwarded-By`
 - `X-Axis-Org-Role`
+- `X-Axis-Integration-ID`
+- `X-Axis-Integration-Version`
+- `X-Axis-Integration-Hash`
+- `X-Axis-Principal-Type`
+- `X-Axis-Principal-ID`
+- `X-Axis-Principal-Scopes`
+- `X-Axis-Access-Mode`
 
 Downstream services accept business routes only when the request also carries
 the shared internal authentication token. Companion uses the same protected
@@ -74,17 +92,16 @@ channel for governance calls to Nexus. Health endpoints remain public.
   policy versions plus the risk defaults, with shadow simulation, independent
   promotion and durable binding hashes. See
   [Advanced governance](advanced-governance.md).
-- Companion can manually execute an approved, durable prepared action after
-  validating the approval binding hash. Executors are selected per capability by
-  the `COMPANION_V2_EXECUTION_MODE` set: `local` runs the calendar simulator,
-  `google_calendar` creates real events in a shared Google Calendar (ADC service
-  account, `COMPANION_V2_GOOGLE_CALENDAR_ID`) with the attempt's idempotency key as
-  the event id. Each execution records its mode and whether it produced external
-  effects; both flow through the same fail-closed, binding-checked path.
-- Deleting an event (`calendar.events.delete`) is a compensating action: it runs
-  through the same governed path as the create and carries its own binding hash,
-  so a create's approval can never authorize the rollback. The delete is
-  idempotent (an already-gone event is a success).
+- Companion can execute an approved, durable `axis.prepared-action.v2` after
+  revalidating its binding and authority. The action binds a canonical
+  capability UUID, manifest and schema hashes, operation, arguments,
+  idempotency and `executor_binding_id`. Dispatch uses only that binding;
+  domain phrases and legacy capability keys never select code.
+- Organization-specific executors implement `axis.connector.v1`: HTTPS outside
+  development, HMAC request/response signatures, bounded schemas and sizes,
+  stable invocation/idempotency keys, and result lookup after ambiguous
+  timeouts. Calendar and clinical behavior are extension or explicit legacy
+  adapters, not Axis core defaults.
 - Execution Gate fails closed when Nexus is unavailable or not configured.
 - A virployee can also "process and respond" to input without external effects or
   approval (read/explain): the Assist usecase durably reserves an idempotent run
@@ -98,14 +115,23 @@ channel for governance calls to Nexus. Health endpoints remain public.
 - BFF owns organization membership and product ownership. Companion persists
   `org_id` on its own records and independently enforces that boundary after
   BFF resolves the request context.
-- A product (machine, not a Clerk user) can call the BFF inbound edge
-  `POST /v1/assist-runs` with an API key that maps to an organization + virployee; the
-  request is submitted to Companion's durable assist queue. BFF returns `200`
+- A product (machine, not a Clerk user) installs an immutable,
+  topology-neutral `axis.product-integration.v3` contract under its existing
+  organization-owned product. BFF owns the global pointer and hashed
+  credential; a configured `IntegrationParticipant` registry projects only
+  applicable functional snapshots. V2 remains immutable behind a compatibility
+  translator. The credential authorizes declared entrypoints and scopes; it
+  never lets the caller invent an organization, Virployee or permission.
+- An installed product can call the BFF inbound edge `POST /v1/assist-runs` or
+  `POST /v1/product-events`. BFF derives organization, product, integration
+  revision/hash and technical principal from the credential, strips forged
+  authority headers, and submits work to Companion. BFF returns `200`
   when an optional bounded synchronous wait observes completion, otherwise
   `202` with `id` and `status_url`; `GET /v1/assist-runs/:id` polls the same
   organization/virployee-scoped row. `GET /v1/assist-capabilities` exposes the current
-  ingress contract and limits. This edge is separate from the human-session
-  `/api` surface.
+  ingress contract and limits. Missing, suspended, incompatible or drifted
+  integrations fail closed. See
+  [Product integration contract](product-integration-contract.md).
 - Every virployee has a tamper-evident audit ledger held by Nexus: assist runs
   and governed executions append a hash-chained, optionally HMAC-signed event
   (`POST /v1/audit/events`), chained per virployee (`chain_scope =
@@ -130,18 +156,21 @@ channel for governance calls to Nexus. Health endpoints remain public.
   share a database. Reconciliation re-enqueues received assist rows, safely resets stale
   pre-answer assists within a bounded recovery budget, finalizes stale answering
   runs, and recovers stale governed
-  executions with the original idempotency key, and retries failed execution
-  result reports to Nexus. Execution completion and creation of its Nexus outbox
-  message are one Companion database transaction. A bounded dispatcher delivers
+  executions with the original idempotency key, and retries failed governance
+  result reports. Execution completion and creation of its neutral, versioned
+  governance outbox message are one Companion database transaction. A bounded dispatcher delivers
   that immutable snapshot with leases, heartbeat, exponential backoff, ten
-  attempts, dead-letter and explicit replay; `nexus_report_status` remains a
-  compatibility projection of the outbox state. Persisted failures are stable
+  attempts, dead-letter and explicit replay; the Nexus HTTP sender is one
+  adapter, while `nexus_report_status` remains a compatibility projection of
+  the neutral outbox state. Persisted failures are stable
   error codes rather than raw errors, and operational events contain metadata only — never payloads,
   PHI, secrets, or signed URLs. Every affected business record still appends
   hash-only metadata to the virployee ledger. Scheduler and worker goroutines
   stop before each service closes its database.
 - Companion exposes an organization/product-scoped operations surface for fleet health,
-  reconciliation runs, durable jobs, worker controls and Nexus outbox replay.
+  reconciliation runs, durable jobs, worker controls and governance outbox
+  replay. Legacy `nexus_*` fields remain response projections only during the
+  v2 compatibility window.
   Reconciliation findings use stable fingerprints and carry bounded metadata
   only; they are committed with a durable outbox record and delivered
   idempotently to Nexus. Nexus folds those observations into revisioned
@@ -150,6 +179,27 @@ channel for governance calls to Nexus. Health endpoints remain public.
   safe repair/replay controls, incident actions, legal holds and exports; all
   mutations remain organization-bound, authorized, version checked where applicable
   and idempotent.
+- Companion and Nexus independently maintain metadata-only served-product
+  projections by organization, product, area and time window. Configured
+  without traffic is `idle`; insufficient information is `unknown`; contract
+  drift is `blocked`; governance denials are not technical failures. BFF
+  composes both projections without Nexus querying or importing Companion.
+- Companion resolves versioned prompts as an immutable bundle:
+  non-replaceable Axis safety base, Job Role, Profile Template and Virployee.
+  A product-specific binding wins over the organization default at each level.
+  New promotions require a passing synthetic evaluation for the exact artifact,
+  product and snapshot hash from the last 24 hours plus an independent Nexus
+  authorization. Assist persists the versions and `prompt_bundle_hash`.
+- Business watchers are distinct from runtime recovery watchers. A version is
+  triggered by a schedule or product event, uses an exact active/conformant read
+  capability as detector, and produces deduplicated typed occurrences. Modes
+  are `observe`, `propose` and `execute_if_authorized`; the latter invokes the
+  ordinary ToolInvocationGate with stable idempotency. A watcher never creates a
+  task plan or compensation sequence.
+- FinOps is an append-only cost ledger separate from quotas. It attributes
+  priced or explicitly `unpriced` consumption to organization, stable product,
+  Virployee, capability and model. Budgets emit informational thresholds but
+  never authorize or block work; quotas remain the control mechanism.
 - Job workers share persisted circuit-breaker state across replicas. Retryable
   dependency failures open an organization/product/job-kind circuit after the bounded
   threshold; one half-open probe decides recovery, while protected
@@ -172,8 +222,8 @@ channel for governance calls to Nexus. Health endpoints remain public.
   a durable `memory.decay` schedule survive restarts; Runtime receives approved
   content only in the resolved scope while traces retain safe references and
   hashes.
-- Additional external providers and a general-purpose task engine remain future
-  modules; approval SoD, break-glass and specialist orchestration are already
+- Additional external providers and executors are registered through adapters
+  and connectors; approval SoD, break-glass and specialist orchestration remain
   enforced by Nexus and Companion.
 
 ## Stable workforce and bounded professional context
@@ -291,8 +341,10 @@ it.
 
 Conversions that need native binaries cross `ExtractionPort` into the isolated
 artifact-worker container; the Companion process never shells out. The worker
-has bounded multipart input/output and per-request temporary storage, and owns
-the LibreOffice, Poppler/Tesseract, ImageMagick, FFmpeg and DCMTK adapters.
+application depends on `ProfileExtractorPort`, while toolchain and allowlisted
+process execution are outbound adapters. It has bounded multipart input/output
+and per-request temporary storage; LibreOffice, Poppler/Tesseract,
+ImageMagick, FFmpeg and DCMTK remain adapter details.
 Office and DICOM fail closed when the worker is unavailable. PDF and
 Vertex-native image/audio/video retain the verified staged original and may add
 OCR, normalized media, keyframes or transcripts without replacing it. Every
@@ -324,7 +376,9 @@ quota denial happens before the model and optional enrichment degrades to its
 deterministic analyzer without spending tokens.
 
 Capability release is a separate promotion lifecycle: `draft → conformant →
-active`. A normalized manifest hash binds schemas, scopes, idempotency,
+active`. Its catalog UUID is canonical; the human name is descriptive and a
+technical key is only a migration alias. A normalized manifest hash binds
+`executor_binding_id`, operation, input/output schemas, scopes, idempotency,
 rollback, timeouts/retries, postconditions, quota areas, Secret Manager refs,
 attestation and cost class. Only promoted capabilities are assignable. A
 governance or manifest change invalidates conformance, activation rechecks

@@ -8,16 +8,16 @@ import (
 )
 
 type Definition struct {
-	CapabilityKey         string          `json:"capability_key"`
-	Name                  string          `json:"name"`
-	Description           string          `json:"description"`
-	RequiredAutonomy      string          `json:"required_autonomy"`
-	RiskClass             string          `json:"risk_class"`
-	SideEffectClass       string          `json:"side_effect_class"`
-	RequiresNexusApproval bool            `json:"requires_nexus_approval"`
-	EvidenceRequired      bool            `json:"evidence_required"`
-	Manifest              domain.Manifest `json:"manifest"`
-	JobRoleNames          []string        `json:"job_role_names"`
+	CapabilityKey              string          `json:"capability_key"`
+	Name                       string          `json:"name"`
+	Description                string          `json:"description"`
+	RequiredAutonomy           string          `json:"required_autonomy"`
+	RiskClass                  string          `json:"risk_class"`
+	SideEffectClass            string          `json:"side_effect_class"`
+	RequiresGovernanceApproval bool            `json:"requires_governance_approval"`
+	EvidenceRequired           bool            `json:"evidence_required"`
+	Manifest                   domain.Manifest `json:"manifest"`
+	JobRoleNames               []string        `json:"job_role_names"`
 }
 
 // Definitions renders reusable clinical capability templates for the product
@@ -29,7 +29,7 @@ func Definitions(productSurface string) []Definition {
 			CapabilityKey: RecordsSearchKey, Name: "Clinical records search",
 			Description:      "Evidence-bound search over an authorized clinical repository generation.",
 			RequiredAutonomy: "A0", RiskClass: "medium", SideEffectClass: "read",
-			RequiresNexusApproval: false, EvidenceRequired: true,
+			RequiresGovernanceApproval: false, EvidenceRequired: true,
 			Manifest: domain.Manifest{
 				Version: "1.0.0", ProductSurface: productSurface, InputSchema: SearchInputSchema(), OutputSchema: SearchOutputSchema(),
 				RequiredScopes: []string{"assist:run", "documents:read"},
@@ -44,7 +44,7 @@ func Definitions(productSurface string) []Definition {
 			CapabilityKey: TimelineBuildKey, Name: "Clinical timeline build",
 			Description:      "Regenerable, evidence-bound clinical timeline projection.",
 			RequiredAutonomy: "A1", RiskClass: "medium", SideEffectClass: "read",
-			RequiresNexusApproval: false, EvidenceRequired: true,
+			RequiresGovernanceApproval: false, EvidenceRequired: true,
 			Manifest: domain.Manifest{
 				Version: "1.0.0", ProductSurface: productSurface, InputSchema: TimelineInputSchema(), OutputSchema: TimelineOutputSchema(),
 				RequiredScopes: []string{"assist:run", "documents:read"},

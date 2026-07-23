@@ -16,7 +16,7 @@ const session = {
     name: 'dev-org',
     products: [{
       id: productID,
-      product_surface: 'axis',
+      product_surface: 'test-product',
       name: 'Axis',
       status: 'active',
       state: 'active',
@@ -168,7 +168,7 @@ const orgs = [{
 
 const products = [{
   id: 'product-axis',
-  product_surface: 'axis',
+  product_surface: 'test-product',
   name: 'Axis',
   status: 'active',
   state: 'active',
@@ -249,13 +249,14 @@ test('all main sections render with coherent action buttons', async ({ page }) =
   await expect(page.locator('.topbar h1')).toHaveText('Virployees')
 
   const nav = page.locator('.nav')
-  for (const section of ['Virployees', 'Approvals', 'Capabilities', 'Job Roles', 'Profile Templates', 'Admin']) {
+  for (const section of ['Virployees', 'Approvals', 'Capabilities', 'Job Roles', 'Profile Templates']) {
     await nav.getByRole('button', { name: section }).click()
     await expect(page.locator('.topbar h1')).toHaveText(section)
     await assertVisualSystem(page)
   }
 
-  await nav.getByRole('button', { name: 'Admin' }).click()
+  await nav.getByRole('button', { name: 'Organization' }).click()
+  await expect(page.locator('.topbar h1')).toHaveText('Admin')
   const adminTabs = page.locator('.organization-admin-section__tabs')
   for (const tab of ['Users', 'Orgs', 'Products']) {
     await adminTabs.getByRole('tab', { name: tab }).click()
@@ -263,12 +264,117 @@ test('all main sections render with coherent action buttons', async ({ page }) =
   }
 })
 
+test('navigation separates Companion, Nexus, Operations, and Administration', async ({ page }) => {
+  await page.goto('/')
+
+  const nav = page.locator('.nav')
+  await expect(nav.locator('.nav-section-label')).toHaveText([
+    'Companion',
+    'Nexus',
+    'Operations',
+    'Administration',
+  ])
+
+  await expect(nav.locator('button[data-domain="companion"]')).toHaveText([
+    'Virployees',
+    'Workforce',
+    'Coordination',
+    'Learning',
+    'Prompts',
+    'Watchers',
+    'Evaluations',
+    'Capabilities',
+    'Job Roles',
+    'Profile Templates',
+    'Knowledge Bases',
+    'Professional Policies',
+    'MCP Governance',
+  ])
+  await expect(nav.locator('button[data-domain="nexus"]')).toHaveText([
+    'Overview',
+    'Approvals',
+    'Policies & access',
+    'Incidents & SLOs',
+    'Holds & exports',
+  ])
+  await expect(nav.locator('button[data-domain="operations"]')).toHaveText(['Fleet & runtime'])
+  await expect(nav.locator('button[data-domain="administration"]')).toHaveText(['Organization'])
+})
+
+test('product integration editor defaults to topology-neutral v3 and still identifies v2 history', async ({ page }) => {
+  await page.goto('/')
+  await page.locator('.nav').getByRole('button', { name: 'Organization' }).click()
+  await page.getByRole('tab', { name: 'Product integration' }).click()
+
+  const editor = page.getByLabel('Contract JSON')
+  await expect(editor).toHaveValue(/axis\.product-integration\.v3/)
+  const defaultV3 = JSON.parse(await editor.inputValue())
+  expect(defaultV3).toEqual({
+    schema_version: 'axis.product-integration.v3',
+    entrypoints: [],
+    capabilities: [],
+    events: [],
+    governed_operations: [],
+    connector_bindings: [],
+    authentication: { mode: 'api_key', scopes: ['assist.write'] },
+    limits: { max_request_bytes: 1048576, max_result_bytes: 1048576, rate_per_minute: 60 },
+  })
+  await expect(page.getByRole('heading', { name: 'Participant readiness' })).toBeVisible()
+  await expect(page.getByText('axis.product-integration.v2')).toBeVisible()
+
+  await page.getByRole('button', { name: 'Use as draft' }).click()
+  const installedV3 = JSON.parse(await editor.inputValue())
+  expect(installedV3.entrypoints).toEqual([{
+    kind: 'virployee',
+    id: '11111111-1111-4111-8111-111111111111',
+  }])
+  expect(installedV3.capabilities[0]).toMatchObject({
+    name: 'Prepare an operations summary',
+    executor_binding_id: 'summary-main',
+    operation: 'summary.prepare',
+  })
+  expect(installedV3.governed_operations[0].required_scopes).toEqual(['assist.write'])
+  expect(installedV3.connector_bindings[0]).toEqual({
+    id: 'summary-main',
+    connector_id: 'generic-http',
+    operation: 'summary.prepare',
+    secret_ref: 'secret://connectors/summary-main',
+  })
+})
+
+test('Nexus overview exposes its complete control-plane responsibilities', async ({ page }) => {
+  await page.goto('/')
+
+  const nav = page.locator('.nav')
+  await nav.getByRole('button', { name: 'Overview', exact: true }).click()
+  await expect(page.locator('.topbar h1')).toHaveText('Nexus')
+  await expect(page.locator('.nexus-domain-card')).toHaveCount(8)
+  for (const responsibility of [
+    'Authorization engine',
+    'Action types & risk',
+    'Policies & access',
+    'Approvals',
+    'Audit & evidence',
+    'Incidents & SLOs',
+    'Preservation & exports',
+    'Nexus operations',
+  ]) {
+    await expect(page.getByRole('heading', { name: responsibility, exact: true })).toBeVisible()
+  }
+
+  await nav.getByRole('button', { name: 'Incidents & SLOs', exact: true }).click()
+  await expect(page.locator('.operations-tabs button.active')).toHaveText('Incidents & SLOs')
+
+  await nav.getByRole('button', { name: 'Holds & exports', exact: true }).click()
+  await expect(page.locator('.operations-tabs button.active')).toHaveText('Holds & exports')
+})
+
 test('admin users are scoped by organization rather than product', async ({ page }) => {
   await page.goto('/')
   await page.waitForLoadState('networkidle')
 
   const usersRequest = page.waitForRequest((request) => new URL(request.url()).pathname === '/api/users')
-  await page.locator('.nav').getByRole('button', { name: 'Admin' }).click()
+  await page.locator('.nav').getByRole('button', { name: 'Organization' }).click()
 
   const request = await usersRequest
   expect(request.headers()['x-org-id']).toBe('dev-org')
@@ -277,9 +383,8 @@ test('admin users are scoped by organization rather than product', async ({ page
 
 test('advanced governance renders policy precedence and metadata-only controls', async ({ page }) => {
   await page.goto('/')
-  await page.locator('.nav').getByRole('button', { name: 'Governance', exact: true }).click()
-  await expect(page.locator('.topbar h1')).toHaveText('Governance')
-  await expect(page.getByRole('heading', { name: 'Policy changes should be explainable before they are active.' })).toBeVisible()
+  await page.locator('.nav').getByRole('button', { name: 'Policies & access', exact: true }).click()
+  await expect(page.locator('.topbar h1')).toHaveText('Policies & access')
   await expect(page.getByLabel('Policy decision precedence')).toContainText('Deny')
   await expect(page.getByLabel('Policy decision precedence')).toContainText('Approval')
   await expect(page.getByLabel('Policy decision precedence')).toContainText('Allow')
@@ -298,7 +403,7 @@ test('crud lists use one toolbar and do not render row action columns', async ({
     await expect(page.locator('.iam-control__bulk-buttons')).toHaveCount(1)
   }
 
-  await nav.getByRole('button', { name: 'Admin' }).click()
+  await nav.getByRole('button', { name: 'Organization' }).click()
   const adminTabs = page.locator('.organization-admin-section__tabs')
   for (const tab of ['Users', 'Orgs', 'Products']) {
     await adminTabs.getByRole('tab', { name: tab }).click()
@@ -317,7 +422,7 @@ test('builder and admin toolbars align primary actions with filters and keep lif
     await expectConsistentToolbarHierarchy(page, section)
   }
 
-  await nav.getByRole('button', { name: 'Admin' }).click()
+  await nav.getByRole('button', { name: 'Organization' }).click()
   const adminTabs = page.locator('.organization-admin-section__tabs')
   for (const tab of ['Users', 'Orgs', 'Products']) {
     await adminTabs.getByRole('tab', { name: tab }).click()
@@ -335,7 +440,7 @@ test('crud lists keep selection and primary columns fixed and expose created tim
     await expectStickySelectionAndPrimary(page)
   }
 
-  await nav.getByRole('button', { name: 'Admin' }).click()
+  await nav.getByRole('button', { name: 'Organization' }).click()
   const adminTabs = page.locator('.organization-admin-section__tabs')
   for (const tab of ['Users', 'Orgs', 'Products']) {
     await adminTabs.getByRole('tab', { name: tab }).click()
@@ -361,7 +466,7 @@ test('crud tables stay usable across desktop, tablet, and mobile viewports', asy
       await expectResponsiveCrudTable(page, viewport.name)
     }
 
-    await nav.getByRole('button', { name: 'Admin' }).click()
+    await nav.getByRole('button', { name: 'Organization' }).click()
     const adminTabs = page.locator('.organization-admin-section__tabs')
     for (const tab of ['Users', 'Orgs', 'Products']) {
       await adminTabs.getByRole('tab', { name: tab }).click()
@@ -433,6 +538,22 @@ test('virployee edit, preview, and dry run panels have matching top and bottom a
   await page.getByRole('button', { name: 'Dry Run' }).click()
   await expect(page.getByRole('heading', { name: 'Dry Run' })).toBeVisible()
   await expectActionBars(page, '.virployee-form-actions--top', '.virployee-edit-form__footer')
+})
+
+test('prepared actions are reviewed from their schema and sent unchanged to the execution gate', async ({ page }) => {
+  await openSofiaDryRun(page)
+  await runDryRunInput(page, 'Prepare the weekly operations summary')
+
+  const review = page.getByLabel('Prepared action')
+  await expect(review).toContainText('summary.prepare')
+  await expect(review).toContainText('Capability UUID')
+  await expect(review).toContainText('Weekly operations')
+  await expect(page.getByRole('button', { name: 'Check execution gate' }).first()).toBeDisabled()
+
+  await review.getByRole('button', { name: 'Confirm prepared action' }).click()
+  await expect(page.getByRole('button', { name: 'Check execution gate' }).first()).toBeEnabled()
+  await page.getByRole('button', { name: 'Check execution gate' }).first().click()
+  await expect(page.getByText('Allowed by governance').first()).toBeVisible()
 })
 
 test('virployee memory panel keeps the page layout contained across desktop and mobile', async ({ page }) => {
@@ -578,12 +699,12 @@ test('allow and deny gate results do not expose approval actions', async ({ page
 
   await runDryRunInput(page, 'Que reuniones tengo manana')
   await page.getByRole('button', { name: 'Check execution gate' }).first().click()
-  await expect(page.getByText('Allowed by Nexus').first()).toBeVisible()
+  await expect(page.getByText('Allowed by governance').first()).toBeVisible()
   await expect(page.getByRole('button', { name: 'Review approval' })).toHaveCount(0)
 
   await runDryRunInput(page, 'Agenda una reunion "Smoke Deny" manana a las 16 con ana@example.com')
   await page.getByRole('button', { name: 'Check execution gate' }).first().click()
-  await expect(page.getByText('Denied by Nexus').first()).toBeVisible()
+  await expect(page.getByText('Denied by governance').first()).toBeVisible()
   await expect(page.getByRole('button', { name: 'Review approval' })).toHaveCount(0)
 })
 
@@ -607,6 +728,12 @@ async function installApiFixtures(page: Page) {
     }
     if (path === '/api/virployees/virployee-sofia/execution-gate' && route.request().method() === 'POST') {
       const input = requestInput(route)
+      if (isPreparedActionInput(input)) {
+        const payload = route.request().postDataJSON() as { prepared_action?: { schema_version?: string } }
+        if (payload.prepared_action?.schema_version !== 'axis.prepared-action.v2') {
+          return json(route, { error: 'prepared_action is required' }, 422)
+        }
+      }
       const result = executionGateForInput(input, state)
       return json(route, result)
     }
@@ -618,6 +745,86 @@ async function installApiFixtures(page: Page) {
     if (path === '/api/organizations') return json(route, { data: session.organizations })
     if (path === '/api/orgs') return json(route, { data: orgs })
     if (path === '/api/organizations/dev-org/products') return json(route, { data: products })
+    const integrationBase = `/api/organizations/dev-org/products/${productID}/integration`
+    if (path === `${integrationBase}/readiness`) {
+      return json(route, {
+        status: 'ready',
+        lifecycle: 'active',
+        contract_hash: 'active-contract-hash',
+        version: 2,
+        participants: {
+          gateway: { status: 'ready' },
+          assistant: { status: 'ready' },
+        },
+      })
+    }
+    if (path === `${integrationBase}/credentials`) return json(route, { items: [] })
+    if (path === integrationBase) {
+      return json(route, {
+        integration: {
+          id: 'integration-e2e',
+          lifecycle: 'active',
+          active_version_id: 'integration-version-v3',
+          product_surface: 'test-product',
+        },
+        versions: [
+          {
+            id: 'integration-version-v3',
+            revision: 2,
+            schema_version: 'axis.product-integration.v3',
+            contract: {
+              schema_version: 'axis.product-integration.v3',
+              entrypoints: [{
+                kind: 'virployee',
+                id: '11111111-1111-4111-8111-111111111111',
+              }],
+              capabilities: [{
+                id: '22222222-2222-4222-8222-222222222222',
+                name: 'Prepare an operations summary',
+                version: 'v1',
+                manifest_hash: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                executor_binding_id: 'summary-main',
+                operation: 'summary.prepare',
+                input_schema_hash: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+                output_schema_hash: 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+              }],
+              events: [],
+              governed_operations: [{
+                capability_id: '22222222-2222-4222-8222-222222222222',
+                operation: 'summary.prepare',
+                required_scopes: ['assist.write'],
+              }],
+              connector_bindings: [{
+                id: 'summary-main',
+                connector_id: 'generic-http',
+                operation: 'summary.prepare',
+                secret_ref: 'secret://connectors/summary-main',
+              }],
+              authentication: {
+                mode: 'api_key',
+                scopes: ['assist.write'],
+              },
+              limits: {
+                max_request_bytes: 1048576,
+                max_result_bytes: 1048576,
+                rate_per_minute: 60,
+              },
+            },
+            contract_hash: 'active-contract-hash',
+            status: 'active',
+            created_at: now,
+          },
+          {
+            id: 'integration-version-v2',
+            revision: 1,
+            schema_version: 'axis.product-integration.v2',
+            contract_hash: 'legacy-contract-hash',
+            status: 'retired',
+            created_at: now,
+          },
+        ],
+      })
+    }
     if (path === '/api/role-definitions') return json(route, [
       { key: 'policy_admin', description: 'Manage policies', permissions: ['policies.read', 'policies.write'] },
       { key: 'auditor', description: 'Read governance history', permissions: ['audit.read', 'policies.read'] },
@@ -673,7 +880,7 @@ async function runDryRunInput(page: Page, input: string) {
   await page.getByLabel('Action input').fill(input)
   await page.getByRole('button', { name: /Run (Dry Run|again)/ }).first().click()
   await expect(page.getByText('Dry Run result')).toBeVisible()
-  const date = page.getByLabel('Date')
+  const date = page.locator('input[type="date"]:visible')
   if (await date.count()) {
     await date.fill('2099-01-01')
   }
@@ -716,8 +923,8 @@ function requestInput(route: Route): string {
 function executionGateForInput(input: string, state: ApiFixtureState) {
   const sequence = nextSequence(state)
   const dryRun = dryRunForInput(input)
-  if (isReadInput(input)) {
-    const result = executionGateResponse(input, dryRun, 'pass', 'Allowed by Nexus')
+  if (isReadInput(input) || isPreparedActionInput(input)) {
+    const result = executionGateResponse(input, dryRun, 'pass', 'Allowed by governance')
     state.runs.unshift(executionGateTrace(input, dryRun, sequence, 'allow'))
     return result
   }
@@ -752,6 +959,71 @@ function executionGateForInput(input: string, state: ApiFixtureState) {
 }
 
 function dryRunForInput(input: string) {
+  if (isPreparedActionInput(input)) {
+    const inputSchema = {
+      type: 'object',
+      required: ['title', 'period'],
+      properties: {
+        title: { type: 'string', title: 'Summary title' },
+        period: { type: 'string', title: 'Reporting period' },
+        include_metrics: { type: 'boolean', title: 'Include metrics' },
+      },
+    }
+    return {
+      input,
+      runtime_context: runtimeContext,
+      intent: {
+        matched: true,
+        capability_key: 'legacy.summary.prepare',
+        domain: 'operations',
+        resource: 'summary',
+        action: 'prepare',
+        confidence: 0.96,
+        matched_by: ['capability_id'],
+        rules: [],
+        proposed_by: 'llm',
+        model_id: 'fixture-model',
+      },
+      required_capability: {
+        id: '11111111-1111-4111-8111-111111111111',
+        capability_key: 'legacy.summary.prepare',
+        name: 'Prepare an operations summary',
+        required_autonomy: 'A2',
+        matched: true,
+        input_schema: inputSchema,
+      },
+      required_autonomy: 'A2',
+      virployee_autonomy: 'A3',
+      decision: 'allowed',
+      reason: 'virployee autonomy allows the required capability',
+      next_step: 'review the prepared payload',
+      draft: {
+        status: 'ready',
+        action: 'summary.prepare',
+        kind: 'prepared_action',
+        summary: 'Weekly operations summary',
+        fields: [],
+        missing_fields: [],
+        notes: [],
+      },
+      prepared_action: {
+        schema_version: 'axis.prepared-action.v2',
+        capability_id: '11111111-1111-4111-8111-111111111111',
+        manifest_hash: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        executor_binding_id: 'connector-main',
+        operation: 'summary.prepare',
+        input_schema_hash: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+        output_schema_hash: 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+        arguments: {
+          title: 'Weekly operations',
+          period: 'current_week',
+          include_metrics: true,
+        },
+        required_autonomy: 'A2',
+        idempotency_hash: 'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd',
+      },
+    }
+  }
   if (isReadInput(input)) {
     return {
       input,
@@ -897,7 +1169,7 @@ function executionGateTrace(
       key: 'nexus_policy',
       status: nexusDecision === 'allow' ? 'pass' : 'blocked',
       reason: nexusDecision === 'allow'
-        ? 'Allowed by Nexus'
+        ? 'Allowed by governance'
         : nexusDecision === 'deny'
           ? 'Action type is disabled'
           : 'Requires human approval',
@@ -924,6 +1196,10 @@ function executionGateTrace(
 
 function isReadInput(input: string): boolean {
   return input.toLowerCase().includes('que reuniones') || input.toLowerCase().includes('qué reuniones')
+}
+
+function isPreparedActionInput(input: string): boolean {
+  return input.toLowerCase().includes('weekly operations summary')
 }
 
 function isDenyInput(input: string): boolean {

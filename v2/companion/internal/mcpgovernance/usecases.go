@@ -295,7 +295,7 @@ func (u *UseCases) CallTool(ctx context.Context, invocation Invocation) (out Inv
 		return InvocationResult{}, domainerr.Validation("idempotency key is required for write capabilities")
 	}
 
-	if tool.Capability.SideEffectClass == "write" || tool.Capability.RequiresNexusApproval {
+	if tool.Capability.SideEffectClass == "write" || tool.Capability.RequiresGovernanceApproval {
 		if u.writeGate == nil {
 			blockedBy = "execution_gate"
 			return InvocationResult{}, domainerr.Conflict("execution gate is not configured")
@@ -475,7 +475,7 @@ func toolFromCapability(capability capabilitydomain.Capability, authorityHash st
 			IdempotentHint:  capability.Manifest.Idempotency.Mode == "required", OpenWorldHint: capability.SideEffectClass == "write",
 		},
 		Meta: ToolMeta{CapabilityVersion: capability.Manifest.Version, ManifestHash: capability.ManifestHash,
-			RiskClass: capability.RiskClass, RequiresApproval: capability.RequiresNexusApproval, RollbackMode: capability.Manifest.RollbackMode},
+			RiskClass: capability.RiskClass, RequiresApproval: capability.RequiresGovernanceApproval, RollbackMode: capability.Manifest.RollbackMode},
 		Capability: capability, AuthorityHash: authorityHash,
 	}
 }

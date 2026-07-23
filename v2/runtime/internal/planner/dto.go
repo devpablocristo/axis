@@ -15,12 +15,15 @@ type ProposeRequest struct {
 }
 
 type CapabilityInfo struct {
-	CapabilityKey    string `json:"capability_key"`
-	Name             string `json:"name,omitempty"`
-	Description      string `json:"description,omitempty"`
-	RequiredAutonomy string `json:"required_autonomy,omitempty"`
-	RiskClass        string `json:"risk_class,omitempty"`
-	SideEffectClass  string `json:"side_effect_class,omitempty"`
+	CapabilityID     string         `json:"capability_id,omitempty"`
+	CapabilityKey    string         `json:"capability_key"`
+	Name             string         `json:"name,omitempty"`
+	Description      string         `json:"description,omitempty"`
+	RequiredAutonomy string         `json:"required_autonomy,omitempty"`
+	RiskClass        string         `json:"risk_class,omitempty"`
+	SideEffectClass  string         `json:"side_effect_class,omitempty"`
+	Operation        string         `json:"operation,omitempty"`
+	InputSchema      map[string]any `json:"input_schema,omitempty"`
 }
 
 type MemoryRef struct {
@@ -39,13 +42,15 @@ type ProposeResponse struct {
 }
 
 type ProposedIntent struct {
-	Matched          bool    `json:"matched"`
-	CapabilityKey    string  `json:"capability_key,omitempty"`
-	Domain           string  `json:"domain,omitempty"`
-	Resource         string  `json:"resource,omitempty"`
-	Action           string  `json:"action,omitempty"`
-	RequiredAutonomy string  `json:"required_autonomy,omitempty"`
-	Confidence       float64 `json:"confidence,omitempty"`
+	Matched          bool           `json:"matched"`
+	CapabilityID     string         `json:"capability_id,omitempty"`
+	CapabilityKey    string         `json:"capability_key,omitempty"`
+	Domain           string         `json:"domain,omitempty"`
+	Resource         string         `json:"resource,omitempty"`
+	Action           string         `json:"action,omitempty"`
+	RequiredAutonomy string         `json:"required_autonomy,omitempty"`
+	Confidence       float64        `json:"confidence,omitempty"`
+	Arguments        map[string]any `json:"arguments,omitempty"`
 }
 
 // AnswerRequest is what Companion sends when a virployee must PROCESS input data
@@ -125,6 +130,7 @@ type Citation struct {
 // already-PII-free distilled text plus the capability_key and job role — never
 // draft values or memory content.
 type EnrichRequest struct {
+	CapabilityID  string `json:"capability_id,omitempty"`
 	CapabilityKey string `json:"capability_key"`
 	Title         string `json:"title"`
 	Content       string `json:"content"`

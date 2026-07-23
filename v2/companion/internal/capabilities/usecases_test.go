@@ -50,15 +50,20 @@ func (r *fakeCapabilityRepo) Create(_ context.Context, orgID string, input domai
 	id := uuid.New()
 	now := time.Now().UTC()
 	row := domain.Capability{
-		ID:               id,
-		OrgID:            orgID,
-		CapabilityKey:    input.CapabilityKey,
-		Name:             input.Name,
-		Description:      input.Description,
-		RequiredAutonomy: input.RequiredAutonomy,
-		PromotionState:   domain.PromotionDraft,
-		CreatedAt:        now,
-		UpdatedAt:        now,
+		ID:                         id,
+		OrgID:                      orgID,
+		CapabilityKey:              input.CapabilityKey,
+		Name:                       input.Name,
+		Description:                input.Description,
+		RequiredAutonomy:           input.RequiredAutonomy,
+		RiskClass:                  input.Governance.RiskClass,
+		SideEffectClass:            input.Governance.SideEffectClass,
+		RequiresGovernanceApproval: input.Governance.RequiresGovernanceApproval,
+		EvidenceRequired:           input.Governance.EvidenceRequired,
+		RollbackCapabilityKey:      input.Governance.RollbackCapabilityKey,
+		PromotionState:             domain.PromotionDraft,
+		CreatedAt:                  now,
+		UpdatedAt:                  now,
 	}
 	r.rows[id] = row
 	return row, nil
@@ -142,7 +147,7 @@ func (r *fakeCapabilityRepo) Update(_ context.Context, orgID string, id uuid.UUI
 	row.RequiredAutonomy = input.RequiredAutonomy
 	row.RiskClass = input.Governance.RiskClass
 	row.SideEffectClass = input.Governance.SideEffectClass
-	row.RequiresNexusApproval = input.Governance.RequiresNexusApproval
+	row.RequiresGovernanceApproval = input.Governance.RequiresGovernanceApproval
 	row.EvidenceRequired = input.Governance.EvidenceRequired
 	row.RollbackCapabilityKey = input.Governance.RollbackCapabilityKey
 	row.PromotionState = domain.PromotionDraft

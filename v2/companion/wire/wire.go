@@ -5,18 +5,21 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
 	cfg "github.com/devpablocristo/companion-v2/cmd/config"
+	"github.com/devpablocristo/companion-v2/internal/adapters/out/googlecalendar"
 	"github.com/devpablocristo/companion-v2/internal/artifactindex"
 	"github.com/devpablocristo/companion-v2/internal/artifacts"
 	"github.com/devpablocristo/companion-v2/internal/attestation"
+	"github.com/devpablocristo/companion-v2/internal/automation"
 	"github.com/devpablocristo/companion-v2/internal/capabilities"
-	"github.com/devpablocristo/companion-v2/internal/clinicalcapabilities"
 	"github.com/devpablocristo/companion-v2/internal/executionstats"
+	"github.com/devpablocristo/companion-v2/internal/finops"
 	"github.com/devpablocristo/companion-v2/internal/infra/migrations"
 	"github.com/devpablocristo/companion-v2/internal/jobroles"
 	"github.com/devpablocristo/companion-v2/internal/jobs"
@@ -27,8 +30,10 @@ import (
 	"github.com/devpablocristo/companion-v2/internal/nexusclient"
 	"github.com/devpablocristo/companion-v2/internal/operations"
 	"github.com/devpablocristo/companion-v2/internal/outbox"
+	"github.com/devpablocristo/companion-v2/internal/productintegrations"
 	"github.com/devpablocristo/companion-v2/internal/professionalauthority"
 	"github.com/devpablocristo/companion-v2/internal/profiletemplates"
+	"github.com/devpablocristo/companion-v2/internal/promptgovernance"
 	"github.com/devpablocristo/companion-v2/internal/quotas"
 	"github.com/devpablocristo/companion-v2/internal/runtimeclient"
 	"github.com/devpablocristo/companion-v2/internal/virployees"
@@ -58,6 +63,109 @@ type runtimeAnswererAdapter struct{ client *runtimeclient.Client }
 
 type governedReadInvokerAdapter struct {
 	gate *mcpgovernance.ToolInvocationGate
+}
+
+type promptResolverAdapter struct{ service *promptgovernance.Service }
+
+func (a promptResolverAdapter) ResolvePrompt(ctx context.Context, orgID, productID string, virployeeID uuid.UUID, _ string) (virployees.PromptResolution, error) {
+	resolved, err := a.service.Resolve(ctx, orgID, "service:assist", virployeeID, productID, true)
+	if err != nil {
+		return virployees.PromptResolution{}, err
+	}
+	versions, err := json.Marshal(resolved.ResolvedVersions)
+	if err != nil {
+		return virployees.PromptResolution{}, err
+	}
+	return virployees.PromptResolution{BundleHash: resolved.PromptBundleHash, Content: resolved.EffectiveContent, Versions: versions}, nil
+}
+
+type automationGateAdapter struct {
+	gate *mcpgovernance.ToolInvocationGate
+}
+
+type finOpsAdapter struct{ service *finops.Service }
+
+func (a finOpsAdapter) RecordFinOpsUsage(ctx context.Context, in virployees.FinOpsUsage) error {
+	return a.service.Record(ctx, finops.Usage{
+		OrgID: in.OrgID, ProductID: in.ProductID, Area: in.Area, Service: in.Service,
+		VirployeeID: in.VirployeeID, CapabilityKey: in.CapabilityKey, CapabilityVersion: in.CapabilityVersion,
+		Model: in.Model, InputUnits: in.InputUnits, OutputUnits: in.OutputUnits,
+		EstimatedCostMicroUSD: in.EstimatedCostMicroUSD, IdempotencyKey: in.IdempotencyKey,
+	})
+}
+
+func automationInvocationContext(ctx context.Context, gate *mcpgovernance.ToolInvocationGate, in automation.GateRequest, subjectID, caseID uuid.UUID) (mcpgovernance.InvocationContext, error) {
+	return gate.ResolveContext(ctx, mcpgovernance.ContextRequest{
+		OrgID: in.OrgID, ActorID: in.ActorID, ActorRole: "service",
+		VirployeeID: in.VirployeeID, SubjectID: subjectID, CaseID: caseID,
+		ProductSurface: in.ProductSurface,
+	})
+}
+
+func (a automationGateAdapter) Detect(ctx context.Context, in automation.GateRequest) ([]automation.Proposal, error) {
+	var args map[string]any
+	if err := json.Unmarshal(in.DetectorArguments, &args); err != nil {
+		return nil, domainerr.Validation("watcher detector arguments are invalid")
+	}
+	subjectID, err := uuid.Parse(strings.TrimSpace(fmt.Sprint(args["subject_id"])))
+	if err != nil || subjectID == uuid.Nil {
+		return nil, domainerr.Validation("watcher detector arguments require subject_id")
+	}
+	var caseID uuid.UUID
+	if raw := strings.TrimSpace(fmt.Sprint(args["case_id"])); raw != "" && raw != "<nil>" {
+		caseID, err = uuid.Parse(raw)
+		if err != nil {
+			return nil, domainerr.Validation("watcher detector case_id is invalid")
+		}
+	}
+	resolved, err := automationInvocationContext(ctx, a.gate, in, subjectID, caseID)
+	if err != nil {
+		return nil, err
+	}
+	out, err := a.gate.CallTool(ctx, mcpgovernance.Invocation{Context: resolved, ToolName: in.DetectorKey, Arguments: args, ExpectedManifestHash: in.DetectorHash})
+	if err != nil {
+		return nil, err
+	}
+	raw, err := json.Marshal(out.Result["proposals"])
+	if err != nil {
+		return nil, err
+	}
+	var proposals []automation.Proposal
+	if err := json.Unmarshal(raw, &proposals); err != nil {
+		return nil, domainerr.Conflict("watcher detector returned invalid proposals")
+	}
+	return proposals, nil
+}
+
+func (a automationGateAdapter) Invoke(ctx context.Context, in automation.GateRequest, proposal automation.Proposal) (string, string, error) {
+	subjectID, err := uuid.Parse(strings.TrimSpace(proposal.SubjectID))
+	if err != nil || subjectID == uuid.Nil {
+		return "", "", domainerr.Validation("watcher proposal subject_id is invalid")
+	}
+	var caseID uuid.UUID
+	if proposal.CaseID != nil {
+		caseID = *proposal.CaseID
+	}
+	resolved, err := automationInvocationContext(ctx, a.gate, in, subjectID, caseID)
+	if err != nil {
+		return "", "", err
+	}
+	var arguments map[string]any
+	if err := json.Unmarshal(proposal.Arguments, &arguments); err != nil {
+		return "", "", domainerr.Validation("watcher proposal arguments are invalid")
+	}
+	out, err := a.gate.CallTool(ctx, mcpgovernance.Invocation{
+		Context: resolved, ToolName: in.ActionKey, Arguments: arguments,
+		IdempotencyKey: in.IdempotencyKey, ExpectedManifestHash: in.ActionHash,
+	})
+	if err != nil {
+		return "", "", err
+	}
+	invocationID := out.ApprovalID
+	if invocationID == "" {
+		invocationID = out.BindingHash
+	}
+	return out.Status, invocationID, nil
 }
 
 func (a governedReadInvokerAdapter) SupportsGovernedRead(capabilityKey string) bool {
@@ -291,7 +399,15 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	virployeesUsecases.SetContinuityAssignmentValidator(workforceUsecases)
 	virployeesUsecases.SetCapabilityValidator(capabilitiesUsecases)
 	virployeesUsecases.SetProfileTemplateReader(profileTemplatesUsecases)
+	promptGovernanceService := promptgovernance.NewService(db.Pool())
+	virployeesUsecases.SetPromptResolver(promptResolverAdapter{service: promptGovernanceService})
+	finOpsService := finops.NewService(db.Pool())
+	virployeesUsecases.SetFinOpsRecorder(finOpsAdapter{service: finOpsService})
 	virployeesUsecases.SetQuotaPorts(quotaRepository, quotaRepository)
+	if err := configureConnectors(ctx, config, virployeesUsecases); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("configure connectors: %w", err)
+	}
 	authorityUsecases := professionalauthority.NewUseCases(professionalauthority.NewRepository(db.Pool()))
 	virployeesUsecases.SetAuthorityEvaluator(authorityUsecases)
 	mcpRepository := mcpgovernance.NewRepository(db.Pool())
@@ -302,6 +418,8 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	virployeesUsecases.SetGovernedReadInvoker(governedReadInvokerAdapter{gate: mcpUsecases})
 	virployeesUsecases.SetMCPExecutionContextValidator(mcpUsecases)
 	mcpHandler := mcpgovernance.NewHandler(mcpUsecases)
+	automationHandler := automation.NewHandler(automation.NewService(db.Pool(), automationGateAdapter{gate: mcpUsecases}))
+	finOpsHandler := finops.NewHandler(finOpsService)
 	var nexusClient *nexusclient.Client
 	if config.NexusBaseURL != "" {
 		nexusClient = nexusclient.New(config.NexusBaseURL, &http.Client{Timeout: 5 * time.Second, Transport: otelhttp.NewTransport(http.DefaultTransport)}, config.InternalAuthSecret)
@@ -420,11 +538,6 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 			return nil, err
 		}
 		virployeesUsecases.SetKnowledgeRetriever(knowledgeRetriever)
-		clinicalExecutor := clinicalcapabilities.NewExecutor(
-			knowledgeRetriever, virployeesUsecases, runtimeAnswererAdapter{client: runtimePlanner},
-		)
-		mcpUsecases.RegisterReadExecutor(clinicalcapabilities.RecordsSearchKey, clinicalExecutor)
-		mcpUsecases.RegisterReadExecutor(clinicalcapabilities.TimelineBuildKey, clinicalExecutor)
 	}
 	// Executors are wired per enabled mode (COMPANION_V2_EXECUTION_MODE is a set).
 	// The local simulator and a real external executor can coexist on different
@@ -449,7 +562,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		// Both the forward action and its compensation (delete) run through the
 		// same executor and the same governed path; the delete carries its own
 		// binding (G3.5).
-		googleExecutor := virployees.NewGoogleCalendarExecutor(calendarAPI, config.GoogleCalendarID)
+		googleExecutor := googlecalendar.NewGoogleCalendarExecutor(calendarAPI, config.GoogleCalendarID)
 		virployeesUsecases.RegisterExecutor("calendar.events.create", googleExecutor)
 		virployeesUsecases.RegisterExecutor("calendar.events.delete", googleExecutor)
 	}
@@ -478,6 +591,8 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		learningUsecases.SetProcedureEnricher(learning.NewRuntimeEnricher(enrichClient))
 	}
 	learningHandler := learning.NewHandler(learningUsecases)
+	productIntegrationHandler := productintegrations.NewHandler(productintegrations.NewService(db.Pool()))
+	promptGovernanceHandler := promptgovernance.NewHandler(promptGovernanceService)
 
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
@@ -485,11 +600,12 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	router.Use(routeAwareBodySizeLimit(config.MaxBodyBytes, config.KnowledgeUploadMaxBodyBytes))
 	router.Use(ginmw.NewCORS(ginmw.CORSConfig{
 		Origins:      config.CORSOrigins,
-		AllowHeaders: []string{"X-Actor-ID", "X-Org-ID", "X-Axis-Org-Role", "X-Axis-Virployee-ID", "X-Axis-Subject-ID", "X-Axis-Case-ID", "X-Axis-Product-Surface", "X-Axis-Repository-Generation", "X-Idempotency-Key", "Idempotency-Key"},
+		AllowHeaders: []string{"X-Actor-ID", "X-Org-ID", "X-Axis-Org-Role", "X-Axis-Virployee-ID", "X-Axis-Subject-ID", "X-Axis-Case-ID", "X-Axis-Product-ID", "X-Axis-Product-Surface", "X-Axis-Integration-ID", "X-Axis-Integration-Version", "X-Axis-Integration-Hash", "X-Axis-Principal-Type", "X-Axis-Principal-ID", "X-Axis-Scopes", "X-Axis-Principal-Scopes", "X-Axis-Repository-Generation", "X-Idempotency-Key", "Idempotency-Key"},
 	}))
 	ginmw.RegisterHealthEndpoints(router, db.Ping)
 	api := router.Group("/v1")
 	api.Use(internalAuthMiddleware(config.InternalAuthSecret))
+	api.Use(productIntegrationHandler.Middleware())
 	mcp := router.Group("")
 	mcp.Use(internalAuthMiddleware(config.InternalAuthSecret))
 	mcpHandler.MCPRoutes(mcp)
@@ -507,6 +623,10 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	executionStatsHandler.Routes(api)
 	learningHandler.Routes(api)
 	mcpHandler.AdminRoutes(api)
+	productIntegrationHandler.Routes(api)
+	promptGovernanceHandler.Routes(api)
+	automationHandler.Routes(api)
+	finOpsHandler.Routes(api)
 	server := &http.Server{
 		Addr:    config.Addr(),
 		Handler: tracedServerHandler("companion-v2", observability.Middleware(logger, router)),

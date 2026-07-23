@@ -28,7 +28,7 @@ func TestRepositoryCapabilityPromotionAndInvalidation(t *testing.T) {
 	created, err := repository.Create(ctx, orgID, domain.NormalizedCreateInput{
 		CapabilityKey: "diagnosis.reports.create", Name: "Create diagnosis", RequiredAutonomy: "A3",
 		Governance: domain.NormalizedGovernance{
-			RiskClass: "high", SideEffectClass: "write", RequiresNexusApproval: approval, EvidenceRequired: true,
+			RiskClass: "high", SideEffectClass: "write", RequiresGovernanceApproval: approval, EvidenceRequired: true,
 		},
 	})
 	if err != nil {
@@ -60,7 +60,7 @@ func TestRepositoryCapabilityPromotionAndInvalidation(t *testing.T) {
 	changed, err := repository.Update(ctx, created.OrgID, created.ID, domain.NormalizedUpdateInput{
 		Name: created.Name, RequiredAutonomy: created.RequiredAutonomy,
 		Governance: domain.NormalizedGovernance{
-			RiskClass: "critical", SideEffectClass: "write", RequiresNexusApproval: true, EvidenceRequired: true,
+			RiskClass: "critical", SideEffectClass: "write", RequiresGovernanceApproval: true, EvidenceRequired: true,
 		},
 	})
 	if err != nil || changed.PromotionState != domain.PromotionDraft || changed.ConformedHash != "" || changed.ActivatedAt != nil {

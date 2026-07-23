@@ -37,7 +37,8 @@ type Trace struct {
 	DryRunDecision    string
 	GateDecision      string
 	GateChecks        []GateCheck
-	NexusResult       *NexusResult
+	GovernanceResult  *GovernanceResult
+	NexusResult       *GovernanceResult
 	ExecutionResult   *ExecutionResult
 	BindingHash       string
 	MemoryReferences  []memories.Reference
@@ -55,7 +56,8 @@ type CreateInput struct {
 	DryRunDecision    string
 	GateDecision      string
 	GateChecks        []GateCheck
-	NexusResult       *NexusResult
+	GovernanceResult  *GovernanceResult
+	NexusResult       *GovernanceResult
 	ExecutionResult   *ExecutionResult
 	BindingHash       string
 	MemoryReferences  []memories.Reference
@@ -70,7 +72,7 @@ type GateCheck struct {
 	Reason string `json:"reason"`
 }
 
-type NexusResult struct {
+type GovernanceResult struct {
 	CheckID              string `json:"check_id,omitempty"`
 	Available            bool   `json:"available"`
 	Decision             string `json:"decision,omitempty"`
@@ -84,17 +86,22 @@ type NexusResult struct {
 	Error                string `json:"error,omitempty"`
 }
 
+// NexusResult is the legacy name retained while v2 API consumers migrate to
+// the provider-neutral governance_result field.
+type NexusResult = GovernanceResult
+
 type ExecutionResult struct {
-	Status            string `json:"status,omitempty"`
-	Mode              string `json:"mode,omitempty"`
-	ApprovalID        string `json:"approval_id,omitempty"`
-	ApprovalStatus    string `json:"approval_status,omitempty"`
-	BindingHash       string `json:"binding_hash,omitempty"`
-	Message           string `json:"message,omitempty"`
-	ExternalEffects   bool   `json:"external_effects"`
-	ResourceID        string `json:"resource_id,omitempty"`
-	DurationMS        int64  `json:"duration_ms,omitempty"`
-	NexusReportStatus string `json:"nexus_report_status,omitempty"`
+	Status                 string `json:"status,omitempty"`
+	Mode                   string `json:"mode,omitempty"`
+	ApprovalID             string `json:"approval_id,omitempty"`
+	ApprovalStatus         string `json:"approval_status,omitempty"`
+	BindingHash            string `json:"binding_hash,omitempty"`
+	Message                string `json:"message,omitempty"`
+	ExternalEffects        bool   `json:"external_effects"`
+	ResourceID             string `json:"resource_id,omitempty"`
+	DurationMS             int64  `json:"duration_ms,omitempty"`
+	GovernanceReportStatus string `json:"governance_report_status,omitempty"`
+	NexusReportStatus      string `json:"nexus_report_status,omitempty"`
 }
 
 func HashString(value string) string {

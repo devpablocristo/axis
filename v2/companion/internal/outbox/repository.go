@@ -15,7 +15,7 @@ import (
 )
 
 const messageColumns = `
-    id, org_id, aggregate_type, aggregate_id, kind, dedupe_key, payload_json,
+    id, org_id, destination, contract_version, aggregate_type, aggregate_id, kind, dedupe_key, payload_json,
     status, attempts, max_attempts, available_at, lease_owner, lease_until,
     heartbeat_at, last_error_code, created_at, updated_at, delivered_at`
 
@@ -25,18 +25,28 @@ func NewRepository(pool *pgxpool.Pool) *Repository { return &Repository{pool: po
 
 func (r *Repository) EnqueueTx(ctx context.Context, tx pgx.Tx, input EnqueueInput) (Message, bool, error) {
 	input.OrgID = strings.TrimSpace(input.OrgID)
+	input.Destination = strings.ToLower(strings.TrimSpace(input.Destination))
+	input.ContractVersion = strings.TrimSpace(input.ContractVersion)
+	if input.Destination == "" {
+		input.Destination = DestinationGovernance
+	}
+	if input.ContractVersion == "" {
+		input.ContractVersion = GovernanceContractVersion
+	}
 	input.AggregateType = strings.TrimSpace(input.AggregateType)
 	input.Kind = strings.TrimSpace(input.Kind)
 	input.DedupeKey = strings.TrimSpace(input.DedupeKey)
 	if input.ID == uuid.Nil {
 		input.ID = uuid.New()
 	}
-	if input.OrgID == "" || input.AggregateID == uuid.Nil || !validMessageType(input.AggregateType, input.Kind) || input.DedupeKey == "" || !json.Valid(input.Payload) {
-		return Message{}, false, fmt.Errorf("invalid Nexus outbox message")
+	if input.OrgID == "" || input.AggregateID == uuid.Nil || !errorCodePattern.MatchString(input.Destination) ||
+		input.ContractVersion == "" || !validMessageType(input.AggregateType, input.Kind) ||
+		input.DedupeKey == "" || !json.Valid(input.Payload) {
+		return Message{}, false, fmt.Errorf("invalid governance outbox message")
 	}
 	if input.Kind == KindAuditEvent {
-		if _, err := ParseNexusAuditEvent(input.Payload, input.AggregateID); err != nil {
-			return Message{}, false, fmt.Errorf("invalid Nexus outbox audit payload: %w", err)
+		if _, err := ParseGovernanceAuditEvent(input.Payload, input.AggregateID); err != nil {
+			return Message{}, false, fmt.Errorf("invalid governance outbox audit payload: %w", err)
 		}
 	}
 	if input.Kind == KindOperationalFinding {
@@ -45,25 +55,27 @@ func (r *Repository) EnqueueTx(ctx context.Context, tx pgx.Tx, input EnqueueInpu
 		}
 	}
 	message, err := scanMessage(tx.QueryRow(ctx, `
-        INSERT INTO companion_nexus_outbox
-            (id, org_id, aggregate_type, aggregate_id, kind, dedupe_key, payload_json)
-        VALUES ($1,$2,$3,$4,$5,$6,$7)
+        INSERT INTO companion_outbox_messages
+            (id, org_id, destination, contract_version, aggregate_type, aggregate_id, kind, dedupe_key, payload_json)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
         ON CONFLICT (org_id, kind, dedupe_key) DO NOTHING
         RETURNING `+messageColumns,
-		input.ID, input.OrgID, input.AggregateType, input.AggregateID, input.Kind, input.DedupeKey, input.Payload))
+		input.ID, input.OrgID, input.Destination, input.ContractVersion, input.AggregateType, input.AggregateID, input.Kind, input.DedupeKey, input.Payload))
 	inserted := err == nil
 	if errors.Is(err, pgx.ErrNoRows) {
 		message, err = scanMessage(tx.QueryRow(ctx, `
             SELECT `+messageColumns+`
-            FROM companion_nexus_outbox
+            FROM companion_outbox_messages
             WHERE org_id=$1 AND kind=$2 AND dedupe_key=$3
         `, input.OrgID, input.Kind, input.DedupeKey))
 	}
 	if err != nil {
-		return Message{}, false, fmt.Errorf("enqueue Nexus outbox message: %w", err)
+		return Message{}, false, fmt.Errorf("enqueue governance outbox message: %w", err)
 	}
-	if !inserted && (message.AggregateType != input.AggregateType || message.AggregateID != input.AggregateID || message.Kind != input.Kind || !sameJSON(message.Payload, input.Payload)) {
-		return Message{}, false, fmt.Errorf("nexus outbox dedupe key conflicts with a different message")
+	if !inserted && (message.Destination != input.Destination || message.ContractVersion != input.ContractVersion ||
+		message.AggregateType != input.AggregateType || message.AggregateID != input.AggregateID ||
+		message.Kind != input.Kind || !sameJSON(message.Payload, input.Payload)) {
+		return Message{}, false, fmt.Errorf("governance outbox dedupe key conflicts with a different message")
 	}
 	if inserted {
 		if err := recordEvent(ctx, tx, message.ID, "pending", json.RawMessage(`{}`)); err != nil {
@@ -92,13 +104,13 @@ func (r *Repository) Claim(ctx context.Context, options ClaimOptions) ([]Message
 	rows, err := tx.Query(ctx, `
         WITH picked AS (
             SELECT id
-            FROM companion_nexus_outbox
+            FROM companion_outbox_messages
             WHERE status='pending' AND attempts < max_attempts AND available_at <= now()
             ORDER BY available_at, created_at, id
             LIMIT $2
             FOR UPDATE SKIP LOCKED
         )
-        UPDATE companion_nexus_outbox AS message
+        UPDATE companion_outbox_messages AS message
         SET status='processing', attempts=attempts+1, lease_owner=$1,
             lease_until=now()+make_interval(secs => $3), heartbeat_at=now(), updated_at=now()
         FROM picked
@@ -135,7 +147,7 @@ func (r *Repository) Claim(ctx context.Context, options ClaimOptions) ([]Message
 
 func (r *Repository) Heartbeat(ctx context.Context, id uuid.UUID, workerID string, lease time.Duration) error {
 	tag, err := r.pool.Exec(ctx, `
-        UPDATE companion_nexus_outbox
+        UPDATE companion_outbox_messages
         SET heartbeat_at=now(), lease_until=now()+make_interval(secs => $3), updated_at=now()
         WHERE id=$1 AND lease_owner=$2 AND status='processing'
     `, id, strings.TrimSpace(workerID), durationSeconds(lease))
@@ -160,7 +172,7 @@ func (r *Repository) MarkDelivered(ctx context.Context, id uuid.UUID, workerID s
 	var kind string
 	var attempts int
 	err = tx.QueryRow(ctx, `
-        UPDATE companion_nexus_outbox
+        UPDATE companion_outbox_messages
         SET status='delivered', lease_owner='', lease_until=NULL, last_error_code='',
             delivered_at=now(), updated_at=now()
         WHERE id=$1 AND lease_owner=$2 AND status='processing'
@@ -175,7 +187,7 @@ func (r *Repository) MarkDelivered(ctx context.Context, id uuid.UUID, workerID s
 	if aggregateType == AggregateTypeExecutionAttempt && kind == KindExecutionResult {
 		if _, err := tx.Exec(ctx, `
         UPDATE companion_execution_attempts
-        SET nexus_report_status='reported', nexus_report_attempts=$2,
+        SET governance_report_status='reported', nexus_report_status='reported', nexus_report_attempts=$2,
             report_lease_owner='', report_lease_until=NULL, last_watcher_error='', updated_at=now()
 		WHERE id=$1 AND org_id=$3
 	`, aggregateID, attempts, orgID); err != nil {
@@ -199,7 +211,7 @@ func (r *Repository) MarkFailed(ctx context.Context, id uuid.UUID, workerID, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	message, err := scanMessage(tx.QueryRow(ctx, `
-        UPDATE companion_nexus_outbox
+        UPDATE companion_outbox_messages
         SET status=CASE WHEN $4 AND attempts < max_attempts THEN 'pending' ELSE 'dead' END,
             available_at=CASE WHEN $4 AND attempts < max_attempts
                               THEN now()+make_interval(secs => $5) ELSE available_at END,
@@ -222,7 +234,8 @@ func (r *Repository) MarkFailed(ctx context.Context, id uuid.UUID, workerID, err
 	if message.AggregateType == AggregateTypeExecutionAttempt && message.Kind == KindExecutionResult {
 		if _, err := tx.Exec(ctx, `
         UPDATE companion_execution_attempts
-        SET nexus_report_status=$2, nexus_report_attempts=$3, nexus_report_next_at=$4,
+        SET governance_report_status=$2, nexus_report_status=$2,
+            nexus_report_attempts=$3, nexus_report_next_at=$4,
             report_lease_owner='', report_lease_until=NULL, last_watcher_error=$5, updated_at=now()
 		WHERE id=$1 AND org_id=$6
 	`, message.AggregateID, projection, message.Attempts, message.AvailableAt, errorCode, message.OrgID); err != nil {
@@ -251,13 +264,13 @@ func (r *Repository) RecoverExpiredLeases(ctx context.Context, limit int) (Recov
 	rows, err := tx.Query(ctx, `
         WITH picked AS (
             SELECT id
-            FROM companion_nexus_outbox
+            FROM companion_outbox_messages
             WHERE status='processing' AND lease_until < now()
             ORDER BY lease_until, id
             LIMIT $1
             FOR UPDATE SKIP LOCKED
         )
-        UPDATE companion_nexus_outbox AS message
+        UPDATE companion_outbox_messages AS message
         SET status=CASE WHEN attempts < max_attempts THEN 'pending' ELSE 'dead' END,
             available_at=CASE WHEN attempts < max_attempts THEN now() ELSE available_at END,
             lease_owner='', lease_until=NULL, heartbeat_at=NULL,
@@ -305,7 +318,8 @@ func (r *Repository) RecoverExpiredLeases(ctx context.Context, limit int) (Recov
 		if item.aggregateType == AggregateTypeExecutionAttempt && item.kind == KindExecutionResult {
 			if _, err := tx.Exec(ctx, `
             UPDATE companion_execution_attempts
-            SET nexus_report_status=$2, nexus_report_attempts=$3, nexus_report_next_at=$4,
+            SET governance_report_status=$2, nexus_report_status=$2,
+                nexus_report_attempts=$3, nexus_report_next_at=$4,
                 last_watcher_error='lease_expired', updated_at=now()
 			WHERE id=$1 AND org_id=$5
 		`, item.aggregateID, projection, item.attempts, item.availableAt, item.orgID); err != nil {
@@ -332,7 +346,7 @@ func (r *Repository) Replay(ctx context.Context, orgID string, id uuid.UUID, ava
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	message, err := scanMessage(tx.QueryRow(ctx, `
-        UPDATE companion_nexus_outbox
+        UPDATE companion_outbox_messages
         SET status='pending', attempts=0, available_at=$3, lease_owner='', lease_until=NULL,
             heartbeat_at=NULL, last_error_code='', delivered_at=NULL, updated_at=now()
         WHERE org_id=$1 AND id=$2 AND status='dead'
@@ -347,7 +361,8 @@ func (r *Repository) Replay(ctx context.Context, orgID string, id uuid.UUID, ava
 	if message.AggregateType == AggregateTypeExecutionAttempt && message.Kind == KindExecutionResult {
 		if _, err := tx.Exec(ctx, `
         UPDATE companion_execution_attempts
-        SET nexus_report_status='pending', nexus_report_attempts=0, nexus_report_next_at=$2,
+        SET governance_report_status='pending', nexus_report_status='pending',
+            nexus_report_attempts=0, nexus_report_next_at=$2,
             last_watcher_error='', updated_at=now()
 		WHERE id=$1 AND org_id=$3
 	`, message.AggregateID, message.AvailableAt, message.OrgID); err != nil {
@@ -365,7 +380,7 @@ func (r *Repository) Replay(ctx context.Context, orgID string, id uuid.UUID, ava
 
 func (r *Repository) Get(ctx context.Context, orgID string, id uuid.UUID) (Message, error) {
 	message, err := scanMessage(r.pool.QueryRow(ctx, `
-        SELECT `+messageColumns+` FROM companion_nexus_outbox WHERE org_id=$1 AND id=$2
+        SELECT `+messageColumns+` FROM companion_outbox_messages WHERE org_id=$1 AND id=$2
     `, strings.TrimSpace(orgID), id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Message{}, ErrMessageNotFound
@@ -380,7 +395,7 @@ func scanMessage(row rowScanner) (Message, error) {
 	var payload []byte
 	var status string
 	err := row.Scan(
-		&message.ID, &message.OrgID, &message.AggregateType, &message.AggregateID,
+		&message.ID, &message.OrgID, &message.Destination, &message.ContractVersion, &message.AggregateType, &message.AggregateID,
 		&message.Kind, &message.DedupeKey, &payload, &status, &message.Attempts,
 		&message.MaxAttempts, &message.AvailableAt, &message.LeaseOwner, &message.LeaseUntil,
 		&message.HeartbeatAt, &message.LastErrorCode, &message.CreatedAt, &message.UpdatedAt,
@@ -396,7 +411,7 @@ func recordEvent(ctx context.Context, tx pgx.Tx, id uuid.UUID, event string, met
 		metadata = json.RawMessage(`{}`)
 	}
 	_, err := tx.Exec(ctx, `
-        INSERT INTO companion_nexus_outbox_events (outbox_id, event, metadata_json)
+        INSERT INTO companion_outbox_events (outbox_id, event, metadata_json)
         VALUES ($1,$2,$3)
     `, id, event, metadata)
 	if err != nil {

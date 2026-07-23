@@ -21,3 +21,38 @@ func TestValidateAuthConfigRequiresClerkIssuerAndInternalSecret(t *testing.T) {
 		t.Fatal("expected missing internal secret to be rejected")
 	}
 }
+
+func TestValidateAuthConfigRequiresExplicitDevelopmentLegacyKeys(t *testing.T) {
+	base := cfg.Config{
+		Environment:        "development",
+		IdentityProvider:   "dev",
+		InternalAuthSecret: "secret",
+		ProductAPIKeys:     "legacy=product|virployee|actor|surface",
+	}
+	if err := validateAuthConfig(base); err == nil {
+		t.Fatal("expected legacy keys without the explicit opt-in to be rejected")
+	}
+	base.AllowLegacyProductAPIKeys = true
+	if err := validateAuthConfig(base); err != nil {
+		t.Fatalf("expected explicit development legacy keys to be accepted: %v", err)
+	}
+	base.Environment = "prd"
+	base.IdentityProvider = "clerk"
+	base.ClerkIssuerURL = "https://issuer.example"
+	if err := validateAuthConfig(base); err == nil {
+		t.Fatal("expected legacy product keys to be rejected outside development/test")
+	}
+}
+
+func TestValidateAuthConfigAllowsUnavailableOptionalParticipants(t *testing.T) {
+	config := cfg.Config{
+		Environment:        "development",
+		IdentityProvider:   "dev",
+		InternalAuthSecret: "secret",
+		CompanionBaseURL:   "",
+		NexusBaseURL:       "",
+	}
+	if err := validateAuthConfig(config); err != nil {
+		t.Fatalf("BFF must start in a degraded state without optional participants: %v", err)
+	}
+}

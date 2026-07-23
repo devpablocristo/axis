@@ -3,7 +3,7 @@ SHELL := /bin/bash
 # auto-loads it without -f, and make targets pin -f explicitly).
 DC := docker compose --project-directory $(CURDIR) -f $(CURDIR)/docker-compose.yml $(if $(wildcard $(CURDIR)/docker-compose.override.yml),-f $(CURDIR)/docker-compose.override.yml,)
 
-.PHONY: up down seed-demo test-console-e2e test-approval-flow-e2e test-console-real-e2e test-e2e
+.PHONY: up down seed-demo seed-demo-integration seed-demo-approval-legacy test-console-e2e test-approval-flow-e2e test-console-real-e2e test-e2e
 
 up:
 	@test -f .env || cp .env.example .env
@@ -13,6 +13,15 @@ down:
 	$(DC) down
 
 seed-demo:
+	@test -f .env || cp .env.example .env
+	BFF_V2_IDENTITY_PROVIDER=dev $(DC) up -d --build bff-v2
+	BFF_V2_IDENTITY_PROVIDER=dev $(DC) run --rm -T --build seed-demo scripts/seed-demo-product-integration.sh
+
+seed-demo-integration: seed-demo
+
+# Explicit compatibility fixture for the historical Calendar approval E2E.
+# New installations and the generic seed never install domain action types.
+seed-demo-approval-legacy:
 	@test -f .env || cp .env.example .env
 	BFF_V2_IDENTITY_PROVIDER=dev $(DC) up -d --build bff-v2 console-v2
 	BFF_V2_IDENTITY_PROVIDER=dev $(DC) run --rm -T --build seed-demo

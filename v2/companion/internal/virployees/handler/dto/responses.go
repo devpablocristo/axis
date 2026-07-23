@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/devpablocristo/companion-v2/internal/invocation"
 	"github.com/devpablocristo/companion-v2/internal/virployees/dryrun"
 	"github.com/devpablocristo/companion-v2/internal/virployees/executiongate"
 	"github.com/devpablocristo/companion-v2/internal/virployees/runtimecontext"
@@ -23,6 +24,10 @@ type AssistRunResponse struct {
 	AssignmentID           string             `json:"assignment_id,omitempty"`
 	AssignmentVersion      int64              `json:"assignment_version,omitempty"`
 	ResponsibleVirployeeID string             `json:"responsible_virployee_id,omitempty"`
+	ProductID              string             `json:"product_id,omitempty"`
+	ProductSurface         string             `json:"product_surface,omitempty"`
+	InvocationContext      invocation.Context `json:"invocation_context"`
+	CapabilityID           string             `json:"capability_id,omitempty"`
 	CapabilityKey          string             `json:"capability_key,omitempty"`
 	CapabilityManifestHash string             `json:"capability_manifest_hash,omitempty"`
 	Status                 string             `json:"status"`
@@ -148,28 +153,32 @@ type RuntimeContextCapabilityResponse struct {
 }
 
 type DryRunResponse struct {
-	Input              string                    `json:"input"`
-	RuntimeContext     RuntimeContextResponse    `json:"runtime_context"`
-	Intent             DryRunIntentResponse      `json:"intent"`
-	RequiredCapability *DryRunCapabilityResponse `json:"required_capability,omitempty"`
-	RequiredAutonomy   string                    `json:"required_autonomy"`
-	VirployeeAutonomy  string                    `json:"virployee_autonomy"`
-	Decision           string                    `json:"decision"`
-	Reason             string                    `json:"reason"`
-	NextStep           string                    `json:"next_step"`
-	Draft              DryRunDraftResponse       `json:"draft"`
+	Input              string                         `json:"input"`
+	RuntimeContext     RuntimeContextResponse         `json:"runtime_context"`
+	Intent             DryRunIntentResponse           `json:"intent"`
+	RequiredCapability *DryRunCapabilityResponse      `json:"required_capability,omitempty"`
+	RequiredAutonomy   string                         `json:"required_autonomy"`
+	VirployeeAutonomy  string                         `json:"virployee_autonomy"`
+	Decision           string                         `json:"decision"`
+	Reason             string                         `json:"reason"`
+	NextStep           string                         `json:"next_step"`
+	Draft              DryRunDraftResponse            `json:"draft"`
+	PreparedAction     *dryrun.PreparedActionProposal `json:"prepared_action,omitempty"`
 }
 
 type DryRunCapabilityResponse struct {
-	ID               string `json:"id,omitempty"`
-	CapabilityKey    string `json:"capability_key"`
-	Name             string `json:"name,omitempty"`
-	RequiredAutonomy string `json:"required_autonomy"`
-	Matched          bool   `json:"matched"`
+	ID               string         `json:"id,omitempty"`
+	ManifestHash     string         `json:"manifest_hash,omitempty"`
+	CapabilityKey    string         `json:"capability_key"`
+	Name             string         `json:"name,omitempty"`
+	RequiredAutonomy string         `json:"required_autonomy"`
+	Matched          bool           `json:"matched"`
+	InputSchema      map[string]any `json:"input_schema,omitempty"`
 }
 
 type DryRunIntentResponse struct {
 	Matched       bool                       `json:"matched"`
+	CapabilityID  string                     `json:"capability_id,omitempty"`
 	CapabilityKey string                     `json:"capability_key"`
 	Domain        string                     `json:"domain"`
 	Resource      string                     `json:"resource"`
@@ -233,23 +242,24 @@ type ExecutionGateCheckResponse struct {
 }
 
 type RunTraceResponse struct {
-	ID                string                           `json:"id"`
-	VirployeeID       string                           `json:"virployee_id"`
-	Operation         string                           `json:"operation"`
-	InputHash         string                           `json:"input_hash"`
-	InputPreview      string                           `json:"input_preview"`
-	Intent            map[string]any                   `json:"intent"`
-	CapabilityID      string                           `json:"capability_id,omitempty"`
-	CapabilityKey     string                           `json:"capability_key"`
-	DryRunDecision    string                           `json:"dry_run_decision"`
-	GateDecision      string                           `json:"gate_decision,omitempty"`
-	GateChecks        []RunTraceGateCheckResponse      `json:"gate_checks"`
-	NexusResult       *RunTraceNexusResultResponse     `json:"nexus_result,omitempty"`
-	ExecutionResult   *RunTraceExecutionResultResponse `json:"execution_result,omitempty"`
-	BindingHash       string                           `json:"binding_hash,omitempty"`
-	MemoryReferences  []MemoryReferenceResponse        `json:"memory_references"`
-	MemoryContextHash string                           `json:"memory_context_hash"`
-	CreatedAt         time.Time                        `json:"created_at"`
+	ID                string                            `json:"id"`
+	VirployeeID       string                            `json:"virployee_id"`
+	Operation         string                            `json:"operation"`
+	InputHash         string                            `json:"input_hash"`
+	InputPreview      string                            `json:"input_preview"`
+	Intent            map[string]any                    `json:"intent"`
+	CapabilityID      string                            `json:"capability_id,omitempty"`
+	CapabilityKey     string                            `json:"capability_key"`
+	DryRunDecision    string                            `json:"dry_run_decision"`
+	GateDecision      string                            `json:"gate_decision,omitempty"`
+	GateChecks        []RunTraceGateCheckResponse       `json:"gate_checks"`
+	GovernanceResult  *RunTraceGovernanceResultResponse `json:"governance_result,omitempty"`
+	NexusResult       *RunTraceNexusResultResponse      `json:"nexus_result,omitempty"`
+	ExecutionResult   *RunTraceExecutionResultResponse  `json:"execution_result,omitempty"`
+	BindingHash       string                            `json:"binding_hash,omitempty"`
+	MemoryReferences  []MemoryReferenceResponse         `json:"memory_references"`
+	MemoryContextHash string                            `json:"memory_context_hash"`
+	CreatedAt         time.Time                         `json:"created_at"`
 }
 
 type RunTraceGateCheckResponse struct {
@@ -258,7 +268,7 @@ type RunTraceGateCheckResponse struct {
 	Reason string `json:"reason"`
 }
 
-type RunTraceNexusResultResponse struct {
+type RunTraceGovernanceResultResponse struct {
 	CheckID              string `json:"check_id,omitempty"`
 	Available            bool   `json:"available"`
 	Decision             string `json:"decision,omitempty"`
@@ -272,17 +282,20 @@ type RunTraceNexusResultResponse struct {
 	Error                string `json:"error,omitempty"`
 }
 
+type RunTraceNexusResultResponse = RunTraceGovernanceResultResponse
+
 type RunTraceExecutionResultResponse struct {
-	Status            string `json:"status,omitempty"`
-	Mode              string `json:"mode,omitempty"`
-	ApprovalID        string `json:"approval_id,omitempty"`
-	ApprovalStatus    string `json:"approval_status,omitempty"`
-	BindingHash       string `json:"binding_hash,omitempty"`
-	Message           string `json:"message,omitempty"`
-	ExternalEffects   bool   `json:"external_effects"`
-	ResourceID        string `json:"resource_id,omitempty"`
-	DurationMS        int64  `json:"duration_ms,omitempty"`
-	NexusReportStatus string `json:"nexus_report_status,omitempty"`
+	Status                 string `json:"status,omitempty"`
+	Mode                   string `json:"mode,omitempty"`
+	ApprovalID             string `json:"approval_id,omitempty"`
+	ApprovalStatus         string `json:"approval_status,omitempty"`
+	BindingHash            string `json:"binding_hash,omitempty"`
+	Message                string `json:"message,omitempty"`
+	ExternalEffects        bool   `json:"external_effects"`
+	ResourceID             string `json:"resource_id,omitempty"`
+	DurationMS             int64  `json:"duration_ms,omitempty"`
+	GovernanceReportStatus string `json:"governance_report_status,omitempty"`
+	NexusReportStatus      string `json:"nexus_report_status,omitempty"`
 }
 
 type ListRunTracesResponse struct {
@@ -338,6 +351,11 @@ func RunTraceFromDomain(trace runtraces.Trace) RunTraceResponse {
 	for _, ref := range trace.MemoryReferences {
 		memoryReferences = append(memoryReferences, MemoryReferenceResponse{ID: ref.ID.String(), Title: ref.Title, Type: ref.Type, Version: ref.Version, Hash: ref.Hash, Sensitivity: ref.Sensitivity, Score: ref.Score})
 	}
+	governanceResult := trace.GovernanceResult
+	if governanceResult == nil {
+		governanceResult = trace.NexusResult
+	}
+	governanceResponse := runTraceGovernanceResultFromDomain(governanceResult)
 	return RunTraceResponse{
 		ID:                trace.ID.String(),
 		VirployeeID:       trace.VirployeeID.String(),
@@ -350,7 +368,8 @@ func RunTraceFromDomain(trace runtraces.Trace) RunTraceResponse {
 		DryRunDecision:    trace.DryRunDecision,
 		GateDecision:      trace.GateDecision,
 		GateChecks:        checks,
-		NexusResult:       runTraceNexusResultFromDomain(trace.NexusResult),
+		GovernanceResult:  governanceResponse,
+		NexusResult:       governanceResponse,
 		ExecutionResult:   runTraceExecutionResultFromDomain(trace.ExecutionResult),
 		BindingHash:       trace.BindingHash,
 		MemoryReferences:  memoryReferences,
@@ -359,11 +378,11 @@ func RunTraceFromDomain(trace runtraces.Trace) RunTraceResponse {
 	}
 }
 
-func runTraceNexusResultFromDomain(result *runtraces.NexusResult) *RunTraceNexusResultResponse {
+func runTraceGovernanceResultFromDomain(result *runtraces.GovernanceResult) *RunTraceGovernanceResultResponse {
 	if result == nil {
 		return nil
 	}
-	return &RunTraceNexusResultResponse{
+	return &RunTraceGovernanceResultResponse{
 		CheckID:              result.CheckID,
 		Available:            result.Available,
 		Decision:             result.Decision,
@@ -382,17 +401,22 @@ func runTraceExecutionResultFromDomain(result *runtraces.ExecutionResult) *RunTr
 	if result == nil {
 		return nil
 	}
+	governanceReportStatus := result.GovernanceReportStatus
+	if governanceReportStatus == "" {
+		governanceReportStatus = result.NexusReportStatus
+	}
 	return &RunTraceExecutionResultResponse{
-		Status:            result.Status,
-		Mode:              result.Mode,
-		ApprovalID:        result.ApprovalID,
-		ApprovalStatus:    result.ApprovalStatus,
-		BindingHash:       result.BindingHash,
-		Message:           result.Message,
-		ExternalEffects:   result.ExternalEffects,
-		ResourceID:        result.ResourceID,
-		DurationMS:        result.DurationMS,
-		NexusReportStatus: result.NexusReportStatus,
+		Status:                 result.Status,
+		Mode:                   result.Mode,
+		ApprovalID:             result.ApprovalID,
+		ApprovalStatus:         result.ApprovalStatus,
+		BindingHash:            result.BindingHash,
+		Message:                result.Message,
+		ExternalEffects:        result.ExternalEffects,
+		ResourceID:             result.ResourceID,
+		DurationMS:             result.DurationMS,
+		GovernanceReportStatus: governanceReportStatus,
+		NexusReportStatus:      governanceReportStatus,
 	}
 }
 
@@ -457,6 +481,13 @@ func DryRunFromDomain(result dryrun.Result) DryRunResponse {
 			RequiredAutonomy: string(result.RequiredCapability.RequiredAutonomy),
 			Matched:          result.RequiredCapability.Matched,
 		}
+		for _, capability := range result.RuntimeContext.Capabilities {
+			if capability.ID.String() == result.RequiredCapability.ID {
+				requiredCapability.ManifestHash = capability.ManifestHash
+				requiredCapability.InputSchema = capability.Manifest.InputSchema
+				break
+			}
+		}
 	}
 	return DryRunResponse{
 		Input:              result.Input,
@@ -469,6 +500,7 @@ func DryRunFromDomain(result dryrun.Result) DryRunResponse {
 		Reason:             result.Reason,
 		NextStep:           result.NextStep,
 		Draft:              DraftFromDomain(result.Draft),
+		PreparedAction:     result.PreparedAction,
 	}
 }
 
@@ -507,6 +539,7 @@ func IntentFromDomain(intent dryrun.Intent) DryRunIntentResponse {
 	}
 	return DryRunIntentResponse{
 		Matched:       intent.Matched,
+		CapabilityID:  intent.CapabilityID,
 		CapabilityKey: intent.CapabilityKey,
 		Domain:        intent.Domain,
 		Resource:      intent.Resource,

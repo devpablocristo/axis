@@ -30,22 +30,22 @@ var (
 )
 
 type Scope struct {
-	OrgID                string
-	VirployeeID          uuid.UUID
-	ProductSurface       string
-	SubjectID            string
-	RepositoryGeneration string
+	OrgID                string    `json:"org_id"`
+	VirployeeID          uuid.UUID `json:"virployee_id"`
+	ProductSurface       string    `json:"product_surface"`
+	SubjectID            string    `json:"subject_id"`
+	RepositoryGeneration string    `json:"repository_generation"`
 }
 
 type Manifest struct {
-	DocumentID string
-	Name       string
-	SourceRef  string
-	ReadURL    string
-	SHA256     string
-	MIMEType   string
-	SizeBytes  int64
-	Required   bool
+	DocumentID string `json:"document_id"`
+	Name       string `json:"name"`
+	SourceRef  string `json:"source_ref,omitempty"`
+	ReadURL    string `json:"read_url,omitempty"`
+	SHA256     string `json:"sha256"`
+	MIMEType   string `json:"mime_type"`
+	SizeBytes  int64  `json:"size_bytes"`
+	Required   bool   `json:"required,omitempty"`
 }
 
 type Status string

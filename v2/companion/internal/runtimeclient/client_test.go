@@ -13,19 +13,22 @@ import (
 	profiletemplatedomain "github.com/devpablocristo/companion-v2/internal/profiletemplates/usecases/domain"
 	"github.com/devpablocristo/companion-v2/internal/virployees/runtimecontext"
 	virployeedomain "github.com/devpablocristo/companion-v2/internal/virployees/usecases/domain"
+	"github.com/google/uuid"
 )
 
 func TestProposeMapsResponseAndForwardsToken(t *testing.T) {
 	var gotToken string
 	var gotBody proposeRequest
+	capabilityID := uuid.New()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotToken = r.Header.Get("X-Axis-Internal-Token")
 		_ = json.NewDecoder(r.Body).Decode(&gotBody)
 		_ = json.NewEncoder(w).Encode(proposeResponse{
 			Intent: proposedIntent{
-				Matched: true, CapabilityKey: "calendar.events.create",
+				Matched: true, CapabilityID: capabilityID.String(), CapabilityKey: "calendar.events.create",
 				Domain: "calendar", Resource: "events", Action: "create",
 				RequiredAutonomy: "A2", Confidence: 0.9,
+				Arguments: map[string]any{"title": "Weekly review"},
 			},
 			Model: "test-model",
 		})
@@ -37,7 +40,17 @@ func TestProposeMapsResponseAndForwardsToken(t *testing.T) {
 		ProfileTemplate: profiletemplatedomain.ProfileTemplate{SystemPrompt: "Be helpful."},
 		JobRole:         jobroledomain.JobRole{Name: "Receptionist"},
 		Capabilities: []capabilitydomain.Capability{
-			{CapabilityKey: "calendar.events.create", Name: "Create", RequiredAutonomy: virployeedomain.AutonomyA2, RiskClass: "high"},
+			{
+				ID: capabilityID, CapabilityKey: "calendar.events.create", Name: "Create",
+				RequiredAutonomy: virployeedomain.AutonomyA2, RiskClass: "high",
+				Manifest: capabilitydomain.Manifest{
+					Operation: "events.create",
+					InputSchema: map[string]any{
+						"type":       "object",
+						"properties": map[string]any{"title": map[string]any{"type": "string"}},
+					},
+				},
+			},
 		},
 		MemoryContext: []memories.ContextItem{{Title: "Timezone", Type: "preference", Content: "America/Argentina/Buenos_Aires"}},
 	}
@@ -49,14 +62,22 @@ func TestProposeMapsResponseAndForwardsToken(t *testing.T) {
 	if gotToken != "secret-token" {
 		t.Fatalf("expected internal token forwarded, got %q", gotToken)
 	}
-	if gotBody.SystemPrompt != "Be helpful." || len(gotBody.Capabilities) != 1 || gotBody.Capabilities[0].CapabilityKey != "calendar.events.create" {
+	if gotBody.SystemPrompt != "Be helpful." || len(gotBody.Capabilities) != 1 ||
+		gotBody.Capabilities[0].CapabilityID != capabilityID.String() ||
+		gotBody.Capabilities[0].CapabilityKey != "calendar.events.create" ||
+		gotBody.Capabilities[0].Operation != "events.create" ||
+		gotBody.Capabilities[0].InputSchema["type"] != "object" {
 		t.Fatalf("unexpected request body: %+v", gotBody)
 	}
 	if len(gotBody.Memory) != 1 || gotBody.Memory[0].Content != "America/Argentina/Buenos_Aires" {
 		t.Fatalf("approved memory content was not sent to Runtime: %+v", gotBody.Memory)
 	}
-	if !proposal.Intent.Matched || proposal.Intent.CapabilityKey != "calendar.events.create" || proposal.Intent.Action != "create" {
+	if !proposal.Intent.Matched || proposal.Intent.CapabilityID != capabilityID.String() ||
+		proposal.Intent.CapabilityKey != "calendar.events.create" || proposal.Intent.Action != "create" {
 		t.Fatalf("unexpected proposal intent: %+v", proposal.Intent)
+	}
+	if proposal.Intent.Arguments["title"] != "Weekly review" {
+		t.Fatalf("runtime arguments were not propagated: %+v", proposal.Intent.Arguments)
 	}
 	if proposal.RequiredAutonomy != virployeedomain.AutonomyA2 {
 		t.Fatalf("expected A2, got %q", proposal.RequiredAutonomy)

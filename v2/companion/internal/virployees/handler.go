@@ -12,10 +12,12 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
+	"github.com/devpablocristo/companion-v2/internal/invocation"
 	"github.com/devpablocristo/companion-v2/internal/quotas"
 	"github.com/devpablocristo/companion-v2/internal/virployees/dryrun"
 	"github.com/devpablocristo/companion-v2/internal/virployees/executiongate"
 	"github.com/devpablocristo/companion-v2/internal/virployees/handler/dto"
+	"github.com/devpablocristo/companion-v2/internal/virployees/preparedactions"
 	"github.com/devpablocristo/companion-v2/internal/virployees/runtimecontext"
 	"github.com/devpablocristo/companion-v2/internal/virployees/runtraces"
 	"github.com/devpablocristo/companion-v2/internal/virployees/usecases/domain"
@@ -33,7 +35,7 @@ type UseCasesPort interface {
 	RuntimeContext(context.Context, string, uuid.UUID) (runtimecontext.Context, error)
 	DryRun(context.Context, string, uuid.UUID, string) (dryrun.Result, error)
 	ExecutionGate(context.Context, string, uuid.UUID, string, *executiongate.ConfirmedDraft, ...executiongate.PrincipalContext) (executiongate.Result, error)
-	ExecutionGateWithAssistRun(context.Context, string, uuid.UUID, string, *executiongate.ConfirmedDraft, executiongate.PrincipalContext, uuid.UUID) (executiongate.Result, error)
+	ExecutionGateWithAssistRun(context.Context, string, uuid.UUID, string, *executiongate.ConfirmedDraft, *preparedactions.PreparedActionV2, executiongate.PrincipalContext, uuid.UUID) (executiongate.Result, error)
 	SimulateApprovedExecution(context.Context, string, uuid.UUID, uuid.UUID) (runtraces.Trace, error)
 	ExecuteApprovedAction(context.Context, string, uuid.UUID, uuid.UUID) (runtraces.Trace, error)
 	Assist(context.Context, string, uuid.UUID, json.RawMessage, string, AssistMetadata) (AssistRun, error)
@@ -98,7 +100,7 @@ func (h *Handler) SubmitAssistRun(c *gin.Context) {
 	if idem == "" {
 		idem = strings.TrimSpace(c.GetHeader("Idempotency-Key"))
 	}
-	metadata, err := assistMetadataFromRequest(req)
+	metadata, err := assistMetadataFromRequest(c, req)
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -173,7 +175,7 @@ func (h *Handler) Assist(c *gin.Context) {
 	if idem == "" {
 		idem = strings.TrimSpace(c.GetHeader("Idempotency-Key"))
 	}
-	metadata, err := assistMetadataFromRequest(req)
+	metadata, err := assistMetadataFromRequest(c, req)
 	if err != nil {
 		ginmw.Respond(c, err)
 		return
@@ -189,7 +191,7 @@ func (h *Handler) Assist(c *gin.Context) {
 	ginmw.WriteJSON(c, http.StatusOK, assistRunToDTO(run))
 }
 
-func assistMetadataFromRequest(req dto.AssistRequest) (AssistMetadata, error) {
+func assistMetadataFromRequest(c *gin.Context, req dto.AssistRequest) (AssistMetadata, error) {
 	parseOptional := func(raw, field string) (uuid.UUID, error) {
 		raw = strings.TrimSpace(raw)
 		if raw == "" {
@@ -209,11 +211,53 @@ func assistMetadataFromRequest(req dto.AssistRequest) (AssistMetadata, error) {
 	if err != nil {
 		return AssistMetadata{}, err
 	}
+	capabilityID, err := parseOptional(req.CapabilityID, "capability_id")
+	if err != nil {
+		return AssistMetadata{}, err
+	}
+	productID := firstHeader(c, "X-Axis-Product-ID", "X-Product-ID")
+	if productID == "" {
+		productID = strings.TrimSpace(req.ProductID)
+	}
+	productSurface := firstHeader(c, "X-Axis-Product-Surface", "X-Product-Surface")
+	if productSurface == "" {
+		productSurface = req.ProductSurface
+	}
+	integrationRevision := int64(0)
+	if raw := strings.TrimSpace(c.GetHeader("X-Axis-Integration-Version")); raw != "" {
+		integrationRevision, err = strconv.ParseInt(raw, 10, 64)
+		if err != nil || integrationRevision < 1 {
+			return AssistMetadata{}, domainerr.Validation("X-Axis-Integration-Version must be a positive integer")
+		}
+	}
+	scopesHeader := firstHeader(c, "X-Axis-Scopes", "X-Axis-Principal-Scopes")
+	scopes := strings.FieldsFunc(scopesHeader, func(r rune) bool {
+		return r == ',' || r == ' ' || r == '\t' || r == '\n'
+	})
+	invocationContext := invocation.Context{
+		ProductID: productID, ProductSurface: productSurface,
+		IntegrationID:       strings.TrimSpace(c.GetHeader("X-Axis-Integration-ID")),
+		IntegrationRevision: integrationRevision,
+		IntegrationHash:     strings.TrimSpace(c.GetHeader("X-Axis-Integration-Hash")),
+		PrincipalType:       strings.TrimSpace(c.GetHeader("X-Axis-Principal-Type")),
+		PrincipalID:         firstHeader(c, "X-Axis-Principal-ID", "X-Actor-ID"),
+		Scopes:              scopes, AccessMode: strings.TrimSpace(c.GetHeader("X-Axis-Access-Mode")),
+	}
 	return AssistMetadata{
-		AssistType: req.AssistType, ProductSurface: req.ProductSurface, SubjectID: req.SubjectID,
-		CapabilityKey: req.CapabilityKey,
-		CaseID:        caseID, AssignmentID: assignmentID, RepositoryGeneration: req.RepositoryGeneration,
+		AssistType: req.AssistType, ProductID: productID, ProductSurface: productSurface,
+		Invocation: invocationContext, SubjectID: req.SubjectID,
+		CapabilityID: capabilityID, CapabilityKey: req.CapabilityKey,
+		CaseID: caseID, AssignmentID: assignmentID, RepositoryGeneration: req.RepositoryGeneration,
 	}, nil
+}
+
+func firstHeader(c *gin.Context, names ...string) string {
+	for _, name := range names {
+		if value := strings.TrimSpace(c.GetHeader(name)); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func respondQuotaError(c *gin.Context, err error) bool {
@@ -245,6 +289,10 @@ func assistRunToDTO(run AssistRun) dto.AssistRunResponse {
 		AssignmentID:           coordinationResponseUUID(run.AssignmentID),
 		AssignmentVersion:      run.AssignmentVersion,
 		ResponsibleVirployeeID: coordinationResponseUUID(responsibleVirployeeID(run)),
+		ProductID:              run.ProductID,
+		ProductSurface:         run.ProductSurface,
+		InvocationContext:      run.Invocation,
+		CapabilityID:           coordinationResponseUUID(run.CapabilityID),
 		CapabilityKey:          run.CapabilityKey,
 		CapabilityManifestHash: run.CapabilityManifestHash,
 		Status:                 run.Status,
@@ -418,7 +466,10 @@ func (h *Handler) ExecutionGate(c *gin.Context) {
 		}
 		assistRunID = parsed
 	}
-	out, err := h.ucs.ExecutionGateWithAssistRun(c.Request.Context(), orgID(c), id, req.Input, req.ConfirmedDraftToDomain(), req.PrincipalToDomain(), assistRunID)
+	out, err := h.ucs.ExecutionGateWithAssistRun(
+		c.Request.Context(), orgID(c), id, req.Input,
+		req.ConfirmedDraftToDomain(), req.PreparedAction, req.PrincipalToDomain(), assistRunID,
+	)
 	if err != nil {
 		if respondQuotaError(c, err) {
 			return

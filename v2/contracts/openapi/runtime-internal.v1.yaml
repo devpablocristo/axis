@@ -1,0 +1,222 @@
+openapi: 3.1.0
+info:
+  title: Axis Runtime Internal API
+  version: 1.0.0
+paths:
+  /v1/propose:
+    post:
+      operationId: proposeCapability
+      security:
+        - internalToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProposeRequest"
+      responses:
+        "200":
+          description: A non-authoritative model proposal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProposeResponse"
+        "400":
+          $ref: "#/components/responses/Error"
+        "502":
+          $ref: "#/components/responses/Error"
+  /v1/enrich:
+    post:
+      operationId: enrichText
+      security:
+        - internalToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Enriched text
+          content:
+            application/json:
+              schema:
+                type: object
+  /v1/answer:
+    post:
+      operationId: answer
+      security:
+        - internalToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Model answer
+          content:
+            application/json:
+              schema:
+                type: object
+  /v1/embeddings:
+    post:
+      operationId: embedTexts
+      security:
+        - internalToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - texts
+                - task_type
+              properties:
+                texts:
+                  type: array
+                  minItems: 1
+                  maxItems: 64
+                  items:
+                    type: string
+                    minLength: 1
+                task_type:
+                  type: string
+                  enum:
+                    - RETRIEVAL_DOCUMENT
+                    - RETRIEVAL_QUERY
+      responses:
+        "200":
+          description: Embeddings
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - model
+                  - dimensions
+                  - embeddings
+                properties:
+                  model:
+                    type: string
+                  dimensions:
+                    type: integer
+                    minimum: 1
+                  embeddings:
+                    type: array
+                    items:
+                      type: array
+                      items:
+                        type: number
+                        format: float
+        "503":
+          $ref: "#/components/responses/Error"
+components:
+  securitySchemes:
+    internalToken:
+      type: apiKey
+      in: header
+      name: X-Axis-Internal-Token
+  schemas:
+    Capability:
+      type: object
+      additionalProperties: false
+      required:
+        - capability_id
+        - name
+        - required_autonomy
+      properties:
+        capability_id:
+          type: string
+          format: uuid
+        capability_key:
+          type: string
+          deprecated: true
+        name:
+          type: string
+        operation:
+          type: string
+        required_autonomy:
+          type: string
+          enum:
+            - A0
+            - A1
+            - A2
+            - A3
+        input_schema:
+          type: object
+    ProposeRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - input
+        - capabilities
+      properties:
+        input:
+          type: string
+          minLength: 1
+        capabilities:
+          type: array
+          items:
+            $ref: "#/components/schemas/Capability"
+        memory:
+          type: array
+          items:
+            type: object
+    ProposeResponse:
+      type: object
+      required:
+        - intent
+      properties:
+        intent:
+          type: object
+          additionalProperties: false
+          required:
+            - matched
+          properties:
+            matched:
+              type: boolean
+            capability_id:
+              type: string
+              format: uuid
+            capability_key:
+              type: string
+              deprecated: true
+            action:
+              type: string
+            required_autonomy:
+              type: string
+            confidence:
+              type: number
+              minimum: 0
+              maximum: 1
+            arguments:
+              type: object
+    ErrorEnvelope:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: object
+          required:
+            - code
+            - message
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+  responses:
+    Error:
+      description: Request or provider failure
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"

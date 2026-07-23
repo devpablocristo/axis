@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://axis.local/contracts/schemas/prepared-action.v2.schema.json",
+  "title": "axis.prepared-action.v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "capability_id",
+    "manifest_hash",
+    "executor_binding_id",
+    "operation",
+    "input_schema_hash",
+    "output_schema_hash",
+    "arguments",
+    "required_autonomy"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "axis.prepared-action.v2"
+    },
+    "capability_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "manifest_hash": {
+      "$ref": "#/$defs/sha256"
+    },
+    "executor_binding_id": {
+      "$ref": "#/$defs/code"
+    },
+    "operation": {
+      "$ref": "#/$defs/code"
+    },
+    "input_schema_hash": {
+      "$ref": "#/$defs/sha256"
+    },
+    "output_schema_hash": {
+      "$ref": "#/$defs/sha256"
+    },
+    "arguments": {
+      "type": "object"
+    },
+    "required_autonomy": {
+      "type": "string",
+      "enum": [
+        "A0",
+        "A1",
+        "A2",
+        "A3"
+      ]
+    },
+    "idempotency_hash": {
+      "$ref": "#/$defs/sha256"
+    },
+    "principal_type": {
+      "type": "string",
+      "enum": [
+        "human",
+        "service",
+        "virployee"
+      ]
+    },
+    "principal_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "assist_context": {
+      "type": "object"
+    },
+    "professional_scope": {
+      "type": "object"
+    },
+    "mcp_context": {
+      "type": "object"
+    }
+  },
+  "$defs": {
+    "code": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._:-]{0,127}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  }
+}

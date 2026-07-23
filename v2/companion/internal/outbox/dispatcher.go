@@ -39,7 +39,7 @@ type Dispatcher struct {
 func NewDispatcher(repository RepositoryPort, sender Sender, config DispatcherConfig) *Dispatcher {
 	config.WorkerID = strings.TrimSpace(config.WorkerID)
 	if config.WorkerID == "" {
-		config.WorkerID = "nexus-outbox-" + uuid.NewString()
+		config.WorkerID = "governance-outbox-" + uuid.NewString()
 	}
 	if config.Concurrency <= 0 {
 		config.Concurrency = 1

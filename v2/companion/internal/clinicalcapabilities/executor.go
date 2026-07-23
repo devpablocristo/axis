@@ -44,7 +44,7 @@ func NewExecutor(retriever ScoredRetriever, runtime RuntimeContextProvider, answ
 }
 
 func (e *Executor) Execute(ctx context.Context, invocation mcpgovernance.InvocationContext, capability capabilitydomain.Capability, arguments map[string]any) (map[string]any, error) {
-	if capability.SideEffectClass != "read" || capability.RequiresNexusApproval {
+	if capability.SideEffectClass != "read" || capability.RequiresGovernanceApproval {
 		return nil, domainerr.Forbidden("Assist only invokes read-only capabilities")
 	}
 	if strings.TrimSpace(invocation.ProductSurface) == "" || strings.TrimSpace(invocation.RepositoryGeneration) == "" {

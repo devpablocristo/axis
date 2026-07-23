@@ -289,19 +289,23 @@ func (r *Repository) CreateRunTrace(ctx context.Context, orgID string, input run
 		return runtraces.Trace{}, fmt.Errorf("marshal memory references: %w", err)
 	}
 	var nexusResult any
-	if input.NexusResult != nil {
+	governanceResult := input.GovernanceResult
+	if governanceResult == nil {
+		governanceResult = input.NexusResult
+	}
+	if governanceResult != nil {
 		redacted := runtraces.RedactValue(map[string]any{
-			"check_id":               input.NexusResult.CheckID,
-			"available":              input.NexusResult.Available,
-			"decision":               input.NexusResult.Decision,
-			"risk_level":             input.NexusResult.RiskLevel,
-			"status":                 input.NexusResult.Status,
-			"decision_reason":        input.NexusResult.DecisionReason,
-			"would_require_approval": input.NexusResult.WouldRequireApproval,
-			"binding_hash":           input.NexusResult.BindingHash,
-			"approval_id":            input.NexusResult.ApprovalID,
-			"approval_status":        input.NexusResult.ApprovalStatus,
-			"error":                  input.NexusResult.Error,
+			"check_id":               governanceResult.CheckID,
+			"available":              governanceResult.Available,
+			"decision":               governanceResult.Decision,
+			"risk_level":             governanceResult.RiskLevel,
+			"status":                 governanceResult.Status,
+			"decision_reason":        governanceResult.DecisionReason,
+			"would_require_approval": governanceResult.WouldRequireApproval,
+			"binding_hash":           governanceResult.BindingHash,
+			"approval_id":            governanceResult.ApprovalID,
+			"approval_status":        governanceResult.ApprovalStatus,
+			"error":                  governanceResult.Error,
 		})
 		raw, err := json.Marshal(redacted)
 		if err != nil {
@@ -311,17 +315,22 @@ func (r *Repository) CreateRunTrace(ctx context.Context, orgID string, input run
 	}
 	var executionResult any
 	if input.ExecutionResult != nil {
+		governanceReportStatus := input.ExecutionResult.GovernanceReportStatus
+		if governanceReportStatus == "" {
+			governanceReportStatus = input.ExecutionResult.NexusReportStatus
+		}
 		redacted := runtraces.RedactValue(map[string]any{
-			"status":              input.ExecutionResult.Status,
-			"mode":                input.ExecutionResult.Mode,
-			"approval_id":         input.ExecutionResult.ApprovalID,
-			"approval_status":     input.ExecutionResult.ApprovalStatus,
-			"binding_hash":        input.ExecutionResult.BindingHash,
-			"message":             input.ExecutionResult.Message,
-			"external_effects":    input.ExecutionResult.ExternalEffects,
-			"resource_id":         input.ExecutionResult.ResourceID,
-			"duration_ms":         input.ExecutionResult.DurationMS,
-			"nexus_report_status": input.ExecutionResult.NexusReportStatus,
+			"status":                   input.ExecutionResult.Status,
+			"mode":                     input.ExecutionResult.Mode,
+			"approval_id":              input.ExecutionResult.ApprovalID,
+			"approval_status":          input.ExecutionResult.ApprovalStatus,
+			"binding_hash":             input.ExecutionResult.BindingHash,
+			"message":                  input.ExecutionResult.Message,
+			"external_effects":         input.ExecutionResult.ExternalEffects,
+			"resource_id":              input.ExecutionResult.ResourceID,
+			"duration_ms":              input.ExecutionResult.DurationMS,
+			"governance_report_status": governanceReportStatus,
+			"nexus_report_status":      governanceReportStatus,
 		})
 		raw, err := json.Marshal(redacted)
 		if err != nil {
@@ -740,12 +749,19 @@ func scanRunTrace(row scanner) (runtraces.Trace, error) {
 		if err := json.Unmarshal(nexusRaw, &nexus); err != nil {
 			return runtraces.Trace{}, err
 		}
+		item.GovernanceResult = &nexus
 		item.NexusResult = &nexus
 	}
 	if len(executionRaw) > 0 {
 		var execution runtraces.ExecutionResult
 		if err := json.Unmarshal(executionRaw, &execution); err != nil {
 			return runtraces.Trace{}, err
+		}
+		if execution.GovernanceReportStatus == "" {
+			execution.GovernanceReportStatus = execution.NexusReportStatus
+		}
+		if execution.NexusReportStatus == "" {
+			execution.NexusReportStatus = execution.GovernanceReportStatus
 		}
 		item.ExecutionResult = &execution
 	}

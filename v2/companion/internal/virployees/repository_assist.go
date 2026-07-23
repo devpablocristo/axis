@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/devpablocristo/companion-v2/internal/invocation"
 	"github.com/devpablocristo/companion-v2/internal/knowledgebases"
 	"github.com/devpablocristo/companion-v2/internal/memories"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
@@ -26,11 +27,14 @@ type AssistRun struct {
 	OrchestrationDeadlineAt *time.Time
 	OwnershipVersion        int64
 	AssistType              string
+	ProductID               string
 	ProductSurface          string
+	Invocation              invocation.Context
 	SubjectID               string
 	AssignmentID            uuid.UUID
 	AssignmentVersion       int64
 	RepositoryGeneration    string
+	CapabilityID            uuid.UUID
 	CapabilityKey           string
 	CapabilityManifestHash  string
 	GroundingMode           string
@@ -53,6 +57,8 @@ type AssistRun struct {
 	Degraded                bool
 	Model                   string
 	PromptVersion           string
+	PromptBundleHash        string
+	PromptVersions          json.RawMessage
 	Error                   string
 	DurationMS              int64
 	StartedAt               time.Time
@@ -91,6 +97,7 @@ func (r *Repository) BeginAssistRun(ctx context.Context, orgID string, virployee
 			return AssistRun{}, false, domainerr.Conflict("case does not belong to the requested Virployee")
 		}
 		metadata.ProductSurface = assistCase.ProductSurface
+		metadata.Invocation.ProductSurface = assistCase.ProductSurface
 		metadata.AssistType = assistCase.AssistType
 		caseID = assistCase.ID
 		responsibleID = assistCase.OwnerVirployeeID
@@ -115,15 +122,27 @@ func (r *Repository) BeginAssistRun(ctx context.Context, orgID string, virployee
 	}
 	tag, err := r.pool.Exec(ctx, `
 		INSERT INTO companion_assist_runs (
-			id, org_id, virployee_id, assist_type, product_surface, subject_id, repository_generation,
-			capability_key, capability_manifest_hash,
+			id, org_id, virployee_id, assist_type, product_id, product_surface, subject_id, repository_generation,
+			invocation_context_version, integration_id, integration_revision, integration_hash,
+			principal_type, principal_id, principal_scopes, access_mode,
+			capability_id, capability_key, capability_manifest_hash,
 			idempotency_key, status, input_hash, input_preview, input_json, case_id, responsible_virployee_id,
 			grounding_mode, continuity_assignment_id, continuity_assignment_version, context_hash,
 			job_role_snapshot_hash, source_authorization_hash, started_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8,''), NULLIF($9,''), $10, 'received', $11, $12, $13::jsonb, $14, $15, $16, $17, $18, $19, $20, $21, now(), now())
+		) VALUES (
+			$1, $2, $3, $4, $5, $6, $7, $8,
+			$9, NULLIF($10,''), $11, NULLIF($12,''),
+			NULLIF($13,''), NULLIF($14,''), $15, $16,
+			$17, NULLIF($18,''), NULLIF($19,''),
+			$20, 'received', $21, $22, $23::jsonb, $24, $25,
+			$26, $27, $28, $29, $30, $31, now(), now()
+		)
 		ON CONFLICT (org_id, virployee_id, idempotency_key) DO NOTHING
-	`, id, orgID, virployeeID, metadata.AssistType, metadata.ProductSurface, metadata.SubjectID, metadata.RepositoryGeneration,
-		metadata.CapabilityKey, metadata.CapabilityManifestHash, idempotencyKey, inputHash, inputPreview, []byte(inputJSON), caseID, responsibleID, metadata.GroundingMode,
+	`, id, orgID, virployeeID, metadata.AssistType, metadata.ProductID, metadata.ProductSurface, metadata.SubjectID, metadata.RepositoryGeneration,
+		metadata.Invocation.SchemaVersion, metadata.Invocation.IntegrationID, metadata.Invocation.IntegrationRevision, metadata.Invocation.IntegrationHash,
+		metadata.Invocation.PrincipalType, metadata.Invocation.PrincipalID, metadata.Invocation.Scopes, metadata.Invocation.AccessMode,
+		nullableAssistUUID(metadata.CapabilityID), metadata.CapabilityKey, metadata.CapabilityManifestHash,
+		idempotencyKey, inputHash, inputPreview, []byte(inputJSON), caseID, responsibleID, metadata.GroundingMode,
 		nullableAssistUUID(metadata.AssignmentID), metadata.AssignmentVersion, metadata.ContextHash, metadata.JobRoleSnapshotHash,
 		metadata.SourceAuthorizationHash)
 	if err != nil {
@@ -318,15 +337,19 @@ const assistRunSelect = `
 	       COALESCE(responsible_virployee_id,virployee_id),
 	       COALESCE(orchestration_plan_id,'00000000-0000-0000-0000-000000000000'::uuid),
 	       orchestration_deadline_at,ownership_version,
-	       assist_type, product_surface, subject_id,
+	       assist_type, product_id, product_surface, subject_id,
+	       invocation_context_version,COALESCE(integration_id,''),integration_revision,COALESCE(integration_hash,''),
+	       COALESCE(principal_type,''),COALESCE(principal_id,''),principal_scopes,access_mode,
 	       COALESCE(continuity_assignment_id,'00000000-0000-0000-0000-000000000000'::uuid),
 	       continuity_assignment_version,repository_generation,
+	       COALESCE(capability_id,'00000000-0000-0000-0000-000000000000'::uuid),
 	       COALESCE(capability_key,''),COALESCE(capability_manifest_hash,''),
 	       grounding_mode,context_hash,memory_context_hash,memory_references,job_role_snapshot_hash,
 	       source_authorization_hash,
 	       answer_status,citations,source_context,
 	       idempotency_key, status, input_hash, input_preview,
-	       input_json, output, output_text, answered, degraded, model, prompt_version, error, duration_ms,
+	       input_json, output, output_text, answered, degraded, model, prompt_version,
+	       prompt_bundle_hash,prompt_versions,error,duration_ms,
 	       started_at, completed_at
 	FROM companion_assist_runs
 `
@@ -335,16 +358,19 @@ type rowScanner interface{ Scan(dest ...any) error }
 
 func (r *Repository) scanAssistRun(row rowScanner) (AssistRun, error) {
 	var out AssistRun
-	var input, output, citations, sourceContext, memoryReferences []byte
+	var input, output, citations, sourceContext, memoryReferences, promptVersions []byte
 	err := row.Scan(
 		&out.ID, &out.OrgID, &out.VirployeeID, &out.CaseID, &out.ResponsibleVirployeeID,
 		&out.OrchestrationPlanID, &out.OrchestrationDeadlineAt, &out.OwnershipVersion,
-		&out.AssistType, &out.ProductSurface, &out.SubjectID, &out.AssignmentID, &out.AssignmentVersion,
-		&out.RepositoryGeneration, &out.CapabilityKey, &out.CapabilityManifestHash,
+		&out.AssistType, &out.ProductID, &out.ProductSurface, &out.SubjectID,
+		&out.Invocation.SchemaVersion, &out.Invocation.IntegrationID, &out.Invocation.IntegrationRevision, &out.Invocation.IntegrationHash,
+		&out.Invocation.PrincipalType, &out.Invocation.PrincipalID, &out.Invocation.Scopes, &out.Invocation.AccessMode,
+		&out.AssignmentID, &out.AssignmentVersion,
+		&out.RepositoryGeneration, &out.CapabilityID, &out.CapabilityKey, &out.CapabilityManifestHash,
 		&out.GroundingMode, &out.ContextHash, &out.MemoryContextHash, &memoryReferences,
 		&out.JobRoleSnapshotHash, &out.SourceAuthorizationHash, &out.AnswerStatus, &citations, &sourceContext, &out.IdempotencyKey, &out.Status,
 		&out.InputHash, &out.InputPreview, &input, &output, &out.OutputText, &out.Answered, &out.Degraded,
-		&out.Model, &out.PromptVersion, &out.Error, &out.DurationMS, &out.StartedAt, &out.CompletedAt,
+		&out.Model, &out.PromptVersion, &out.PromptBundleHash, &promptVersions, &out.Error, &out.DurationMS, &out.StartedAt, &out.CompletedAt,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -355,8 +381,14 @@ func (r *Repository) scanAssistRun(row rowScanner) (AssistRun, error) {
 	if len(input) > 0 {
 		out.InputJSON = json.RawMessage(input)
 	}
+	out.Invocation.OrgID = out.OrgID
+	out.Invocation.ProductID = out.ProductID
+	out.Invocation.ProductSurface = out.ProductSurface
 	if len(output) > 0 {
 		out.Output = json.RawMessage(output)
+	}
+	if len(promptVersions) > 0 {
+		out.PromptVersions = json.RawMessage(promptVersions)
 	}
 	if len(citations) > 0 {
 		if err := json.Unmarshal(citations, &out.Citations); err != nil {
@@ -374,6 +406,20 @@ func (r *Repository) scanAssistRun(row rowScanner) (AssistRun, error) {
 		}
 	}
 	return out, nil
+}
+
+func (r *Repository) SetAssistPromptContext(ctx context.Context, orgID string, id uuid.UUID, productID, bundleHash string, versions json.RawMessage) (AssistRun, error) {
+	if len(versions) == 0 {
+		versions = json.RawMessage(`[]`)
+	}
+	_, err := r.pool.Exec(ctx, `UPDATE companion_assist_runs
+		SET product_id=$3,prompt_bundle_hash=$4,prompt_versions=$5::jsonb,updated_at=now()
+		WHERE org_id=$1 AND id=$2 AND status NOT IN ('done','failed','needs_human')`,
+		orgID, id, strings.TrimSpace(productID), strings.TrimSpace(bundleHash), []byte(versions))
+	if err != nil {
+		return AssistRun{}, err
+	}
+	return r.GetAssistRunByID(ctx, orgID, id)
 }
 
 func nullableAssistUUID(id uuid.UUID) any {

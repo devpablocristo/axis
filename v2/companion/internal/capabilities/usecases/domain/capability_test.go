@@ -38,6 +38,18 @@ func TestNormalizeCreateInputValidatesKey(t *testing.T) {
 	}
 }
 
+func TestNormalizeCreateInputAllowsUUIDOnlyIdentity(t *testing.T) {
+	got, err := NormalizeCreateInput(CreateInput{
+		Name: "Gestionar campos de granos", RequiredAutonomy: "A2",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.CapabilityKey != "" {
+		t.Fatalf("an omitted compatibility alias must stay omitted, got %q", got.CapabilityKey)
+	}
+}
+
 func TestNormalizeCreateInputAllowsEnye(t *testing.T) {
 	if _, err := NormalizeCreateInput(CreateInput{CapabilityKey: "niñez.casos.leer", Name: "Read cases", RequiredAutonomy: "A0"}); err != nil {
 		t.Fatalf("expected ñ to be valid, got %v", err)

@@ -62,7 +62,7 @@ func validateConformance(ctx context.Context, capability domain.Capability, chec
 
 	governanceOK := capability.EvidenceRequired
 	if capability.SideEffectClass == "write" {
-		governanceOK = governanceOK && capability.RequiresNexusApproval && manifest.AttestationRequired
+		governanceOK = governanceOK && capability.RequiresGovernanceApproval && manifest.AttestationRequired
 	}
 	add("governance", governanceOK, "evidence is required; writes also require Nexus approval and signed attestation")
 

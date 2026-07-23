@@ -11,8 +11,6 @@ import (
 	"fmt"
 	"strings"
 	"unicode/utf8"
-
-	ai "github.com/devpablocristo/platform/kernels/ai/go"
 )
 
 const (
@@ -26,7 +24,7 @@ const (
 )
 
 type Planner struct {
-	provider ai.Provider
+	provider ModelPort
 	model    string
 	pricing  Pricing
 }
@@ -36,7 +34,7 @@ type Pricing struct {
 	OutputMicroUSDPerMillionTokens int64
 }
 
-func New(provider ai.Provider, model string, pricing ...Pricing) *Planner {
+func New(provider ModelPort, model string, pricing ...Pricing) *Planner {
 	configured := Pricing{}
 	if len(pricing) > 0 {
 		configured = pricing[0]
@@ -59,10 +57,10 @@ func (p *Planner) Propose(ctx context.Context, req ProposeRequest) (ProposeRespo
 	// Provide both structured-output mechanisms so the same call works across
 	// providers: Anthropic uses the tool (tool_use), Gemini/Vertex uses the
 	// ResponseSchema (JSON in the text). Echo uses neither → no intent.
-	resp, err := p.provider.Chat(ctx, ai.ChatRequest{
+	resp, err := p.provider.Complete(ctx, ModelRequest{
 		SystemPrompt:   buildSystemPrompt(req),
-		Messages:       []ai.Message{{Role: "user", Content: req.Input}},
-		Tools:          []ai.Tool{buildProposeTool(req.Capabilities)},
+		Messages:       []ModelMessage{{Role: "user", Content: req.Input}},
+		Tools:          []ModelTool{buildProposeTool(req.Capabilities)},
 		ResponseSchema: proposeSchema(req.Capabilities),
 		MaxTokens:      512,
 	})
@@ -97,10 +95,10 @@ func (p *Planner) Enrich(ctx context.Context, req EnrichRequest) (EnrichResponse
 		return original, nil
 	}
 
-	resp, err := p.provider.Chat(ctx, ai.ChatRequest{
+	resp, err := p.provider.Complete(ctx, ModelRequest{
 		SystemPrompt:   buildEnrichSystemPrompt(req),
-		Messages:       []ai.Message{{Role: "user", Content: "Title: " + req.Title + "\n\nProcedure:\n" + req.Content}},
-		Tools:          []ai.Tool{buildEnrichTool()},
+		Messages:       []ModelMessage{{Role: "user", Content: "Title: " + req.Title + "\n\nProcedure:\n" + req.Content}},
+		Tools:          []ModelTool{buildEnrichTool()},
 		ResponseSchema: enrichSchema(),
 		MaxTokens:      2048,
 	})
@@ -154,9 +152,9 @@ func (p *Planner) Answer(ctx context.Context, req AnswerRequest) (AnswerResponse
 	if strings.TrimSpace(partText) != "" {
 		userContent += "\n\nVerified extracted document content:\n" + partText
 	}
-	chatReq := ai.ChatRequest{
+	chatReq := ModelRequest{
 		SystemPrompt: buildAnswerSystemPrompt(req),
-		Messages:     []ai.Message{{Role: "user", Content: userContent}},
+		Messages:     []ModelMessage{{Role: "user", Content: userContent}},
 		MaxTokens:    4096,
 	}
 	if groundingMode == "sources_only" {
@@ -164,7 +162,7 @@ func (p *Planner) Answer(ctx context.Context, req AnswerRequest) (AnswerResponse
 	} else if len(req.ResponseSchema) > 0 {
 		chatReq.ResponseSchema = req.ResponseSchema
 	}
-	resp, err := p.provider.Chat(ctx, chatReq)
+	resp, err := p.provider.Complete(ctx, chatReq)
 	if err != nil {
 		return AnswerResponse{}, err
 	}
@@ -356,8 +354,8 @@ func enrichSchema() map[string]any {
 	}
 }
 
-func buildEnrichTool() ai.Tool {
-	return ai.Tool{
+func buildEnrichTool() ModelTool {
+	return ModelTool{
 		Name:        enrichToolName,
 		Description: "Return an improved title and step-by-step wording for a learned procedure. Do not change what it does.",
 		Parameters:  enrichSchema(),
@@ -370,8 +368,12 @@ func buildEnrichSystemPrompt(req EnrichRequest) string {
 	b.WriteString("Rewrite it as clear, ordered steps in the same language as the input. ")
 	b.WriteString("Keep the exact meaning: do NOT add, remove, or reorder actions, and do NOT invent details. ")
 	b.WriteString("The procedure is for the capability \"")
-	b.WriteString(req.CapabilityKey)
-	b.WriteString("\"; keep that capability_key referenced in the text. ")
+	identity := strings.TrimSpace(req.CapabilityID)
+	if identity == "" {
+		identity = strings.TrimSpace(req.CapabilityKey)
+	}
+	b.WriteString(identity)
+	b.WriteString("\"; preserve that capability identity in the text. ")
 	b.WriteString("Never include secrets, credentials, emails, or any personal data. ")
 	b.WriteString("Call ")
 	b.WriteString(enrichToolName)
@@ -379,7 +381,7 @@ func buildEnrichSystemPrompt(req EnrichRequest) string {
 	return b.String()
 }
 
-func interpretEnrich(resp ai.ChatResponse) (title, content string, ok bool) {
+func interpretEnrich(resp ModelResponse) (title, content string, ok bool) {
 	for _, call := range resp.ToolCalls {
 		if call.Name != enrichToolName {
 			continue
@@ -431,35 +433,54 @@ func looksAdversarial(input string) bool {
 
 // proposeSchema is the structured-output contract for the proposal, used both
 // as the Anthropic tool input schema and as the Gemini/Vertex ResponseSchema.
-// capability_key is constrained to the assigned keys (plus empty) so the model
-// cannot propose a capability the virployee does not have.
+// capability_id is constrained to the assigned UUIDs. Legacy callers without
+// UUIDs retain the capability_key constraint during the compatibility window.
 func proposeSchema(capabilities []CapabilityInfo) map[string]any {
 	keys := make([]string, 0, len(capabilities)+1)
+	ids := make([]string, 0, len(capabilities)+1)
 	for _, capability := range capabilities {
 		keys = append(keys, capability.CapabilityKey)
+		if id := strings.TrimSpace(capability.CapabilityID); id != "" {
+			ids = append(ids, id)
+		}
 	}
 	keys = append(keys, "") // allow "no capability applies"
-	return map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"capability_key": map[string]any{
-				"type":        "string",
-				"enum":        keys,
-				"description": "The assigned capability_key that best matches the request, or empty.",
-			},
-			"confidence": map[string]any{
-				"type":        "number",
-				"description": "Confidence between 0 and 1.",
-			},
+	ids = append(ids, "")
+	properties := map[string]any{
+		"capability_key": map[string]any{
+			"type":        "string",
+			"enum":        keys,
+			"description": "Deprecated assigned capability alias, or empty.",
 		},
-		"required": []string{"capability_key"},
+		"confidence": map[string]any{
+			"type":        "number",
+			"description": "Confidence between 0 and 1.",
+		},
+		"arguments": map[string]any{
+			"type":        "object",
+			"description": "Arguments proposed for the selected capability. Companion validates them against the active manifest.",
+		},
+	}
+	required := []string{"capability_key"}
+	if len(ids) == len(capabilities)+1 {
+		properties["capability_id"] = map[string]any{
+			"type":        "string",
+			"enum":        ids,
+			"description": "The assigned capability UUID that best matches the request, or empty.",
+		}
+		required = []string{"capability_id"}
+	}
+	return map[string]any{
+		"type":       "object",
+		"properties": properties,
+		"required":   required,
 	}
 }
 
-func buildProposeTool(capabilities []CapabilityInfo) ai.Tool {
-	return ai.Tool{
+func buildProposeTool(capabilities []CapabilityInfo) ModelTool {
+	return ModelTool{
 		Name:        proposeToolName,
-		Description: "Classify the user's request into exactly one assigned capability, or empty string when none applies. Never invent a capability key.",
+		Description: "Classify the request into one assigned capability UUID and propose schema-bound arguments, or return an empty identity when none applies.",
 		Parameters:  proposeSchema(capabilities),
 	}
 }
@@ -478,12 +499,16 @@ func buildSystemPrompt(req ProposeRequest) string {
 	b.WriteString("Classify the user's request into one of your assigned capabilities. ")
 	b.WriteString("Call ")
 	b.WriteString(proposeToolName)
-	b.WriteString(" with the capability_key that best matches. ")
+	b.WriteString(" with the capability_id that best matches and any proposed arguments. ")
 	b.WriteString("When the user asks for an operational task (create, change, find or look something up), pick the capability that best covers it even if the phrasing is loose, indirect, or includes extra conditions to resolve later; lower the confidence instead of refusing. ")
-	b.WriteString("Use an empty capability_key only for greetings, small talk, or requests unrelated to every assigned capability. Never invent a key.\n\nAssigned capabilities:\n")
+	b.WriteString("Use an empty capability_id only for greetings, small talk, or requests unrelated to every assigned capability. Never invent an identity.\n\nAssigned capabilities:\n")
 	for _, capability := range req.Capabilities {
 		b.WriteString("- ")
-		b.WriteString(capability.CapabilityKey)
+		identity := strings.TrimSpace(capability.CapabilityID)
+		if identity == "" {
+			identity = strings.TrimSpace(capability.CapabilityKey)
+		}
+		b.WriteString(identity)
 		if capability.Name != "" {
 			b.WriteString(" (")
 			b.WriteString(capability.Name)
@@ -506,23 +531,27 @@ func buildSystemPrompt(req ProposeRequest) string {
 	return b.String()
 }
 
-func interpret(resp ai.ChatResponse, capabilities []CapabilityInfo) ProposedIntent {
-	assigned := make(map[string]CapabilityInfo, len(capabilities))
+func interpret(resp ModelResponse, capabilities []CapabilityInfo) ProposedIntent {
+	assignedKeys := make(map[string]CapabilityInfo, len(capabilities))
+	assignedIDs := make(map[string]CapabilityInfo, len(capabilities))
 	for _, capability := range capabilities {
-		assigned[capability.CapabilityKey] = capability
+		assignedKeys[capability.CapabilityKey] = capability
+		if id := strings.TrimSpace(capability.CapabilityID); id != "" {
+			assignedIDs[id] = capability
+		}
 	}
 	// Anthropic path: a tool_use call.
 	for _, call := range resp.ToolCalls {
 		if call.Name != proposeToolName {
 			continue
 		}
-		if intent, ok := intentFromArgs(call.Args, assigned); ok {
+		if intent, ok := intentFromArgs(call.Args, assignedIDs, assignedKeys); ok {
 			return intent
 		}
 	}
 	// Gemini/Vertex path: structured JSON returned as text via ResponseSchema.
 	if text := stripCodeFences(resp.Text); text != "" {
-		if intent, ok := intentFromArgs([]byte(text), assigned); ok {
+		if intent, ok := intentFromArgs([]byte(text), assignedIDs, assignedKeys); ok {
 			return intent
 		}
 	}
@@ -532,32 +561,59 @@ func interpret(resp ai.ChatResponse, capabilities []CapabilityInfo) ProposedInte
 // intentFromArgs validates a structured proposal and maps it to an intent.
 // An empty or unassigned capability_key yields (,false): the model cannot
 // propose a capability the virployee does not have (Companion re-checks too).
-func intentFromArgs(raw []byte, assigned map[string]CapabilityInfo) (ProposedIntent, bool) {
+func intentFromArgs(raw []byte, assignedIDs, assignedKeys map[string]CapabilityInfo) (ProposedIntent, bool) {
 	var args struct {
-		CapabilityKey string  `json:"capability_key"`
-		Confidence    float64 `json:"confidence"`
+		CapabilityID  string         `json:"capability_id"`
+		CapabilityKey string         `json:"capability_key"`
+		Confidence    float64        `json:"confidence"`
+		Arguments     map[string]any `json:"arguments"`
 	}
 	if err := json.Unmarshal(raw, &args); err != nil {
 		return ProposedIntent{}, false
 	}
+	id := strings.TrimSpace(args.CapabilityID)
 	key := strings.TrimSpace(args.CapabilityKey)
-	capability, ok := assigned[key]
-	if key == "" || !ok {
-		return ProposedIntent{}, false
+	var (
+		capability CapabilityInfo
+		ok         bool
+	)
+	if id != "" {
+		capability, ok = assignedIDs[id]
+		if !ok {
+			return ProposedIntent{}, false
+		}
+		// Once a canonical identity is present, model-supplied aliases are
+		// descriptive only and cannot redirect capability selection.
+		key = strings.TrimSpace(capability.CapabilityKey)
+	} else {
+		if key == "" {
+			return ProposedIntent{}, false
+		}
+		capability, ok = assignedKeys[key]
+		if !ok {
+			return ProposedIntent{}, false
+		}
+		id = strings.TrimSpace(capability.CapabilityID)
+		key = strings.TrimSpace(capability.CapabilityKey)
 	}
 	domain, resource, action := splitKey(key)
+	if action == "" {
+		action = strings.TrimSpace(capability.Operation)
+	}
 	confidence := args.Confidence
 	if confidence <= 0 || confidence > 1 {
 		confidence = 0.8
 	}
 	return ProposedIntent{
 		Matched:          true,
+		CapabilityID:     id,
 		CapabilityKey:    key,
 		Domain:           domain,
 		Resource:         resource,
 		Action:           action,
 		RequiredAutonomy: capability.RequiredAutonomy,
 		Confidence:       confidence,
+		Arguments:        args.Arguments,
 	}, true
 }
 

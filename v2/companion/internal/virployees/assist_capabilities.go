@@ -24,10 +24,13 @@ func validateAssistCapabilitySnapshot(rc runtimecontext.Context, run AssistRun) 
 		return assistCapabilityContract{}, nil
 	}
 	for _, capability := range rc.Capabilities {
+		if run.CapabilityID != uuid.Nil && capability.ID != run.CapabilityID {
+			continue
+		}
 		if capability.CapabilityKey != run.CapabilityKey {
 			continue
 		}
-		if capability.SideEffectClass != "read" || capability.RequiresNexusApproval ||
+		if capability.SideEffectClass != "read" || capability.RequiresGovernanceApproval ||
 			capability.ManifestHash == "" || capability.ManifestHash != capability.ConformedHash ||
 			capability.ManifestHash != run.CapabilityManifestHash ||
 			capability.Manifest.ProductSurface != run.ProductSurface {
@@ -70,11 +73,11 @@ func (u *UseCases) processGovernedCapabilityAssist(ctx context.Context, run Assi
 	}
 	started := time.Now()
 	result, invokeErr := u.governedReads.InvokeGovernedRead(ctx, GovernedReadInvocation{
-		OrgID: run.OrgID, ActorID: "service:" + run.ProductSurface,
+		OrgID: run.OrgID, ActorID: assistInvocationActor(run),
 		VirployeeID: responsibleID, SubjectID: subjectID, CaseID: run.CaseID,
 		AssignmentID: run.AssignmentID, AssignmentVersion: run.AssignmentVersion,
-		ProductSurface: run.ProductSurface, RepositoryGeneration: run.RepositoryGeneration,
-		CapabilityKey: run.CapabilityKey, CapabilityManifestHash: run.CapabilityManifestHash,
+		ProductID: run.ProductID, ProductSurface: run.ProductSurface, RepositoryGeneration: run.RepositoryGeneration,
+		CapabilityID: run.CapabilityID, CapabilityKey: run.CapabilityKey, CapabilityManifestHash: run.CapabilityManifestHash,
 		IdempotencyKey: run.IdempotencyKey, Arguments: arguments,
 	})
 	durationMS := time.Since(started).Milliseconds()
@@ -122,6 +125,13 @@ func (u *UseCases) processGovernedCapabilityAssist(ctx context.Context, run Assi
 	}
 	u.emitAssistAudit(ctx, run.OrgID, responsibleID, done, run.InputHash)
 	return done, nil
+}
+
+func assistInvocationActor(run AssistRun) string {
+	if strings.TrimSpace(run.Invocation.PrincipalID) != "" {
+		return run.Invocation.PrincipalID
+	}
+	return "service:" + run.ProductSurface
 }
 
 func canonicalCapabilityCitations(result map[string]any) ([]knowledgebases.Citation, error) {

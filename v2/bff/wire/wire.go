@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	cfg "github.com/devpablocristo/bff-v2/cmd/config"
+	"github.com/devpablocristo/bff-v2/internal/adapters/companionhttp"
 	"github.com/devpablocristo/bff-v2/internal/gateway"
 	"github.com/devpablocristo/bff-v2/internal/identity"
 	clerkprovider "github.com/devpablocristo/bff-v2/internal/identity/provider/clerk"
@@ -17,6 +18,8 @@ import (
 	"github.com/devpablocristo/bff-v2/internal/inbound"
 	"github.com/devpablocristo/bff-v2/internal/infra/migrations"
 	"github.com/devpablocristo/bff-v2/internal/orgs"
+	"github.com/devpablocristo/bff-v2/internal/productedge"
+	"github.com/devpablocristo/bff-v2/internal/productintegrations"
 	"github.com/devpablocristo/bff-v2/internal/products"
 	"github.com/devpablocristo/bff-v2/internal/session"
 	"github.com/devpablocristo/bff-v2/internal/users"
@@ -43,13 +46,6 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	if config.DatabaseURL == "" {
 		return nil, fmt.Errorf("BFF_V2_DATABASE_URL or DATABASE_URL is required")
 	}
-	if config.CompanionBaseURL == "" {
-		return nil, fmt.Errorf("BFF_V2_COMPANION_BASE_URL is required")
-	}
-	if config.NexusBaseURL == "" {
-		return nil, fmt.Errorf("BFF_V2_NEXUS_BASE_URL is required")
-	}
-
 	dbConfig, err := postgres.ConfigFromEnv("BFF_V2_DB", "bff_v2")
 	if err != nil {
 		return nil, err
@@ -90,6 +86,22 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 
 	productsRepo := products.NewRepository(db.Pool())
 	productsUC := products.NewUseCases(productsRepo, orgProvider)
+	serviceHTTPClient := &http.Client{Timeout: 20 * time.Second, Transport: otelhttp.NewTransport(http.DefaultTransport)}
+	productIntegrationClient := productintegrations.NewHTTPServiceClient(config.InternalAuthSecret, serviceHTTPClient)
+	productIntegrationService := productintegrations.NewServiceWithParticipants(
+		db.Pool(),
+		productintegrations.NewParticipantRegistry(
+			productintegrations.NewHTTPParticipantWithProjection(
+				"companion", config.CompanionBaseURL, productIntegrationClient,
+				productintegrations.ProductInvocationProjection,
+			),
+			productintegrations.NewHTTPParticipantWithProjection(
+				"nexus", config.NexusBaseURL, productIntegrationClient,
+				productintegrations.GovernanceProjection,
+			),
+		).WithInvocationProjection(productintegrations.ProductInvocationProjection),
+	)
+	productIntegrationHandler := productintegrations.NewHandler(productIntegrationService)
 	orgsRepo := orgs.NewRepository(db.Pool())
 	orgsUC := orgs.NewUseCases(orgsRepo, productsUC, orgProvider, identityUC)
 
@@ -155,6 +167,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	products.NewHandler(productsUC, products.HandlerOptions{
 		DefaultPrincipalID: config.DevPrincipalID,
 	}).OrganizationProductRoutes(protected)
+	productIntegrationHandler.Routes(protected)
 	users.NewHandler(usersUC, users.HandlerOptions{
 		DefaultPrincipalID: config.DevPrincipalID,
 	}).Routes(protected)
@@ -163,9 +176,25 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	// Product-facing inbound edge (machine auth via API key), mounted at the root
 	// OUTSIDE the human-session middleware. A configured consumer POSTs
 	// /v1/assist-runs with an API key that maps to a product + virployee.
-	if bindings := inbound.ParseBindings(config.ProductAPIKeys); len(bindings) > 0 {
-		inbound.NewHandler(bindings, config.CompanionBaseURL, config.InternalAuthSecret, nil).Routes(router)
-	}
+	productEdgeAdapter := companionhttp.New(
+		config.CompanionBaseURL,
+		config.InternalAuthSecret,
+		&http.Client{Timeout: 90 * time.Second, Transport: otelhttp.NewTransport(http.DefaultTransport)},
+	)
+	inbound.NewHandlerWithPorts(
+		productIntegrationService,
+		inbound.ParseBindings(config.ProductAPIKeys),
+		productedge.Ports{
+			StartAssist:         productEdgeAdapter,
+			GetAssistRun:        productEdgeAdapter,
+			PublishProductEvent: productEdgeAdapter,
+			ResolveRouting:      productEdgeAdapter,
+		},
+		inbound.HandlerOptions{
+			AllowLegacyBindings: config.AllowLegacyProductAPIKeys,
+			RouteSigningSecret:  config.InternalAuthSecret,
+		},
+	).Routes(router)
 
 	server := &http.Server{
 		Addr:    config.Addr(),
@@ -211,6 +240,12 @@ func validateAuthConfig(config cfg.Config) error {
 		}
 	default:
 		return fmt.Errorf("unsupported BFF_V2_IDENTITY_PROVIDER %q", config.IdentityProvider)
+	}
+	if strings.TrimSpace(config.ProductAPIKeys) != "" && !config.AllowLegacyProductAPIKeys {
+		return fmt.Errorf("BFF_V2_PRODUCT_API_KEYS requires explicit BFF_V2_ALLOW_LEGACY_PRODUCT_API_KEYS=true")
+	}
+	if config.AllowLegacyProductAPIKeys && config.Environment != "development" && config.Environment != "test" {
+		return fmt.Errorf("legacy product API keys are not allowed in %s", config.Environment)
 	}
 	return nil
 }

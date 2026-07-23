@@ -88,8 +88,7 @@ export function GovernancePage({ orgId, principalId, productSurface }: Props) {
 
   return (
     <section className="governance-page">
-      <header className="governance-brief">
-        <div><span className="governance-eyebrow">Effective authority ledger</span><h2>Policy changes should be explainable before they are active.</h2><p>CEL sees identifiers, roles, risk and hashes only. Payloads and conversations stay outside Nexus.</p></div>
+      <header className="governance-brief governance-brief--compact">
         <div className="decision-precedence" aria-label="Policy decision precedence"><strong>Decision order</strong><span className="precedence-deny">Deny</span><i>then</i><span className="precedence-approval">Approval</span><i>then</i><span className="precedence-allow">Allow</span></div>
       </header>
       {error ? <p role="alert" className="iam-control__inline-error">{error}</p> : null}

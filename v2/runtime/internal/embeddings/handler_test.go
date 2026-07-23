@@ -12,11 +12,11 @@ import (
 
 type fakeProvider struct{ tasks []string }
 
-func (p *fakeProvider) Model() string   { return DefaultModel }
-func (p *fakeProvider) Dimensions() int { return DefaultDim }
-func (p *fakeProvider) Embed(_ context.Context, _ string, task string) ([]float32, error) {
-	p.tasks = append(p.tasks, task)
-	return make([]float32, DefaultDim), nil
+func (p *fakeProvider) Model() string   { return "fake-embedding" }
+func (p *fakeProvider) Dimensions() int { return 3 }
+func (p *fakeProvider) Embed(_ context.Context, request EmbeddingRequest) ([]float32, error) {
+	p.tasks = append(p.tasks, request.TaskType)
+	return make([]float32, p.Dimensions()), nil
 }
 
 func TestHandlerEmbedsEachDocument(t *testing.T) {

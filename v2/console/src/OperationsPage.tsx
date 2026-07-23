@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import { axisDownload, axisFetch } from './api'
 import { formatDateTime24 } from './formatters'
 
-type Props = { orgId: string; principalId: string; productSurface: string }
+type Props = { orgId: string; principalId: string; productSurface: string; initialTab?: Tab }
 type ServiceOverview = { status?: string; fleet?: Record<string, number>; jobs?: Record<string, number>; outbox?: Record<string, number>; incidents?: Record<string, number>; active_holds?: number; exports?: Record<string, number>; oldest_queued_job_age_seconds?: number; oldest_outbox_age_seconds?: number }
 type OperationsOverview = { status: 'healthy' | 'partial' | 'unavailable'; services: Record<'companion' | 'nexus', ServiceOverview> }
 type FleetMember = { virployee_id: string; name: string; status: string; job_role_name: string; autonomy: string; active_subjects: number; max_active_subjects: number; pending_jobs: number; recent_errors: number; authority_state: string; last_success_at?: string }
@@ -17,9 +17,11 @@ type ExportItem = { id: string; scope_type: string; scope_id: string; categories
 type SLO = { metric_key: string; comparator: string; target: number; window_seconds: number; minimum_samples: number; severity: string; enabled: boolean; status: string; value?: number; sample_count: number }
 type NotificationPolicy = { enabled: boolean; webhook_secret_ref: string; revision: number }
 type DownloadToken = { token: string; export_id: string; manifest_hash: string; expires_at: string }
-type Tab = 'fleet' | 'reconciliation' | 'delivery' | 'incidents' | 'retention'
+type ServedProduct = { service: 'companion' | 'nexus'; product_surface: string; area: string; status: string; configured: boolean; observed: boolean; access_mode?: string; requests: number; succeeded: number; denied: number; failed: number; latency_p95_ms?: number; last_seen_at?: string; last_error_code?: string }
+type FinOpsSummary = { group: string; events: number; input_units: number; output_units: number; cost_micro_usd: number; unpriced: number }
+type Tab = 'fleet' | 'products' | 'finops' | 'reconciliation' | 'delivery' | 'incidents' | 'retention'
 
-export function OperationsPage({ orgId, principalId, productSurface }: Props) {
+export function OperationsPage({ orgId, principalId, productSurface, initialTab = 'fleet' }: Props) {
   const [overview, setOverview] = useState<OperationsOverview | null>(null)
   const [fleet, setFleet] = useState<FleetMember[]>([])
   const [jobs, setJobs] = useState<Job[]>([])
@@ -31,7 +33,9 @@ export function OperationsPage({ orgId, principalId, productSurface }: Props) {
   const [exports, setExports] = useState<ExportItem[]>([])
   const [slos, setSLOs] = useState<SLO[]>([])
   const [notification, setNotification] = useState<NotificationPolicy>({ enabled: false, webhook_secret_ref: '', revision: 0 })
-  const [activeTab, setActiveTab] = useState<Tab>('fleet')
+  const [servedProducts, setServedProducts] = useState<ServedProduct[]>([])
+  const [finops, setFinOps] = useState<FinOpsSummary[]>([])
+  const [activeTab, setActiveTab] = useState<Tab>(initialTab)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
@@ -44,7 +48,7 @@ export function OperationsPage({ orgId, principalId, productSurface }: Props) {
   const load = useCallback(async () => {
     setLoading(true); setError('')
     try {
-      const [nextOverview, nextFleet, companionJobs, nexusJobs, companionRuns, nexusRuns, companionControls, nexusControls, nextOutbox, nextIncidents, nextSLOs, nextHolds, nextExports, nextNotification] = await Promise.all([
+      const [nextOverview, nextFleet, companionJobs, nexusJobs, companionRuns, nexusRuns, companionControls, nexusControls, nextOutbox, nextIncidents, nextSLOs, nextHolds, nextExports, nextNotification, nextServed, nextFinOps] = await Promise.all([
         api<OperationsOverview>('/api/operations/overview'),
         api<{ items: FleetMember[] }>('/api/operations/fleet'),
         api<{ items: Job[] }>('/api/operations/jobs?service=companion&limit=100'),
@@ -59,13 +63,17 @@ export function OperationsPage({ orgId, principalId, productSurface }: Props) {
         api<{ items: LegalHold[] }>('/api/operations/legal-holds'),
         api<{ items: ExportItem[] }>('/api/operations/exports'),
         api<NotificationPolicy>('/api/operations/notifications'),
+        api<{ items: ServedProduct[] }>('/api/operations/product-service-map?service=all&window=24h'),
+        api<{ items: FinOpsSummary[] }>('/api/finops/summary?group_by=product'),
       ])
       setOverview(nextOverview); setFleet(nextFleet.items ?? []); setJobs([...(companionJobs.items ?? []), ...(nexusJobs.items ?? [])]); setReconciliations([...(companionRuns.items ?? []), ...(nexusRuns.items ?? [])])
       setControls([...(companionControls.items ?? []).map(item=>({...item,service:'companion' as const})), ...(nexusControls.items ?? []).map(item=>({...item,service:'nexus' as const}))]); setOutbox(nextOutbox.items ?? []); setIncidents(nextIncidents.items ?? []); setSLOs(nextSLOs.items ?? []); setHolds(nextHolds.items ?? []); setExports(nextExports.items ?? []); setNotification(nextNotification)
+      setServedProducts(nextServed.items ?? []); setFinOps(nextFinOps.items ?? [])
     } catch (cause) { setError(message(cause, 'Could not load operations')) } finally { setLoading(false) }
   }, [api])
 
   useEffect(() => { void load() }, [load])
+  useEffect(() => { setActiveTab(initialTab) }, [initialTab])
   useEffect(() => { setHoldScope((current) => ({ ...current, scope_id: current.scope_type === 'organization' ? orgId : current.scope_id })) }, [orgId])
 
   const run = async (key: string, action: (idempotencyKey: string) => Promise<void>) => {
@@ -86,8 +94,7 @@ export function OperationsPage({ orgId, principalId, productSurface }: Props) {
 
   if (loading && !overview) return <div className="spinner" />
   return <section className="operations-page">
-    <header className="operations-rail">
-      <div className="operations-rail__title"><span>Organization control plane</span><h2>Know what can run, what is stuck, and what requires a person.</h2><p>Operational views contain identifiers, hashes and error codes only. Subject content stays outside this surface.</p></div>
+    <header className="operations-rail operations-rail--compact">
       <div className="operations-rail__services" aria-label="Service health path">
         <ServiceNode name="Companion" state={serviceState('companion')} detail={`${fleet.length} Virployees`} />
         <i aria-hidden="true" />
@@ -98,13 +105,26 @@ export function OperationsPage({ orgId, principalId, productSurface }: Props) {
     {overview?.status !== 'healthy' ? <div className="operations-degraded"><AlertTriangle aria-hidden="true" /><span>{overview?.status === 'partial' ? 'One service is unavailable. Missing data is not treated as healthy.' : 'Operational state is unavailable.'}</span></div> : null}
     {error ? <p role="alert" className="iam-control__inline-error">{error}</p> : null}
     <nav className="operations-tabs" aria-label="Operations sections">
-      {([['fleet','Fleet'],['reconciliation','Reconciliation'],['delivery','Jobs & delivery'],['incidents','Incidents & SLOs'],['retention','Holds & exports']] as Array<[Tab,string]>).map(([key,label]) => <button key={key} className={activeTab===key?'active':''} onClick={() => setActiveTab(key)}>{label}</button>)}
+      {([['fleet','Fleet'],['products','Products served'],['finops','FinOps'],['reconciliation','Reconciliation'],['delivery','Jobs & delivery'],['incidents','Incidents & SLOs'],['retention','Holds & exports']] as Array<[Tab,string]>).map(([key,label]) => <button key={key} className={activeTab===key?'active':''} onClick={() => setActiveTab(key)}>{label}</button>)}
     </nav>
 
     {activeTab === 'fleet' ? <div className="operations-grid">
       <article className="card operations-card operations-card--wide"><CardHeading icon={<Stethoscope />} title="Fleet condition" note="Derived from current Virployees; no separate Agent records." />
         <div className="table-wrap"><table><thead><tr><th>Virployee</th><th>Role</th><th>State</th><th>Subjects</th><th>Queue</th><th>Authority</th><th>Last success</th></tr></thead><tbody>{fleet.length===0?<EmptyRow span={7} text="No Virployees are available in this organization."/>:fleet.map((item)=><tr key={item.virployee_id}><td><strong>{item.name}</strong><code>{short(item.virployee_id)}</code></td><td>{item.job_role_name}</td><td><Status value={item.status}/></td><td>{item.active_subjects} / {item.max_active_subjects || '—'}</td><td>{item.pending_jobs}</td><td>{item.authority_state}</td><td>{item.last_success_at?formatDateTime24(item.last_success_at):'Never'}</td></tr>)}</tbody></table></div>
       </article>
+    </div> : null}
+
+    {activeTab === 'products' ? <div className="operations-grid">
+      <article className="card operations-card operations-card--wide"><CardHeading icon={<Stethoscope/>} title="Products served" note="Configured and observed areas are tracked independently. Idle and unknown are explicit states."/>
+        <div className="served-product-matrix">{(['companion','nexus'] as const).map(service=><section key={service}><header><strong>{service}</strong><span>{servedProducts.filter(item=>item.service===service).length} area projections</span></header><div className="table-wrap"><table><thead><tr><th>Product / area</th><th>State</th><th>Contract</th><th>Traffic</th><th>Denied</th><th>Technical failures</th><th>p95</th><th>Last activity</th></tr></thead><tbody>{servedProducts.filter(item=>item.service===service).length===0?<EmptyRow span={8} text={`${service} is unavailable or has no configured products.`}/>:servedProducts.filter(item=>item.service===service).map((item,index)=><tr key={`${service}-${item.product_surface}-${item.area}-${index}`}><td><strong>{item.product_surface}</strong><span>{item.area}{item.access_mode?` · ${item.access_mode}`:''}</span></td><td><Status value={item.status}/></td><td>{item.configured?'configured':'observed only'}</td><td>{item.requests} / {item.succeeded}</td><td>{item.denied}</td><td>{item.failed}</td><td>{item.latency_p95_ms===undefined?'—':`${item.latency_p95_ms} ms`}</td><td>{item.last_seen_at?formatDateTime24(item.last_seen_at):'Never'}</td></tr>)}</tbody></table></div></section>)}</div>
+      </article>
+    </div> : null}
+
+    {activeTab === 'finops' ? <div className="operations-grid">
+      <article className="card operations-card operations-card--wide"><CardHeading title="Cost attribution" note="FinOps accounts for consumption. Quotas remain the only mechanism that controls or blocks work."/>
+        <div className="finops-summary">{finops.map(item=><div key={item.group}><span>{item.group||'Unattributed product'}</span><strong>${(item.cost_micro_usd/1_000_000).toFixed(4)}</strong><small>{item.events} events · {(item.input_units+item.output_units).toLocaleString()} units</small>{item.unpriced?<em>{item.unpriced} unpriced</em>:null}</div>)}{finops.length===0?<p className="axis-muted">No recorded cost events for this period.</p>:null}</div>
+      </article>
+      <article className="card operations-card"><CardHeading title="Budget behavior" note="80% and 100% thresholds create informational incidents. Budget excess never blocks execution."/><p className="axis-muted">Budgets are scoped to the organization or one product and use UTC calendar months.</p></article>
     </div> : null}
 
     {activeTab === 'reconciliation' ? <div className="operations-grid">

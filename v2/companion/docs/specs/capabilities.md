@@ -20,7 +20,7 @@ Public representation:
 {
   "id": "uuid",
   "org_id": "org-id",
-  "capability_key": "analizar.estudios.medicos",
+  "capability_key": "capability.abcdefghijklmnopqrstuvwx.invoke",
   "name": "Analizar estudios médicos",
   "description": "Analiza estudios médicos y comunica sus hallazgos.",
   "required_autonomy": "A1",
@@ -39,7 +39,9 @@ Fields:
 
 - `id`: server-generated UUID and the relationship identity.
 - `org_id`: request context organization; Capabilities are organization-scoped in v2.
-- `capability_key`: stable internal compatibility key, unique per organization. The Console generates it and does not expose it as the Capability's user-facing identity.
+- `capability_key`: deprecated organization-local input/output alias retained
+  only while v2 consumers migrate. If omitted, Companion derives an opaque
+  alias from the UUID; it never selects an executor or domain code.
 - `name`: required, clear description of the ability, for example `Analizar estudios médicos`.
 - `description`: optional human explanation.
 - `required_autonomy`: required minimum Virployee autonomy for assignment.
@@ -71,11 +73,13 @@ There is no default for `required_autonomy`; the creator must choose it.
 ## User-facing Capability and internal key
 
 People create, find and assign a Capability by its clear ability phrase in
-`name`. The Console must not ask them to invent or understand a technical key.
-It generates `capability_key` from the phrase for API and runtime compatibility.
+`name`. The Console does not ask for or derive a technical key from that phrase.
+The server-generated UUID is the canonical identity in assignments, manifests,
+runtime proposals and prepared actions.
 
-The direct API contract still accepts and returns `capability_key`. Its internal
-rules are:
+The compatibility API still accepts and returns `capability_key`. A caller that
+continues to provide one must obey the legacy validation rules below, but new
+callers omit it:
 
 `capability_key` rules:
 
@@ -135,32 +139,22 @@ Example: a Virployee with `autonomy = A2` can receive a Capability with
 
 This is configuration validation only. It does not execute anything.
 
-## Clinical read capabilities
+## Domain capability extensions
 
-Axis defines two organization-scoped, product-neutral keys. The consumer must provide
-its own `product_surface` when it installs the manifest:
+Axis core does not define clinical, agricultural, Calendar or other
+domain-specific capabilities. An organization installs its capability UUIDs,
+schemas and executor bindings through `axis.product-integration.v3`; a domain
+executor implements `axis.connector.v1`. Input and output validation come from
+the active manifest, not from branches in Assist.
 
-- `clinical.records.search`: A0, read-only, medium risk, evidence required,
-  30-second timeout, one attempt, inbound/embeddings quotas.
-- `clinical.timeline.build`: A1, read-only, medium risk, evidence required,
-  120-second timeout, one attempt, inbound/LLM quotas.
+Runtime proposes `capability_id + arguments`. Companion verifies the exact UUID
+is active, assigned and conformant, validates arguments against the manifest,
+and constructs `axis.prepared-action.v2`. Unknown, unassigned, drifted or
+executor-less capabilities fail closed. The accepted run snapshots the UUID,
+manifest hash, binding and schema hashes; all participate in
+context/idempotency and are revalidated before execution.
 
-Their input and output schemas set `additionalProperties=false`. Search returns
-bounded excerpts, scores and canonical document/source/hash/locator references;
-its opaque cursor is bound to organization, Virployee, subject, case, product,
-repository generation, query and manifest hash. Timeline is a projection, not
-a persisted clinical entity. It returns ordered events, coverage and canonical
-references, with `completed|partial|abstained` status.
-
-Assist accepts a nullable canonical `capability_key`. When it is present, any
-active, assigned, conformant read capability with a registered executor is
-eligible; write, unknown or executor-less capabilities fail closed. Input and
-output validation come from the active manifest, not from branches in Assist.
-The accepted run snapshots the key and manifest hash; both participate in
-context/idempotency and are checked again before execution. Product-owned
-aliases are never interpreted by Axis.
-
-`/v1/virployee-routing:resolve` includes the optional canonical capability key.
+`/v1/virployee-routing:resolve` includes the optional canonical capability UUID.
 Existing assignments become `reassignment_required` when their member no
 longer has an active/conformant assignment or enough autonomy; new candidates
 are filtered by the same predicates.
@@ -178,7 +172,7 @@ The conformance gate is deterministic and fail-closed. It validates:
 - Secret Manager references only (never inline credentials); and
 - executor attestation for write capabilities.
 
-Write capabilities require Nexus approval, evidence, required idempotency,
+Write capabilities require governance approval, evidence, required idempotency,
 manual or automatic rollback, an executor quota, postconditions and signed
 attestation. All capabilities require an inbound quota and an explicit cost
 class. Conformance stores a structured report and the exact manifest hash.
@@ -231,7 +225,8 @@ Capabilities for the current organization.
 - Capability is a minimal Companion domain entity.
 - Capability is organization-scoped and identified by UUID.
 - `name` is the primary user-facing representation and describes the ability in a clear phrase.
-- `capability_key` is a generated, unique organization-local compatibility key, not a user-facing identity.
+- `capability_key` is an opaque, unique organization-local compatibility alias,
+  not a user-facing or execution identity.
 - Capability has one `required_autonomy`.
 - Capability promotion is `draft → conformant → active` and is bound to the
   normalized manifest hash.
@@ -239,5 +234,5 @@ Capabilities for the current organization.
   activation.
 - Virployees reference capabilities by UUID.
 - Assignment validates organization, lifecycle, promotion and autonomy compatibility.
-- Tool execution and Nexus policy evaluation remain separate bounded contexts;
+- Tool execution and governance policy evaluation remain separate bounded contexts;
   the manifest declares the contract they must satisfy.

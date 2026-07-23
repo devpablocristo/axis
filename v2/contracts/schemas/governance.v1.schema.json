@@ -1,0 +1,176 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://axis.local/contracts/schemas/governance.v1.schema.json",
+  "title": "axis.governance.v1",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/checkRequest"
+    },
+    {
+      "$ref": "#/$defs/checkResult"
+    },
+    {
+      "$ref": "#/$defs/executionResult"
+    }
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "code": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._:-]{0,127}$"
+    },
+    "checkRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "invocation_context",
+        "capability_id",
+        "operation",
+        "binding_hash",
+        "authority_binding_hash"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "axis.governance-check.v1"
+        },
+        "invocation_context": {
+          "$ref": "invocation-context.v1.schema.json"
+        },
+        "capability_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "operation": {
+          "$ref": "#/$defs/code"
+        },
+        "target_system": {
+          "$ref": "#/$defs/code"
+        },
+        "target_resource": {
+          "type": "string",
+          "maxLength": 1024
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "binding_hash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "authority_binding_hash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "policy_revision_hash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "scope_revision": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "checkResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "check_id",
+        "available",
+        "decision",
+        "status",
+        "binding_hash"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "axis.governance-result.v1"
+        },
+        "check_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "available": {
+          "type": "boolean"
+        },
+        "decision": {
+          "type": "string",
+          "enum": [
+            "allow",
+            "deny",
+            "require_approval"
+          ]
+        },
+        "risk_level": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "decision_reason": {
+          "type": "string"
+        },
+        "would_require_approval": {
+          "type": "boolean"
+        },
+        "binding_hash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "approval_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "approval_status": {
+          "type": "string"
+        },
+        "error": {
+          "type": "string"
+        }
+      }
+    },
+    "executionResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "check_id",
+        "binding_hash",
+        "status",
+        "duration_ms",
+        "attestation"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "axis.governance-execution-result.v1"
+        },
+        "check_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "binding_hash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "succeeded",
+            "failed",
+            "unknown"
+          ]
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "result": {
+          "type": "object"
+        },
+        "attestation": {
+          "$ref": "attestation.v1.schema.json"
+        }
+      }
+    }
+  }
+}

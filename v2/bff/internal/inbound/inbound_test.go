@@ -1,15 +1,44 @@
 package inbound
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/devpablocristo/bff-v2/internal/adapters/companionhttp"
+	"github.com/devpablocristo/bff-v2/internal/productedge"
 	"github.com/gin-gonic/gin"
 )
+
+type authenticatorFunc func(context.Context, string) (productedge.MachineBinding, error)
+
+func (f authenticatorFunc) AuthenticateAPIKey(ctx context.Context, key string) (productedge.MachineBinding, error) {
+	return f(ctx, key)
+}
+
+func newLegacyTestHandler(bindings map[string]Binding, companionURL, secret string) *Handler {
+	adapter := companionhttp.New(companionURL, secret, nil)
+	return NewHandlerWithPorts(nil, bindings, productedge.Ports{
+		StartAssist: adapter, GetAssistRun: adapter,
+		PublishProductEvent: adapter, ResolveRouting: adapter,
+	}, HandlerOptions{AllowLegacyBindings: true, RouteSigningSecret: secret})
+}
+
+func newGovernedTestHandler(
+	authenticator APIKeyAuthenticator,
+	companionURL, secret string,
+) *Handler {
+	adapter := companionhttp.New(companionURL, secret, nil)
+	return NewHandlerWithPorts(authenticator, nil, productedge.Ports{
+		StartAssist: adapter, GetAssistRun: adapter,
+		PublishProductEvent: adapter, ResolveRouting: adapter,
+	}, HandlerOptions{RouteSigningSecret: secret})
+}
 
 func TestParseBindings(t *testing.T) {
 	raw := "medkey=8c3a623a|3e5a24e1|service:producta|producta|clinical-pool\n other=t2|v2|a2|productb"
@@ -58,7 +87,7 @@ func TestAssistRunResolvesStableAssignmentAndPreservesRouteForPolling(t *testing
 		ProductID: "product-1", VirployeeID: "vp-legacy", ActorID: "service:producta",
 		ProductSurface: "producta", RoutingPoolID: "pool-clinical",
 	}}
-	handler := NewHandler(bindings, companion.URL, "internal-token", nil)
+	handler := newLegacyTestHandler(bindings, companion.URL, "internal-token")
 	router := gin.New()
 	handler.Routes(router)
 	body := `{"product_surface":"producta","assist_type":"clinical","subject_id":"patient-a","case_id":"case-1","input":{"question":"status"}}`
@@ -101,7 +130,7 @@ func newTestEngine(companionURL string) *gin.Engine {
 	bindings := map[string]Binding{
 		"secret-key": {ProductID: "product-1", VirployeeID: "vp-1", ActorID: "service:producta", ProductSurface: "producta"},
 	}
-	h := NewHandler(bindings, companionURL, "internal-token", nil)
+	h := newLegacyTestHandler(bindings, companionURL, "internal-token")
 	r := gin.New()
 	h.Routes(r)
 	return r
@@ -307,5 +336,104 @@ func TestAssistRunRejectsProductMismatch(t *testing.T) {
 	newTestEngine("http://unused").ServeHTTP(rec, req)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 when product_surface mismatches the key, got %d", rec.Code)
+	}
+}
+
+func TestAssistRunRequiresAssistWriteForPersistedCredential(t *testing.T) {
+	authenticator := authenticatorFunc(func(context.Context, string) (productedge.MachineBinding, error) {
+		return productedge.MachineBinding{
+			Context: productedge.InvocationContext{
+				ProductID: "product-1", ProductSurface: "producta", PrincipalID: "service:reader",
+				PrincipalType: "service", Scopes: []string{"assist.read"},
+			},
+			VirployeeID: "vp-1",
+		}, nil
+	})
+	handler := NewHandlerWithPorts(authenticator, nil, productedge.Ports{}, HandlerOptions{})
+	router := gin.New()
+	handler.Routes(router)
+	req := httptest.NewRequest(http.MethodPost, "/v1/assist-runs", strings.NewReader(`{"input":{}}`))
+	req.Header.Set("X-API-Key", "axis_pk_read_only_credential_value")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "assist.write") {
+		t.Fatalf("expected assist.write rejection, got code=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestPersistedCredentialFailureNeverFallsBackToLegacyBinding(t *testing.T) {
+	const key = "axis_pk_revoked_but_still_configured_legacy_key"
+	authenticator := authenticatorFunc(func(context.Context, string) (productedge.MachineBinding, error) {
+		return productedge.MachineBinding{}, errors.New("repository unavailable")
+	})
+	handler := NewHandlerWithPorts(
+		authenticator,
+		map[string]Binding{key: {
+			ProductID: "product-legacy", VirployeeID: "vp-legacy", ActorID: "legacy",
+			ProductSurface: "legacy",
+		}},
+		productedge.Ports{},
+		HandlerOptions{AllowLegacyBindings: true},
+	)
+	router := gin.New()
+	handler.Routes(router)
+	req := httptest.NewRequest(http.MethodGet, "/v1/assist-capabilities", nil)
+	req.Header.Set("X-API-Key", key)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("persisted auth failure must be authoritative, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestProductEventTranslatesVersionAndPropagatesInvocationContext(t *testing.T) {
+	var got map[string]json.RawMessage
+	var headers http.Header
+	companion := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		headers = r.Header.Clone()
+		raw, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(raw, &got); err != nil {
+			t.Errorf("decode forwarded event: %v", err)
+		}
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"run_ids":[]}`))
+	}))
+	defer companion.Close()
+
+	authenticator := authenticatorFunc(func(context.Context, string) (productedge.MachineBinding, error) {
+		return productedge.MachineBinding{
+			Context: productedge.InvocationContext{
+				OrgID: "org-1", ProductID: "product-1", ProductSurface: "surface-a",
+				IntegrationID: "integration-1", IntegrationRevision: 7,
+				IntegrationHash: strings.Repeat("a", 64), PrincipalID: "service:event-source",
+				PrincipalType: "service", Scopes: []string{"events.write"},
+				AccessMode: productedge.AccessModeDirect,
+			},
+			AllowedEvents: []productedge.EventContract{{
+				Type: "artifact.updated", Version: "v1", SchemaHash: strings.Repeat("b", 64),
+			}},
+		}, nil
+	})
+	handler := newGovernedTestHandler(authenticator, companion.URL, "internal-token")
+	router := gin.New()
+	handler.Routes(router)
+	req := httptest.NewRequest(http.MethodPost, "/v1/product-events", strings.NewReader(
+		`{"event_id":"11111111-1111-4111-8111-111111111111","event_type":"artifact.updated","version":"v1","payload":{"state":"ready"}}`,
+	))
+	req.Header.Set("X-API-Key", "axis_pk_event_source_credential")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected event acceptance, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if string(got["event_version"]) != `"v1"` || got["version"] != nil {
+		t.Fatalf("public version was not translated to event_version: %+v", got)
+	}
+	if headers.Get("X-Product-ID") != "product-1" || headers.Get("X-Axis-Product-ID") != "product-1" ||
+		headers.Get("X-Org-ID") != "org-1" || headers.Get("X-Axis-Principal-Type") != "service" ||
+		headers.Get("X-Axis-Integration-ID") != "integration-1" ||
+		headers.Get("X-Axis-Integration-Version") != "7" ||
+		headers.Get("X-Axis-Access-Mode") != "direct" {
+		t.Fatalf("invocation context was not propagated: %+v", headers)
 	}
 }

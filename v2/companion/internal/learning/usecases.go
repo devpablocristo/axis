@@ -348,7 +348,7 @@ func (u *UseCases) applyEnrichment(ctx context.Context, orgID string, candidate 
 	reservedUnits := int64(len(title)+len(content)+3)/4 + 2048
 	if u.quota != nil {
 		if _, err := u.quota.Consume(ctx, quotas.ConsumeRequest{
-			Key:            quotas.Key{OrgID: orgID, ProductSurface: "axis", Area: quotas.AreaLLM},
+			Key:            quotas.Key{OrgID: orgID, ProductSurface: quotas.ProductSurfaceFromContext(ctx), Area: quotas.AreaLLM},
 			IdempotencyKey: idempotencyKey, SubjectType: "learning_candidate", SubjectID: candidate.VirployeeID, Units: reservedUnits,
 		}); err != nil {
 			slog.WarnContext(ctx, "learning_enrich_quota_exceeded_fallback_deterministic")
@@ -379,7 +379,7 @@ func (u *UseCases) applyEnrichment(ctx context.Context, orgID string, candidate 
 	}
 	if u.ledger != nil {
 		_ = u.ledger.RecordUsage(ctx, quotas.Usage{
-			Key:            quotas.Key{OrgID: orgID, ProductSurface: "axis", Area: quotas.AreaLLM},
+			Key:            quotas.Key{OrgID: orgID, ProductSurface: quotas.ProductSurfaceFromContext(ctx), Area: quotas.AreaLLM},
 			IdempotencyKey: idempotencyKey + ":actual", SubjectType: "learning_candidate", SubjectID: candidate.VirployeeID,
 			Units: out.InputTokens + out.OutputTokens, Model: out.ModelID, EstimatedCostMicroUSD: out.EstimatedCostMicroUSD,
 			Metadata: map[string]any{"input_tokens": out.InputTokens, "output_tokens": out.OutputTokens, "estimated": true},

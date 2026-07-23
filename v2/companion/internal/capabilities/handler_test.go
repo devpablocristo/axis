@@ -20,7 +20,7 @@ func TestCapabilityManifestConformAndActivateRoutes(t *testing.T) {
 	repo := &fakeCapabilityRepo{rows: map[uuid.UUID]domain.Capability{id: {
 		ID: id, OrgID: "organization-1", CapabilityKey: "diagnosis.reports.create", Name: "Create diagnosis",
 		RequiredAutonomy: virployeedomain.AutonomyA3, RiskClass: "high", SideEffectClass: "write",
-		RequiresNexusApproval: true, EvidenceRequired: true, PromotionState: domain.PromotionDraft,
+		RequiresGovernanceApproval: true, EvidenceRequired: true, PromotionState: domain.PromotionDraft,
 	}}}
 	ucs, err := NewUseCases(repo)
 	if err != nil {
@@ -53,6 +53,54 @@ func TestCapabilityManifestConformAndActivateRoutes(t *testing.T) {
 	active := capabilityRequest(t, router, http.MethodPost, "/v1/capabilities/"+id.String()+"/activate", map[string]any{}, http.StatusOK)
 	if active.PromotionState != domain.PromotionActive || active.ActivatedAt == nil {
 		t.Fatalf("unexpected activation response: %+v", active)
+	}
+}
+
+func TestCreateCapabilityUsesUUIDIdentityAndGovernanceCompatibilityFields(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &fakeCapabilityRepo{rows: map[uuid.UUID]domain.Capability{}}
+	ucs, err := NewUseCases(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := gin.New()
+	NewHandler(ucs).Routes(router.Group("/v1"))
+
+	body := map[string]any{
+		"name":                         "Gestionar campos de granos",
+		"description":                  "Coordina el trabajo de los lotes.",
+		"required_autonomy":            "A2",
+		"requires_governance_approval": true,
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/v1/capabilities", bytes.NewReader(raw))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-Org-ID", "organization-1")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	var payload struct {
+		ID                         string `json:"id"`
+		CapabilityKey              string `json:"capability_key"`
+		RequiresGovernanceApproval bool   `json:"requires_governance_approval"`
+		RequiresNexusApproval      bool   `json:"requires_nexus_approval"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := uuid.Parse(payload.ID); err != nil {
+		t.Fatalf("capability UUID is invalid: %q", payload.ID)
+	}
+	if payload.CapabilityKey != "" {
+		t.Fatalf("human name must not be converted into a key: %q", payload.CapabilityKey)
+	}
+	if !payload.RequiresGovernanceApproval || !payload.RequiresNexusApproval {
+		t.Fatalf("canonical and legacy governance fields must remain equivalent: %+v", payload)
 	}
 }
 

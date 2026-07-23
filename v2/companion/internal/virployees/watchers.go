@@ -56,12 +56,16 @@ func (u *UseCases) RunOperationalWatchersOnce(ctx context.Context, config Watche
 
 func (u *UseCases) recoverExecution(ctx context.Context, repo OperationalRepositoryPort, work ExecutionWork, config WatcherConfig) {
 	attempt, prepared := work.Attempt, work.Action
+	operation := prepared.Action.Action
+	if prepared.ActionV2 != nil {
+		operation = prepared.ActionV2.Operation
+	}
 	fail := func(errorCode string) {
 		if attempt.RecoveryAttempts+1 >= config.MaxRecoveryAttempts {
 			message := "execution recovery exhausted"
 			failed, completeErr := u.executionRepo.CompleteExecution(ctx, attempt.OrgID, attempt.ID, "failed", "", map[string]any{"watcher": "recovery_exhausted"}, message, time.Since(attempt.StartedAt).Milliseconds())
 			if completeErr == nil {
-				u.emitExecutionAudit(ctx, attempt.OrgID, attempt.VirployeeID, prepared.BindingHash, prepared.Action.Action, prepared.GovernanceCheckID.String(), failed)
+				u.emitExecutionAudit(ctx, attempt.OrgID, attempt.VirployeeID, prepared.BindingHash, operation, prepared.GovernanceCheckID.String(), failed)
 				return
 			}
 		}
@@ -80,14 +84,33 @@ func (u *UseCases) recoverExecution(ctx context.Context, repo OperationalReposit
 		fail("approval_not_executable")
 		return
 	}
-	if prepared.Action.MCPContext != nil {
-		if u.mcpContext == nil || u.mcpContext.ValidateMCPExecutionContext(ctx, *prepared.Action.MCPContext) != nil {
+	mcpContext := prepared.Action.MCPContext
+	if prepared.ActionV2 != nil {
+		mcpContext = prepared.ActionV2.MCPContext
+	}
+	if mcpContext != nil {
+		if u.mcpContext == nil || u.mcpContext.ValidateMCPExecutionContext(ctx, *mcpContext) != nil {
 			fail("mcp_context_revalidation_failed")
 			return
 		}
 	}
-	executor := u.executors[prepared.Action.Action]
-	if executor == nil {
+	var execute func(context.Context) (ExecutionOutcome, error)
+	if prepared.ActionV2 != nil {
+		executor := u.executorBindings[prepared.ActionV2.ExecutorBindingID]
+		if executor != nil {
+			execute = func(execCtx context.Context) (ExecutionOutcome, error) {
+				return executor.ExecuteV2(execCtx, attempt.OrgID, attempt.VirployeeID, attempt, *prepared.ActionV2)
+			}
+		}
+	} else {
+		executor := u.executors[prepared.Action.Action]
+		if executor != nil {
+			execute = func(execCtx context.Context) (ExecutionOutcome, error) {
+				return executor.Execute(execCtx, attempt.OrgID, attempt.VirployeeID, attempt, prepared.Action)
+			}
+		}
+	}
+	if execute == nil {
 		fail("executor_unconfigured")
 		return
 	}
@@ -96,7 +119,7 @@ func (u *UseCases) recoverExecution(ctx context.Context, repo OperationalReposit
 		return
 	}
 	started := time.Now()
-	outcome, executeErr := executor.Execute(ctx, attempt.OrgID, attempt.VirployeeID, attempt, prepared.Action)
+	outcome, executeErr := execute(ctx)
 	result := outcome.Result
 	if result == nil {
 		result = map[string]any{}
@@ -111,7 +134,7 @@ func (u *UseCases) recoverExecution(ctx context.Context, repo OperationalReposit
 		fail("execution_completion_failed")
 		return
 	}
-	u.emitExecutionAudit(ctx, attempt.OrgID, attempt.VirployeeID, prepared.BindingHash, prepared.Action.Action, prepared.GovernanceCheckID.String(), completed)
+	u.emitExecutionAudit(ctx, attempt.OrgID, attempt.VirployeeID, prepared.BindingHash, operation, prepared.GovernanceCheckID.String(), completed)
 	u.emitWatcherAudit(ctx, attempt.OrgID, attempt.VirployeeID.String(), "execution_attempt", attempt.ID.String(), "execution_recovered", "stale execution recovered idempotently", map[string]any{
 		"binding_hash": prepared.BindingHash, "status": completed.Status,
 	})

@@ -1,9 +1,20 @@
 package quotas
 
 import (
+	"context"
 	"errors"
 	"testing"
 )
+
+func TestProductSurfaceContextNeverFallsBackToAConsumerProduct(t *testing.T) {
+	if got := ProductSurfaceFromContext(context.Background()); got != ProductSurfacePlatformInternal {
+		t.Fatalf("unexpected internal product surface: %q", got)
+	}
+	ctx := WithProductSurface(context.Background(), " Consumer-App ")
+	if got := ProductSurfaceFromContext(ctx); got != "consumer-app" {
+		t.Fatalf("trusted product surface was not normalized: %q", got)
+	}
+}
 
 func TestRetryAfterOnlyRecognizesQuotaErrors(t *testing.T) {
 	if _, ok := RetryAfter(errors.New("other")); ok {

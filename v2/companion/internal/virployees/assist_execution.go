@@ -200,12 +200,20 @@ func professionalActionScopeQuery(capabilityKey string, action *preparedactions.
 	return strings.TrimSpace(strings.Join(parts, " "))
 }
 
-func (u *UseCases) evaluateProfessionalActionScope(ctx context.Context, orgID string, virployeeID, jobRoleID uuid.UUID, capabilityKey string, action *preparedactions.Action) (executiongate.ConversationScopeResult, *preparedactions.ProfessionalScopeBinding, bool) {
+func professionalActionScopeQueryV2(capabilityKey string, legacy *preparedactions.Action, action *preparedactions.PreparedActionV2) string {
+	if action == nil {
+		return professionalActionScopeQuery(capabilityKey, legacy)
+	}
+	return strings.TrimSpace(strings.Join([]string{
+		strings.TrimSpace(capabilityKey), strings.TrimSpace(action.Operation),
+	}, " "))
+}
+
+func (u *UseCases) evaluateProfessionalActionScope(ctx context.Context, orgID string, virployeeID, jobRoleID uuid.UUID, query string) (executiongate.ConversationScopeResult, *preparedactions.ProfessionalScopeBinding, bool) {
 	evaluator, ok := u.authority.(ConversationScopeEvaluatorPort)
 	if !ok || evaluator == nil {
 		return executiongate.ConversationScopeResult{}, nil, false
 	}
-	query := professionalActionScopeQuery(capabilityKey, action)
 	result, err := evaluator.EvaluateConversationScope(ctx, executiongate.ConversationScopeInput{
 		OrgID: orgID, VirployeeID: virployeeID, JobRoleID: jobRoleID, Query: query,
 	})
@@ -241,6 +249,27 @@ func (u *UseCases) verifyCurrentProfessionalActionScope(ctx context.Context, org
 		return domainerr.Conflict("professional scope no longer permits this action")
 	}
 	if result.SnapshotHash != action.ProfessionalScope.SnapshotHash {
+		return domainerr.Conflict("professional scope changed after approval")
+	}
+	return nil
+}
+
+func (u *UseCases) verifyCurrentProfessionalActionScopeV2(ctx context.Context, orgID string, virployeeID, jobRoleID uuid.UUID, capabilityKey string, action preparedactions.PreparedActionV2) error {
+	if action.ProfessionalScope == nil {
+		return domainerr.Conflict("prepared action v2 has no professional-scope binding")
+	}
+	evaluator, ok := u.authority.(ConversationScopeEvaluatorPort)
+	if !ok || evaluator == nil {
+		return domainerr.Conflict("professional scope evaluator is unavailable")
+	}
+	query := professionalActionScopeQueryV2(capabilityKey, nil, &action)
+	if runtraces.HashString(query) != action.ProfessionalScope.QueryHash {
+		return domainerr.Conflict("prepared action professional-scope query changed")
+	}
+	result, err := evaluator.EvaluateConversationScope(ctx, executiongate.ConversationScopeInput{
+		OrgID: orgID, VirployeeID: virployeeID, JobRoleID: jobRoleID, Query: query,
+	})
+	if err != nil || !result.Allowed || result.SnapshotHash != action.ProfessionalScope.SnapshotHash {
 		return domainerr.Conflict("professional scope changed after approval")
 	}
 	return nil

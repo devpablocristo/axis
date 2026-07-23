@@ -152,11 +152,6 @@ export function KnowledgeBasesPage({ orgId, principalId, productSurface }: Knowl
 
   return (
     <section className="page-section knowledge-bases-page">
-      <div className="card workforce-summary">
-        <div className="card-header"><h2>Grounded knowledge</h2></div>
-        <p>Only authorized professional, Virployee, subject and case libraries are retrieved during Assist.</p>
-        <p className="axis-muted">Direct uploads, connectors and pre-indexed artifacts all pass through the same organization and patient isolation contract.</p>
-      </div>
       {error ? <p role="alert" className="iam-control__inline-error">{error}</p> : null}
       {notice ? <p role="status" className="iam-control__inline-note">{notice}</p> : null}
       {loading ? <div className="spinner" /> : (

@@ -57,7 +57,10 @@ func (s *Service) Overview(ctx context.Context, organization, actor, role, produ
 	if err := s.authorize(ctx, organization, actor, role, "ops.read", product, "ops.overview.read", "operations", "overview"); err != nil {
 		return Overview{}, err
 	}
-	out := Overview{Service: "nexus", Status: "healthy", Incidents: map[string]int{}, Jobs: map[string]int{}, Exports: map[string]int{}, GeneratedAt: s.now()}
+	out := Overview{
+		Service: "nexus", Status: "healthy", Incidents: map[string]int{}, Jobs: map[string]int{},
+		Exports: map[string]int{}, ServedProducts: map[string]int{}, GeneratedAt: s.now(),
+	}
 	if err := groupCounts(ctx, s.pool, `SELECT status,count(*)::int FROM operational_incidents WHERE org_id=$1 GROUP BY status`, []any{organization}, out.Incidents); err != nil {
 		return out, err
 	}
@@ -65,6 +68,14 @@ func (s *Service) Overview(ctx context.Context, organization, actor, role, produ
 		return out, err
 	}
 	if err := groupCounts(ctx, s.pool, `SELECT status,count(*)::int FROM enterprise_exports WHERE org_id=$1 GROUP BY status`, []any{organization}, out.Exports); err != nil {
+		return out, err
+	}
+	if err := groupCounts(ctx, s.pool, `
+		SELECT lifecycle,count(*)::int
+		FROM nexus_product_integrations
+		WHERE org_id=$1 AND ($2='' OR product_surface=$2)
+		GROUP BY lifecycle
+	`, []any{organization, product}, out.ServedProducts); err != nil {
 		return out, err
 	}
 	_ = s.pool.QueryRow(ctx, `SELECT count(*)::int FROM legal_holds WHERE org_id=$1 AND status='active'`, organization).Scan(&out.ActiveHolds)

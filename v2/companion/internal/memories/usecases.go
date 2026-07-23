@@ -217,7 +217,7 @@ func (u *UseCases) consumeEmbeddingQuota(ctx context.Context, organization, idem
 		return nil
 	}
 	_, err := u.quota.Consume(ctx, quotas.ConsumeRequest{
-		Key:            quotas.Key{OrgID: strings.TrimSpace(organization), ProductSurface: "axis", Area: quotas.AreaEmbeddings},
+		Key:            quotas.Key{OrgID: strings.TrimSpace(organization), ProductSurface: quotas.ProductSurfaceFromContext(ctx), Area: quotas.AreaEmbeddings},
 		IdempotencyKey: idempotencyKey, SubjectType: subjectType, SubjectID: subjectID, Units: units,
 	})
 	return err
@@ -228,7 +228,7 @@ func (u *UseCases) recordEmbeddingUsage(ctx context.Context, organization, idemp
 		return
 	}
 	_ = u.ledger.RecordUsage(ctx, quotas.Usage{
-		Key:            quotas.Key{OrgID: strings.TrimSpace(organization), ProductSurface: "axis", Area: quotas.AreaEmbeddings},
+		Key:            quotas.Key{OrgID: strings.TrimSpace(organization), ProductSurface: quotas.ProductSurfaceFromContext(ctx), Area: quotas.AreaEmbeddings},
 		IdempotencyKey: idempotencyKey + ":actual", SubjectType: subjectType, SubjectID: subjectID,
 		Units: units, Model: model, Metadata: map[string]any{"estimated": true},
 	})

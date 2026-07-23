@@ -78,15 +78,13 @@ evidence requirements and the executor from the active tenant manifest and
 assignment. Assist contains no product aliases or clinical capability keys and
 forces governed reads to `sources_only`.
 
-The Axis-owned clinical executors then apply their domain behavior. Search retains the
-retriever score while bounding excerpts and paginating only within one immutable
-repository generation. Timeline supplies at most 200 authorized fragments and
-100.000 characters to the responsible Virployee with its active Job Role and
-profile, plus the manifest output schema. Memory, general knowledge and
-specialist orchestration are never clinical evidence for this path. Companion
-allows one schema/citation repair; any remaining event without an exact allowed
-reference abstains the entire timeline. Date filtering and asc/desc ordering run
-in Go after schema and citation validation.
+A clinical extension may apply domain behavior through `axis.connector.v1`;
+that code is not part of Companion core. The connector descriptor binds exact
+capability UUIDs, operations and input/output schemas. Companion supplies only
+the authorized, bounded arguments and verifies the signed result against the
+registered binding. Domain-specific pagination, evidence synthesis and
+ordering remain the extension's responsibility, while Companion retains
+assignment, schema, authority, idempotency and governance enforcement.
 
 ## Topic scope
 
@@ -157,7 +155,7 @@ capability assigned
 AND autonomy sufficient
 AND professional scope/policy permits it
 AND required delegation is current
-AND Nexus allows it or its exact approval is valid
+AND the configured governance provider allows it or its exact approval is valid
 ```
 
 Every Assist run persists a deterministic `context_hash` over organization,
@@ -167,31 +165,41 @@ source identifiers/hashes, the complete source-authorization snapshot and the
 conversation-policy snapshot. Both assignment and source authorization are
 revalidated before execution; reassignment or a binding/version change prevents
 a queued or previously approved run from continuing under stale ownership.
-Capability Assist also binds the canonical capability key and exact manifest
-hash. `product_surface` and `repository_generation` are part of the governed
+Capability Assist binds the canonical capability UUID and exact manifest,
+executor and schema hashes. A legacy key is descriptive compatibility data and
+never selects code. `product_surface` and `repository_generation` are part of the governed
 ToolInvocationGate context; policy, kill switches, assignment, promotion,
 manifest, autonomy and authority are resolved again immediately before its
 read executor runs.
 
-The side-effect Execution Gate separately binds the exact prepared action,
+Answering Assist also resolves the immutable prompt bundle (Axis safety base,
+Job Role, Profile Template and Virployee, with a product binding preferred at
+each level). The exact prompt version list and `prompt_bundle_hash` are
+persisted on the run and included in `context_hash`; changing a binding cannot
+reuse authority derived from the previous bundle.
+
+The side-effect Execution Gate separately binds the exact
+`axis.prepared-action.v2`,
 memory context hash when used, scope-policy revision, policy-pack
-IDs/versions/revisions, selected delegation/revision and the active Nexus policy
-snapshot. Nexus persists the policy and authority snapshots alongside the normal
-binding hash; Companion also stores the Nexus policy snapshot immutably on the
-prepared action. Companion re-resolves authority and calls Nexus revalidation
-immediately before execution, failing closed if any bound snapshot changed.
+IDs/versions/revisions, selected delegation/revision and the active governance
+policy snapshot. The Nexus adapter currently persists those policy and
+authority snapshots alongside the binding hash; Companion stores the neutral
+governance snapshot immutably on the prepared action. Companion re-resolves
+authority and invokes governance revalidation immediately before execution,
+failing closed if any bound snapshot changed.
 An action derived from an Assist run must also carry that run's `context_hash`,
 so reassignment, source changes, policy changes, delegation expiry/revocation
 or any other bound-context change invalidates the earlier approval.
 
 Policy text, patient data, document content, PHI, secrets and signed URLs never
-cross the Companion-to-Nexus authority contract.
+cross the Companion-to-governance authority contract.
 
 MCP-originated actions add a metadata-only binding containing the selected
 subject/case, continuity assignment revision, capability manifest and MCP
 policy revision, authority snapshot, payload hash and stable idempotency hash.
 The binding is part of the prepared-action payload and is revalidated before an
-approved executor runs. Raw MCP arguments are not included in the Nexus check.
+approved executor runs. Raw MCP arguments are not included in the governance
+check.
 
 ## Management API
 

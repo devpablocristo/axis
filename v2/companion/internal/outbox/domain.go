@@ -19,6 +19,8 @@ import (
 const MaxDeliveryAttempts = 10
 
 const (
+	DestinationGovernance              = "governance"
+	GovernanceContractVersion          = "axis.governance-outbox.v1"
 	AggregateTypeExecutionAttempt      = "execution_attempt"
 	AggregateTypeProfessionalAuthority = "professional_authority"
 	AggregateTypeOperationalFinding    = "operational_finding"
@@ -94,27 +96,29 @@ const (
 )
 
 type Message struct {
-	ID            uuid.UUID
-	OrgID         string
-	AggregateType string
-	AggregateID   uuid.UUID
-	Kind          string
-	DedupeKey     string
-	Payload       json.RawMessage
-	Status        Status
-	Attempts      int
-	MaxAttempts   int
-	AvailableAt   time.Time
-	LeaseOwner    string
-	LeaseUntil    *time.Time
-	HeartbeatAt   *time.Time
-	LastErrorCode string
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
-	DeliveredAt   *time.Time
+	ID              uuid.UUID
+	OrgID           string
+	Destination     string
+	ContractVersion string
+	AggregateType   string
+	AggregateID     uuid.UUID
+	Kind            string
+	DedupeKey       string
+	Payload         json.RawMessage
+	Status          Status
+	Attempts        int
+	MaxAttempts     int
+	AvailableAt     time.Time
+	LeaseOwner      string
+	LeaseUntil      *time.Time
+	HeartbeatAt     *time.Time
+	LastErrorCode   string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	DeliveredAt     *time.Time
 }
 
-type NexusExecutionResult struct {
+type GovernanceExecutionResult struct {
 	VirployeeID        string         `json:"virployee_id"`
 	GovernanceCheckID  string         `json:"governance_check_id"`
 	IdempotencyKey     string         `json:"idempotency_key"`
@@ -127,10 +131,13 @@ type NexusExecutionResult struct {
 	Attestation        string         `json:"attestation"`
 }
 
-// NexusAuditEvent is deliberately metadata-only. Professional authority
+// NexusExecutionResult is the legacy name retained for source compatibility.
+type NexusExecutionResult = GovernanceExecutionResult
+
+// GovernanceAuditEvent is deliberately metadata-only. Professional authority
 // payloads must never carry policy text, principal data, prompts, documents,
 // PHI, secrets, or arbitrary maps.
-type NexusAuditEvent struct {
+type GovernanceAuditEvent struct {
 	VirployeeID  string `json:"virployee_id"`
 	ActorType    string `json:"actor_type"`
 	ActorID      string `json:"actor_id"`
@@ -141,6 +148,9 @@ type NexusAuditEvent struct {
 	Revision     int64  `json:"revision"`
 	SnapshotHash string `json:"snapshot_hash"`
 }
+
+// NexusAuditEvent is the legacy name retained for source compatibility.
+type NexusAuditEvent = GovernanceAuditEvent
 
 // ProfessionalAuthorityAuditSpec is the allowlist shared by producers and
 // senders. Requiring exact static summaries prevents user-controlled policy or
@@ -164,18 +174,18 @@ func ProfessionalAuthorityAuditSpec(eventType string) (subjectType, summary stri
 	}
 }
 
-func ParseNexusAuditEvent(raw json.RawMessage, aggregateID uuid.UUID) (NexusAuditEvent, error) {
-	var payload NexusAuditEvent
+func ParseGovernanceAuditEvent(raw json.RawMessage, aggregateID uuid.UUID) (GovernanceAuditEvent, error) {
+	var payload GovernanceAuditEvent
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&payload); err != nil {
-		return NexusAuditEvent{}, err
+		return GovernanceAuditEvent{}, err
 	}
 	if err := decoder.Decode(&struct{}{}); err != io.EOF {
 		if err == nil {
-			return NexusAuditEvent{}, fmt.Errorf("multiple JSON values are not allowed")
+			return GovernanceAuditEvent{}, fmt.Errorf("multiple JSON values are not allowed")
 		}
-		return NexusAuditEvent{}, err
+		return GovernanceAuditEvent{}, err
 	}
 	expectedSubjectType, expectedSummary, ok := ProfessionalAuthorityAuditSpec(payload.EventType)
 	subjectID, subjectErr := uuid.Parse(payload.SubjectID)
@@ -187,9 +197,13 @@ func ParseNexusAuditEvent(raw json.RawMessage, aggregateID uuid.UUID) (NexusAudi
 		payload.ActorType != "human" || !safeMetadataID(payload.ActorID) ||
 		subjectErr != nil || subjectID != aggregateID || !virployeeValid ||
 		payload.Revision <= 0 || !validSHA256(payload.SnapshotHash) {
-		return NexusAuditEvent{}, fmt.Errorf("professional authority audit metadata is invalid")
+		return GovernanceAuditEvent{}, fmt.Errorf("professional authority audit metadata is invalid")
 	}
 	return payload, nil
+}
+
+func ParseNexusAuditEvent(raw json.RawMessage, aggregateID uuid.UUID) (NexusAuditEvent, error) {
+	return ParseGovernanceAuditEvent(raw, aggregateID)
 }
 
 func validSHA256(value string) bool {
@@ -205,13 +219,15 @@ func safeMetadataID(value string) bool {
 }
 
 type EnqueueInput struct {
-	ID            uuid.UUID
-	OrgID         string
-	AggregateType string
-	AggregateID   uuid.UUID
-	Kind          string
-	DedupeKey     string
-	Payload       json.RawMessage
+	ID              uuid.UUID
+	OrgID           string
+	Destination     string
+	ContractVersion string
+	AggregateType   string
+	AggregateID     uuid.UUID
+	Kind            string
+	DedupeKey       string
+	Payload         json.RawMessage
 }
 
 type ClaimOptions struct {

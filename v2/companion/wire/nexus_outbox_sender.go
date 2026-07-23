@@ -18,7 +18,17 @@ type nexusOutboxClient interface {
 }
 
 func newNexusOutboxSender(client nexusOutboxClient) outbox.Sender {
+	return newGovernanceOutboxSender(client)
+}
+
+func newGovernanceOutboxSender(client nexusOutboxClient) outbox.Sender {
 	return outbox.SenderFunc(func(ctx context.Context, message outbox.Message) error {
+		if message.Destination != "" && message.Destination != outbox.DestinationGovernance {
+			return outbox.Permanent("unsupported_outbox_destination", fmt.Errorf("unsupported outbox destination"))
+		}
+		if message.ContractVersion != "" && message.ContractVersion != outbox.GovernanceContractVersion {
+			return outbox.Permanent("unsupported_outbox_contract", fmt.Errorf("unsupported outbox contract"))
+		}
 		switch {
 		case message.AggregateType == outbox.AggregateTypeExecutionAttempt && message.Kind == outbox.KindExecutionResult:
 			return sendNexusExecutionResult(ctx, client, message)
@@ -47,13 +57,16 @@ func sendNexusExecutionResult(ctx context.Context, client nexusOutboxClient, mes
 		return outbox.Permanent("invalid_outbox_payload", fmt.Errorf("required delivery metadata is missing"))
 	}
 	if err := client.ReportExecutionResult(ctx, message.OrgID, payload.GovernanceCheckID, payload.IdempotencyKey, payload.BindingHash, payload.Status, payload.DurationMS, payload.Result, payload.AttestationVersion, payload.ExecutorVersion, payload.Attestation); err != nil {
+		if nexusclient.IsPermanentHTTPError(err) {
+			return outbox.Permanent("governance_rejected", err)
+		}
 		return outbox.Retryable("nexus_unavailable", err)
 	}
 	return nil
 }
 
 func sendNexusAuthorityAudit(ctx context.Context, client nexusOutboxClient, message outbox.Message) error {
-	payload, err := outbox.ParseNexusAuditEvent(message.Payload, message.AggregateID)
+	payload, err := outbox.ParseGovernanceAuditEvent(message.Payload, message.AggregateID)
 	if err != nil {
 		return outbox.Permanent("invalid_outbox_payload", err)
 	}

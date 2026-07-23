@@ -246,8 +246,9 @@ services:
       BFF_V2_NEXUS_BASE_URL: ${BFF_V2_NEXUS_BASE_URL:-http://nexus-v2:8080}
       BFF_V2_IDENTITY_PROVIDER: ${BFF_V2_IDENTITY_PROVIDER:-dev}
       BFF_V2_INTERNAL_AUTH_SECRET: ${AXIS_V2_INTERNAL_AUTH_SECRET:-axis-v2-local-internal}
-      # Product machine credentials for the inbound edge (POST /v1/assist-runs).
-      # Format: <apiKey>=<organization>|<virployee>|<actor>|<product>, entries comma/newline-separated.
+      # Compatibility-only machine credentials. Persisted credentials are
+      # authoritative; this fallback requires an explicit development opt-in.
+      BFF_V2_ALLOW_LEGACY_PRODUCT_API_KEYS: ${BFF_V2_ALLOW_LEGACY_PRODUCT_API_KEYS:-false}
       BFF_V2_PRODUCT_API_KEYS: ${BFF_V2_PRODUCT_API_KEYS:-}
       BFF_V2_CLERK_SECRET_KEY: ${BFF_V2_CLERK_SECRET_KEY:-${BFF_V2_CLERK_SECRET:-}}
       BFF_V2_CLERK_API_BASE_URL: ${BFF_V2_CLERK_API_BASE_URL:-https://api.clerk.com/v1}
@@ -315,6 +316,7 @@ services:
     volumes:
       - ./console:/app
       - console-v2-node-modules:/app/node_modules
+    command: ["sh", "-lc", "npm ci && npm run build && npm run preview -- --host 0.0.0.0 --port 19173"]
     depends_on:
       bff-v2:
         condition: service_healthy

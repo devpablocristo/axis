@@ -44,6 +44,10 @@ type Config struct {
 	ArtifactExtractorBaseURL     string
 	GoogleCalendarSecretRef      string
 	ExecutorAttestationSecretRef string
+	// ConnectorRegistrationsJSON is an array of organization-scoped
+	// axis.connector.v1 descriptors. It contains secret references only, never
+	// secret material; wire validates and registers each binding at startup.
+	ConnectorRegistrationsJSON string
 
 	// GoogleCalendarID is the calendar the google_calendar executor writes to
 	// (a calendar shared with the workload's service account). Required when
@@ -98,6 +102,7 @@ func Load() Config {
 		ArtifactExtractorBaseURL:     strings.TrimRight(strings.TrimSpace(envconfig.Get("COMPANION_V2_ARTIFACT_EXTRACTOR_BASE_URL", "")), "/"),
 		GoogleCalendarSecretRef:      strings.TrimSpace(envconfig.Get("COMPANION_V2_GOOGLE_CALENDAR_SECRET_REF", "")),
 		ExecutorAttestationSecretRef: strings.TrimSpace(envconfig.Get("COMPANION_V2_EXECUTOR_ATTESTATION_SECRET_REF", "")),
+		ConnectorRegistrationsJSON:   strings.TrimSpace(envconfig.Get("COMPANION_V2_CONNECTORS_JSON", "")),
 		LearningMinExecutions:        envconfig.Int("COMPANION_V2_LEARNING_MIN_EXECUTIONS", 3),
 		LearningEnricherEnabled:      envconfig.Bool("COMPANION_V2_LEARNING_ENRICHER_ENABLED", false),
 		ServiceVersion:               envconfig.Get("COMPANION_V2_SERVICE_VERSION", ""),

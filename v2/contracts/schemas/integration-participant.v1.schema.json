@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://axis.local/contracts/schemas/integration-participant.v1.schema.json",
+  "title": "axis.integration-participant.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "participant_id",
+    "supported_contracts",
+    "operations"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "axis.integration-participant.v1"
+    },
+    "participant_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._:-]{0,127}$"
+    },
+    "supported_contracts": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": [
+          "axis.product-integration.v2",
+          "axis.product-integration.v3"
+        ]
+      }
+    },
+    "operations": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": [
+          "validate",
+          "activate",
+          "readiness",
+          "suspend",
+          "retire",
+          "reconcile_product"
+        ]
+      }
+    }
+  }
+}

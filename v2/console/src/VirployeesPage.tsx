@@ -7,6 +7,15 @@ import {
 import { useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react'
 import { crudPrimaryStickyColumn, crudSelectionStickyColumn } from './crudTableColumns'
 import { formatDateTime24 } from './formatters'
+import {
+  LegacyCalendarDraftView as ConfirmableCalendarDraftView,
+  isLegacyCalendarDraft as requiresConfirmedCalendarDraft,
+  isLegacyCalendarDraftComplete as isCalendarCreateDraftComplete,
+  legacyCalendarConfirmedDraft as calendarConfirmedDraftFromValues,
+  legacyCalendarDraftValuesFromDryRun as calendarCreateDraftValuesFromDryRun,
+  type LegacyCalendarDraftKey as CalendarCreateDraftKey,
+  type LegacyCalendarDraftValues as CalendarCreateDraftValues,
+} from './legacy/calendarDraftAdapter'
 import { VirployeeMemoryPanel } from './VirployeeMemoryPanel'
 import {
   type Approval,
@@ -19,10 +28,11 @@ import {
   type VirployeeAutonomy,
   type VirployeeAutonomyLevel,
   type Virployee,
-  type VirployeeConfirmedDraft,
   type VirployeeDryRun,
   type VirployeeExecutionGate,
+  type VirployeeGateConfirmation,
   type VirployeeRunTrace,
+  type PreparedActionV2,
   type VirployeeRuntimeContext,
   type ProfileTemplate,
   type ProfessionalPolicyBinding,
@@ -75,15 +85,6 @@ import {
 
 type CrudLifecycleView = 'active' | 'archived' | 'trash'
 type BulkAction = 'archive' | 'trash' | 'restore' | 'purge'
-type CalendarCreateDraftValues = {
-  title: string
-  date: string
-  time: string
-  timezone: string
-  duration_minutes: string
-  attendees: string
-}
-type CalendarCreateDraftKey = keyof CalendarCreateDraftValues
 
 type VirployeesPageProps = {
   orgId: string
@@ -204,7 +205,7 @@ export function VirployeesPage({
   const [simulationError, setSimulationError] = useState('')
   const simulationRequestRef = useRef(0)
   const [calendarDraftValues, setCalendarDraftValues] = useState<CalendarCreateDraftValues | null>(null)
-  const [confirmedDraft, setConfirmedDraft] = useState<VirployeeConfirmedDraft | null>(null)
+  const [confirmedAction, setConfirmedAction] = useState<VirployeeGateConfirmation | null>(null)
   const [editRow, setEditRow] = useState<Virployee | null>(null)
   const [editValues, setEditValues] = useState<VirployeeEditValues | null>(null)
   const [editSaving, setEditSaving] = useState(false)
@@ -834,7 +835,7 @@ export function VirployeesPage({
     setSimulationError('')
     setSimulationLoading(false)
     setCalendarDraftValues(null)
-    setConfirmedDraft(null)
+    setConfirmedAction(null)
     setActionError('')
     void loadRunTraces(row)
   }
@@ -858,7 +859,7 @@ export function VirployeesPage({
     setSimulationLoading(false)
     setSimulationError('')
     setCalendarDraftValues(null)
-    setConfirmedDraft(null)
+    setConfirmedAction(null)
   }
 
 	const openMemory = (row: Virployee) => {
@@ -895,7 +896,7 @@ export function VirployeesPage({
     setExecutionGateError('')
     setSimulationError('')
     setCalendarDraftValues(null)
-    setConfirmedDraft(null)
+    setConfirmedAction(null)
   }
 
   async function loadRunTraces(row: Virployee) {
@@ -927,12 +928,12 @@ export function VirployeesPage({
     setExecutionGateError('')
     setSimulationError('')
     setCalendarDraftValues(null)
-    setConfirmedDraft(null)
+    setConfirmedAction(null)
     try {
       const result = await dryRunVirployee(dryRunRow.id, dryRunInput, orgId, principalId)
       if (dryRunRequestRef.current !== requestID) return
       setDryRunResult(result)
-      setCalendarDraftValues(calendarCreateDraftValuesFromDryRun(result))
+      setCalendarDraftValues(result.prepared_action ? null : calendarCreateDraftValuesFromDryRun(result))
       void loadRunTraces(dryRunRow)
     } catch (error) {
       if (dryRunRequestRef.current !== requestID) return
@@ -944,26 +945,34 @@ export function VirployeesPage({
 
   const checkExecutionGate = async () => {
     if (!dryRunRow || !dryRunResult || executionGateLoading || stringValue(dryRunInput).length === 0) return
-    const confirmedDraftForGate = confirmedDraft ?? (
+    const confirmationForGate = confirmedAction ?? (
+      !dryRunResult.prepared_action &&
       requiresConfirmedCalendarDraft(dryRunResult) &&
       calendarDraftValues &&
       isCalendarCreateDraftComplete(calendarDraftValues)
         ? calendarConfirmedDraftFromValues(calendarDraftValues)
         : null
     )
-    if (requiresConfirmedCalendarDraft(dryRunResult) && !confirmedDraftForGate) return
+    if ((Boolean(dryRunResult.prepared_action) || requiresConfirmedCalendarDraft(dryRunResult)) && !confirmationForGate) return
     const requestID = executionGateRequestRef.current + 1
     executionGateRequestRef.current = requestID
     setExecutionGateLoading(true)
     setExecutionGateError('')
     setExecutionGateResult(null)
-    if (confirmedDraftForGate) setConfirmedDraft(confirmedDraftForGate)
+    if (confirmationForGate) setConfirmedAction(confirmationForGate)
     try {
-      const result = await checkVirployeeExecutionGate(dryRunRow.id, dryRunInput, orgId, principalId, confirmedDraftForGate ?? undefined)
+      const result = await checkVirployeeExecutionGate(dryRunRow.id, dryRunInput, orgId, principalId, confirmationForGate ?? undefined)
       if (executionGateRequestRef.current !== requestID) return
       setExecutionGateResult(result)
       setDryRunResult(result.dry_run)
-      setCalendarDraftValues(calendarCreateDraftValuesFromDryRun(result.dry_run))
+      if (result.dry_run.prepared_action && isPreparedActionV2(confirmationForGate)) {
+        setConfirmedAction(
+          samePreparedActionBinding(result.dry_run.prepared_action, confirmationForGate)
+            ? result.dry_run.prepared_action
+            : null,
+        )
+      }
+      setCalendarDraftValues(result.dry_run.prepared_action ? null : calendarCreateDraftValuesFromDryRun(result.dry_run))
       void loadRunTraces(dryRunRow)
     } catch (error) {
       if (executionGateRequestRef.current !== requestID) return
@@ -975,14 +984,23 @@ export function VirployeesPage({
 
   const updateCalendarDraftValue = (key: CalendarCreateDraftKey, value: string) => {
     setCalendarDraftValues((current) => current ? { ...current, [key]: value } : current)
-    setConfirmedDraft(null)
+    setConfirmedAction(null)
     setExecutionGateResult(null)
     setExecutionGateError('')
   }
 
   const confirmCalendarDraft = () => {
     if (!calendarDraftValues || !isCalendarCreateDraftComplete(calendarDraftValues)) return
-    setConfirmedDraft(calendarConfirmedDraftFromValues(calendarDraftValues))
+    setConfirmedAction(calendarConfirmedDraftFromValues(calendarDraftValues))
+    setExecutionGateResult(null)
+    setExecutionGateError('')
+    setSimulationError('')
+  }
+
+  const confirmPreparedAction = () => {
+    const preparedAction = dryRunResult?.prepared_action
+    if (!preparedAction || !isPreparedActionComplete(preparedAction, preparedActionSchema(dryRunResult))) return
+    setConfirmedAction(preparedAction)
     setExecutionGateResult(null)
     setExecutionGateError('')
     setSimulationError('')
@@ -995,11 +1013,12 @@ export function VirployeesPage({
     setSimulationLoading(true)
     setSimulationError('')
     try {
-      const values = calendarDraftValues
-      const summary = values
-        ? `${values.title}\n${values.date} ${values.time} (${values.timezone})\n${values.duration_minutes} minutes\n${values.attendees}`
-        : 'Execute the approved prepared action?'
-      if (!window.confirm(`Execute this local calendar event?\n\n${summary}`)) return
+      const summary = dryRunResult?.prepared_action
+        ? preparedActionSummary(dryRunResult.prepared_action, preparedActionSchema(dryRunResult))
+        : calendarDraftValues
+          ? `${calendarDraftValues.title}\n${calendarDraftValues.date} ${calendarDraftValues.time} (${calendarDraftValues.timezone})\n${calendarDraftValues.duration_minutes} minutes\n${calendarDraftValues.attendees}`
+          : 'No payload summary is available.'
+      if (!window.confirm(`Execute this approved action?\n\n${summary}`)) return
       await executeApprovedVirployeeAction(dryRunRow.id, approvalId, orgId, principalId)
       if (simulationRequestRef.current !== requestID) return
       await loadRunTraces(dryRunRow)
@@ -1183,7 +1202,7 @@ export function VirployeesPage({
                 runTracesLoading={runTracesLoading}
                 runTracesError={runTracesError}
                 calendarDraftValues={calendarDraftValues}
-                confirmedDraft={confirmedDraft}
+                confirmedAction={confirmedAction}
                 autonomyByLevel={autonomyByLevel}
                 supervisor={userByID.get(dryRunResult?.runtime_context.virployee.supervisor_user_id ?? dryRunRow.supervisor_user_id)}
                 onInputChange={updateDryRunInput}
@@ -1194,6 +1213,7 @@ export function VirployeesPage({
                 onReviewApproval={onReviewApproval ? (approvalId) => onReviewApproval({ approvalId, virployeeId: dryRunRow.id }) : undefined}
                 onCalendarDraftValueChange={updateCalendarDraftValue}
                 onConfirmCalendarDraft={confirmCalendarDraft}
+                onConfirmPreparedAction={confirmPreparedAction}
                 onClose={closeDryRun}
               />
             ) : null}
@@ -2002,7 +2022,7 @@ function VirployeeDryRunInline(props: {
   runTracesLoading: boolean
   runTracesError: string
   calendarDraftValues: CalendarCreateDraftValues | null
-  confirmedDraft: VirployeeConfirmedDraft | null
+  confirmedAction: VirployeeGateConfirmation | null
   autonomyByLevel: ReadonlyMap<VirployeeAutonomy, VirployeeAutonomyLevel>
   supervisor?: OrgUser
   onInputChange: (value: string) => void
@@ -2013,6 +2033,7 @@ function VirployeeDryRunInline(props: {
   onReviewApproval?: (approvalId: string) => void
   onCalendarDraftValueChange: (key: CalendarCreateDraftKey, value: string) => void
   onConfirmCalendarDraft: () => void
+  onConfirmPreparedAction: () => void
   onClose: () => void
 }) {
   const context = props.result?.runtime_context
@@ -2020,15 +2041,26 @@ function VirployeeDryRunInline(props: {
   const requiredCapability = props.result?.required_capability
   const capabilities = context?.capabilities ?? []
   const canRun = stringValue(props.input).length > 0 && !props.loading
-  const needsConfirmedDraft = props.result ? requiresConfirmedCalendarDraft(props.result) : false
-  const draftComplete = props.calendarDraftValues ? isCalendarCreateDraftComplete(props.calendarDraftValues) : false
+  const needsLegacyConfirmedDraft = props.result
+    ? !props.result.prepared_action && requiresConfirmedCalendarDraft(props.result)
+    : false
+  const legacyDraftComplete = props.calendarDraftValues ? isCalendarCreateDraftComplete(props.calendarDraftValues) : false
+  const preparedActionComplete = props.result?.prepared_action
+    ? isPreparedActionComplete(props.result.prepared_action, preparedActionSchema(props.result))
+    : false
   const canCheckGate = Boolean(props.result) &&
     canRun &&
     !props.executionGateLoading &&
-    (!needsConfirmedDraft || Boolean(props.confirmedDraft) || draftComplete)
+    (
+      props.result?.prepared_action
+        ? isPreparedActionV2(props.confirmedAction) &&
+          samePreparedActionBinding(props.result.prepared_action, props.confirmedAction) &&
+          preparedActionComplete
+        : !needsLegacyConfirmedDraft || Boolean(props.confirmedAction) || legacyDraftComplete
+    )
   const supervisorValue = props.supervisor ? userLabel(props.supervisor) : 'Unknown Supervisor'
   const latestGateRun = latestExecutionGateRun(props.runTraces)
-  const latestApprovalID = latestGateRun?.nexus_result?.approval_id ?? ''
+  const latestApprovalID = governanceResult(latestGateRun)?.approval_id ?? ''
   const latestSimulatedRun = latestSimulatedExecutionRun(props.runTraces, latestApprovalID)
   const [latestApproval, setLatestApproval] = useState<Approval | null>(null)
   const [latestApprovalLoading, setLatestApprovalLoading] = useState(false)
@@ -2115,7 +2147,7 @@ function VirployeeDryRunInline(props: {
           <textarea
             rows={3}
             value={props.input}
-            placeholder="Agendá una reunión para mañana"
+            placeholder="Describe the action to evaluate"
             onChange={(event) => props.onInputChange(event.currentTarget.value)}
           />
         </label>
@@ -2136,9 +2168,9 @@ function VirployeeDryRunInline(props: {
                   tone={executionGateTone(props.executionGate)}
                 />
                 <FlowSummaryItem
-                  label="Nexus"
-                  value={latestGateRun ? formatNexusTrace(latestGateRun, latestApproval) : 'Not called'}
-                  tone={nexusTraceTone(latestGateRun, latestApproval)}
+                  label="Governance"
+                  value={latestGateRun ? formatGovernanceTrace(latestGateRun, latestApproval) : 'Not called'}
+                  tone={governanceTraceTone(latestGateRun, latestApproval)}
                 />
                 <FlowSummaryItem
                   label="Approval"
@@ -2178,11 +2210,21 @@ function VirployeeDryRunInline(props: {
               </div>
             </section>
 
-            {requiresConfirmedCalendarDraft(props.result) && props.calendarDraftValues ? (
+            {props.result.prepared_action ? (
+              <ConfirmablePreparedActionView
+                action={props.result.prepared_action}
+                schema={preparedActionSchema(props.result)}
+                confirmed={
+                  isPreparedActionV2(props.confirmedAction) &&
+                  samePreparedActionBinding(props.result.prepared_action, props.confirmedAction)
+                }
+                onConfirm={props.onConfirmPreparedAction}
+              />
+            ) : requiresConfirmedCalendarDraft(props.result) && props.calendarDraftValues ? (
               <ConfirmableCalendarDraftView
                 draft={props.result.draft}
                 values={props.calendarDraftValues}
-                confirmed={Boolean(props.confirmedDraft)}
+                confirmed={Boolean(props.confirmedAction)}
                 onValueChange={props.onCalendarDraftValueChange}
                 onConfirm={props.onConfirmCalendarDraft}
               />
@@ -2320,104 +2362,57 @@ function DryRunIntentView(props: { intent: VirployeeDryRun['intent'] }) {
   )
 }
 
-function ConfirmableCalendarDraftView(props: {
-  draft: VirployeeDryRun['draft']
-  values: CalendarCreateDraftValues
+function ConfirmablePreparedActionView(props: {
+  action: PreparedActionV2
+  schema: Record<string, unknown>
   confirmed: boolean
-  onValueChange: (key: CalendarCreateDraftKey, value: string) => void
   onConfirm: () => void
 }) {
-  const complete = isCalendarCreateDraftComplete(props.values)
+  const fields = preparedActionFields(props.action, props.schema)
+  const complete = isPreparedActionComplete(props.action, props.schema)
   const reviewMessage = props.confirmed
-    ? 'Draft confirmed'
+    ? 'Prepared action confirmed'
     : complete
-      ? 'Ready to check the gate.'
-      : 'Complete the draft before checking the gate.'
-  const clarifications = props.draft.missing_fields.filter((field) => {
-    return isCalendarCreateDraftKey(field.key) && stringValue(props.values[field.key]).length === 0
-  })
+      ? 'Review the payload, then confirm it before checking the gate.'
+      : 'The prepared payload does not satisfy its input schema.'
+
   return (
-    <section className="virployee-preview__section" aria-label="Draft">
-      <SectionHeading title="Draft" eyebrow="Human review" />
-      {clarifications.length > 0 ? (
-        <div className="virployee-dry-run__clarifications" aria-label="Needs clarification">
-          <strong>Needs clarification</strong>
-          {clarifications.map((field) => (
-            <span key={field.key}>{clarificationQuestion(field.key)}</span>
-          ))}
-        </div>
-      ) : null}
-      <div className="virployee-preview__grid">
-        <label className="form-group">
-          Action
-          <input value="Create calendar event" readOnly />
-        </label>
-        <label className="form-group">
-          Title
-          <input
-            value={props.values.title}
-            placeholder="Reunión"
-            onChange={(event) => props.onValueChange('title', event.currentTarget.value)}
-            required
-          />
-          {stringValue(props.values.title).length === 0 ? <span className="form-field-required">Required</span> : null}
-        </label>
-        <label className="form-group">
-          Date
-          <input
-            type="date"
-            value={props.values.date}
-            onChange={(event) => props.onValueChange('date', event.currentTarget.value)}
-            required
-          />
-          {stringValue(props.values.date).length === 0 ? <span className="form-field-required">Required</span> : null}
-        </label>
-        <label className="form-group">
-          Time
-          <input
-            type="time"
-            value={props.values.time}
-            onChange={(event) => props.onValueChange('time', event.currentTarget.value)}
-            required
-          />
-          {stringValue(props.values.time).length === 0 ? <span className="form-field-required">Required</span> : null}
-        </label>
-        <label className="form-group">
-          Timezone
-          <input
-            value={props.values.timezone}
-            placeholder="America/Argentina/Buenos_Aires"
-            onChange={(event) => props.onValueChange('timezone', event.currentTarget.value)}
-            required
-          />
-          {stringValue(props.values.timezone).length === 0 ? <span className="form-field-required">Required</span> : null}
-        </label>
-        <label className="form-group">
-          Duration (minutes)
-          <input
-            type="number"
-            min="5"
-            max="1440"
-            step="5"
-            value={props.values.duration_minutes}
-            onChange={(event) => props.onValueChange('duration_minutes', event.currentTarget.value)}
-            required
-          />
-        </label>
-        <label className="form-group full-width">
-          Attendees
-          <input
-            value={props.values.attendees}
-            placeholder="ana@example.com"
-            onChange={(event) => props.onValueChange('attendees', event.currentTarget.value)}
-            required
-          />
-          {stringValue(props.values.attendees).length === 0 ? <span className="form-field-required">Required</span> : null}
-        </label>
+    <section className="virployee-preview__section prepared-action-review" aria-label="Prepared action">
+      <SectionHeading title="Prepared action" eyebrow="Contract review" />
+      <div className="prepared-action-review__identity">
+        <PreviewField label="Operation" value={props.action.operation || '—'} />
+        <PreviewField label="Capability UUID" value={props.action.capability_id || '—'} />
+        <PreviewField label="Connector binding" value={props.action.executor_binding_id || '—'} />
+        <PreviewField label="Required autonomy" value={props.action.required_autonomy || '—'} />
       </div>
+      <div className="prepared-action-review__payload" aria-label="Validated payload">
+        {fields.length > 0 ? fields.map((field) => (
+          <PreviewField
+            key={field.key}
+            label={`${field.label}${field.required ? ' · required' : ''}`}
+            value={formatPreparedActionValue(field.value, field.format)}
+          />
+        )) : (
+          <p className="virployee-preview__empty">The action has no payload fields.</p>
+        )}
+      </div>
+      <details className="prepared-action-review__binding">
+        <summary>Integrity binding</summary>
+        <div className="virployee-preview__grid">
+          <PreviewField label="Manifest hash" value={shortHash(props.action.manifest_hash)} />
+          <PreviewField label="Input schema" value={shortHash(props.action.input_schema_hash)} />
+          <PreviewField label="Output schema" value={shortHash(props.action.output_schema_hash)} />
+          <PreviewField label="Idempotency hash" value={shortHash(props.action.idempotency_hash || '')} />
+        </div>
+      </details>
       <div className="virployee-dry-run__draft-actions">
-        <button type="button" className="btn-secondary" disabled={!complete || props.confirmed} onClick={props.onConfirm}>
-          Confirm draft
+        <button
+          type="button"
+          className="btn-secondary"
+          disabled={!complete || props.confirmed}
+          onClick={props.onConfirm}
+        >
+          Confirm prepared action
         </button>
         <span className={complete || props.confirmed ? 'iam-control__inline-note' : 'iam-control__inline-error'}>
           {reviewMessage}
@@ -2525,10 +2520,11 @@ function ApprovalCheckpointView(props: {
   onReviewApproval?: (approvalId: string) => void
   onSimulateApprovedExecution: (approvalId: string) => void
 }) {
-  const approvalID = props.run?.nexus_result?.approval_id ?? ''
+  const governance = governanceResult(props.run)
+  const approvalID = governance?.approval_id ?? ''
   if (!approvalID) return null
-  const status = props.approval?.status || props.run?.nexus_result?.approval_status || 'pending'
-  const bindingHash = props.approval?.binding_hash || props.run?.nexus_result?.binding_hash || props.run?.binding_hash || ''
+  const status = props.approval?.status || governance?.approval_status || 'pending'
+  const bindingHash = props.approval?.binding_hash || governance?.binding_hash || props.run?.binding_hash || ''
   const decision = props.approval?.decided_by ? formatApprovalDecision(props.approval) : 'Not decided yet'
   return (
     <section className="virployee-preview__section virployee-approval-checkpoint" aria-label="Approval checkpoint">
@@ -2539,9 +2535,9 @@ function ApprovalCheckpointView(props: {
       <div className="virployee-preview__grid">
         <PreviewField label="Approval" value={shortHash(approvalID)} />
         <PreviewField label="Status" value={formatApprovalStatus(status)} />
-        <PreviewField label="Risk" value={props.approval?.risk_level || props.run?.nexus_result?.risk_level || '-'} />
+        <PreviewField label="Risk" value={props.approval?.risk_level || governance?.risk_level || '-'} />
         <PreviewField label="Binding hash" value={shortHash(bindingHash)} />
-        <PreviewField label="Reason" value={props.approval?.reason || props.run?.nexus_result?.decision_reason || '-'} />
+        <PreviewField label="Reason" value={props.approval?.reason || governance?.decision_reason || '-'} />
         <PreviewField label="Decision" value={decision} />
       </div>
       {props.error ? <p role="alert" className="iam-control__inline-error">{props.error}</p> : null}
@@ -2560,7 +2556,7 @@ function ApprovalCheckpointView(props: {
             {status === 'pending' ? 'Review approval' : 'View approval'}
           </button>
         ) : null}
-        {status === 'approved' && Boolean(props.run?.nexus_result?.check_id) && !props.simulatedRun ? (
+        {status === 'approved' && Boolean(governance?.check_id) && !props.simulatedRun ? (
           <button type="button" className="btn-primary" disabled={props.simulationLoading} onClick={() => props.onSimulateApprovedExecution(approvalID)}>
             {props.simulationLoading ? 'Executing...' : 'Execute locally'}
           </button>
@@ -2581,7 +2577,7 @@ function RunTraceHistory(props: {
   onRefresh: () => void
 }) {
   const approvalIDs = useMemo(
-    () => Array.from(new Set(props.runs.map((run) => run.nexus_result?.approval_id || run.execution_result?.approval_id).filter(Boolean) as string[])).sort(),
+    () => Array.from(new Set(props.runs.map((run) => governanceResult(run)?.approval_id || run.execution_result?.approval_id).filter(Boolean) as string[])).sort(),
     [props.runs],
   )
   const approvalKey = approvalIDs.join('|')
@@ -2638,13 +2634,14 @@ function RunTraceHistory(props: {
           <RunTraceAuditSummary runs={props.runs} approvalByID={approvalByID} />
           <div className="virployee-run-history">
             {props.runs.map((run, index) => {
-              const approvalID = run.nexus_result?.approval_id || run.execution_result?.approval_id || ''
+              const governance = governanceResult(run)
+              const approvalID = governance?.approval_id || run.execution_result?.approval_id || ''
               const approval = approvalID ? approvalByID[approvalID] : null
-              const approvalStatus = approval?.status || run.nexus_result?.approval_status || ''
+              const approvalStatus = approval?.status || governance?.approval_status || ''
               const simulatedRun = latestSimulatedExecutionRun(props.runs, approvalID)
               const canSimulateExecution = run.operation === 'execution_gate' &&
                 approvalID.length > 0 &&
-                Boolean(run.nexus_result?.check_id) &&
+                Boolean(governance?.check_id) &&
                 approvalStatus === 'approved' &&
                 !simulatedRun
               return (
@@ -2664,8 +2661,8 @@ function RunTraceHistory(props: {
                     <div className="virployee-run-history__facts">
                       <AuditFact label="Capability" value={runCapabilityKey(run)} />
                       <AuditFact
-                        label="Nexus"
-                        value={<StatusBadge value={formatNexusTrace(run, approval)} tone={nexusTraceTone(run, approval)} />}
+                        label="Governance"
+                        value={<StatusBadge value={formatGovernanceTrace(run, approval)} tone={governanceTraceTone(run, approval)} />}
                       />
                       <AuditFact label="Approval" value={approvalID ? formatApprovalTrace(run, approval) : 'None'} />
                       <AuditFact label="Binding" value={shortHash(runBindingHash(run))} />
@@ -2676,10 +2673,10 @@ function RunTraceHistory(props: {
                       <p>{runInputPreview(run)}</p>
                     </div>
 
-                    {formatNexusReason(run) ? (
+                    {formatGovernanceReason(run) ? (
                       <div className="virployee-run-history__reason">
                         <span>Reason</span>
-                        <p>{formatNexusReason(run)}</p>
+                        <p>{formatGovernanceReason(run)}</p>
                       </div>
                     ) : null}
                     {approval?.decided_by ? (
@@ -2697,7 +2694,7 @@ function RunTraceHistory(props: {
                             className="btn-sm btn-secondary"
                             onClick={() => props.onReviewApproval?.(approvalID)}
                           >
-                            {(approval?.status || run.nexus_result?.approval_status) === 'pending' ? 'Review approval' : 'View approval'}
+                            {(approval?.status || governance?.approval_status) === 'pending' ? 'Review approval' : 'View approval'}
                           </button>
                         ) : null}
                         {canSimulateExecution ? (
@@ -2727,11 +2724,11 @@ type StatusTone = 'success' | 'danger' | 'warning' | 'muted'
 
 function RunTraceAuditSummary(props: { runs: VirployeeRunTrace[]; approvalByID: Record<string, Approval | null> }) {
   const latestRun = props.runs[0]
-  const latestApprovalID = latestRun?.nexus_result?.approval_id || latestRun?.execution_result?.approval_id || ''
+  const latestApprovalID = governanceResult(latestRun)?.approval_id || latestRun?.execution_result?.approval_id || ''
   const latestApproval = latestApprovalID ? props.approvalByID[latestApprovalID] : null
   const approvalIDs = new Set(
     props.runs
-      .map((run) => run.nexus_result?.approval_id || run.execution_result?.approval_id)
+      .map((run) => governanceResult(run)?.approval_id || run.execution_result?.approval_id)
       .filter((id): id is string => Boolean(id)),
   )
   const simulatedCount = props.runs.filter((run) => run.operation === 'simulated_execution' || run.operation === 'execution').length
@@ -3272,78 +3269,128 @@ function formatState(value: string): string {
   return value || '-'
 }
 
-function requiresConfirmedCalendarDraft(result: VirployeeDryRun): boolean {
-  return result.intent.matched && result.draft.action === 'calendar.events.create'
+type PreparedActionField = {
+  key: string
+  label: string
+  format: string
+  required: boolean
+  value: unknown
 }
 
-function isCalendarCreateDraftKey(value: string): value is CalendarCreateDraftKey {
-  return value === 'title' || value === 'date' || value === 'time' || value === 'timezone' || value === 'duration_minutes' || value === 'attendees'
+function isPreparedActionV2(value: VirployeeGateConfirmation | null | undefined): value is PreparedActionV2 {
+  return Boolean(
+    value &&
+    'schema_version' in value &&
+    value.schema_version === 'axis.prepared-action.v2',
+  )
 }
 
-function clarificationQuestion(value: string): string {
-  if (value === 'title') return 'What is the event title?'
-  if (value === 'date') return 'What date should I use?'
-  if (value === 'time') return 'What time should I use?'
-  if (value === 'timezone') return 'What timezone should I use?'
-  if (value === 'duration_minutes') return 'How long should the event last?'
-  if (value === 'attendees') return 'Who should be invited?'
-  return 'Please complete the missing field.'
+function samePreparedActionBinding(left: PreparedActionV2, right: PreparedActionV2): boolean {
+  return left.capability_id === right.capability_id &&
+    left.manifest_hash === right.manifest_hash &&
+    left.operation === right.operation &&
+    left.executor_binding_id === right.executor_binding_id &&
+    left.input_schema_hash === right.input_schema_hash &&
+    left.output_schema_hash === right.output_schema_hash &&
+    left.idempotency_hash === right.idempotency_hash &&
+    JSON.stringify(left.arguments) === JSON.stringify(right.arguments)
 }
 
-function calendarCreateDraftValuesFromDryRun(result: VirployeeDryRun): CalendarCreateDraftValues | null {
-  if (!requiresConfirmedCalendarDraft(result)) return null
-  const values: CalendarCreateDraftValues = {
-    title: '',
-    date: '',
-    time: '',
-    timezone: browserTimezone(),
-    duration_minutes: '60',
-    attendees: '',
-  }
-  for (const field of result.draft.fields) {
-    if (field.key === 'title' || field.key === 'attendees') {
-      values[field.key] = field.value
+function preparedActionSchema(result: VirployeeDryRun | null | undefined): Record<string, unknown> {
+  return result?.prepared_action?.input_schema ?? result?.required_capability?.input_schema ?? {}
+}
+
+function preparedActionFields(
+  action: PreparedActionV2,
+  schema: Record<string, unknown>,
+): PreparedActionField[] {
+  const properties = isUnknownRecord(schema.properties) ? schema.properties : {}
+  const required = new Set(
+    Array.isArray(schema.required)
+      ? schema.required.filter((item): item is string => typeof item === 'string')
+      : [],
+  )
+  const keys = Array.from(new Set([...Object.keys(properties), ...Object.keys(action.arguments)]))
+  return keys.map((key) => {
+    const property = isUnknownRecord(properties[key]) ? properties[key] : {}
+    return {
+      key,
+      label: typeof property.title === 'string' && property.title.trim()
+        ? property.title
+        : humanizeSchemaKey(key),
+      format: typeof property.format === 'string'
+        ? property.format
+        : typeof property.type === 'string'
+          ? property.type
+          : '',
+      required: required.has(key),
+      value: action.arguments[key],
     }
-    if (field.key === 'time') values.time = canonicalTime(field.value)
+  })
+}
+
+function isPreparedActionComplete(
+  action: PreparedActionV2,
+  schema: Record<string, unknown>,
+): boolean {
+  const properties = isUnknownRecord(schema.properties) ? schema.properties : {}
+  const required = Array.isArray(schema.required)
+    ? schema.required.filter((item): item is string => typeof item === 'string')
+    : []
+  for (const key of required) {
+    if (!hasPreparedActionValue(action.arguments[key])) return false
   }
-  return values
+  for (const [key, definition] of Object.entries(properties)) {
+    if (!isUnknownRecord(definition) || !hasPreparedActionValue(action.arguments[key])) continue
+    const type = typeof definition.type === 'string' ? definition.type : ''
+    if (!preparedActionValueMatchesType(action.arguments[key], type)) return false
+  }
+  return true
 }
 
-function isCalendarCreateDraftComplete(values: CalendarCreateDraftValues): boolean {
-  return stringValue(values.title).length > 0 &&
-    /^\d{4}-\d{2}-\d{2}$/.test(stringValue(values.date)) &&
-    /^\d{2}:\d{2}$/.test(stringValue(values.time)) &&
-    stringValue(values.timezone).length > 0 &&
-    Number(values.duration_minutes) >= 5 && Number(values.duration_minutes) <= 1440 &&
-    stringValue(values.attendees).length > 0
+function preparedActionValueMatchesType(value: unknown, type: string): boolean {
+  if (!type) return true
+  if (type === 'array') return Array.isArray(value)
+  if (type === 'object') return isUnknownRecord(value)
+  if (type === 'integer') return typeof value === 'number' && Number.isInteger(value)
+  if (type === 'number') return typeof value === 'number' && Number.isFinite(value)
+  if (type === 'boolean') return typeof value === 'boolean'
+  if (type === 'string') return typeof value === 'string'
+  return true
 }
 
-function calendarConfirmedDraftFromValues(values: CalendarCreateDraftValues): VirployeeConfirmedDraft {
-  return {
-    action: 'calendar.events.create',
-    kind: 'calendar_event',
-    fields: [
-      { key: 'title', value: stringValue(values.title) },
-      { key: 'date', value: stringValue(values.date) },
-      { key: 'time', value: stringValue(values.time) },
-      { key: 'timezone', value: stringValue(values.timezone) },
-      { key: 'duration_minutes', value: stringValue(values.duration_minutes) },
-      { key: 'attendees', value: stringValue(values.attendees) },
-    ],
+function hasPreparedActionValue(value: unknown): boolean {
+  return value !== undefined && value !== null && (typeof value !== 'string' || value.trim().length > 0)
+}
+
+function formatPreparedActionValue(value: unknown, format: string): string {
+  if (value === undefined || value === null || value === '') return '—'
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No'
+  if (typeof value === 'string' || typeof value === 'number') return String(value)
+  if (format === 'array' && Array.isArray(value)) return value.map(String).join(', ')
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return String(value)
   }
 }
 
-function browserTimezone(): string {
-  return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+function preparedActionSummary(action: PreparedActionV2, schema: Record<string, unknown>): string {
+  const fields = preparedActionFields(action, schema)
+  const values = fields.map((field) => `${field.label}: ${formatPreparedActionValue(field.value, field.format)}`)
+  return [action.operation || 'Prepared action', ...values].join('\n')
 }
 
-function canonicalTime(value: string): string {
-  const match = value.match(/(?:a las\s*)?(\d{1,2})(?::(\d{2}))?/i)
-  if (!match) return ''
-  const hour = Number(match[1])
-  const minute = Number(match[2] ?? '0')
-  if (hour > 23 || minute > 59) return ''
-  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
+function humanizeSchemaKey(value: string): string {
+  const label = value
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/[._-]+/g, ' ')
+    .trim()
+  return label ? label.charAt(0).toUpperCase() + label.slice(1) : 'Value'
+}
+
+function isUnknownRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value))
 }
 
 function formatDraftStatus(value: VirployeeDryRun['draft']['status']): string {
@@ -3398,8 +3445,12 @@ function runInputPreview(run: VirployeeRunTrace): string {
   return run.input_preview || shortHash(run.input_hash)
 }
 
+function governanceResult(run?: VirployeeRunTrace | null) {
+  return run?.governance_result ?? run?.nexus_result
+}
+
 function runBindingHash(run: VirployeeRunTrace): string {
-  return run.execution_result?.binding_hash || run.nexus_result?.binding_hash || run.binding_hash || run.input_hash || ''
+  return run.execution_result?.binding_hash || governanceResult(run)?.binding_hash || run.binding_hash || run.input_hash || ''
 }
 
 function formatRunDecision(run: VirployeeRunTrace, approval?: Approval | null): string {
@@ -3408,8 +3459,9 @@ function formatRunDecision(run: VirployeeRunTrace, approval?: Approval | null): 
   }
   if (run.operation === 'execution') return run.execution_result?.status === 'succeeded' ? 'Executed' : 'Failed'
   if (run.operation === 'execution_gate') {
-    if (run.nexus_result?.decision === 'require_approval') {
-      const status = approval?.status || run.nexus_result.approval_status || 'pending'
+    const governance = governanceResult(run)
+    if (governance?.decision === 'require_approval') {
+      const status = approval?.status || governance.approval_status || 'pending'
       if (status === 'approved') return 'Approved'
       if (status === 'rejected') return 'Rejected'
       return 'Needs approval'
@@ -3422,8 +3474,9 @@ function formatRunDecision(run: VirployeeRunTrace, approval?: Approval | null): 
 function runDecisionTone(run: VirployeeRunTrace, approval?: Approval | null): StatusTone {
   if (run.operation === 'simulated_execution') return 'success'
   if (run.operation === 'execution') return run.execution_result?.status === 'succeeded' ? 'success' : 'danger'
-  if (run.operation === 'execution_gate' && run.nexus_result?.decision === 'require_approval') {
-    return approvalStatusTone(approval?.status || run.nexus_result.approval_status || 'pending')
+  const governance = governanceResult(run)
+  if (run.operation === 'execution_gate' && governance?.decision === 'require_approval') {
+    return approvalStatusTone(approval?.status || governance.approval_status || 'pending')
   }
   const decision = formatRunDecision(run, approval)
   return decision === 'Allowed' || decision === 'Pass' ? 'success' : 'danger'
@@ -3438,51 +3491,55 @@ function executionGateTone(gate: VirployeeExecutionGate | null): StatusTone {
   return gate.execution_gate.decision === 'pass' ? 'success' : 'danger'
 }
 
-function formatNexusTrace(run: VirployeeRunTrace, approval?: Approval | null): string {
+function formatGovernanceTrace(run: VirployeeRunTrace, approval?: Approval | null): string {
   if (run.operation === 'simulated_execution') {
     return run.execution_result?.external_effects ? 'External effects recorded' : 'No external effects'
   }
   if (run.operation === 'execution') return run.execution_result?.status === 'succeeded' ? 'Execution completed' : 'Execution failed'
-  if (!run.nexus_result) return 'Nexus not called'
-  if (!run.nexus_result.available) return 'Nexus unavailable'
-  if (run.nexus_result.decision === 'allow') return 'Allowed by Nexus'
-  if (run.nexus_result.decision === 'deny') return 'Denied by Nexus'
-  if (run.nexus_result.decision === 'require_approval') {
-    const status = approval?.status || run.nexus_result.approval_status
+  const governance = governanceResult(run)
+  if (!governance) return 'Governance not called'
+  if (!governance.available) return 'Governance unavailable'
+  if (governance.decision === 'allow') return 'Allowed by governance'
+  if (governance.decision === 'deny') return 'Denied by governance'
+  if (governance.decision === 'require_approval') {
+    const status = approval?.status || governance.approval_status
     return status ? `Requires human approval · ${formatApprovalStatus(status)}` : 'Requires human approval'
   }
-  return run.nexus_result.decision ? `Nexus ${run.nexus_result.decision}` : 'Nexus checked'
+  return governance.decision ? `Governance ${governance.decision}` : 'Governance checked'
 }
 
-function nexusTraceTone(run?: VirployeeRunTrace | null, approval?: Approval | null): StatusTone {
+function governanceTraceTone(run?: VirployeeRunTrace | null, approval?: Approval | null): StatusTone {
   if (!run) return 'muted'
   if (run.operation === 'simulated_execution') return run.execution_result?.external_effects ? 'warning' : 'success'
   if (run.operation === 'execution') return run.execution_result?.status === 'succeeded' ? 'success' : 'danger'
-  if (!run.nexus_result) return 'muted'
-  if (!run.nexus_result.available || run.nexus_result.decision === 'deny') return 'danger'
-  if (run.nexus_result.decision === 'require_approval') {
-    return approvalStatusTone(approval?.status || run.nexus_result.approval_status || 'pending')
+  const governance = governanceResult(run)
+  if (!governance) return 'muted'
+  if (!governance.available || governance.decision === 'deny') return 'danger'
+  if (governance.decision === 'require_approval') {
+    return approvalStatusTone(approval?.status || governance.approval_status || 'pending')
   }
-  if (run.nexus_result.decision === 'allow') return 'success'
+  if (governance.decision === 'allow') return 'success'
   return 'muted'
 }
 
-function formatNexusReason(run: VirployeeRunTrace): string {
+function formatGovernanceReason(run: VirployeeRunTrace): string {
   if (run.operation === 'simulated_execution') return run.execution_result?.message || ''
   if (run.operation === 'execution') return run.execution_result?.message || ''
-  if (!run.nexus_result) return ''
-  return run.nexus_result.error || run.nexus_result.decision_reason || run.nexus_result.status || ''
+  const governance = governanceResult(run)
+  if (!governance) return ''
+  return governance.error || governance.decision_reason || governance.status || ''
 }
 
 function formatApprovalTrace(run: VirployeeRunTrace, approval?: Approval | null): string {
-  const approvalID = run.nexus_result?.approval_id || run.execution_result?.approval_id
+  const governance = governanceResult(run)
+  const approvalID = governance?.approval_id || run.execution_result?.approval_id
   if (!approvalID) return ''
-  const status = approval?.status || run.nexus_result?.approval_status || run.execution_result?.approval_status || 'pending'
+  const status = approval?.status || governance?.approval_status || run.execution_result?.approval_status || 'pending'
   return `Approval ${shortHash(approvalID)} · ${formatApprovalStatus(status)}`
 }
 
 function approvalTraceTone(run?: VirployeeRunTrace | null, approval?: Approval | null): StatusTone {
-  return approvalStatusTone(approval?.status || run?.nexus_result?.approval_status || '')
+  return approvalStatusTone(approval?.status || governanceResult(run)?.approval_status || '')
 }
 
 function formatApprovalDecision(approval: Approval): string {

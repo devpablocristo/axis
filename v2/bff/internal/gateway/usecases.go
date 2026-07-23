@@ -59,10 +59,17 @@ func (u *UseCases) NexusTargetURL(requestPath, rawQuery string) string {
 }
 
 func parseBaseURL(value string) (*url.URL, error) {
-	return url.Parse(strings.TrimRight(strings.TrimSpace(value), "/"))
+	value = strings.TrimRight(strings.TrimSpace(value), "/")
+	if value == "" {
+		return nil, nil
+	}
+	return url.Parse(value)
 }
 
 func targetURL(baseURL *url.URL, requestPath, rawQuery string) string {
+	if baseURL == nil || strings.TrimSpace(baseURL.Scheme) == "" || strings.TrimSpace(baseURL.Host) == "" {
+		return ""
+	}
 	target := *baseURL
 	appPath := strings.TrimPrefix(requestPath, "/api")
 	if appPath == requestPath {

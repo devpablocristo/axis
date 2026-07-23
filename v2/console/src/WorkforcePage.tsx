@@ -31,7 +31,7 @@ type ReassignmentDraft = {
   reason: string
 }
 
-export function WorkforcePage({ orgId, principalId, organizationName }: WorkforcePageProps) {
+export function WorkforcePage({ orgId, principalId }: WorkforcePageProps) {
   const [subjects, setSubjects] = useState<WorkSubject[]>([])
   const [pools, setPools] = useState<RoutingPool[]>([])
   const [jobRoles, setJobRoles] = useState<JobRole[]>([])
@@ -137,11 +137,6 @@ export function WorkforcePage({ orgId, principalId, organizationName }: Workforc
 
   return (
     <section className="page-section workforce-page">
-      <div className="card workforce-summary">
-        <div className="card-header"><h2>Stable workforce assignments</h2></div>
-        <p>Owner organization: <strong>{organizationName || 'Current organization organization'}</strong></p>
-        <p className="axis-muted">Each subject keeps one Virployee in a pool; one Virployee can serve several isolated subjects up to its capacity.</p>
-      </div>
       {error ? <p role="alert" className="iam-control__inline-error">{error}</p> : null}
       {notice ? <p role="status" className="iam-control__inline-note">{notice}</p> : null}
       {loading ? <div className="spinner" /> : (

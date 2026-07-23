@@ -43,7 +43,7 @@ func TestCapabilityMustConformBeforeAssignmentAndActivation(t *testing.T) {
 	repo := &fakeCapabilityRepo{rows: map[uuid.UUID]domain.Capability{id: {
 		ID: id, OrgID: "organization-1", CapabilityKey: "diagnosis.reports.create", Name: "Create diagnosis",
 		RequiredAutonomy: virployeedomain.AutonomyA3, RiskClass: "high", SideEffectClass: "write",
-		RequiresNexusApproval: true, EvidenceRequired: true, PromotionState: domain.PromotionDraft,
+		RequiresGovernanceApproval: true, EvidenceRequired: true, PromotionState: domain.PromotionDraft,
 	}}}
 	uc, err := NewUseCases(repo)
 	if err != nil {
@@ -96,7 +96,7 @@ func TestConformanceFailsClosedForMissingPoliciesAndPlainSecret(t *testing.T) {
 	}
 	manifest.SecretRefs = []string{"executor-password-in-plain-text"}
 	capability := domain.Capability{
-		OrgID: "organization-1", SideEffectClass: "write", RequiresNexusApproval: true, EvidenceRequired: true,
+		OrgID: "organization-1", SideEffectClass: "write", RequiresGovernanceApproval: true, EvidenceRequired: true,
 		Manifest: manifest, ManifestHash: hash,
 	}
 	report, err := validateConformance(context.Background(), capability, &fakeQuotaPolicyChecker{allowed: false})

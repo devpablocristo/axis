@@ -54,6 +54,23 @@ func (h *Handler) Routes(router gin.IRouter) {
 	router.Any("/quota-policies/*path", h.ForwardCompanion)
 	router.Any("/learning", h.ForwardCompanion)
 	router.Any("/learning/*path", h.ForwardCompanion)
+	router.Any("/prompts", h.ForwardCompanion)
+	router.Any("/prompts/*path", h.ForwardCompanion)
+	router.Any("/prompt-versions", h.ForwardCompanion)
+	router.Any("/prompt-versions/*path", h.ForwardCompanion)
+	router.Any("/prompt-bindings", h.ForwardCompanion)
+	router.Any("/prompt-bindings/*path", h.ForwardCompanion)
+	router.Any("/prompt-resolution", h.ForwardCompanion)
+	router.Any("/evaluation-suites", h.ForwardCompanion)
+	router.Any("/evaluation-suites/*path", h.ForwardCompanion)
+	router.Any("/evaluation-runs", h.ForwardCompanion)
+	router.Any("/evaluation-runs/*path", h.ForwardCompanion)
+	router.Any("/watchers", h.ForwardCompanion)
+	router.Any("/watchers/*path", h.ForwardCompanion)
+	router.Any("/watcher-versions", h.ForwardCompanion)
+	router.Any("/watcher-versions/*path", h.ForwardCompanion)
+	router.Any("/finops", h.ForwardCompanion)
+	router.Any("/finops/*path", h.ForwardCompanion)
 	router.Any("/runtime/mcp-policy", h.ForwardCompanion)
 	router.Any("/runtime/mcp-policy/*path", h.ForwardCompanion)
 	router.Any("/runtime/mcp-invocations", h.ForwardCompanion)
@@ -103,6 +120,7 @@ func (h *Handler) Routes(router gin.IRouter) {
 	router.Any("/governance-policy-evaluations", h.ForwardNexus)
 	router.Any("/governance-policy-changelog", h.ForwardNexus)
 	router.GET("/operations/overview", h.OperationsOverview)
+	router.GET("/operations/product-service-map", h.ProductServiceMap)
 	router.Any("/operations/fleet", h.ForwardCompanion)
 	router.Any("/operations/reconciliations", h.ForwardOperationsReconciliations)
 	router.Any("/operations/reconciliations/*path", h.ForwardOperationsReconciliations)
@@ -120,6 +138,76 @@ func (h *Handler) Routes(router gin.IRouter) {
 	router.Any("/operations/legal-holds/*path", h.ForwardNexus)
 	router.Any("/operations/exports", h.ForwardNexus)
 	router.Any("/operations/exports/*path", h.ForwardNexus)
+}
+
+func (h *Handler) ProductServiceMap(c *gin.Context) {
+	resolved, err := h.ucs.Resolve(c.Request.Context(), gatewaydomain.ResolveInput{OrgID: c.GetHeader("X-Org-ID"), ProductSurface: c.GetHeader("X-Product-Surface"), PrincipalID: h.principalID(c)})
+	if err != nil {
+		ginmw.Respond(c, err)
+		return
+	}
+	service := strings.ToLower(strings.TrimSpace(c.DefaultQuery("service", "all")))
+	if service != "all" && service != "companion" && service != "nexus" {
+		ginmw.WriteError(c, http.StatusBadRequest, "invalid_service", "service must be all, companion or nexus")
+		return
+	}
+	targets := map[string]func(string, string) string{}
+	if service == "all" || service == "companion" {
+		targets["companion"] = h.ucs.TargetURL
+	}
+	if service == "all" || service == "nexus" {
+		targets["nexus"] = h.ucs.NexusTargetURL
+	}
+	type result struct {
+		name   string
+		items  []any
+		status int
+		err    error
+	}
+	results := make(chan result, len(targets))
+	query := "window=" + c.DefaultQuery("window", "24h")
+	for name, target := range targets {
+		go func(name string, target func(string, string) string) {
+			req, reqErr := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, target("/api/operations/served-products", query), nil)
+			if reqErr != nil {
+				results <- result{name: name, err: reqErr}
+				return
+			}
+			h.setTrustedHeaders(req, resolved)
+			resp, callErr := h.client.Do(req)
+			if callErr != nil {
+				results <- result{name: name, err: callErr}
+				return
+			}
+			defer func() { _ = resp.Body.Close() }()
+			body, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+			var envelope struct {
+				Items []any `json:"items"`
+			}
+			if readErr == nil && resp.StatusCode < 500 {
+				readErr = json.Unmarshal(body, &envelope)
+			}
+			results <- result{name: name, items: envelope.Items, status: resp.StatusCode, err: readErr}
+		}(name, target)
+	}
+	items, services, available := []any{}, map[string]string{}, 0
+	for range len(targets) {
+		item := <-results
+		if item.err != nil || item.status >= 500 {
+			services[item.name] = "unavailable"
+			continue
+		}
+		services[item.name] = "available"
+		items = append(items, item.items...)
+		available++
+	}
+	status := "healthy"
+	if available == 0 {
+		status = "unavailable"
+	} else if available < len(targets) {
+		status = "partial"
+	}
+	ginmw.WriteJSON(c, http.StatusOK, gin.H{"status": status, "services": services, "items": items})
 }
 
 func (h *Handler) ForwardVirployees(c *gin.Context) {
@@ -238,8 +326,10 @@ func (h *Handler) OperationsOverview(c *gin.Context) {
 
 func (h *Handler) setTrustedHeaders(req *http.Request, resolved gatewaydomain.ResolvedContext) {
 	req.Header.Set("X-Actor-ID", resolved.PrincipalID)
+	req.Header.Set("X-Axis-Principal-Type", "human")
 	req.Header.Set("X-Org-ID", resolved.OrgID)
-	req.Header.Set("X-Org-ID", resolved.OrgID)
+	req.Header.Set("X-Product-ID", resolved.Product.ID.String())
+	req.Header.Set("X-Axis-Product-ID", resolved.Product.ID.String())
 	req.Header.Set("X-Product-Surface", resolved.ProductSurface)
 	req.Header.Set("X-Axis-Forwarded-By", "bff-v2")
 	req.Header.Set("X-Axis-Org-Role", resolved.MembershipRole)
@@ -286,9 +376,18 @@ func (h *Handler) forward(c *gin.Context, targetURL func(string, string) string,
 	req.Header.Del("X-Axis-Permissions")
 	req.Header.Del("X-Permissions")
 	req.Header.Del("X-Roles")
+	req.Header.Del("X-Product-ID")
+	req.Header.Del("X-Axis-Product-ID")
+	req.Header.Del("X-Axis-Integration-ID")
+	req.Header.Del("X-Axis-Integration-Version")
+	req.Header.Del("X-Axis-Integration-Hash")
+	req.Header.Del("X-Axis-Access-Mode")
+	req.Header.Del("X-Axis-Principal-Type")
 	req.Header.Set("X-Actor-ID", resolved.PrincipalID)
+	req.Header.Set("X-Axis-Principal-Type", "human")
 	req.Header.Set("X-Org-ID", resolved.OrgID)
-	req.Header.Set("X-Org-ID", resolved.OrgID)
+	req.Header.Set("X-Product-ID", resolved.Product.ID.String())
+	req.Header.Set("X-Axis-Product-ID", resolved.Product.ID.String())
 	req.Header.Set("X-Product-Surface", resolved.ProductSurface)
 	req.Header.Set("X-Axis-Forwarded-By", "bff-v2")
 	req.Header.Set("X-Axis-Org-Role", resolved.MembershipRole)
