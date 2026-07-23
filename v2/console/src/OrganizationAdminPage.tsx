@@ -7,12 +7,11 @@ type OrganizationAdminView = 'users' | 'orgs' | 'products'
 
 type OrganizationAdminPageProps = {
   organizationId: string
-  orgId: string
   principalId: string
   onSessionChanged: () => void | Promise<void>
 }
 
-export function OrganizationAdminPage({ organizationId, orgId, principalId, onSessionChanged }: OrganizationAdminPageProps) {
+export function OrganizationAdminPage({ organizationId, principalId, onSessionChanged }: OrganizationAdminPageProps) {
   const [view, setView] = useState<OrganizationAdminView>('users')
 
   return (
@@ -52,7 +51,7 @@ export function OrganizationAdminPage({ organizationId, orgId, principalId, onSe
       ) : view === 'products' ? (
         <ProductsPage organizationId={organizationId} principalId={principalId} onSessionChanged={onSessionChanged} />
       ) : (
-        <UsersPage orgId={orgId} principalId={principalId} />
+        <UsersPage orgId={organizationId} principalId={principalId} />
       )}
     </div>
   )

@@ -272,7 +272,6 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
         ) : activePage === 'admin' ? (
           <OrganizationAdminPage
             organizationId={selectedOrganization?.id ?? ''}
-            orgId={selectedProduct?.id ?? ''}
             principalId={principalId}
             onSessionChanged={refresh}
           />
