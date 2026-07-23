@@ -27,6 +27,7 @@ type RequiredCapability struct {
 
 type Intent struct {
 	Matched       bool
+	CapabilityID  string
 	CapabilityKey string
 	Domain        string
 	Resource      string
@@ -34,6 +35,9 @@ type Intent struct {
 	Confidence    float64
 	MatchedBy     []string
 	Rules         []IntentRule
+	// Arguments are proposed data only. Companion validates them against the
+	// assigned capability manifest before a PreparedActionV2 can be emitted.
+	Arguments map[string]any
 
 	// Provenance of the proposal. The deterministic matcher sets
 	// ProposedBy="deterministic"; the LLM runtime sets "llm" plus ModelID and
@@ -98,6 +102,26 @@ type Result struct {
 	Reason             string
 	NextStep           string
 	Draft              Draft
+	PreparedAction     *PreparedActionProposal
+}
+
+// PreparedActionProposal is the transport-neutral preview returned by dry-run.
+// It is reconstructed and rebound to server-side authority at the execution
+// gate; clients cannot use these fields to select executable code.
+type PreparedActionProposal struct {
+	SchemaVersion     string         `json:"schema_version"`
+	CapabilityID      string         `json:"capability_id"`
+	ManifestHash      string         `json:"manifest_hash"`
+	ExecutorBindingID string         `json:"executor_binding_id"`
+	Operation         string         `json:"operation"`
+	InputSchemaHash   string         `json:"input_schema_hash"`
+	OutputSchemaHash  string         `json:"output_schema_hash"`
+	Arguments         map[string]any `json:"arguments"`
+	RequiredAutonomy  string         `json:"required_autonomy"`
+	IdempotencyHash   string         `json:"idempotency_hash,omitempty"`
+	PrincipalType     string         `json:"principal_type,omitempty"`
+	PrincipalID       string         `json:"principal_id,omitempty"`
+	InputSchema       map[string]any `json:"input_schema,omitempty"`
 }
 
 type matchedIntent struct {
@@ -167,12 +191,17 @@ func EvaluateWithProposal(input string, ctx runtimecontext.Context, proposal Pro
 	}
 
 	required := RequiredCapability{
+		ID:               intent.CapabilityID,
 		CapabilityKey:    intent.CapabilityKey,
 		RequiredAutonomy: proposal.RequiredAutonomy,
 		Matched:          false,
 	}
-	if matched, ok := findCapability(ctx.Capabilities, intent.CapabilityKey); ok {
+	if matched, ok := findCapabilityForIntent(ctx.Capabilities, intent); ok {
+		intent.CapabilityID = matched.ID.String()
+		intent.CapabilityKey = matched.CapabilityKey
+		result.Intent = intent
 		required.ID = matched.ID.String()
+		required.CapabilityKey = matched.CapabilityKey
 		required.Name = matched.Name
 		required.RequiredAutonomy = matched.RequiredAutonomy
 		required.Matched = true
@@ -274,56 +303,7 @@ func MatchIntent(input string, capabilities []capabilitydomain.Capability) match
 // a fallback; catalogForCapabilities overrides it with the assigned
 // capability's actual required autonomy.
 func knownIntentDefinitions() []intentDefinition {
-	resourceKeywords := []string{
-		"calendar",
-		"calendario",
-		"event",
-		"events",
-		"evento",
-		"eventos",
-		"reunion",
-		"reuniones",
-		"meeting",
-		"meetings",
-	}
-	return []intentDefinition{
-		{
-			Domain:           "calendar",
-			Resource:         "events",
-			Action:           "create",
-			CapabilityKey:    "calendar.events.create",
-			RequiredAutonomy: virployeedomain.AutonomyA2,
-			ResourceKeywords: resourceKeywords,
-			ActionKeywords:   []string{"crear", "crea", "create", "agendar", "agenda", "agende", "programar", "programa", "schedule", "book"},
-		},
-		{
-			Domain:           "calendar",
-			Resource:         "events",
-			Action:           "read",
-			CapabilityKey:    "calendar.events.read",
-			RequiredAutonomy: virployeedomain.AutonomyA1,
-			ResourceKeywords: resourceKeywords,
-			ActionKeywords:   []string{"leer", "lee", "ver", "listar", "lista", "mostrar", "mostra", "consultar", "consulta", "read", "list", "show", "find", "buscar", "busca", "que", "tengo", "hay"},
-		},
-		{
-			Domain:           "calendar",
-			Resource:         "events",
-			Action:           "update",
-			CapabilityKey:    "calendar.events.update",
-			RequiredAutonomy: virployeedomain.AutonomyA2,
-			ResourceKeywords: resourceKeywords,
-			ActionKeywords:   []string{"editar", "edita", "actualizar", "actualiza", "modificar", "modifica", "cambiar", "cambia", "reprogramar", "reprograma", "update", "change", "reschedule"},
-		},
-		{
-			Domain:           "calendar",
-			Resource:         "events",
-			Action:           "delete",
-			CapabilityKey:    "calendar.events.delete",
-			RequiredAutonomy: virployeedomain.AutonomyA2,
-			ResourceKeywords: resourceKeywords,
-			ActionKeywords:   []string{"eliminar", "elimina", "borrar", "borra", "cancelar", "cancela", "delete", "remove", "cancel"},
-		},
-	}
+	return legacyIntentDefinitions()
 }
 
 // catalogForCapabilities builds the intent catalog from ONLY the capabilities
@@ -400,28 +380,20 @@ func buildDraft(input string, intent Intent, decision Decision) Draft {
 			Notes:   []string{"No external action will be executed."},
 		}
 	}
-	switch intent.CapabilityKey {
-	case "calendar.events.create":
-		return buildCalendarEventCreateDraft(input, intent, decision)
-	case "calendar.events.read":
-		return buildCalendarEventReadDraft(input, intent, decision)
-	case "calendar.events.update":
-		return buildCalendarEventUpdateDraft(input, intent, decision)
-	case "calendar.events.delete":
-		return buildCalendarEventDeleteDraft(input, intent, decision)
-	default:
-		status := DraftStatusNotApplicable
-		if decision == DecisionBlocked {
-			status = DraftStatusBlocked
-		}
-		return Draft{
-			Status:  status,
-			Action:  intent.CapabilityKey,
-			Kind:    "generic_action",
-			Summary: "No structured draft is available for this action yet.",
-			Fields:  []DraftField{},
-			Notes:   []string{"No external action will be executed."},
-		}
+	if draft, ok := legacyDraft(input, intent, decision); ok {
+		return draft
+	}
+	status := DraftStatusNotApplicable
+	if decision == DecisionBlocked {
+		status = DraftStatusBlocked
+	}
+	return Draft{
+		Status:  status,
+		Action:  intent.CapabilityKey,
+		Kind:    "generic_action",
+		Summary: "No structured draft is available for this action yet.",
+		Fields:  []DraftField{},
+		Notes:   []string{"No external action will be executed."},
 	}
 }
 
@@ -650,6 +622,23 @@ func findCapability(items []capabilitydomain.Capability, key string) (capability
 		}
 	}
 	return capabilitydomain.Capability{}, false
+}
+
+func findCapabilityForIntent(items []capabilitydomain.Capability, intent Intent) (capabilitydomain.Capability, bool) {
+	capabilityID := strings.TrimSpace(intent.CapabilityID)
+	if capabilityID != "" {
+		for _, item := range items {
+			if item.ID.String() != capabilityID {
+				continue
+			}
+			if intent.CapabilityKey != "" && item.CapabilityKey != intent.CapabilityKey {
+				return capabilitydomain.Capability{}, false
+			}
+			return item, true
+		}
+		return capabilitydomain.Capability{}, false
+	}
+	return findCapability(items, intent.CapabilityKey)
 }
 
 func firstMatchedKeyword(text string, keywords []string) (string, bool) {

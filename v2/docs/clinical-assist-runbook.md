@@ -63,7 +63,8 @@ con **referencias a documentos** y recibe un **panorama diagnóstico**. El arco:
 
 ```
 consumer → POST {AXIS_COMPANION_BASE_URL}/v1/assist-runs  [X-API-Key]
-        → BFF inbound: la key → organization + product surface + virployee + service principal
+        → BFF inbound: credencial persistida → organization + product + instalación + service principal
+        → routing pool: subject + profesión → Virployee estable
         → companion POST /v1/virployees/{id}/assist  (X-Axis-Internal-Token + X-Org-ID + X-Actor-ID)
         → companion: reserva caso+corrida (idempotentes) → staging/índice del corpus
                      → policy selector: direct | consult | needs_human
@@ -76,19 +77,19 @@ efectos externos ni aprobación (read/explain). El `output` es el informe del m�
 (author, summary, conditions con evidencia, recommended_next_steps, urgent_flags,
 information_needed, disclaimer).
 
-## Config (local)
+## Instalación local
 
 - **companion:** `COMPANION_V2_RUNTIME_BASE_URL=http://runtime-v2:8080` (ya en el compose;
   sin esto el answerer queda nil y el assist devuelve "runtime answerer is not configured").
-- **BFF:** `BFF_V2_PRODUCT_API_KEYS` con la credencial del consumidor. El quinto
-  campo (`routing_pool_id`) es opcional; cuando está presente el BFF resuelve la
-  asignación estable antes de enviar Assist. Sin él se conserva el Virployee
-  fijo sólo para integraciones legacy fuera de pools. Formato
-  `<apiKey>=<organization>|<virployee>|<actor>|<product>`. Ejemplo neutro:
-  ```
-  BFF_V2_PRODUCT_API_KEYS=local-key=8c3a623a-f9d2-44d2-a71e-e9c14992031e|3e5a24e1-cfe2-44c9-8c15-698de5dade5a|service:external-product|external-product|POOL_UUID
-  ```
-  Ponelo en `.env` o `docker-compose.override.yml` (no commitear la key real).
+- **BFF:** crear una versión `axis.product-integration.v2` desde
+  `Administración → Product integration`, declarar BFF + Companion, las APIs,
+  pools/Virployees, capabilities y eventos autorizados, validar y activar.
+  Después crear una credencial persistida con scopes `assist.write` y/o
+  `events.write`. El secreto aparece una sola vez; Axis guarda sólo su hash.
+- La credencial no fija ni permite elegir un Virployee. Cuando el contrato
+  autoriza un pool, BFF resuelve `subject + profesión/pool → Virployee` y
+  conserva la asignación estable. Un entrypoint directo sólo funciona si su ID
+  está declarado explícitamente.
 - El consumidor debe crear y asignar el **Virployee** apropiado dentro de su
   organization. El LLM real requiere credenciales del runtime (Vertex/ADC); sin
   ellas corre en **Echo** y la corrida sale `degraded` (sin diagnóstico real, pero el arco
@@ -98,7 +99,7 @@ information_needed, disclaimer).
 
 ```bash
 cd v2 && make up
-# smoke (AXIS_API_KEY = la key que configuraste en BFF_V2_PRODUCT_API_KEYS):
+# smoke (AXIS_API_KEY = la credencial creada para la instalación activa):
 curl -sS -X POST http://127.0.0.1:19080/v1/assist-runs \
   -H "X-API-Key: $AXIS_API_KEY" -H "Idempotency-Key: diagnosis-g42-v1" \
   -H "Content-Type: application/json" \

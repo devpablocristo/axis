@@ -8,6 +8,7 @@ import (
 
 	"github.com/devpablocristo/companion-v2/internal/artifacts"
 	capabilitydomain "github.com/devpablocristo/companion-v2/internal/capabilities/usecases/domain"
+	"github.com/devpablocristo/companion-v2/internal/invocation"
 	jobroledomain "github.com/devpablocristo/companion-v2/internal/jobroles/usecases/domain"
 	"github.com/devpablocristo/companion-v2/internal/knowledgebases"
 	"github.com/devpablocristo/companion-v2/internal/memories"
@@ -50,7 +51,10 @@ type ExecutionRepositoryPort interface {
 	BeginExecution(ctx context.Context, orgID string, virployeeID uuid.UUID, preparedActionID uuid.UUID, idempotencyKey string) (ExecutionAttempt, bool, error)
 	GetExecutionByPreparedAction(ctx context.Context, orgID string, preparedActionID uuid.UUID) (ExecutionAttempt, error)
 	CompleteExecution(ctx context.Context, orgID string, id uuid.UUID, status, resourceID string, result map[string]any, executionError string, durationMS int64) (ExecutionAttempt, error)
-	CreateLocalCalendarEvent(ctx context.Context, orgID string, virployeeID uuid.UUID, attempt ExecutionAttempt, action preparedactions.Action) (string, error)
+}
+
+type ExecutionRepositoryV2Port interface {
+	SavePreparedActionV2(ctx context.Context, orgID string, virployeeID uuid.UUID, checkID, approvalID string, capabilityID uuid.UUID, capabilityKey, payloadHash, bindingHash string, action preparedactions.PreparedActionV2) (PreparedActionRecord, error)
 }
 
 type JobRoleReaderPort interface {
@@ -126,6 +130,14 @@ type ActionExecutorPort interface {
 	Execute(ctx context.Context, orgID string, virployeeID uuid.UUID, attempt ExecutionAttempt, action preparedactions.Action) (ExecutionOutcome, error)
 }
 
+type ActionExecutorV2Port interface {
+	ExecuteV2(ctx context.Context, orgID string, virployeeID uuid.UUID, attempt ExecutionAttempt, action preparedactions.PreparedActionV2) (ExecutionOutcome, error)
+}
+
+type LegacyCalendarStorePort interface {
+	CreateLocalCalendarEvent(ctx context.Context, orgID string, virployeeID uuid.UUID, attempt ExecutionAttempt, action preparedactions.Action) (string, error)
+}
+
 type MemoryReaderPort interface {
 	RecallInternal(context.Context, string, uuid.UUID, string, int) ([]memories.Recalled, error)
 }
@@ -156,7 +168,9 @@ type GovernedReadInvocation struct {
 	AssignmentID           uuid.UUID
 	AssignmentVersion      int64
 	ProductSurface         string
+	ProductID              string
 	RepositoryGeneration   string
+	CapabilityID           uuid.UUID
 	CapabilityKey          string
 	CapabilityManifestHash string
 	IdempotencyKey         string
@@ -236,7 +250,10 @@ type ArtifactIngestorPort interface {
 
 type AssistMetadata struct {
 	AssistType              string
+	ProductID               string
 	ProductSurface          string
+	Invocation              invocation.Context
+	CapabilityID            uuid.UUID
 	CapabilityKey           string
 	CapabilityManifestHash  string
 	SubjectID               string
@@ -249,6 +266,35 @@ type AssistMetadata struct {
 	MemoryContextHash       string
 	JobRoleSnapshotHash     string
 	SourceAuthorizationHash string
+	PromptBundleHash        string
+}
+
+type PromptResolution struct {
+	BundleHash string
+	Content    string
+	Versions   json.RawMessage
+}
+
+type PromptResolverPort interface {
+	ResolvePrompt(context.Context, string, string, uuid.UUID, string) (PromptResolution, error)
+}
+
+type FinOpsUsage struct {
+	OrgID, ProductID, Area, Service  string
+	VirployeeID                      uuid.UUID
+	CapabilityKey, CapabilityVersion string
+	Model                            string
+	InputUnits, OutputUnits          int64
+	EstimatedCostMicroUSD            int64
+	IdempotencyKey                   string
+}
+
+type FinOpsRecorderPort interface {
+	RecordFinOpsUsage(context.Context, FinOpsUsage) error
+}
+
+type AssistPromptContextRepositoryPort interface {
+	SetAssistPromptContext(context.Context, string, uuid.UUID, string, string, json.RawMessage) (AssistRun, error)
 }
 
 // AssistRepositoryPort persists product assist runs (reserve-before-LLM).
@@ -311,6 +357,7 @@ type UseCases struct {
 	approvals             ApprovalReaderPort
 	authority             AuthorityEvaluatorPort
 	executors             map[string]ActionExecutorPort
+	executorBindings      map[string]ActionExecutorV2Port
 	memories              MemoryReaderPort
 	knowledge             KnowledgeRetrieverPort
 	governedReads         GovernedReadInvokerPort
@@ -329,10 +376,16 @@ type UseCases struct {
 	mcpContext            MCPExecutionContextValidatorPort
 	quota                 quotas.QuotaPort
 	usageLedger           quotas.UsageLedgerPort
+	promptResolver        PromptResolverPort
+	finops                FinOpsRecorderPort
 	lifecycle             *lifecycle.Service
 }
 
 func (u *UseCases) SetAssistQueue(queue AssistQueuePort) { u.assistQueue = queue }
+
+func (u *UseCases) SetPromptResolver(resolver PromptResolverPort) { u.promptResolver = resolver }
+
+func (u *UseCases) SetFinOpsRecorder(recorder FinOpsRecorderPort) { u.finops = recorder }
 
 func (u *UseCases) SetCoordinationQueue(queue CoordinationQueuePort) { u.coordinationQueue = queue }
 
@@ -365,6 +418,7 @@ func NewUseCases(repo RepositoryPort, jobRoles ...JobRoleReaderPort) (*UseCases,
 		capabilities:     noopCapabilityValidator{},
 		profileTemplates: noopProfileTemplateReader{},
 		executors:        map[string]ActionExecutorPort{},
+		executorBindings: map[string]ActionExecutorV2Port{},
 		lifecycle:        service,
 	}
 	if executionRepo, ok := repo.(ExecutionRepositoryPort); ok {
@@ -446,6 +500,16 @@ func (u *UseCases) RegisterExecutor(action string, executor ActionExecutorPort) 
 	action = strings.TrimSpace(action)
 	if action != "" && executor != nil {
 		u.executors[action] = executor
+	}
+}
+
+// RegisterExecutorBinding installs a provider-neutral outbound adapter. V2
+// prepared actions dispatch only through this registry and never by capability
+// key, product surface or provider name.
+func (u *UseCases) RegisterExecutorBinding(bindingID string, executor ActionExecutorV2Port) {
+	bindingID = strings.ToLower(strings.TrimSpace(bindingID))
+	if bindingID != "" && executor != nil {
+		u.executorBindings[bindingID] = executor
 	}
 }
 
@@ -605,18 +669,18 @@ func (u *UseCases) dryRun(ctx context.Context, orgID string, id uuid.UUID, input
 			// matcher, which is scoped to the assigned capabilities and still
 			// passes through the execution gate and Nexus.
 			slog.WarnContext(ctx, "runtime_propose_failed_fallback_deterministic", "error", runtraces.RedactText(err.Error()))
-			return dryrun.Evaluate(input, runtimeCtx), nil
+			return attachRuntimeActionPreview(dryrun.Evaluate(input, runtimeCtx))
 		}
 		u.recordProposalUsage(ctx, orgID, id, quotaID, proposal)
 		// Echo means no LLM is configured. Its empty proposal is transport
 		// success, not a semantic decision, so retain the scoped deterministic
 		// matcher used when the runtime is absent or unavailable.
 		if !proposal.Intent.Matched && proposal.Intent.ModelID == "echo" {
-			return dryrun.Evaluate(input, runtimeCtx), nil
+			return attachRuntimeActionPreview(dryrun.Evaluate(input, runtimeCtx))
 		}
-		return dryrun.EvaluateWithProposal(input, runtimeCtx, proposal), nil
+		return attachRuntimeActionPreview(dryrun.EvaluateWithProposal(input, runtimeCtx, proposal))
 	}
-	return dryrun.Evaluate(input, runtimeCtx), nil
+	return attachRuntimeActionPreview(dryrun.Evaluate(input, runtimeCtx))
 }
 
 func (u *UseCases) ExecutionGate(
@@ -638,7 +702,7 @@ func (u *UseCases) ExecutionGate(
 			return executiongate.Result{}, domainerr.Validation(err.Error())
 		}
 	}
-	return u.executionGate(ctx, orgID, id, input, confirmedDraft, principal, uuid.Nil, nil, "")
+	return u.executionGate(ctx, orgID, id, input, confirmedDraft, nil, principal, uuid.Nil, nil, "")
 }
 
 // ExecutionGateWithAssistRun is the HTTP-facing bound variant. assistRunID is
@@ -649,6 +713,7 @@ func (u *UseCases) ExecutionGateWithAssistRun(
 	id uuid.UUID,
 	input string,
 	confirmedDraft *executiongate.ConfirmedDraft,
+	requestedPreparedAction *preparedactions.PreparedActionV2,
 	principal executiongate.PrincipalContext,
 	assistRunID uuid.UUID,
 ) (executiongate.Result, error) {
@@ -656,7 +721,7 @@ func (u *UseCases) ExecutionGateWithAssistRun(
 	if err != nil {
 		return executiongate.Result{}, domainerr.Validation(err.Error())
 	}
-	return u.executionGate(ctx, orgID, id, input, confirmedDraft, normalized, assistRunID, nil, "")
+	return u.executionGate(ctx, orgID, id, input, confirmedDraft, requestedPreparedAction, normalized, assistRunID, nil, "")
 }
 
 // ExecutionGateFromMCP is the governed entrypoint used by the MCP facade. The
@@ -675,7 +740,7 @@ func (u *UseCases) ExecutionGateFromMCP(
 	if err != nil {
 		return executiongate.Result{}, domainerr.Validation(err.Error())
 	}
-	return u.executionGate(ctx, orgID, id, input, confirmedDraft, normalized, uuid.Nil, &binding, binding.CapabilityKey)
+	return u.executionGate(ctx, orgID, id, input, confirmedDraft, nil, normalized, uuid.Nil, &binding, binding.CapabilityKey)
 }
 
 func (u *UseCases) executionGate(
@@ -684,6 +749,7 @@ func (u *UseCases) executionGate(
 	id uuid.UUID,
 	input string,
 	confirmedDraft *executiongate.ConfirmedDraft,
+	requestedPreparedAction *preparedactions.PreparedActionV2,
 	principal executiongate.PrincipalContext,
 	assistRunID uuid.UUID,
 	mcpBinding *preparedactions.MCPContextBinding,
@@ -700,14 +766,29 @@ func (u *UseCases) executionGate(
 	if err != nil {
 		return executiongate.Result{}, err
 	}
-	if confirmedDraft != nil {
-		result, err = executiongate.ApplyConfirmedDraft(result, *confirmedDraft)
+	var preparedAction *preparedactions.Action
+	var preparedActionV2 *preparedactions.PreparedActionV2
+	if requestedPreparedAction != nil && confirmedDraft != nil {
+		return executiongate.Result{}, domainerr.Validation("only one prepared action confirmation may be provided")
+	}
+	if requestedPreparedAction != nil {
+		preparedActionV2, err = validateRequestedRuntimeAction(result, *requestedPreparedAction, principal)
 		if err != nil {
 			return executiongate.Result{}, domainerr.Validation(err.Error())
 		}
+	} else if confirmedDraft != nil {
+		result, preparedActionV2, err = prepareConfirmedActionV2(result, *confirmedDraft, principal)
+		if err != nil {
+			return executiongate.Result{}, domainerr.Validation(err.Error())
+		}
+		if preparedActionV2 == nil {
+			result, err = executiongate.ApplyConfirmedDraft(result, *confirmedDraft)
+			if err != nil {
+				return executiongate.Result{}, domainerr.Validation(err.Error())
+			}
+		}
 	}
-	var preparedAction *preparedactions.Action
-	if confirmedDraft != nil && result.Draft.Status == dryrun.DraftStatusReady {
+	if preparedActionV2 == nil && confirmedDraft != nil && result.Draft.Status == dryrun.DraftStatusReady {
 		prepared, prepareErr := preparedactions.FromReadyDraft(result.Draft)
 		if prepareErr != nil {
 			return executiongate.Result{}, domainerr.Validation(prepareErr.Error())
@@ -723,12 +804,18 @@ func (u *UseCases) executionGate(
 		return executiongate.Result{}, err
 	}
 	scopeResult, professionalScope, scopeEvaluated := u.evaluateProfessionalActionScope(
-		ctx, orgID, id, result.RuntimeContext.Virployee.JobRoleID, result.Intent.CapabilityKey, preparedAction,
+		ctx, orgID, id, result.RuntimeContext.Virployee.JobRoleID,
+		professionalActionScopeQueryV2(result.Intent.CapabilityKey, preparedAction, preparedActionV2),
 	)
 	if preparedAction != nil {
 		preparedAction.AssistContext = assistBinding
 		preparedAction.ProfessionalScope = professionalScope
 		preparedAction.MCPContext = mcpBinding
+	}
+	if preparedActionV2 != nil {
+		preparedActionV2.AssistContext = assistBinding
+		preparedActionV2.ProfessionalScope = professionalScope
+		preparedActionV2.MCPContext = mcpBinding
 	}
 	gate := executiongate.Evaluate(result)
 	if scopeEvaluated {
@@ -736,7 +823,11 @@ func (u *UseCases) executionGate(
 	}
 	var authority *executiongate.AuthorityCheckResult
 	if gate.Gate.Decision == executiongate.DecisionPass && u.authority != nil {
-		capability, ok := runtimeCapability(result.RuntimeContext.Capabilities, result.Intent.CapabilityKey)
+		capability, ok := runtimeCapabilityForIntent(
+			result.RuntimeContext.Capabilities,
+			result.Intent.CapabilityID,
+			result.Intent.CapabilityKey,
+		)
 		if !ok {
 			gate = executiongate.ApplyAuthorityUnavailable(gate)
 		} else {
@@ -749,7 +840,7 @@ func (u *UseCases) executionGate(
 			}
 		}
 	}
-	bindingHash, err := bindingHashForAuthorityContext(orgID, result, preparedAction, authority, assistBinding, professionalScope)
+	bindingHash, err := bindingHashForAuthorityContextV2(orgID, result, preparedAction, preparedActionV2, authority, assistBinding, professionalScope)
 	if err != nil {
 		return executiongate.Result{}, err
 	}
@@ -787,15 +878,33 @@ func (u *UseCases) executionGate(
 	}
 	gate.Governance = &governance
 	gate = executiongate.ApplyGovernance(gate, governance)
-	if preparedAction != nil && governance.Decision == "require_approval" {
-		payloadHash, hashErr := preparedAction.PayloadHash()
+	if (preparedAction != nil || preparedActionV2 != nil) && governance.Decision == "require_approval" {
+		var payloadHash string
+		var hashErr error
+		if preparedActionV2 != nil {
+			payloadHash, hashErr = preparedActionV2.PayloadHash()
+		} else {
+			payloadHash, hashErr = preparedAction.PayloadHash()
+		}
 		if hashErr != nil {
 			return executiongate.Result{}, hashErr
 		}
 		if u.executionRepo == nil {
 			return executiongate.Result{}, domainerr.Conflict("execution repository is not configured")
 		}
-		if _, saveErr := u.executionRepo.SavePreparedAction(ctx, orgID, id, governance.CheckID, governance.ApprovalID, result.Intent.CapabilityKey, payloadHash, bindingHash, *preparedAction); saveErr != nil {
+		if preparedActionV2 != nil {
+			v2Repo, ok := u.executionRepo.(ExecutionRepositoryV2Port)
+			if !ok {
+				return executiongate.Result{}, domainerr.Conflict("execution repository cannot persist prepared action v2")
+			}
+			capabilityID, parseErr := uuid.Parse(preparedActionV2.CapabilityID)
+			if parseErr != nil {
+				return executiongate.Result{}, domainerr.Conflict("prepared action capability id is invalid")
+			}
+			if _, saveErr := v2Repo.SavePreparedActionV2(ctx, orgID, id, governance.CheckID, governance.ApprovalID, capabilityID, result.Intent.CapabilityKey, payloadHash, bindingHash, *preparedActionV2); saveErr != nil {
+				return executiongate.Result{}, saveErr
+			}
+		} else if _, saveErr := u.executionRepo.SavePreparedAction(ctx, orgID, id, governance.CheckID, governance.ApprovalID, result.Intent.CapabilityKey, payloadHash, bindingHash, *preparedAction); saveErr != nil {
 			return executiongate.Result{}, saveErr
 		}
 		var parsedApprovalID uuid.UUID
@@ -807,11 +916,15 @@ func (u *UseCases) executionGate(
 			}
 		}
 		if strings.TrimSpace(governance.PolicySnapshotHash) != "" {
-			policyRepo, ok := u.executionRepo.(NexusPolicyPreparedActionRepositoryPort)
-			if !ok {
-				return executiongate.Result{}, domainerr.Conflict("execution repository cannot bind Nexus policy authority")
+			var bindErr error
+			if policyRepo, ok := u.executionRepo.(GovernancePolicyPreparedActionRepositoryPort); ok {
+				bindErr = policyRepo.BindPreparedActionGovernancePolicy(ctx, orgID, id, parsedApprovalID, governance.PolicySnapshotHash)
+			} else if legacyRepo, ok := u.executionRepo.(NexusPolicyPreparedActionRepositoryPort); ok {
+				bindErr = legacyRepo.BindPreparedActionNexusPolicy(ctx, orgID, id, parsedApprovalID, governance.PolicySnapshotHash)
+			} else {
+				return executiongate.Result{}, domainerr.Conflict("execution repository cannot bind governance policy authority")
 			}
-			if bindErr := policyRepo.BindPreparedActionNexusPolicy(ctx, orgID, id, parsedApprovalID, governance.PolicySnapshotHash); bindErr != nil {
+			if bindErr != nil {
 				return executiongate.Result{}, bindErr
 			}
 		}
@@ -839,6 +952,23 @@ func runtimeCapability(capabilities []capabilitydomain.Capability, key string) (
 		}
 	}
 	return capabilitydomain.Capability{}, false
+}
+
+func runtimeCapabilityForIntent(
+	capabilities []capabilitydomain.Capability,
+	capabilityID string,
+	key string,
+) (capabilitydomain.Capability, bool) {
+	capabilityID = strings.TrimSpace(capabilityID)
+	if capabilityID != "" {
+		for _, capability := range capabilities {
+			if capability.ID.String() == capabilityID {
+				return capability, true
+			}
+		}
+		return capabilitydomain.Capability{}, false
+	}
+	return runtimeCapability(capabilities, key)
 }
 
 // dryRunForCapability skips intent inference for a server-selected MCP tool.
@@ -1150,6 +1280,7 @@ func intentTrace(intent dryrun.Intent) map[string]any {
 	}
 	return map[string]any{
 		"matched":        intent.Matched,
+		"capability_id":  intent.CapabilityID,
 		"capability_key": intent.CapabilityKey,
 		"domain":         intent.Domain,
 		"resource":       intent.Resource,
@@ -1202,6 +1333,65 @@ func bindingHashForAuthorityContext(
 		binding["professional_scope"] = professionalScope
 	}
 	return runtraces.BindingHash(binding)
+}
+
+func bindingHashForAuthorityContextV2(
+	orgID string,
+	result dryrun.Result,
+	legacy *preparedactions.Action,
+	prepared *preparedactions.PreparedActionV2,
+	authority *executiongate.AuthorityCheckResult,
+	assist *preparedactions.AssistContextBinding,
+	professionalScope *preparedactions.ProfessionalScopeBinding,
+) (string, error) {
+	if prepared == nil {
+		return bindingHashForAuthorityContext(orgID, result, legacy, authority, assist, professionalScope)
+	}
+	binding := actionBindingV2(orgID, result, *prepared)
+	if authority != nil {
+		binding["professional_authority"] = map[string]any{
+			"snapshot_hash":        authority.SnapshotHash,
+			"scope_revision":       authority.ScopeRevision,
+			"policy_revision_hash": authority.PolicyRevisionHash,
+			"delegation_required":  authority.DelegationRequired,
+			"delegation_id":        authority.DelegationID,
+			"delegation_revision":  authority.DelegationRevision,
+		}
+	}
+	if assist != nil {
+		binding["assist_context"] = assist
+	}
+	if professionalScope != nil {
+		binding["professional_scope"] = professionalScope
+	}
+	return runtraces.BindingHash(binding)
+}
+
+func actionBindingV2(orgID string, result dryrun.Result, prepared preparedactions.PreparedActionV2) map[string]any {
+	proposedBy := result.Intent.ProposedBy
+	if proposedBy == "" {
+		proposedBy = "deterministic"
+	}
+	payloadHash, _ := prepared.PayloadHash()
+	return map[string]any{
+		"schema_version":       preparedactions.V2SchemaVersion,
+		"org_id":               normalizeOrgID(orgID),
+		"virployee_id":         result.RuntimeContext.Virployee.ID.String(),
+		"operation":            prepared.Operation,
+		"capability_id":        prepared.CapabilityID,
+		"capability_key_alias": result.Intent.CapabilityKey,
+		"manifest_hash":        prepared.ManifestHash,
+		"executor_binding_id":  prepared.ExecutorBindingID,
+		"input_schema_hash":    prepared.InputSchemaHash,
+		"output_schema_hash":   prepared.OutputSchemaHash,
+		"prepared_action_hash": payloadHash,
+		"input_hash":           runtraces.HashString(result.Input),
+		"memory_context_hash":  result.RuntimeContext.MemoryContextHash,
+		"proposed_by":          proposedBy,
+		"model_id":             result.Intent.ModelID,
+		"prompt_version":       result.Intent.PromptVersion,
+		"intent_confidence":    result.Intent.Confidence,
+	}
 }
 
 func actionBinding(orgID string, result dryrun.Result, prepared *preparedactions.Action) map[string]any {

@@ -25,12 +25,12 @@ import {
 type Props = { orgId: string; principalId: string; productSurface: string }
 
 const emptyPolicy = {
-  assistType: 'clinical_diagnosis', entrypoint: '', mode: 'shadow' as OrchestrationPolicy['mode'],
+  assistType: '', entrypoint: '', mode: 'shadow' as OrchestrationPolicy['mode'],
   selector: '', synthesis: '', schema: '{\n  "type": "object"\n}', maxSpecialists: 3,
   consultationTimeout: 120, orchestrationTimeout: 300,
 }
 const emptyRoute = {
-  assistType: 'clinical_diagnosis', entrypoint: '', code: '', target: '', capability: '',
+  assistType: '', entrypoint: '', code: '', target: '', capability: '',
   requirement: 'selector_allowed' as SpecialistRoute['requirement_mode'], enabled: true,
 }
 
@@ -138,8 +138,7 @@ export function CoordinationPage({ orgId, principalId, productSurface }: Props) 
 
   return (
     <section className="page-section coordination-page">
-      <div className="coordination-toolbar">
-        <p className="axis-muted">Governed ownership, bounded specialist fan-out and human escalation.</p>
+      <div className="coordination-toolbar coordination-toolbar--actions">
         <button type="button" className="btn-secondary" onClick={() => void load()} disabled={loading || Boolean(busy)}>
           {loading ? 'Refreshing…' : 'Refresh'}
         </button>
@@ -206,7 +205,7 @@ export function CoordinationPage({ orgId, principalId, productSurface }: Props) 
         <div className="coordination-form">
           <Field label="Assist type"><input value={routeForm.assistType} onChange={(e) => setRouteForm({ ...routeForm, assistType: e.target.value })} /></Field>
           <Field label="Entrypoint"><EntitySelect value={routeForm.entrypoint} onChange={(entrypoint) => setRouteForm({ ...routeForm, entrypoint })} items={virployees.map((item) => ({ id: item.id, name: item.name }))} /></Field>
-          <Field label="Specialty code"><input placeholder="clinical.cardiology" value={routeForm.code} onChange={(e) => setRouteForm({ ...routeForm, code: e.target.value })} /></Field>
+          <Field label="Specialty code"><input placeholder="domain.specialty" value={routeForm.code} onChange={(e) => setRouteForm({ ...routeForm, code: e.target.value })} /></Field>
           <Field label="Specialist"><EntitySelect value={routeForm.target} onChange={(target) => setRouteForm({ ...routeForm, target })} items={virployees.map((item) => ({ id: item.id, name: item.name }))} /></Field>
           <Field label="Capability"><EntitySelect value={routeForm.capability} onChange={(capability) => setRouteForm({ ...routeForm, capability })} items={capabilities.map((item) => ({ id: item.id, name: item.name }))} /></Field>
           <Field label="Requirement"><select value={routeForm.requirement} onChange={(e) => setRouteForm({ ...routeForm, requirement: e.target.value as SpecialistRoute['requirement_mode'] })}><option value="selector_allowed">selector allowed</option><option value="advisory_only">advisory only</option><option value="required">required</option></select></Field>

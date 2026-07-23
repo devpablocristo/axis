@@ -12,7 +12,7 @@ func TestBootstrapDefinitionsMatchP1GovernanceAndAssignments(t *testing.T) {
 		t.Fatalf("expected two canonical definitions, got %d", len(definitions))
 	}
 	for _, definition := range definitions {
-		if definition.RiskClass != "medium" || definition.SideEffectClass != "read" || definition.RequiresNexusApproval || !definition.EvidenceRequired {
+		if definition.RiskClass != "medium" || definition.SideEffectClass != "read" || definition.RequiresGovernanceApproval || !definition.EvidenceRequired {
 			t.Fatalf("unsafe clinical definition: %+v", definition)
 		}
 		if definition.Manifest.RollbackMode != "none" || definition.Manifest.Retry.MaxAttempts != 1 || definition.Manifest.ProductSurface != "product-a" {

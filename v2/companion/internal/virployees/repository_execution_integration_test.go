@@ -34,7 +34,7 @@ func TestCompleteExecutionAtomicallyCreatesImmutableOutboxMessage(t *testing.T) 
 	preparedID, executionID := uuid.New(), uuid.New()
 	governanceCheckID, approvalID := uuid.New(), uuid.New()
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM companion_nexus_outbox WHERE org_id=$1`, orgID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM companion_outbox_messages WHERE org_id=$1`, orgID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM virployees WHERE org_id=$1 AND id=$2`, orgID, virployeeID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM job_roles WHERE org_id=$1 AND id=$2`, orgID, jobRoleID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM profile_templates WHERE org_id=$1 AND id=$2`, orgID, profileID)
@@ -69,7 +69,7 @@ func TestCompleteExecutionAtomicallyCreatesImmutableOutboxMessage(t *testing.T) 
 	var count int
 	if err := pool.QueryRow(ctx, `
 		SELECT min(payload_json::text)::text, min(status), count(*)
-		FROM companion_nexus_outbox
+		FROM companion_outbox_messages
 		WHERE org_id=$1 AND aggregate_id=$2
 	`, orgID, executionID).Scan(&payloadRaw, &status, &count); err != nil {
 		t.Fatal(err)
@@ -88,7 +88,7 @@ func TestCompleteExecutionAtomicallyCreatesImmutableOutboxMessage(t *testing.T) 
 		t.Fatalf("missing signed attestation: %+v", payload)
 	}
 
-	if _, err := pool.Exec(ctx, `UPDATE companion_nexus_outbox SET status='delivered', delivered_at=now() WHERE org_id=$1 AND aggregate_id=$2`, orgID, executionID); err != nil {
+	if _, err := pool.Exec(ctx, `UPDATE companion_outbox_messages SET status='delivered', delivered_at=now() WHERE org_id=$1 AND aggregate_id=$2`, orgID, executionID); err != nil {
 		t.Fatal(err)
 	}
 	attempt, err = repository.CompleteExecution(ctx, orgID, executionID, "succeeded", "resource-test", result, "", 42)
@@ -98,7 +98,7 @@ func TestCompleteExecutionAtomicallyCreatesImmutableOutboxMessage(t *testing.T) 
 	if attempt.NexusReportStatus != "reported" {
 		t.Fatalf("idempotent completion regressed projection: %+v", attempt)
 	}
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM companion_nexus_outbox WHERE org_id=$1 AND aggregate_id=$2`, orgID, executionID).Scan(&count); err != nil {
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM companion_outbox_messages WHERE org_id=$1 AND aggregate_id=$2`, orgID, executionID).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
 	if count != 1 {

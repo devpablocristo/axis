@@ -21,8 +21,18 @@ func TestHTTPExtractionClientStreamsVerifiedBlobAndRebindsProvenance(t *testing.
 			writer.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		var metadata struct{ Profile string }
-		if err := json.Unmarshal([]byte(request.FormValue("metadata")), &metadata); err != nil || metadata.Profile != "office" {
+		var metadata struct {
+			Profile string `json:"profile"`
+			Scope   struct {
+				OrgID string `json:"org_id"`
+			} `json:"scope"`
+			Manifest struct {
+				DocumentID string `json:"document_id"`
+			} `json:"manifest"`
+		}
+		if err := json.Unmarshal([]byte(request.FormValue("metadata")), &metadata); err != nil ||
+			metadata.Profile != "office" || metadata.Scope.OrgID != "organization-a" ||
+			metadata.Manifest.DocumentID != "doc-1" {
 			t.Errorf("invalid metadata: %+v err=%v", metadata, err)
 		}
 		file, _, err := request.FormFile("artifact")

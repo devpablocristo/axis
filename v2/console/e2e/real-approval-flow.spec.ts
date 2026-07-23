@@ -177,7 +177,7 @@ async function devSession(request: APIRequestContext): Promise<{
   }
   return {
     orgID: organization.id,
-    productSurface: product?.product_surface ?? 'axis',
+    productSurface: product?.product_surface ?? '',
     principalID: payload.principal_id || payload.actor_id,
   }
 }

@@ -14,7 +14,26 @@ const (
 	AreaEmbeddings = "embeddings"
 	AreaBytes      = "bytes"
 	AreaExecutors  = "executors"
+
+	ProductSurfacePlatformInternal = "platform-internal"
 )
+
+type productSurfaceContextKey struct{}
+
+func WithProductSurface(ctx context.Context, productSurface string) context.Context {
+	productSurface = strings.ToLower(strings.TrimSpace(productSurface))
+	if productSurface == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, productSurfaceContextKey{}, productSurface)
+}
+
+func ProductSurfaceFromContext(ctx context.Context) string {
+	if value, ok := ctx.Value(productSurfaceContextKey{}).(string); ok && strings.TrimSpace(value) != "" {
+		return strings.ToLower(strings.TrimSpace(value))
+	}
+	return ProductSurfacePlatformInternal
+}
 
 var (
 	ErrPolicyMissing = errors.New("quota policy is required")

@@ -110,11 +110,8 @@ export function LearningProposalsPage(props: { orgId: string; principalId: strin
   const totalLoaded = columns.pending.length + columns.accepted.length + columns.dismissed.length
 
   return (
-    <section className="page-section approvals-control">
+    <section className="page-section approvals-control learning-proposals">
       <div className="approvals-header-actions">
-        <p className="learning-proposals__intro">
-          Procedures the workforce learned from repeated successful work. Accept to teach the virployee; dismiss to discard.
-        </p>
         <button type="button" className="btn-secondary" disabled={busy} onClick={() => void runScan()}>
           {scanning ? 'Scanning...' : 'Scan for new learnings'}
         </button>

@@ -25,7 +25,7 @@ func (u *UseCases) consumeQuota(ctx context.Context, key quotas.Key, idempotency
 func quotaKey(orgID, productSurface, area string) quotas.Key {
 	productSurface = strings.TrimSpace(productSurface)
 	if productSurface == "" {
-		productSurface = "axis"
+		productSurface = quotas.ProductSurfacePlatformInternal
 	}
 	return quotas.Key{OrgID: normalizeOrgID(orgID), ProductSurface: productSurface, Area: area}
 }
@@ -41,16 +41,24 @@ func estimatedAnswerTokens(input json.RawMessage, parts []artifacts.ContentPart)
 }
 
 func (u *UseCases) recordLLMUsage(ctx context.Context, run AssistRun, stage string, output AnswerOutput) {
-	if u.usageLedger == nil {
-		return
+	if u.usageLedger != nil {
+		_ = u.usageLedger.RecordUsage(ctx, quotas.Usage{
+			Key:            quotaKey(run.OrgID, run.ProductSurface, quotas.AreaLLM),
+			IdempotencyKey: run.ID.String() + ":actual:" + stage, SubjectType: "assist_run", SubjectID: run.ID.String(),
+			Units: output.InputTokens + output.OutputTokens, Model: output.ModelID,
+			EstimatedCostMicroUSD: output.EstimatedCostMicroUSD,
+			Metadata:              map[string]any{"input_tokens": output.InputTokens, "output_tokens": output.OutputTokens, "estimated": true},
+		})
 	}
-	_ = u.usageLedger.RecordUsage(ctx, quotas.Usage{
-		Key:            quotaKey(run.OrgID, run.ProductSurface, quotas.AreaLLM),
-		IdempotencyKey: run.ID.String() + ":actual:" + stage, SubjectType: "assist_run", SubjectID: run.ID.String(),
-		Units: output.InputTokens + output.OutputTokens, Model: output.ModelID,
-		EstimatedCostMicroUSD: output.EstimatedCostMicroUSD,
-		Metadata:              map[string]any{"input_tokens": output.InputTokens, "output_tokens": output.OutputTokens, "estimated": true},
-	})
+	if u.finops != nil {
+		_ = u.finops.RecordFinOpsUsage(ctx, FinOpsUsage{
+			OrgID: run.OrgID, ProductID: run.ProductID, Area: "llm", Service: "companion",
+			VirployeeID: run.VirployeeID, CapabilityKey: run.CapabilityKey,
+			Model: output.ModelID, InputUnits: output.InputTokens, OutputUnits: output.OutputTokens,
+			EstimatedCostMicroUSD: output.EstimatedCostMicroUSD,
+			IdempotencyKey:        run.ID.String() + ":finops:" + stage,
+		})
+	}
 }
 
 func estimatedDryRunTokens(input string, runtimeCtx runtimecontext.Context) int64 {
@@ -69,7 +77,7 @@ func (u *UseCases) recordProposalUsage(ctx context.Context, orgID string, virplo
 		return
 	}
 	_ = u.usageLedger.RecordUsage(ctx, quotas.Usage{
-		Key: quotaKey(orgID, "axis", quotas.AreaLLM), IdempotencyKey: idempotencyKey + ":actual",
+		Key: quotaKey(orgID, quotas.ProductSurfaceFromContext(ctx), quotas.AreaLLM), IdempotencyKey: idempotencyKey + ":actual",
 		SubjectType: "virployee", SubjectID: virployeeID.String(), Units: proposal.InputTokens + proposal.OutputTokens,
 		Model: proposal.Intent.ModelID, EstimatedCostMicroUSD: proposal.EstimatedCostMicroUSD,
 		Metadata: map[string]any{"input_tokens": proposal.InputTokens, "output_tokens": proposal.OutputTokens, "estimated": true},

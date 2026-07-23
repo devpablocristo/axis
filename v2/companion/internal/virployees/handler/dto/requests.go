@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 
 	"github.com/devpablocristo/companion-v2/internal/virployees/executiongate"
+	"github.com/devpablocristo/companion-v2/internal/virployees/preparedactions"
 	"github.com/devpablocristo/companion-v2/internal/virployees/usecases/domain"
 )
 
@@ -14,7 +15,9 @@ type AssistRequest struct {
 	InputJSON            json.RawMessage `json:"input_json"`
 	IdempotencyKey       string          `json:"idempotency_key,omitempty"`
 	AssistType           string          `json:"assist_type,omitempty"`
+	ProductID            string          `json:"product_id,omitempty"`
 	ProductSurface       string          `json:"product_surface,omitempty"`
+	CapabilityID         string          `json:"capability_id,omitempty"`
 	CapabilityKey        string          `json:"capability_key,omitempty"`
 	SubjectID            string          `json:"subject_id,omitempty"`
 	CaseID               string          `json:"case_id,omitempty"`
@@ -81,11 +84,12 @@ type DryRunVirployeeRequest struct {
 }
 
 type ExecutionGateVirployeeRequest struct {
-	Input          string                 `json:"input" binding:"required"`
-	AssistRunID    string                 `json:"assist_run_id,omitempty"`
-	PrincipalType  string                 `json:"principal_type,omitempty"`
-	PrincipalID    string                 `json:"principal_id,omitempty"`
-	ConfirmedDraft *ConfirmedDraftRequest `json:"confirmed_draft"`
+	Input          string                            `json:"input" binding:"required"`
+	AssistRunID    string                            `json:"assist_run_id,omitempty"`
+	PrincipalType  string                            `json:"principal_type,omitempty"`
+	PrincipalID    string                            `json:"principal_id,omitempty"`
+	ConfirmedDraft *ConfirmedDraftRequest            `json:"confirmed_draft"`
+	PreparedAction *preparedactions.PreparedActionV2 `json:"prepared_action"`
 }
 
 type SimulateApprovedExecutionRequest struct {

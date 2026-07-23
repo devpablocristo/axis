@@ -8,9 +8,9 @@ import (
 	"time"
 
 	cfg "github.com/devpablocristo/companion-v2/cmd/config"
+	"github.com/devpablocristo/companion-v2/internal/adapters/out/googlecalendar"
 	"github.com/devpablocristo/companion-v2/internal/attestation"
 	"github.com/devpablocristo/companion-v2/internal/secrets"
-	"github.com/devpablocristo/companion-v2/internal/virployees"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"golang.org/x/oauth2/google"
 )
@@ -43,12 +43,12 @@ func resolveAttestationKey(ctx context.Context, config cfg.Config) ([]byte, erro
 	return attestation.DeriveDevelopmentKey(config.InternalAuthSecret), nil
 }
 
-func resolveGoogleCalendarAPI(ctx context.Context, config cfg.Config) (virployees.CalendarAPI, error) {
+func resolveGoogleCalendarAPI(ctx context.Context, config cfg.Config) (googlecalendar.CalendarAPI, error) {
 	if config.GoogleCalendarSecretRef == "" {
 		if config.Environment == "production" {
 			return nil, errors.New("production google_calendar requires COMPANION_V2_GOOGLE_CALENDAR_SECRET_REF")
 		}
-		return virployees.NewGoogleCalendarAPI(ctx)
+		return googlecalendar.NewGoogleCalendarAPI(ctx)
 	}
 	resolver, err := secretResolver(ctx)
 	if err != nil {
@@ -59,5 +59,5 @@ func resolveGoogleCalendarAPI(ctx context.Context, config cfg.Config) (virployee
 		return nil, fmt.Errorf("resolve google calendar credentials: %w", err)
 	}
 	defer value.Destroy()
-	return virployees.NewGoogleCalendarAPIFromJSON(ctx, value.Bytes)
+	return googlecalendar.NewGoogleCalendarAPIFromJSON(ctx, value.Bytes)
 }

@@ -10,9 +10,9 @@ import (
 
 const maxTextsPerRequest = 64
 
-type Handler struct{ provider Provider }
+type Handler struct{ provider EmbeddingPort }
 
-func NewHandler(provider Provider) *Handler { return &Handler{provider: provider} }
+func NewHandler(provider EmbeddingPort) *Handler { return &Handler{provider: provider} }
 
 func (h *Handler) Routes(router gin.IRouter) { router.POST("/embeddings", h.Embed) }
 
@@ -47,7 +47,10 @@ func (h *Handler) Embed(c *gin.Context) {
 			ginmw.WriteError(c, http.StatusBadRequest, "invalid_request", "embedding text cannot be empty")
 			return
 		}
-		embedding, err := h.provider.Embed(c.Request.Context(), value, request.TaskType)
+		embedding, err := h.provider.Embed(c.Request.Context(), EmbeddingRequest{
+			Text:     value,
+			TaskType: request.TaskType,
+		})
 		if err != nil {
 			ginmw.WriteError(c, http.StatusBadGateway, "embedding_failed", "embedding provider failed")
 			return

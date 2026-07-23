@@ -8,6 +8,8 @@ import (
 
 	ai "github.com/devpablocristo/platform/kernels/ai/go"
 	cfg "github.com/devpablocristo/runtime-v2/cmd/config"
+	"github.com/devpablocristo/runtime-v2/internal/adapters/out/embeddingdeterministic"
+	"github.com/devpablocristo/runtime-v2/internal/adapters/out/embeddingvertex"
 	"github.com/devpablocristo/runtime-v2/internal/embeddings"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"golang.org/x/oauth2/google"
@@ -53,7 +55,7 @@ func buildProvider(ctx context.Context, config cfg.Config) (ai.Provider, string)
 	}
 }
 
-func buildEmbeddingProvider(ctx context.Context, config cfg.Config) embeddings.Provider {
+func buildEmbeddingProvider(ctx context.Context, config cfg.Config) embeddings.EmbeddingPort {
 	if config.VertexProject == "" {
 		slog.WarnContext(ctx, "runtime_embedding_no_project")
 		return developmentEmbeddingFallback(ctx, config)
@@ -63,7 +65,7 @@ func buildEmbeddingProvider(ctx context.Context, config cfg.Config) embeddings.P
 		slog.WarnContext(ctx, "runtime_embedding_no_adc", "error", err.Error())
 		return developmentEmbeddingFallback(ctx, config)
 	}
-	provider, err := embeddings.NewVertex(embeddings.VertexConfig{
+	provider, err := embeddingvertex.New(embeddingvertex.Config{
 		Project: config.VertexProject, Location: config.VertexLocation, Model: config.EmbeddingModel,
 		Dimensions: config.EmbeddingDim,
 		TokenSource: func(context.Context) (string, error) {
@@ -82,11 +84,11 @@ func buildEmbeddingProvider(ctx context.Context, config cfg.Config) embeddings.P
 	return provider
 }
 
-func developmentEmbeddingFallback(ctx context.Context, config cfg.Config) embeddings.Provider {
+func developmentEmbeddingFallback(ctx context.Context, config cfg.Config) embeddings.EmbeddingPort {
 	if config.Environment == "production" || !config.DevelopmentEmbeddingsEnabled {
 		return nil
 	}
-	provider, err := embeddings.NewDeterministic(config.EmbeddingDim)
+	provider, err := embeddingdeterministic.New(config.EmbeddingDim)
 	if err != nil {
 		slog.WarnContext(ctx, "runtime_development_embedding_invalid_config", "error", err.Error())
 		return nil

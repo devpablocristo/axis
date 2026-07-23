@@ -36,18 +36,18 @@ type Capability struct {
 
 	// Governance contract (Fase 1). Fail-safe defaults treat an unconfigured
 	// capability as maximally governed.
-	RiskClass             string // low | medium | high | critical
-	SideEffectClass       string // read | write
-	RequiresNexusApproval bool
-	EvidenceRequired      bool
-	RollbackCapabilityKey string // optional capability_key that undoes this one; "" = none
-	PromotionState        PromotionState
-	Manifest              Manifest
-	ManifestHash          string
-	ConformedHash         string
-	ConformanceReport     ConformanceReport
-	ConformedAt           *time.Time
-	ActivatedAt           *time.Time
+	RiskClass                  string // low | medium | high | critical
+	SideEffectClass            string // read | write
+	RequiresGovernanceApproval bool
+	EvidenceRequired           bool
+	RollbackCapabilityKey      string // optional capability_key that undoes this one; "" = none
+	PromotionState             PromotionState
+	Manifest                   Manifest
+	ManifestHash               string
+	ConformedHash              string
+	ConformanceReport          ConformanceReport
+	ConformedAt                *time.Time
+	ActivatedAt                *time.Time
 
 	CreatedAt time.Time
 	UpdatedAt time.Time
@@ -58,14 +58,14 @@ type Capability struct {
 }
 
 // GovernanceInput carries the optional governance-contract fields shared by
-// create and update. RequiresNexusApproval is a pointer so an omitted value can
+// create and update. RequiresGovernanceApproval is a pointer so an omitted value can
 // default fail-safe (approval required) rather than to Go's false zero value.
 type GovernanceInput struct {
-	RiskClass             string
-	SideEffectClass       string
-	RequiresNexusApproval *bool
-	EvidenceRequired      bool
-	RollbackCapabilityKey string
+	RiskClass                  string
+	SideEffectClass            string
+	RequiresGovernanceApproval *bool
+	EvidenceRequired           bool
+	RollbackCapabilityKey      string
 }
 
 type CreateInput struct {
@@ -84,11 +84,11 @@ type UpdateInput struct {
 }
 
 type NormalizedGovernance struct {
-	RiskClass             string
-	SideEffectClass       string
-	RequiresNexusApproval bool
-	EvidenceRequired      bool
-	RollbackCapabilityKey string
+	RiskClass                  string
+	SideEffectClass            string
+	RequiresGovernanceApproval bool
+	EvidenceRequired           bool
+	RollbackCapabilityKey      string
 }
 
 type NormalizedCreateInput struct {
@@ -125,8 +125,8 @@ func NormalizeCreateInput(in CreateInput) (NormalizedCreateInput, error) {
 	if err != nil {
 		return NormalizedCreateInput{}, err
 	}
-	if !validCapabilityKey(key) {
-		return NormalizedCreateInput{}, domainerr.Validation("capability_key must use domain.resource.action with lowercase letters only")
+	if key != "" && !validCapabilityKey(key) {
+		return NormalizedCreateInput{}, domainerr.Validation("capability_key compatibility alias must use domain.resource.action with lowercase letters only")
 	}
 	if name == "" {
 		return NormalizedCreateInput{}, domainerr.Validation("name is required")
@@ -178,19 +178,19 @@ func normalizeGovernance(in GovernanceInput) (NormalizedGovernance, error) {
 		return NormalizedGovernance{}, err
 	}
 	requiresApproval := true
-	if in.RequiresNexusApproval != nil {
-		requiresApproval = *in.RequiresNexusApproval
+	if in.RequiresGovernanceApproval != nil {
+		requiresApproval = *in.RequiresGovernanceApproval
 	}
 	rollback := strings.TrimSpace(in.RollbackCapabilityKey)
 	if rollback != "" && !validCapabilityKey(rollback) {
 		return NormalizedGovernance{}, domainerr.Validation("rollback_capability_key must use domain.resource.action with lowercase letters only")
 	}
 	return NormalizedGovernance{
-		RiskClass:             riskClass,
-		SideEffectClass:       sideEffectClass,
-		RequiresNexusApproval: requiresApproval,
-		EvidenceRequired:      in.EvidenceRequired,
-		RollbackCapabilityKey: rollback,
+		RiskClass:                  riskClass,
+		SideEffectClass:            sideEffectClass,
+		RequiresGovernanceApproval: requiresApproval,
+		EvidenceRequired:           in.EvidenceRequired,
+		RollbackCapabilityKey:      rollback,
 	}, nil
 }
 

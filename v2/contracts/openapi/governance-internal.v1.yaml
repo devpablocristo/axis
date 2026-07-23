@@ -1,0 +1,174 @@
+openapi: 3.1.0
+info:
+  title: Axis Governance Internal API
+  version: 1.0.0
+  description: >
+    Neutral governance contract. The nexushttp adapter translates this contract
+    to legacy Nexus DTOs during the compatibility window.
+paths:
+  /v1/governance/check:
+    post:
+      operationId: checkGovernance
+      security:
+        - internalToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ../schemas/governance.v1.schema.json#/$defs/checkRequest
+      responses:
+        "200":
+          description: Deterministic governance result
+          content:
+            application/json:
+              schema:
+                $ref: ../schemas/governance.v1.schema.json#/$defs/checkResult
+        "400":
+          $ref: "#/components/responses/PermanentError"
+        "401":
+          $ref: "#/components/responses/PermanentError"
+        "403":
+          $ref: "#/components/responses/PermanentError"
+        "408":
+          $ref: "#/components/responses/RetryableError"
+        "429":
+          $ref: "#/components/responses/RetryableError"
+        "500":
+          $ref: "#/components/responses/RetryableError"
+        "503":
+          $ref: "#/components/responses/RetryableError"
+  /v1/governance/checks/{check_id}/revalidate:
+    post:
+      operationId: revalidateGovernance
+      security:
+        - internalToken: []
+      parameters:
+        - $ref: "#/components/parameters/CheckID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - binding_hash
+                - authority_binding_hash
+                - policy_snapshot_hash
+              properties:
+                binding_hash:
+                  $ref: "#/components/schemas/SHA256"
+                authority_binding_hash:
+                  $ref: "#/components/schemas/SHA256"
+                policy_snapshot_hash:
+                  $ref: "#/components/schemas/SHA256"
+                policy_revision_hash:
+                  $ref: "#/components/schemas/SHA256"
+                scope_revision:
+                  type: integer
+                  minimum: 0
+      responses:
+        "200":
+          description: Revalidation result
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - valid
+                  - reason
+                  - policy_snapshot_hash
+                properties:
+                  valid:
+                    type: boolean
+                  reason:
+                    type: string
+                  policy_snapshot_hash:
+                    $ref: "#/components/schemas/SHA256"
+        "400":
+          $ref: "#/components/responses/PermanentError"
+        "409":
+          $ref: "#/components/responses/PermanentError"
+        "429":
+          $ref: "#/components/responses/RetryableError"
+        "500":
+          $ref: "#/components/responses/RetryableError"
+  /v1/governance/checks/{check_id}/result:
+    post:
+      operationId: reportGovernedExecution
+      security:
+        - internalToken: []
+      parameters:
+        - $ref: "#/components/parameters/CheckID"
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 8
+            maxLength: 255
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ../schemas/governance.v1.schema.json#/$defs/executionResult
+      responses:
+        "200":
+          description: Result durably accepted
+        "400":
+          $ref: "#/components/responses/PermanentError"
+        "409":
+          $ref: "#/components/responses/PermanentError"
+        "429":
+          $ref: "#/components/responses/RetryableError"
+        "500":
+          $ref: "#/components/responses/RetryableError"
+components:
+  securitySchemes:
+    internalToken:
+      type: apiKey
+      in: header
+      name: X-Axis-Internal-Token
+  parameters:
+    CheckID:
+      name: check_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  schemas:
+    SHA256:
+      type: string
+      pattern: "^[a-f0-9]{64}$"
+    Error:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: object
+          required:
+            - code
+            - message
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+  responses:
+    PermanentError:
+      description: Permanent governance rejection
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    RetryableError:
+      description: Retryable governance dependency failure
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"

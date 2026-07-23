@@ -174,13 +174,14 @@ type DownloadToken struct {
 }
 
 type Overview struct {
-	Service     string         `json:"service"`
-	Status      string         `json:"status"`
-	Incidents   map[string]int `json:"incidents"`
-	Jobs        map[string]int `json:"jobs"`
-	ActiveHolds int            `json:"active_holds"`
-	Exports     map[string]int `json:"exports"`
-	GeneratedAt time.Time      `json:"generated_at"`
+	Service        string         `json:"service"`
+	Status         string         `json:"status"`
+	Incidents      map[string]int `json:"incidents"`
+	Jobs           map[string]int `json:"jobs"`
+	ActiveHolds    int            `json:"active_holds"`
+	Exports        map[string]int `json:"exports"`
+	ServedProducts map[string]int `json:"served_products"`
+	GeneratedAt    time.Time      `json:"generated_at"`
 }
 
 type WorkerControl struct {

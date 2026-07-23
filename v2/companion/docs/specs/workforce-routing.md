@@ -72,11 +72,12 @@ organization + routing_pool + work_subject -> virployee
 4. If every member is at capacity, return `status=unavailable` without creating
    an assignment.
 
-Callers may also supply a canonical `capability_key`. In that case both an
+Callers may also supply a canonical `capability_id` UUID. In that case both an
 existing assignee and every new candidate must have that active, conformant
 capability assigned and sufficient autonomy. Axis accepts only canonical
-capability keys; product-owned aliases must be translated by the consumer
-before the query. A capability mismatch returns `reassignment_required` for an existing
+capability UUIDs; `capability_key` is only a compatibility alias and never
+selects an assignment or executor. A capability mismatch returns
+`reassignment_required` for an existing
 assignment or `unavailable` for a new one; it never rotates the subject
 silently.
 
@@ -98,6 +99,11 @@ Assist receives `subject_id`, an optional `case_id`, and the resolved continuity
 responsible Virployee agree before work is accepted and snapshots the current
 assignment version. It revalidates that version before processing durable work.
 A case can narrow context further, but cannot widen the subject boundary.
+
+Machine ingress also carries BFF-derived `product_id`, integration revision and
+contract hash. A credential authorizes contract-declared pools or direct
+entrypoints but never embeds an implicit subject-to-Virployee choice. Product
+headers supplied by the caller are discarded before routing.
 
 Existing Virployees keep working without fabricated subjects, pools or
 assignments. Continuity routing applies only when the caller supplies the new

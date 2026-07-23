@@ -72,8 +72,10 @@ No query scans a sibling subject or case. Conflict detection, active-content
 uniqueness, curation audit and safe Runtime references also carry the scope, so
 two patients assigned to one Virployee cannot collide or leak through recall.
 
-Every memory indexing or vector-query call reserves the organization's `axis / embeddings`
-quota before reaching Runtime. A denied indexing job remains retryable; denied
+Every memory indexing or vector-query call reserves the trusted request
+product's `embeddings` quota before reaching Runtime. Internal jobs use the
+explicit `platform-internal` attribution rather than pretending to belong to a
+consumer. A denied indexing job remains retryable; denied
 or unavailable query embedding degrades to the same organization-scoped lexical
 recall. Successful calls append only token estimates, model and operational
 identifiers to the usage ledger—never query text, memory content or vectors.

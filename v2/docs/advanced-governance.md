@@ -81,6 +81,20 @@ from this authority snapshot, so experimenting in shadow cannot invalidate an
 already approved action. The governance product comes from the active
 capability manifest rather than from client input.
 
+Companion uses the same separation for prompt promotion. Prompt bodies and
+synthetic fixtures never leave Companion; Nexus receives only artifact IDs,
+content/report hashes and the safe product/actor coordinates needed to authorize
+promotion. The promoted prompt bundle hash joins the Assist context hash, so a
+prompt change invalidates authority derived from an earlier bundle.
+
+Product integrations do not make Nexus depend on Companion. BFF projects
+topology-neutral v3 governed operations through an `IntegrationParticipant`;
+the Nexus adapter translates them to its local snapshot. Nexus validates its
+declared APIs, capability UUID/operation bindings, access modes and webhook
+metadata. Relayed calls use the canonical `via_orchestrator` mode;
+`via_companion` is read only as a v2 compatibility alias. Nexus maintains its
+own served-product projection and never queries the Companion monitor.
+
 ## API surface
 
 Nexus exposes these authenticated routes under `/v1`; BFF forwards the public
@@ -114,6 +128,10 @@ POST                 /operations/legal-holds/:id/release
 POST                 /operations/exports
 POST                 /operations/exports/:id/download-token
 POST                 /internal/operations/findings
+POST                 /product-integrations/:product_id/versions
+POST                 /product-integration-versions/:id/validate|activate
+GET                  /product-integrations/:product_id/readiness
+GET                  /operations/served-products
 ```
 
 Companion keeps delegation management nested under the Virployee, including

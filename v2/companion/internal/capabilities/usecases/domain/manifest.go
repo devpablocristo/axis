@@ -4,11 +4,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"regexp"
 	"sort"
 	"strings"
 
 	"github.com/devpablocristo/platform/errors/go/domainerr"
 )
+
+var executorIdentifierPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._:-]{0,127}$`)
 
 type IdempotencyContract struct {
 	Mode      string   `json:"mode"`
@@ -35,6 +38,10 @@ type Manifest struct {
 	SecretRefs          []string            `json:"secret_refs"`
 	AttestationRequired bool                `json:"attestation_required"`
 	CostClass           string              `json:"cost_class"`
+	ExecutorBindingID   string              `json:"executor_binding_id,omitempty"`
+	Operation           string              `json:"operation,omitempty"`
+	InputSchemaHash     string              `json:"input_schema_hash,omitempty"`
+	OutputSchemaHash    string              `json:"output_schema_hash,omitempty"`
 }
 
 type ManifestInput struct {
@@ -52,6 +59,8 @@ type ManifestInput struct {
 	SecretRefs          []string
 	AttestationRequired bool
 	CostClass           string
+	ExecutorBindingID   string
+	Operation           string
 }
 
 type ConformanceCheck struct {
@@ -75,6 +84,16 @@ func NormalizeManifest(input ManifestInput) (Manifest, string, error) {
 	if err != nil {
 		return Manifest{}, "", err
 	}
+	executorBindingID := strings.ToLower(strings.TrimSpace(input.ExecutorBindingID))
+	operation := strings.ToLower(strings.TrimSpace(input.Operation))
+	if (executorBindingID == "") != (operation == "") {
+		return Manifest{}, "", domainerr.Validation("executor_binding_id and operation must be provided together")
+	}
+	if executorBindingID != "" &&
+		(!executorIdentifierPattern.MatchString(executorBindingID) ||
+			!executorIdentifierPattern.MatchString(operation)) {
+		return Manifest{}, "", domainerr.Validation("executor_binding_id or operation is invalid")
+	}
 	manifest := Manifest{
 		Version:             strings.TrimSpace(input.Version),
 		ProductSurface:      strings.ToLower(strings.TrimSpace(input.ProductSurface)),
@@ -90,12 +109,33 @@ func NormalizeManifest(input ManifestInput) (Manifest, string, error) {
 		SecretRefs:          normalizedSet(input.SecretRefs, false),
 		AttestationRequired: input.AttestationRequired,
 		CostClass:           strings.ToLower(strings.TrimSpace(input.CostClass)),
+		ExecutorBindingID:   executorBindingID,
+		Operation:           operation,
+	}
+	if executorBindingID != "" {
+		manifest.InputSchemaHash, err = HashSchema(inputSchema)
+		if err != nil {
+			return Manifest{}, "", err
+		}
+		manifest.OutputSchemaHash, err = HashSchema(outputSchema)
+		if err != nil {
+			return Manifest{}, "", err
+		}
 	}
 	manifestHash, err := HashManifest(manifest)
 	if err != nil {
 		return Manifest{}, "", err
 	}
 	return manifest, manifestHash, nil
+}
+
+func HashSchema(schema map[string]any) (string, error) {
+	raw, err := json.Marshal(schema)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:]), nil
 }
 
 func HashManifest(manifest Manifest) (string, error) {

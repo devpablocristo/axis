@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/devpablocristo/companion-v2/internal/virployees/preparedactions"
 	"github.com/google/uuid"
 )
 
@@ -93,10 +94,14 @@ func (r *Repository) claimExecutionWork(ctx context.Context, predicate string, c
 	now := time.Now().UTC()
 	rows, err := tx.Query(ctx, `
 		SELECT e.id, e.org_id, e.virployee_id, e.prepared_action_id, e.idempotency_key,
-			e.status, e.resource_id, e.result, e.error, e.duration_ms, e.nexus_report_status,
+			e.status, e.resource_id, e.result, e.error, e.duration_ms,
+			e.governance_report_status, e.nexus_report_status,
 			e.started_at, e.completed_at, e.recovery_attempts, e.nexus_report_attempts,
-			p.governance_check_id, p.approval_id, p.capability_key, p.payload,
-			p.payload_hash, p.binding_hash
+			p.governance_check_id, p.approval_id,
+			COALESCE(p.capability_id,'00000000-0000-0000-0000-000000000000'::uuid),
+			p.capability_key, p.payload_version, p.executor_binding_id, p.operation, p.payload,
+			p.payload_hash, p.binding_hash, p.authority_binding_hash,
+			p.governance_policy_snapshot_hash, p.nexus_policy_snapshot_hash
 		FROM companion_execution_attempts e
 		JOIN companion_prepared_actions p ON p.id = e.prepared_action_id
 		WHERE `+predicate+`
@@ -113,15 +118,42 @@ func (r *Repository) claimExecutionWork(ctx context.Context, predicate string, c
 		if err := rows.Scan(&work.Attempt.ID, &work.Attempt.OrgID, &work.Attempt.VirployeeID,
 			&work.Attempt.PreparedActionID, &work.Attempt.IdempotencyKey, &work.Attempt.Status,
 			&work.Attempt.ResourceID, &result, &work.Attempt.Error, &work.Attempt.DurationMS,
-			&work.Attempt.NexusReportStatus, &work.Attempt.StartedAt, &work.Attempt.CompletedAt,
+			&work.Attempt.GovernanceReportStatus, &work.Attempt.NexusReportStatus,
+			&work.Attempt.StartedAt, &work.Attempt.CompletedAt,
 			&work.Attempt.RecoveryAttempts, &work.Attempt.ReportAttempts,
-			&work.Action.GovernanceCheckID, &work.Action.ApprovalID, &work.Action.CapabilityKey,
-			&payload, &work.Action.PayloadHash, &work.Action.BindingHash); err != nil {
+			&work.Action.GovernanceCheckID, &work.Action.ApprovalID, &work.Action.CapabilityID,
+			&work.Action.CapabilityKey, &work.Action.PayloadVersion, &work.Action.ExecutorBindingID,
+			&work.Action.Operation, &payload, &work.Action.PayloadHash, &work.Action.BindingHash,
+			&work.Action.AuthorityBindingHash, &work.Action.GovernancePolicySnapshotHash,
+			&work.Action.NexusPolicySnapshotHash); err != nil {
 			rows.Close()
 			return nil, err
 		}
 		work.Action.ID, work.Action.OrgID, work.Action.VirployeeID = work.Attempt.PreparedActionID, work.Attempt.OrgID, work.Attempt.VirployeeID
-		if err := json.Unmarshal(payload, &work.Action.Action); err != nil {
+		if work.Attempt.GovernanceReportStatus == "" {
+			work.Attempt.GovernanceReportStatus = work.Attempt.NexusReportStatus
+		}
+		if work.Attempt.NexusReportStatus == "" {
+			work.Attempt.NexusReportStatus = work.Attempt.GovernanceReportStatus
+		}
+		if work.Action.GovernancePolicySnapshotHash == "" {
+			work.Action.GovernancePolicySnapshotHash = work.Action.NexusPolicySnapshotHash
+		}
+		if work.Action.NexusPolicySnapshotHash == "" {
+			work.Action.NexusPolicySnapshotHash = work.Action.GovernancePolicySnapshotHash
+		}
+		if work.Action.PayloadVersion == preparedactions.V2SchemaVersion {
+			var action preparedactions.PreparedActionV2
+			if err := json.Unmarshal(payload, &action); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("decode watcher prepared action v2: %w", err)
+			}
+			if err := action.Validate(); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("validate watcher prepared action v2: %w", err)
+			}
+			work.Action.ActionV2 = &action
+		} else if err := json.Unmarshal(payload, &work.Action.Action); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("decode watcher prepared action: %w", err)
 		}

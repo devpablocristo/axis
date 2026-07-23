@@ -58,3 +58,54 @@ func executionAutonomyForPreparedAction(action string) (virployeedomain.Autonomy
 		return "", false
 	}
 }
+
+func (u *UseCases) verifyCurrentExecutionEligibilityV2(
+	ctx context.Context,
+	orgID string,
+	virployeeID uuid.UUID,
+	capabilityID uuid.UUID,
+	capabilityKeyAlias string,
+	action preparedactions.PreparedActionV2,
+) (virployeedomain.Virployee, capabilitydomain.Capability, error) {
+	virployee, err := u.repo.Get(ctx, orgID, virployeeID)
+	if err != nil {
+		return virployeedomain.Virployee{}, capabilitydomain.Capability{}, err
+	}
+	if virployee.State() != virployeedomain.StateActive {
+		return virployeedomain.Virployee{}, capabilitydomain.Capability{}, domainerr.Conflict("virployee is no longer active")
+	}
+	assigned := false
+	for _, id := range virployee.CapabilityIDs {
+		if id == capabilityID {
+			assigned = true
+			break
+		}
+	}
+	if !assigned {
+		return virployeedomain.Virployee{}, capabilitydomain.Capability{}, domainerr.Conflict("approved capability id is no longer assigned to the Virployee")
+	}
+	capability, err := u.capabilities.Get(ctx, orgID, capabilityID)
+	if err != nil {
+		return virployeedomain.Virployee{}, capabilitydomain.Capability{}, domainerr.Conflict("approved capability could not be revalidated")
+	}
+	if capability.State() != capabilitydomain.StateActive || capability.PromotionState != capabilitydomain.PromotionActive {
+		return virployeedomain.Virployee{}, capabilitydomain.Capability{}, domainerr.Conflict("approved capability is no longer active and promoted")
+	}
+	if capabilityKeyAlias != "" && capability.CapabilityKey != capabilityKeyAlias {
+		return virployeedomain.Virployee{}, capabilitydomain.Capability{}, domainerr.Conflict("prepared action capability alias no longer matches its UUID")
+	}
+	if action.CapabilityID != capability.ID.String() ||
+		action.ManifestHash != capability.ManifestHash ||
+		action.ManifestHash != capability.ConformedHash ||
+		action.ExecutorBindingID != capability.Manifest.ExecutorBindingID ||
+		action.Operation != capability.Manifest.Operation ||
+		action.InputSchemaHash != capability.Manifest.InputSchemaHash ||
+		action.OutputSchemaHash != capability.Manifest.OutputSchemaHash {
+		return virployeedomain.Virployee{}, capabilitydomain.Capability{}, domainerr.Conflict("prepared action manifest or executor binding changed after approval")
+	}
+	required := virployeedomain.AutonomyLevel(strings.TrimSpace(action.RequiredAutonomy))
+	if required != capability.RequiredAutonomy || !virployee.Autonomy.Allows(required) {
+		return virployeedomain.Virployee{}, capabilitydomain.Capability{}, domainerr.Conflict("Virployee autonomy no longer allows the prepared action")
+	}
+	return virployee, capability, nil
+}

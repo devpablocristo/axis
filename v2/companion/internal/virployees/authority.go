@@ -44,6 +44,10 @@ type NexusPolicyPreparedActionRepositoryPort interface {
 	BindPreparedActionNexusPolicy(context.Context, string, uuid.UUID, uuid.UUID, string) error
 }
 
+type GovernancePolicyPreparedActionRepositoryPort interface {
+	BindPreparedActionGovernancePolicy(context.Context, string, uuid.UUID, uuid.UUID, string) error
+}
+
 func (u *UseCases) SetAuthorityEvaluator(evaluator AuthorityEvaluatorPort) { u.authority = evaluator }
 
 func (u *UseCases) evaluateAuthority(ctx context.Context, orgID string, virployeeID, jobRoleID uuid.UUID, capability capabilitydomain.Capability, principal executiongate.PrincipalContext, mcp *preparedactions.MCPContextBinding) (executiongate.AuthorityCheckResult, error) {
@@ -88,6 +92,31 @@ func (u *UseCases) verifyCurrentAuthority(ctx context.Context, orgID string, vir
 		return executiongate.AuthorityCheckResult{}, domainerr.Conflict("professional authority could not be revalidated")
 	}
 	if !result.Allowed {
+		return executiongate.AuthorityCheckResult{}, domainerr.Conflict("professional authority no longer permits this action")
+	}
+	if result.SnapshotHash != expectedHash {
+		return executiongate.AuthorityCheckResult{}, domainerr.Conflict("professional authority changed after approval")
+	}
+	return result, nil
+}
+
+func (u *UseCases) verifyCurrentAuthorityV2(ctx context.Context, orgID string, virployeeID uuid.UUID, capability capabilitydomain.Capability, action preparedactions.PreparedActionV2, expectedHash string) (executiongate.AuthorityCheckResult, error) {
+	if u.authority == nil {
+		return executiongate.AuthorityCheckResult{}, domainerr.Conflict("professional authority evaluator is unavailable")
+	}
+	if strings.TrimSpace(expectedHash) == "" {
+		return executiongate.AuthorityCheckResult{}, domainerr.Conflict("approval has no professional authority binding")
+	}
+	virployee, err := u.repo.Get(ctx, orgID, virployeeID)
+	if err != nil {
+		return executiongate.AuthorityCheckResult{}, err
+	}
+	principal, err := executiongate.NormalizePrincipalContext(executiongate.PrincipalContext{Type: action.PrincipalType, ID: action.PrincipalID})
+	if err != nil {
+		return executiongate.AuthorityCheckResult{}, domainerr.Conflict("prepared action principal context is invalid")
+	}
+	result, err := u.evaluateAuthority(ctx, orgID, virployeeID, virployee.JobRoleID, capability, principal, action.MCPContext)
+	if err != nil || !result.Allowed {
 		return executiongate.AuthorityCheckResult{}, domainerr.Conflict("professional authority no longer permits this action")
 	}
 	if result.SnapshotHash != expectedHash {

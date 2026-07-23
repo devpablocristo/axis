@@ -1,7 +1,6 @@
 package executiongate
 
 import (
-	"errors"
 	"strings"
 	"time"
 
@@ -149,7 +148,7 @@ type ConfirmedDraftField struct {
 }
 
 func Evaluate(result dryrun.Result) Result {
-	requiredExecutionAutonomy := requiredExecutionAutonomyFor(result.Intent)
+	requiredExecutionAutonomy := requiredExecutionAutonomyFor(result)
 	checks := []Check{
 		intentMatchedCheck(result),
 		capabilityAssignedCheck(result),
@@ -268,17 +267,25 @@ func governanceCheck(governance GovernanceCheckResult) Check {
 	}
 }
 
-func requiredExecutionAutonomyFor(intent dryrun.Intent) virployeedomain.AutonomyLevel {
+func requiredExecutionAutonomyFor(result dryrun.Result) virployeedomain.AutonomyLevel {
+	intent := result.Intent
 	if !intent.Matched {
 		return virployeedomain.AutonomyA0
 	}
-	if intent.CapabilityKey == "calendar.events.read" {
-		return virployeedomain.AutonomyA1
+	for _, capability := range result.RuntimeContext.Capabilities {
+		if (intent.CapabilityID != "" && capability.ID.String() == intent.CapabilityID) ||
+			(intent.CapabilityID == "" && capability.CapabilityKey == intent.CapabilityKey) {
+			if capability.Manifest.ExecutorBindingID != "" {
+				return capability.RequiredAutonomy
+			}
+			if required, ok := legacyRequiredExecutionAutonomy(intent.CapabilityKey); ok {
+				return required
+			}
+			return capability.RequiredAutonomy
+		}
 	}
-	if intent.CapabilityKey == "calendar.events.create" ||
-		intent.CapabilityKey == "calendar.events.update" ||
-		intent.CapabilityKey == "calendar.events.delete" {
-		return virployeedomain.AutonomyA3
+	if required, ok := legacyRequiredExecutionAutonomy(intent.CapabilityKey); ok {
+		return required
 	}
 	return virployeedomain.AutonomyA5
 }
@@ -348,92 +355,5 @@ func nextStep(decision Decision, checks []Check) string {
 }
 
 func ApplyConfirmedDraft(result dryrun.Result, confirmed ConfirmedDraft) (dryrun.Result, error) {
-	confirmed.Action = strings.TrimSpace(confirmed.Action)
-	confirmed.Kind = strings.TrimSpace(confirmed.Kind)
-	if confirmed.Action == "" {
-		return dryrun.Result{}, errors.New("confirmed_draft.action is required")
-	}
-	if !result.Intent.Matched {
-		return dryrun.Result{}, errors.New("confirmed_draft cannot be used when no intent was detected")
-	}
-	if confirmed.Action != result.Intent.CapabilityKey {
-		return dryrun.Result{}, errors.New("confirmed_draft.action must match the detected intent")
-	}
-	if confirmed.Action != "calendar.events.create" {
-		return dryrun.Result{}, errors.New("confirmed_draft is only supported for calendar.events.create")
-	}
-
-	fields := confirmedFieldMap(confirmed.Fields)
-	missing := []dryrun.DraftMissingField{}
-	for _, required := range calendarEventCreateRequiredFields() {
-		if strings.TrimSpace(fields[required.key]) == "" {
-			missing = append(missing, dryrun.DraftMissingField{
-				Key:    required.key,
-				Label:  required.label,
-				Reason: required.reason,
-			})
-		}
-	}
-	status := dryrun.DraftStatusReady
-	if len(missing) > 0 {
-		status = dryrun.DraftStatusNeedsInput
-	}
-	result.Draft = dryrun.Draft{
-		Status:        status,
-		Action:        "calendar.events.create",
-		Kind:          "calendar_event",
-		Summary:       "Prepare a calendar event draft",
-		Fields:        confirmedDraftFields(fields),
-		MissingFields: missing,
-		Notes:         []string{"No external action will be executed."},
-	}
-	return result, nil
-}
-
-func confirmedFieldMap(fields []ConfirmedDraftField) map[string]string {
-	out := map[string]string{}
-	for _, field := range fields {
-		key := strings.TrimSpace(field.Key)
-		if key == "" {
-			continue
-		}
-		out[key] = strings.TrimSpace(field.Value)
-	}
-	return out
-}
-
-func confirmedDraftFields(fields map[string]string) []dryrun.DraftField {
-	out := []dryrun.DraftField{}
-	for _, required := range calendarEventCreateRequiredFields() {
-		value := strings.TrimSpace(fields[required.key])
-		if value == "" {
-			continue
-		}
-		out = append(out, dryrun.DraftField{
-			Key:    required.key,
-			Label:  required.label,
-			Value:  value,
-			Source: "confirmed",
-		})
-	}
-	return out
-}
-
-func calendarEventCreateRequiredFields() []struct {
-	key    string
-	label  string
-	reason string
-} {
-	return []struct {
-		key    string
-		label  string
-		reason string
-	}{
-		{key: "title", label: "Title", reason: "Title is required before preparing the event."},
-		{key: "date", label: "Date", reason: "Date in YYYY-MM-DD format is required before preparing the event."},
-		{key: "time", label: "Time", reason: "Time is required before preparing the event."},
-		{key: "timezone", label: "Timezone", reason: "An IANA timezone is required before preparing the event."},
-		{key: "duration_minutes", label: "Duration", reason: "Duration in minutes is required before preparing the event."},
-		{key: "attendees", label: "Attendees", reason: "At least one attendee is required for a meeting."},
-	}
+	return applyLegacyCalendarConfirmedDraft(result, confirmed)
 }

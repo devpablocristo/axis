@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -34,6 +35,9 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 
 func (r *Repository) Create(ctx context.Context, orgID string, input domain.NormalizedCreateInput) (domain.Capability, error) {
 	id := uuid.New()
+	if input.CapabilityKey == "" {
+		input.CapabilityKey = generatedCompatibilityAlias(id)
+	}
 	now := time.Now().UTC()
 	row := r.pool.QueryRow(ctx, `
 		INSERT INTO capabilities (
@@ -44,9 +48,18 @@ func (r *Repository) Create(ctx context.Context, orgID string, input domain.Norm
 		VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12)
 		RETURNING `+capabilitySelectColumns+`
 	`, id.String(), orgID, input.CapabilityKey, input.Name, input.Description, string(input.RequiredAutonomy),
-		input.Governance.RiskClass, input.Governance.SideEffectClass, input.Governance.RequiresNexusApproval,
+		input.Governance.RiskClass, input.Governance.SideEffectClass, input.Governance.RequiresGovernanceApproval,
 		input.Governance.EvidenceRequired, input.Governance.RollbackCapabilityKey, now)
 	return scanCapability(row)
+}
+
+func generatedCompatibilityAlias(id uuid.UUID) string {
+	opaque := strings.NewReplacer(
+		"0", "a", "1", "b", "2", "c", "3", "d", "4", "e",
+		"5", "f", "6", "g", "7", "h", "8", "i", "9", "j",
+		"a", "k", "b", "l", "c", "m", "d", "n", "e", "o", "f", "p",
+	).Replace(strings.ReplaceAll(id.String(), "-", ""))
+	return "capability." + opaque + ".invoke"
 }
 
 func (r *Repository) List(ctx context.Context, orgID string, state domain.State) ([]domain.Capability, error) {
@@ -142,7 +155,7 @@ func (r *Repository) Update(ctx context.Context, orgID string, id uuid.UUID, inp
 			AND trashed_at IS NULL
 		RETURNING `+capabilitySelectColumns+`
 	`, orgID, id.String(), input.Name, input.Description, string(input.RequiredAutonomy),
-		input.Governance.RiskClass, input.Governance.SideEffectClass, input.Governance.RequiresNexusApproval,
+		input.Governance.RiskClass, input.Governance.SideEffectClass, input.Governance.RequiresGovernanceApproval,
 		input.Governance.EvidenceRequired, input.Governance.RollbackCapabilityKey, time.Now().UTC())
 	item, err := scanCapability(row)
 	if err == nil {
@@ -209,7 +222,7 @@ func (r *Repository) SaveConformance(ctx context.Context, orgID string, id uuid.
 		RETURNING `+capabilitySelectColumns+`
 	`, orgID, id.String(), expected.ManifestHash, report.Conformant, raw, now,
 		string(expected.RequiredAutonomy), expected.RiskClass, expected.SideEffectClass,
-		expected.RequiresNexusApproval, expected.EvidenceRequired, expected.RollbackCapabilityKey)
+		expected.RequiresGovernanceApproval, expected.EvidenceRequired, expected.RollbackCapabilityKey)
 	return scanCapability(row)
 }
 
@@ -372,7 +385,7 @@ func scanCapability(row scanner) (domain.Capability, error) {
 		&requiredAutonomy,
 		&model.RiskClass,
 		&model.SideEffectClass,
-		&model.RequiresNexusApproval,
+		&model.RequiresGovernanceApproval,
 		&model.EvidenceRequired,
 		&model.RollbackCapabilityKey,
 		&promotionState,

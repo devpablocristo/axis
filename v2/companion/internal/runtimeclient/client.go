@@ -17,6 +17,7 @@ import (
 	"github.com/devpablocristo/companion-v2/internal/virployees/dryrun"
 	"github.com/devpablocristo/companion-v2/internal/virployees/runtimecontext"
 	virployeedomain "github.com/devpablocristo/companion-v2/internal/virployees/usecases/domain"
+	"github.com/google/uuid"
 )
 
 type Client struct {
@@ -303,13 +304,20 @@ func (c *Client) Answer(ctx context.Context, in AnswerRequest) (AnswerResult, er
 func capabilitiesFrom(items []capabilitydomain.Capability) []capabilityInfo {
 	out := make([]capabilityInfo, 0, len(items))
 	for _, item := range items {
+		capabilityID := ""
+		if item.ID != uuid.Nil {
+			capabilityID = item.ID.String()
+		}
 		out = append(out, capabilityInfo{
+			CapabilityID:     capabilityID,
 			CapabilityKey:    item.CapabilityKey,
 			Name:             item.Name,
 			Description:      item.Description,
 			RequiredAutonomy: string(item.RequiredAutonomy),
 			RiskClass:        item.RiskClass,
 			SideEffectClass:  item.SideEffectClass,
+			Operation:        item.Manifest.Operation,
+			InputSchema:      item.Manifest.InputSchema,
 		})
 	}
 	return out
@@ -326,6 +334,7 @@ func memoryFrom(items []memories.ContextItem) []memoryRef {
 func toProposal(resp proposeResponse) dryrun.Proposal {
 	intent := dryrun.Intent{
 		Matched:       resp.Intent.Matched,
+		CapabilityID:  resp.Intent.CapabilityID,
 		CapabilityKey: resp.Intent.CapabilityKey,
 		Domain:        resp.Intent.Domain,
 		Resource:      resp.Intent.Resource,
@@ -333,6 +342,7 @@ func toProposal(resp proposeResponse) dryrun.Proposal {
 		Confidence:    resp.Intent.Confidence,
 		MatchedBy:     []string{},
 		Rules:         []dryrun.IntentRule{},
+		Arguments:     resp.Intent.Arguments,
 	}
 	// Provenance is stamped whenever the runtime answered — also on "no
 	// capability applies" — so the console never misattributes an LLM answer
@@ -361,12 +371,15 @@ type proposeRequest struct {
 }
 
 type capabilityInfo struct {
-	CapabilityKey    string `json:"capability_key"`
-	Name             string `json:"name,omitempty"`
-	Description      string `json:"description,omitempty"`
-	RequiredAutonomy string `json:"required_autonomy,omitempty"`
-	RiskClass        string `json:"risk_class,omitempty"`
-	SideEffectClass  string `json:"side_effect_class,omitempty"`
+	CapabilityID     string         `json:"capability_id,omitempty"`
+	CapabilityKey    string         `json:"capability_key"`
+	Name             string         `json:"name,omitempty"`
+	Description      string         `json:"description,omitempty"`
+	RequiredAutonomy string         `json:"required_autonomy,omitempty"`
+	RiskClass        string         `json:"risk_class,omitempty"`
+	SideEffectClass  string         `json:"side_effect_class,omitempty"`
+	Operation        string         `json:"operation,omitempty"`
+	InputSchema      map[string]any `json:"input_schema,omitempty"`
 }
 
 type memoryRef struct {
@@ -383,13 +396,15 @@ type proposeResponse struct {
 }
 
 type proposedIntent struct {
-	Matched          bool    `json:"matched"`
-	CapabilityKey    string  `json:"capability_key,omitempty"`
-	Domain           string  `json:"domain,omitempty"`
-	Resource         string  `json:"resource,omitempty"`
-	Action           string  `json:"action,omitempty"`
-	RequiredAutonomy string  `json:"required_autonomy,omitempty"`
-	Confidence       float64 `json:"confidence,omitempty"`
+	Matched          bool           `json:"matched"`
+	CapabilityID     string         `json:"capability_id,omitempty"`
+	CapabilityKey    string         `json:"capability_key,omitempty"`
+	Domain           string         `json:"domain,omitempty"`
+	Resource         string         `json:"resource,omitempty"`
+	Action           string         `json:"action,omitempty"`
+	RequiredAutonomy string         `json:"required_autonomy,omitempty"`
+	Confidence       float64        `json:"confidence,omitempty"`
+	Arguments        map[string]any `json:"arguments,omitempty"`
 }
 
 type enrichRequest struct {

@@ -75,6 +75,97 @@ export type ProductInput = {
 	product_surface?: string
 }
 
+export type ProductIntegrationV3Contract = {
+  schema_version: 'axis.product-integration.v3'
+  entrypoints: Array<{
+    kind: 'virployee' | 'routing_pool'
+    id: string
+  }>
+  capabilities: Array<{
+    id: string
+    name: string
+    version: string
+    manifest_hash: string
+    executor_binding_id: string
+    operation: string
+    input_schema_hash: string
+    output_schema_hash: string
+    legacy_key?: string
+  }>
+  events: Array<{
+    type: string
+    version: string
+    schema: Record<string, unknown>
+    schema_hash: string
+  }>
+  governed_operations: Array<{
+    capability_id: string
+    operation: string
+    required_scopes: string[]
+  }>
+  connector_bindings: Array<{
+    id: string
+    connector_id: string
+    operation: string
+    secret_ref?: string
+  }>
+  authentication: {
+    mode: string
+    scopes: string[]
+  }
+  limits: {
+    max_request_bytes: number
+    max_result_bytes: number
+    rate_per_minute: number
+  }
+}
+
+export type ProductIntegrationContract = ProductIntegrationV3Contract | {
+  schema_version: string
+  [key: string]: unknown
+}
+
+export type ProductIntegration = {
+  id: string
+  lifecycle: string
+  active_version_id?: string
+  product_surface: string
+}
+
+export type ProductIntegrationVersion = {
+  id: string
+  revision: number
+  schema_version?: string
+  contract?: ProductIntegrationContract
+  contract_hash: string
+  status: string
+  created_at: string
+}
+
+export type ProductIntegrationReadiness = {
+  status: string
+  lifecycle: string
+  contract_hash?: string
+  version?: number
+  participants?: Record<string, { status: string }>
+  services?: Record<string, { status: string }>
+}
+
+export type ProductIntegrationCredential = {
+  id: string
+  key_prefix: string
+  service_principal: string
+  scopes: string[]
+  status: string
+  created_at: string
+  secret?: string
+}
+
+export type ProductIntegrationState = {
+  integration: ProductIntegration
+  versions: ProductIntegrationVersion[]
+}
+
 export type Approval = {
 	id: string
 	governance_check_id: string
@@ -590,10 +681,12 @@ export type VirployeeDryRun = {
   intent: VirployeeDryRunIntent
   required_capability?: {
     id?: string
+    manifest_hash?: string
     capability_key: string
     name?: string
     required_autonomy: VirployeeAutonomy
     matched: boolean
+    input_schema?: Record<string, unknown>
   }
   required_autonomy: VirployeeAutonomy
   virployee_autonomy: VirployeeAutonomy
@@ -601,6 +694,7 @@ export type VirployeeDryRun = {
   reason: string
   next_step: string
   draft: VirployeeDryRunDraft
+  prepared_action?: PreparedActionV2
 }
 
 export type VirployeeDryRunIntent = {
@@ -648,6 +742,24 @@ export type VirployeeConfirmedDraft = {
   }>
 }
 
+export type PreparedActionV2 = {
+  schema_version: 'axis.prepared-action.v2'
+  capability_id: string
+  manifest_hash: string
+  executor_binding_id: string
+  operation: string
+  input_schema_hash: string
+  output_schema_hash: string
+  arguments: Record<string, unknown>
+  required_autonomy: VirployeeAutonomy
+  idempotency_hash?: string
+  principal_type?: string
+  principal_id?: string
+  input_schema?: Record<string, unknown>
+}
+
+export type VirployeeGateConfirmation = VirployeeConfirmedDraft | PreparedActionV2
+
 export type VirployeeExecutionGate = {
   input: string
   dry_run: VirployeeDryRun
@@ -664,6 +776,20 @@ export type VirployeeExecutionGate = {
     }>
     next_step: string
   }
+}
+
+export type VirployeeGovernanceResult = {
+  check_id?: string
+  available: boolean
+  decision?: string
+  risk_level?: string
+  status?: string
+  decision_reason?: string
+  would_require_approval?: boolean
+  binding_hash?: string
+  approval_id?: string
+  approval_status?: string
+  error?: string
 }
 
 export type VirployeeRunTrace = {
@@ -687,19 +813,8 @@ export type VirployeeRunTrace = {
     status: 'pass' | 'blocked'
     reason: string
   }>
-  nexus_result?: {
-    check_id?: string
-    available: boolean
-    decision?: string
-    risk_level?: string
-    status?: string
-    decision_reason?: string
-    would_require_approval?: boolean
-    binding_hash?: string
-    approval_id?: string
-    approval_status?: string
-    error?: string
-  }
+  governance_result?: VirployeeGovernanceResult
+  nexus_result?: VirployeeGovernanceResult
   execution_result?: {
     status?: string
     mode?: string
@@ -776,6 +891,10 @@ export type CapabilityPromotionState = 'draft' | 'conformant' | 'active'
 export type CapabilityManifest = {
   version: string
   product_surface: string
+  executor_binding_id?: string
+  operation?: string
+  input_schema_hash?: string
+  output_schema_hash?: string
   input_schema: Record<string, unknown>
   output_schema: Record<string, unknown>
   required_scopes: string[]
@@ -805,7 +924,8 @@ export type Capability = {
   required_autonomy: VirployeeAutonomy
   risk_class: CapabilityRiskClass
   side_effect_class: CapabilitySideEffectClass
-  requires_nexus_approval: boolean
+  requires_governance_approval?: boolean
+  requires_nexus_approval?: boolean
   evidence_required: boolean
   rollback_capability_key: string
   promotion_state: CapabilityPromotionState
@@ -835,7 +955,7 @@ export type CapabilityInput = {
   required_autonomy: VirployeeAutonomy | ''
   risk_class?: CapabilityRiskClass
   side_effect_class?: CapabilitySideEffectClass
-  requires_nexus_approval?: boolean
+  requires_governance_approval?: boolean
   evidence_required?: boolean
   rollback_capability_key?: string
 }
@@ -1536,6 +1656,101 @@ export function purgeProduct(id: string, organizationId: string, principalId: st
 	})
 }
 
+function productIntegrationPath(organizationId: string, productId: string): string {
+  return `/api/organizations/${encodeURIComponent(organizationId)}/products/${encodeURIComponent(productId)}/integration`
+}
+
+export function getProductIntegration(
+  organizationId: string,
+  productId: string,
+  principalId: string,
+): Promise<ProductIntegrationState> {
+  return axisFetch<ProductIntegrationState>(productIntegrationPath(organizationId, productId), {
+    orgId: organizationId,
+    principalId,
+  })
+}
+
+export function getProductIntegrationReadiness(
+  organizationId: string,
+  productId: string,
+  principalId: string,
+): Promise<ProductIntegrationReadiness> {
+  return axisFetch<ProductIntegrationReadiness>(
+    `${productIntegrationPath(organizationId, productId)}/readiness`,
+    { orgId: organizationId, principalId },
+  )
+}
+
+export function listProductIntegrationCredentials(
+  organizationId: string,
+  productId: string,
+  principalId: string,
+): Promise<ProductIntegrationCredential[]> {
+  return axisFetch<{ items: ProductIntegrationCredential[] }>(
+    `${productIntegrationPath(organizationId, productId)}/credentials`,
+    { orgId: organizationId, principalId },
+  ).then((payload) => payload.items ?? [])
+}
+
+export function createProductIntegrationVersion(
+  organizationId: string,
+  productId: string,
+  contract: ProductIntegrationContract,
+  principalId: string,
+): Promise<ProductIntegrationVersion> {
+  return axisFetch<ProductIntegrationVersion>(
+    `${productIntegrationPath(organizationId, productId)}/versions`,
+    {
+      method: 'POST',
+      orgId: organizationId,
+      principalId,
+      body: { contract },
+    },
+  )
+}
+
+export function validateProductIntegrationVersion(
+  organizationId: string,
+  productId: string,
+  versionId: string,
+  principalId: string,
+): Promise<unknown> {
+  return axisFetch(
+    `${productIntegrationPath(organizationId, productId)}/versions/${encodeURIComponent(versionId)}/validate`,
+    { method: 'POST', orgId: organizationId, principalId },
+  )
+}
+
+export function activateProductIntegrationVersion(
+  organizationId: string,
+  productId: string,
+  versionId: string,
+  principalId: string,
+): Promise<unknown> {
+  return axisFetch(
+    `${productIntegrationPath(organizationId, productId)}/versions/${encodeURIComponent(versionId)}/activate`,
+    { method: 'POST', orgId: organizationId, principalId },
+  )
+}
+
+export function createProductIntegrationCredential(
+  organizationId: string,
+  productId: string,
+  input: { service_principal: string; scopes: string[] },
+  principalId: string,
+): Promise<ProductIntegrationCredential> {
+  return axisFetch<ProductIntegrationCredential>(
+    `${productIntegrationPath(organizationId, productId)}/credentials`,
+    {
+      method: 'POST',
+      orgId: organizationId,
+      principalId,
+      body: input,
+    },
+  )
+}
+
 export function listApprovals(
 	orgId: string,
 	principalId: string,
@@ -1694,13 +1909,18 @@ export function checkVirployeeExecutionGate(
   input: string,
   orgId: string,
   principalId: string,
-  confirmedDraft?: VirployeeConfirmedDraft,
+  confirmation?: VirployeeGateConfirmation,
 ): Promise<VirployeeExecutionGate> {
+  const confirmationBody = confirmation
+    ? 'schema_version' in confirmation && confirmation.schema_version === 'axis.prepared-action.v2'
+      ? { prepared_action: confirmation }
+      : { confirmed_draft: confirmation }
+    : {}
   return axisFetch<VirployeeExecutionGate>(`/api/virployees/${encodeURIComponent(id)}/execution-gate`, {
     method: 'POST',
     orgId,
     principalId,
-    body: confirmedDraft ? { input, confirmed_draft: confirmedDraft } : { input },
+    body: { input, ...confirmationBody },
   })
 }
 
@@ -1981,7 +2201,7 @@ export function createCapability(input: CapabilityInput, orgId: string, principa
       required_autonomy: input.required_autonomy,
       risk_class: input.risk_class,
       side_effect_class: input.side_effect_class,
-      requires_nexus_approval: input.requires_nexus_approval,
+      requires_governance_approval: input.requires_governance_approval,
       evidence_required: input.evidence_required,
       rollback_capability_key: input.rollback_capability_key,
     },
@@ -2004,7 +2224,7 @@ export function updateCapability(
       required_autonomy: input.required_autonomy,
       risk_class: input.risk_class,
       side_effect_class: input.side_effect_class,
-      requires_nexus_approval: input.requires_nexus_approval,
+      requires_governance_approval: input.requires_governance_approval,
       evidence_required: input.evidence_required,
       rollback_capability_key: input.rollback_capability_key,
     },

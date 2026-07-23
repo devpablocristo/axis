@@ -1,10 +1,7 @@
-import { Component, type ErrorInfo, type ReactNode, useLayoutEffect } from 'react'
-import { ClerkProvider, SignedIn, SignedOut, SignInButton, UserButton, useAuth } from '@clerk/clerk-react'
+import { Component, type ErrorInfo, type ReactNode } from 'react'
 import { App } from './App'
-import { setAxisAuthTokenGetter } from './api'
-
-const clerkPublishableKey = (import.meta.env.VITE_CLERK_PUBLISHABLE_KEY ?? '').trim()
-const clerkJwtTemplate = (import.meta.env.VITE_CLERK_JWT_TEMPLATE ?? 'axis-bff').trim()
+import { AuthGateway, AxisAuthMark } from './auth/AuthPort'
+import { configuredAuthPort } from './auth/wireAuth'
 
 class ConsoleErrorBoundary extends Component<{ children: ReactNode }, { message: string }> {
   state = { message: '' }
@@ -22,7 +19,7 @@ class ConsoleErrorBoundary extends Component<{ children: ReactNode }, { message:
       return (
         <main className="auth-page">
           <section className="auth-panel">
-            <ShieldLogo />
+            <AxisAuthMark />
             <h1>Axis Console</h1>
             <p>{this.state.message}</p>
             <button type="button" className="btn-primary" onClick={() => window.location.reload()}>Reload</button>
@@ -34,73 +31,12 @@ class ConsoleErrorBoundary extends Component<{ children: ReactNode }, { message:
   }
 }
 
-function ShieldLogo() {
-  return (
-    <div className="auth-mark" aria-hidden="true">
-      <span />
-    </div>
-  )
-}
-
-function AxisSignedInConsole() {
-  const { getToken, isLoaded, isSignedIn } = useAuth()
-
-  useLayoutEffect(() => {
-    if (!isLoaded || !isSignedIn) {
-      setAxisAuthTokenGetter(null)
-      return undefined
-    }
-    setAxisAuthTokenGetter(() => getToken({ template: clerkJwtTemplate || 'axis-bff' }))
-    return () => setAxisAuthTokenGetter(null)
-  }, [getToken, isLoaded, isSignedIn])
-
-  if (!isLoaded || !isSignedIn) {
-    return (
-      <main className="auth-page">
-        <section className="auth-panel">
-          <ShieldLogo />
-          <h1>Axis Console</h1>
-        </section>
-      </main>
-    )
-  }
-
-  return <App authSlot={<UserButton />} />
-}
-
-function AxisConsoleWithClerk() {
-  return (
-    <>
-      <SignedIn>
-        <AxisSignedInConsole />
-      </SignedIn>
-      <SignedOut>
-        <main className="auth-page">
-          <section className="auth-panel">
-            <ShieldLogo />
-            <h1>Axis Console</h1>
-            <SignInButton mode="redirect" forceRedirectUrl="/" fallbackRedirectUrl="/">
-              <button type="button" className="btn-primary">Sign in</button>
-            </SignInButton>
-          </section>
-        </main>
-      </SignedOut>
-    </>
-  )
-}
-
 export function ConsoleRoot() {
-  const app = clerkPublishableKey ? (
-    <ClerkProvider publishableKey={clerkPublishableKey}>
-      <AxisConsoleWithClerk />
-    </ClerkProvider>
-  ) : (
-    <App />
-  )
-
   return (
     <ConsoleErrorBoundary>
-      {app}
+      <AuthGateway port={configuredAuthPort}>
+        {({ accountSlot }) => <App authSlot={accountSlot} />}
+      </AuthGateway>
     </ConsoleErrorBoundary>
   )
 }

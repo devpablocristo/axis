@@ -26,10 +26,10 @@ session="$(
 )"
 
 ORG_ID="$(jq -r '.organizations[0].id // .org_id // empty' <<<"$session")"
-PRODUCT_SURFACE="$(jq -r '.organizations[0].products[0].product_surface // "axis"' <<<"$session")"
+PRODUCT_SURFACE="$(jq -r '.organizations[0].products[0].product_surface // empty' <<<"$session")"
 PRINCIPAL_ID="$(jq -r '.principal_id // .actor_id // empty' <<<"$session")"
 
-if [[ -z "$ORG_ID" || -z "$PRINCIPAL_ID" ]]; then
+if [[ -z "$ORG_ID" || -z "$PRINCIPAL_ID" || -z "$PRODUCT_SURFACE" ]]; then
   echo "could not resolve dev organization/principal from /api/session" >&2
   echo "$session" >&2
   exit 1
@@ -153,9 +153,10 @@ ensure_capability() {
     jq -n \
       --arg side "$side_effect" \
       --arg scope "$key" \
+      --arg productSurface "$PRODUCT_SURFACE" \
       '{
         version: "1.0.0",
-        product_surface: "axis",
+        product_surface: $productSurface,
         input_schema: {type: "object"},
         output_schema: {type: "object"},
         required_scopes: [$scope],

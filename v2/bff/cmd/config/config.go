@@ -7,20 +7,21 @@ import (
 )
 
 type Config struct {
-	Environment        string
-	Port               string
-	DatabaseURL        string
-	RunMigrations      bool
-	MaxBodyBytes       int64
+	Environment                 string
+	Port                        string
+	DatabaseURL                 string
+	RunMigrations               bool
+	MaxBodyBytes                int64
 	KnowledgeUploadMaxBodyBytes int64
-	CORSOrigins        []string
-	CompanionBaseURL   string
-	NexusBaseURL       string
-	IdentityProvider   string
-	InternalAuthSecret string
+	CORSOrigins                 []string
+	CompanionBaseURL            string
+	NexusBaseURL                string
+	IdentityProvider            string
+	InternalAuthSecret          string
 	// ProductAPIKeys is the raw BFF_V2_PRODUCT_API_KEYS value: product machine
 	// credentials for the inbound /v1/assist-runs edge. Parsed by inbound.ParseBindings.
-	ProductAPIKeys string
+	ProductAPIKeys            string
+	AllowLegacyProductAPIKeys bool
 
 	ClerkSecretKey         string
 	ClerkAPIBaseURL        string
@@ -40,21 +41,25 @@ type Config struct {
 
 func Load() Config {
 	return Config{
-		Environment:        envconfig.NormalizeEnv(envconfig.Get("BFF_V2_ENV", "development")),
-		Port:               envconfig.Get("PORT", "19080"),
-		DatabaseURL:        envconfig.Get("BFF_V2_DATABASE_URL", envconfig.Get("DATABASE_URL", "")),
-		RunMigrations:      envconfig.Bool("BFF_V2_RUN_MIGRATIONS", true),
-		MaxBodyBytes:       envconfig.Int64("BFF_V2_MAX_BODY_BYTES", 1<<20),
+		Environment:                 envconfig.NormalizeEnv(envconfig.Get("BFF_V2_ENV", "development")),
+		Port:                        envconfig.Get("PORT", "19080"),
+		DatabaseURL:                 envconfig.Get("BFF_V2_DATABASE_URL", envconfig.Get("DATABASE_URL", "")),
+		RunMigrations:               envconfig.Bool("BFF_V2_RUN_MIGRATIONS", true),
+		MaxBodyBytes:                envconfig.Int64("BFF_V2_MAX_BODY_BYTES", 1<<20),
 		KnowledgeUploadMaxBodyBytes: envconfig.Int64("BFF_V2_KNOWLEDGE_UPLOAD_MAX_BODY_BYTES", 251<<20),
-		CORSOrigins:        splitCSV(envconfig.Get("BFF_V2_CORS_ORIGINS", "")),
-		CompanionBaseURL:   strings.TrimRight(envconfig.Get("BFF_V2_COMPANION_BASE_URL", "http://127.0.0.1:19086"), "/"),
-		NexusBaseURL:       strings.TrimRight(envconfig.Get("BFF_V2_NEXUS_BASE_URL", "http://127.0.0.1:19087"), "/"),
-		IdentityProvider:   strings.TrimSpace(strings.ToLower(envconfig.Get("BFF_V2_IDENTITY_PROVIDER", "dev"))),
-		InternalAuthSecret: strings.TrimSpace(envconfig.Get("BFF_V2_INTERNAL_AUTH_SECRET", envconfig.Get("AXIS_V2_INTERNAL_AUTH_SECRET", ""))),
-		ProductAPIKeys:     envconfig.Get("BFF_V2_PRODUCT_API_KEYS", ""),
-		ClerkSecretKey:     envconfig.Get("BFF_V2_CLERK_SECRET_KEY", envconfig.Get("BFF_V2_CLERK_SECRET", envconfig.Get("CLERK_SECRET_KEY", ""))),
-		ClerkAPIBaseURL:    strings.TrimRight(envconfig.Get("BFF_V2_CLERK_API_BASE_URL", "https://api.clerk.com/v1"), "/"),
-		ClerkIssuerURL:     strings.TrimRight(envconfig.Get("BFF_V2_CLERK_ISSUER_URL", envconfig.Get("CLERK_ISSUER_URL", "")), "/"),
+		CORSOrigins:                 splitCSV(envconfig.Get("BFF_V2_CORS_ORIGINS", "")),
+		CompanionBaseURL:            strings.TrimRight(envconfig.Get("BFF_V2_COMPANION_BASE_URL", "http://127.0.0.1:19086"), "/"),
+		NexusBaseURL:                strings.TrimRight(envconfig.Get("BFF_V2_NEXUS_BASE_URL", "http://127.0.0.1:19087"), "/"),
+		IdentityProvider:            strings.TrimSpace(strings.ToLower(envconfig.Get("BFF_V2_IDENTITY_PROVIDER", "dev"))),
+		InternalAuthSecret:          strings.TrimSpace(envconfig.Get("BFF_V2_INTERNAL_AUTH_SECRET", envconfig.Get("AXIS_V2_INTERNAL_AUTH_SECRET", ""))),
+		ProductAPIKeys:              envconfig.Get("BFF_V2_PRODUCT_API_KEYS", ""),
+		AllowLegacyProductAPIKeys: envconfig.Bool(
+			"BFF_V2_ALLOW_LEGACY_PRODUCT_API_KEYS",
+			false,
+		),
+		ClerkSecretKey:  envconfig.Get("BFF_V2_CLERK_SECRET_KEY", envconfig.Get("BFF_V2_CLERK_SECRET", envconfig.Get("CLERK_SECRET_KEY", ""))),
+		ClerkAPIBaseURL: strings.TrimRight(envconfig.Get("BFF_V2_CLERK_API_BASE_URL", "https://api.clerk.com/v1"), "/"),
+		ClerkIssuerURL:  strings.TrimRight(envconfig.Get("BFF_V2_CLERK_ISSUER_URL", envconfig.Get("CLERK_ISSUER_URL", "")), "/"),
 		ClerkWebhookSecret: envconfig.Get(
 			"BFF_V2_CLERK_WEBHOOK_SECRET",
 			envconfig.Get("CLERK_WEBHOOK_SECRET", ""),

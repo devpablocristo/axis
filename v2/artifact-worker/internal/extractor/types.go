@@ -15,25 +15,25 @@ var (
 )
 
 type Scope struct {
-	OrgID                string
-	VirployeeID          string
-	ProductSurface       string
-	SubjectID            string
-	RepositoryGeneration string
+	OrgID                string `json:"org_id"`
+	VirployeeID          string `json:"virployee_id,omitempty"`
+	ProductSurface       string `json:"product_surface,omitempty"`
+	SubjectID            string `json:"subject_id,omitempty"`
+	RepositoryGeneration string `json:"repository_generation,omitempty"`
 }
 
 type Manifest struct {
-	DocumentID string
-	Name       string
-	SHA256     string
-	MIMEType   string
-	SizeBytes  int64
+	DocumentID string `json:"document_id"`
+	Name       string `json:"name"`
+	SHA256     string `json:"sha256"`
+	MIMEType   string `json:"mime_type"`
+	SizeBytes  int64  `json:"size_bytes"`
 }
 
 type Metadata struct {
-	Scope    Scope
-	Manifest Manifest
-	Profile  string
+	Scope    Scope    `json:"scope"`
+	Manifest Manifest `json:"manifest"`
+	Profile  string   `json:"profile"`
 }
 
 type Locator struct {

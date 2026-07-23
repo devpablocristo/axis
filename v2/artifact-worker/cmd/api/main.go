@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/devpablocristo/artifact-worker-v2/internal/adapters/out/processrunner"
+	"github.com/devpablocristo/artifact-worker-v2/internal/adapters/out/toolchain"
 	"github.com/devpablocristo/artifact-worker-v2/internal/extractor"
 	"github.com/devpablocristo/artifact-worker-v2/internal/server"
 )
@@ -25,7 +27,8 @@ func main() {
 	if port == "" {
 		port = "8080"
 	}
-	service := extractor.NewService(extractor.OSRunner{}, os.Getenv("ARTIFACT_WORKER_WHISPER_MODEL"), os.Getenv("ARTIFACT_WORKER_WHISPER_BIN"))
+	profiles := toolchain.New(processrunner.Adapter{}, os.Getenv("ARTIFACT_WORKER_WHISPER_MODEL"), os.Getenv("ARTIFACT_WORKER_WHISPER_BIN"))
+	service := extractor.NewService(profiles)
 	concurrency := 2
 	if configured, err := strconv.Atoi(strings.TrimSpace(os.Getenv("ARTIFACT_WORKER_CONCURRENCY"))); err == nil && configured > 0 {
 		concurrency = configured

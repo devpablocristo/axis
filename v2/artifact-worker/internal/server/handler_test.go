@@ -11,8 +11,10 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/devpablocristo/artifact-worker-v2/internal/adapters/out/toolchain"
 	"github.com/devpablocristo/artifact-worker-v2/internal/extractor"
 )
 
@@ -52,7 +54,7 @@ func extractionRequest(t *testing.T, token, declaredHash string) *http.Request {
 }
 
 func TestHandlerAuthenticatesAndChecksArtifactHash(t *testing.T) {
-	handler := NewHandler(extractor.NewService(workerRunner{}, "", ""), "internal-token").Routes()
+	handler := NewHandler(extractor.NewService(toolchain.New(workerRunner{}, "", "")), "internal-token").Routes()
 	unauthorized := httptest.NewRecorder()
 	handler.ServeHTTP(unauthorized, extractionRequest(t, "wrong", ""))
 	if unauthorized.Code != http.StatusUnauthorized {
@@ -69,5 +71,30 @@ func TestHandlerAuthenticatesAndChecksArtifactHash(t *testing.T) {
 	handler.ServeHTTP(valid, extractionRequest(t, "internal-token", ""))
 	if valid.Code != http.StatusOK || !bytes.Contains(valid.Body.Bytes(), []byte(`"document_id":"doc-1"`)) {
 		t.Fatalf("unexpected extraction response: %d %s", valid.Code, valid.Body.String())
+	}
+}
+
+func TestExtractionMetadataUsesPublishedSnakeCaseContract(t *testing.T) {
+	raw, err := json.Marshal(extractor.Metadata{
+		Profile: "image",
+		Scope: extractor.Scope{
+			OrgID: "organization-1", VirployeeID: "11111111-1111-4111-8111-111111111111",
+			ProductSurface: "product-a", SubjectID: "subject-1", RepositoryGeneration: "generation-1",
+		},
+		Manifest: extractor.Manifest{
+			DocumentID: "doc-1", Name: "scan.tiff", SHA256: strings.Repeat("a", 64),
+			MIMEType: "image/tiff", SizeBytes: 10,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{
+		`"org_id"`, `"virployee_id"`, `"product_surface"`, `"repository_generation"`,
+		`"document_id"`, `"mime_type"`, `"size_bytes"`,
+	} {
+		if !bytes.Contains(raw, []byte(field)) {
+			t.Fatalf("published metadata field %s missing from %s", field, raw)
+		}
 	}
 }

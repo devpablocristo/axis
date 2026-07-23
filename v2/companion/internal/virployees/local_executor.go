@@ -7,18 +7,20 @@ import (
 	"strings"
 	"time"
 
+	capabilitydomain "github.com/devpablocristo/companion-v2/internal/capabilities/usecases/domain"
 	"github.com/devpablocristo/companion-v2/internal/virployees/executiongate"
 	"github.com/devpablocristo/companion-v2/internal/virployees/preparedactions"
 	"github.com/devpablocristo/companion-v2/internal/virployees/runtraces"
+	"github.com/devpablocristo/companion-v2/internal/virployees/usecases/domain"
 	"github.com/devpablocristo/platform/errors/go/domainerr"
 	"github.com/google/uuid"
 )
 
 type LocalCalendarExecutor struct {
-	repo ExecutionRepositoryPort
+	repo LegacyCalendarStorePort
 }
 
-func NewLocalCalendarExecutor(repo ExecutionRepositoryPort) *LocalCalendarExecutor {
+func NewLocalCalendarExecutor(repo LegacyCalendarStorePort) *LocalCalendarExecutor {
 	return &LocalCalendarExecutor{repo: repo}
 }
 
@@ -104,32 +106,66 @@ func (u *UseCases) ExecuteApprovedAction(ctx context.Context, orgID string, id, 
 	if prepared.BindingHash != approval.BindingHash || prepared.GovernanceCheckID.String() != approval.GovernanceCheckID {
 		return runtraces.Trace{}, domainerr.Conflict("approval binding does not match prepared action")
 	}
-	if prepared.NexusPolicySnapshotHash != approval.PolicySnapshotHash {
+	governancePolicySnapshotHash := prepared.GovernancePolicySnapshotHash
+	if governancePolicySnapshotHash == "" {
+		governancePolicySnapshotHash = prepared.NexusPolicySnapshotHash
+	}
+	if governancePolicySnapshotHash != approval.PolicySnapshotHash {
 		return runtraces.Trace{}, domainerr.Conflict("approval policy snapshot does not match prepared action")
 	}
-	payloadHash, err := prepared.Action.PayloadHash()
+	isV2 := prepared.ActionV2 != nil
+	var payloadHash string
+	if isV2 {
+		payloadHash, err = prepared.ActionV2.PayloadHash()
+	} else {
+		payloadHash, err = prepared.Action.PayloadHash()
+	}
 	if err != nil || payloadHash != prepared.PayloadHash {
 		return runtraces.Trace{}, domainerr.Conflict("prepared action payload does not match its approved hash")
 	}
-	currentVirployee, currentCapability, err := u.verifyCurrentExecutionEligibility(ctx, orgID, id, prepared.CapabilityKey, prepared.Action)
+	var currentVirployee domain.Virployee
+	var currentCapability capabilitydomain.Capability
+	var assistContext *preparedactions.AssistContextBinding
+	var mcpContext *preparedactions.MCPContextBinding
+	operation := prepared.Action.Action
+	if isV2 {
+		currentVirployee, currentCapability, err = u.verifyCurrentExecutionEligibilityV2(
+			ctx, orgID, id, prepared.CapabilityID, prepared.CapabilityKey, *prepared.ActionV2,
+		)
+		if err == nil {
+			err = u.verifyCurrentProfessionalActionScopeV2(ctx, orgID, id, currentVirployee.JobRoleID, prepared.CapabilityKey, *prepared.ActionV2)
+		}
+		assistContext = prepared.ActionV2.AssistContext
+		mcpContext = prepared.ActionV2.MCPContext
+		operation = prepared.ActionV2.Operation
+	} else {
+		currentVirployee, currentCapability, err = u.verifyCurrentExecutionEligibility(ctx, orgID, id, prepared.CapabilityKey, prepared.Action)
+		if err == nil {
+			err = u.verifyCurrentProfessionalActionScope(ctx, orgID, id, currentVirployee.JobRoleID, prepared.CapabilityKey, prepared.Action)
+		}
+		assistContext = prepared.Action.AssistContext
+		mcpContext = prepared.Action.MCPContext
+	}
 	if err != nil {
 		return runtraces.Trace{}, err
 	}
-	if err := u.verifyCurrentProfessionalActionScope(ctx, orgID, id, currentVirployee.JobRoleID, prepared.CapabilityKey, prepared.Action); err != nil {
+	if err := u.verifyPreparedAssistContext(ctx, orgID, id, assistContext); err != nil {
 		return runtraces.Trace{}, err
 	}
-	if err := u.verifyPreparedAssistContext(ctx, orgID, id, prepared.Action.AssistContext); err != nil {
-		return runtraces.Trace{}, err
-	}
-	if prepared.Action.MCPContext != nil {
+	if mcpContext != nil {
 		if u.mcpContext == nil {
 			return runtraces.Trace{}, domainerr.Conflict("MCP execution context validator is unavailable")
 		}
-		if err := u.mcpContext.ValidateMCPExecutionContext(ctx, *prepared.Action.MCPContext); err != nil {
+		if err := u.mcpContext.ValidateMCPExecutionContext(ctx, *mcpContext); err != nil {
 			return runtraces.Trace{}, err
 		}
 	}
-	currentAuthority, err := u.verifyCurrentAuthority(ctx, orgID, id, currentCapability, prepared.Action, prepared.AuthorityBindingHash)
+	var currentAuthority executiongate.AuthorityCheckResult
+	if isV2 {
+		currentAuthority, err = u.verifyCurrentAuthorityV2(ctx, orgID, id, currentCapability, *prepared.ActionV2, prepared.AuthorityBindingHash)
+	} else {
+		currentAuthority, err = u.verifyCurrentAuthority(ctx, orgID, id, currentCapability, prepared.Action, prepared.AuthorityBindingHash)
+	}
 	if err != nil {
 		return runtraces.Trace{}, err
 	}
@@ -150,11 +186,25 @@ func (u *UseCases) ExecuteApprovedAction(ctx context.Context, orgID string, id, 
 			return runtraces.Trace{}, domainerr.Conflict("governance authority changed after approval")
 		}
 	}
-	executor := u.executors[prepared.Action.Action]
-	if executor == nil {
-		return runtraces.Trace{}, domainerr.Conflict("executor is not configured for prepared action")
+	var execute func(context.Context, string, uuid.UUID, ExecutionAttempt) (ExecutionOutcome, error)
+	if isV2 {
+		executor := u.executorBindings[prepared.ActionV2.ExecutorBindingID]
+		if executor == nil {
+			return runtraces.Trace{}, domainerr.Conflict("executor binding is not configured for prepared action")
+		}
+		execute = func(execCtx context.Context, execOrgID string, virployeeID uuid.UUID, attempt ExecutionAttempt) (ExecutionOutcome, error) {
+			return executor.ExecuteV2(execCtx, execOrgID, virployeeID, attempt, *prepared.ActionV2)
+		}
+	} else {
+		executor := u.executors[prepared.Action.Action]
+		if executor == nil {
+			return runtraces.Trace{}, domainerr.Conflict("executor is not configured for legacy prepared action")
+		}
+		execute = func(execCtx context.Context, execOrgID string, virployeeID uuid.UUID, attempt ExecutionAttempt) (ExecutionOutcome, error) {
+			return executor.Execute(execCtx, execOrgID, virployeeID, attempt, prepared.Action)
+		}
 	}
-	idempotencyKey := runtraces.HashString(fmt.Sprintf("%s:%s:%s:%s", orgID, approvalID, prepared.BindingHash, prepared.Action.Action))
+	idempotencyKey := runtraces.HashString(fmt.Sprintf("%s:%s:%s:%s", orgID, approvalID, prepared.BindingHash, operation))
 	if err := u.consumeQuota(ctx, quotaKey(orgID, "axis", "executors"), idempotencyKey, "prepared_action", prepared.ID.String(), 1); err != nil {
 		return runtraces.Trace{}, err
 	}
@@ -167,7 +217,7 @@ func (u *UseCases) ExecuteApprovedAction(ctx context.Context, orgID string, id, 
 	}
 	if created {
 		started := time.Now()
-		outcome, executeErr := executor.Execute(ctx, orgID, id, attempt, prepared.Action)
+		outcome, executeErr := execute(ctx, orgID, id, attempt)
 		durationMS := time.Since(started).Milliseconds()
 		status := "succeeded"
 		errorMessage := ""
@@ -193,12 +243,16 @@ func (u *UseCases) ExecuteApprovedAction(ctx context.Context, orgID string, id, 
 		// Record the real execution in the tamper-evident ledger (best-effort:
 		// emitted once, on the created attempt, so idempotent re-entry does not
 		// duplicate it). Keyed by binding_hash — no external payload/PII.
-		u.emitExecutionAudit(ctx, orgID, id, prepared.BindingHash, prepared.Action.Action, prepared.GovernanceCheckID.String(), attempt)
+		u.emitExecutionAudit(ctx, orgID, id, prepared.BindingHash, operation, prepared.GovernanceCheckID.String(), attempt)
 	}
-	// Delivery to Nexus is asynchronous. CompleteExecution atomically created the
-	// outbox message and NexusReportStatus is its backwards-compatible projection.
-	reportStatus := attempt.NexusReportStatus
+	// Governance delivery is asynchronous. CompleteExecution atomically creates
+	// the outbox message; NexusReportStatus is the backwards-compatible projection.
+	reportStatus := attempt.GovernanceReportStatus
+	if reportStatus == "" {
+		reportStatus = attempt.NexusReportStatus
+	}
 	if existing, err := u.executionRepo.FindExecutionTraceByApproval(ctx, orgID, id, approvalID.String()); err == nil {
+		existing.ExecutionResult.GovernanceReportStatus = reportStatus
 		existing.ExecutionResult.NexusReportStatus = reportStatus
 		return existing, nil
 	} else if !domainerr.IsNotFound(err) {
@@ -208,15 +262,21 @@ func (u *UseCases) ExecuteApprovedAction(ctx context.Context, orgID string, id, 
 	if err != nil {
 		return runtraces.Trace{}, err
 	}
-	nexus := source.NexusResult
-	if nexus != nil {
-		copy := *nexus
+	governanceResult := source.GovernanceResult
+	if governanceResult == nil {
+		governanceResult = source.NexusResult
+	}
+	if governanceResult != nil {
+		copy := *governanceResult
 		copy.ApprovalStatus = approval.Status
-		nexus = &copy
+		governanceResult = &copy
 	}
 	mode := resultString(attempt.Result, "mode", "local")
 	externalEffects := resultBool(attempt.Result, "external_effects")
-	message := "Local calendar event created."
+	message := "Governed action executed."
+	if !isV2 {
+		message = "Local calendar event created."
+	}
 	if attempt.Status == "failed" {
 		message = attempt.Error
 	}
@@ -225,12 +285,13 @@ func (u *UseCases) ExecuteApprovedAction(ctx context.Context, orgID string, id, 
 		InputHash: source.InputHash, InputPreview: source.InputPreview, Intent: source.Intent,
 		CapabilityID: source.CapabilityID, CapabilityKey: source.CapabilityKey,
 		DryRunDecision: source.DryRunDecision, GateDecision: "pass", GateChecks: source.GateChecks,
-		NexusResult: nexus, BindingHash: prepared.BindingHash,
+		GovernanceResult: governanceResult, NexusResult: governanceResult, BindingHash: prepared.BindingHash,
 		MemoryReferences: source.MemoryReferences, MemoryContextHash: source.MemoryContextHash,
 		ExecutionResult: &runtraces.ExecutionResult{
 			Status: attempt.Status, Mode: mode, ApprovalID: approval.ID, ApprovalStatus: approval.Status,
 			BindingHash: prepared.BindingHash, Message: message, ExternalEffects: externalEffects,
-			ResourceID: attempt.ResourceID, DurationMS: attempt.DurationMS, NexusReportStatus: reportStatus,
+			ResourceID: attempt.ResourceID, DurationMS: attempt.DurationMS,
+			GovernanceReportStatus: reportStatus, NexusReportStatus: reportStatus,
 		},
 	})
 }

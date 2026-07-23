@@ -1,13 +1,15 @@
-import { Activity, BookOpen, Bot, BriefcaseBusiness, ClipboardCheck, GraduationCap, Network, RefreshCw, Scale, ScrollText, ServerCog, Settings, ShieldCheck, SlidersHorizontal, UsersRound, Wrench } from 'lucide-react'
+import { Activity, ArchiveRestore, Beaker, BookOpen, Bot, BriefcaseBusiness, ClipboardCheck, FileCode2, GraduationCap, LayoutDashboard, Network, Radar, RefreshCw, Scale, ScrollText, ServerCog, Settings, Siren, SlidersHorizontal, UsersRound, Wrench } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { ApprovalsPage } from './ApprovalsPage'
 import { CapabilitiesPage } from './CapabilitiesPage'
 import { CoordinationPage } from './CoordinationPage'
+import { CompanionGovernancePage } from './CompanionGovernancePage'
 import { GovernancePage } from './GovernancePage'
 import { LearningProposalsPage } from './LearningProposalsPage'
 import { JobRolesPage } from './JobRolesPage'
 import { KnowledgeBasesPage } from './KnowledgeBasesPage'
 import { MCPGovernancePage } from './MCPGovernancePage'
+import { NexusOverviewPage, type NexusDestination } from './NexusOverviewPage'
 import { OperationsPage } from './OperationsPage'
 import { ProfileTemplatesPage } from './ProfileTemplatesPage'
 import { ProfessionalPoliciesPage } from './ProfessionalPoliciesPage'
@@ -26,7 +28,10 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
   const [session, setSession] = useState<LoadState<Session>>({ data: null, loading: true, error: '' })
   const [orgId, setOrgId] = useState(localStorage.getItem('axis.v2.org_id') || '')
   const [productSurface, setProductSurface] = useState(localStorage.getItem('axis.v2.product_surface') || '')
-  const [activePage, setActivePage] = useState<Page>('virployees')
+  const [activePage, setActivePage] = useState<Page>(() => {
+    const storedPage = localStorage.getItem('axis.v2.active_page')
+    return isPage(storedPage) ? storedPage : 'virployees'
+  })
   const [approvalReviewContext, setApprovalReviewContext] = useState<ApprovalReviewContext | null>(null)
   const [focusDryRunVirployeeId, setFocusDryRunVirployeeId] = useState('')
 
@@ -90,20 +95,25 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
     if (productSurface) localStorage.setItem('axis.v2.product_surface', productSurface)
   }, [productSurface])
 
+  useEffect(() => {
+    localStorage.setItem('axis.v2.active_page', activePage)
+  }, [activePage])
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand">
-          <ShieldCheck aria-hidden="true" />
+          <Bot aria-hidden="true" />
           <div>
             <strong>Axis</strong>
             <span>Console v2</span>
           </div>
         </div>
         <nav className="nav">
-          <span className="nav-section-label">Operate</span>
+          <span className="nav-section-label nav-section-label--companion">Companion</span>
           <button
             type="button"
+            data-domain="companion"
             className={activePage === 'virployees' ? 'active' : ''}
             onClick={() => {
               setFocusDryRunVirployeeId('')
@@ -115,6 +125,125 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
           </button>
           <button
             type="button"
+            data-domain="companion"
+            className={activePage === 'workforce' ? 'active' : ''}
+            onClick={() => setActivePage('workforce')}
+          >
+            <UsersRound aria-hidden="true" />
+            Workforce
+          </button>
+          <button
+            type="button"
+            data-domain="companion"
+            className={activePage === 'coordination' ? 'active' : ''}
+            onClick={() => setActivePage('coordination')}
+          >
+            <Network aria-hidden="true" />
+            Coordination
+          </button>
+          <button
+            type="button"
+            data-domain="companion"
+            className={activePage === 'learning-proposals' ? 'active' : ''}
+            onClick={() => setActivePage('learning-proposals')}
+          >
+            <GraduationCap aria-hidden="true" />
+            Learning
+          </button>
+          <button
+            type="button"
+            data-domain="companion"
+            className={activePage === 'prompts' ? 'active' : ''}
+            onClick={() => setActivePage('prompts')}
+          >
+            <FileCode2 aria-hidden="true" />
+            Prompts
+          </button>
+          <button
+            type="button"
+            data-domain="companion"
+            className={activePage === 'watchers' ? 'active' : ''}
+            onClick={() => setActivePage('watchers')}
+          >
+            <Radar aria-hidden="true" />
+            Watchers
+          </button>
+          <button
+            type="button"
+            data-domain="companion"
+            className={activePage === 'evaluations' ? 'active' : ''}
+            onClick={() => setActivePage('evaluations')}
+          >
+            <Beaker aria-hidden="true" />
+            Evaluations
+          </button>
+          <button
+            type="button"
+            data-domain="companion"
+            className={activePage === 'capabilities' ? 'active' : ''}
+            onClick={() => setActivePage('capabilities')}
+          >
+            <Wrench aria-hidden="true" />
+            Capabilities
+          </button>
+          <button
+            type="button"
+            data-domain="companion"
+            className={activePage === 'job-roles' ? 'active' : ''}
+            onClick={() => setActivePage('job-roles')}
+          >
+            <BriefcaseBusiness aria-hidden="true" />
+            Job Roles
+          </button>
+          <button
+            type="button"
+            data-domain="companion"
+            className={activePage === 'profile-templates' ? 'active' : ''}
+            onClick={() => setActivePage('profile-templates')}
+          >
+            <SlidersHorizontal aria-hidden="true" />
+            Profile Templates
+          </button>
+          <button
+            type="button"
+            data-domain="companion"
+            className={activePage === 'knowledge-bases' ? 'active' : ''}
+            onClick={() => setActivePage('knowledge-bases')}
+          >
+            <BookOpen aria-hidden="true" />
+            Knowledge Bases
+          </button>
+          <button
+            type="button"
+            data-domain="companion"
+            className={activePage === 'professional-policies' ? 'active' : ''}
+            onClick={() => setActivePage('professional-policies')}
+          >
+            <ScrollText aria-hidden="true" />
+            Professional Policies
+          </button>
+          <button
+            type="button"
+            data-domain="companion"
+            className={activePage === 'mcp-governance' ? 'active' : ''}
+            onClick={() => setActivePage('mcp-governance')}
+          >
+            <ServerCog aria-hidden="true" />
+            MCP Governance
+          </button>
+          <span className="nav-section-label nav-section-label--nexus">Nexus</span>
+          <button
+            type="button"
+            data-domain="nexus"
+            className={activePage === 'nexus-overview' ? 'active' : ''}
+            onClick={() => setActivePage('nexus-overview')}
+          >
+            <LayoutDashboard aria-hidden="true" />
+            Overview
+          </button>
+          <button
+            type="button"
+            data-domain="nexus"
             className={activePage === 'approvals' ? 'active' : ''}
             onClick={() => {
               setApprovalReviewContext(null)
@@ -126,101 +255,50 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
           </button>
           <button
             type="button"
-            className={activePage === 'coordination' ? 'active' : ''}
-            onClick={() => setActivePage('coordination')}
-          >
-            <Network aria-hidden="true" />
-            Coordination
-          </button>
-          <button
-            type="button"
-            className={activePage === 'workforce' ? 'active' : ''}
-            onClick={() => setActivePage('workforce')}
-          >
-            <UsersRound aria-hidden="true" />
-            Workforce
-          </button>
-          <button
-            type="button"
-            className={activePage === 'learning-proposals' ? 'active' : ''}
-            onClick={() => setActivePage('learning-proposals')}
-          >
-            <GraduationCap aria-hidden="true" />
-            Learning
-          </button>
-          <button
-            type="button"
-            className={activePage === 'operations' ? 'active' : ''}
-            onClick={() => setActivePage('operations')}
-          >
-            <Activity aria-hidden="true" />
-            Operations
-          </button>
-          <span className="nav-section-label nav-section-label--builder">Builder</span>
-          <button
-            type="button"
-            className={activePage === 'capabilities' ? 'active' : ''}
-            onClick={() => setActivePage('capabilities')}
-          >
-            <Wrench aria-hidden="true" />
-            Capabilities
-          </button>
-          <button
-            type="button"
-            className={activePage === 'job-roles' ? 'active' : ''}
-            onClick={() => setActivePage('job-roles')}
-          >
-            <BriefcaseBusiness aria-hidden="true" />
-            Job Roles
-          </button>
-          <button
-            type="button"
-            className={activePage === 'profile-templates' ? 'active' : ''}
-            onClick={() => setActivePage('profile-templates')}
-          >
-            <SlidersHorizontal aria-hidden="true" />
-            Profile Templates
-          </button>
-          <button
-            type="button"
-            className={activePage === 'knowledge-bases' ? 'active' : ''}
-            onClick={() => setActivePage('knowledge-bases')}
-          >
-            <BookOpen aria-hidden="true" />
-            Knowledge Bases
-          </button>
-          <button
-            type="button"
-            className={activePage === 'professional-policies' ? 'active' : ''}
-            onClick={() => setActivePage('professional-policies')}
-          >
-            <ScrollText aria-hidden="true" />
-            Professional Policies
-          </button>
-          <span className="nav-section-label nav-section-label--admin">Admin</span>
-          <button
-            type="button"
+            data-domain="nexus"
             className={activePage === 'governance' ? 'active' : ''}
             onClick={() => setActivePage('governance')}
           >
             <Scale aria-hidden="true" />
-            Governance
+            Policies & access
           </button>
           <button
             type="button"
-            className={activePage === 'mcp-governance' ? 'active' : ''}
-            onClick={() => setActivePage('mcp-governance')}
+            data-domain="nexus"
+            className={activePage === 'nexus-incidents' ? 'active' : ''}
+            onClick={() => setActivePage('nexus-incidents')}
           >
-            <ServerCog aria-hidden="true" />
-            MCP Governance
+            <Siren aria-hidden="true" />
+            Incidents & SLOs
           </button>
           <button
             type="button"
+            data-domain="nexus"
+            className={activePage === 'nexus-retention' ? 'active' : ''}
+            onClick={() => setActivePage('nexus-retention')}
+          >
+            <ArchiveRestore aria-hidden="true" />
+            Holds & exports
+          </button>
+          <span className="nav-section-label nav-section-label--operations">Operations</span>
+          <button
+            type="button"
+            data-domain="operations"
+            className={activePage === 'operations' ? 'active' : ''}
+            onClick={() => setActivePage('operations')}
+          >
+            <Activity aria-hidden="true" />
+            Fleet & runtime
+          </button>
+          <span className="nav-section-label nav-section-label--administration">Administration</span>
+          <button
+            type="button"
+            data-domain="administration"
             className={activePage === 'admin' ? 'active' : ''}
             onClick={() => setActivePage('admin')}
           >
             <Settings aria-hidden="true" />
-            Admin
+            Organization
           </button>
         </nav>
       </aside>
@@ -273,6 +351,8 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
           <OrganizationAdminPage
             organizationId={selectedOrganization?.id ?? ''}
             principalId={principalId}
+            productId={selectedProduct?.id ?? ''}
+            productSurface={selectedProduct?.product_surface ?? ''}
             onSessionChanged={refresh}
           />
 		) : organizations.length === 0 ? (
@@ -285,6 +365,13 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
           <CapabilitiesPage orgId={(selectedOrganization?.id ?? "")} principalId={principalId} />
         ) : activePage === 'learning-proposals' ? (
           <LearningProposalsPage orgId={(selectedOrganization?.id ?? "")} principalId={principalId} />
+        ) : activePage === 'prompts' || activePage === 'watchers' || activePage === 'evaluations' ? (
+          <CompanionGovernancePage
+            orgId={selectedOrganization?.id ?? ''}
+            principalId={principalId}
+            productId={selectedProduct.id}
+            initialTab={activePage}
+          />
         ) : activePage === 'profile-templates' ? (
           <ProfileTemplatesPage orgId={(selectedOrganization?.id ?? "")} principalId={principalId} />
         ) : activePage === 'knowledge-bases' ? (
@@ -297,8 +384,14 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
           <ProfessionalPoliciesPage orgId={(selectedOrganization?.id ?? "")} principalId={principalId} />
         ) : activePage === 'mcp-governance' ? (
           <MCPGovernancePage orgId={(selectedOrganization?.id ?? "")} principalId={principalId} />
+        ) : activePage === 'nexus-overview' ? (
+          <NexusOverviewPage onNavigate={(destination: NexusDestination) => setActivePage(destination)} />
         ) : activePage === 'governance' ? (
           <GovernancePage orgId={(selectedOrganization?.id ?? "")} principalId={principalId} productSurface={selectedProduct.product_surface} />
+        ) : activePage === 'nexus-incidents' ? (
+          <OperationsPage orgId={(selectedOrganization?.id ?? "")} principalId={principalId} productSurface={selectedProduct.product_surface} initialTab="incidents" />
+        ) : activePage === 'nexus-retention' ? (
+          <OperationsPage orgId={(selectedOrganization?.id ?? "")} principalId={principalId} productSurface={selectedProduct.product_surface} initialTab="retention" />
         ) : activePage === 'approvals' ? (
           <ApprovalsPage
             orgId={(selectedOrganization?.id ?? "")}
@@ -344,7 +437,32 @@ export function App({ authSlot }: { authSlot?: ReactNode } = {}) {
   )
 }
 
-type Page = 'virployees' | 'job-roles' | 'capabilities' | 'learning-proposals' | 'profile-templates' | 'knowledge-bases' | 'professional-policies' | 'governance' | 'mcp-governance' | 'approvals' | 'coordination' | 'workforce' | 'operations' | 'admin'
+type Page = 'virployees' | 'job-roles' | 'capabilities' | 'learning-proposals' | 'prompts' | 'watchers' | 'evaluations' | 'profile-templates' | 'knowledge-bases' | 'professional-policies' | 'nexus-overview' | 'governance' | 'mcp-governance' | 'nexus-incidents' | 'nexus-retention' | 'approvals' | 'coordination' | 'workforce' | 'operations' | 'admin'
+
+function isPage(value: string | null): value is Page {
+  return value !== null && [
+    'virployees',
+    'job-roles',
+    'capabilities',
+    'learning-proposals',
+    'prompts',
+    'watchers',
+    'evaluations',
+    'profile-templates',
+    'knowledge-bases',
+    'professional-policies',
+    'nexus-overview',
+    'governance',
+    'mcp-governance',
+    'nexus-incidents',
+    'nexus-retention',
+    'approvals',
+    'coordination',
+    'workforce',
+    'operations',
+    'admin',
+  ].includes(value)
+}
 
 type ApprovalReviewContext = {
   approvalId: string
@@ -355,11 +473,17 @@ function pageTitle(page: Page): string {
   if (page === 'job-roles') return 'Job Roles'
   if (page === 'capabilities') return 'Capabilities'
   if (page === 'learning-proposals') return 'Learning'
+  if (page === 'prompts') return 'Prompt governance'
+  if (page === 'watchers') return 'Watchers'
+  if (page === 'evaluations') return 'Behavior evaluations'
   if (page === 'profile-templates') return 'Profile Templates'
   if (page === 'knowledge-bases') return 'Knowledge Bases'
   if (page === 'professional-policies') return 'Professional Policies'
-  if (page === 'governance') return 'Governance'
+  if (page === 'nexus-overview') return 'Nexus'
+  if (page === 'governance') return 'Policies & access'
   if (page === 'mcp-governance') return 'MCP Governance'
+  if (page === 'nexus-incidents') return 'Incidents & SLOs'
+  if (page === 'nexus-retention') return 'Holds & exports'
   if (page === 'approvals') return 'Approvals'
   if (page === 'coordination') return 'Specialist coordination'
   if (page === 'workforce') return 'Workforce continuity'

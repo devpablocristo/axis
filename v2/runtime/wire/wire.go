@@ -11,6 +11,7 @@ import (
 	ginmw "github.com/devpablocristo/platform/http/gin/go"
 	observability "github.com/devpablocristo/platform/observability/go"
 	cfg "github.com/devpablocristo/runtime-v2/cmd/config"
+	"github.com/devpablocristo/runtime-v2/internal/adapters/out/modelkernel"
 	"github.com/devpablocristo/runtime-v2/internal/embeddings"
 	"github.com/devpablocristo/runtime-v2/internal/planner"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -43,7 +44,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	}
 
 	provider, effectiveModel := buildProvider(ctx, config)
-	plannerHandler := planner.NewHandler(planner.New(provider, effectiveModel, planner.Pricing{
+	plannerHandler := planner.NewHandler(planner.New(modelkernel.New(provider), effectiveModel, planner.Pricing{
 		InputMicroUSDPerMillionTokens:  config.LLMInputCostMicroUSDPerMillionTokens,
 		OutputMicroUSDPerMillionTokens: config.LLMOutputCostMicroUSDPerMillionTokens,
 	}))

@@ -233,7 +233,7 @@ func testUseCases(t *testing.T, sideEffect string) (*UseCases, *fakeRepository, 
 	capability := capabilitydomain.Capability{
 		ID: capabilityID, OrgID: orgID, CapabilityKey: "calendar.events." + map[string]string{"read": "read", "write": "create"}[sideEffect],
 		Name: "Calendar", Description: "Calendar tool", RequiredAutonomy: virployeedomain.AutonomyA3,
-		RiskClass: "medium", SideEffectClass: sideEffect, RequiresNexusApproval: sideEffect == "write",
+		RiskClass: "medium", SideEffectClass: sideEffect, RequiresGovernanceApproval: sideEffect == "write",
 		PromotionState: capabilitydomain.PromotionActive, ManifestHash: "manifest-hash", ConformedHash: "manifest-hash",
 		Manifest: capabilitydomain.Manifest{
 			Version: "1.0.0", ProductSurface: "axis",

@@ -16,6 +16,7 @@ import (
 	profiletemplatedomain "github.com/devpablocristo/companion-v2/internal/profiletemplates/usecases/domain"
 	"github.com/devpablocristo/companion-v2/internal/virployees/dryrun"
 	"github.com/devpablocristo/companion-v2/internal/virployees/executiongate"
+	"github.com/devpablocristo/companion-v2/internal/virployees/preparedactions"
 	"github.com/devpablocristo/companion-v2/internal/virployees/runtimecontext"
 	"github.com/devpablocristo/companion-v2/internal/virployees/runtraces"
 	"github.com/devpablocristo/companion-v2/internal/virployees/usecases/domain"
@@ -335,6 +336,37 @@ func TestHandlerExecutionGate(t *testing.T) {
 	}
 }
 
+func TestHandlerAcceptsPreparedActionV2Confirmation(t *testing.T) {
+	fake := &handlerFakeUseCases{}
+	router := testRouter(fake)
+	capabilityID := uuid.NewString()
+	body := `{"input":"manage the field","prepared_action":{` +
+		`"schema_version":"axis.prepared-action.v2",` +
+		`"capability_id":"` + capabilityID + `",` +
+		`"manifest_hash":"` + strings.Repeat("a", 64) + `",` +
+		`"executor_binding_id":"grain-connector","operation":"fields.manage",` +
+		`"input_schema_hash":"` + strings.Repeat("b", 64) + `",` +
+		`"output_schema_hash":"` + strings.Repeat("c", 64) + `",` +
+		`"arguments":{"field_id":"north-1"},"required_autonomy":"A2"}}`
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/virployees/"+uuid.NewString()+"/execution-gate",
+		strings.NewReader(body),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Org-ID", "organization-1")
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected prepared action to reach the gate, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if fake.lastPreparedAction == nil ||
+		fake.lastPreparedAction.CapabilityID != capabilityID ||
+		fake.lastPreparedAction.ExecutorBindingID != "grain-connector" {
+		t.Fatalf("prepared action was not forwarded: %+v", fake.lastPreparedAction)
+	}
+}
+
 func TestHandlerSimulateApprovedExecution(t *testing.T) {
 	fake := &handlerFakeUseCases{}
 	router := testRouter(fake)
@@ -502,11 +534,12 @@ func testRouter(ucs UseCasesPort) *gin.Engine {
 }
 
 type handlerFakeUseCases struct {
-	lastAction    string
-	lastActor     string
-	lastOrg       string
-	lastPrincipal executiongate.PrincipalContext
-	lastAssistRun uuid.UUID
+	lastAction         string
+	lastActor          string
+	lastOrg            string
+	lastPrincipal      executiongate.PrincipalContext
+	lastAssistRun      uuid.UUID
+	lastPreparedAction *preparedactions.PreparedActionV2
 }
 
 func (f *handlerFakeUseCases) Create(_ context.Context, orgID string, input domain.CreateInput) (domain.Virployee, error) {
@@ -587,12 +620,13 @@ func (f *handlerFakeUseCases) ExecutionGate(ctx context.Context, orgID string, i
 	if len(principalContexts) > 0 {
 		principal = principalContexts[0]
 	}
-	return f.ExecutionGateWithAssistRun(ctx, orgID, id, input, confirmedDraft, principal, uuid.Nil)
+	return f.ExecutionGateWithAssistRun(ctx, orgID, id, input, confirmedDraft, nil, principal, uuid.Nil)
 }
 
-func (f *handlerFakeUseCases) ExecutionGateWithAssistRun(ctx context.Context, orgID string, id uuid.UUID, input string, confirmedDraft *executiongate.ConfirmedDraft, principal executiongate.PrincipalContext, assistRunID uuid.UUID) (executiongate.Result, error) {
+func (f *handlerFakeUseCases) ExecutionGateWithAssistRun(ctx context.Context, orgID string, id uuid.UUID, input string, confirmedDraft *executiongate.ConfirmedDraft, preparedAction *preparedactions.PreparedActionV2, principal executiongate.PrincipalContext, assistRunID uuid.UUID) (executiongate.Result, error) {
 	f.lastPrincipal = principal
 	f.lastAssistRun = assistRunID
+	f.lastPreparedAction = preparedAction
 	result, err := f.DryRun(ctx, orgID, id, input)
 	if err != nil {
 		return executiongate.Result{}, err

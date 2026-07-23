@@ -69,7 +69,7 @@ func TestPostgresOutboxTransactionalClaimDeadLetterReplayAndProjection(t *testin
 	orgID := "outbox-test-" + uuid.NewString()
 	messageID := uuid.New()
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM companion_nexus_outbox WHERE org_id=$1`, orgID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM companion_outbox_messages WHERE org_id=$1`, orgID)
 	})
 	input := EnqueueInput{
 		ID: messageID, OrgID: orgID, AggregateType: "execution_attempt",
@@ -135,7 +135,7 @@ func TestPostgresOutboxTransactionalClaimDeadLetterReplayAndProjection(t *testin
 		t.Fatalf("first failure=%+v err=%v", message, err)
 	}
 	for expectedAttempt := 2; expectedAttempt <= MaxDeliveryAttempts; expectedAttempt++ {
-		if _, err := pool.Exec(ctx, `UPDATE companion_nexus_outbox SET available_at=now() WHERE org_id=$1 AND id=$2`, orgID, messageID); err != nil {
+		if _, err := pool.Exec(ctx, `UPDATE companion_outbox_messages SET available_at=now() WHERE org_id=$1 AND id=$2`, orgID, messageID); err != nil {
 			t.Fatal(err)
 		}
 		claimed, err = repository.Claim(ctx, ClaimOptions{WorkerID: "replica-a", Batch: 1, Lease: time.Minute})
@@ -182,7 +182,7 @@ func TestDispatcherPersistsOnlySafeErrorCode(t *testing.T) {
 	orgID := "outbox-dispatcher-test-" + uuid.NewString()
 	messageID := uuid.New()
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM companion_nexus_outbox WHERE org_id=$1`, orgID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM companion_outbox_messages WHERE org_id=$1`, orgID)
 	})
 	tx, err := pool.Begin(ctx)
 	if err != nil {

@@ -21,10 +21,11 @@ history and metadata-only invocation audit through the corresponding audit APIs.
 `ToolInvocationGate` is shared by the MCP facade and the internal execution
 path. Inputs and outputs are validated against the promoted manifest schemas.
 Reads require a registered executor. Writes require a stable idempotency key and
-pass through Execution Gate and Nexus; approval binds organization, actor, Virployee,
+pass through Execution Gate and the configured governance port; approval binds organization, actor, Virployee,
 subject/case, continuity assignment revision, delegation/authority snapshot,
-capability manifest and its product surface, MCP policy revision, active Nexus
-policy snapshot, payload hash, and idempotency hash. Nexus receives only safe
+capability manifest and its product surface, MCP policy revision, active
+governance policy snapshot, payload hash, and idempotency hash. The governance
+adapter receives only safe
 metadata and opaque internal subject/case references. Those mutable inputs are
 revalidated immediately before execution, so a policy, assignment, delegation,
 functional-authority or manifest change invalidates an earlier approval.
@@ -42,4 +43,4 @@ with the same key and identical payload/context reuse the prior pending approval
 reuse with different payload or authority context fails closed. Invocation audit
 stores identifiers, statuses, and hashes only. Raw tool arguments, results,
 documents, conversations, and patient display data are not persisted or sent to
-Nexus.
+the governance provider.

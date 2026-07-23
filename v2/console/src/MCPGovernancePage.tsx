@@ -77,8 +77,8 @@ export function MCPGovernancePage({ orgId, principalId }: { orgId: string; princ
 				</div>
 				<div className="virployee-preview__grid">
 					<label className="form-group"><span>Allowed capabilities</span><textarea rows={5} value={policy.allowed_capabilities.join('\n')} onChange={(event) => setPolicy({ ...policy, allowed_capabilities: splitLines(event.currentTarget.value) })} placeholder="Empty allows any otherwise-authorized capability" /></label>
-					<label className="form-group"><span>Denied capabilities</span><textarea rows={5} value={policy.denied_capabilities.join('\n')} onChange={(event) => setPolicy({ ...policy, denied_capabilities: splitLines(event.currentTarget.value) })} placeholder="calendar.events.delete" /></label>
-					<label className="form-group"><span>Capability kill switches</span><textarea rows={5} value={switchesText} onChange={(event) => setSwitchesText(event.currentTarget.value)} placeholder="calendar.events.create" /></label>
+					<label className="form-group"><span>Denied capabilities</span><textarea rows={5} value={policy.denied_capabilities.join('\n')} onChange={(event) => setPolicy({ ...policy, denied_capabilities: splitLines(event.currentTarget.value) })} placeholder="One capability identifier per line" /></label>
+					<label className="form-group"><span>Capability kill switches</span><textarea rows={5} value={switchesText} onChange={(event) => setSwitchesText(event.currentTarget.value)} placeholder="One capability identifier per line" /></label>
 				</div>
 				<footer className="virployee-panel-footer"><button type="button" className="btn-primary" disabled={saving} onClick={() => void save()}>{saving ? 'Saving…' : 'Save MCP policy'}</button><button type="button" className="btn-secondary" onClick={() => void load()}>Refresh</button></footer>
 			</div>

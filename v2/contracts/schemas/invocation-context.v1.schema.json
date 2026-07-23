@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://axis.local/contracts/schemas/invocation-context.v1.schema.json",
+  "title": "axis.invocation-context.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "org_id",
+    "principal_id",
+    "access_mode"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "axis.invocation-context.v1"
+    },
+    "org_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "product_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "product_surface": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "integration_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "integration_revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "integration_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "principal_type": {
+      "type": "string",
+      "enum": [
+        "human",
+        "service",
+        "virployee"
+      ]
+    },
+    "principal_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "scopes": {
+      "type": "array",
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/code"
+      }
+    },
+    "access_mode": {
+      "type": "string",
+      "enum": [
+        "direct",
+        "via_orchestrator"
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "integration_id"
+        ]
+      },
+      "then": {
+        "required": [
+          "product_id",
+          "integration_revision",
+          "integration_hash"
+        ]
+      }
+    },
+    {
+      "if": {
+        "anyOf": [
+          {
+            "required": [
+              "integration_revision"
+            ]
+          },
+          {
+            "required": [
+              "integration_hash"
+            ]
+          }
+        ]
+      },
+      "then": {
+        "required": [
+          "product_id",
+          "integration_id",
+          "integration_revision",
+          "integration_hash"
+        ]
+      }
+    }
+  ],
+  "$defs": {
+    "code": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._:-]{0,127}$"
+    }
+  }
+}

@@ -2,81 +2,44 @@ package extractor
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"testing"
 )
 
-type runnerStub struct{ calls []string }
-
-func (runner *runnerStub) Run(_ context.Context, workDir, name string, arguments ...string) ([]byte, error) {
-	runner.calls = append(runner.calls, name)
-	switch name {
-	case "soffice":
-		return nil, os.WriteFile(filepath.Join(workDir, "report.pdf"), []byte("converted-pdf"), 0o600)
-	case "pdftotext":
-		return []byte("Glucose 126 mg/dL"), nil
-	case "convert":
-		return nil, os.WriteFile(filepath.Join(workDir, "normalized.png"), []byte("png"), 0o600)
-	case "tesseract":
-		return []byte("OCR result"), nil
-	case "dcmdump":
-		return []byte("(0028,0010) Rows 512"), nil
-	case "dcmj2pnm":
-		return nil, os.WriteFile(filepath.Join(workDir, "frame.png"), []byte("frame"), 0o600)
-	}
-	return nil, nil
+type profileStub struct {
+	profile string
+	parts   []Part
 }
 
-func TestOfficeProducesTextAndLayoutPreservingPDF(t *testing.T) {
-	workDir := t.TempDir()
-	input := filepath.Join(workDir, "report.docx")
-	if err := os.WriteFile(input, []byte("office"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	parts, err := NewService(&runnerStub{}, "", "").Extract(context.Background(), workDir, input, Metadata{
-		Profile: "office", Manifest: Manifest{DocumentID: "doc-1", Name: "report.docx", SHA256: "abc"},
+func (stub *profileStub) Extract(_ context.Context, _, _, profile string) ([]Part, error) {
+	stub.profile = profile
+	return stub.parts, nil
+}
+
+func TestServiceOwnsValidationAndManifestAttribution(t *testing.T) {
+	profiles := &profileStub{parts: []Part{{Kind: "text", Text: "result"}}}
+	service := NewService(profiles)
+	parts, err := service.Extract(context.Background(), t.TempDir(), "artifact.bin", Metadata{
+		Profile: "neutral",
+		Manifest: Manifest{
+			DocumentID: "document-1",
+			Name:       "artifact.bin",
+			SHA256:     "abc",
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(parts) != 2 || parts[0].Kind != "text" || parts[1].MIMEType != "application/pdf" || parts[1].DocumentID != "doc-1" || parts[1].SHA256 != "abc" {
-		t.Fatalf("unexpected office derivatives: %+v", parts)
+	if profiles.profile != "neutral" || len(parts) != 1 {
+		t.Fatalf("unexpected profile dispatch: %q %+v", profiles.profile, parts)
+	}
+	if parts[0].DocumentID != "document-1" || parts[0].SHA256 != "abc" || parts[0].Name != "artifact.bin" {
+		t.Fatalf("application attribution missing: %+v", parts[0])
 	}
 }
 
-func TestImageAndDICOMProduceNativeVisualDerivatives(t *testing.T) {
-	for _, testCase := range []struct {
-		profile  string
-		mimeType string
-	}{
-		{profile: "image", mimeType: "image/png"},
-		{profile: "dicom", mimeType: "image/png"},
-	} {
-		workDir := t.TempDir()
-		input := filepath.Join(workDir, "input.bin")
-		_ = os.WriteFile(input, []byte("binary"), 0o600)
-		parts, err := NewService(&runnerStub{}, "", "").Extract(context.Background(), workDir, input, Metadata{
-			Profile: testCase.profile, Manifest: Manifest{DocumentID: "doc"},
-		})
-		if err != nil {
-			t.Fatalf("%s: %v", testCase.profile, err)
-		}
-		found := false
-		for _, part := range parts {
-			if part.Kind == "inline_data" && part.MIMEType == testCase.mimeType && len(part.Data) > 0 {
-				found = true
-			}
-		}
-		if !found {
-			t.Fatalf("%s visual derivative missing: %+v", testCase.profile, parts)
-		}
-	}
-}
-
-func TestAudioRequiresConfiguredTranscriptionModel(t *testing.T) {
-	_, err := NewService(&runnerStub{}, "", "").Extract(context.Background(), t.TempDir(), "input.mp3", Metadata{Profile: "audio"})
-	if err != ErrUnavailable {
-		t.Fatalf("expected unavailable transcription without model, got %v", err)
+func TestServiceFailsClosedWithoutProfileAdapter(t *testing.T) {
+	_, err := NewService(nil).Extract(context.Background(), t.TempDir(), "artifact.bin", Metadata{Profile: "neutral"})
+	if err != ErrInvalidRequest {
+		t.Fatalf("expected invalid request without adapter, got %v", err)
 	}
 }

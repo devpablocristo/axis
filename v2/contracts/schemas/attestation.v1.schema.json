@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://axis.local/contracts/schemas/attestation.v1.schema.json",
+  "title": "axis.executor-attestation.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "executor_version",
+    "org_id",
+    "governance_check_id",
+    "binding_hash",
+    "idempotency_key",
+    "status",
+    "duration_ms",
+    "result_hash",
+    "algorithm",
+    "signature"
+  ],
+  "properties": {
+    "version": {
+      "const": "axis.executor-attestation.v1"
+    },
+    "executor_version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "org_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "governance_check_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "binding_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "idempotency_key": {
+      "type": "string",
+      "minLength": 8,
+      "maxLength": 255
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "succeeded",
+        "failed",
+        "unknown"
+      ]
+    },
+    "duration_ms": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "result_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "algorithm": {
+      "const": "hmac-sha256"
+    },
+    "signature": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{43}$"
+    }
+  }
+}

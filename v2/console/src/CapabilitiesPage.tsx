@@ -25,6 +25,7 @@ import {
   trashCapability,
   unarchiveCapability,
   updateCapability,
+  updateCapabilityManifest,
 } from './api'
 
 type CrudLifecycleView = 'active' | 'archived' | 'trash'
@@ -58,7 +59,7 @@ const SIDE_EFFECT_OPTIONS: Array<{ label: string; value: CapabilitySideEffectCla
 ]
 
 const APPROVAL_OPTIONS: Array<{ label: string; value: string }> = [
-  { label: 'Requires Nexus approval', value: 'true' },
+  { label: 'Requires governance approval', value: 'true' },
   { label: 'No approval needed', value: 'false' },
 ]
 
@@ -74,6 +75,9 @@ const CrudPage = PlatformCrudPage as unknown as <T extends { id: string }>(
 // Capability row extended with pre-formatted stat cells (Fase 3). Computed at
 // fetch time so CrudColumn keys stay real row fields (keyof T constraint).
 type CapabilityRow = Capability & {
+  capability_uuid: string
+  executor_binding: string
+  executor_operation: string
   stats_activity: string
   stats_executions: string
   stats_success: string
@@ -85,6 +89,9 @@ function toCapabilityRows(capabilities: Capability[], stats: CapabilityStats[]):
     const item = byKey.get(capability.capability_key)
     return {
       ...capability,
+      capability_uuid: capability.id,
+      executor_binding: capability.manifest?.executor_binding_id || '—',
+      executor_operation: capability.manifest?.operation || '—',
       stats_activity: item ? `${item.dry_runs} dry · ${item.gates} gate` : '—',
       stats_executions: formatStatsExecutions(item),
       stats_success: formatStatsSuccess(item),
@@ -246,11 +253,15 @@ export function CapabilitiesPage({ orgId, principalId }: CapabilitiesPageProps) 
     setFormSaving(true)
     setActionError('')
     try {
+      let saved: Capability
       if (formMode === 'create') {
-        await createCapability(capabilityPayload(formValues), orgId, principalId)
+        saved = await createCapability(capabilityPayload(formValues), orgId, principalId)
       } else if (selectedRow) {
-        await updateCapability(selectedRow.id, capabilityPayload(formValues), orgId, principalId)
+        saved = await updateCapability(selectedRow.id, capabilityPayload(formValues), orgId, principalId)
+      } else {
+        return
       }
+      await updateExecutorBinding(saved, formValues, orgId, principalId)
       closeForm()
       clearSelected()
       setReloadVersion((current) => current + 1)
@@ -500,7 +511,10 @@ function capabilityColumns(
   return [
     selectionColumn<CapabilityRow>(selectedIds, onToggle),
     { key: 'name', header: 'Capability', className: 'iam-control__primary-col', ...crudPrimaryStickyColumn },
+    { key: 'capability_uuid', header: 'Capability UUID', render: (value) => shortCapabilityID(String(value ?? '')) },
     { key: 'description', header: 'Description' },
+    { key: 'executor_binding', header: 'Connector binding' },
+    { key: 'executor_operation', header: 'Operation' },
     { key: 'created_at', header: 'Created', className: 'iam-control__created-col', render: (value) => formatDateTime24(String(value ?? '')) },
     { key: 'required_autonomy', header: 'Required autonomy', render: (value) => formatRequiredAutonomy(String(value ?? '')) },
     { key: 'promotion_state', header: 'Promotion', render: (value) => formatPromotionState(String(value ?? '')) },
@@ -516,8 +530,18 @@ function capabilityFormFields(): CrudPageProps<Capability>['formFields'] {
     {
       key: 'name',
       label: 'Capability',
-      placeholder: 'Analizar estudios médicos',
+      placeholder: 'Prepare a weekly operations summary',
       fullWidth: true,
+    },
+    {
+      key: 'executor_binding_id',
+      label: 'Connector binding (optional)',
+      placeholder: 'connector-main',
+    },
+    {
+      key: 'operation',
+      label: 'Connector operation (optional)',
+      placeholder: 'summary.prepare',
     },
     {
       key: 'required_autonomy',
@@ -541,8 +565,8 @@ function capabilityFormFields(): CrudPageProps<Capability>['formFields'] {
       options: SIDE_EFFECT_OPTIONS,
     },
     {
-      key: 'requires_nexus_approval',
-      label: 'Nexus approval',
+      key: 'requires_governance_approval',
+      label: 'Governance approval',
       type: 'select' as const,
       placeholder: 'Requires approval (default)',
       options: APPROVAL_OPTIONS,
@@ -562,10 +586,12 @@ function capabilityToFormValues(row: Capability): CrudFormValues {
   return {
     capability_key: row.capability_key,
     name: row.name,
+    executor_binding_id: row.manifest?.executor_binding_id ?? '',
+    operation: row.manifest?.operation ?? '',
     required_autonomy: row.required_autonomy,
     risk_class: row.risk_class,
     side_effect_class: row.side_effect_class,
-    requires_nexus_approval: row.requires_nexus_approval ? 'true' : 'false',
+    requires_governance_approval: (row.requires_governance_approval ?? row.requires_nexus_approval) ? 'true' : 'false',
     evidence_required: row.evidence_required ? 'true' : 'false',
     rollback_capability_key: row.rollback_capability_key ?? '',
     description: row.description ?? '',
@@ -574,17 +600,41 @@ function capabilityToFormValues(row: Capability): CrudFormValues {
 
 function capabilityPayload(values: CrudFormValues): CapabilityInput {
   const name = stringValue(values.name)
+  const compatibilityAlias = capabilityKeyValue(values.capability_key)
   return {
-    capability_key: capabilityKeyValue(values.capability_key) || capabilityKeyFromPhrase(name),
+    capability_key: compatibilityAlias || undefined,
     name,
     description: stringValue(values.description),
     required_autonomy: requiredAutonomyValue(values.required_autonomy),
     risk_class: riskClassValue(values.risk_class),
     side_effect_class: sideEffectValue(values.side_effect_class),
-    requires_nexus_approval: booleanSelectValue(values.requires_nexus_approval),
+    requires_governance_approval: booleanSelectValue(values.requires_governance_approval),
     evidence_required: stringValue(values.evidence_required) === 'true' ? true : undefined,
     rollback_capability_key: capabilityKeyValue(values.rollback_capability_key) || undefined,
   }
+}
+
+async function updateExecutorBinding(
+  capability: Capability,
+  values: CrudFormValues,
+  orgId: string,
+  principalId: string,
+): Promise<void> {
+  const executorBindingID = stringValue(values.executor_binding_id)
+  const operation = stringValue(values.operation)
+  const currentBindingID = capability.manifest?.executor_binding_id ?? ''
+  const currentOperation = capability.manifest?.operation ?? ''
+  if (executorBindingID === currentBindingID && operation === currentOperation) return
+  await updateCapabilityManifest(
+    capability.id,
+    {
+      ...capability.manifest,
+      executor_binding_id: executorBindingID || undefined,
+      operation: operation || undefined,
+    },
+    orgId,
+    principalId,
+  )
 }
 
 function riskClassValue(value: CrudFormValues[string]): CapabilityRiskClass | undefined {
@@ -619,10 +669,17 @@ function capabilitySearchText(row: Capability): string {
     row.capability_key,
     row.name,
     row.description,
+    row.manifest?.executor_binding_id,
+    row.manifest?.operation,
     row.required_autonomy,
     formatRequiredAutonomy(row.required_autonomy),
     row.state,
   ].join(' ')
+}
+
+function shortCapabilityID(value: string): string {
+  if (!value) return '—'
+  return value.length > 18 ? `${value.slice(0, 8)}…${value.slice(-6)}` : value
 }
 
 function selectionColumn<T extends Capability>(
@@ -687,18 +744,6 @@ function stringValue(value: CrudFormValues[string]): string {
 
 function capabilityKeyValue(value: CrudFormValues[string]): string {
   return stringValue(value).toLowerCase()
-}
-
-function capabilityKeyFromPhrase(value: string): string {
-  const words = value
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .match(/[a-zñ]+/g) ?? []
-  if (words.length === 0) return 'capacidad.general.interna'
-  if (words.length === 1) return `${words[0]}.capacidad.general`
-  if (words.length === 2) return `${words[0]}.${words[1]}.capacidad`
-  return `${words[0]}.${words[1]}.${words.slice(2).join('')}`
 }
 
 function requiredAutonomyValue(value: CrudFormValues[string]): VirployeeAutonomy | '' {

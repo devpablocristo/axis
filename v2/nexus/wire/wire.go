@@ -22,6 +22,7 @@ import (
 	"github.com/devpablocristo/nexus-v2/internal/governancepolicies"
 	"github.com/devpablocristo/nexus-v2/internal/infra/migrations"
 	"github.com/devpablocristo/nexus-v2/internal/jobs"
+	"github.com/devpablocristo/nexus-v2/internal/productintegrations"
 	"github.com/devpablocristo/nexus-v2/internal/watchers"
 	postgres "github.com/devpablocristo/platform/databases/postgres/go"
 	ginmw "github.com/devpablocristo/platform/http/gin/go"
@@ -140,6 +141,8 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 		DefaultTimeout: config.JobTimeout, RecoveryBatch: config.WatcherBatchSize,
 	})
 	operationsService := enterpriseops.NewService(db.Pool(), jobsRepository, authorizationUseCases)
+	productIntegrationService := productintegrations.NewService(db.Pool())
+	productIntegrationHandler := productintegrations.NewHandler(productIntegrationService)
 	operationsService.ConfigureNotificationDelivery(
 		notificationDestinationResolver{environment: config.Environment},
 		enterpriseops.NewHTTPNotificationSender(&http.Client{Timeout: 10 * time.Second, Transport: otelhttp.NewTransport(http.DefaultTransport)}, config.Environment != "production"),
@@ -173,6 +176,12 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 			"X-Org-ID",
 			"X-Axis-Org-Role",
 			"X-Product-Surface",
+			"X-Product-ID",
+			"X-Axis-Product-ID",
+			"X-Axis-Integration-ID",
+			"X-Axis-Integration-Version",
+			"X-Axis-Integration-Hash",
+			"X-Axis-Access-Mode",
 			"Idempotency-Key",
 		},
 	}))
@@ -180,6 +189,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 
 	api := router.Group("/v1")
 	api.Use(internalAuthMiddleware(config.InternalAuthSecret))
+	api.Use(productIntegrationHandler.RuntimeMiddleware())
 	actionTypeHandler.Routes(api)
 	authorizationHandler.Routes(api)
 	policyHandler.Routes(api)
@@ -188,6 +198,7 @@ func Initialize(ctx context.Context) (*Dependencies, error) {
 	auditHandler.Routes(api)
 	evidenceHandler.Routes(api)
 	enterpriseops.NewHandler(operationsService).Routes(api)
+	productIntegrationHandler.Routes(api)
 
 	server := &http.Server{
 		Addr:    config.Addr(),

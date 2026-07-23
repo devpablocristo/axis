@@ -1,0 +1,310 @@
+openapi: 3.1.0
+info:
+  title: Axis Product Facade
+  version: 1.0.0
+  description: >
+    Stable product-facing API. Consumers authenticate to this facade and do
+    not address Companion, Nexus or any other Axis process directly.
+paths:
+  /v1/assist-runs:
+    post:
+      operationId: startAssistRun
+      security:
+        - productApiKey: []
+        - productBearer: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - name: Prefer
+          in: header
+          required: false
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StartAssistRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/AssistRun"
+        "201":
+          $ref: "#/components/responses/AssistRun"
+        "202":
+          $ref: "#/components/responses/AssistRun"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "429":
+          $ref: "#/components/responses/Error"
+        "502":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+  /v1/assist-runs/{run_id}:
+    get:
+      operationId: getAssistRun
+      security:
+        - productApiKey: []
+        - productBearer: []
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: route
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          $ref: "#/components/responses/AssistRun"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "502":
+          $ref: "#/components/responses/Error"
+  /v1/assist-capabilities:
+    get:
+      operationId: getAssistCapabilities
+      security:
+        - productApiKey: []
+        - productBearer: []
+      responses:
+        "200":
+          description: Installed assist surface and bounded execution formats
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - schema_version
+                properties:
+                  schema_version:
+                    type: string
+                  states:
+                    type: array
+                    items:
+                      type: string
+                  orchestration:
+                    type: object
+                  formats:
+                    type: object
+        "401":
+          $ref: "#/components/responses/Error"
+        "502":
+          $ref: "#/components/responses/Error"
+  /v1/product-events:
+    post:
+      operationId: publishProductEvent
+      security:
+        - productApiKey: []
+        - productBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductEvent"
+      responses:
+        "200":
+          description: Event accepted or already processed
+          content:
+            application/json:
+              schema:
+                type: object
+        "201":
+          description: Event accepted
+          content:
+            application/json:
+              schema:
+                type: object
+        "202":
+          description: Event accepted for asynchronous processing
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "413":
+          $ref: "#/components/responses/Error"
+        "429":
+          $ref: "#/components/responses/Error"
+        "502":
+          $ref: "#/components/responses/Error"
+components:
+  securitySchemes:
+    productApiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+    productBearer:
+      type: http
+      scheme: bearer
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 8
+        maxLength: 255
+  schemas:
+    StartAssistRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - product_surface
+        - assist_type
+        - subject_type
+        - subject_id
+        - repository_generation
+        - input
+      properties:
+        owner_system:
+          type: string
+          deprecated: true
+          description: Compatibility-only descriptive field; it never selects a service.
+        product_surface:
+          type: string
+          minLength: 1
+          maxLength: 128
+        assist_type:
+          type: string
+          minLength: 1
+          maxLength: 128
+        capability_id:
+          type: string
+          format: uuid
+        capability_key:
+          type: string
+          deprecated: true
+          description: Migration alias; it never selects executable code.
+        subject_type:
+          type: string
+        subject_id:
+          type: string
+        case_id:
+          type: string
+        assignment_id:
+          type: string
+          format: uuid
+        virployee_id:
+          type: string
+          format: uuid
+        routing_pool_id:
+          type: string
+          format: uuid
+        repository_generation:
+          type: string
+        input:
+          type: object
+    AssistRun:
+      type: object
+      required:
+        - id
+        - status
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+        status_url:
+          type: string
+        result:
+          type: object
+        error:
+          type: object
+    ProductEvent:
+      type: object
+      additionalProperties: false
+      required:
+        - event_id
+        - event_type
+        - version
+        - payload
+      properties:
+        event_id:
+          type: string
+          format: uuid
+        event_type:
+          type: string
+          pattern: "^[a-z0-9][a-z0-9._:-]{0,127}$"
+        version:
+          type: string
+          minLength: 1
+          maxLength: 64
+        virployee_id:
+          type: string
+          format: uuid
+        subject_id:
+          type: string
+        case_id:
+          type: string
+        payload:
+          type: object
+    ErrorEnvelope:
+      type: object
+      additionalProperties: false
+      required:
+        - error
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required:
+            - code
+            - message
+          properties:
+            code:
+              type: string
+              enum:
+                - unauthorized
+                - scope_required
+                - capability_not_authorized
+                - entrypoint_not_authorized
+                - event_not_authorized
+                - invalid_request
+                - invalid_event
+                - invalid_capability
+                - invalid_entrypoint
+                - idempotency_required
+                - event_too_large
+                - downstream_unavailable
+                - routing_unavailable
+                - quota_exceeded
+                - forbidden
+                - not_found
+            message:
+              type: string
+  responses:
+    AssistRun:
+      description: Assist run state
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/AssistRun"
+    Error:
+      description: Closed failure
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"

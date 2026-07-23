@@ -1,0 +1,188 @@
+openapi: 3.1.0
+info:
+  title: Axis Artifact Extraction Internal API
+  version: 1.0.0
+paths:
+  /v1/extract:
+    post:
+      operationId: extractArtifact
+      security:
+        - internalToken: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - metadata
+                - artifact
+              properties:
+                metadata:
+                  description: JSON-encoded ExtractionMetadata.
+                  type: string
+                  contentMediaType: application/json
+                  contentSchema:
+                    $ref: "#/components/schemas/ExtractionMetadata"
+                artifact:
+                  type: string
+                  format: binary
+      responses:
+        "200":
+          description: Bounded extraction result
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - parts
+                properties:
+                  parts:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Part"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "413":
+          $ref: "#/components/responses/Error"
+        "422":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+components:
+  securitySchemes:
+    internalToken:
+      type: apiKey
+      in: header
+      name: X-Axis-Internal-Token
+  schemas:
+    ExtractionMetadata:
+      type: object
+      additionalProperties: false
+      required:
+        - scope
+        - manifest
+        - profile
+      properties:
+        scope:
+          type: object
+          additionalProperties: false
+          required:
+            - org_id
+          properties:
+            org_id:
+              type: string
+              format: uuid
+            virployee_id:
+              type: string
+              format: uuid
+            product_surface:
+              type: string
+            subject_id:
+              type: string
+            repository_generation:
+              type: string
+        manifest:
+          type: object
+          additionalProperties: false
+          required:
+            - document_id
+            - name
+            - sha256
+            - mime_type
+            - size_bytes
+          properties:
+            document_id:
+              type: string
+            name:
+              type: string
+            sha256:
+              type: string
+              pattern: "^[a-f0-9]{64}$"
+            mime_type:
+              type: string
+            size_bytes:
+              type: integer
+              minimum: 1
+              maximum: 262144000
+        profile:
+          type: string
+          enum:
+            - office
+            - ocr_pdf
+            - image
+            - audio
+            - video
+            - dicom
+    Part:
+      type: object
+      additionalProperties: false
+      required:
+        - kind
+      properties:
+        kind:
+          type: string
+          enum:
+            - text
+            - inline_data
+        text:
+          type: string
+        data:
+          type: string
+          contentEncoding: base64
+        mime_type:
+          type: string
+        name:
+          type: string
+        document_id:
+          type: string
+        sha256:
+          type: string
+          pattern: "^[a-f0-9]{64}$"
+        locator:
+          type: object
+          additionalProperties: false
+          properties:
+            page:
+              type: integer
+              minimum: 1
+            slide:
+              type: integer
+              minimum: 1
+            sheet:
+              type: string
+            bbox:
+              type: array
+              items:
+                type: number
+            start_ms:
+              type: integer
+              minimum: 0
+            end_ms:
+              type: integer
+              minimum: 0
+            frame:
+              type: integer
+              minimum: 1
+    ErrorEnvelope:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: object
+          required:
+            - code
+          properties:
+            code:
+              type: string
+  responses:
+    Error:
+      description: Extraction rejected or unavailable
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"

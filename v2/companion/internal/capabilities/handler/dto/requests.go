@@ -7,15 +7,16 @@ import (
 )
 
 type CreateCapabilityRequest struct {
-	CapabilityKey         string `json:"capability_key" binding:"required"`
-	Name                  string `json:"name" binding:"required"`
-	Description           string `json:"description"`
-	RequiredAutonomy      string `json:"required_autonomy" binding:"required"`
-	RiskClass             string `json:"risk_class"`
-	SideEffectClass       string `json:"side_effect_class"`
-	RequiresNexusApproval *bool  `json:"requires_nexus_approval"`
-	EvidenceRequired      bool   `json:"evidence_required"`
-	RollbackCapabilityKey string `json:"rollback_capability_key"`
+	CapabilityKey              string `json:"capability_key"`
+	Name                       string `json:"name" binding:"required"`
+	Description                string `json:"description"`
+	RequiredAutonomy           string `json:"required_autonomy" binding:"required"`
+	RiskClass                  string `json:"risk_class"`
+	SideEffectClass            string `json:"side_effect_class"`
+	RequiresGovernanceApproval *bool  `json:"requires_governance_approval"`
+	RequiresNexusApproval      *bool  `json:"requires_nexus_approval"`
+	EvidenceRequired           bool   `json:"evidence_required"`
+	RollbackCapabilityKey      string `json:"rollback_capability_key"`
 }
 
 func (r CreateCapabilityRequest) ToDomain() domain.CreateInput {
@@ -29,37 +30,46 @@ func (r CreateCapabilityRequest) ToDomain() domain.CreateInput {
 }
 
 func (r CreateCapabilityRequest) governance() domain.GovernanceInput {
+	requiresApproval := r.RequiresGovernanceApproval
+	if requiresApproval == nil {
+		requiresApproval = r.RequiresNexusApproval
+	}
 	return domain.GovernanceInput{
-		RiskClass:             r.RiskClass,
-		SideEffectClass:       r.SideEffectClass,
-		RequiresNexusApproval: r.RequiresNexusApproval,
-		EvidenceRequired:      r.EvidenceRequired,
-		RollbackCapabilityKey: r.RollbackCapabilityKey,
+		RiskClass:                  r.RiskClass,
+		SideEffectClass:            r.SideEffectClass,
+		RequiresGovernanceApproval: requiresApproval,
+		EvidenceRequired:           r.EvidenceRequired,
+		RollbackCapabilityKey:      r.RollbackCapabilityKey,
 	}
 }
 
 type UpdateCapabilityRequest struct {
-	Name                  string `json:"name" binding:"required"`
-	Description           string `json:"description"`
-	RequiredAutonomy      string `json:"required_autonomy" binding:"required"`
-	RiskClass             string `json:"risk_class"`
-	SideEffectClass       string `json:"side_effect_class"`
-	RequiresNexusApproval *bool  `json:"requires_nexus_approval"`
-	EvidenceRequired      bool   `json:"evidence_required"`
-	RollbackCapabilityKey string `json:"rollback_capability_key"`
+	Name                       string `json:"name" binding:"required"`
+	Description                string `json:"description"`
+	RequiredAutonomy           string `json:"required_autonomy" binding:"required"`
+	RiskClass                  string `json:"risk_class"`
+	SideEffectClass            string `json:"side_effect_class"`
+	RequiresGovernanceApproval *bool  `json:"requires_governance_approval"`
+	RequiresNexusApproval      *bool  `json:"requires_nexus_approval"`
+	EvidenceRequired           bool   `json:"evidence_required"`
+	RollbackCapabilityKey      string `json:"rollback_capability_key"`
 }
 
 func (r UpdateCapabilityRequest) ToDomain() domain.UpdateInput {
+	requiresApproval := r.RequiresGovernanceApproval
+	if requiresApproval == nil {
+		requiresApproval = r.RequiresNexusApproval
+	}
 	return domain.UpdateInput{
 		Name:             r.Name,
 		Description:      r.Description,
 		RequiredAutonomy: r.RequiredAutonomy,
 		Governance: domain.GovernanceInput{
-			RiskClass:             r.RiskClass,
-			SideEffectClass:       r.SideEffectClass,
-			RequiresNexusApproval: r.RequiresNexusApproval,
-			EvidenceRequired:      r.EvidenceRequired,
-			RollbackCapabilityKey: r.RollbackCapabilityKey,
+			RiskClass:                  r.RiskClass,
+			SideEffectClass:            r.SideEffectClass,
+			RequiresGovernanceApproval: requiresApproval,
+			EvidenceRequired:           r.EvidenceRequired,
+			RollbackCapabilityKey:      r.RollbackCapabilityKey,
 		},
 	}
 }
@@ -83,6 +93,8 @@ type CapabilityManifestRequest struct {
 	SecretRefs          []string                   `json:"secret_refs"`
 	AttestationRequired bool                       `json:"attestation_required"`
 	CostClass           string                     `json:"cost_class"`
+	ExecutorBindingID   string                     `json:"executor_binding_id,omitempty"`
+	Operation           string                     `json:"operation,omitempty"`
 }
 
 func (r CapabilityManifestRequest) ToDomain() domain.ManifestInput {
@@ -91,5 +103,6 @@ func (r CapabilityManifestRequest) ToDomain() domain.ManifestInput {
 		RequiredScopes: r.RequiredScopes, Idempotency: r.Idempotency, RollbackMode: r.RollbackMode,
 		TimeoutMS: r.TimeoutMS, Retry: r.Retry, Postconditions: r.Postconditions, QuotaAreas: r.QuotaAreas,
 		SecretRefs: r.SecretRefs, AttestationRequired: r.AttestationRequired, CostClass: r.CostClass,
+		ExecutorBindingID: r.ExecutorBindingID, Operation: r.Operation,
 	}
 }

@@ -16,35 +16,42 @@ import (
 )
 
 type PreparedActionRecord struct {
-	ID                      uuid.UUID
-	OrgID                   string
-	VirployeeID             uuid.UUID
-	GovernanceCheckID       uuid.UUID
-	ApprovalID              uuid.UUID
-	CapabilityKey           string
-	Action                  preparedactions.Action
-	PayloadHash             string
-	BindingHash             string
-	AuthorityBindingHash    string
-	NexusPolicySnapshotHash string
+	ID                           uuid.UUID
+	OrgID                        string
+	VirployeeID                  uuid.UUID
+	GovernanceCheckID            uuid.UUID
+	ApprovalID                   uuid.UUID
+	CapabilityID                 uuid.UUID
+	CapabilityKey                string
+	PayloadVersion               string
+	ExecutorBindingID            string
+	Operation                    string
+	Action                       preparedactions.Action
+	ActionV2                     *preparedactions.PreparedActionV2
+	PayloadHash                  string
+	BindingHash                  string
+	AuthorityBindingHash         string
+	GovernancePolicySnapshotHash string
+	NexusPolicySnapshotHash      string
 }
 
 type ExecutionAttempt struct {
-	ID                uuid.UUID
-	OrgID             string
-	VirployeeID       uuid.UUID
-	PreparedActionID  uuid.UUID
-	IdempotencyKey    string
-	Status            string
-	ResourceID        string
-	Result            map[string]any
-	Error             string
-	DurationMS        int64
-	NexusReportStatus string
-	StartedAt         time.Time
-	CompletedAt       *time.Time
-	RecoveryAttempts  int
-	ReportAttempts    int
+	ID                     uuid.UUID
+	OrgID                  string
+	VirployeeID            uuid.UUID
+	PreparedActionID       uuid.UUID
+	IdempotencyKey         string
+	Status                 string
+	ResourceID             string
+	Result                 map[string]any
+	Error                  string
+	DurationMS             int64
+	GovernanceReportStatus string
+	NexusReportStatus      string
+	StartedAt              time.Time
+	CompletedAt            *time.Time
+	RecoveryAttempts       int
+	ReportAttempts         int
 }
 
 func (r *Repository) SavePreparedAction(ctx context.Context, orgID string, virployeeID uuid.UUID, checkID, approvalID string, capabilityKey, payloadHash, bindingHash string, action preparedactions.Action) (PreparedActionRecord, error) {
@@ -64,12 +71,57 @@ func (r *Repository) SavePreparedAction(ctx context.Context, orgID string, virpl
 	_, err = r.pool.Exec(ctx, `
 		INSERT INTO companion_prepared_actions (
 			id, org_id, virployee_id, governance_check_id, approval_id,
-			capability_key, action, payload, payload_hash, binding_hash, created_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, now())
+			capability_key, action, payload_version, payload, payload_hash, binding_hash, created_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, now())
 		ON CONFLICT (org_id, approval_id) DO NOTHING
-	`, id, orgID, virployeeID, parsedCheckID, parsedApprovalID, capabilityKey, action.Action, payload, payloadHash, bindingHash)
+	`, id, orgID, virployeeID, parsedCheckID, parsedApprovalID, capabilityKey, action.Action, action.SchemaVersion, payload, payloadHash, bindingHash)
 	if err != nil {
 		return PreparedActionRecord{}, fmt.Errorf("save prepared action: %w", err)
+	}
+	return r.GetPreparedActionByApproval(ctx, orgID, virployeeID, parsedApprovalID)
+}
+
+func (r *Repository) SavePreparedActionV2(
+	ctx context.Context,
+	orgID string,
+	virployeeID uuid.UUID,
+	checkID, approvalID string,
+	capabilityID uuid.UUID,
+	capabilityKey, payloadHash, bindingHash string,
+	action preparedactions.PreparedActionV2,
+) (PreparedActionRecord, error) {
+	parsedCheckID, err := uuid.Parse(strings.TrimSpace(checkID))
+	if err != nil || parsedCheckID == uuid.Nil {
+		return PreparedActionRecord{}, domainerr.Validation("governance check id is required")
+	}
+	parsedApprovalID, err := uuid.Parse(strings.TrimSpace(approvalID))
+	if err != nil || parsedApprovalID == uuid.Nil {
+		return PreparedActionRecord{}, domainerr.Validation("approval id is required")
+	}
+	if capabilityID == uuid.Nil || action.CapabilityID != capabilityID.String() {
+		return PreparedActionRecord{}, domainerr.Validation("prepared action capability binding is invalid")
+	}
+	computedHash, err := action.PayloadHash()
+	if err != nil || computedHash != strings.TrimSpace(payloadHash) {
+		return PreparedActionRecord{}, domainerr.Validation("prepared action payload hash is invalid")
+	}
+	payload, err := json.Marshal(action)
+	if err != nil {
+		return PreparedActionRecord{}, err
+	}
+	id := uuid.New()
+	_, err = r.pool.Exec(ctx, `
+		INSERT INTO companion_prepared_actions (
+			id, org_id, virployee_id, governance_check_id, approval_id,
+			capability_id, capability_key, action, payload_version,
+			executor_binding_id, operation, payload, payload_hash, binding_hash, created_at
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14,now())
+		ON CONFLICT (org_id, approval_id) DO NOTHING
+	`, id, orgID, virployeeID, parsedCheckID, parsedApprovalID, capabilityID, capabilityKey,
+		action.Operation, action.SchemaVersion, action.ExecutorBindingID, action.Operation,
+		payload, payloadHash, bindingHash)
+	if err != nil {
+		return PreparedActionRecord{}, fmt.Errorf("save prepared action v2: %w", err)
 	}
 	return r.GetPreparedActionByApproval(ctx, orgID, virployeeID, parsedApprovalID)
 }
@@ -79,14 +131,17 @@ func (r *Repository) GetPreparedActionByApproval(ctx context.Context, orgID stri
 	var payload []byte
 	err := r.pool.QueryRow(ctx, `
 		SELECT id, org_id, virployee_id, governance_check_id, approval_id,
-		       capability_key, action, payload, payload_hash, binding_hash, authority_binding_hash,
-		       nexus_policy_snapshot_hash
+		       COALESCE(capability_id,'00000000-0000-0000-0000-000000000000'::uuid),
+		       capability_key, action, payload_version, executor_binding_id, operation,
+		       payload, payload_hash, binding_hash, authority_binding_hash,
+		       governance_policy_snapshot_hash, nexus_policy_snapshot_hash
 		FROM companion_prepared_actions
 		WHERE org_id = $1 AND virployee_id = $2 AND approval_id = $3
 	`, orgID, virployeeID, approvalID).Scan(
 		&out.ID, &out.OrgID, &out.VirployeeID, &out.GovernanceCheckID, &out.ApprovalID,
-		&out.CapabilityKey, &out.Action.Action, &payload, &out.PayloadHash, &out.BindingHash, &out.AuthorityBindingHash,
-		&out.NexusPolicySnapshotHash,
+		&out.CapabilityID, &out.CapabilityKey, &out.Action.Action, &out.PayloadVersion,
+		&out.ExecutorBindingID, &out.Operation, &payload, &out.PayloadHash, &out.BindingHash, &out.AuthorityBindingHash,
+		&out.GovernancePolicySnapshotHash, &out.NexusPolicySnapshotHash,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -94,8 +149,23 @@ func (r *Repository) GetPreparedActionByApproval(ctx context.Context, orgID stri
 		}
 		return PreparedActionRecord{}, err
 	}
-	if err := json.Unmarshal(payload, &out.Action); err != nil {
+	if out.PayloadVersion == preparedactions.V2SchemaVersion {
+		var action preparedactions.PreparedActionV2
+		if err := json.Unmarshal(payload, &action); err != nil {
+			return PreparedActionRecord{}, fmt.Errorf("decode prepared action v2: %w", err)
+		}
+		if err := action.Validate(); err != nil {
+			return PreparedActionRecord{}, fmt.Errorf("validate prepared action v2: %w", err)
+		}
+		out.ActionV2 = &action
+	} else if err := json.Unmarshal(payload, &out.Action); err != nil {
 		return PreparedActionRecord{}, fmt.Errorf("decode prepared action: %w", err)
+	}
+	if out.GovernancePolicySnapshotHash == "" {
+		out.GovernancePolicySnapshotHash = out.NexusPolicySnapshotHash
+	}
+	if out.NexusPolicySnapshotHash == "" {
+		out.NexusPolicySnapshotHash = out.GovernancePolicySnapshotHash
 	}
 	return out, nil
 }
@@ -123,27 +193,33 @@ func (r *Repository) BindPreparedActionAuthority(ctx context.Context, orgID stri
 	return nil
 }
 
-// BindPreparedActionNexusPolicy persists the exact policy snapshot returned by
-// Nexus. The value is immutable so a later approval cannot be substituted onto
-// an already prepared action.
-func (r *Repository) BindPreparedActionNexusPolicy(ctx context.Context, orgID string, virployeeID, approvalID uuid.UUID, snapshotHash string) error {
+// BindPreparedActionGovernancePolicy persists the exact policy snapshot
+// returned by the configured governance provider. It is immutable so a later
+// approval cannot be substituted onto an already prepared action.
+func (r *Repository) BindPreparedActionGovernancePolicy(ctx context.Context, orgID string, virployeeID, approvalID uuid.UUID, snapshotHash string) error {
 	snapshotHash = strings.TrimSpace(snapshotHash)
 	if snapshotHash == "" {
-		return domainerr.Validation("Nexus policy snapshot hash is required")
+		return domainerr.Validation("governance policy snapshot hash is required")
 	}
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE companion_prepared_actions
-		SET nexus_policy_snapshot_hash=$4
+		SET governance_policy_snapshot_hash=$4, nexus_policy_snapshot_hash=$4
 		WHERE org_id=$1 AND virployee_id=$2 AND approval_id=$3
+		  AND (governance_policy_snapshot_hash='' OR governance_policy_snapshot_hash=$4)
 		  AND (nexus_policy_snapshot_hash='' OR nexus_policy_snapshot_hash=$4)
 	`, orgID, virployeeID, approvalID, snapshotHash)
 	if err != nil {
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		return domainerr.Conflict("prepared action Nexus policy binding is missing or immutable")
+		return domainerr.Conflict("prepared action governance policy binding is missing or immutable")
 	}
 	return nil
+}
+
+// BindPreparedActionNexusPolicy is retained for legacy in-process ports.
+func (r *Repository) BindPreparedActionNexusPolicy(ctx context.Context, orgID string, virployeeID, approvalID uuid.UUID, snapshotHash string) error {
+	return r.BindPreparedActionGovernancePolicy(ctx, orgID, virployeeID, approvalID, snapshotHash)
 }
 
 func (r *Repository) BeginExecution(ctx context.Context, orgID string, virployeeID uuid.UUID, preparedActionID uuid.UUID, idempotencyKey string) (ExecutionAttempt, bool, error) {
@@ -151,8 +227,8 @@ func (r *Repository) BeginExecution(ctx context.Context, orgID string, virployee
 	tag, err := r.pool.Exec(ctx, `
 		INSERT INTO companion_execution_attempts (
 			id, org_id, virployee_id, prepared_action_id, idempotency_key,
-			status, nexus_report_status, started_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, 'running', 'pending', now(), now())
+			status, governance_report_status, nexus_report_status, started_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, 'running', 'pending', 'pending', now(), now())
 		ON CONFLICT (org_id, prepared_action_id) DO NOTHING
 	`, id, orgID, virployeeID, preparedActionID, idempotencyKey)
 	if err != nil {
@@ -167,12 +243,13 @@ func (r *Repository) GetExecutionByPreparedAction(ctx context.Context, orgID str
 	var result []byte
 	err := r.pool.QueryRow(ctx, `
 		SELECT id, prepared_action_id, idempotency_key, status, resource_id, result,
-		       error, duration_ms, nexus_report_status, started_at, completed_at
+		       error, duration_ms, governance_report_status, nexus_report_status, started_at, completed_at
 		FROM companion_execution_attempts
 		WHERE org_id = $1 AND prepared_action_id = $2
 	`, orgID, preparedActionID).Scan(
 		&out.ID, &out.PreparedActionID, &out.IdempotencyKey, &out.Status, &out.ResourceID,
-		&result, &out.Error, &out.DurationMS, &out.NexusReportStatus, &out.StartedAt, &out.CompletedAt,
+		&result, &out.Error, &out.DurationMS, &out.GovernanceReportStatus, &out.NexusReportStatus,
+		&out.StartedAt, &out.CompletedAt,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -182,6 +259,12 @@ func (r *Repository) GetExecutionByPreparedAction(ctx context.Context, orgID str
 	}
 	if err := json.Unmarshal(result, &out.Result); err != nil {
 		return ExecutionAttempt{}, err
+	}
+	if out.GovernanceReportStatus == "" {
+		out.GovernanceReportStatus = out.NexusReportStatus
+	}
+	if out.NexusReportStatus == "" {
+		out.NexusReportStatus = out.GovernanceReportStatus
 	}
 	return out, nil
 }
@@ -202,7 +285,7 @@ func (r *Repository) CompleteExecution(ctx context.Context, orgID string, id uui
 		UPDATE companion_execution_attempts
 		SET status = $3, resource_id = $4, result = $5::jsonb, error = $6,
 		    duration_ms = $7, completed_at = now(), updated_at = now(),
-		    nexus_report_status = 'pending',
+		    governance_report_status = 'pending', nexus_report_status = 'pending',
 		    recovery_lease_owner = '', recovery_lease_until = NULL, last_watcher_error = ''
 		WHERE org_id = $1 AND id = $2
 		RETURNING prepared_action_id, virployee_id, idempotency_key
@@ -226,7 +309,7 @@ func (r *Repository) CompleteExecution(ctx context.Context, orgID string, id uui
 	if err != nil {
 		return ExecutionAttempt{}, err
 	}
-	payload, err := json.Marshal(outbox.NexusExecutionResult{
+	payload, err := json.Marshal(outbox.GovernanceExecutionResult{
 		VirployeeID: virployeeID.String(), GovernanceCheckID: governanceCheckID.String(),
 		IdempotencyKey: idempotencyKey, BindingHash: bindingHash, Status: status,
 		DurationMS: durationMS, Result: result,
@@ -252,7 +335,8 @@ func (r *Repository) CompleteExecution(ctx context.Context, orgID string, id uui
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE companion_execution_attempts
-		SET nexus_report_status=$3, nexus_report_attempts=$4, nexus_report_next_at=$5
+		SET governance_report_status=$3, nexus_report_status=$3,
+		    nexus_report_attempts=$4, nexus_report_next_at=$5
 		WHERE org_id=$1 AND id=$2
 	`, orgID, id, projection, message.Attempts, message.AvailableAt); err != nil {
 		return ExecutionAttempt{}, err
