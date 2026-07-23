@@ -41,10 +41,7 @@ func (r *Repository) Ensure(ctx context.Context, input domain.EnsureInput) (doma
 			slug = COALESCE(NULLIF(EXCLUDED.slug, ''), axis_orgs.slug),
 			status = EXCLUDED.status,
 			synced_at = EXCLUDED.synced_at,
-			updated_at = EXCLUDED.updated_at,
-			archived_at = NULL,
-			trashed_at = NULL,
-			purge_after = NULL
+			updated_at = EXCLUDED.updated_at
 		RETURNING id, provider, provider_org_id, name, slug, status, synced_at, created_at, updated_at, archived_at, trashed_at, purge_after
 		)
 		SELECT u.id, u.provider, u.provider_org_id, u.name, u.slug, u.status, u.synced_at,

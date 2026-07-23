@@ -40,8 +40,8 @@ github.com/devpablocristo/platform/http/go v0.2.0 h1:r6DWVguu22vaGV7B+a9iEvs6lBn
 github.com/devpablocristo/platform/http/go v0.2.0/go.mod h1:qinUKdGJ51xbKMLYWF96bSGu8JSRAbWPsAqTusrg5tk=
 github.com/devpablocristo/platform/observability/go v0.2.1 h1:lu5nefAmX6NTHbjRs4lhx6WUyvG2ubE3Jw1vP7q0Oec=
 github.com/devpablocristo/platform/observability/go v0.2.1/go.mod h1:5wQDDBbjRN2m1S1rcmZzfavQeXN6CPnDvGpgF19uU38=
-github.com/devpablocristo/platform/sdks/clerk/go v0.1.0 h1:XmVwjn7h/ZhewIpTKvHDuUzQ6usljoKTXfERxm+I2+I=
-github.com/devpablocristo/platform/sdks/clerk/go v0.1.0/go.mod h1:INxBqFFJXPNsGxizdDIM7RDkbDe6755hyQ5gDtLjSm8=
+github.com/devpablocristo/platform/sdks/clerk/go v0.2.0 h1:m2EIl49uzya5S17mX2qRAcoZ7/qPy0hSpOSecDwWIzc=
+github.com/devpablocristo/platform/sdks/clerk/go v0.2.0/go.mod h1:RZDaIFnsNrm+50ZDry0b+lpYUy5CatEyuO9VME3z/s0=
 github.com/devpablocristo/platform/security/go v0.2.2 h1:qVHSXm659qnzUf4qCFFf4WD1aVWnAz5TWgkKinknvyk=
 github.com/devpablocristo/platform/security/go v0.2.2/go.mod h1:P0FEZO5qZDDOxLk6+d90AFlQeiK3qiQ3CnTKqscCmeg=
 github.com/dhui/dktest v0.4.6 h1:+DPKyScKSEp3VLtbMDHcUq6V5Lm5zfZZVb0Sk7Ahom4=

@@ -120,6 +120,22 @@ func (p *Provider) ListUserOrgMemberships(ctx context.Context, providerUserID st
 	return out, nil
 }
 
+func (p *Provider) ListOrganizationMemberships(ctx context.Context, providerOrgID string) ([]domain.ProviderOrgMembership, error) {
+	items, err := p.client.ListOrganizationMemberships(ctx, providerOrgID)
+	if err != nil {
+		return nil, mapClerkError(err)
+	}
+	out := make([]domain.ProviderOrgMembership, 0, len(items))
+	for _, item := range items {
+		membership := providerOrgMembership(item)
+		if membership.Org.ProviderOrgID == "" || membership.User.ProviderUserID == "" {
+			continue
+		}
+		out = append(out, membership)
+	}
+	return out, nil
+}
+
 func (p *Provider) EnsureOrgMembership(ctx context.Context, providerOrgID, providerUserID, role string) error {
 	input := clerkapi.OrgMembershipInput{
 		ProviderOrgID:  providerOrgID,
@@ -143,6 +159,9 @@ func (p *Provider) EnsureOrgMembership(ctx context.Context, providerOrgID, provi
 
 func (p *Provider) DeleteOrgMembership(ctx context.Context, providerOrgID, providerUserID string) error {
 	if err := p.client.DeleteOrgMembership(ctx, providerOrgID, providerUserID); err != nil {
+		if clerkapi.IsNotFound(err) {
+			return nil
+		}
 		return mapClerkError(err)
 	}
 	return nil
@@ -202,6 +221,7 @@ func providerOrgMembership(item clerkapi.OrganizationMembership) domain.Provider
 	return domain.ProviderOrgMembership{
 		Org:  providerOrg(org),
 		Role: axisRole(item.Role),
+		User: providerUser(item.User),
 	}
 }
 

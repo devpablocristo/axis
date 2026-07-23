@@ -28,20 +28,38 @@ type OrganizationAccessPort interface {
 	ResolveAccess(ctx context.Context, productID, principalID string) (productdomain.Product, productdomain.OrgMember, error)
 }
 
+type IdentityPort interface {
+	Get(ctx context.Context, id string) (identitydomain.User, error)
+}
+
 type UseCases struct {
 	repo        RepositoryPort
 	products    OrganizationAccessPort
 	orgProvider identity.OrgProviderPort
+	identity    IdentityPort
 }
 
-func NewUseCases(repo RepositoryPort, products OrganizationAccessPort, orgProvider identity.OrgProviderPort) *UseCases {
-	return &UseCases{repo: repo, products: products, orgProvider: orgProvider}
+func NewUseCases(repo RepositoryPort, products OrganizationAccessPort, orgProvider identity.OrgProviderPort, identities ...IdentityPort) *UseCases {
+	var identityPort IdentityPort
+	if len(identities) > 0 {
+		identityPort = identities[0]
+	}
+	return &UseCases{repo: repo, products: products, orgProvider: orgProvider, identity: identityPort}
 }
 
 func (u *UseCases) List(ctx context.Context, input domain.ListInput) ([]domain.Org, error) {
 	normalized, err := domain.NormalizeListInput(input)
 	if err != nil {
 		return nil, err
+	}
+	if u.identity != nil && u.orgProvider != nil {
+		principal, identityErr := u.identity.Get(ctx, normalized.PrincipalID)
+		if identityErr != nil {
+			return nil, identityErr
+		}
+		if principal.Provider == identitydomain.ProviderClerk {
+			return u.listFromProvider(ctx, normalized, principal.ProviderUserID)
+		}
 	}
 	products, err := u.products.ListForPrincipal(ctx, normalized.PrincipalID)
 	if err != nil {
@@ -55,6 +73,24 @@ func (u *UseCases) List(ctx context.Context, input domain.ListInput) ([]domain.O
 		return items, nil
 	}
 	return filterOrgsForProducts(items, products), nil
+}
+
+func (u *UseCases) listFromProvider(ctx context.Context, input domain.NormalizedListInput, providerUserID string) ([]domain.Org, error) {
+	memberships, err := u.orgProvider.ListUserOrgMemberships(ctx, providerUserID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]domain.Org, 0, len(memberships))
+	for _, membership := range memberships {
+		item, ensureErr := u.repo.Ensure(ctx, ensureFromProvider(membership.Org))
+		if ensureErr != nil {
+			return nil, ensureErr
+		}
+		if item.State() == input.Lifecycle {
+			out = append(out, item)
+		}
+	}
+	return out, nil
 }
 
 func (u *UseCases) Create(ctx context.Context, input domain.CreateInput) (domain.Org, error) {

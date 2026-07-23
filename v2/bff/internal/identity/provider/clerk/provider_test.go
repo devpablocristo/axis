@@ -49,6 +49,8 @@ func newFakeClerk(t *testing.T, status int) *fakeClerk {
 			_, _ = w.Write([]byte(`{"id":"user_123","deleted":true}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/users/user_123/organization_memberships":
 			_, _ = w.Write([]byte(`{"data":[{"role":"org:admin","organization":{"id":"org_PROVIDER","name":"Provider Org","slug":"provider-org"}}],"total_count":1}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/organization_memberships":
+			_, _ = w.Write([]byte(`{"data":[{"role":"org:member","organization":{"id":"org_PROVIDER","name":"Provider Org","slug":"provider-org"},"public_user_data":{"user_id":"user_456","identifier":"member@example.com"}}],"total_count":1}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/organizations":
 			_, _ = w.Write([]byte(`{"id":"org_CREATED","name":"Created Org","slug":"created-org"}`))
 		case r.Method == http.MethodPatch && r.URL.Path == "/organizations/org_PROVIDER":
@@ -125,6 +127,27 @@ func TestFindUserByEmailMapsClerkUser(t *testing.T) {
 	}
 	if user.ProviderUserID != "user_123" || user.Email != "ada@example.com" {
 		t.Fatalf("unexpected mapped user: %+v", user)
+	}
+}
+
+func TestListOrganizationMembershipsMapsClerkDirectory(t *testing.T) {
+	f := newFakeClerk(t, http.StatusOK)
+	provider := NewProvider(Config{SecretKey: "sk_test_fake", BaseURL: f.server.URL})
+
+	memberships, err := provider.ListOrganizationMemberships(context.Background(), "org_PROVIDER")
+	if err != nil {
+		t.Fatalf("ListOrganizationMemberships: %v", err)
+	}
+	if len(memberships) != 1 {
+		t.Fatalf("expected one membership, got %+v", memberships)
+	}
+	got := memberships[0]
+	if got.Org.ProviderOrgID != "org_PROVIDER" || got.User.ProviderUserID != "user_456" ||
+		got.User.Email != "member@example.com" || got.Role != "member" {
+		t.Fatalf("unexpected mapped membership: %+v", got)
+	}
+	if !f.hit("GET /organization_memberships?") || !f.hit("organization_id=org_PROVIDER") {
+		t.Fatalf("expected Clerk organization directory endpoint; hits=%v", f.paths())
 	}
 }
 
