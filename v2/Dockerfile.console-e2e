@@ -5,3 +5,8 @@ FROM mcr.microsoft.com/playwright:v1.61.1-noble
 COPY --from=node-runtime /usr/local /usr/local
 
 WORKDIR /app
+
+COPY console/package*.json ./
+RUN npm ci
+
+COPY console/ ./

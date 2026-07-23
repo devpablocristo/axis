@@ -313,10 +313,7 @@ services:
       VITE_CLERK_PUBLISHABLE_KEY: ""
       VITE_CLERK_JWT_TEMPLATE: axis-bff
       VITE_HMR_CLIENT_PORT: "19173"
-    volumes:
-      - ./console:/app
-      - console-v2-node-modules:/app/node_modules
-    command: ["sh", "-lc", "npm ci && npm run build && npm run preview -- --host 0.0.0.0 --port 19173"]
+    command: ["sh", "-lc", "npm run build && npm run preview -- --host 0.0.0.0 --port 19173"]
     depends_on:
       bff-v2:
         condition: service_healthy
@@ -333,9 +330,6 @@ services:
     working_dir: /app
     environment:
       PLAYWRIGHT_BASE_URL: http://console-v2-e2e:19173
-    volumes:
-      - ./console:/app
-      - console-v2-node-modules:/app/node_modules
     depends_on:
       console-v2-e2e:
         condition: service_healthy
